@@ -1,0 +1,193 @@
+// Records which tmux keys the readiness paths send for each recorded pane
+// frame. scripts/dev/readiness-diff.mjs copies this file and its tmux mock
+// (helpers/readiness-trace-tmux.ts) unchanged into a base checkout and runs it
+// in both trees, so it may statically import only those and modules that exist
+// on the base as well. Runs only when READINESS_TRACE_OUT is set.
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import type { StartupPaneContext } from '../tmux-session.js';
+import { PANE_ID, trace } from './helpers/readiness-trace-tmux.js';
+
+const TRACE_OUT = process.env.READINESS_TRACE_OUT;
+const TRACE_SET = process.env.READINESS_TRACE_SET ?? 'r5';
+const FIXTURE_ROOT = process.env.READINESS_FIXTURE_ROOT
+  ?? join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+const STARTUP_MESSAGE = 'Read .omc/state/team/trace/workers/worker-1/inbox.md, execute now, report concrete progress.';
+
+vi.mock('../../platform/process-utils.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../platform/process-utils.js')>(),
+  isProcessIdentityLive: vi.fn(async () => 'live'),
+}));
+
+vi.mock('../../cli/tmux-utils.js', async importOriginal => {
+  const { tmuxUtilsOverrides } = await import('./helpers/readiness-trace-tmux.js');
+  return {
+    ...await importOriginal<typeof import('../../cli/tmux-utils.js')>(),
+    ...Object.fromEntries(Object.entries(tmuxUtilsOverrides()).map(([name, fn]) => [name, vi.fn(fn)])),
+  };
+});
+
+import { deliverStartupInbox } from '../tmux-session.js';
+import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
+import { awaitWorkerLaunchAcknowledgement, prepareWorkerLaunchAttempt } from '../worker-launch-ack.js';
+
+type Fixture = { file: string; provider: StartupPaneContext['provider']; source: string };
+type TraceCase = {
+  case: string;
+  fn: string;
+  fixture: string;
+  eventState: string | null;
+  env: Record<string, string | null>;
+  control: boolean;
+  run: () => Promise<unknown>;
+};
+
+// Each set lists its cases; later PRs add sets here and in readiness-diff.mjs.
+const SETS: Record<string, (fixtures: Fixture[], contexts: Map<string, StartupPaneContext>) => TraceCase[]> = {
+  r5: (fixtures, contexts) => {
+    const values = [undefined, '', 'abc', '4999', '5000', '29999', '30000', '60000', '120000', '120001', '600000', '6e4', '9007199254740992'];
+    return fixtures.flatMap(fixture => values.map(raw => ({
+      case: `${fixture.file} OMC_TEAM_READY_TIMEOUT_MS=${raw === undefined ? '<unset>' : JSON.stringify(raw)}`,
+      fn: 'deliverStartupInbox',
+      fixture: fixture.file,
+      eventState: null,
+      env: { OMC_TEAM_READY_TIMEOUT_MS: raw ?? null },
+      control: fixture.file === 'claude/2.1.325/idle.txt' && raw === undefined,
+      run: () => deliverStartupInbox(contexts.get(fixture.provider)!, STARTUP_MESSAGE, { attemptAlreadyFenced: true }),
+    })));
+  },
+};
+
+// Advance the fake clock only while the code under test sleeps; between
+// sleeps let real file I/O finish so it never eats into the deadline.
+async function settleOnFakeClock<T>(work: Promise<T>): Promise<T> {
+  let settled = false;
+  void work.then(() => { settled = true; }, () => { settled = true; });
+  while (!settled) {
+    if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync();
+    else await new Promise(resolve => setImmediate(resolve));
+  }
+  return work;
+}
+
+const supported = currentStrictProcessStartIdentity() !== null
+  && (process.platform === 'darwin' || process.platform === 'linux');
+
+describe.skipIf(!TRACE_OUT)('readiness trace harness', () => {
+  let root = '';
+  const savedEnv = new Map<string, string | undefined>();
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'readiness-trace-'));
+    for (const key of ['HOME', 'USERPROFILE', 'OMC_STATE_DIR', 'OMC_TEAM_READY_TIMEOUT_MS']) savedEnv.set(key, process.env[key]);
+    process.env.HOME = root;
+    process.env.USERPROFILE = root;
+    delete process.env.OMC_STATE_DIR;
+  });
+
+  afterAll(() => {
+    for (const [key, value] of savedEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it(`records the keys sent for set ${TRACE_SET}`, async () => {
+    expect(supported, 'needs a strict process start identity (darwin or linux)').toBe(true);
+    const buildCases = SETS[TRACE_SET];
+    expect(buildCases, `unknown set ${TRACE_SET}`).toBeDefined();
+    const fixtures = (JSON.parse(readFileSync(join(FIXTURE_ROOT, 'manifest.json'), 'utf8')) as Fixture[]);
+
+    const contexts = new Map<string, StartupPaneContext>();
+    for (const provider of new Set(fixtures.map(fixture => fixture.provider))) {
+      const attempt = await prepareWorkerLaunchAttempt({
+        cwd: root,
+        teamName: 'trace-team',
+        workerName: `worker-${provider}`,
+        instanceId: randomUUID(),
+        paneId: PANE_ID,
+        provider,
+        runtimeCliPath: '/runtime-cli.cjs',
+      });
+      const { ackPath, ...rest } = attempt;
+      writeFileSync(ackPath, JSON.stringify({
+        schema_version: rest.schema_version,
+        attempt_id: rest.attempt_id,
+        nonce: rest.nonce,
+        instance_id: rest.instance_id,
+        team_name: rest.team_name,
+        worker_name: rest.worker_name,
+        pane_id: rest.pane_id,
+        provider: rest.provider,
+        created_at: rest.created_at,
+        kind: 'worker_launch_ack',
+        written_at: new Date().toISOString(),
+      }));
+      await awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 1_000, pollIntervalMs: 5 });
+      contexts.set(provider, {
+        provider,
+        attempt,
+        ownership: {
+          provider: 'tmux',
+          providerTarget: 'trace:0',
+          paneId: PANE_ID,
+          splitTarget: '%1',
+          leaderPaneId: '%1',
+          reservedPaneIds: [],
+          source: 'split',
+          tmuxServerIdentity: {
+            socket_path: '/tmp/omc-readiness-trace.sock',
+            server_pid: process.pid,
+            process_started_at: currentStrictProcessStartIdentity()!,
+          },
+        },
+      });
+    }
+
+    const results = [];
+    const warn = vi.spyOn(console, 'warn');
+    for (const traceCase of buildCases!(fixtures, contexts)) {
+      trace.frame = readFileSync(join(FIXTURE_ROOT, traceCase.fixture), 'utf8');
+      trace.keys = [];
+      trace.unknown = [];
+      for (const [key, value] of Object.entries(traceCase.env)) {
+        if (value === null) delete process.env[key];
+        else process.env[key] = value;
+      }
+      const warnings: string[] = [];
+      warn.mockImplementation((...args: unknown[]) => { warnings.push(args.map(String).join(' ')); });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      trace.startedAt = Date.now();
+      let result: unknown;
+      try {
+        result = await settleOnFakeClock(traceCase.run());
+      } catch (error) {
+        result = { threw: error instanceof Error ? error.message : String(error) };
+      }
+      const waitMs = Date.now() - trace.startedAt;
+      vi.useRealTimers();
+      const { run: _run, ...described } = traceCase;
+      results.push({
+        ...described,
+        keys: trace.keys,
+        result,
+        wait_ms: waitMs,
+        unknown_commands: trace.unknown,
+        warnings,
+      });
+    }
+    warn.mockRestore();
+
+    writeFileSync(TRACE_OUT!, `${JSON.stringify({
+      set: TRACE_SET,
+      loaded_modules: ['tmux-session', 'worker-launch-ack', 'team-owner-epoch'],
+      cases: results,
+    }, null, 2)}\n`);
+  }, 30 * 60_000);
+});

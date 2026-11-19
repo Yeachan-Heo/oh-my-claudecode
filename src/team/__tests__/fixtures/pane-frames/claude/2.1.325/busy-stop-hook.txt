@@ -1,0 +1,41 @@
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Haiku 5.5 · Claude Xxx
+ ▝▝   ▝▝   /private/tmp/omc-proto-X5IS/work
+
+
+❯ Reply with exactly the word OK and nothing else.
+
+⏺ OK
+
+✽ Tinkering… (running Stop hooks… 1/3 · 1s · ↓ 1 tokens)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [OMC#5.8.4] | Model: Haiku 5.5 | effort:medium | 5h:0%(0h0m) wk:0%(0d0h) fable:0%(0d0h) | ctx:0%
+  ⏵⏵ auto mode on (shift+tab to cycle)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

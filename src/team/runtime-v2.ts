@@ -120,8 +120,6 @@ import {
   observeTeamSessionTargetPresence,
   redactBoundedDiagnostic,
   killTeamSession,
-  paneHasActiveTask,
-  paneLooksReady,
   applyMainVerticalLayout,
   splitTeamWorkerPaneWithEvidence,
   type StartupPaneContext,
@@ -137,6 +135,7 @@ import {
   providerForTeamTarget,
 } from "./tmux-session.js";
 import { herdrWorkspaceIdFromSessionTarget, herdrCloseWorkspace, herdrWorkspaceExists } from "./herdr-session.js";
+import { classifyPane, observePane } from "./pane-readiness.js";
 import {
   composeInitialInbox,
   ensureWorkerStateDir,
@@ -8349,11 +8348,21 @@ export async function monitorTeamV2(
     }
 
     // A dead provider leaves its shell prompt behind; that is not an idle worker.
+    // A worker stopped at a trust dialog is not working either, and nothing
+    // nudges it. A busy pane is not reported, whatever else is on screen.
+    const paneSignals = observePane(paneCapture);
+    const paneState = classifyPane(paneSignals);
+    const paneWaitsAtTrust = paneState.kind === "trust" && !paneSignals.busy;
     const paneSuggestsIdle =
       alive &&
       providerLiveness !== "dead" &&
-      paneLooksReady(paneCapture) &&
-      !paneHasActiveTask(paneCapture);
+      (paneState.kind === "idle" || paneWaitsAtTrust);
+    // cursor-agent prints its workspace trust notice and exits; there is nothing to answer.
+    const paneWaitsAt = !paneWaitsAtTrust
+      ? "idle at prompt"
+      : paneState.trust === "cursor_workspace_trust"
+        ? "stopped at the Cursor workspace trust notice"
+        : "waiting at a trust dialog";
     const statusFresh = isFreshTimestamp(status.updated_at);
     const heartbeatFresh = isFreshTimestamp(heartbeat?.last_turn_at);
     const hasWorkStartEvidence =
@@ -8385,19 +8394,19 @@ export async function monitorTeamV2(
       nonReportingWorkers.push(w.name);
       if (stallReason === "missing_dependency") {
         recommendations.push(
-          `Investigate ${w.name}: task-${outstandingTask?.id ?? expectedTaskId} is blocked by missing task ids [${missingDependencyIds.join(", ")}]; pane is idle at prompt`,
+          `Investigate ${w.name}: task-${outstandingTask?.id ?? expectedTaskId} is blocked by missing task ids [${missingDependencyIds.join(", ")}]; pane is ${paneWaitsAt}`,
         );
       } else if (stallReason === "no_work_start_evidence") {
         recommendations.push(
-          `Investigate ${w.name}: assigned work but no work-start evidence; pane is idle at prompt`,
+          `Investigate ${w.name}: assigned work but no work-start evidence; pane is ${paneWaitsAt}`,
         );
       } else if (stallReason === "stale_or_missing_worker_reports") {
         recommendations.push(
-          `Investigate ${w.name}: pane is idle while status/heartbeat are stale or missing`,
+          `Investigate ${w.name}: pane is ${paneWaitsAtTrust ? paneWaitsAt : "idle"} while status/heartbeat are stale or missing`,
         );
       } else {
         recommendations.push(
-          `Investigate ${w.name}: no meaningful turn progress and pane is idle at prompt`,
+          `Investigate ${w.name}: no meaningful turn progress and pane is ${paneWaitsAt}`,
         );
       }
     }

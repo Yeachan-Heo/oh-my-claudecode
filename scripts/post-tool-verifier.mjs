@@ -20,8 +20,13 @@ import { resolveContextPercent } from './lib/context-usage.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { initializeRalphStateForSkill } from './lib/ralph-startup.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 const SKIP_HOOKS = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
+
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true). The module is loaded by main() only when the switch is on,
+// so with the switch off the messages below are the ones this hook always produced.
+let contextText = null;
 const HOOK_DISABLED =
   process.env.DISABLE_OMC === '1' ||
   process.env.DISABLE_OMC === 'true' ||
@@ -1037,10 +1042,19 @@ function getAgentCompletionSummary(directory, quietLevel = QUIET_LEVEL, sessionI
 
       const parts = [];
       if (quietLevel < 2 && running.length > 0) {
-        parts.push(`Running: ${running.length} [${running.map(a => a.agent_type.replace('oh-my-claudecode:', '')).join(', ')}]`);
+        if (contextText) {
+          // Names are identifiers: each is written exactly (escaped, not cleaned; a written form over 80 characters is replaced by
+          // a notice). At most 10 are listed, the rest as "+N more".
+          const names = running.map(a => contextText.escapeIdentifier(String(a.agent_type ?? '').replace('oh-my-claudecode:', ''), 80) || 'unknown');
+          const shown = names.slice(0, 10);
+          const more = names.length > shown.length ? `, +${names.length - shown.length} more` : '';
+          parts.push(`Running: ${running.length} [${shown.join(', ')}${more}]`);
+        } else {
+          parts.push(`Running: ${running.length} [${running.map(a => String(a.agent_type ?? '').replace('oh-my-claudecode:', '') || 'unknown').join(', ')}]`);
+        }
       }
-      if (quietLevel < 2 && completed > 0) parts.push(`Completed: ${completed}`);
-      if (failed > 0) parts.push(`Failed: ${failed}`);
+      if (quietLevel < 2 && completed > 0) parts.push(`Completed: ${contextText ? contextText.cleanHostText(completed, 20) : completed}`);
+      if (failed > 0) parts.push(`Failed: ${contextText ? contextText.cleanHostText(failed, 20) : failed}`);
 
       return parts.join(' | ');
     } catch {}
@@ -1100,7 +1114,9 @@ function generateMessage(toolName, toolOutput, sessionId, toolCount, directory, 
     case 'TaskOutput': {
       const summary = summarizeAgentResult(toolOutput);
       if (QUIET_LEVEL < 2 && summary) {
-        message = `TaskOutput summary: ${summary}`;
+        message = contextText
+          ? `TaskOutput summary:\n${contextText.untrustedEnvelope(summary, 'process-output')}`
+          : `TaskOutput summary: ${summary}`;
       }
       if (wasTruncated) {
         const truncationNote = `TaskOutput clipped (${rawLength} chars). Continue with concise synthesis and defer full logs to files.`;
@@ -1170,6 +1186,7 @@ async function main() {
   try {
     const input = await readStdin();
     const data = JSON.parse(input);
+    contextText = await loadContextText();
     await setJevHookContext(data);
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1): record known Bash/PowerShell error classes. Never affects the hook.
@@ -1269,7 +1286,8 @@ async function main() {
       };
     }
 
-    console.log(JSON.stringify(response, null, 2));
+    // With the text cleaning switch on the message is cleaned and bounded where it is emitted, whatever branch composed it.
+    console.log(JSON.stringify(contextText ? contextText.cleanHookOutput(response) : response, null, 2));
   } catch (error) {
     // On error, always continue
     console.log(JSON.stringify({ continue: true }));
