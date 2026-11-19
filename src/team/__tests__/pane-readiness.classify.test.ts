@@ -253,6 +253,10 @@ describe('claudeTrustFocus', () => {
     expect(claudeTrustFocus(`${STALE_YES}${trust}`)).toBe('no');
   });
 
+  it('reads an answered dialog with the input prompt drawn below its choices as stale', () => {
+    expect(claudeTrustFocus(read('claude/unversioned/trust-files-then-idle.txt'))).toBe('stale');
+  });
+
   it('reads no focus while a new dialog below an answered one has not drawn its choices', () => {
     expect(claudeTrustFocus(midDraw)).toBeNull();
     expect(claudeTrustFocus(`${read('claude/2.1.328/trust-yes-focused.txt')}\n${midDraw}`)).toBeNull();

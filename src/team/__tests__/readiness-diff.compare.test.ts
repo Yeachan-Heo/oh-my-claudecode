@@ -107,10 +107,12 @@ describe('readiness-diff set trust', () => {
   const base = () => ({ set: 'trust', loaded_modules: [], cases: [
     trustCase('immediate', delivered, ok, 470),
     trustCase('batched', [['Down'], ['Enter']], persistent, 250),
+    trustCase('stale', [['Down'], ['Enter']], persistent, 250),
   ] });
   const goodHead = () => ({ set: 'trust', loaded_modules: [], cases: [
     trustCase('immediate', delivered, ok, 720),
     trustCase('batched', delivered, ok, 720),
+    trustCase('stale', [], persistent, 0),
   ] });
   const runTrust = (head: Trace, baseTrace: Trace = base()) =>
     summarize({ set: 'trust', baseSha: 'base', headSha: 'head', base: baseTrace, head });
@@ -135,6 +137,12 @@ describe('readiness-diff set trust', () => {
     const summary = runTrust(head);
     expect(summary).toContain(`failure: ${TRUST} keys=immediate key sequence differs from base`);
     expect(summary).toContain(`failure: ${TRUST} keys=immediate head waited 970ms`);
+  });
+
+  it('fails when head sends a key into the live prompt below a stale dialog', () => {
+    const head = goodHead();
+    head.cases[2] = trustCase('stale', [['Down']], persistent, 250);
+    expect(runTrust(head)).toContain(`failure: ${TRUST} keys=stale head sent 1 key(s) into the live prompt`);
   });
 
   it('fails when a mode has no case', () => {

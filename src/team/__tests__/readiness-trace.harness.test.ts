@@ -111,14 +111,20 @@ const SETS: Record<string, (fixtures: Fixture[], contexts: Map<string, StartupPa
     const idle = readFileSync(join(FIXTURE_ROOT, 'claude/2.1.325/idle.txt'), 'utf8');
     const dialogs = fixtures.filter(fixture =>
       fixture.provider === 'claude' && /❯\s*No, exit/.test(readFileSync(join(FIXTURE_ROOT, fixture.file), 'utf8')));
-    return dialogs.flatMap(fixture => (['immediate', 'batched'] as const).map(mode => ({
+    // An answered dialog left above the live input prompt: keys reach the
+    // prompt, so the pane stays as recorded.
+    const stale = (file: string) => {
+      const lines = readFileSync(join(FIXTURE_ROOT, file), 'utf8').split('\n');
+      return lines.slice(lines.findIndex(line => /^\s*Yes,/.test(line)) + 1).some(line => /^\s*❯/.test(line));
+    };
+    return dialogs.flatMap(fixture => (stale(fixture.file) ? ['stale'] as const : ['immediate', 'batched'] as const).map(mode => ({
       case: `${fixture.file} keys=${mode}`,
       fn: 'deliverStartupInbox',
       fixture: fixture.file,
       eventState: mode,
       env: { OMC_TEAM_READY_TIMEOUT_MS: null },
       control: fixture.file === 'claude/2.1.325/trust.txt' && mode === 'immediate',
-      pane: () => claudeTrustPane(readFileSync(join(FIXTURE_ROOT, fixture.file), 'utf8'), idle, mode),
+      pane: mode === 'stale' ? undefined : () => claudeTrustPane(readFileSync(join(FIXTURE_ROOT, fixture.file), 'utf8'), idle, mode),
       run: () => deliverStartupInbox(contexts.get(fixture.provider)!, STARTUP_MESSAGE, { attemptAlreadyFenced: true }),
     })));
   },

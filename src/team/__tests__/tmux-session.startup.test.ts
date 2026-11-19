@@ -958,6 +958,57 @@ describe('worker pane startup safety', () => {
     expect(downs).toBe(2);
   });
 
+  strictTmuxIt('reads the pane once more after answering Claude Code trust at the last poll before the deadline', async () => {
+    const context = await acceptedContext('claude');
+    const question = 'Quick safety check: Is this a project you created or one you trust?';
+    const frames = {
+      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      trusted: '❯ \n',
+    };
+    // The dialog first appears at 29,500 ms of a 30,000 ms wait and takes each key at once.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    let startedAt = 0;
+    tmuxState.captureAt = () => {
+      for (const args of tmuxState.args.slice(applied)) {
+        if (args[0] !== 'send-keys' || args.includes('-l')) continue;
+        if (args.at(-1) === 'Down' && focus === 'no') focus = 'yes';
+        if (args.at(-1) === 'Enter' && focus === 'yes') focus = 'trusted';
+      }
+      applied = tmuxState.args.length;
+      return Date.now() - startedAt < 29_500 ? 'Starting…\n' : frames[focus];
+    };
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      startedAt = Date.now();
+      const work = waitForStartupPaneReady(context, { timeoutMs: 30_000, pollIntervalMs: 250, attemptAlreadyFenced: true });
+      let settled = false;
+      void work.then(() => { settled = true; }, () => { settled = true; });
+      while (!settled) {
+        if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync();
+        else await new Promise(resolveTick => setImmediate(resolveTick));
+      }
+      await expect(work).resolves.toEqual({ ok: true });
+      expect(focus).toBe('trusted');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  strictTmuxIt('sends no key to an answered Claude trust dialog left above a live input prompt', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const answered = readFileSync(join(corpus, 'claude/unversioned/trust-files-then-idle.txt'), 'utf8');
+    // The user pressed Up: the live prompt now shows a history entry.
+    tmuxState.captures = [answered, `${answered.trimEnd()} previous prompt from history\n`];
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 3_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: false, reason: 'selector_persistent' });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
   strictTmuxIt('sends Down, not Enter, when only a stale line above the live trust dialog shows Yes focused', async () => {
     const context = await acceptedContext('claude');
     const live = 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n';

@@ -40,13 +40,17 @@ const REQUIRED_HEAD_MODULES = { r5: [], trust: [] };
 // failed: there head has to keep going to succeed.
 const HEAD_MAY_CONTINUE_WHERE_BASE_FAILED = new Set(['trust']);
 
+// Cases where head may return sooner than base: in the trust set's stale
+// case base answers the dead dialog first and head returns without a key.
+const WAIT_MAY_SHORTEN = { trust: (baseCase) => baseCase.eventState === 'stale' };
+
 const succeeded = (traceCase) => traceCase.result?.ok === true;
 
 const STARTUP_WAIT_MAX_MS = 120_000;
 const STARTUP_WAIT_DEFAULT_MS = 30_000;
 // waitForStartupPaneReady's default poll interval.
 const STARTUP_POLL_MS = 250;
-const TRUST_MODES = ['immediate', 'batched'];
+const TRUST_MODES = ['immediate', 'batched', 'stale'];
 
 // The product's own parser decides which values may lengthen the wait, so the
 // comparator cannot read a value differently from it (6e4, unsafe integers).
@@ -74,10 +78,11 @@ const SET_CRITERIA = {
     return failures;
   },
   // Claude Code's trust dialog, answered by a pane that applies each key as it
-  // arrives (immediate) or the keys sent between captures together (batched).
+  // arrives (immediate) or the keys sent between captures together (batched),
+  // or an answered dialog left above the live input prompt (stale).
   // Immediate: head sends what base sent and waits exactly one more poll, for
   // the capture that shows Yes focused. Batched: base confirms "No, exit" and
-  // fails; head succeeds.
+  // fails; head succeeds. Stale: head sends no key and returns what base did.
   trust: (pairs) => {
     const failures = [];
     for (const mode of TRUST_MODES) {
@@ -91,6 +96,10 @@ const SET_CRITERIA = {
         if (head.wait_ms !== base.wait_ms + STARTUP_POLL_MS) {
           failures.push(`${id} head waited ${head.wait_ms}ms, not base ${base.wait_ms}ms + one ${STARTUP_POLL_MS}ms poll`);
         }
+      }
+      if (base.eventState === 'stale') {
+        if (head.keys.length > 0) failures.push(`${id} head sent ${head.keys.length} key(s) into the live prompt`);
+        if (!sameResult) failures.push(`${id} result ${JSON.stringify(head.result)} differs from base`);
       }
       if (base.eventState === 'batched') {
         if (base.result?.reason !== 'selector_persistent') failures.push(`${id} base result ${JSON.stringify(base.result)} is not selector_persistent`);
@@ -233,7 +242,7 @@ export function compare(set, base, head) {
     const headMayContinue = HEAD_MAY_CONTINUE_WHERE_BASE_FAILED.has(set) && !succeeded(baseCase);
     if (!headMayContinue && !isSubsequence(headKeys, baseKeys)) counts.head_only_keys++;
     if (!isSubsequence(baseKeys, headKeys)) counts.base_only_keys++;
-    if (headCase.wait_ms < baseCase.wait_ms) counts.wait_shorter++;
+    if (headCase.wait_ms < baseCase.wait_ms && !WAIT_MAY_SHORTEN[set]?.(baseCase)) counts.wait_shorter++;
     const [baseNudges, headNudges] = [baseCase.nudges ?? [], headCase.nudges ?? []];
     if (headNudges.length < baseNudges.length) counts.nudge_missing++;
     headNudges.slice(0, baseNudges.length).forEach((nudge, index) => {
