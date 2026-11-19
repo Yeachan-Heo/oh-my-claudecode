@@ -1172,20 +1172,23 @@ describe('task list: calls whose events become visible out of order give the lis
     };
     const seedEvents = seeds.map((spec, i) => eventOf(NOW - 60_000 + i, 50 + i, spec));
     // what the hooks do: publish an event, fold under the lock (publish the list when it changed, remove what went into the base and the leftovers)
-    const replay = (events, order) => {
+    // `clocks` is the clock of the fold after each publication (the same clock for all by default)
+    const replay = (events, order, clocks = order.map(() => NOW + 4000)) => {
       let snap = null;
       let folder = [...seedEvents];
+      let clock = NOW;
       const sync = () => {
-        const f = L.foldEvents({ record: snap, broken: false }, folder, 'main', env(), NOW + 4000);
+        const f = L.foldEvents({ record: snap, broken: false }, folder, 'main', env(), clock);
         if (f.changed) snap = L.foldedRecord(f);
         folder = folder.filter(({ name }) => !f.done.has(name) && !f.absorbed.includes(name));
       };
       sync();
-      for (const i of order) {
+      order.forEach((i, n) => {
+        clock = clocks[n];
         folder = [...folder, events[i]].sort((x, y) => (x.name < y.name ? -1 : 1));
         sync();
-      }
-      return view(L.foldEvents({ record: snap, broken: false }, folder, 'main', env(), NOW + 4000).record?.items);
+      });
+      return view(L.foldEvents({ record: snap, broken: false }, folder, 'main', env(), clock).record?.items);
     };
     it.each(kindNames)('first call: %s', (first) => {
       const orders = permutations(3).filter((order) => order.join('') !== '012');
@@ -1197,6 +1200,31 @@ describe('task list: calls whose events become visible out of order give the lis
           for (const order of orders) {
             const got = replay(events, order);
             if (JSON.stringify(got) !== JSON.stringify(inOrder)) wrong.push(`${first},${second},${third} published ${order.join('')}: ${got.join(' | ')} instead of ${inOrder.join(' | ')}`);
+          }
+        }
+      }
+      expect(wrong).toEqual([]);
+    }, 60_000);
+
+    // The clock of the folds moves between the publications. A hook is stopped after 3 s, so calls more than 3 s apart cannot be held up past each
+    // other: of the three calls the early ones are published first and are settled (older than the window) when the late ones become visible, which
+    // can still come in either order among themselves. The clock of a fold is at most 3 s past the call of the oldest call not yet published.
+    const layouts = [
+      { name: 'one early call, two late ones', at: [1000, 10_000, 11_000], orders: [[0, 1, 2], [0, 2, 1]], clocks: [2000, 12_000, 14_000] },
+      { name: 'two early calls, one late one', at: [1000, 2000, 11_500], orders: [[0, 1, 2], [1, 0, 2]], clocks: [3500, 5000, 14_500] },
+    ];
+    it.each(kindNames)('with the clock of the folds moving, first call: %s', (first) => {
+      const wrong = [];
+      for (const layout of layouts) {
+        const clocks = layout.clocks.map((ms) => NOW + ms);
+        for (const second of kindNames) {
+          for (const third of kindNames) {
+            const events = [first, second, third].map((kind, slot) => eventOf(NOW + layout.at[slot], slot, kinds[kind](slot)));
+            const inOrder = replay(events, layout.orders[0], clocks);
+            for (const order of layout.orders.slice(1)) {
+              const got = replay(events, order, clocks);
+              if (JSON.stringify(got) !== JSON.stringify(inOrder)) wrong.push(`${layout.name}: ${first},${second},${third} published ${order.join('')}: ${got.join(' | ')} instead of ${inOrder.join(' | ')}`);
+            }
           }
         }
       }
