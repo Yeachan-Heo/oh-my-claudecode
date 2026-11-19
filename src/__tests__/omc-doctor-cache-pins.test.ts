@@ -117,7 +117,8 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     // (more than the old cap of 2000 for two levels) is fine now; the cap sits well above a real cached version (about
     // 9000 entries), and one entry beyond it cannot be judged. The large tree is nested, so only a count over the whole
     // tree reaches the cap: package.json, the directories a and a/b, 100 group directories and the files in them.
-    test('a version with more than 20000 entries in its whole tree cannot be judged: it is skipped as unreadable, 20000 are fine', () => {
+    // Skipped on Windows: it creates about 90000 files, which the path handling job does not need and a runner may not finish in time.
+    test.skipIf(process.platform === 'win32')('a version with more than 20000 entries in its whole tree cannot be judged: it is skipped as unreadable, 20000 are fine', () => {
       const flat = (count: number) => Array.from({ length: count - 1 }, (_unused, i) => `f${i}`);
       const nested = (count: number) => Array.from({ length: count - 103 }, (_unused, i) => path.join('a', 'b', `g${i % 100}`, `f${i}`));
       for (const command of commands) {
