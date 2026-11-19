@@ -60,15 +60,37 @@ export function resolveStartupReadyTimeoutMs(env: NodeJS.ProcessEnv): number {
   );
 }
 
-/** One-line note on what the variable was set to and what the wait used. */
-export function describeStartupReadyTimeout(env: NodeJS.ProcessEnv): string {
+const DISPLAY_MAX_CHARS = 32;
+// JSON.stringify already escapes C0 controls, quotes and lone surrogates; this
+// catches what it leaves raw: DEL, C1 (U+009B is a terminal CSI), line and
+// paragraph separators, and bidi controls that reorder the rest of the line.
+const UNSAFE_DISPLAY_CHARS = /[\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+function displayValue(raw: string): string {
+  if (/^[\x21-\x7e]{1,32}$/.test(raw)) return raw;
+  const quoted = JSON.stringify(raw.slice(0, DISPLAY_MAX_CHARS)).replace(
+    UNSAFE_DISPLAY_CHARS,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+  return raw.length > DISPLAY_MAX_CHARS
+    ? `${quoted}... (truncated, ${raw.length} chars)`
+    : quoted;
+}
+
+/**
+ * One-line note on what the variable was set to and the wait the caller used.
+ */
+export function describeStartupReadyTimeout(
+  env: NodeJS.ProcessEnv,
+  effectiveMs: number,
+): string {
   const raw = env[READY_TIMEOUT_ENV];
   const setting =
     raw == null
       ? `${READY_TIMEOUT_ENV} unset`
-      : `${READY_TIMEOUT_ENV}=${/^[\x21-\x7e]{1,32}$/.test(raw) ? raw : JSON.stringify(raw.slice(0, 32))}`;
+      : `${READY_TIMEOUT_ENV}=${displayValue(raw)}`;
   return (
-    `${setting} (effective ${resolveStartupReadyTimeoutMs(env)}ms; ` +
+    `${setting} (effective ${effectiveMs}ms; ` +
     `startup wait is clamped to ${STARTUP_READY_TIMEOUT_MIN_MS}..${STARTUP_READY_TIMEOUT_MAX_MS}ms)`
   );
 }

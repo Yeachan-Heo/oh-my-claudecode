@@ -60,15 +60,34 @@ describe('startup readiness wait from OMC_TEAM_READY_TIMEOUT_MS', () => {
     expect(resolveStartupReadyTimeoutMs(env(raw))).toBe(waitMs);
   });
 
-  it('names the variable, the set value, and the value actually used', () => {
-    expect(describeStartupReadyTimeout(env('5000'))).toBe(
+  it('names the variable, the set value, and the wait the caller used', () => {
+    expect(describeStartupReadyTimeout(env('5000'), 30_000)).toBe(
       'OMC_TEAM_READY_TIMEOUT_MS=5000 (effective 30000ms; startup wait is clamped to 30000..120000ms)',
     );
-    expect(describeStartupReadyTimeout(env('600000'))).toContain('=600000 (effective 120000ms;');
-    expect(describeStartupReadyTimeout(env(undefined))).toContain('OMC_TEAM_READY_TIMEOUT_MS unset (effective 30000ms;');
+    expect(describeStartupReadyTimeout(env('600000'), 120_000)).toContain('=600000 (effective 120000ms;');
+    expect(describeStartupReadyTimeout(env(undefined), 50)).toContain('OMC_TEAM_READY_TIMEOUT_MS unset (effective 50ms;');
   });
 
-  it('keeps the note on one line when the value holds a newline', () => {
-    expect(describeStartupReadyTimeout(env('6\n0000'))).toContain('OMC_TEAM_READY_TIMEOUT_MS="6\\n0000" (effective 30000ms;');
+  it.each([
+    ['a newline', '6\n0000', '"6\\n0000"'],
+    ['a C1 CSI', '6\u009b0000', '"6\\u009b0000"'],
+    ['DEL', '6\u007f0000', '"6\\u007f0000"'],
+    ['a line separator', '6\u20280000', '"6\\u20280000"'],
+    ['a paragraph separator', '6\u20290000', '"6\\u20290000"'],
+    ['a right-to-left override', '6\u202e0000', '"6\\u202e0000"'],
+    ['a right-to-left isolate', '6\u20670000', '"6\\u20670000"'],
+    ['a right-to-left mark', '6\u200f0000', '"6\\u200f0000"'],
+  ])('shows %s in the value as a visible escape', (_label, raw, shown) => {
+    const note = describeStartupReadyTimeout(env(raw), 30_000);
+    expect(note).toContain(`OMC_TEAM_READY_TIMEOUT_MS=${shown} (effective 30000ms;`);
+    expect(note).toMatch(/^[\x20-\x7e]+$/);
+  });
+
+  it('marks a long value as truncated with its full length', () => {
+    const raw = `${'0'.repeat(32)}60000`;
+    expect(describeStartupReadyTimeout(env(raw), 60_000)).toBe(
+      `OMC_TEAM_READY_TIMEOUT_MS="${'0'.repeat(32)}"... (truncated, 37 chars) ` +
+        '(effective 60000ms; startup wait is clamped to 30000..120000ms)',
+    );
   });
 });

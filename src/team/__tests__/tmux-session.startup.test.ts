@@ -1310,4 +1310,14 @@ describe('startup readiness wait set by OMC_TEAM_READY_TIMEOUT_MS', () => {
     expect(warnings[0]).toContain(`timed out after ${waitMs}ms`);
     expect(warnings[0]).toContain(note);
   });
+
+  strictTmuxIt('reports the wait the caller passed, not one recomputed from the variable', async () => {
+    const context = await acceptedContext('claude');
+    await bannerThenIdle(Number.POSITIVE_INFINITY);
+
+    await expect(settleOnFakeClock(waitForStartupPaneReady(context, { timeoutMs: 50, pollIntervalMs: 1 })))
+      .resolves.toEqual({ ok: false, reason: 'readiness_timeout' });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('timed out after 50ms; OMC_TEAM_READY_TIMEOUT_MS unset (effective 50ms;');
+  });
 });

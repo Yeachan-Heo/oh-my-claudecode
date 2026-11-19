@@ -4689,7 +4689,7 @@ export async function waitForStartupPaneReady(
   }
   console.warn(
     `[tmux-session] waitForStartupPaneReady: pane ${safePaneDiagnosticToken(context.ownership.paneId)} ` +
-      `timed out after ${timeoutMs}ms; ${describeStartupReadyTimeout(process.env)}`,
+      `timed out after ${timeoutMs}ms; ${describeStartupReadyTimeout(process.env, timeoutMs)}`,
   );
   return { ok: false, reason: "readiness_timeout" };
 }
