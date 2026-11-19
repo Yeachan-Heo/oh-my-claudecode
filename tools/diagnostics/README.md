@@ -629,6 +629,7 @@ measurement. In short:
   period that pairs with no transcript boundary is a Jev boundary on its own.
 - A user message is a `user` row without `isMeta`, `isCompactSummary`, `isVisibleInTranscriptOnly`,
   `toolUseResult` or a `tool_result` block; reminder fragments are cut from its blocks.
+- The default prohibition wording covers every class except `other` (`don't|do not touch|modify|edit|change|commit|push|delete|remove|restart|run|deploy|merge|install`, `never install`, `no installing`); `other` has no default phrase and exists for wording in a `--patterns` file.
 - A prohibition is a user message that matches a prohibition pattern; it has targets (backtick text, absolute
   paths, file names with an extension) or is general. A candidate is a `Bash`, `Edit`, `Write`, `MultiEdit` or
   `NotebookEdit` call after the first boundary that follows the prohibition and matches its class (`edit`,
@@ -651,7 +652,7 @@ of the same name as a whole (a key that is absent keeps its default):
 | `prohibitions` | `[regular expression, class]` pairs in matching order |
 | `revocations_v2` | revocation wording of rule 2 (a negation before the phrase is part of each pattern) |
 | `revocations_v3` | explicit permission phrases of rule 3 |
-| `permission_words`, `question_starts` | a sentence with a permission word that ends with `?` or starts with a question word does not revoke (empty by default) |
+| `permission_words`, `question_starts` | a sentence with a permission word that ends with `?` or starts with a question word does not revoke. Defaults: the words of the default permission phrases (`go ahead`, `may`, `can`, `allowed`, `permitted`, `permission`) and a modal or auxiliary verb followed by a pronoun (`can you`, `could we`, `may I`, `should we`, `do you`, `is it`, ...), so `Don't deploy. Can you go ahead with analysis?` keeps the prohibition and `You may now deploy.` lifts it. An empty list switches the exception off |
 | `negations` | words that, directly before a revocation phrase, cancel it (default `not`) |
 
 Patterns are matched case-insensitively. A pattern that does not compile, an unknown key or an unknown class

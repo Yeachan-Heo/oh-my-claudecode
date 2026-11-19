@@ -614,6 +614,66 @@ describe('user prohibitions after compaction', () => {
     expect(pyEval('[module.is_revoked(t, 3) for t in argument]', texts)).toEqual([true, true, true, false, false, false]);
   });
 
+  it('v3 default wording: a question with a permission word keeps the prohibition, explicit consent lifts it', () => {
+    const questions = [
+      "Don't deploy. Can you go ahead with analysis?",
+      "Don't deploy. Can you go ahead with analysis",
+      "Don't deploy. Could we go ahead with the analysis first?",
+      "Don't deploy. Is it ok to go ahead?",
+      "Don't deploy. Should I go ahead with the plan?",
+      "Don't deploy. May I go ahead?",
+      "Don't deploy. Do you think you can go ahead and read the logs?",
+      "Don't deploy. You can go ahead now, right?",
+    ];
+    const consents = ["Don't deploy yet. You may now deploy.", "Don't deploy yet. Go ahead.", "Don't deploy yet. You can now deploy it."];
+    const lines = [...questions, ...consents];
+    expect(pyEval('[module.is_revoked(t, 3) for t in argument]', lines)).toEqual([
+      ...questions.map(() => false), ...consents.map(() => true),
+    ]);
+    const rowsFor = (text: string) => [user(1, text), host(2), call(3, 'Bash', { command: 'bash deploy.sh' }, 'q1')];
+    const asked = run('v3-default-question', { 'p/v3-dq.jsonl': rowsFor(questions[0]) }, { rule: null });
+    expect(asked.report.prohibitions.revoked_in_same_message).toBe(0);
+    expect(asked.report.candidates.by_class).toEqual({ deploy: 1 });
+    const consented = run('v3-default-consent', { 'p/v3-dc.jsonl': rowsFor("Don't deploy yet. You may now deploy.") }, { rule: null });
+    expect(consented.report.prohibitions.revoked_in_same_message).toBe(1);
+    expect(consented.report.candidates.total).toBe(0);
+  });
+
+  it('a --patterns file replaces the question lists as a whole', () => {
+    const text = "Can you go ahead with analysis?";
+    const call3 = (spec: unknown) => pyEval('(module.set_patterns(argument["spec"]), module.is_revoked(argument["text"], 3))[1]', { spec, text });
+    expect(call3({})).toBe(false);
+    expect(call3({ permission_words: [] })).toBe(true);
+    expect(call3({ question_starts: [], permission_words: ['go\\s+ahead'] })).toBe(false); // the sentence still ends with "?"
+    expect(call3({ permission_words: ['allowed'] })).toBe(true);
+  });
+
+  it('a default install prohibition gives a candidate for an install command after a compaction', () => {
+    const install = (text: string, command: string) => [user(1, text), host(2), call(3, 'Bash', { command }, 'i1')];
+    for (const [name, text] of [
+      ['dont', "Don't install left-pad"], ['curly', 'Don’t install left-pad'], ['donot', 'Do not install left-pad'],
+      ['never', 'Never install left-pad'], ['noing', 'No installing anything new'], ['nos', 'No installs today'],
+    ]) {
+      const { report } = run(`install-${name}`, { [`p/install-${name}.jsonl`]: install(text, 'npm install left-pad') }, { rule: null });
+      expect(report.prohibitions.by_class, text).toEqual({ install: 1 });
+      expect(report.candidates.by_class, text).toEqual({ install: 1 });
+    }
+    // With a target (backticks) the command must name it, under every rule.
+    const named = run('install-target', { 'p/install-t.jsonl': install("Don't install `left-pad`", 'pnpm add left-pad') }, { rule: 1 });
+    expect(named.report.candidates.by_class).toEqual({ install: 1 });
+    const other = run('install-other', { 'p/install-o.jsonl': install("Don't install `left-pad`", 'npm install right-pad') }, { rule: 1 });
+    expect(other.report.candidates.total).toBe(0);
+    // Wording that is not a prohibition of installing stays out.
+    const none = run('install-none', { 'p/install-n.jsonl': install('Please install left-pad', 'npm install left-pad') }, { rule: null });
+    expect(none.report.prohibitions.total).toBe(0);
+  });
+
+  it('every class with a command or target rule has a default prohibition wording', () => {
+    const classes = pyEval('sorted({klass for _pattern, klass in module.DEFAULT_PATTERNS["prohibitions"]})', null);
+    const matched = pyEval('sorted(set(module.COMMAND_CLASSES) | set(module.TARGET_CLASSES))', null);
+    for (const klass of matched) expect(classes, klass).toContain(klass);
+  });
+
   it('stdout is pure JSON without --out; the summary line goes to stderr', () => {
     const root = join(WORK, 'stdout');
     writeJsonl(join(root, 'projects', 'p', 's1.jsonl'),
