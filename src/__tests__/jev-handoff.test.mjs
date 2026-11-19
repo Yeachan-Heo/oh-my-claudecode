@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
 import assert from 'node:assert/strict';
 import { afterAll, describe, it } from 'vitest';
+import { jevLogFiles, rotateJevLog } from '../../scripts/jev-resolve.mjs';
 import {
   DEFAULT_HANDOFF_FILE, DEFAULT_LAUNCHER_COMMAND, DEFAULT_TAKEOVER_MARKER, HANDOFF_BLOCK_BYTES, LAUNCHER_ATTEMPT_LIMIT, LAUNCHER_IN_FLIGHT_MS,
   assessMode, handedOverText, handoffFileName, handoffModeTools, handoffStepBytes, handoffSteps, handoffWarnBytes,
@@ -222,6 +223,23 @@ describe('handoff module', () => {
     assert.equal(handoffModeTools('Bash', { command: `jev-session --role worker --brief ${brief}` }, context), false);
     assert.equal(handoffModeTools('Bash', { command: `jev-session --role worker --brief ${brief}` }, { ...context, logDir: tempDir() }), false); // no row: in flight
     assert.equal(handoffModeTools('Bash', { command: `jev-session --role worker --brief ${brief}` }, { ...context, logDir: tempDir(), now: t0 + LAUNCHER_IN_FLIGHT_MS + 1 }), true);
+  });
+
+  it('launcherGate: a rotation in the same second as the call keeps the start row (the archive stamp has whole seconds, the call time milliseconds)', () => {
+    const logDir = tempDir();
+    const brief = join(tempDir(), 'HANDOFF.md');
+    const second = Date.UTC(2026, 10, 19, 9, 0, 5); // a whole second: the call at .100, the start row at .200, the rotation at .300
+    const live = join(logDir, 'sessions.jsonl');
+    writeFileSync(live, JSON.stringify({ point: 'session-routing', ts: new Date(second + 200).toISOString(), brief, result: 'decided', starter_exit: 0 }) + '\n');
+    rotateJevLog(live, 1, new Date(second + 300));
+    assert.equal(existsSync(live), false, 'the log was rotated');
+    const state = { handoff_path: brief, launcher_attempts: 1, launcher_attempt_ts: second + 100 };
+    assert.deepEqual(launcherGate({ state, logDir, now: second + LAUNCHER_IN_FLIGHT_MS + 100 }), { allow: false, status: 'started' });
+    // the archive list: an archive is left out only when the end of its stamp second is before the time asked for
+    const [archive] = jevLogFiles(logDir, 'sessions');
+    assert.deepEqual(jevLogFiles(logDir, 'sessions', second + 999), [archive]);
+    assert.deepEqual(jevLogFiles(logDir, 'sessions', second + 1000), []);
+    assert.deepEqual(jevLogFiles(logDir, 'sessions', second), [archive]);
   });
 
   it('the refusal text names why the launcher is refused', () => {

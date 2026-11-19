@@ -147,9 +147,13 @@ export function rotateJevLog(path, maxBytes, now = new Date()) {
  * rotated archives <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (see rotateJevLog),
  * ordered by their stamp, newest archive first. Only files that exist. With
  * sinceMs, an archive whose rotation time is older than that is left out (every
- * row of an archive is older than its rotation time). A reader that looks for
- * the last row of a kind goes through the list in order; rotation never
- * deletes, so the archives are the history of the log.
+ * row of an archive is older than its rotation time). The stamp holds whole
+ * seconds, cut down from the rotation time, while sinceMs and the row times of
+ * the log are milliseconds: an archive is left out only when even the end of its
+ * stamp second is before sinceMs, so a row written in the same second as the
+ * rotation is not lost. A reader that looks for the last row of a kind goes
+ * through the list in order; rotation never deletes, so the archives are the
+ * history of the log.
  */
 export function jevLogFiles(dir, name, sinceMs = 0) {
   const files = [];
@@ -164,7 +168,7 @@ export function jevLogFiles(dir, name, sinceMs = 0) {
     const m = pattern.exec(entry);
     if (!m) continue;
     const stamp = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
-    if (!(stamp >= sinceMs)) continue;
+    if (!(stamp + 1000 > sinceMs)) continue; // the rotation fell in [stamp, stamp + 1000 ms)
     archives.push({ stamp, path: join(dir, entry) });
   }
   archives.sort((a, b) => b.stamp - a.stamp || (a.path < b.path ? 1 : -1));
