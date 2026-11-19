@@ -5,14 +5,20 @@
 // Usage (from any cwd):
 //   node scripts/dev/readiness-diff.mjs [--base origin/dev] --set r5 [--out /tmp/readiness-diff-r5]
 //
-// The base is checked out once as a detached worktree under $TMPDIR and
-// reused. Both trees run the head copy of
+// The base is checked out once as a detached worktree at
+// $TMPDIR/omc-readiness-diff-<base sha> and reused while its tracked files are
+// clean and its node_modules still follows the lockfile rule; otherwise it is
+// recreated. To clear the cache by hand:
+//   git worktree remove --force "$TMPDIR/omc-readiness-diff-<base sha>"
+// Both trees run the head copy of
 // src/team/__tests__/readiness-trace.harness.test.ts against the head pane
 // frame fixtures with tmux mocked, so neither run starts tmux or a provider.
 // Writes base.json, head.json and summary.txt to --out; exits 0 only when
 // summary.txt ends in RESULT PASS.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
@@ -39,9 +45,11 @@ function readinessTimeoutBelowFloor(raw) {
 const SET_CRITERIA = {
   r5: (pairs) => {
     const failures = [];
-    for (const { id, base, head, identical } of pairs) {
-      if (readinessTimeoutBelowFloor(base.env.OMC_TEAM_READY_TIMEOUT_MS) && !identical) {
-        failures.push(`${id} differs although the variable cannot lengthen the wait`);
+    for (const { id, base, head, sameKeys, sameResult } of pairs) {
+      if (!sameKeys) failures.push(`${id} key sequence differs from base`);
+      if (!sameResult) failures.push(`${id} result differs from base`);
+      if (readinessTimeoutBelowFloor(base.env.OMC_TEAM_READY_TIMEOUT_MS) && head.wait_ms !== base.wait_ms) {
+        failures.push(`${id} wait changed although the variable cannot lengthen it`);
       }
       if (head.wait_ms > STARTUP_WAIT_MAX_MS) failures.push(`${id} head waited ${head.wait_ms}ms > ${STARTUP_WAIT_MAX_MS}ms`);
     }
@@ -70,17 +78,52 @@ function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+function sameLockfile(baseRoot) {
+  return readFileSync(join(HEAD_ROOT, 'package-lock.json'), 'utf8')
+    === readFileSync(join(baseRoot, 'package-lock.json'), 'utf8');
+}
+
+// A cached base is trusted only when it is still exactly the base revision:
+// the right commit, no tracked or untracked change besides the copied harness
+// and the node_modules link, and node_modules linked to head when the
+// lockfiles match or installed by npm ci when they do not.
+function cachedBaseProblem(baseRoot, baseSha) {
+  let headSha;
+  try {
+    headSha = git(baseRoot, 'rev-parse', 'HEAD');
+  } catch {
+    return 'not a git worktree';
+  }
+  if (headSha !== baseSha) return `at ${headSha}`;
+  const allowed = new Set([`?? ${HARNESS}`, ` M ${HARNESS}`, '?? node_modules']);
+  const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: baseRoot, encoding: 'utf8' })
+    .split('\n').filter(line => line && !allowed.has(line));
+  if (dirty.length > 0) return `changed files: ${dirty.slice(0, 5).join(', ')}`;
+  const modules = join(baseRoot, 'node_modules');
+  if (!existsSync(modules)) return undefined;
+  const linked = lstatSync(modules).isSymbolicLink();
+  if (sameLockfile(baseRoot)) {
+    if (!linked || realpathSync(modules) !== realpathSync(join(HEAD_ROOT, 'node_modules'))) return 'node_modules is not the head link';
+  } else if (linked || !existsSync(join(modules, '.package-lock.json'))) {
+    return 'node_modules was not installed by npm ci';
+  }
+  return undefined;
+}
+
 function prepareBaseTree(baseSha) {
   const baseRoot = join(tmpdir(), `omc-readiness-diff-${baseSha}`);
+  const problem = existsSync(baseRoot) ? cachedBaseProblem(baseRoot, baseSha) : undefined;
+  if (problem) {
+    console.warn(`recreating ${baseRoot}: ${problem}`);
+    const modules = join(baseRoot, 'node_modules');
+    if (existsSync(modules) && lstatSync(modules).isSymbolicLink()) unlinkSync(modules);
+    execFileSync('git', ['worktree', 'remove', '--force', baseRoot], { cwd: HEAD_ROOT, stdio: 'ignore' });
+  }
   if (!existsSync(baseRoot)) {
     execFileSync('git', ['worktree', 'add', '--detach', baseRoot, baseSha], { cwd: HEAD_ROOT, stdio: 'ignore' });
-  } else if (git(baseRoot, 'rev-parse', 'HEAD') !== baseSha) {
-    throw new Error(`${baseRoot} is not at ${baseSha}; remove it with git worktree remove`);
   }
   if (!existsSync(join(baseRoot, 'node_modules'))) {
-    const sameLock = readFileSync(join(HEAD_ROOT, 'package-lock.json'), 'utf8')
-      === readFileSync(join(baseRoot, 'package-lock.json'), 'utf8');
-    if (sameLock) symlinkSync(join(HEAD_ROOT, 'node_modules'), join(baseRoot, 'node_modules'), 'dir');
+    if (sameLockfile(baseRoot)) symlinkSync(join(HEAD_ROOT, 'node_modules'), join(baseRoot, 'node_modules'), 'dir');
     else execFileSync('npm', ['ci'], { cwd: baseRoot, stdio: 'inherit' });
   }
   // The native addon is a local build product that git does not carry.
@@ -117,7 +160,7 @@ function isSubsequence(candidate, of) {
   return index === candidate.length;
 }
 
-function compare(set, base, head) {
+export function compare(set, base, head) {
   const failures = [];
   const differences = [];
   const baseCases = new Map(base.cases.map(traceCase => [traceCase.case, traceCase]));
@@ -132,8 +175,9 @@ function compare(set, base, head) {
     if (!headCase) continue;
     const [baseKeys, headKeys] = [keySequence(baseCase), keySequence(headCase)];
     const sameKeys = isDeepStrictEqual(baseKeys, headKeys);
-    const identical = sameKeys && isDeepStrictEqual(baseCase.result, headCase.result) && baseCase.wait_ms === headCase.wait_ms;
-    pairs.push({ id, base: baseCase, head: headCase, identical });
+    const sameResult = isDeepStrictEqual(baseCase.result, headCase.result);
+    const identical = sameKeys && sameResult && baseCase.wait_ms === headCase.wait_ms;
+    pairs.push({ id, base: baseCase, head: headCase, sameKeys, sameResult });
     if (identical) counts.identical++;
     if (!isSubsequence(headKeys, baseKeys)) counts.head_only_keys++;
     if (!isSubsequence(baseKeys, headKeys)) counts.base_only_keys++;
@@ -146,7 +190,7 @@ function compare(set, base, head) {
     if (!identical) {
       const parts = [];
       if (!sameKeys) parts.push(`keys base=${baseKeys.length} head=${headKeys.length}`);
-      if (!isDeepStrictEqual(baseCase.result, headCase.result)) {
+      if (!sameResult) {
         parts.push(`result base=${JSON.stringify(baseCase.result)} head=${JSON.stringify(headCase.result)}`);
       }
       if (baseCase.wait_ms !== headCase.wait_ms) parts.push(`wait_ms base=${baseCase.wait_ms} head=${headCase.wait_ms}`);
@@ -175,25 +219,32 @@ function compare(set, base, head) {
   return { counts, controls: controls.length, differences, failures, cases: pairs.length };
 }
 
-const options = parseArgs(process.argv.slice(2));
-const baseSha = git(HEAD_ROOT, 'rev-parse', '--verify', `${options.base}^{commit}`);
-const headSha = git(HEAD_ROOT, 'rev-parse', 'HEAD') + (git(HEAD_ROOT, 'status', '--porcelain') ? '-dirty' : '');
-mkdirSync(options.out, { recursive: true });
-const baseRoot = prepareBaseTree(baseSha);
-const base = runHarness(baseRoot, options.set, join(options.out, 'base.json'));
-const head = runHarness(HEAD_ROOT, options.set, join(options.out, 'head.json'));
-const { counts, controls, differences, failures, cases } = compare(options.set, base, head);
+export function summarize({ set, baseSha, headSha, base, head }) {
+  const { counts, controls, differences, failures, cases } = compare(set, base, head);
+  return [
+    `readiness-diff base=${baseSha} head=${headSha} set=${set}`,
+    `cases=${cases} control_cases=${controls} base_keys=${sentCount(base)} head_keys=${sentCount(head)}`,
+    `identical=${counts.identical} head_only_keys=${counts.head_only_keys} base_only_keys=${counts.base_only_keys} ` +
+      `wait_shorter=${counts.wait_shorter} nudge_missing=${counts.nudge_missing} nudge_delay_max_ms=${counts.nudge_delay_max_ms}`,
+    `differences: ${differences.length}`,
+    ...differences.map(line => `  ${line}`),
+    ...failures.map(line => `failure: ${line}`),
+    `RESULT ${failures.length === 0 ? 'PASS' : 'FAIL'}`,
+  ].join('\n');
+}
 
-const summary = [
-  `readiness-diff base=${baseSha} head=${headSha} set=${options.set}`,
-  `cases=${cases} control_cases=${controls} base_keys=${sentCount(base)} head_keys=${sentCount(head)}`,
-  `identical=${counts.identical} head_only_keys=${counts.head_only_keys} base_only_keys=${counts.base_only_keys} ` +
-    `wait_shorter=${counts.wait_shorter} nudge_missing=${counts.nudge_missing} nudge_delay_max_ms=${counts.nudge_delay_max_ms}`,
-  `differences: ${differences.length}`,
-  ...differences.map(line => `  ${line}`),
-  ...failures.map(line => `failure: ${line}`),
-  `RESULT ${failures.length === 0 ? 'PASS' : 'FAIL'}`,
-].join('\n');
-writeFileSync(join(options.out, 'summary.txt'), `${summary}\n`);
-console.log(summary);
-process.exit(failures.length === 0 ? 0 : 1);
+function main() {
+  const options = parseArgs(process.argv.slice(2));
+  const baseSha = git(HEAD_ROOT, 'rev-parse', '--verify', `${options.base}^{commit}`);
+  const headSha = git(HEAD_ROOT, 'rev-parse', 'HEAD') + (git(HEAD_ROOT, 'status', '--porcelain') ? '-dirty' : '');
+  mkdirSync(options.out, { recursive: true });
+  const baseRoot = prepareBaseTree(baseSha);
+  const base = runHarness(baseRoot, options.set, join(options.out, 'base.json'));
+  const head = runHarness(HEAD_ROOT, options.set, join(options.out, 'head.json'));
+  const summary = summarize({ set: options.set, baseSha, headSha, base, head });
+  writeFileSync(join(options.out, 'summary.txt'), `${summary}\n`);
+  console.log(summary);
+  process.exit(summary.endsWith('RESULT PASS') ? 0 : 1);
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

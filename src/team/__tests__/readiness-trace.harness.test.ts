@@ -27,11 +27,44 @@ const trace = vi.hoisted(() => ({
   unknown: [] as string[],
 }));
 
-// Same word rule as the guarded `if-shell` success side: single-quoted words,
-// with '"'"' standing for a literal quote.
-function guardedShellWords(command: string): string[] {
-  return [...command.matchAll(/'((?:[^']|'"'"')*)'/g)].map(match =>
-    match[1]!.replace(/'"'"'/g, "'"));
+// POSIX shell word splitting for the quoting forms the tmux helpers emit:
+// single quotes (shellQuote's '"'"' included), double quotes, backslashes, and
+// words glued together. Returns null for anything else (expansions, operators,
+// unbalanced quotes) so the caller keeps the original text instead of guessing.
+function shellWords(command: string): string[] | null {
+  const words: string[] = [];
+  let word: string | null = null;
+  for (let index = 0; index < command.length; index++) {
+    const char = command[index]!;
+    if (char === ' ' || char === '\t') {
+      if (word !== null) words.push(word);
+      word = null;
+    } else if (char === "'") {
+      const end = command.indexOf("'", index + 1);
+      if (end < 0) return null;
+      word = (word ?? '') + command.slice(index + 1, end);
+      index = end;
+    } else if (char === '"') {
+      let text = '';
+      for (index++; index < command.length && command[index] !== '"'; index++) {
+        const inner = command[index]!;
+        if (inner === '$' || inner === '`') return null;
+        if (inner === '\\' && '$`"\\'.includes(command[index + 1] ?? '')) index++;
+        text += command[index];
+      }
+      if (index >= command.length) return null;
+      word = (word ?? '') + text;
+    } else if (char === '\\') {
+      if (index + 1 >= command.length || command[index + 1] === '\n') return null;
+      word = (word ?? '') + command[++index];
+    } else if (/[$`;&|<>(){}[\]*?~#!\n]/.test(char)) {
+      return null;
+    } else {
+      word = (word ?? '') + char;
+    }
+  }
+  if (word !== null) words.push(word);
+  return words;
 }
 
 function recordSend(fn: string, args: string[], guarded: boolean): void {
@@ -60,8 +93,8 @@ function fakeTmux(fn: string, rawArgs: string[]): string {
     const success = args[2] ?? '';
     const marker = success.match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
     const nativeEnd = success.lastIndexOf('; display-message');
-    const native = guardedShellWords(nativeEnd >= 0 ? success.slice(0, nativeEnd) : success);
-    if (native[0] === 'send-keys') recordSend(fn, native, true);
+    const native = shellWords(nativeEnd >= 0 ? success.slice(0, nativeEnd) : success);
+    if (native?.[0] === 'send-keys') recordSend(fn, native, true);
     else trace.unknown.push(`${fn}: if-shell ${success}`);
     return marker ? `${marker}\n` : '';
   }
@@ -74,8 +107,8 @@ function fakeTmux(fn: string, rawArgs: string[]): string {
 }
 
 function fakeShell(fn: string, command: string): string {
-  const words = guardedShellWords(command);
-  if (words.length > 0) return fakeTmux(fn, words);
+  const words = shellWords(command);
+  if (words !== null && words.length > 0) return fakeTmux(fn, words);
   trace.unknown.push(`${fn}: ${command}`);
   return '';
 }
