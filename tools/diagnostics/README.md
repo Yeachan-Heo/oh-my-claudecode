@@ -861,7 +861,8 @@ script of unknown content, so it reads the runners that fit the kind of the chec
 `lint`: eslint, ruff; `typecheck`: tsc, ruff; `build`: tsc). A runner that is not listed reads no summary, so only its visible
 exit status or a printed exit code decides. The zero-test reports (`Tests: 0 total`, `No tests found`, `no tests ran`,
 `ℹ tests 0`, `[no tests to run]`, `running 0 tests`) follow the same rule. Gradle and Maven are not recognized on purpose:
-their lifecycle goals can also publish, so an exit code proves less there.
+their lifecycle goals can also publish, so an exit code proves less there. A command with several runners (`tsc; vitest run | tail`) is
+read for the last one, whose status is the command's, so the summary lines of an earlier runner do not count.
 
 # Advisor event coverage
 

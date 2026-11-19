@@ -28,7 +28,8 @@ b. Compaction boundary. A transcript row with type "system" and subtype "compact
    host boundary. A "jev" journal row inside the period that pairs with no transcript boundary is a Jev
    boundary on its own (its time is ts). Every real compaction is therefore one boundary in the counts. Counts
    are kept apart for host and Jev. Boundaries outside the period are ignored; the journal row of a pair may
-   lie outside the period.
+   lie outside the period. (Amended after review, for every rule version: a journal row and its transcript
+   boundary used to count as two boundaries.)
 
 c. User message. A transcript row with type "user" and message.role "user", without isMeta true, without
    isCompactSummary true, without isVisibleInTranscriptOnly true, without a toolUseResult field and without any
@@ -135,7 +136,9 @@ matching order), "revocations_v2", "revocations_v3", "permission_words", "questi
 (lists of regular expressions) each replace the default list of the same name as a whole; a key that is
 absent keeps its default. Classes are edit, delete, commit, push, restart, run, install, deploy, merge and
 other. The report labels (element names and the limits text) are English and the JSON keys follow the
-compaction-report/1 template.
+compaction-report/1 template. (Amended after review, for every rule version: the default lists of
+"permission_words" and "question_starts" and the default install prohibition wording were added; they were
+empty or missing before.)
 """
 import argparse
 import bisect
