@@ -2,7 +2,7 @@
 // Synthetic data in a temporary directory; the script runs with python3 -I through spawnSync.
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -765,5 +765,316 @@ describe('default journal path', () => {
     const proc = spawnSync('python3', ['-I', SCRIPT, '--help'], { encoding: 'utf8' });
     expect(proc.status).toBe(0);
     expect(proc.stdout.replace(/\s+/g, ' ')).toContain('OMC_STATE_DIR');
+  });
+});
+
+// ===== Blind labelling: binding_lost and stale_kept_fix_lost =====
+// Synthetic data only. Human texts carry the token ZZQ (must never reach stdout); the post-compaction
+// state carries POSTQ (must never reach the labelling export).
+
+function measureEnv(unitConfigs) {
+  const env = makeEnv();
+  const dir = join(env.projects, '-test');
+  const compactRows = [];
+  for (const cfg of unitConfigs) {
+    const { sid, i } = cfg;
+    const ts = (s) => `2026-11-13T${String(10 + Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:${String(s).padStart(2, '0')}Z`;
+    const binding = `Order ${sid} in force BX${sid} ZZQ`;
+    const stale = `Old ${sid} order SX${sid} outdated ZZQ`;
+    const fix = `Correction ${sid} replaces FX${sid} new ZZQ`;
+    const parts = [];
+    if (!cfg.bindingLost) parts.push(binding);
+    if (cfg.staleKept) parts.push(stale);
+    if (!cfg.fixLost) parts.push(fix);
+    writeJsonl(join(dir, `${sid}.jsonl`), [
+      ask(sid, ts(0), binding, { uuid: `B${sid}` }),
+      ask(sid, ts(5), stale, { uuid: `S${sid}` }),
+      ask(sid, ts(10), fix, { uuid: `F${sid}` }),
+      boundary(`U${sid}`, ts(20)),
+      stateRow(sid, ts(30), `State POSTQ: ${parts.join(' ')}`),
+      apiRequest(sid, ts(40)),
+      assistant(sid, ts(50), `n-${sid}`, 'test-model-b', [{ type: 'text', text: 'continuing' }]),
+    ]);
+    compactRows.push(compactRow(ts(20), sid, null, 'auto', cfg.result));
+  }
+  writeCompact(env.compactFile, compactRows);
+  return env;
+}
+
+function labelRowsFor(unitConfigs, { skipBindingWhen = null, withoutFix = false } = {}) {
+  const rows = [];
+  for (const cfg of unitConfigs) {
+    if (!(skipBindingWhen && skipBindingWhen(cfg))) {
+      rows.push({ unit_id: `U${cfg.sid}`, block_id: `B${cfg.sid}#0`, label: 'binding', superseded_by: null, reason: 'command in force' });
+    }
+    rows.push({ unit_id: `U${cfg.sid}`, block_id: `S${cfg.sid}#0`, label: 'stale', superseded_by: withoutFix ? null : `F${cfg.sid}#0`, reason: 'replaced by a later correction' });
+  }
+  return rows;
+}
+
+function writeLabelFile(env, rows, name = 'labels.jsonl') {
+  const file = join(env.dir, name);
+  writeJsonl(file, rows);
+  return file;
+}
+
+function jevUnits(count, makeFlags) {
+  return Array.from({ length: count }, (_, i) => ({ sid: `mJ${String(i).padStart(2, '0')}`, i, result: 'jev', ...makeFlags(i) }));
+}
+
+const NO_LOSS = () => ({ bindingLost: false, staleKept: false, fixLost: false });
+
+describe('blind labelling of binding and stale instructions', () => {
+  it('without the new options the result keeps its keys and its text lines', () => {
+    const env = measureEnv(jevUnits(2, NO_LOSS));
+    try {
+      const result = resultJson(env);
+      expect(Object.keys(result)).toEqual(['template', 'metric', 'script', 'generated_at', 'rule', 'period', 'data_range', 'n',
+        'model', 'trigger', 'journal_trigger', 'control_arm', 'data_quality', 'results', 'min_support', 'caveats',
+        'ask_loss_threshold', 'verdicts', 'levels']);
+      expect(result.verdicts['jev/main'].head_lost).toBe('insufficient data');
+      const text = run(env);
+      expect(text.status, text.stderr).toBe(0);
+      expect(text.stdout).toContain('verdict jev/main: head_lost insufficient data, ask_lost insufficient data');
+      expect(text.stdout).not.toContain('command measure');
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('export: pre-boundary human blocks only, existing file refused', () => {
+    const env = measureEnv(jevUnits(1, NO_LOSS));
+    try {
+      const exportFile = join(env.dir, 'export.jsonl');
+      const proc = run(env, ['--export-labeling', exportFile, '--json']);
+      expect(proc.status, proc.stderr).toBe(0);
+      expect(proc.stdout.includes('ZZQ'), 'human text leaked to stdout').toBe(false);
+      expect(JSON.parse(proc.stdout).labeling_export).toEqual({ units: 1, blocks: 3 });
+      const content = readFileSync(exportFile, 'utf8');
+      const lines = content.trim().split('\n').map((x) => JSON.parse(x));
+      expect(lines).toHaveLength(1);
+      const unit = lines[0];
+      expect(unit.unit_id).toBe('UmJ00');
+      expect(unit.messages_before).toBe(3);
+      expect(unit.window_messages).toBe(3);
+      expect(unit.messages.flatMap((m) => m.blocks.map((b) => b.block_id))).toEqual(['BmJ00#0', 'SmJ00#0', 'FmJ00#0']);
+      expect(content.includes('POSTQ'), 'post-compaction text leaked to export').toBe(false);
+      expect(content.includes('ZZQ')).toBe(true);
+      expect(statSync(exportFile).mode & 0o777).toBe(0o600);
+      expect(run(env, ['--export-labeling', exportFile]).status, 'existing export file must be refused').toBe(1);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the human messages are collected only for the export and the labels', () => {
+    const env = measureEnv(jevUnits(1, NO_LOSS));
+    try {
+      const transcript = join(env.projects, '-test', readdirSync(join(env.projects, '-test')).find((name) => name.endsWith('.jsonl'))!);
+      const code = [
+        'import importlib.util, json, sys',
+        'sys.dont_write_bytecode = True',
+        'spec = importlib.util.spec_from_file_location("probe", sys.argv[1])',
+        'module = importlib.util.module_from_spec(spec)',
+        'spec.loader.exec_module(module)',
+        'off = module.walk_file(sys.argv[2])[0]["boundaries"]',
+        'on = module.walk_file(sys.argv[2], True)[0]["boundaries"]',
+        'print(json.dumps([[b["asks_n"] for b in off], [b["asks_n"] for b in on], [len(b["asks_list"]) for b in off]]))',
+      ].join('\n');
+      const proc = spawnSync('python3', ['-I', '-c', code, SCRIPT, transcript], { encoding: 'utf8', timeout: 30000 });
+      expect(proc.status, proc.stderr).toBe(0);
+      const [off, on, offLists] = JSON.parse(proc.stdout);
+      expect(off).toEqual([0]);
+      expect(offLists).toEqual([0]);
+      expect(on[0]).toBeGreaterThan(0);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('export: block text longer than the limit is cut and flagged; the window keeps the last messages', () => {
+    const env = makeEnv();
+    try {
+      const dir = join(env.projects, '-test');
+      const long = 'A'.repeat(700) + ' ENDQ';
+      writeJsonl(join(dir, 'sLong.jsonl'), [
+        ask('SLg', '2026-11-13T10:00:00Z', long, { uuid: 'BLg' }),
+        ask('SLg', '2026-11-13T10:00:05Z', 'Short request ZZQ', { uuid: 'FLg' }),
+        ask('SLg', '2026-11-13T10:00:06Z', 'Another short request ZZQ', { uuid: 'GLg' }),
+        boundary('ULg', '2026-11-13T10:00:10Z'),
+        stateRow('SLg', '2026-11-13T10:00:11Z', 'Long state'),
+        apiRequest('SLg', '2026-11-13T10:00:12Z'),
+      ]);
+      writeCompact(env.compactFile, [compactRow('2026-11-13T10:00:10Z', 'SLg', null, 'manual', 'jev')]);
+      const exportFile = join(env.dir, 'long.jsonl');
+      const proc = run(env, ['--export-labeling', exportFile]);
+      expect(proc.status, proc.stderr).toBe(0);
+      const unit = JSON.parse(readFileSync(exportFile, 'utf8').trim());
+      const block = unit.messages[0].blocks[0];
+      expect(block.text).toHaveLength(500);
+      expect(block.truncated).toBe(true);
+      expect(readFileSync(exportFile, 'utf8').includes('ENDQ')).toBe(false);
+      const windowFile = join(env.dir, 'window.jsonl');
+      expect(run(env, ['--export-labeling', windowFile, '--export-window', '2']).status).toBe(0);
+      const windowed = JSON.parse(readFileSync(windowFile, 'utf8').trim());
+      expect([windowed.messages_before, windowed.window_messages]).toEqual([3, 2]);
+      expect(run(env, ['--export-labeling', join(env.dir, 'zero.jsonl'), '--export-window', '0']).status).toBe(2);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('binding_lost: 3 lost of 30 binding blocks gives 10 %, does not meet the threshold; unlabelled blocks are not counted', () => {
+    const units = jevUnits(30, (i) => ({ bindingLost: i < 3, staleKept: false, fixLost: false }));
+    const env = measureEnv(units);
+    try {
+      const labelFile = writeLabelFile(env, labelRowsFor(units));
+      const proc = run(env, ['--labels', labelFile, '--json']);
+      expect(proc.status, proc.stderr).toBe(0);
+      expect(proc.stdout.includes('ZZQ'), 'human text leaked to stdout').toBe(false);
+      const result = JSON.parse(proc.stdout);
+      const group = result.command_measure.groups['jev/main'];
+      expect([group.binding_lost.count, group.binding_lost.total]).toEqual([3, 30]);
+      expect(group.binding_lost.rate).toBe(0.1);
+      expect(group.binding_lost.verdict).toBe('does not meet the ask-loss threshold');
+      // F blocks carry no label in these tests: 30 unlabelled blocks, excluded from denominators
+      expect(group.blocks_unlabelled).toBe(30);
+      expect(group.units_with_state).toBe(30);
+      expect(result.command_measure.labels.accepted).toBe(60);
+      expect(group.binding_lost.wilson_upper_95).toBeGreaterThan(0.05);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a binding block without a label leaves the denominator; 0 of 30 gives an upper bound of 11.35 %', () => {
+    const units = jevUnits(32, NO_LOSS);
+    units[0].noLabel = true;
+    units[1].noLabel = true;
+    const env = measureEnv(units);
+    try {
+      const labelFile = writeLabelFile(env, labelRowsFor(units, { skipBindingWhen: (cfg) => cfg.noLabel === true }));
+      const group = resultJson(env, ['--labels', labelFile]).command_measure.groups['jev/main'];
+      expect([group.binding_lost.count, group.binding_lost.total]).toEqual([0, 30]);
+      // 32 F blocks + 2 unlabelled B blocks
+      expect(group.blocks_unlabelled).toBe(34);
+      expect(group.binding_lost.verdict).toBe('does not meet the ask-loss threshold');
+      expect(Math.abs(group.binding_lost.wilson_upper_95 - wilsonUpper(0, 30))).toBeLessThan(1e-4);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('stale_kept_fix_lost: a kept stale block with a lost fix counts; a removed stale block is not a failure', () => {
+    const units = jevUnits(30, (i) => ({ bindingLost: false, staleKept: i < 2, fixLost: i < 2 }));
+    const env = measureEnv(units);
+    try {
+      const labelFile = writeLabelFile(env, labelRowsFor(units));
+      const group = resultJson(env, ['--labels', labelFile]).command_measure.groups['jev/main'];
+      expect([group.stale_kept_fix_lost.count, group.stale_kept_fix_lost.total]).toEqual([2, 30]);
+      expect(group.stale_removed).toBe(28);
+      expect(group.stale_kept_fix_lost.verdict).toBe('does not meet the ask-loss threshold');
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('stale removed in every unit: 0 of 80 meets the threshold (upper bound 4.58 %)', () => {
+    const units = jevUnits(80, NO_LOSS);
+    const env = measureEnv(units);
+    try {
+      const labelFile = writeLabelFile(env, labelRowsFor(units));
+      const group = resultJson(env, ['--labels', labelFile]).command_measure.groups['jev/main'];
+      expect([group.stale_kept_fix_lost.count, group.stale_kept_fix_lost.total]).toEqual([0, 80]);
+      expect(group.stale_kept_fix_lost.verdict).toBe('meets the ask-loss threshold');
+      expect(Math.abs(group.stale_kept_fix_lost.wilson_upper_95 - wilsonUpper(0, 80))).toBeLessThan(1e-4);
+      expect(group.stale_removed).toBe(80);
+      // the verdict follows --ask-loss-threshold
+      const strict = resultJson(env, ['--labels', labelFile, '--ask-loss-threshold', '0.01']).command_measure.groups['jev/main'];
+      expect(strict.stale_kept_fix_lost.verdict).toBe('does not meet the ask-loss threshold');
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('groups are separate: fallback with 10 units gives insufficient data, jev keeps its own verdict', () => {
+    const units = [
+      ...jevUnits(30, NO_LOSS),
+      ...Array.from({ length: 10 }, (_, i) => ({ sid: `mF${String(i).padStart(2, '0')}`, i: 100 + i, result: 'fallback', bindingLost: true, staleKept: false, fixLost: false })),
+    ];
+    const env = measureEnv(units);
+    try {
+      const labelFile = writeLabelFile(env, labelRowsFor(units));
+      const result = resultJson(env, ['--labels', labelFile]);
+      const fallback = result.command_measure.groups['fallback/main'];
+      expect(fallback.binding_lost.total).toBe(10);
+      expect(fallback.binding_lost.verdict).toBe('insufficient data');
+      expect(fallback.binding_lost.rate).toBe('insufficient data');
+      const jevGroup = result.command_measure.groups['jev/main'];
+      expect([jevGroup.binding_lost.total, jevGroup.binding_lost.count]).toEqual([30, 0]);
+      expect(jevGroup.binding_lost.verdict).toBe('does not meet the ask-loss threshold');
+      // the head_lost verdicts of the base result stay in place
+      expect(result.verdicts['jev/main'].head_lost).toBeDefined();
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a restatement: a lost binding block counts as kept when its named restatement is present', () => {
+    const env = makeEnv();
+    try {
+      const dir = join(env.projects, '-test');
+      writeJsonl(join(dir, 'sR.jsonl'), [
+        ask('SR', '2026-11-13T10:00:00Z', 'Prepare the cost summary for the month ZZQ', { uuid: 'RB' }),
+        ask('SR', '2026-11-13T10:00:05Z', 'Confirming the cost summary ZZQ', { uuid: 'RR' }),
+        boundary('UR', '2026-11-13T10:00:10Z'),
+        stateRow('SR', '2026-11-13T10:00:11Z', 'State POSTQ: Confirming the cost summary ZZQ'),
+        apiRequest('SR', '2026-11-13T10:00:12Z'),
+      ]);
+      writeCompact(env.compactFile, [compactRow('2026-11-13T10:00:10Z', 'SR', null, 'manual', 'jev')]);
+      const labelFile = writeLabelFile(env, [
+        { unit_id: 'UR', block_id: 'RB#0', label: 'binding', superseded_by: 'RR#0', reason: 'restated later' },
+        { unit_id: 'UR', block_id: 'RR#0', label: 'binding', superseded_by: null, reason: 'the restatement' },
+      ]);
+      const group = resultJson(env, ['--labels', labelFile]).command_measure.groups['jev/main'];
+      expect(group.binding_lost.total).toBe(2);
+      expect(group.binding_lost.count).toBe(0);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('invalid label rows are rejected and counted by reason', () => {
+    const units = jevUnits(3, NO_LOSS);
+    const env = measureEnv(units);
+    try {
+      const rows = labelRowsFor(units, { withoutFix: true });
+      rows.push({ unit_id: 'UmJ00', block_id: 'Absent#0', label: 'binding', superseded_by: null, reason: 'x' });
+      rows.push({ unit_id: 'UmJ01', block_id: 'BmJ01#0', label: 'binding', superseded_by: null, reason: '' });
+      const labelFile = writeLabelFile(env, rows);
+      const { rejected, accepted } = resultJson(env, ['--labels', labelFile]).command_measure.labels;
+      expect(rejected.stale_without_fix).toBe(3);
+      expect(rejected.unknown_block).toBe(1);
+      expect(rejected.missing_reason).toBe(1);
+      expect(accepted).toBe(3);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a missing labels file exits 2; the text mode prints the measure lines only with labels', () => {
+    const units = jevUnits(2, NO_LOSS);
+    const env = measureEnv(units);
+    try {
+      expect(run(env, ['--labels', join(env.dir, 'absent.jsonl'), '--json']).status).toBe(2);
+      const labelFile = writeLabelFile(env, labelRowsFor(units));
+      const text = run(env, ['--labels', labelFile]);
+      expect(text.status, text.stderr).toBe(0);
+      expect(text.stdout).toContain('command measure: labels read 4, accepted 4, rejected 0');
+      expect(text.stdout).toContain('jev/main: units with state 2');
+      expect(text.stdout.includes('ZZQ')).toBe(false);
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
   });
 });

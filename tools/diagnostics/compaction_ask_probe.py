@@ -6,6 +6,7 @@ rates of the first and last human ask (head_lost, ask_lost), empty calls after a
 canaries. It never prints ask or state contents, only numbers, levels and identifiers.
 Usage: python3 -I compaction_ask_probe.py [--projects <dir>] [--transcript <file>]...
     [--compact <file>] [--to <ISO-8601-UTC>] [--days <N>] [--details] [--json] [--out <file>]
+    [--export-labeling <file>] [--labels <file>] [--export-window <N>] [--export-limit <N>]
 Without --compact the journal is compaction.jsonl in $OMC_JEV_LOG_DIR, else in .omc/state/jev under the
 current directory (run the tool from the project root). With OMC_STATE_DIR set, the Jev log directory has a
 project identifier in its path: pass the file with --compact or set OMC_JEV_LOG_DIR.
@@ -64,11 +65,24 @@ RULE (written before the measurement; do not change after seeing the results):
   compact_ts equals their ts, string comparison), after_without_compact (an after row with a compact_ts
   absent from the ts of compact rows), compact_without_boundary (a compact row with result jev or
   fallback in the period whose thread was read and which was not consumed in the pair assignment).
-- Ask and state contents are never printed (neither to stdout nor to a file): only numbers, levels and
-  identifiers.
+- Ask and state contents are never printed (neither to stdout nor to the --out file): only numbers, levels
+  and identifiers. The only exception is the opt-in --export-labeling file (see below), which holds human
+  message text by design.
 
-Exit codes: 0 a valid run; 1 --out write refused (the file exists); 2 a usage error or a missing
---compact file.
+Exit codes: 0 a valid run; 1 --out or --export-labeling write refused (the file exists); 2 a usage error,
+a missing --compact file or a missing --labels file.
+
+Blind labelling of binding and stale instructions (optional; without --export-labeling and --labels the
+output is the one described above):
+- --export-labeling <file.jsonl> writes, for every main-thread unit (compact boundary), the human messages
+  before the boundary: the last --export-window messages (default 40), each text block cut to --export-limit
+  characters (default 500, flagged "truncated"). Nothing after the boundary is written. The file is created
+  exclusively with mode 0600; an existing file is refused (exit 1).
+- --labels <file.jsonl> reads rows {unit_id, block_id, label: "binding" or "stale", superseded_by, reason} and
+  adds the command_measure block to the result: binding_lost and stale_kept_fix_lost per group jev/main and
+  fallback/main (rule text: command_measure.rule). Presence after a compaction uses the same levels as
+  ask_lost. Unlabelled blocks leave the denominators and are counted; rejected rows are counted by reason.
+- Only numbers and verdicts go to standard output. Message text goes to the export file only.
 """
 
 import argparse
@@ -280,8 +294,9 @@ def close_boundary(bnd, window_new, via_next=False):
     bnd.pop("state_texts", None)
     bnd.pop("window_matches", None)
     bnd.pop("window_new", None)
-def walk_file(path):
-    """One streaming pass over a JSONL file; (file state, list of boundary records).
+def walk_file(path, keep_asks=False):
+    """One streaming pass over a JSONL file; (file state, list of boundary records). The human messages are
+    kept for the labelling export only when keep_asks is true.
 
     A boundary record: index, uuid, ts_text, ts, trigger, has_state, state_text, head300, ask300,
     canaries (list of strings), kept (number), calls (list of {id, model, empty})."""
@@ -299,6 +314,7 @@ def walk_file(path):
     asks_before = set()
     first300 = None
     last300 = None
+    asks_file = []  # human messages with their text blocks, in file order (labelling export; empty unless keep_asks)
 
     def close_current(via_next=False):
         nonlocal current
@@ -349,6 +365,8 @@ def walk_file(path):
                         "head300": first300,
                         "ask300": last300,
                         "end": "end_of_file",
+                        "asks_list": asks_file,
+                        "asks_n": len(asks_file),
                     }
                     window_new = current["window_new"]
                     window_matches = current["window_matches"]
@@ -372,6 +390,11 @@ def walk_file(path):
                         asks_before.update(CANARY_PATH.findall(t))
                         asks_before.update(CANARY_CODE.findall(t))
                         asks_before.update(CANARY_HEX.findall(t))
+                        if keep_asks:
+                            human_id = row.get("uuid") if isinstance(row.get("uuid"), str) and row.get("uuid") else f"line-{rows}"
+                            blocks_list = [{"block_id": f"{human_id}#{index}", "text": block_text} for index, block_text in human_blocks(row)]
+                            if blocks_list:
+                                asks_file.append({"message_id": human_id, "blocks": blocks_list})
                         canary_deque.append([])
                     elif row_type == "user" and split["canaries"]:
                         matches = []
@@ -432,10 +455,10 @@ def walk_file(path):
     }, None
 
 
-def walk_file_safe(path):
+def walk_file_safe(path, keep_asks=False):
     """A wrapper with an open-error handler; (state or None, message)."""
     try:
-        return walk_file(path)
+        return walk_file(path, keep_asks)
     except OSError as e:
         return None, f"read error: {e}"
 def read_journal(path, from_e, to_e):
@@ -553,7 +576,7 @@ def assign_units(occurrences, compacts):
     dup_gap = sum(len(occs) - 1 for occs in by_key.values())
     unit_list = sorted(units.values(), key=lambda g: (g["ts"], str(g["file"]), g["key"]))
     return unit_list, dup_gap, used
-def main_analysis(files, journal_data, from_e, to_e):
+def main_analysis(files, journal_data, from_e, to_e, keep_asks=False):
     """Boundary occurrences in the period, pair-rule assignment, levels; the analysis dict."""
     read_threads = {}
     occurrences = []
@@ -561,7 +584,7 @@ def main_analysis(files, journal_data, from_e, to_e):
     total_rows = 0
     total_bad = 0
     for path, role, agent_id in files:
-        state, message = walk_file_safe(path)
+        state, message = walk_file_safe(path, keep_asks)
         if message is not None:
             print(f"warning: skipping file {path}: {message}", file=sys.stderr)
             continue
@@ -611,6 +634,239 @@ def wilson(count, total, z=Z_95):
 
 def round4(x, places=4):
     return None if x is None else round(x, places)
+
+
+# ---- Blind labelling: binding and stale instructions ----
+
+EXPORT_WINDOW_DEFAULT = 40
+EXPORT_LIMIT_DEFAULT = 500
+MEASURE_GROUPS = ("jev/main", "fallback/main")
+LABEL_BINDING = "binding"
+LABEL_STALE = "stale"
+RULE_LABELS = (
+    "Units: compact boundaries of the main thread, groups jev/main and fallback/main. Human blocks: text blocks "
+    "of human messages before the boundary, the last export window of messages. A block is present after the "
+    "compaction when its level (the ask_lost mechanism: full, trace, paraphrased) is not lost. binding_lost: a "
+    "block labelled binding is lost when it is absent after the compaction and the block named in superseded_by "
+    "(a restatement, if any) is absent too. stale_kept_fix_lost (critical): a block labelled stale is kept after "
+    "the compaction and the block named in superseded_by (its replacement) is absent. Removing a stale block is "
+    "not a failure. Denominator: labelled blocks of the group in units with a post-compaction state. Unlabelled "
+    "blocks are excluded and counted. Verdict: an upper Wilson 95% bound <= the ask-loss threshold meets it; "
+    "fewer than 30 blocks per group gives insufficient data."
+)
+
+
+def human_blocks(row):
+    """Text blocks of a human message as (block index, normalized text).
+
+    The index counts every text block of the message content, so block ids stay stable.
+    Empty blocks and blocks starting with an excluded prefix are dropped."""
+    result = []
+    index = 0
+    for block in blocks(row):
+        if block.get("type") != "text":
+            continue
+        text = normalize_ws(REMINDER_RE.sub(" ", str(block.get("text", ""))))
+        if text and not text.startswith(NON_ASK_PREFIXES):
+            result.append((index, text))
+        index += 1
+    return result
+
+
+def unit_window(unit, window):
+    """Human messages before a unit boundary: (count of all of them, last `window` messages with blocks)."""
+    messages = unit["asks_list"][: unit["asks_n"]]
+    return len(messages), messages[-window:]
+
+
+def window_index(units, window):
+    """Index of main-thread units for labelling: unit_id -> block positions and texts inside the window."""
+    index = {}
+    for unit in units:
+        if unit["role"] != "main":
+            continue
+        _, window_messages = unit_window(unit, window)
+        positions = {}
+        texts = {}
+        position = 0
+        for message in window_messages:
+            for block in message["blocks"]:
+                positions[block["block_id"]] = position
+                texts[block["block_id"]] = block["text"]
+                position += 1
+        index[unit["key"]] = {"unit": unit, "positions": positions, "texts": texts}
+    return index
+
+
+def export_labeling(path, units, window, limit):
+    """Write one JSON line per main-thread unit with the human messages before its boundary.
+
+    The file is created exclusively with mode 0600. Block text is cut to `limit` characters and
+    flagged when cut. Nothing from the post-compaction context is written."""
+    lines = []
+    block_total = 0
+    for unit in units:
+        if unit["role"] != "main":
+            continue
+        before, window_messages = unit_window(unit, window)
+        messages_out = []
+        for message in window_messages:
+            blocks_out = []
+            for block in message["blocks"]:
+                text = block["text"]
+                blocks_out.append({"block_id": block["block_id"], "text": text[:limit], "truncated": len(text) > limit})
+                block_total += 1
+            messages_out.append({"message_id": message["message_id"], "blocks": blocks_out})
+        lines.append({
+            "unit_id": unit["key"],
+            "session_id": unit["session"],
+            "timestamp": unit["ts_text"],
+            "file": str(unit["file"]),
+            "messages_before": before,
+            "window_messages": len(window_messages),
+            "window_limit": window,
+            "text_limit": limit,
+            "messages": messages_out,
+        })
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as out_file:
+        for line in lines:
+            out_file.write(json.dumps(line, ensure_ascii=False) + "\n")
+    return len(lines), block_total
+
+
+def label_problem(row, index):
+    """Reason a label row is rejected, or None when it is usable."""
+    if not isinstance(row, dict):
+        return "not_an_object"
+    unit_id = row.get("unit_id")
+    block_id = row.get("block_id")
+    if not isinstance(unit_id, str) or not isinstance(block_id, str):
+        return "bad_ids"
+    if row.get("label") not in (LABEL_BINDING, LABEL_STALE):
+        return "bad_label"
+    reason_text = row.get("reason")
+    if not isinstance(reason_text, str) or not reason_text.strip():
+        return "missing_reason"
+    successor = row.get("superseded_by")
+    if successor is not None and not isinstance(successor, str):
+        return "bad_superseded_by"
+    if unit_id not in index:
+        return "unknown_unit"
+    positions = index[unit_id]["positions"]
+    if block_id not in positions:
+        return "unknown_block"
+    if row["label"] == LABEL_STALE and successor is None:
+        return "stale_without_fix"
+    if successor is not None:
+        if successor not in positions:
+            return "unknown_successor"
+        if positions[successor] <= positions[block_id]:
+            return "successor_not_later"
+    return None
+
+
+def read_labels(path, index):
+    """Blind labels from JSONL: (accepted rows keyed by (unit_id, block_id), rejected counts by reason, rows read)."""
+    accepted = {}
+    rejected = {}
+    read_count = 0
+    with open(path, encoding="utf-8", errors="replace") as label_file:
+        for line in label_file:
+            line = line.strip()
+            if not line:
+                continue
+            read_count += 1
+            try:
+                row = json.loads(line)
+            except ValueError:
+                row = None
+                reject_code = "bad_json"
+            else:
+                reject_code = label_problem(row, index)
+                if reject_code is None and (row["unit_id"], row["block_id"]) in accepted:
+                    reject_code = "duplicate"
+            if reject_code is not None:
+                rejected[reject_code] = rejected.get(reject_code, 0) + 1
+                continue
+            accepted[(row["unit_id"], row["block_id"])] = row
+    return accepted, rejected, read_count
+
+
+def rate_block(count, total, threshold):
+    """One measure: counts, Wilson 95% bounds and the verdict against the ask-loss threshold."""
+    if total < MIN_SUPPORT:
+        return {"count": count, "total": total, "rate": "insufficient data",
+                "wilson_lower_95": "insufficient data", "wilson_upper_95": "insufficient data",
+                "verdict": "insufficient data"}
+    lower, upper = wilson(count, total)
+    verdict = "meets the ask-loss threshold" if upper <= threshold else "does not meet the ask-loss threshold"
+    return {"count": count, "total": total, "rate": round4(count / total),
+            "wilson_lower_95": round4(lower), "wilson_upper_95": round4(upper), "verdict": verdict}
+
+
+def measure_commands(index, accepted, threshold):
+    """binding_lost and stale_kept_fix_lost per measured group, from accepted labels."""
+    groups = {name: {"units_with_state": 0, "blocks_unlabelled": 0, "labelled_without_state": 0,
+                     "stale_removed": 0, "binding_total": 0, "binding_count": 0,
+                     "stale_total": 0, "stale_count": 0}
+              for name in MEASURE_GROUPS}
+    for unit_id, entry in index.items():
+        unit = entry["unit"]
+        if unit["group"] not in groups:
+            continue
+        group = groups[unit["group"]]
+        if not unit["has_state"]:
+            group["labelled_without_state"] += sum(1 for block_id in entry["positions"] if (unit_id, block_id) in accepted)
+            continue
+        group["units_with_state"] += 1
+        levels = {block_id: ask_level(text[:FULL_PREFIX_LEN], unit["state_text"]) for block_id, text in entry["texts"].items()}
+        for block_id in entry["positions"]:
+            label = accepted.get((unit_id, block_id))
+            if label is None:
+                group["blocks_unlabelled"] += 1
+                continue
+            successor = label.get("superseded_by")
+            if label["label"] == LABEL_BINDING:
+                group["binding_total"] += 1
+                if levels[block_id] == "lost" and (successor is None or levels[successor] == "lost"):
+                    group["binding_count"] += 1
+            else:
+                group["stale_total"] += 1
+                if levels[block_id] == "lost":
+                    group["stale_removed"] += 1
+                elif levels[successor] == "lost":
+                    group["stale_count"] += 1
+    result = {}
+    for name, group in groups.items():
+        result[name] = {
+            "units_with_state": group["units_with_state"],
+            "blocks_unlabelled": group["blocks_unlabelled"],
+            "labelled_without_state": group["labelled_without_state"],
+            "stale_removed": group["stale_removed"],
+            "binding_lost": rate_block(group["binding_count"], group["binding_total"], threshold),
+            "stale_kept_fix_lost": rate_block(group["stale_count"], group["stale_total"], threshold),
+        }
+    return result
+
+
+def command_text_lines(measure):
+    """Summary lines of the labelling measure (numbers and verdicts only); none without labels."""
+    if not measure:
+        return []
+    rejected = measure["labels"]["rejected"]
+    lines = [f"command measure: labels read {measure['labels']['read']}, accepted {measure['labels']['accepted']}, "
+             f"rejected {sum(rejected.values())}"]
+    for group_name in MEASURE_GROUPS:
+        group = measure["groups"][group_name]
+        lines.append(f"  {group_name}: units with state {group['units_with_state']}, unlabelled blocks "
+                     f"{group['blocks_unlabelled']}, labelled blocks without state {group['labelled_without_state']}, "
+                     f"stale removed {group['stale_removed']}")
+        for key in ("binding_lost", "stale_kept_fix_lost"):
+            item = group[key]
+            lines.append(f"    {key}: {item['count']}/{item['total']}, rate {item['rate']}, "
+                         f"Wilson 95% [{item['wilson_lower_95']}, {item['wilson_upper_95']}], {item['verdict']}")
+    return lines
 
 
 def counts(values):
@@ -754,6 +1010,7 @@ def text_report(report, verdicts):
     for g in sorted(verdicts):
         v = verdicts[g]
         lines.append(f"  verdict {g}: head_lost {v['head_lost']}, ask_lost {v['ask_lost']}, upper bounds {v['head_upper_bound']} / {v['ask_upper_bound']}")
+    lines.extend(command_text_lines(report.get("command_measure")))
     return "\n".join(lines)
 def find_transcripts(projects):
     """Transcripts: main <projects>/<dir>/<id>.jsonl and subagent <projects>/<dir>/<id>/subagents/agent-*.jsonl."""
@@ -791,7 +1048,20 @@ def main(argv=None):
     parser.add_argument("--details", action="store_true", help="add the unit list (without ask contents)")
     parser.add_argument("--json", action="store_true", help="the result as one JSON object")
     parser.add_argument("--out", default=None, help="write to a new file (mode x, 0600; existing: exit 1)")
+    parser.add_argument("--export-labeling", default=None, help="write the blind labelling export (JSONL, new file, mode 0600)")
+    parser.add_argument("--labels", default=None, help="read blind labels (JSONL) and compute binding_lost and stale_kept_fix_lost")
+    parser.add_argument("--export-window", type=int, default=EXPORT_WINDOW_DEFAULT, help="human messages before a boundary kept in the export (default 40)")
+    parser.add_argument("--export-limit", type=int, default=EXPORT_LIMIT_DEFAULT, help="characters kept per human block in the export (default 500)")
     args = parser.parse_args(argv)
+    if args.export_window < 1 or args.export_limit < 1:
+        print("error: --export-window and --export-limit must be at least 1", file=sys.stderr)
+        return 2
+    if args.export_labeling and os.path.exists(args.export_labeling):
+        print(f"error: --export-labeling: the file {args.export_labeling} exists, export refused", file=sys.stderr)
+        return 1
+    if args.labels and not os.path.isfile(args.labels):
+        print(f"error: --labels: no file {args.labels}", file=sys.stderr)
+        return 2
     if args.days < 0:
         print("error: --days must not be negative", file=sys.stderr)
         return 2
@@ -822,7 +1092,7 @@ def main(argv=None):
         files = find_transcripts(args.projects)
     files.sort(key=lambda x: x[0])
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    analysis = main_analysis(files, journal_data, from_e, to_e)
+    analysis = main_analysis(files, journal_data, from_e, to_e, keep_asks=bool(args.export_labeling or args.labels))
     units = analysis["units"]
     compact_without_boundary = 0
     for c in journal_data["compacts_all"]:
@@ -861,6 +1131,26 @@ def main(argv=None):
         },
     ]
     report, groups, verdicts, levels = build_report(units, quality, generated_at, from_dt, to_dt, args.ask_loss_threshold)
+    if args.export_labeling:
+        try:
+            exported_units, exported_blocks = export_labeling(args.export_labeling, units, args.export_window, args.export_limit)
+        except OSError as e:
+            print(f"error: --export-labeling: {e}", file=sys.stderr)
+            return 1
+        report["labeling_export"] = {"units": exported_units, "blocks": exported_blocks}
+        print(f"export written: {args.export_labeling} (units {exported_units}, blocks {exported_blocks})", file=sys.stderr)
+    if args.labels:
+        label_index = window_index(units, args.export_window)
+        try:
+            accepted, rejected, read_count = read_labels(args.labels, label_index)
+        except OSError as e:
+            print(f"error: --labels: {e}", file=sys.stderr)
+            return 2
+        report["command_measure"] = {
+            "rule": RULE_LABELS,
+            "labels": {"read": read_count, "accepted": len(accepted), "rejected": rejected},
+            "groups": measure_commands(label_index, accepted, args.ask_loss_threshold),
+        }
     report["verdicts"] = verdicts
     report["levels"] = levels
     if args.details:
