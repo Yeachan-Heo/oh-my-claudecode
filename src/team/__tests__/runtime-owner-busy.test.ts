@@ -47,12 +47,13 @@ vi.mock('../tmux-session.js', async importOriginal => ({
 import { canonicalRecoveryPayloadHash, readRecoveryFinalState, readRecoveryOutcome, reserveRecoveryRequest as persistRecoveryRequest, writeRecoveryPhase } from '../recovery-request-store.js';
 import {
   executeRecoverDeadWorkerV2Owner,
+  finalizeRecoveryOwnerResult,
   recoverDeadWorkerV2,
   setRuntimeOwnerRecoveryClient,
   type RuntimeOwnerRecoveryClient,
 } from '../runtime-v2.js';
 import { absPath, TeamPaths } from '../state-paths.js';
-import { readRevisionedTeamConfig } from '../monitor.js';
+import { readRevisionedTeamConfig, saveTeamConfigAtRevision } from '../monitor.js';
 import { currentProcessStartIdentity, currentStrictProcessStartIdentity, isProcessIdentityDead, isValidProcessStartIdentity, publishOwnerEpoch, readLatestOwnerEpoch } from '../team-owner-epoch.js';
 import { reserveTeamInstance } from '../team-instance.js';
 import { runRecoverySaga } from '../recovery-saga.js';
@@ -860,6 +861,40 @@ describe('recovery owner retry deadline', () => {
     // The executor without the deadline reads no task here and ends with worker_not_found.
     await expect(execute(teamName)).resolves.toMatchObject({ outcome: 'failed', error: 'worker_not_found' });
     expect(readRecoveryOutcome(cwd, 'stuck-request')).toMatchObject({ kind: 'final', error: { code: 'worker_not_found' } });
+    expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();
+  });
+
+  it('publishes a saved timeout final after its owner died between the config save and the final', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-crash-');
+    const teamName = 'deadline-crash';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    // The owner that decided the timeout is dead (this pid, another start).
+    const deadStartedAt = hostValidDeadProcessStartIdentity(process.pid);
+    publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: deadStartedAt, nonce: 'prior-owner' });
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.runtime_owner_epoch = { epoch: 1, nonce: 'prior-owner', pid: process.pid, process_started_at: deadStartedAt,
+      created_at: new Date().toISOString() };
+    writeFileSync(configPath, JSON.stringify(config));
+    const input = { teamName, cwd, workerName: 'worker-1', requestId: 'stuck-request', instanceId: TEAM_INSTANCE_ID };
+    const timeout = { outcome: 'failed' as const, committed: false as const, error: 'recovery_request_timeout' as const,
+      message: 'Recovery owner deadline exceeded: no attempt finished within 300000 ms of admission.',
+      requestId: 'stuck-request', recoveryId: 'stuck-recovery', teamName, workerName: 'worker-1', updatedAt: new Date().toISOString() };
+    // The owner dies right after the config save, before it publishes the final.
+    await finalizeRecoveryOwnerResult(input, 'stuck-recovery', timeout, {
+      readRevisionedConfig: readRevisionedTeamConfig,
+      saveConfigAtRevision: saveTeamConfigAtRevision,
+      publishFinal: () => { throw new Error('owner died'); },
+    });
+    const saved = await readRevisionedTeamConfig(teamName, cwd);
+    expect(saved?.config.active_recovery).toBeUndefined();
+    expect(saved?.config.last_recovery).toMatchObject({ recovery_id: 'stuck-recovery', phase: 'failed' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toBeNull();
+
+    await expect(execute(teamName)).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+    expect(readRecoveryFinalState(cwd, 'stuck-request')).toMatchObject({ kind: 'valid',
+      final: { outcome: 'failed', error: { code: 'recovery_request_timeout', message: expect.stringContaining('deadline exceeded') } } });
+    expect(tmuxMocks.tmuxExecAsync.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
     expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();
   });
 
