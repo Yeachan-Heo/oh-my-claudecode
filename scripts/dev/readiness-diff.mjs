@@ -44,6 +44,9 @@ const succeeded = (traceCase) => traceCase.result?.ok === true;
 
 const STARTUP_WAIT_MAX_MS = 120_000;
 const STARTUP_WAIT_DEFAULT_MS = 30_000;
+// waitForStartupPaneReady's default poll interval.
+const STARTUP_POLL_MS = 250;
+const TRUST_MODES = ['immediate', 'batched'];
 
 // The product's own parser decides which values may lengthen the wait, so the
 // comparator cannot read a value differently from it (6e4, unsafe integers).
@@ -72,12 +75,26 @@ const SET_CRITERIA = {
   },
   // Claude Code's trust dialog, answered by a pane that applies each key as it
   // arrives (immediate) or the keys sent between captures together (batched).
+  // Immediate: head sends what base sent and waits exactly one more poll, for
+  // the capture that shows Yes focused. Batched: base confirms "No, exit" and
+  // fails; head succeeds.
   trust: (pairs) => {
     const failures = [];
+    for (const mode of TRUST_MODES) {
+      if (!pairs.some(({ base }) => base.eventState === mode)) failures.push(`no ${mode} case`);
+    }
     for (const { id, base, head, sameKeys, sameResult } of pairs) {
-      if (!succeeded(head)) failures.push(`${id} head result ${JSON.stringify(head.result)}`);
-      if (base.eventState === 'immediate' && !(sameKeys && sameResult)) {
-        failures.push(`${id} head differs from base where the base already succeeded`);
+      if (!TRUST_MODES.includes(base.eventState)) failures.push(`${id} has unknown mode ${base.eventState}`);
+      if (base.eventState === 'immediate') {
+        if (!sameKeys) failures.push(`${id} key sequence differs from base`);
+        if (!sameResult || !succeeded(head)) failures.push(`${id} result ${JSON.stringify(head.result)} differs from base or failed`);
+        if (head.wait_ms !== base.wait_ms + STARTUP_POLL_MS) {
+          failures.push(`${id} head waited ${head.wait_ms}ms, not base ${base.wait_ms}ms + one ${STARTUP_POLL_MS}ms poll`);
+        }
+      }
+      if (base.eventState === 'batched') {
+        if (base.result?.reason !== 'selector_persistent') failures.push(`${id} base result ${JSON.stringify(base.result)} is not selector_persistent`);
+        if (!succeeded(head)) failures.push(`${id} head result ${JSON.stringify(head.result)}`);
       }
     }
     return failures;

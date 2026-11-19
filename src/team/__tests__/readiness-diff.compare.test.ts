@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 type TraceCase = {
   case: string;
+  eventState?: string | null;
   env: Record<string, string | null>;
   control: boolean;
   keys: Array<{ fn: string; pane: string; guarded: boolean; keys: string[]; at_ms: number }>;
@@ -85,5 +86,59 @@ describe('readiness-diff set r5', () => {
     const head = trace([traceCase(null, 1_000), traceCase(raw, 40_000)]);
     const summary = summarize({ set: 'r5', baseSha: 'base', headSha: 'head', base, head });
     expect(summary).toMatch(allowed ? /RESULT PASS$/ : /RESULT FAIL$/);
+  });
+});
+
+describe('readiness-diff set trust', () => {
+  const TRUST = 'claude/2.1.325/trust.txt';
+  const ok = { ok: true, kind: 'attempted_unconfirmed' };
+  const persistent = { ok: false, reason: 'selector_persistent' };
+  const trustCase = (mode: string, keys: string[][], result: unknown, waitMs: number): TraceCase => ({
+    case: `${TRUST} keys=${mode}`,
+    eventState: mode,
+    env: { OMC_TEAM_READY_TIMEOUT_MS: null },
+    control: mode === 'immediate',
+    keys: keys.map(send),
+    result,
+    wait_ms: waitMs,
+    unknown_commands: [],
+  });
+  const delivered = [['Down'], ['Enter'], ['-l', 'Read inbox.md'], ['Enter'], ['Enter']];
+  const base = () => ({ set: 'trust', loaded_modules: [], cases: [
+    trustCase('immediate', delivered, ok, 470),
+    trustCase('batched', [['Down'], ['Enter']], persistent, 250),
+  ] });
+  const goodHead = () => ({ set: 'trust', loaded_modules: [], cases: [
+    trustCase('immediate', delivered, ok, 720),
+    trustCase('batched', delivered, ok, 720),
+  ] });
+  const runTrust = (head: Trace, baseTrace: Trace = base()) =>
+    summarize({ set: 'trust', baseSha: 'base', headSha: 'head', base: baseTrace, head });
+
+  it('passes the fixed behavior', () => {
+    expect(runTrust(goodHead())).toMatch(/RESULT PASS$/);
+  });
+
+  it('fails when head behaves like base', () => {
+    expect(runTrust(base())).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when batched head still fails', () => {
+    const head = goodHead();
+    head.cases[1] = trustCase('batched', [['Down']], { ok: false, reason: 'readiness_timeout' }, 30_000);
+    expect(runTrust(head)).toContain(`failure: ${TRUST} keys=batched head result`);
+  });
+
+  it('fails when immediate keys differ or the wait is not exactly one poll longer', () => {
+    const head = goodHead();
+    head.cases[0] = trustCase('immediate', [['Enter'], ...delivered.slice(2)], ok, 970);
+    const summary = runTrust(head);
+    expect(summary).toContain(`failure: ${TRUST} keys=immediate key sequence differs from base`);
+    expect(summary).toContain(`failure: ${TRUST} keys=immediate head waited 970ms`);
+  });
+
+  it('fails when a mode has no case', () => {
+    const only = (trace: Trace) => ({ ...trace, cases: trace.cases.slice(0, 1) });
+    expect(runTrust(only(goodHead()), only(base()))).toContain('failure: no batched case');
   });
 });
