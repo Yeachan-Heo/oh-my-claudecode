@@ -72,6 +72,10 @@ const TABLE: Readonly<Record<string, Row>> = {
   'claude/2.1.325/idle.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/2.1.325/trust-just-answered.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
   'claude/2.1.325/trust.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
+  'claude/2.1.328/busy-long-turn.txt': { ready: true, busy: true, trust: null, known_wrong: true, reason: BUSY_READY, state: 'busy' },
+  'claude/2.1.328/done.txt': { ready: true, busy: false, trust: null, state: 'idle' },
+  'claude/2.1.328/idle-after-esc-interrupt.txt': { ready: true, busy: false, trust: null, state: 'idle' },
+  'claude/2.1.328/idle-after-stopfailure.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   // Claude Code's first-run dialogs are read only by the startup wait (detectClaudeStartupDialog).
   'claude/2.1.328/bypass-permissions-yes-focused.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/2.1.328/bypass-permissions.txt': { ready: true, busy: false, trust: null, state: 'idle' },
@@ -79,6 +83,7 @@ const TABLE: Readonly<Record<string, Row>> = {
   'claude/2.1.328/fullscreen-renderer.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/2.1.328/idle-after-fullscreen-renderer.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/2.1.328/trust-yes-focused.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
+  'claude/2.1.328/trust.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
   // Claude Code's onboarding is read only by the startup wait (detectClaudeStartupDialog).
   'claude/2.1.329/onboarding-security-notes.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
   'claude/2.1.329/onboarding-theme.txt': { ready: true, busy: false, trust: null, state: 'idle' },
