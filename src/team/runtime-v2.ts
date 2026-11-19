@@ -1182,9 +1182,14 @@ function configuredPaneOwnership(
  * The two halves of the opt-in tree kill (OMC_TEAM_KILL_PANE_TREE) for a rollback that retires a launch attempt and then kills the pane: `read`
  * is the last argument of retireAndCleanupCurrentWorkerLaunchAttempt, which runs it right before the provider is terminated, and `terminate` runs
  * first in the cleanup, before anything asks whether the pane is still alive. A descendant that left the provider's process group is no longer
- * below the pane's root once the provider is gone, and the kill of the pane reads the tree only after that.
+ * below the pane's root once the provider is gone, and the kill of the pane reads the tree only after that. The tree is read only of a pane that
+ * the kill of the pane would not refuse at once (not the pane of the leader, not a reserved one) and, when `proved` is given, that it proves
+ * to be the pane of the team; what is not read is not signalled.
  */
-function paneTreeFence(ownership: WorkerPaneOwnership | null | undefined): {
+function paneTreeFence(
+  ownership: WorkerPaneOwnership | null | undefined,
+  proved?: () => Promise<boolean>,
+): {
   read: () => Promise<void>;
   terminate: () => Promise<void>;
 } {
@@ -1194,7 +1199,10 @@ function paneTreeFence(ownership: WorkerPaneOwnership | null | undefined): {
       if (
         process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
         ownership?.tmuxServerIdentity &&
-        ownership.paneId.startsWith("%")
+        ownership.paneId.startsWith("%") &&
+        ownership.paneId !== ownership.leaderPaneId &&
+        !ownership.reservedPaneIds.includes(ownership.paneId) &&
+        (!proved || (await proved()))
       )
         tree = await capturePaneProcessTree(
           ownership.tmuxServerIdentity,
@@ -4870,7 +4878,34 @@ export async function executeRecoverDeadWorkerV2Owner(
           const priorOwnership = configuredPaneOwnership(owner.config, {
             pane_id: priorLaunch.pane_id,
           });
-          const fence = paneTreeFence(priorOwnership);
+          const adoptPrior = async () =>
+            owner.config.tmux_session && leaderPaneId
+              ? adoptWorkerPaneOwnership({
+                  provider: providerForTeamTarget(
+                    owner.config.tmux_session,
+                    priorLaunch.pane_id,
+                  ),
+                  providerTarget: owner.config.tmux_session,
+                  paneId: priorLaunch.pane_id,
+                  leaderPaneId,
+                  reservedPaneIds,
+                  ...(tmuxServerIdentityForTarget(
+                    owner.config.tmux_session,
+                    owner.config.tmux_server_identity,
+                  )
+                    ? {
+                        tmuxServerIdentity: tmuxServerIdentityForTarget(
+                          owner.config.tmux_session,
+                          owner.config.tmux_server_identity,
+                        ),
+                      }
+                    : {}),
+                })
+              : null;
+          const fence = paneTreeFence(
+            priorOwnership,
+            async () => (await adoptPrior())?.ok === true,
+          );
           const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
             priorLaunch,
             "recovery_replacement",
@@ -4882,34 +4917,9 @@ export async function executeRecoverDeadWorkerV2Owner(
                   )
                 : ("unknown" as const);
               if (paneLiveness === "dead") return true;
-              if (
-                paneLiveness !== "alive" ||
-                !owner.config.tmux_session ||
-                !leaderPaneId
-              )
-                return false;
-              const adopted = await adoptWorkerPaneOwnership({
-                provider: providerForTeamTarget(
-                  owner.config.tmux_session,
-                  priorLaunch.pane_id,
-                ),
-                providerTarget: owner.config.tmux_session,
-                paneId: priorLaunch.pane_id,
-                leaderPaneId,
-                reservedPaneIds,
-                ...(tmuxServerIdentityForTarget(
-                  owner.config.tmux_session,
-                  owner.config.tmux_server_identity,
-                )
-                  ? {
-                      tmuxServerIdentity: tmuxServerIdentityForTarget(
-                        owner.config.tmux_session,
-                        owner.config.tmux_server_identity,
-                      ),
-                    }
-                  : {}),
-              });
-              if (!adopted.ok) return false;
+              if (paneLiveness !== "alive") return false;
+              const adopted = await adoptPrior();
+              if (!adopted?.ok) return false;
               for (
                 let cleanupAttempt = 0;
                 cleanupAttempt < 2;

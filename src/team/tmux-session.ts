@@ -4143,7 +4143,8 @@ export async function spawnOwnedWorkerInPane(
   } catch (error) {
     // The pane's process tree is read right before the provider is terminated (the last argument), and signalled first in the cleanup: a
     // descendant that left the provider's process group is no longer below the pane's root once the provider is gone, and the kill of the
-    // pane reads the tree after that (OMC_TEAM_KILL_PANE_TREE).
+    // pane reads the tree after that (OMC_TEAM_KILL_PANE_TREE). Not read of the pane of the leader or a reserved one, which the kill of the
+    // pane refuses.
     let fencedTree: PaneProcessTree | null = null;
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
       attempt,
@@ -4161,7 +4162,9 @@ export async function spawnOwnedWorkerInPane(
         if (
           process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
           ownership.tmuxServerIdentity &&
-          ownership.paneId.startsWith("%")
+          ownership.paneId.startsWith("%") &&
+          ownership.paneId !== ownership.leaderPaneId &&
+          !ownership.reservedPaneIds.includes(ownership.paneId)
         )
           fencedTree = await capturePaneProcessTree(
             ownership.tmuxServerIdentity,

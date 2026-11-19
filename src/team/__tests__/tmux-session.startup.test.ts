@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -59,6 +60,10 @@ const tmuxState = vi.hoisted(() => ({
   livenessError: null as Error | null,
   captureError: null as Error | null,
   activeAttempt: null as WorkerLaunchAttempt | null,
+  // Answers to the guarded `#{pane_pid} #{pane_dead}` query, one per query, the last one repeating; none leaves the pane root unreadable.
+  paneRoots: [] as Array<{ pid: number; dead: boolean }>,
+  afterEnter: null as ((attempt: WorkerLaunchAttempt) => Promise<void>) | null,
+  onKillPane: null as (() => void) | null,
 }));
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => {
@@ -253,10 +258,19 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
               process_start_identity: fixtureProcessStartIdentity,
               written_at: new Date().toISOString(),
             }), 'utf8');
+            await tmuxState.afterEnter?.(attempt);
             tmuxState.activeAttempt = null;
           }
         }
         const marker = success.match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+        if (words.includes('#{pane_pid} #{pane_dead}')) {
+          const root = tmuxState.paneRoots.length > 1 ? tmuxState.paneRoots.shift() : tmuxState.paneRoots[0];
+          if (root) return { stdout: `${root.pid} ${root.dead ? 1 : 0}\n${marker}\n`, stderr: '' };
+        }
+        if (nativeCommand === 'kill-pane' && tmuxState.onKillPane) {
+          tmuxState.paneStatus = '1 cmd\n';
+          tmuxState.onKillPane();
+        }
         return { stdout: marker ? `${marker}\n` : '', stderr: '' };
       }
       return { stdout: '', stderr: '' };
@@ -336,6 +350,9 @@ beforeEach(() => {
   tmuxState.livenessError = null;
   tmuxState.captureError = null;
   tmuxState.activeAttempt = null;
+  tmuxState.paneRoots = [];
+  tmuxState.afterEnter = null;
+  tmuxState.onKillPane = null;
   originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   processMocks.isProcessIdentityLive.mockResolvedValue('live');
 });
@@ -1155,6 +1172,93 @@ describe('worker pane startup safety', () => {
     expect(tmuxState.paneStatus).toBe('0 cmd\n');
     expect(tmuxState.args.some(args => args.some(arg => arg.includes('#{pane_pid} #{pane_dead}')))).toBe(treeKill); // inside the guarded command
     delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
+  });
+
+  // A failed launch whose provider is proved gone runs its cleanup. With OMC_TEAM_KILL_PANE_TREE the process tree of the pane, read through the hook of
+  // the retirement before the provider is terminated, is signalled first in that cleanup, before the pane is killed: the later read of the kill of
+  // the pane finds a dead pane here, so only the signal of the cleanup can end the descendant. The tree is read only of a pane that the kill of the
+  // pane would not refuse at once (not the pane of the leader, not a reserved one).
+  describe('a failed launch whose provider is proved gone', () => {
+    let paneRoot: ChildProcess | undefined;
+    let descendantPid = 0;
+    const isAlive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'EPERM';
+      }
+    };
+
+    afterEach(() => {
+      for (const pid of [descendantPid, paneRoot?.pid ?? 0]) {
+        if (pid > 0) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            /* already exited */
+          }
+        }
+      }
+      paneRoot = undefined;
+      descendantPid = 0;
+    });
+
+    /** The root of a pane with one descendant, both real processes (the descendant only sleeps). */
+    async function startPane(): Promise<void> {
+      paneRoot = spawn('sh', ['-c', 'sleep 600 & echo $!; wait'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      descendantPid = await new Promise<number>((resolve, reject) => {
+        paneRoot!.stdout!.once('data', chunk => resolve(Number(String(chunk).trim())));
+        paneRoot!.once('error', reject);
+      });
+      expect(descendantPid).toBeGreaterThan(1);
+    }
+
+    // `killed`: whether the cleanup gets as far as the kill of the pane (it does not for the pane of the leader or a reserved one, which the kill refuses).
+    const rows: Array<[string, boolean, () => WorkerPaneOwnership, string, boolean]> = [
+      ['a pane of the team with the switch', true, () => ownership('%2'), 'worker_start_provider_failed', true],
+      ['a pane of the team without the switch', false, () => ownership('%2'), 'worker_start_provider_failed', true],
+      ['the pane of the leader with the switch', true, () => ownership('%1'), 'worker_launch_cleanup_unverified', false],
+      ['a reserved pane with the switch', true, () => ({ ...ownership('%2'), reservedPaneIds: ['%2'] }), 'worker_launch_cleanup_unverified', false],
+    ];
+
+    strictTmuxIt.each(rows)('%s', async (_what, treeKill, owned, rejection, killed) => {
+      if (treeKill) process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+      cwd = await createFixture('omc-startup-launch-failed-tree-');
+      process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
+      processMocks.isProcessIdentityLive.mockResolvedValue('dead');
+      await startPane();
+      // The first two answers are the reads of the hook (the root before and after the process list); a read after them finds the pane dead.
+      tmuxState.paneRoots = [{ pid: paneRoot!.pid!, dead: false }, { pid: paneRoot!.pid!, dead: false }, { pid: paneRoot!.pid!, dead: true }];
+      tmuxState.afterEnter = attempt => markProviderExited(attempt);
+      let descendantAliveAtKill: boolean | undefined;
+      tmuxState.onKillPane = () => { descendantAliveAtKill = isAlive(descendantPid); };
+
+      await expect(spawnOwnedWorkerInPane('startup:0', owned(), {
+        teamName: 'startup-team',
+        workerName: 'worker-1',
+        instanceId: randomUUID(),
+        envVars: {},
+        launchArgs: ['--version'],
+        launchBinary: '/usr/bin/codex',
+        cwd,
+        provider: 'codex',
+        launchBootstrapPath: '/runtime-cli.js',
+        launchStateCwd: cwd,
+        launchContext: { kind: 'initial' },
+      })).rejects.toThrow(rejection);
+
+      const rootQueries = tmuxState.args.filter(args => args.some(arg => arg.includes('#{pane_pid} #{pane_dead}'))).length;
+      if (treeKill && killed) {
+        expect(rootQueries).toBe(3); // the two reads of the hook, then the read of the kill of the pane, which finds a dead pane
+        expect(descendantAliveAtKill).toBe(false); // signalled before the kill of the pane
+        expect(isAlive(descendantPid)).toBe(false);
+      } else {
+        expect(rootQueries).toBe(0);
+        expect(descendantAliveAtKill).toBe(killed ? true : undefined);
+        expect(isAlive(descendantPid)).toBe(true);
+      }
+    }, 30_000);
   });
 
   it('refuses an owned worker launch without its immutable instance id', async () => {

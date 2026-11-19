@@ -1124,6 +1124,54 @@ describe('scaleUp duplicate worker guard', () => {
     }
   });
 
+  // The tree is read only of a pane the kill of the pane would not refuse at once: not the pane of the leader, not a reserved one. The
+  // mocked adoption reports the new pane (%12) as such a pane, and the mocked tree would be signalled if it were read.
+  it.each([
+    ['the pane of the leader', { leaderPaneId: '%12' }],
+    ['a reserved pane', { reservedPaneIds: ['%12'] }],
+  ])('a rolled back scale up reads and signals no pane tree of %s', async (_what, excluded) => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'named' });
+    const worktreePath = join(cwd, '.omc', 'team', 'demo-team', 'worktrees', 'worker-2');
+    gitWorktreeMocks.ensureWorkerWorktree.mockReturnValue({ path: worktreePath, branch: 'worker-2',
+      detached: false, created: true });
+    gitWorktreeMocks.installWorktreeRootAgents.mockReturnValue(undefined);
+    teamOpsMocks.teamWriteWorkerIdentity.mockRejectedValue(new Error('identity write failed'));
+    tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+    const adoptDefault = tmuxSessionMocks.adoptWorkerPaneOwnership.getMockImplementation()!;
+    tmuxSessionMocks.adoptWorkerPaneOwnership.mockImplementation(async (input) => {
+      const adopted = await adoptDefault(input);
+      return input.paneId === '%12'
+        ? { ...adopted, ownership: { ...adopted.ownership, ...excluded } as typeof adopted.ownership }
+        : adopted;
+    });
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockResolvedValue(tree);
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    let hookRan = false;
+    workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementationOnce(async (_attempt, _reason, cleanup, beforeProviderTermination) => {
+      await beforeProviderTermination?.();
+      hookRan = true;
+      return cleanup();
+    });
+    try {
+      const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd,
+        { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' } as NodeJS.ProcessEnv);
+
+      expect(result).toMatchObject({ ok: false });
+      expect(hookRan).toBe(true);
+      expect(tmuxSessionMocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
   it('cleans the exact partial worktree and worker directory when worktree creation throws', async () => {
     config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'named' });
     const worktreePath = join(cwd, '.omc', 'team', 'demo-team', 'worktrees', 'worker-2');
