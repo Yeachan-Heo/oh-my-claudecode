@@ -237,9 +237,13 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     ].map(record => JSON.stringify(record)).join('\n') + '\n', 'utf-8');
     const withEvents = await monitorTeamV2('demo-team', cwd);
     const shown = withEvents?.workers[0]?.providerEvent;
-    expect(shown?.event).toBe('UserPromptSubmit');
-    expect(shown?.ageSeconds).toBeGreaterThanOrEqual(12);
-    expect(shown?.ageSeconds).toBeLessThan(60);
+    if (process.platform === 'win32') {
+      expect(shown).toEqual({ event: 'none', ageSeconds: null });
+    } else {
+      expect(shown?.event).toBe('UserPromptSubmit');
+      expect(shown?.ageSeconds).toBeGreaterThanOrEqual(12);
+      expect(shown?.ageSeconds).toBeLessThan(60);
+    }
     expect(withEvents?.recommendations).toEqual(without?.recommendations);
     expect(withEvents?.nonReportingWorkers).toEqual(without?.nonReportingWorkers);
     expect(withEvents?.deadWorkers).toEqual(without?.deadWorkers);
