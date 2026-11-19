@@ -108,12 +108,14 @@ describe('background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICAT
   it('predicts the tokens of a notification at the reminder rate, its non-ASCII characters at 3.72 and its trace at 0.58', async () => {
     const p = row(note('Status: registry', `Report ${'é'.repeat(8000)}`), { handle: 'n1' });
     const w = talk(30);
-    const { out, record } = await compactRun(NOTE_ENV, [...w.slice(0, 3), p, ...w.slice(3)]);
+    // The host counts more tokens than the notification costs (a prediction never goes below zero).
+    const { out, record } = await compactRun(NOTE_ENV, [...w.slice(0, 3), p, ...w.slice(3)], { tokens: 60000 });
     expect(record).toMatchObject({ result: 'jev', notifications: 1 });
     const trace = out.messages.find((m) => /^\[compacted\] background task notification/.test(m.text || ''));
     expect(trace).toBeTruthy();
     const nonAscii = [...p.text].filter((c) => c.codePointAt(0) > 127).length;
-    const expected = Math.round(30000 - (0.363 * p.text.length + 3.72 * nonAscii - 0.58 * trace.text.length));
+    const expected = Math.round(60000 - (0.363 * p.text.length + 3.72 * nonAscii - 0.58 * trace.text.length));
+    expect(expected).toBeGreaterThan(0);
     expect(Math.abs(record.tokens_after_pred - expected)).toBeLessThanOrEqual(1);
   });
 
