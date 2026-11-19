@@ -665,6 +665,38 @@ describe('agent output summarization / truncation (issue #1373)', () => {
   );
 });
 
+describe('agent completion summary with a running agent without agent_type', () => {
+  it('keeps the Completed and Failed parts when a running agent has no agent_type', () => {
+    withTempDir((tempDir) => {
+      mkdirSync(join(tempDir, '.omc', 'state'), { recursive: true });
+      writeFileSync(
+        join(tempDir, '.omc', 'state', 'subagent-tracking.json'),
+        JSON.stringify({
+          agents: [
+            { agent_id: 'agent-without-type', status: 'running' },
+            { agent_id: 'agent-with-type', agent_type: 'oh-my-claudecode:executor', status: 'running' },
+          ],
+          total_completed: 2,
+          total_failed: 1,
+        }),
+      );
+
+      const out = runPostToolVerifier({
+        tool_name: 'Task',
+        tool_input: {},
+        tool_response: 'ok',
+        session_id: 'agent-type-missing',
+        cwd: tempDir,
+      });
+
+      const context = out.hookSpecificOutput?.additionalContext ?? '';
+      expect(context).toContain('Running: 2 [unknown, executor]');
+      expect(context).toContain('Completed: 2');
+      expect(context).toContain('Failed: 1');
+    });
+  });
+});
+
 describe('post-tool hook regression coverage (issue #2615)', () => {
   it('prefers canonical edit success output over embedded markdown diagnostics', () => {
     const out = runPostToolVerifier({
