@@ -9,7 +9,8 @@
  * The latest event is display-only: nothing decides startup, liveness,
  * recommendations, or nudges from it.
  */
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -56,13 +57,27 @@ export async function readLatestProviderEvent(
   attemptId: string | undefined,
 ): Promise<LatestProviderEvent> {
   if (!attemptId) return { event: 'none' };
-  let content: string;
+  // Read only a regular file reached without symlinks: a FIFO left at the path
+  // would otherwise block the whole monitor cycle.
+  const workersDir = join(teamStateRoot, 'workers');
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    content = await readFile(providerEventsPath(teamStateRoot, workerName), 'utf8');
+    for (const dir of [workersDir, join(workersDir, workerName)]) {
+      if (!(await lstat(dir)).isDirectory()) return { event: 'none' };
+    }
+    handle = await open(
+      providerEventsPath(teamStateRoot, workerName),
+      constants.O_RDONLY
+        | (constants.O_NOFOLLOW ?? 0)
+        | (process.platform === 'win32' ? 0 : (constants.O_NONBLOCK ?? 0)),
+    );
+    if (!(await handle.stat()).isFile()) return { event: 'none' };
+    return parseLatestProviderEvent(await handle.readFile('utf8'), attemptId);
   } catch {
     return { event: 'none' };
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
-  return parseLatestProviderEvent(content, attemptId);
 }
 
 export function providerEventSettingsPath(teamStateRoot: string): string {
