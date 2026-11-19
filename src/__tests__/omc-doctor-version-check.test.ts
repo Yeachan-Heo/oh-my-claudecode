@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { read, runCommand, scriptOf, spellingsMeet, upperBelow, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
+import { read, runCommand, scriptOf, upperBelow, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
 
 const text = read('skills/omc-doctor/SKILL.md');
 const versionCommand = text.split('\n').find((l) => l.startsWith('node -e ') && l.includes("'Updater: "));
@@ -520,9 +520,9 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
                 root === 'a checkout elsewhere' ? { Channel: 'plugin-dir', Installed: '9.9.0', 'Plugin root': checkout }
                   : unreadable ? { Channel: 'unknown' }
                     : registry === 'valid' ? { Channel: `marketplace ${layout.ns}`, Installed: '5.8.0', Plugin: layout.key }
-                      // A root that does not exist is not a loaded checkout (the runtime skips it), so it never overrides a registry entry;
-                      // with no registry at all, a root that is named stays a plugin-dir install with no version, as before this rule.
-                      : root === 'unset' ? { Channel: 'npm', Installed: layout.ns === 'omc' ? '5.8.0' : '(none)' } // the npm channel reads the omc cache only
+                      // A root that does not exist is not a loaded checkout (the runtime skips it), so it never overrides a registry entry
+                      // and, with no registry at all, it is no plugin-dir install either: the managed cache answers, as with no root.
+                      : root === 'unset' || root === 'a path that does not exist' ? { Channel: 'npm', Installed: layout.ns === 'omc' ? '5.8.0' : '(none)' } // the npm channel reads the omc cache only
                         : { Channel: 'plugin-dir', Installed: '(none)' };
               const got = Object.fromEntries(Object.keys(expected).map((k) => [k, k === 'Channel' && expected.Channel === 'unknown' ? (out.Channel ?? '').split(' ')[0] : out[k]]));
               expect({ layout: layout.name, registry, root, got }).toEqual({ layout: layout.name, registry, root, got: expected });
@@ -603,8 +603,8 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
         expect(twoSpellings(true, 'alias').Channel).toBe('plugin-dir');
         expect(twoSpellings(true, 'different').Channel).toContain('different directories');
         const folded = twoSpellings(false, 'alias').Channel;
-        if (spellingsMeet()) expect(folded).toBe('plugin-dir');
-        else expect(folded).toContain('different directories');
+        // On a volume that tells the names apart the alias names no directory and is ignored, so the one checkout still answers.
+        expect(folded).toBe('plugin-dir');
       });
     });
   });
@@ -655,6 +655,83 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     });
   });
 
+  // A root variable that names nothing is not a loaded checkout (the runtime wrapper looks for the HUD of the root and otherwise
+  // falls through to the managed cache), so it never makes a plugin-dir install, a conflict or a channel on its own.
+  describe('a plugin root variable that does not name an existing directory is ignored', () => {
+    const makeRoot = (dir: string, name: string) => {
+      const root = path.join(dir, name);
+      mkdirSync(root, { recursive: true });
+      writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '5.9.0' }));
+      return root;
+    };
+    const npm = { Channel: 'npm', Installed: '5.8.0', Updater: 'omc update' };
+
+    test('a stale OMC_PLUGIN_ROOT or CLAUDE_PLUGIN_ROOT leaves the npm install on the npm channel, with or without an unrelated registry entry', () => {
+      for (const variable of ['OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT']) {
+        for (const plugins of [undefined, { 'some-other-plugin@market': [{ version: '1.0.0' }] }]) {
+          expect({ variable, out: step1({ plugins, cache: { omc: ['5.7.0', '5.8.0'] }, env: (dir) => ({ [variable]: path.join(dir, 'gone') }) }) }).toEqual({ variable, out: npm });
+        }
+      }
+    });
+
+    test('a root that is a file, or two stale roots that differ, are ignored as well', () => {
+      expect(step1({ cache: { omc: ['5.8.0'] }, env: (dir) => ({ OMC_PLUGIN_ROOT: (writeFileSync(path.join(dir, 'a-file'), '{}'), path.join(dir, 'a-file')) }) })).toEqual(npm);
+      expect(step1({ cache: { omc: ['5.8.0'] }, env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'gone-a'), CLAUDE_PLUGIN_ROOT: path.join(dir, 'gone-b') }) })).toEqual(npm);
+    });
+
+    test('a stale root next to an existing one is no conflict: the existing checkout is the plugin root, in either order', () => {
+      for (const [stale, live] of [['OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT'], ['CLAUDE_PLUGIN_ROOT', 'OMC_PLUGIN_ROOT']]) {
+        let root = '';
+        const out = step1({ cache: { omc: ['5.8.0'] }, env: (dir) => ({ [stale]: path.join(dir, 'gone'), [live]: (root = makeRoot(dir, 'checkout')) }) });
+        expect({ stale, out }).toEqual({ stale, out: { 'Plugin root': root, Channel: 'plugin-dir', Installed: '5.9.0', Latest: '(unavailable) (a --plugin-dir checkout has no update channel)', Updater: 'none (update and rebuild that checkout, then run omc setup --plugin-dir-mode)' } });
+      }
+    });
+  });
+
+  // With several scopes one plugin ID has several entries; the session runs the one whose installPath is the active root,
+  // not the highest version in the list.
+  describe('the entry of the active root decides Installed when a plugin ID has entries for several scopes', () => {
+    const entries = (dir: string, extra: Record<string, unknown> = {}) => {
+      const base = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+      return { 'oh-my-claudecode@omc': [{ scope: 'project', version: '5.8.0', installPath: path.join(base, '5.8.0'), ...extra }, { scope: 'user', version: '5.9.0', installPath: path.join(base, '5.9.0') }] };
+    };
+    const base = (dir: string, v: string) => path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', v);
+    const run = (env: ((dir: string) => Record<string, string>) | undefined, plugins: (dir: string) => Record<string, unknown> = entries) =>
+      step1({ plugins, cache: { omc: ['5.8.0', '5.9.0'] }, clone: { omc: '5.9.0' }, env });
+
+    test('a root on the older entry reports that entry, a root on the newer entry or none reports the highest', () => {
+      for (const variable of ['OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT']) {
+        expect({ variable, got: run((dir) => ({ [variable]: base(dir, '5.8.0') })).Installed }).toEqual({ variable, got: '5.8.0' });
+        expect({ variable, got: run((dir) => ({ [variable]: base(dir, '5.9.0') })).Installed }).toEqual({ variable, got: '5.9.0' });
+      }
+      expect(run(undefined).Installed).toBe('5.9.0');
+      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: dir })).Installed).toBe('5.9.0');
+      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') + path.sep })).Installed).toBe('5.8.0');
+    });
+
+    test('the channel and the latest do not change, so the older active entry is outdated against its clone', () => {
+      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }))).toMatchObject({ Channel: 'marketplace omc', Installed: '5.8.0', Latest: '5.9.0 (marketplace clone)' });
+    });
+
+    test('the active entry may name its version only through its installPath, and one that names none is (none), not the highest cached version', () => {
+      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }), (dir) => ({ 'oh-my-claudecode@omc': [{ installPath: base(dir, '5.8.0') }, { version: '5.9.0' }] })).Installed).toBe('5.8.0');
+      const out = step1({
+        plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ installPath: path.join(dir, 'current') }, { version: '5.9.0' }] }),
+        cache: { omc: ['5.9.0'] },
+        env: (dir) => {
+          mkdirSync(path.join(dir, 'current'), { recursive: true });
+          return { CLAUDE_PLUGIN_ROOT: path.join(dir, 'current') };
+        },
+      });
+      expect(out).toMatchObject({ Channel: 'marketplace omc', Installed: '(none)' });
+    });
+
+    test('a root that matches no entry, or a stale one, leaves the highest entry as Installed', () => {
+      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: path.join(dir, 'gone') })).Installed).toBe('5.9.0');
+      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }), (dir) => ({ 'oh-my-claudecode@omc': [{ version: '5.8.0' }, { version: '5.9.0', installPath: base(dir, '5.9.0') }] })).Installed).toBe('5.9.0');
+    });
+  });
+
   test('the skill routes the update and the diagnosis through the derived lines, with no fixed updater recipe left', () => {
     expect(text).not.toMatch(/marketplace update omc/);
     expect(text).not.toMatch(/claude plugin update oh-my-claudecode@omc/);
@@ -668,6 +745,8 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(diagnosis).toContain('If INSTALLED is older than LATEST on the channel\'s own latest (same order): WARN - outdated plugin');
     expect(diagnosis).toContain('there is none when it is newer than that latest either');
     expect(diagnosis).toContain('If `Channel: unknown`: CRITICAL');
+    expect(diagnosis).toContain('A variable whose path is not an existing directory names no checkout');
+    expect(diagnosis).toContain('`Installed:` comes from those entries alone, because the session runs that install and not a newer entry of another scope');
     expect(diagnosis).toContain('If `Channel: plugin-dir`');
     expect(diagnosis).not.toMatch(/or `Channel: unknown`: report that the latest version could not be checked/);
     const outdated = text.slice(text.indexOf('### Fix: Outdated Plugin'), text.indexOf('### Fix: Stale Cache'));
