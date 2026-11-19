@@ -604,7 +604,10 @@ export async function searchSessionHistory(
 
   const targets = scopeMode === 'all'
     ? buildAllProjectTargets()
-    : buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots);
+    : uniqueSortedTargets([
+      ...buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots),
+      ...(scopeMode === 'project' ? buildAllProjectTargets() : []),
+    ]);
 
   const matchRetainer = createMatchRetainer(limit);
   for (const target of targets) {

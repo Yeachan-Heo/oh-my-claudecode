@@ -1,0 +1,3 @@
+Workspace Trust Required
+Do you trust the contents of this directory?
+Pass --trust, --yolo, or -f to skip this prompt.

@@ -15,6 +15,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { afterSessionStart, foldRegistry, MISSING_MESSAGE, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry } from '../../scripts/lib/jev-compaction-state.mjs';
+import * as writers from '../../scripts/lib/context-text-sanitize.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -105,6 +106,70 @@ describe('jev-compaction-state: registry', () => {
     expect(text).not.toContain('/sub/only.ts');
     expect(renderRegistry(sid, 'agent-1', env)).toContain('/sub/only.ts');
     expect(renderRegistry('nobody', undefined, env)).toBe('');
+  });
+
+  it('writes the changed files exactly when the cleaning writers are passed, and as they were without them', () => {
+    const { env, sid } = setup();
+    const gear = '/p/gear\ufe0f/a.ts';
+    for (const file of [gear, '"quoted".ts', '/p/plain.ts']) post(env, sid, 'Write', { file_path: file });
+    const exact = renderRegistry(sid, undefined, env, writers);
+    const list = exact.split('\n').find((line) => line.startsWith('Changed files (newest last): '));
+    expect(list).toBe('Changed files (newest last): "/p/gear\\ufe0f/a.ts"; "\\"quoted\\".ts"; /p/plain.ts');
+    expect(exact.includes('\ufe0f')).toBe(false);
+    expect(writers.cleanTextBlock(exact)).toBe(exact);
+    expect(renderRegistry(sid, undefined, env)).toContain(`Changed files (newest last): ${gear}; "quoted".ts; /p/plain.ts`);
+    expect(renderRegistry(sid, undefined, env, undefined)).toBe(renderRegistry(sid, undefined, env));
+  });
+
+  // An identifier whose written form (escaped, quoted) has exactly `length` characters: `count` removed characters of `junk`
+  // (6 written characters each, 12 for an astral one) and plain characters for the rest.
+  const writtenLength = (length, junk, count) => `${'x'.repeat(length - 2 - count * (junk.length === 2 ? 12 : 6))}${junk.repeat(count)}`;
+
+  for (const [label, junk, count] of [['variation selector', '\ufe0f', 1], ['variation selector', '\ufe0f', 15], ['astral tag character', String.fromCodePoint(0xE0041), 1], ['astral tag character', String.fromCodePoint(0xE0041), 8]]) {
+    it(`file limit of 250 written characters, one on each side: ${count} x ${label}`, () => {
+      for (const length of [249, 250, 251]) {
+        const { env, sid } = setup();
+        const file = writtenLength(length, junk, count);
+        expect(writers.escapeIdentifier(file).length).toBe(length);
+        post(env, sid, 'Write', { file_path: file });
+        const written = renderRegistry(sid, undefined, env, writers).split('Changed files (newest last): ')[1];
+        if (length <= 250) expect(JSON.parse(written), `${length}`).toBe(file);
+        else expect(written, `${length}`).toBe('[identifier of 251 characters not shown]');
+      }
+    });
+  }
+
+  it('text limit of REGISTRY_CHARS, one on each side: the whole text or whole lines', () => {
+    const unfitted = { ...writers, fitLines: (value) => String(value) };
+    const lengthWith = (text) => {
+      const { env, sid } = setup();
+      post(env, sid, 'TodoWrite', { todos: [...Array.from({ length: 11 }, (_, index) => ({ content: `${index}`.repeat(100), status: 'pending' })), { content: text, status: 'pending' }] });
+      return { env, sid, full: renderRegistry(sid, undefined, env, unfitted) };
+    };
+    const base = lengthWith('t').full.length;
+    for (const length of [REGISTRY_CHARS - 1, REGISTRY_CHARS, REGISTRY_CHARS + 1]) {
+      const { env, sid, full } = lengthWith('t'.repeat(length - base + 1));
+      expect(full.length).toBe(length);
+      const text = renderRegistry(sid, undefined, env, writers);
+      if (length <= REGISTRY_CHARS) {
+        expect(text, `${length}`).toBe(full);
+      } else {
+        // No file is left to drop, so the lines go whole from the end: the task line first.
+        expect(text, `${length}`).toBe(`${full.split('\n')[0]}\n…`);
+      }
+    }
+  });
+
+  it('with the writers drops the oldest files whole to fit REGISTRY_CHARS and replaces a file over 250 characters by a notice', () => {
+    const { env, sid } = setup();
+    for (let i = 0; i < 120; i++) post(env, sid, 'Write', { file_path: `/project/src/gear\ufe0f/deep/folder/file-${i}.ts` });
+    post(env, sid, 'Write', { file_path: `/p/${'\ufe0f'.repeat(60)}.ts` });
+    const text = renderRegistry(sid, undefined, env, writers);
+    expect(text.length).toBeLessThanOrEqual(REGISTRY_CHARS);
+    const entries = text.split('Changed files (newest last): ')[1].split('; ');
+    expect(entries.at(-1)).toMatch(/^\[identifier of \d+ characters not shown\]$/);
+    for (const entry of entries.slice(0, -1)) expect(JSON.parse(entry)).toMatch(/^\/project\/src\/gear\ufe0f\/deep\/folder\/file-\d+\.ts$/);
+    expect(entries.length).toBeLessThan(121);
   });
 });
 

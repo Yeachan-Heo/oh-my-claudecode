@@ -161,6 +161,12 @@ export const TeamPaths = {
   dispatchRequests: (teamName: string) =>
     `.omc/state/team/${teamName}/dispatch/requests.json`,
 
+  // Not `.lock`: that name holds pre-identity-lock mkdir directories, which the file lock cannot read or reclaim.
+  dispatchLock: (teamName: string) =>
+    `.omc/state/team/${teamName}/dispatch/requests.lock`,
+  dispatchLegacyLockDir: (teamName: string) =>
+    `.omc/state/team/${teamName}/dispatch/.lock`,
+  /** @deprecated Use `dispatchLegacyLockDir` instead. Kept for public API compatibility. */
   dispatchLockDir: (teamName: string) =>
     `.omc/state/team/${teamName}/dispatch/.lock`,
   mailboxNotificationLock: (teamName: string, requestId: string) =>

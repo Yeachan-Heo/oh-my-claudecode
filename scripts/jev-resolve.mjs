@@ -205,6 +205,7 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
   let active = false;
   let listed = false;
   let off = false;
+  let explicitShadow = false; // the last entry naming this point is `point:shadow`
   for (const entry of raw.split(",")) {
     const token = entry.trim();
     if (!token) continue;
@@ -222,6 +223,7 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
         if (isActive) activateAll = true;
       }
     } else if (name === point) {
+      explicitShadow = colon !== -1 && token.slice(colon + 1) === "shadow"; // `point:shadow` wins over `all:active` and over an earlier `point:active` (last entry of the name wins)
       // `point:off` turns the point off even under `all`; a later non-off entry for the point turns it back on.
       if (isOff) {
         off = true;
@@ -237,6 +239,10 @@ export function parseJevEnv(point, env = process.env, permissionMode) {
   if (NAMED_ONLY_POINTS.has(point)) {
     sawAll = false;
     activateAll = false;
+  }
+  if (explicitShadow) {
+    activateAll = false;
+    active = false;
   }
   if (!sawAll && !listed) return "off";
   if (permissionMode === "plan") {
@@ -328,6 +334,83 @@ export function isJevLogContextEnabled(env = process.env) {
  */
 export function isJevStateOmitIdsEnabled(env = process.env) {
   return ["1", "true"].includes(String(env.OMC_JEV_STATE_OMIT_IDS ?? "").trim().toLowerCase());
+}
+
+/**
+ * OMC_JEV_ROW_TELEMETRY=1 (or `true`): the shadow-log lines carry the
+ * telemetry of the classifier input and answer (the state length before and
+ * after the cut, pointer fields, the questions version, the answer's model,
+ * usage, usage status and cost fields). Rows without an answer carry the
+ * fields of JEV_ROW_NO_ANSWER empty (null, never zero); a degraded row of the
+ * resolver also has `usage` and `model` as null. Off by default: the rows keep
+ * their shape.
+ */
+export function isJevRowTelemetryEnabled(env = process.env) {
+  return ["1", "true"].includes(String(env.OMC_JEV_ROW_TELEMETRY ?? "").trim().toLowerCase());
+}
+
+/**
+ * Keep only finite, non-negative token counts; null when the usage is absent
+ * or is not an input/output pair. The client does not validate `usage`.
+ * Port of sanitizeUsage in src/hooks/jev/resolver.ts.
+ */
+export function sanitizeUsage(usage) {
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
+  const { input_tokens, output_tokens } = usage;
+  const isCount = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  return isCount(input_tokens) && isCount(output_tokens) ? { input_tokens, output_tokens } : null;
+}
+
+/**
+ * Telemetry fields of a row without an answer (degraded, skipped, breaker):
+ * they are present with null, never zero. The hook-side writers spread it too.
+ * Field names: source_chars is the state length before the resolver's cut,
+ * sent_chars the length the classifier saw, cut_chars the characters the cut
+ * removed, input_complete true when nothing was cut, pointer_expanded and
+ * pointer_unexpanded the pointer telemetry of the request, questions_version
+ * a hash of the questions sent, usage_status reported | partial | unavailable.
+ */
+export const JEV_ROW_NO_ANSWER = {
+  source_chars: null,
+  sent_chars: null,
+  cut_chars: null,
+  input_complete: null,
+  pointer_expanded: null,
+  pointer_unexpanded: null,
+  questions_version: null,
+  jev_model: null,
+  usage_status: null,
+  cost_usd: null,
+  cost_basis: null,
+};
+
+function fnv(text, seed = 0x811c9dc5) {
+  let hash = seed;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/** Hash of the questions exactly as they go out (serializeQuestions); the same two-seed FNV as the compaction log. */
+export function questionsVersion(questions) {
+  const text = JSON.stringify(serializeQuestions(questions ?? {}));
+  return fnv(text) + fnv(text, 0x050c5d1f);
+}
+
+/** A string counts by its length, anything else by its JSON text; null and undefined count 0. */
+function stateCharsOf(value) {
+  if (typeof value === "string") return value.length;
+  if (value === undefined || value === null) return 0;
+  return JSON.stringify(value).length;
+}
+
+/** reported exactly when sanitizeUsage accepts the usage, so the two fields of one row never disagree. */
+function usageStatusOf(usage) {
+  if (sanitizeUsage(usage) !== null) return "reported";
+  if (usage !== null && typeof usage === "object" && !Array.isArray(usage)) return "partial";
+  return "unavailable";
 }
 
 /** Log field name -> the names a hook input may use for it (snake or camel case). */
@@ -515,6 +598,20 @@ export async function resolveRequest(
     state: boundExcerpts(request.state, resolveExcerptChars(request.point, env)),
     questions: request.questions,
   };
+  // OMC_JEV_ROW_TELEMETRY: lengths of the state before and after the cut, and
+  // the pointer telemetry the caller sends in request.pointer as
+  // {expanded, unexpanded} (false and null when it sends none).
+  const rowTelemetry = isJevRowTelemetryEnabled(env);
+  const telemetryInput = rowTelemetry
+    ? {
+        sourceChars: stateCharsOf(request.state),
+        sentChars: stateCharsOf(bound.state),
+        pointer: {
+          expanded: request.pointer?.expanded === true,
+          unexpanded: typeof request.pointer?.unexpanded === "string" && request.pointer.unexpanded !== "" ? request.pointer.unexpanded : null,
+        },
+      }
+    : undefined;
   // Opt-in shared breaker and request limit: a held-back call is logged and
   // ends like a failed one (the caller uses its twin), without a fetch.
   const guard = await loadJevBreaker(env);
@@ -535,6 +632,7 @@ export async function resolveRequest(
           heuristic: comparableHeuristic(request.heuristic, request.questions),
           jev: null,
           answers: null,
+          ...(rowTelemetry ? JEV_ROW_NO_ANSWER : {}),
           ...guard.breaker.skipLogFields(skip),
           durationMs,
         },
@@ -565,6 +663,9 @@ export async function resolveRequest(
   let jevAnswers = null;
   let firstOnly = null;
   let confidence;
+  let jevUsage = null; // OMC_JEV_ROW_TELEMETRY: sanitized usage of the response, null when absent
+  let jevModel = null; // OMC_JEV_ROW_TELEMETRY: the response's model when the body carries one, else null
+  let usageStatus = null; // OMC_JEV_ROW_TELEMETRY: reported | partial | unavailable, set when the answer came
   let entryMode = mode;
   // What the breaker needs to classify a failure: the HTTP status and
   // Retry-After, or that no response arrived at all (timeout, network error).
@@ -609,6 +710,11 @@ export async function resolveRequest(
     jevAnswers = body.answers;
     confidence = jevAnswer.confidence;
     if (firstQuestion !== undefined && Object.hasOwn(body.answers, firstQuestion)) firstOnly = body.answers[firstQuestion];
+    if (rowTelemetry) {
+      jevUsage = sanitizeUsage(body.usage);
+      jevModel = typeof body.model === "string" && body.model !== "" ? body.model : null;
+      usageStatus = usageStatusOf(body.usage);
+    }
   } catch (error) {
     entryMode = "degraded";
     console.error(
@@ -639,6 +745,28 @@ export async function resolveRequest(
       answers: entryMode === "degraded" ? null : jevAnswers,
       confidence: logContext ? firstOnly?.confidence : confidence,
       durationMs,
+      // OMC_JEV_ROW_TELEMETRY: the answer's telemetry. A row without an answer carries the telemetry fields empty.
+      ...(rowTelemetry
+        ? {
+            usage: jevUsage,
+            model: jevModel,
+            ...(entryMode === "degraded"
+              ? JEV_ROW_NO_ANSWER
+              : {
+                  source_chars: telemetryInput.sourceChars,
+                  sent_chars: telemetryInput.sentChars,
+                  cut_chars: Math.max(0, telemetryInput.sourceChars - telemetryInput.sentChars),
+                  input_complete: telemetryInput.sourceChars === telemetryInput.sentChars,
+                  pointer_expanded: telemetryInput.pointer.expanded,
+                  pointer_unexpanded: telemetryInput.pointer.unexpanded,
+                  questions_version: questionsVersion(bound.questions),
+                  jev_model: jevModel,
+                  usage_status: usageStatus,
+                  cost_usd: null,
+                  cost_basis: "unknown",
+                }),
+          }
+        : {}),
       // Under the shared breaker or limit a failed request says why it failed (and the minute's count against the limit).
       ...(guard && failure ? guard.breaker.failureLogFields(guard.settings, failure, granted, failureClass) : {}),
       ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
@@ -654,6 +782,7 @@ export async function resolveRequest(
     confidence,
     durationMs,
     ...(opened ? { breaker: opened } : {}),
+    ...(rowTelemetry ? { jevModel } : {}),
   };
 }
 

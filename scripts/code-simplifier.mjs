@@ -26,7 +26,10 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): file names from git are escaped, not cleaned, only when the switch is on.
+let contextText = null;
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
 const MARKER_FILENAME = 'code-simplifier-triggered.marker';
@@ -108,15 +111,23 @@ function getModifiedFiles(cwd, extensions, maxFiles) {
 }
 
 function buildMessage(files) {
-  const fileList = files.map((f) => `  - ${f}`).join('\n');
-  const fileArgs = files.join('\\n');
+  // With the text cleaning switch on, a name that contains a character the cleaning removes is written as a double-quoted
+  // JSON string with \uXXXX escapes; every other name stays exactly as git printed it. A cleaned name would point the
+  // simplifier at a file that does not exist.
+  const shown = contextText ? files.map((f) => contextText.escapeIdentifier(f)) : files;
+  const escaped = shown.some((f, index) => f !== files[index]);
+  const decodeRule = 'a name in double quotes is a JSON string: its \\uXXXX escapes stand for characters that are not shown; decode them to get the exact name';
+  const escapedNote = escaped ? `Note: ${decodeRule}.\n\n` : '';
+  const fileList = shown.map((f) => `  - ${f}`).join('\n');
+  const fileArgs = shown.join('\\n');
   return (
     `[CODE SIMPLIFIER] Recently modified files detected. Delegate to the ` +
     `code-simplifier agent to simplify the following files for clarity, ` +
     `consistency, and maintainability (without changing behavior):\n\n` +
     `${fileList}\n\n` +
+    escapedNote +
     `Use: Task(subagent_type="oh-my-claudecode:code-simplifier", ` +
-    `prompt="Simplify the recently modified files:\\n${fileArgs}")`
+    `prompt="Simplify the recently modified files${escaped ? ` (${decodeRule})` : ''}:\\n${fileArgs}")`
   );
 }
 
@@ -131,6 +142,7 @@ async function main() {
       return;
     }
     setJevSessionId(data.session_id || data.sessionId, data.agent_id || data.agentId);
+    contextText = await loadContextText();
 
     const cwd = data.cwd || data.directory || process.cwd();
     await setJevHookContext(data);
