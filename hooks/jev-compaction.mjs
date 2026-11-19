@@ -143,7 +143,9 @@
  * after each step, until the prediction reaches the target; the last pass (drop) removes a result with its call. A compaction at or below the usual
  * target is manual: only the scores decide (manualPlan), and the cascade runs only when that still leaves the prediction above the target. In
  * any other case, before Jev is asked, the floor (every removable result gone) is predicted: above the threshold less FLOOR_MARGIN of the window
- * the host's summary runs (floor_above_threshold; no_window when the window is unknown). The compaction record gains cut, cascade_pass,
+ * the host's summary runs (floor_above_threshold; no_window when the window is unknown). The gates on characters (too_few_results of decide, the preflight of the own
+ * threshold) are also measured in tokens (cutInTokens): an image has no characters and costs RATE_IMAGE, so a session that fails them on characters goes on when its
+ * tokens reach the same bounds, and the record has max_reduction_tokens. The compaction record gains cut, cascade_pass,
  * cascade_target_tokens, cascade_predicted_tokens, cascade_tokens_source, cascade_dropped, floor_pred and tokens_after_pred. Host handoff
  * (OMC_JEV_COMPACT_HOST_HANDOFF=1, opt-in with caution: the host's contract is not documented in this repository): the result also carries
  * tokensBefore and tokensAfter, and a manual or automatic cut under HOST_MIN_CUT goes to the host's summary (cut_below_host_min). Question naming
@@ -2449,14 +2451,15 @@ export function listTokens(api, rates = DEFAULT_RATES) {
   return tok;
 }
 
-// The messages as API blocks (a text, a call with its name and input, a result with its text): the estimate's input when the API form is missing.
-function rowsAsApi(messages) {
+// The messages as API blocks (a text, a call with its name and input, a result with its text): the estimate's input when the API form is missing. `images`: a
+// result also carries a block for each image it holds (the gates of cutInTokens count them; the estimate of the tokens before leaves them out).
+function rowsAsApi(messages, images = false) {
   return messages.map((m) => ({
     role: m.role,
     content: [
       ...(m.text ? [{ type: 'text', text: m.text }] : []),
       ...(m.toolUses || []).map((u) => ({ type: 'tool_use', name: u.tool, input: u.input })),
-      ...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text || '' })),
+      ...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: images && imagesOf(r) ? [{ type: 'text', text: r.text || '' }, ...Array.from({ length: imagesOf(r) }, () => ({ type: 'image' }))] : r.text || '' })),
     ],
   }));
 }
@@ -2483,6 +2486,26 @@ function itemTokens(c, rates = DEFAULT_RATES) {
   const full = call + cost(c.res.text || '') + RATE_IMAGE * imagesOf(c.res);
   const short = c.resultChars > SHORT_CHARS ? call + cost(shortText(c)) : full;
   return { full, short, trace: RATE_TRACE * c.trace.length };
+}
+
+// What a compaction could cut, in tokens, for the two gates that decide on characters (the `too_few_results` gate of decide and the preflight of the own
+// threshold). The characters of a call's input and of a result's text leave out what costs tokens without being text, an image, so with the token cascade
+// (OMC_JEV_COMPACT_TARGET_PERCENT) a session that fails the gate on characters is measured here, and it passes when this reaches the same bound: `removable` is
+// what every result that is no pinned one gives back when it goes to its trace (as in the floor), less the tokens of `envelopes` (the characters build adds, of the
+// reminder class), and `listed` the tokens of the list it is a share of (the API form, else the rows with their images). No candidate that saves a token: nothing is counted.
+export function cutInTokens(candidates, messages, api, envelopes = 0, rates = DEFAULT_RATES) {
+  let removable = 0;
+  for (const c of candidates) {
+    if (isPinned(c, rates)) continue;
+    const t = itemTokens(c, rates);
+    removable += Math.max(0, t.full - t.trace);
+  }
+  if (removable <= 0) return { removable: 0, listed: 0 };
+  return { removable: removable - rates.RATE_NOTE * envelopes, listed: listTokens(api ?? rowsAsApi(messages, true), rates) };
+}
+// The bound of the gates in tokens: MIN_REDUCTION of the list, and `minGain` tokens (the own threshold's OWN_MIN_GAIN of the window; none for decide).
+export function worthInTokens(cut, minGain = 0) {
+  return cut.listed > 0 && cut.removable / cut.listed >= MIN_REDUCTION && cut.removable >= minGain;
 }
 
 // The tokens before the compaction, the token cascade's basis: the host's usage in the main loop, else the prefix plus the estimate of the API form. `detail`
@@ -3881,7 +3904,13 @@ async function decide($, e, cfg, record, started) {
   const agentOpts = agentSkip ? { sessionId: record.session_id, source: messages, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates, checked: new Map() } : undefined;
   const movedTokens = (st) => cfg.rates.RATE_MOVED * st.moved_chars - cfg.rates.RATE_TRACE * st.trace_chars;
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
-  if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
+  if (!before || net / before < MIN_REDUCTION) {
+    // The characters leave out what costs tokens without being text (an image). With the token cascade a session that fails them goes on when its tokens
+    // reach the same bound (the floor below is the check that follows the tokens); without it the gate is the characters alone.
+    const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes, cfg.rates);
+    if (cut) record.max_reduction_tokens = cut.listed ? Math.round((cut.removable / cut.listed) * 1000) / 1000 : 0;
+    if (!cut || !worthInTokens(cut)) return { fallback: 'too_few_results' };
+  }
   // Token cascade. The window first (none: the summary runs). The tokens before of an automatic compaction are raised to the threshold, as the
   // host fires there (a subagent's window follows its estimate). A compaction at or below the usual target is manual: only the scores decide
   // and the floor is not checked. Otherwise the floor (every removable result gone) is predicted before Jev is asked, since the scores do not
@@ -4254,7 +4283,11 @@ async function ownThreshold($, e, next) {
     const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active';
     if (cfg.ownSkip && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     let removable = removableChars(candidates);
-    const tooSmall = () => !before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window;
+    let envelopes = 0;
+    let api;
+    // With the token cascade a session that fails the characters is measured in tokens (cutInTokens): an image has no characters and costs thousands of tokens.
+    const tooSmall = () => (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window)
+      && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes, cfg.rates), OWN_MIN_GAIN * window));
     // The delivered messages can only make this worse (they add to `before`, their envelopes come off
     // `removable`), so a transcript that fails here needs no API read, which may hold the turn for HOST_MS.
     if (tooSmall()) return result;
@@ -4264,11 +4297,12 @@ async function ownThreshold($, e, next) {
     // A read that timed out or failed leaves the delivered text unknown: decide could hand a large one
     // back to the summary, so the preflight does not ask.
     if (!('value' in apiRead)) return result;
-    const api = apiFormOf(apiRead.value);
+    api = apiFormOf(apiRead.value);
     const delivered = queuedOf(messages, api);
     if (delivered) {
       for (const blocks of delivered.rows.values()) before += rawChars(blocks);
-      removable -= envelopeChars(messages, delivered.rows, candidates);
+      envelopes = envelopeChars(messages, delivered.rows, candidates);
+      removable -= envelopes;
     }
     if (tooSmall()) return result;
     let reason;
