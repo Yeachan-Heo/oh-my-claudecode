@@ -782,6 +782,26 @@ describe('recovery owner retry deadline', () => {
     });
   });
 
+  it('keeps retrying past the deadline when a successor finds a persisted replacement launch for the recovery', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-persisted-launch-');
+    const teamName = 'deadline-persisted-launch';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    // A predecessor owner persisted the replacement launch, then died before
+    // committing the worker row. This process starts with no pending pane.
+    const currentPath = absPath(cwd, TeamPaths.workerLaunchCurrent(teamName, 'worker-1'));
+    mkdirSync(join(currentPath, '..'), { recursive: true });
+    writeFileSync(currentPath, JSON.stringify({ team_name: teamName, instance_id: TEAM_INSTANCE_ID, worker_name: 'worker-1',
+      pane_id: '%5', attempt_id: 'launch-attempt-r', provider: 'claude',
+      context: { kind: 'recovery', recovery_id: 'stuck-recovery', replacement_generation: 2, pane_attempt_id: 'pane-attempt-r' } }));
+
+    const result = await execute(teamName);
+    expect(result).not.toMatchObject({ error: 'recovery_request_timeout' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toBeNull();
+    await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'stuck-recovery' } },
+    });
+  });
+
   it('falls through to the executor past the deadline when the task records cannot be read', async () => {
     cwd = mkdtempFixture('runtime-owner-deadline-corrupt-task-');
     const teamName = 'deadline-corrupt-task';
