@@ -887,6 +887,42 @@ describe('worker pane startup safety', () => {
     },
   );
 
+  strictTmuxIt('presses Enter in Claude Code’s trust dialog only once the pane shows the affirmative choice focused', async () => {
+    const context = await acceptedContext('claude');
+    const question = 'Quick safety check: Is this a project you created or one you trust?';
+    const frames = {
+      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      declined: `${question}\n❯ No, exit\n  Yes, I trust this folder\nClaude Code didn't start because this folder isn't trusted.\n`,
+      trusted: '❯ \n',
+    };
+    // A busy Claude Code startup reads the keys sent between two captures
+    // together and applies them against the focus it drew before them.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys' && !args.includes('-l'))
+        .map(args => args.at(-1));
+      applied = tmuxState.args.length;
+      const drawn = focus;
+      for (const key of drawn === 'no' || drawn === 'yes' ? keys : []) {
+        if (key === 'Enter') {
+          focus = drawn === 'yes' ? 'trusted' : 'declined';
+          break;
+        }
+        if (key === 'Down') focus = 'yes';
+      }
+      return frames[focus];
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    expect(focus).toBe('trusted');
+  });
+
   strictTmuxIt.each([
     ['Cursor workspace trust', 'Workspace Trust Required\nDo you trust the contents of this directory?\nPass --trust, --yolo, or -f to skip this prompt.\n'],
     ['Claude files trust', 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed\n'],

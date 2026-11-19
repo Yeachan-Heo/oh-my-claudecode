@@ -60,6 +60,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/2.1.325/idle.txt': 'idlePrompt',
   'claude/2.1.325/trust-just-answered.txt': '',
   'claude/2.1.325/trust.txt': 'trust:claude_directory idlePrompt',
+  'claude/2.1.328/trust-yes-focused.txt': 'trust:claude_directory idlePrompt',
   'claude/synthetic/loading-in-scrollback.txt': 'bootstrapping idlePrompt',
   'claude/synthetic/prompt-glyph-in-output.txt': 'idlePrompt',
   'claude/synthetic/shell-prompt-after-exit-dollar.txt': '',

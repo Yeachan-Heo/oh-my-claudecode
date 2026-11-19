@@ -32,6 +32,7 @@ interface FakeRun {
   exitCode: Promise<number | null>;
   waitForOutput: (text: string, timeoutMs?: number) => Promise<number>;
   send: (line: string) => void;
+  press: (keys: string) => void;
 }
 
 let root = '';
@@ -83,6 +84,7 @@ function startFake(scenario: string | undefined, selectBy: 'flag' | 'env' = 'fla
     output: () => stdout,
     exitCode,
     send: line => { child.stdin.write(`${line}\n`); },
+    press: keys => { child.stdin.write(keys); },
     waitForOutput: async (text, timeoutMs = 10_000) => {
       const deadline = Date.now() + timeoutMs;
       while (!stdout.includes(text)) {
@@ -189,12 +191,24 @@ describe.skipIf(process.platform === 'win32')('fake team provider scenarios', ()
   ])('%s: shows the trust dialog and draws the idle prompt only after Down then Enter', async (scenario, trustFile) => {
     const run = startFake(scenario);
     await run.waitForOutput(frame(trustFile));
-    run.send('stray text');
+    run.press('stray text');
     await new Promise(resolveSleep => setTimeout(resolveSleep, 300));
     expect(run.output()).not.toContain(frame('claude/2.1.325/idle.txt'));
-    run.send(DOWN);
+    run.press(DOWN);
+    await run.waitForOutput('❯ Yes, ');
+    run.press('\r');
     await run.waitForOutput(frame('claude/2.1.325/idle.txt'));
     await runClaimLifecycle(run, '\ntask completed\n❯ ');
+  });
+
+  it('claude-trust: Down redraws the dialog exactly as Claude Code 2.1.328 does', async () => {
+    const run = startFake('claude-trust');
+    await run.waitForOutput(frame('claude/2.1.325/trust.txt'));
+    run.press(DOWN);
+    await run.waitForOutput('❯ Yes, ');
+    const focusLines = (text: string) => text.split('\n').filter(line => /No, exit|Yes, I trust/.test(line));
+    expect(focusLines(run.output().split('\x1b[H\x1b[J').at(-1)!))
+      .toEqual(focusLines(frame('claude/2.1.328/trust-yes-focused.txt')));
   });
 
   it('wrapped-trust-35col: prints a dialog already wrapped to 35 columns', () => {
@@ -202,10 +216,23 @@ describe.skipIf(process.platform === 'win32')('fake team provider scenarios', ()
     expect(Math.max(...lines.map(line => [...line].length))).toBeLessThanOrEqual(35);
   });
 
-  it('claude-trust: Enter alone takes the default "No, exit" and quits', async () => {
+  it.each([
+    ['Enter alone', ['\r']],
+    ['Down and Enter in one read', [`${DOWN}\r`]],
+  ])('claude-trust: %s takes the default "No, exit" and quits', async (_label, reads) => {
     const run = startFake('claude-trust');
     await run.waitForOutput(frame('claude/2.1.325/trust.txt'));
-    run.send('');
+    for (const keys of reads) run.press(keys);
+    expect(await run.exitCode).toBe(1);
+    expect(run.output()).toContain('fake-claude failed at await-trust-answer: trust_declined');
+  });
+
+  it('claude-trust-busy-startup: keys sent while startup blocks are read together', async () => {
+    const run = startFake('claude-trust-busy-startup');
+    await run.waitForOutput(frame('claude/2.1.325/trust.txt'));
+    run.press(DOWN);
+    await new Promise(resolveSleep => setTimeout(resolveSleep, 120));
+    run.press('\r');
     expect(await run.exitCode).toBe(1);
     expect(run.output()).toContain('fake-claude failed at await-trust-answer: trust_declined');
   });

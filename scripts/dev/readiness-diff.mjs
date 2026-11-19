@@ -3,7 +3,7 @@
 // subsequence of them, and never waits less.
 //
 // Usage (from any cwd):
-//   node scripts/dev/readiness-diff.mjs [--base origin/dev] --set r5 [--out /tmp/readiness-diff-r5]
+//   node scripts/dev/readiness-diff.mjs [--base origin/dev] --set r5|trust [--out /tmp/readiness-diff-<set>]
 //
 // The base is checked out once as a detached worktree at
 // $TMPDIR/omc-readiness-diff-<base sha> and reused while its tracked files are
@@ -34,7 +34,13 @@ const HARNESS_FILES = [HARNESS, join('src', 'team', '__tests__', 'helpers', 'rea
 const FIXTURE_ROOT = join(HEAD_ROOT, 'src', 'team', '__tests__', 'fixtures', 'pane-frames');
 
 // Modules head must load for a set; a miss means head ran the base path.
-const REQUIRED_HEAD_MODULES = { r5: [] };
+const REQUIRED_HEAD_MODULES = { r5: [], trust: [] };
+
+// Sets whose head may send keys the base did not, in cases where the base
+// failed: there head has to keep going to succeed.
+const HEAD_MAY_CONTINUE_WHERE_BASE_FAILED = new Set(['trust']);
+
+const succeeded = (traceCase) => traceCase.result?.ok === true;
 
 const STARTUP_WAIT_MAX_MS = 120_000;
 const STARTUP_WAIT_DEFAULT_MS = 30_000;
@@ -61,6 +67,18 @@ const SET_CRITERIA = {
         failures.push(`${id} wait changed although the variable cannot lengthen it`);
       }
       if (head.wait_ms > STARTUP_WAIT_MAX_MS) failures.push(`${id} head waited ${head.wait_ms}ms > ${STARTUP_WAIT_MAX_MS}ms`);
+    }
+    return failures;
+  },
+  // Claude Code's trust dialog, answered by a pane that applies each key as it
+  // arrives (immediate) or the keys sent between captures together (batched).
+  trust: (pairs) => {
+    const failures = [];
+    for (const { id, base, head, sameKeys, sameResult } of pairs) {
+      if (!succeeded(head)) failures.push(`${id} head result ${JSON.stringify(head.result)}`);
+      if (base.eventState === 'immediate' && !(sameKeys && sameResult)) {
+        failures.push(`${id} head differs from base where the base already succeeded`);
+      }
     }
     return failures;
   },
@@ -195,7 +213,8 @@ export function compare(set, base, head) {
     const identical = sameKeys && sameResult && baseCase.wait_ms === headCase.wait_ms;
     pairs.push({ id, base: baseCase, head: headCase, sameKeys, sameResult });
     if (identical) counts.identical++;
-    if (!isSubsequence(headKeys, baseKeys)) counts.head_only_keys++;
+    const headMayContinue = HEAD_MAY_CONTINUE_WHERE_BASE_FAILED.has(set) && !succeeded(baseCase);
+    if (!headMayContinue && !isSubsequence(headKeys, baseKeys)) counts.head_only_keys++;
     if (!isSubsequence(baseKeys, headKeys)) counts.base_only_keys++;
     if (headCase.wait_ms < baseCase.wait_ms) counts.wait_shorter++;
     const [baseNudges, headNudges] = [baseCase.nudges ?? [], headCase.nudges ?? []];
