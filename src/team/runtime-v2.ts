@@ -4121,8 +4121,35 @@ export async function prepareRecoveryOwnerBootstrap(
   }
 }
 
-/** Private runtime-owner executor. It never calls the public recovery facade. */
+const recoveryOwnerAttempts = new Map<string, Promise<unknown>>();
+
+/**
+ * Private runtime-owner executor. It never calls the public recovery facade.
+ * Attempts of one recovery in this process run one at a time, so no attempt
+ * judges state another attempt is still writing.
+ */
 export async function executeRecoverDeadWorkerV2Owner(
+  input: RecoverDeadWorkerOwnerInput,
+): Promise<RecoverDeadWorkerV2Result> {
+  const key = JSON.stringify([
+    input.cwd,
+    input.teamName,
+    readRecoveryRequestReservation(input.cwd, input.requestId)?.recovery_id ??
+      input.requestId,
+  ]);
+  const attempt = (recoveryOwnerAttempts.get(key) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => runRecoverDeadWorkerV2OwnerAttempt(input));
+  recoveryOwnerAttempts.set(key, attempt);
+  try {
+    return await attempt;
+  } finally {
+    if (recoveryOwnerAttempts.get(key) === attempt)
+      recoveryOwnerAttempts.delete(key);
+  }
+}
+
+async function runRecoverDeadWorkerV2OwnerAttempt(
   input: RecoverDeadWorkerOwnerInput,
 ): Promise<RecoverDeadWorkerV2Result> {
   const reservation = readRecoveryRequestReservation(
