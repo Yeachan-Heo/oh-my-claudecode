@@ -402,6 +402,13 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       if (!envelope.ok) throw new Error(`recover-worker rejected: ${JSON.stringify(envelope)}`);
       const result = envelope.data.result;
       expect(result, `${JSON.stringify(result)}\n${await ownerDiagnostics()}`).toMatchObject({ outcome: 'recovered' });
+      // Recovery succeeds only once the replacement shows its idle prompt
+      // (claude-trust: after the trust dialog is answered), not while it is
+      // still blocked at startup.
+      const replacementSteps = (await readTrace())
+        .filter(entry => entry.pid !== firstProvider!.pid)
+        .map(entry => entry.step);
+      expect(replacementSteps, await ownerDiagnostics()).toContain('idle-prompt');
 
       const shutdown = await shutdownTeamV2(teamName, cwd, { instanceId, timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS });
       expect(shutdown, await ownerDiagnostics()).toEqual({ outcome: 'cleaned' });

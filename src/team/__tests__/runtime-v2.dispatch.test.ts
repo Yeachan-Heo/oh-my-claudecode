@@ -142,6 +142,7 @@ const mocks = vi.hoisted(() => {
     spawnWorkerInPane: vi.fn(),
     spawnOwnedWorkerInPane: vi.fn(),
     deliverStartupInbox: vi.fn(),
+    waitForStartupPaneReady: vi.fn(),
     probeStartupPaneActivity: vi.fn(),
     startupProviderExited: vi.fn(),
     retryStartupInboxSubmit: vi.fn(),
@@ -347,6 +348,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     spawnWorkerInPane: mocks.spawnWorkerInPane,
     spawnOwnedWorkerInPane: mocks.spawnOwnedWorkerInPane,
     deliverStartupInbox: mocks.deliverStartupInbox,
+    waitForStartupPaneReady: mocks.waitForStartupPaneReady,
     probeStartupPaneActivity: mocks.probeStartupPaneActivity,
     startupProviderExited: mocks.startupProviderExited,
     retryStartupInboxSubmit: mocks.retryStartupInboxSubmit,
@@ -1002,6 +1004,8 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.spawnWorkerInPane.mockReset();
     mocks.spawnOwnedWorkerInPane.mockReset();
     mocks.deliverStartupInbox.mockReset();
+    mocks.waitForStartupPaneReady.mockReset();
+    mocks.waitForStartupPaneReady.mockResolvedValue({ ok: true });
     mocks.probeStartupPaneActivity.mockReset();
     mocks.startupProviderExited.mockReset();
     mocks.retryStartupInboxSubmit.mockReset();
@@ -3891,9 +3895,41 @@ describe('runtime v2 startup inbox dispatch', () => {
 
     expect(result).toMatchObject({ outcome: 'recovered', committed: true, requeuedTaskIds: [], newPaneId: '%2' });
     expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+    // The pane must still be proven ready (a trust dialog answered) before success.
+    expect(mocks.waitForStartupPaneReady).toHaveBeenCalledTimes(1);
+    expect(mocks.waitForStartupPaneReady).toHaveBeenCalledWith(
+      expect.objectContaining({ ownership: expect.objectContaining({ paneId: '%2' }) }),
+      expect.objectContaining({ attemptAlreadyFenced: true }),
+    );
     expect(readRecoveryOutcome(cwd, fixture.requestId)).toMatchObject({ kind: 'final', outcome: 'succeeded' });
     const config = JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
     expect(config.active_recovery).toBeUndefined();
+  });
+
+  it('ends an idle interactive recovery in a failed final when the replacement pane never becomes ready', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-owner-idle-not-ready-');
+    mocks.autoStartupEvidence = false;
+    const fixture = await seedOwnerRecoveryFixture('codex', 'idle-not-ready');
+    configureOwnerPaneLifecycle();
+    mocks.waitForStartupPaneReady.mockResolvedValue({ ok: false, reason: 'selector_persistent' });
+
+    const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+    const result = await executeRecoverDeadWorkerV2Owner({
+      teamName: fixture.teamName,
+      cwd,
+      workerName: 'worker-1',
+      requestId: fixture.requestId,
+      instanceId: fixture.instanceId,
+    });
+
+    expect(result).toMatchObject({ outcome: 'failed', committed: false });
+    expect(result).toMatchObject({ message: expect.stringContaining('selector_persistent') });
+    expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+    // A failed final, not a pending phase the owner would retry forever.
+    expect(readRecoveryOutcome(cwd, fixture.requestId)).toMatchObject({ kind: 'final', outcome: 'failed' });
+    const config = JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
+    expect(config.active_recovery).toBeUndefined();
+    expect(config.last_recovery).toMatchObject({ recovery_id: fixture.recoveryId, phase: 'failed' });
   });
 
   it('requeues the selected task through an exact read when a sibling corrupts after inventory', async () => {
