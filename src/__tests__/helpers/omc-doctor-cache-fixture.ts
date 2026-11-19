@@ -118,6 +118,25 @@ for (const name of ['statSync', 'lstatSync', 'readlinkSync']) {
 }
 `;
 
+// A file system that reports inode 0 for every path gives no identity: existing paths then compare by their exact text.
+// Preload it after the case fold preload (it wraps whatever `statSync` and `lstatSync` are then).
+export const zeroInodePreload = `const fs = require('fs');
+for (const name of ['statSync', 'lstatSync']) {
+  const real = fs[name];
+  fs[name] = function (target, options) {
+    const stat = real.call(fs, target, options);
+    if (options && options.bigint) stat.ino = 0n;
+    return stat;
+  };
+}
+`;
+
+export function writeZeroInodePreload(dir: string) {
+  const file = path.join(dir, 'zero-inode.cjs');
+  writeFileSync(file, zeroInodePreload);
+  return file;
+}
+
 export function writeCaseFoldPreload(dir: string) {
   const file = path.join(dir, 'casefold.cjs');
   writeFileSync(file, caseFoldPreload);
@@ -128,7 +147,7 @@ export function writeCaseFoldPreload(dir: string) {
 // seen from WSL2): a file created as `CaseProbe` is found as `caseprobe`. The commands compare existing paths by device
 // and inode, so a spelling in another letter case names the same directory wherever the volume folds it and another
 // directory wherever it does not, whatever platform name the process reports: they never fold letter case by the name
-// of the platform. `statSync` is what the commands call, so it is what the probe calls.
+// of the platform. The commands call `statSync` and `lstatSync`, which answer alike for the regular probe file.
 export function volumeFoldsCase(dir: string = tmpdir()): boolean {
   const probe = mkdtempSync(path.join(dir, 'omc-case-probe-'));
   try {

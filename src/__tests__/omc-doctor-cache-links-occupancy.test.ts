@@ -687,6 +687,8 @@ fs.mkdirSync = function (target, ...rest) {
   const win32Preload = platformPreload('win32');
 
   // Only the volume folds letter case: a process that reports win32 or darwin over a case-sensitive volume still tells the names apart.
+  // The exception adds protection only: the publisher of win32 stores the plugin root of a record in lower case, and the commands
+  // also match a record that way on win32 (the runtime reads records in that form).
   test('paths that differ from the cache only in letter case protect a version where the volume folds case, whatever platform the process reports', () => {
     for (const command of commands) {
       for (const kind of ['installPath', 'installPath of another plugin', 'occupancy record'] as const) {
@@ -703,7 +705,7 @@ fs.mkdirSync = function (target, ...rest) {
             if (simulated) writeFileSync(preload, platformPreload(simulated));
             const result = runCommand(command, dir, simulated ? { preloads: [preload] } : {});
             expect({ kind, simulated, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
-              folds
+              folds || (kind === 'occupancy record' && simulated === 'win32')
                 ? { kind, simulated, status: 0, versions: '5.1.0,5.9.0', moved: 1 }
                 : { kind, simulated, status: 0, versions: '5.1.0', moved: 2 },
             );
