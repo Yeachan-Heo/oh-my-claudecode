@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, ageVersions, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, read, runCommand, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry, writeZeroInodePreload } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, ageVersions, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, read, runCommand, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry, writeZeroInodePreload } from './helpers/omc-doctor-cache-fixture.js';
 
 const step1Command = read('skills/omc-doctor/SKILL.md').split('\n').find((l) => l.startsWith('node -e ') && l.includes("'Updater: ")) ?? '';
 const PLATFORMS = ['linux', 'darwin', 'win32'] as const;
@@ -194,38 +194,211 @@ describe('omc-doctor occupancy records alone pin nothing, also in the form the w
   });
 });
 
-// A file system that ignores letter case and reports inode 0 gives no identity, so existing paths compare by their exact text
-// (the skill says so). This pins what that means, under every platform name: two spellings of one directory are different
-// paths, the two variables then count as a conflict and nothing moves, and a pin, an installPath or a plugin root in another
-// spelling protects nothing; a record under win32 still protects, by the form the publisher writes. The case fold preload
-// makes the case-sensitive test volume ignore letter case, the zero inode preload takes the identity away; both do no harm
-// on a volume that really behaves so.
-describe('omc-doctor on a volume that ignores letter case and reports inode 0', { timeout: 120_000 }, () => {
+// A file system that reports inode 0 gives no identity, and the commands then guess nothing from the spelling of a path. A path
+// is judged by its exact text only when that text lies inside a cache version (or above the cache directory, where it names no
+// version); every other path that protects or may protect a version could be another name of one, so the command prints
+// `Nothing moved: identity unavailable` and moves nothing. The one exception is a record under win32, which the commands also
+// match in the lower-case form the publisher writes. The case fold preload makes the case-sensitive test volume ignore letter
+// case, the zero inode preload takes the identity away; both do no harm on a volume that really behaves so.
+describe('omc-doctor on a volume that ignores letter case and reports inode 0 fails closed', { timeout: 120_000 }, () => {
   const volume = (dir: string) => [writeCaseFoldPreload(dir), writeZeroInodePreload(dir)];
+  const STOPPED = 'Nothing moved: identity unavailable';
+  // The live version has letters in its name, so another spelling of its name exists (a pin names a version by its text).
+  const LIVE = '5.9.0-beta';
+  const SOURCES = ['installPath of a pin', 'installPath of another plugin', 'OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT', 'occupancy record', 'pinned version'] as const;
+  type Source = typeof SOURCES[number];
 
-  test('cache commands: a path in another letter case protects nothing and the two variables are a conflict, except a record under win32', () => {
-    const sources = ['installPath of a pin', 'installPath of another plugin', 'OMC_PLUGIN_ROOT', 'occupancy record'] as const;
+  // 5.1.0 is pinned, 5.8.0 and the live version are free; the live version is named only through `target`, spelled as given by the caller.
+  function protect(dir: string, source: Source, target: string): Record<string, string> {
+    const registry: Record<string, unknown> = { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }] };
+    if (source === 'installPath of a pin') registry[PLUGIN_ID] = [{ scope: 'user', version: '5.1.0' }, { scope: 'user', installPath: target }];
+    if (source === 'installPath of another plugin') registry['other-plugin@market'] = [{ scope: 'user', installPath: target }];
+    if (source === 'pinned version') registry[PLUGIN_ID] = [{ scope: 'user', version: '5.1.0' }, { scope: 'user', version: target }];
+    if (source === 'occupancy record') writeRecord(dir, target);
+    writeRegistry(dir, registry);
+    if (source === 'OMC_PLUGIN_ROOT') return { OMC_PLUGIN_ROOT: target };
+    if (source === 'CLAUDE_PLUGIN_ROOT') return { CLAUDE_PLUGIN_ROOT: target };
+    return {};
+  }
+
+  test('a path that names a cached version in another letter case stops the command, whatever protects it, except a record under win32', () => {
     for (const command of commands) {
       for (const platform of PLATFORMS) {
-        for (const source of sources) {
-          // 5.1.0 is pinned, 5.8.0 and 5.9.0 are free; 5.9.0 is named only through the alias.
-          const { dir, cache } = makeCache(['5.1.0', '5.8.0', '5.9.0']);
+        for (const source of SOURCES) {
+          const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
           try {
-            const upper = upperBelow(dir, path.join(cache, '5.9.0'));
-            const registry: Record<string, unknown> = { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }] };
-            if (source === 'installPath of a pin') registry[PLUGIN_ID] = [{ scope: 'user', version: '5.1.0' }, { scope: 'user', installPath: upper }];
-            if (source === 'installPath of another plugin') registry['other-plugin@market'] = [{ scope: 'user', installPath: upper }];
-            if (source === 'occupancy record') writeRecord(dir, upper);
-            writeRegistry(dir, registry);
-            const env: Record<string, string> = source === 'OMC_PLUGIN_ROOT' ? { OMC_PLUGIN_ROOT: upper } : {};
+            const target = source === 'pinned version' ? LIVE.toUpperCase() : upperBelow(dir, path.join(cache, LIVE));
+            const env = protect(dir, source, target);
             const result = runCommand(command, dir, { env, preloads: [reportAs(dir, platform), ...volume(dir)] });
-            const kept = source === 'occupancy record' && platform === 'win32';
-            expect({ source, platform, status: result.status, versions: digitVersions(cache) })
-              .toEqual({ source, platform, status: 0, versions: kept ? '5.1.0,5.9.0' : '5.1.0' });
+            const decided = source === 'occupancy record' && platform === 'win32';
+            expect({ source, platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) })
+              .toEqual({ source, platform, status: 0, versions: decided ? `5.1.0,${LIVE}` : `5.1.0,5.8.0,${LIVE}`, moved: decided ? 1 : 0, reason: !decided });
           } finally {
             rmSync(dir, { recursive: true, force: true });
           }
         }
+      }
+    }
+  });
+
+  test('a path that names the cached version by its exact text still protects it, and the free versions still move', () => {
+    for (const command of commands) {
+      for (const platform of PLATFORMS) {
+        for (const source of SOURCES) {
+          const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+          try {
+            const env = protect(dir, source, source === 'pinned version' ? LIVE : path.join(cache, LIVE));
+            const result = runCommand(command, dir, { env, preloads: [reportAs(dir, platform), ...volume(dir)] });
+            expect({ source, platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) })
+              .toEqual({ source, platform, status: 0, versions: `5.1.0,${LIVE}`, moved: 1, reason: false });
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+  });
+
+  test('a path inside the cached version by its exact text protects it, also with a name that does not exist', () => {
+    for (const command of commands) {
+      for (const inside of ['scripts', path.join('scripts', 'missing')]) {
+        const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+        try {
+          mkdirSync(path.join(cache, LIVE, 'scripts'), { recursive: true });
+          ageVersions(cache);
+          const env = protect(dir, 'OMC_PLUGIN_ROOT', path.join(cache, LIVE, inside));
+          const result = runCommand(command, dir, { env, preloads: volume(dir) });
+          expect({ inside, versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) }).toEqual({ inside, versions: `5.1.0,${LIVE}`, moved: 1, reason: false });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('a path inside the cached version in another letter case, also one that does not exist, stops the command', () => {
+    for (const command of commands) {
+      for (const inside of ['scripts', path.join('scripts', 'missing')]) {
+        const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+        try {
+          mkdirSync(path.join(cache, LIVE, 'scripts'), { recursive: true });
+          ageVersions(cache);
+          const env = protect(dir, 'OMC_PLUGIN_ROOT', upperBelow(dir, path.join(cache, LIVE, inside)));
+          const result = runCommand(command, dir, { env, preloads: volume(dir) });
+          expect({ inside, versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) }).toEqual({ inside, versions: `5.1.0,5.8.0,${LIVE}`, moved: 0, reason: true });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('a path outside the cache that exists stops the command, a path that names nothing does not', () => {
+    for (const command of commands) {
+      for (const outside of ['exists', 'missing'] as const) {
+        const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+        try {
+          const target = outside === 'exists' ? makeRoot(dir, 'checkout', '9.9.0') : path.join(dir, 'gone', 'plugin');
+          const env = protect(dir, 'installPath of another plugin', target);
+          const result = runCommand(command, dir, { env, preloads: volume(dir) });
+          // A stale install path under the cache directory itself (the version was deleted) names nothing either.
+          expect({ outside, versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) })
+            .toEqual(outside === 'exists' ? { outside, versions: `5.1.0,5.8.0,${LIVE}`, moved: 0, reason: true } : { outside, versions: '5.1.0', moved: 2, reason: false });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('a path that names nothing, with the root of the file system as its only existing part, does not stop the command', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+      try {
+        const env = protect(dir, 'installPath of another plugin', path.join(path.parse(dir).root, 'omc-doctor-gone-root-entry', 'plugin'));
+        const result = runCommand(command, dir, { env, preloads: volume(dir) });
+        expect({ versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) }).toEqual({ versions: '5.1.0', moved: 2, reason: false });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('a stale pin of a deleted version in the cache directory stays harmless where the file system reports inode 0', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.1.0', '5.8.0']);
+      try {
+        const env = protect(dir, 'installPath of a pin', path.join(cache, '5.0.0'));
+        const result = runCommand(command, dir, { env, preloads: volume(dir) });
+        expect({ versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) }).toEqual({ versions: '5.1.0', moved: 1, reason: false });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // Identity is used only where both sides of a comparison have one: cached versions that report none cannot be compared with a
+  // path that reports one, so such a path stops the command too (nothing is assumed about which volume it is on).
+  test('cached versions without identity and a protecting path outside the cache that has one stop the command', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+      try {
+        const cacheOnly = path.join(dir, 'zero-inode-cache-only.cjs');
+        writeFileSync(cacheOnly, `const fs = require('fs');
+for (const name of ['statSync', 'lstatSync']) {
+  const real = fs[name];
+  fs[name] = function (target, options) {
+    const stat = real.call(fs, target, options);
+    if (options && options.bigint && /[\\\\/]plugins[\\\\/]cache[\\\\/]/.test(String(target))) stat.ino = 0n;
+    return stat;
+  };
+}
+`);
+        const env = protect(dir, 'OMC_PLUGIN_ROOT', makeRoot(dir, 'checkout', '9.9.0'));
+        const result = runCommand(command, dir, { env, preloads: [cacheOnly] });
+        expect({ versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) }).toEqual({ versions: `5.1.0,5.8.0,${LIVE}`, moved: 0, reason: true });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // The protection is read again just before each move: a record published after the first read, which names a cached version
+  // in another letter case where no identity is reported, makes the second read undecided, so every free version is skipped.
+  test('a record that appears after the first read and cannot be judged skips the versions instead of moving them', () => {
+    const racePreload = `const fs = require('fs'), path = require('path'), crypto = require('crypto');
+const realMkdir = fs.mkdirSync;
+let fired = false;
+fs.mkdirSync = function (target, ...rest) {
+  if (!fired && String(target) === process.env.RACE_BACKUP) {
+    fired = true;
+    const dir = path.join(process.env.CLAUDE_CONFIG_DIR, '.omc', 'cache-occupancy');
+    realMkdir.call(fs, dir, { recursive: true });
+    const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.RACE_ROOT, updatedAt: new Date().toISOString() });
+    fs.writeFileSync(path.join(dir, crypto.createHash('sha256').update(record).digest('hex') + '.json'), record);
+  }
+  return realMkdir.call(fs, target, ...rest);
+};
+`;
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+      try {
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }] });
+        const race = path.join(dir, 'race.cjs');
+        writeFileSync(race, racePreload);
+        const env = { RACE_BACKUP: backupDir(dir), RACE_ROOT: upperBelow(dir, path.join(cache, LIVE)) };
+        const result = runCommand(command, dir, { env, preloads: [...volume(dir), race] });
+        expect({ versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ versions: `5.1.0,5.8.0,${LIVE}`, moved: 0 });
+        expect(result.stdout).toMatch(/Skipped 2 version\(s\)/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('the two variables naming one directory by two spellings are a conflict, so nothing moves', () => {
+    for (const command of commands) {
+      for (const platform of PLATFORMS) {
         const { dir, cache } = makeCache(['5.7.0', '5.8.0', '5.9.0']);
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
@@ -240,6 +413,35 @@ describe('omc-doctor on a volume that ignores letter case and reports inode 0', 
     }
   });
 
+  // A `stat` that fails for the path gives no identity either: an exact spelling still protects, another spelling stops the command.
+  test('a stat that fails for a protecting path gives no identity: another spelling stops the command, the exact spelling protects', () => {
+    for (const command of commands) {
+      for (const spelling of ['exact', 'other letter case'] as const) {
+        const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+        try {
+          const failing = path.join(dir, 'stat-fails.cjs');
+          writeFileSync(failing, `const fs = require('fs');
+const real = fs.lstatSync;
+fs.lstatSync = function (target, options) {
+  if (options && options.bigint && /5[.]9[.]0-/i.test(String(target))) throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+  return real.call(fs, target, options);
+};
+`);
+          const target = spelling === 'exact' ? path.join(cache, LIVE) : upperBelow(dir, path.join(cache, LIVE));
+          const env = protect(dir, 'OMC_PLUGIN_ROOT', target);
+          const result = runCommand(command, dir, { env, preloads: [writeCaseFoldPreload(dir), failing] });
+          expect({ spelling, versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) })
+            .toEqual(spelling === 'exact' ? { spelling, versions: `5.1.0,${LIVE}`, moved: 1, reason: false } : { spelling, versions: `5.1.0,5.8.0,${LIVE}`, moved: 0, reason: true });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  // The two variables are diagnosed only by Step 1 and never decide a move: a registry install that Step 1 cannot tell from a
+  // checkout (another letter case of a path under plugins/cache where no inode is reported) reads as plugin-dir, which sends
+  // nobody to the cache commands; the commands judge every path themselves, as above.
   test('Step 1: a root in another letter case than plugins/cache is a checkout there, the exact spelling is the registry install', () => {
     for (const platform of PLATFORMS) {
       for (const spelling of ['exact', 'other letter case'] as const) {

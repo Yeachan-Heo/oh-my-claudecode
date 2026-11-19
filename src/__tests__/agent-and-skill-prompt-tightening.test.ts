@@ -206,6 +206,11 @@ describe('omc-doctor skill', () => {
       expect(fix).toContain('`OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories');
       expect(fix).toContain('the two variables are compared after resolving links and by filesystem identity');
       expect(fix).toContain('letter case is never folded by the name of the platform');
+      expect(fix).toContain('(or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path');
+      expect(fix).toContain('the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system');
+      expect(fix).toContain('An exact spelling still protects the version it names and the free versions still move');
+      expect(fix).toContain('a path that does not exist is judged by its nearest existing parent');
+      expect(fix).toContain('a path that does not exist adds no protection of its own, only through its nearest existing parent as described above');
       expect(fix).toContain('are read again just before each version is moved');
       expect(fix).toContain('only the instant between that last read and the rename remains open');
       expect(fix).toContain('cannot be read or resolved completely');
