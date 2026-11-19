@@ -83,3 +83,43 @@ export function writeRegistry(dir: string, plugins: Record<string, unknown>) {
   writeRegistryFile(dir, { version: 2, plugins });
 }
 
+
+// WSL2 reports `linux` while a config directory on a Windows drive ignores letter case, and a case-sensitive test
+// volume has no such alias. This preload makes the process see one: a path that does not exist is looked up again,
+// component by component, ignoring letter case (the same stat answers as for the real name, so device and inode match;
+// a link reached through the alias is read the same way).
+export const caseFoldPreload = `const fs = require('fs'), path = require('path');
+const fold = (target) => {
+  const abs = path.resolve(String(target));
+  const root = path.parse(abs).root;
+  let current = root;
+  try {
+    for (const part of abs.slice(root.length).split(path.sep).filter(Boolean)) {
+      const exact = path.join(current, part);
+      if (fs.existsSync(exact)) { current = exact; continue; }
+      const hit = fs.readdirSync(current).find((name) => name.toLowerCase() === part.toLowerCase());
+      if (!hit) return abs;
+      current = path.join(current, hit);
+    }
+  } catch (error) { return abs; }
+  return current;
+};
+for (const name of ['statSync', 'lstatSync', 'readlinkSync']) {
+  const real = fs[name];
+  fs[name] = function (target, ...rest) {
+    try { return real.call(fs, target, ...rest); } catch (error) {
+      if (error && error.code === 'ENOENT' && typeof target === 'string') {
+        const folded = fold(target);
+        if (folded !== path.resolve(target)) return real.call(fs, folded, ...rest);
+      }
+      throw error;
+    }
+  };
+}
+`;
+
+export function writeCaseFoldPreload(dir: string) {
+  const file = path.join(dir, 'casefold.cjs');
+  writeFileSync(file, caseFoldPreload);
+  return file;
+}

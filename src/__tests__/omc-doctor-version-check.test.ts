@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { read, runCommand, scriptOf, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
+import { read, runCommand, scriptOf, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
 
 const text = read('skills/omc-doctor/SKILL.md');
 const versionCommand = text.split('\n').find((l) => l.startsWith('node -e ') && l.includes("'Updater: "));
@@ -11,6 +11,7 @@ const versionCommand = text.split('\n').find((l) => l.startsWith('node -e ') && 
 type Profile = {
   plugins?: Record<string, unknown> | ((dir: string) => Record<string, unknown>);
   platform?: string;
+  casefold?: boolean;
   raw?: string;
   cache?: Record<string, string[]>;
   clone?: Record<string, string>;
@@ -39,7 +40,9 @@ function step1(profile: Profile) {
     const preload = path.join(dir, 'platform.cjs');
     if (profile.platform) writeFileSync(preload, `Object.defineProperty(process, 'platform', { value: '${profile.platform}' });\n`);
     profile.setup?.(dir);
-    const result = runCommand(versionCommand ?? '', dir, { preloads: profile.platform ? [preload] : [], env: profile.env?.(dir), timeout: 20_000 });
+    // `casefold` gives the process a volume that ignores letter case while it reports linux (WSL2 on a Windows drive).
+    const preloads = [...(profile.platform ? [preload] : []), ...(profile.casefold ? [writeCaseFoldPreload(dir)] : [])];
+    const result = runCommand(versionCommand ?? '', dir, { preloads, env: profile.env?.(dir), timeout: 20_000 });
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
     return Object.fromEntries(result.stdout.trim().split('\n').map((l) => [l.slice(0, l.indexOf(': ')), l.slice(l.indexOf(': ') + 2)]));
@@ -329,7 +332,9 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       expect(other.Channel).toContain('unknown');
     });
 
-    test('a supported registry entry keeps the marketplace channel, an unrelated plugin or a broken registry does not hide the root', () => {
+    // CLAUDE_PLUGIN_ROOT is only a locator (Claude Code sets it for the plugin a hook belongs to, marketplace installs included),
+    // so it names the active checkout only where the registry holds no supported ID; OMC_PLUGIN_ROOT is the explicit override (below).
+    test('a supported registry entry keeps the marketplace channel for CLAUDE_PLUGIN_ROOT alone, an unrelated plugin or a broken registry does not hide the root', () => {
       const env = (dir: string) => ({ CLAUDE_PLUGIN_ROOT: makeRoot(dir, 'checkout', { 'package.json': { version: '5.9.0' } }) });
       const market = step1({ plugins: { 'oh-my-claudecode@omc': [{ version: '5.8.0' }] }, clone: { omc: '5.8.0' }, env });
       expect(market).toMatchObject({ Plugin: 'oh-my-claudecode@omc', Channel: 'marketplace omc', Installed: '5.8.0' });
@@ -350,6 +355,130 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
         expect(Object.keys(out)).toEqual(['Channel']);
         expect(out.Channel).toContain('different directories');
       }
+    });
+
+    // OMC_PLUGIN_ROOT is the explicit override (`omc --plugin-dir`, highest priority in the runtime resolution), so it names the
+    // loaded checkout whatever the registry holds, unless it names an install the registry manages: a directory inside
+    // plugins/cache or the installPath of a supported entry. That one is a registry install and its channel decides.
+    // A root that does not exist is not a loaded checkout (the runtime skips it) and never overrides anything.
+    describe('OMC_PLUGIN_ROOT against the registry', () => {
+      type Layout = { name: string; key: string; ns: string };
+      const layouts: Layout[] = [
+        { name: 'cache of the omc namespace', key: 'oh-my-claudecode@omc', ns: 'omc' },
+        { name: 'cache of the marketplace namespace', key: 'oh-my-claudecode@oh-my-claudecode', ns: 'oh-my-claudecode' },
+      ];
+      const registries = ['missing', 'valid', 'invalid JSON', 'top-level array', 'null'] as const;
+      const roots = ['unset', 'the cache install', 'a checkout elsewhere', 'a path that does not exist'] as const;
+
+      test('grid: registry x OMC_PLUGIN_ROOT x cache layout', () => {
+        for (const layout of layouts) {
+          for (const registry of registries) {
+            for (const root of roots) {
+              let checkout = '';
+              const out = step1({
+                cache: { [layout.ns]: ['5.8.0'] },
+                clone: { [layout.ns]: '5.8.0' },
+                ...(registry === 'valid'
+                  ? { plugins: (dir: string) => ({ [layout.key]: [{ scope: 'user', version: '5.8.0', installPath: path.join(dir, 'plugins', 'cache', layout.ns, 'oh-my-claudecode', '5.8.0') }] }) }
+                  : registry === 'missing' ? {} : { raw: { 'invalid JSON': '{not json', 'top-level array': '[]', null: 'null' }[registry] }),
+                env: (dir) => ({
+                  OMC_PLUGIN_ROOT: root === 'unset' ? ''
+                    : root === 'the cache install' ? path.join(dir, 'plugins', 'cache', layout.ns, 'oh-my-claudecode', '5.8.0')
+                      : root === 'a path that does not exist' ? path.join(dir, 'gone')
+                        : (checkout = makeRoot(dir, 'checkout', { 'package.json': { version: '9.9.0' } })),
+                }),
+              });
+              const unreadable = registry !== 'missing' && registry !== 'valid';
+              const expected: Record<string, string> =
+                root === 'a checkout elsewhere' ? { Channel: 'plugin-dir', Installed: '9.9.0', 'Plugin root': checkout }
+                  : unreadable ? { Channel: 'unknown' }
+                    : registry === 'valid' ? { Channel: `marketplace ${layout.ns}`, Installed: '5.8.0', Plugin: layout.key }
+                      // A root that does not exist is not a loaded checkout (the runtime skips it), so it never overrides a registry entry;
+                      // with no registry at all, a root that is named stays a plugin-dir install with no version, as before this rule.
+                      : root === 'unset' ? { Channel: 'npm', Installed: layout.ns === 'omc' ? '5.8.0' : '(none)' } // the npm channel reads the omc cache only
+                        : { Channel: 'plugin-dir', Installed: '(none)' };
+              const got = Object.fromEntries(Object.keys(expected).map((k) => [k, k === 'Channel' && expected.Channel === 'unknown' ? (out.Channel ?? '').split(' ')[0] : out[k]]));
+              expect({ layout: layout.name, registry, root, got }).toEqual({ layout: layout.name, registry, root, got: expected });
+              if (expected.Channel === 'unknown') expect(Object.keys(out)).toEqual(['Channel']);
+              if (expected.Channel === 'plugin-dir') expect(out.Updater).toBe(updater);
+            }
+          }
+        }
+      });
+
+      // A file system that reports inode 0 gives no identity; the root is then judged by its path, as the commands do.
+      test('a root inside plugins/cache stays a registry install where the file system reports inode 0', () => {
+        const zeroInode = "const fs = require('fs'); const real = fs.statSync; fs.statSync = function (target, options) { const stat = real.call(fs, target, options); if (options && options.bigint) stat.ino = 0n; return stat; };\n";
+        const out = step1({
+          plugins: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0' }] },
+          cache: { omc: ['5.7.0', '5.8.0'] },
+          clone: { omc: '5.8.0' },
+          setup: (dir) => writeFileSync(path.join(dir, 'zero-inode.cjs'), zeroInode),
+          env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0'), NODE_OPTIONS: `--require ${path.join(dir, 'zero-inode.cjs')}` }),
+        });
+        expect(out.Channel).toBe('marketplace omc');
+      });
+
+      test('a 9.9.0 checkout named by OMC_PLUGIN_ROOT is not reported as the 5.8.0 marketplace install of a stale registry entry', () => {
+        let root = '';
+        const out = step1({
+          plugins: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0' }] },
+          clone: { omc: '6.0.0' },
+          cache: { omc: ['5.8.0'] },
+          env: (dir) => ({ OMC_PLUGIN_ROOT: (root = makeRoot(dir, 'checkout', { 'package.json': { version: '9.9.0' } })) }),
+        });
+        expect(out).toEqual({ 'Plugin root': root, Channel: 'plugin-dir', Installed: '9.9.0', Latest: '(unavailable) (a --plugin-dir checkout has no update channel)', Updater: updater });
+        expect(JSON.stringify(out)).not.toContain('claude plugin update');
+      });
+
+      test('the install of the registry entry stays a marketplace install: its installPath anywhere, reached through a link, or inside plugins/cache', () => {
+        for (const spelled of ['plain', 'link'] as const) {
+          const out = step1({
+            plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0', installPath: path.join(dir, 'custom', 'install') }] }),
+            clone: { omc: '5.8.0' },
+            env: (dir) => {
+              const install = makeRoot(dir, path.join('custom', 'install'), { 'package.json': { version: '5.8.0' } });
+              if (spelled === 'plain') return { OMC_PLUGIN_ROOT: install };
+              symlinkSync(install, path.join(dir, 'alias'), 'junction');
+              return { OMC_PLUGIN_ROOT: path.join(dir, 'alias') };
+            },
+          });
+          expect({ spelled, channel: out.Channel, installed: out.Installed }).toEqual({ spelled, channel: 'marketplace omc', installed: '5.8.0' });
+        }
+        // A directory inside plugins/cache that no entry names (an older version) is a managed install too, not a checkout.
+        const older = step1({
+          plugins: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0' }] },
+          cache: { omc: ['5.7.0', '5.8.0'] },
+          env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0') }),
+        });
+        expect(older.Channel).toBe('marketplace omc');
+      });
+
+      // Where a volume ignores letter case while the platform says linux (WSL2 on a Windows drive), two spellings of a
+      // directory are one directory: the commands compare by filesystem identity, not by the name of the platform.
+      test('a letter-case alias of the install, or of the checkout named by both variables, is the same directory', () => {
+        const aliasOfInstall = (casefold: boolean) => step1({
+          casefold,
+          plugins: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0' }] },
+          cache: { omc: ['5.8.0'] },
+          env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0').toUpperCase() }),
+        });
+        expect(aliasOfInstall(true).Channel).toBe('marketplace omc');
+        // Control: on a volume that does tell the names apart the alias names no directory, which overrides nothing.
+        expect(aliasOfInstall(false).Channel).toBe('marketplace omc');
+        const twoSpellings = (casefold: boolean, other: 'alias' | 'different') => step1({
+          casefold,
+          env: (dir) => {
+            const root = makeRoot(dir, 'checkout', { 'package.json': { version: '9.9.0' } });
+            return { OMC_PLUGIN_ROOT: root, CLAUDE_PLUGIN_ROOT: other === 'alias' ? root.toUpperCase() : makeRoot(dir, 'other', { 'package.json': { version: '5.1.0' } }).toUpperCase() };
+          },
+        });
+        expect(twoSpellings(true, 'alias').Channel).toBe('plugin-dir');
+        expect(twoSpellings(true, 'different').Channel).toContain('different directories');
+        const folded = twoSpellings(false, 'alias').Channel;
+        if (process.platform === 'win32' || process.platform === 'darwin') expect(folded).toBe('plugin-dir');
+        else expect(folded).toContain('different directories');
+      });
     });
   });
 
