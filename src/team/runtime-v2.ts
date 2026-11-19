@@ -2944,6 +2944,10 @@ export async function finalizeRecoveryOwnerResult(
       last_recovery: {
         ...active,
         phase,
+        ...(result.outcome === "failed" &&
+        result.error === "recovery_request_timeout"
+          ? { failure_reason: result.error }
+          : {}),
         state_revision: finalRevision,
         updated_at: new Date().toISOString(),
       },
@@ -3066,6 +3070,52 @@ async function finalizeBoundRecoveryOwnerTerminal(
 /** The longest recover-worker client wait, counted from the persisted intent. */
 const RECOVERY_OWNER_RETRY_DEADLINE_MS = 300_000;
 
+function recoveryTimeoutError(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+): RecoverDeadWorkerV2Failure {
+  return recoveryError(
+    input,
+    recoveryId,
+    "recovery_request_timeout",
+    `Recovery owner deadline exceeded: no attempt finished within ${RECOVERY_OWNER_RETRY_DEADLINE_MS} ms of admission.`,
+  );
+}
+
+/**
+ * Publishes the final of a deadline timeout whose owner saved it to config
+ * but died before publishing it. The fenced owner already made the decision,
+ * so no election is needed. Returns null when there is no such timeout.
+ */
+async function publishSavedRecoveryTimeout(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+): Promise<RecoverDeadWorkerV2Result | null> {
+  const savedTimeout = async (): Promise<boolean> => {
+    const config = (await readRevisionedTeamConfig(input.teamName, input.cwd))
+      ?.config;
+    const last = config?.last_recovery;
+    return (
+      config?.active_recovery?.recovery_id !== recoveryId &&
+      last?.recovery_id === recoveryId &&
+      last.request_id === input.requestId &&
+      last.worker_name === input.workerName &&
+      last.phase === "failed" &&
+      last.failure_reason === "recovery_request_timeout"
+    );
+  };
+  if (!(await savedTimeout())) return null;
+  return withTeamConfigMutationLock(input.teamName, input.cwd, async () =>
+    (await savedTimeout())
+      ? persistRecoveryFinal(
+          input,
+          recoveryId,
+          recoveryTimeoutError(input, recoveryId),
+        )
+      : null,
+  );
+}
+
 /**
  * Past the deadline, the fenced owner fails a recovery that has nothing to
  * hand over instead of running another attempt. Returns null to keep today's
@@ -3092,12 +3142,7 @@ async function finalizeRecoveryPastDeadline(
     return null;
   }
   if (Date.now() < admittedAt + RECOVERY_OWNER_RETRY_DEADLINE_MS) return null;
-  const expired = recoveryError(
-    input,
-    recoveryId,
-    "recovery_request_timeout",
-    `Recovery owner deadline exceeded: no attempt finished within ${RECOVERY_OWNER_RETRY_DEADLINE_MS} ms of admission.`,
-  );
+  const expired = recoveryTimeoutError(input, recoveryId);
   return withTeamInstanceLifecycleLock(
     instance.cwd,
     instance.team_name,
@@ -4074,6 +4119,7 @@ export async function prepareRecoveryOwnerBootstrap(
   if (!bootstrap) throw new Error("runtime_owner_bootstrap_fence_lost");
   if (!isValidTeamInstanceId(input.instanceId))
     throw new Error("team_instance_identity_missing");
+  if (await publishSavedRecoveryTimeout(input, bootstrap.recoveryId)) return;
   const expectedInstanceId = input.instanceId;
   const initial = await readRevisionedTeamConfig(input.teamName, input.cwd);
   if (!initial?.config.instance_id)
@@ -4181,6 +4227,8 @@ async function runRecoverDeadWorkerV2OwnerAttempt(
         "recovery_instance_mismatch",
       );
     }
+    const savedTimeout = await publishSavedRecoveryTimeout(input, recoveryId);
+    if (savedTimeout) return savedTimeout;
     const expectedInstanceId = input.instanceId;
     const beforeOwner = await readRevisionedTeamConfig(
       input.teamName,
