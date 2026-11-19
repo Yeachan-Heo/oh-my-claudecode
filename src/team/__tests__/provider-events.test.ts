@@ -59,7 +59,8 @@ describe('parseLatestProviderEvent', () => {
   });
 });
 
-describe('readLatestProviderEvent', () => {
+// File access refuses symlinks only off Windows; on Windows the reader always returns none.
+describe.skipIf(process.platform === 'win32')('readLatestProviderEvent', () => {
   let root = '';
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'provider-events-')); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
@@ -73,6 +74,19 @@ describe('readLatestProviderEvent', () => {
     writeFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'),
       line({ v: 1, event: 'Stop', at: 1, attempt: 'a1' }));
     expect(await readLatestProviderEvent(root, 'worker-1', undefined)).toEqual({ event: 'none' });
+  });
+
+  it('returns none on Windows, where O_NOFOLLOW cannot refuse a symlinked leaf', async () => {
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    writeFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'),
+      line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    try {
+      expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
   });
 
   it('returns none for a symlinked file or worker directory', async () => {
@@ -153,7 +167,7 @@ describe('withProviderEventSettingsArgs', () => {
   });
 });
 
-describe('provider event hook', () => {
+describe.skipIf(process.platform === 'win32')('provider event hook', () => {
   let root = '';
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'provider-event-hook-')); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });

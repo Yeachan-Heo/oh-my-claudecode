@@ -9,7 +9,7 @@
  * The latest event is display-only: nothing decides startup, liveness,
  * recommendations, or nudges from it.
  */
-import { constants } from 'node:fs';
+import { constants, type Stats } from 'node:fs';
 import { lstat, open, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,27 +51,33 @@ export function providerEventsPath(teamStateRoot: string, workerName: string): s
   return join(teamStateRoot, 'workers', workerName, PROVIDER_EVENTS_FILE);
 }
 
+const sameNode = (a: Stats, b: Stats): boolean => a.dev === b.dev && a.ino === b.ino;
+
 export async function readLatestProviderEvent(
   teamStateRoot: string,
   workerName: string,
   attemptId: string | undefined,
 ): Promise<LatestProviderEvent> {
-  if (!attemptId) return { event: 'none' };
+  // Windows ignores O_NOFOLLOW, so a symlinked leaf cannot be refused there;
+  // the field is display-only, so Windows shows none.
+  if (!attemptId || process.platform === 'win32') return { event: 'none' };
   // Read only a regular file reached without symlinks: a FIFO left at the path
   // would otherwise block the whole monitor cycle.
-  const workersDir = join(teamStateRoot, 'workers');
+  const dirs = [join(teamStateRoot, 'workers'), join(teamStateRoot, 'workers', workerName)];
+  const path = providerEventsPath(teamStateRoot, workerName);
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    for (const dir of [workersDir, join(workersDir, workerName)]) {
-      if (!(await lstat(dir)).isDirectory()) return { event: 'none' };
+    const before = await Promise.all(dirs.map(dir => lstat(dir)));
+    if (!before.every(stats => stats.isDirectory())) return { event: 'none' };
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    // The open resolved the path again. Re-check after it: a parent swapped for
+    // a symlink in between shows as a changed directory or a different leaf.
+    const opened = await handle.stat();
+    const [leaf, ...after] = await Promise.all([lstat(path), ...dirs.map(dir => lstat(dir))]);
+    if (!opened.isFile() || !sameNode(opened, leaf)
+      || after.some((stats, index) => !stats.isDirectory() || !sameNode(stats, before[index]!))) {
+      return { event: 'none' };
     }
-    handle = await open(
-      providerEventsPath(teamStateRoot, workerName),
-      constants.O_RDONLY
-        | (constants.O_NOFOLLOW ?? 0)
-        | (process.platform === 'win32' ? 0 : (constants.O_NONBLOCK ?? 0)),
-    );
-    if (!(await handle.stat()).isFile()) return { event: 'none' };
     return parseLatestProviderEvent(await handle.readFile('utf8'), attemptId);
   } catch {
     return { event: 'none' };
