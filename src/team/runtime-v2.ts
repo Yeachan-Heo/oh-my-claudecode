@@ -3123,9 +3123,13 @@ async function finalizeRecoveryPastDeadline(
             progress.continuation === "adopted"))
       )
         return null;
-      // Reservations are written before the phase records them.
-      const tasks = await teamListTasks(input.teamName, input.cwd);
+      // Reservations are written before the phase records them. Tasks that
+      // cannot be read leave the decision to the executor.
+      const tasks = await teamListTasks(input.teamName, input.cwd).catch(
+        () => null,
+      );
       if (
+        !tasks ||
         tasks.some(
           (task) =>
             task.recovery_reservation?.recovery_id === recoveryId ||
