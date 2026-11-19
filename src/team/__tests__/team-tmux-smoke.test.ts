@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { closeSync, existsSync, openSync } from 'node:fs';
 import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -469,4 +469,77 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     });
     expect(shutdown).toEqual({ outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['worker-1'] });
   }, 480_000);
+
+  it.skipIf(STOP_SCENARIO)('recovers a worker killed after its task completed, then shuts the team down', async () => {
+    const teamName = `tmux-recover-${randomUUID().slice(0, 8)}`;
+    const instanceId = randomUUID();
+    const ownerLog = join(fixtureRoot, 'runtime-cli.stderr.log');
+    let teamSocket: string | undefined;
+    const ownerLogFd = openSync(ownerLog, 'a');
+    // The team runs under its own runtime-cli owner, as `omc team` starts it,
+    // so recovery intents reach the owner loop that serves real teams.
+    const owner = spawn(process.execPath, [runtimeCliPath], {
+      cwd,
+      env: process.env,
+      detached: true,
+      stdio: ['pipe', 'ignore', ownerLogFd],
+    });
+    closeSync(ownerLogFd);
+    const ownerDiagnostics = async () => `${await traceDiagnostics()}\nruntime-cli stderr:\n${
+      (await readFile(ownerLog, 'utf8').catch(() => '<none>')).split('\n').slice(-40).join('\n')}\nactive_recovery: ${
+      JSON.stringify((await readTeamConfig(teamName, cwd).catch(() => null))?.active_recovery)}`;
+    try {
+      owner.stdin!.end(JSON.stringify({
+        teamName,
+        instanceId,
+        workerCount: 1,
+        agentTypes: ['claude'],
+        tasks: [{ subject: 'Smoke task', description: 'Claim this task, complete it, then wait for shutdown.' }],
+        cwd,
+        pollIntervalMs: 500,
+      }));
+
+      await waitFor(
+        'task 1 to be completed through the worker API',
+        async () => {
+          const envelope = await executeTeamApiOperation('read-task', { team_name: teamName, task_id: '1' }, cwd);
+          return envelope.ok ? (envelope.data.task as { status?: string }).status : null;
+        },
+        status => status === 'completed',
+        60_000,
+        ownerDiagnostics,
+      );
+      // runtime-cli, not this process, starts the tmux server, so the
+      // shared afterEach sweep cannot find its socket.
+      teamSocket = (await readTeamConfig(teamName, cwd))?.tmux_server_identity?.socket_path;
+      const [firstProvider] = await readTrace();
+      process.kill(firstProvider!.pid, 'SIGKILL');
+      await waitFor('killed provider to exit', () => isProcessAlive(firstProvider!.pid), alive => !alive, 5_000);
+
+      const envelope = await executeTeamApiOperation('recover-worker', {
+        team_name: teamName,
+        worker: 'worker-1',
+        request_id: 'smoke-recover-1',
+      }, cwd);
+      if (!envelope.ok) throw new Error(`recover-worker rejected: ${JSON.stringify(envelope)}`);
+      const result = envelope.data.result;
+      expect(result, `${JSON.stringify(result)}\n${await ownerDiagnostics()}`).toMatchObject({ outcome: 'recovered' });
+
+      const shutdown = await shutdownTeamV2(teamName, cwd, { instanceId, timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS });
+      expect(shutdown, await ownerDiagnostics()).toEqual({ outcome: 'cleaned' });
+    } finally {
+      if (teamSocket) {
+        await tmuxCmdAsync(['-S', teamSocket, 'kill-server'], { timeout: 2_000, stripTmux: true }).catch(() => undefined);
+      }
+      if (owner.pid && isProcessAlive(owner.pid)) {
+        try { process.kill(-owner.pid, 'SIGKILL'); } catch { /* exited concurrently */ }
+      }
+      for (const line of await processesMentioning([runRoot])) {
+        const pid = Number(line.split(/\s+/)[0]);
+        if (Number.isSafeInteger(pid) && pid > 0) {
+          try { process.kill(pid, 'SIGKILL'); } catch { /* exited concurrently */ }
+        }
+      }
+    }
+  }, 300_000);
 });
