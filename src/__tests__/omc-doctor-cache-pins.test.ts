@@ -50,9 +50,10 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     }
   });
 
-  // An update that refreshes a version directory that already exists overwrites its children; that need not change
-  // the date of the directory itself (an overwrite in place changes the file only). The commands therefore date a
-  // version by the newest of the directory and its entries down to two levels, at most 2000 of them.
+  // An update that refreshes a version directory that already exists overwrites its children in place (`cpSync` with
+  // `force`); that changes the file only, not the date of the directory itself or of any level above it. The commands
+  // therefore date a version by the newest of the directory and every entry below it, at any depth, at most 20000 of
+  // them (a real cached version holds about 9000).
   describe('a version whose existing children are being refreshed is left alone', () => {
     const FRESH_LIMIT = 10 * 60_000;
     // Builds the configuration directory, adds the files to the unpinned version 5.9.0, ages everything an hour
@@ -72,12 +73,13 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     for (const [label, fresh, left] of [
       ['a file directly in the version', 'package.json', true],
       ['a file one directory down (dist/index.js)', path.join('dist', 'index.js'), true],
-      ['a file three levels down is below the scan depth and does not count', path.join('a', 'b', 'c.txt'), false],
+      ['a file three levels down', path.join('a', 'b', 'c.txt'), true],
+      ['a file six levels down', path.join('a', 'b', 'c', 'd', 'e', 'f.txt'), true],
       ['nothing refreshed', null, false],
     ] as const) {
       test(`${label}: ${left ? 'left alone and reported' : 'moved aside like any old version'}`, () => {
         for (const command of commands) {
-          const files = [path.join('dist', 'index.js'), path.join('dist', 'hooks', 'x.cjs'), path.join('a', 'b', 'c.txt')];
+          const files = [path.join('dist', 'index.js'), path.join('dist', 'hooks', 'x.cjs'), path.join('a', 'b', 'c.txt'), path.join('a', 'b', 'c', 'd', 'e', 'f.txt')];
           const { dir, cache, version } = refreshed(files, fresh);
           try {
             // The directory itself, and every level above the refreshed file, still carries the old date, so a check of the directory date alone sees nothing.
@@ -94,31 +96,37 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     }
 
     // The refreshed entry is a directory (the updater replaced a file in it, or created one) whose own date is new.
-    test('a directory entry two levels down with a new date counts', () => {
+    test('a directory entry with a new date counts, at any depth', () => {
       for (const command of commands) {
-        const { dir, cache, version } = refreshed([path.join('dist', 'hooks', 'x.cjs')], null);
-        try {
-          const now = new Date();
-          utimesSync(path.join(version, 'dist', 'hooks'), now, now);
-          const result = runCommand(command, dir);
-          expect({ versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ versions: '5.8.1,5.9.0', moved: 1 });
-          expect(result.stdout).toContain('modified in the last 10 minutes');
-        } finally {
-          rmSync(dir, { recursive: true, force: true });
+        for (const deep of [path.join('dist', 'hooks'), path.join('a', 'b', 'c', 'd', 'e')]) {
+          const { dir, cache, version } = refreshed([path.join(deep, 'x.cjs')], null);
+          try {
+            const now = new Date();
+            utimesSync(path.join(version, deep), now, now);
+            const result = runCommand(command, dir);
+            expect({ deep, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ deep, versions: '5.8.1,5.9.0', moved: 1 });
+            expect(result.stdout).toContain('modified in the last 10 minutes');
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
         }
       }
     });
 
-    test('a version with more than 2000 entries cannot be judged: it is skipped as unreadable, 2000 are fine', () => {
+    // The scan counts every entry it reads, files and directories at every depth. A flat first level of 5000 entries
+    // (more than the old cap of 2000 for two levels) is fine now; the cap sits well above a real cached version (about
+    // 9000 entries), and one entry beyond it cannot be judged. The large tree is nested, so only a count over the whole
+    // tree reaches the cap: package.json, the directories a and a/b, 100 group directories and the files in them.
+    test('a version with more than 20000 entries in its whole tree cannot be judged: it is skipped as unreadable, 20000 are fine', () => {
+      const flat = (count: number) => Array.from({ length: count - 1 }, (_unused, i) => `f${i}`);
+      const nested = (count: number) => Array.from({ length: count - 103 }, (_unused, i) => path.join('a', 'b', `g${i % 100}`, `f${i}`));
       for (const command of commands) {
-        for (const [count, moved] of [[1999, true], [2000, true], [2001, false]] as const) {
-          // The version holds `count` entries in its first level (the scan counts every entry it reads).
-          const files = Array.from({ length: count - 1 }, (_unused, i) => `f${i}`);
-          const { dir, cache } = refreshed([...files, 'package.json'], null);
+        for (const [label, files, moved] of [['flat 5000', flat(5000), true], ['nested 20000', nested(20000), true], ['nested 20001', nested(20001), false]] as const) {
+          const { dir, cache } = refreshed(files, null);
           try {
             const result = runCommand(command, dir);
-            expect({ count, versions: digitVersions(cache), moved: movedAside(dir) })
-              .toEqual({ count, versions: moved ? '5.8.1' : '5.8.1,5.9.0', moved: moved ? 2 : 1 });
+            expect({ label, versions: digitVersions(cache), moved: movedAside(dir) })
+              .toEqual({ label, versions: moved ? '5.8.1' : '5.8.1,5.9.0', moved: moved ? 2 : 1 });
             expect(/Could not judge 1 version/.test(result.stdout)).toBe(!moved);
             expect(result.stdout).not.toMatch(/Skipped/);
           } finally {
