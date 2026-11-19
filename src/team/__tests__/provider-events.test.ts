@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -73,6 +73,33 @@ describe('readLatestProviderEvent', () => {
     writeFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'),
       line({ v: 1, event: 'Stop', at: 1, attempt: 'a1' }));
     expect(await readLatestProviderEvent(root, 'worker-1', undefined)).toEqual({ event: 'none' });
+  });
+
+  it('returns none for a symlinked file or worker directory', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'provider-events-outside-'));
+    try {
+      const target = join(outside, 'events.jsonl');
+      writeFileSync(target, line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
+      mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+      symlinkSync(target, join(root, 'workers', 'worker-1', 'provider-events.jsonl'));
+      expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+      writeFileSync(join(outside, 'provider-events.jsonl'), line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
+      symlinkSync(outside, join(root, 'workers', 'worker-2'));
+      expect(await readLatestProviderEvent(root, 'worker-2', 'a1')).toEqual({ event: 'none' });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('returns none at once for a FIFO', async () => {
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    execFileSync('mkfifo', [join(root, 'workers', 'worker-1', 'provider-events.jsonl')]);
+    const timedOut = Symbol('timed out');
+    const result = await Promise.race([
+      readLatestProviderEvent(root, 'worker-1', 'a1'),
+      new Promise(resolve => setTimeout(() => resolve(timedOut), 2_000)),
+    ]);
+    expect(result).toEqual({ event: 'none' });
   });
 
   it('reads the worker file', async () => {
@@ -177,6 +204,45 @@ describe('provider event hook', () => {
     }
     // An API error ends the turn with StopFailure and no Stop (E0 scenario 4).
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toMatchObject({ event: 'StopFailure' });
+  });
+
+  it('does not write through a symlinked file or worker directory', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'provider-event-hook-outside-'));
+    try {
+      const command = await hookCommand('Stop');
+      mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+      const target = join(outside, 'events.jsonl');
+      writeFileSync(target, '');
+      symlinkSync(target, join(root, 'workers', 'worker-1', 'provider-events.jsonl'));
+      symlinkSync(outside, join(root, 'workers', 'worker-2'));
+      for (const worker of ['worker-1', 'worker-2']) {
+        const result = run(command, { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: `demo/${worker}`, OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe('');
+        expect(result.stderr).toBe('');
+      }
+      expect(readFileSync(target, 'utf8')).toBe('');
+      expect(existsSync(join(outside, 'provider-events.jsonl'))).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('exits 0 at once when the path is a FIFO', async () => {
+    const command = await hookCommand('Stop');
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    const fifo = join(root, 'workers', 'worker-1', 'provider-events.jsonl');
+    execFileSync('mkfifo', [fifo]);
+    const result = spawnSync('sh', ['-c', command], {
+      env: { PATH: process.env.PATH ?? '', OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' },
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+    expect(result.signal).toBeNull();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
+    expect(lstatSync(fifo).isFIFO()).toBe(true);
   });
 
   it('exits 0 silently and creates nothing when it cannot write', async () => {
