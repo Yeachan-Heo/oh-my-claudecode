@@ -128,16 +128,24 @@ const readInbox = {
     const lines = readFileSync(inboxPath, 'utf8').split('\n').map(line => line.trim());
     const claimCommand = lines.find(line => /\bteam api claim-task\b/.test(line));
     const completeCommand = lines.find(line => /\bteam api transition-task-status\b/.test(line) && line.includes('"to":"completed"'));
-    if (!claimCommand || !completeCommand) throw new Error('inbox_lifecycle_commands_missing');
+    if (!claimCommand || !completeCommand) {
+      // A recovered worker that owned no task gets only this note; a real
+      // worker reads it, does nothing, and answers every later trigger.
+      if (!lines.some(line => line.startsWith('Recovery completed for this idle worker.'))) throw new Error('inbox_lifecycle_commands_missing');
+      stdin.on('line', line => { if (/Read \S+\/inbox\.md, execute now/.test(line)) trace('trigger-while-idle'); });
+      return { idle: true };
+    }
     return { claimCommand, completeCommand };
   },
 };
 const claimTask = {
   name: 'claim-task',
+  skip: ({ idle }) => idle === true,
   run: ({ claimCommand }) => ({ claimToken: runTeamApi(claimCommand).claimToken }),
 };
 const completeTask = {
   name: 'complete-task',
+  skip: ({ idle }) => idle === true,
   run: ({ completeCommand, claimToken }) => { runTeamApi(completeCommand.replace('<claim_token>', claimToken)); },
 };
 const completedPrompt = {
@@ -288,8 +296,8 @@ const SCENARIOS = {
           : readInbox.run(context);
       },
     },
-    { ...claimTask, skip: ({ continuations }) => continuations !== undefined },
-    { ...completeTask, skip: ({ continuations }) => continuations !== undefined },
+    { ...claimTask, skip: ({ continuations, idle }) => continuations !== undefined || idle === true },
+    { ...completeTask, skip: ({ continuations, idle }) => continuations !== undefined || idle === true },
     {
       name: 'write-checkpoint',
       skip: ({ continuations }) => continuations === undefined,
