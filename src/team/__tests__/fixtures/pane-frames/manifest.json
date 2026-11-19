@@ -261,7 +261,7 @@
     "hooks": true,
     "source": "recorded",
     "origin": ".omc/plans/readiness-proto/e0/7a/frames.txt#182",
-    "note": "Frame at 1795071480.422, mid tool call in a 187.5s turn (three 60s bash ./work.sh runs). Hook events (epoch s): SessionStart 1795071385.497, UserPromptSubmit 1795071386.747, Stop 1795071574.234."
+    "note": "Frame at 1795071480.422, mid tool call in a 187.5s turn (three 60s bash ./work.sh runs). Hook events (epoch s): SessionStart 1795071385.497, UserPromptSubmit 1795071386.747, Stop 1795071574.234. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
   },
   {
     "file": "claude/2.1.328/bypass-permissions-yes-focused.txt",
@@ -306,7 +306,7 @@
     "hooks": true,
     "source": "recorded",
     "origin": ".omc/plans/readiness-proto/e0/1/frames.txt#10",
-    "note": "Frame at 1795071140.197, idle after the turn. Hook events (epoch s): SessionStart 1795071113.897, UserPromptSubmit 1795071114.995, Stop 1795071116.206."
+    "note": "Frame at 1795071140.197, idle after the turn. Hook events (epoch s): SessionStart 1795071113.897, UserPromptSubmit 1795071114.995, Stop 1795071116.206. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
   },
   {
     "file": "claude/2.1.328/fullscreen-renderer-not-now-focused.txt",
@@ -351,7 +351,7 @@
     "hooks": true,
     "source": "recorded",
     "origin": ".omc/plans/readiness-proto/e0/3/frames.txt#45",
-    "note": "Frame at 1795071425.542, after keys:Escape 1795071421.481 mid turn. Hook events (epoch s): SessionStart 1795071399.424, UserPromptSubmit 1795071400.682; Esc fires no Stop or StopFailure, so UserPromptSubmit stays latest."
+    "note": "Frame at 1795071425.542, after keys:Escape 1795071421.481 mid turn. Hook events (epoch s): SessionStart 1795071399.424, UserPromptSubmit 1795071400.682; Esc fires no Stop or StopFailure, so UserPromptSubmit stays latest. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
   },
   {
     "file": "claude/2.1.328/idle-after-fullscreen-renderer.txt",
@@ -383,7 +383,7 @@
     "hooks": true,
     "source": "recorded",
     "origin": ".omc/plans/readiness-proto/e0/4/frames.txt#8",
-    "note": "Frame at 1795071548.942, after an API error (unknown --model). Hook events (epoch s): SessionStart 1795071522.878, UserPromptSubmit 1795071524.085, StopFailure 1795071524.731; no Stop."
+    "note": "Frame at 1795071548.942, after an API error (unknown --model). Hook events (epoch s): SessionStart 1795071522.878, UserPromptSubmit 1795071524.085, StopFailure 1795071524.731; no Stop. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
   },
   {
     "file": "claude/2.1.328/trust-yes-focused.txt",
@@ -413,7 +413,7 @@
     "hooks": true,
     "source": "recorded",
     "origin": ".omc/plans/readiness-proto/e0/1/frames.txt#1",
-    "note": "Frame at 1795071112.315, before the trust answer (keys:Down 1795071112.848, keys:Enter 1795071113.390). Hook events (epoch s): SessionStart 1795071113.897; none while the dialog is drawn."
+    "note": "Frame at 1795071112.315, before the trust answer (keys:Down 1795071112.848, keys:Enter 1795071113.390). Hook events (epoch s): SessionStart 1795071113.897; none while the dialog is drawn. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
   },
   {
     "file": "claude/2.1.329/onboarding-security-notes.txt",

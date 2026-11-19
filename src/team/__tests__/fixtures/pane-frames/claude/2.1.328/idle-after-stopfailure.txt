@@ -1,6 +1,6 @@
  ▐▛███▛█   Claude Code v2.1.328
 ▝▜██████▀  claude-does-not-exist with high effort · Claude Max
- ▝▝   ▝▝   /private/var/folders/39/6cjg007j1fj8p1bj2s40vgsh0000gn/T/tmp.5zKgJyd9Iy/s4.0Nmq
+ ▝▝   ▝▝   /private/tmp/omc-e0-XXXX/s4.0Nmq
 
 ⚠ Model "claude-does-not-exist" isn't recognized · context assumed to be 1m tokens · update Claude Code, or see the docs
 
@@ -12,7 +12,7 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ❯ Once fixed, resend your message                                                                                       
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [OMC#5.8.4] | Model: claude-does-not-e... | effort:high | 5h:66%(1h11m) wk:88%(4d4h) fable:100%(4d4h) | ctx:0%
+  [OMC#5.8.4] | Model: claude-does-not-e... | effort:high | 5h:0%(0h0m) wk:0%(0d0h) fable:0%(0d0h) | ctx:0%
   ⏵⏵ bypass permissions on (shift+tab to cycle)                                                                       
 
 
