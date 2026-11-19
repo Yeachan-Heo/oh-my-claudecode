@@ -44,7 +44,7 @@ vi.mock('../tmux-session.js', async importOriginal => ({
   ...tmuxMocks,
 }));
 
-import { readRecoveryOutcome, reserveRecoveryRequest as persistRecoveryRequest } from '../recovery-request-store.js';
+import { canonicalRecoveryPayloadHash, readRecoveryFinalState, readRecoveryOutcome, reserveRecoveryRequest as persistRecoveryRequest, writeRecoveryPhase } from '../recovery-request-store.js';
 import {
   executeRecoverDeadWorkerV2Owner,
   recoverDeadWorkerV2,
@@ -671,4 +671,157 @@ describe('runtime owner team mutation contention', () => {
   });
 
 
+});
+
+describe('recovery owner retry deadline', () => {
+  const PAST_DEADLINE_MS = 301_000;
+  const BEFORE_DEADLINE_MS = 240_000;
+
+  function writeIntent(teamName: string, requestId: string, recoveryId: string, ageMs: number): void {
+    const workspaceHash = createHash('sha256').update(cwd).digest('hex');
+    const path = absPath(cwd, TeamPaths.recoveryIntent(teamName, recoveryId));
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, JSON.stringify({ schema_version: 1, kind: 'recover-worker', request_id: requestId,
+      recovery_id: recoveryId, operation: 'recover-worker', workspace_hash: workspaceHash,
+      payload_hash: canonicalRecoveryPayloadHash({ operation: 'recover-worker', workspaceHash, teamName,
+        workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID }),
+      team_name: teamName, worker_name: 'worker-1', instance_id: TEAM_INSTANCE_ID,
+      created_at: new Date(Date.now() - ageMs).toISOString() }));
+  }
+
+  // An elected recovery whose original pane liveness stays unknown: the
+  // transient failure a killed launch wrapper leaves behind.
+  async function seedElectedUnknownLiveness(teamName: string, ageMs: number, worker: Record<string, unknown> = {}): Promise<void> {
+    await reserveFixtureInstance(teamName, cwd);
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, instance_id: TEAM_INSTANCE_ID, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1, ...worker }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 3,
+      active_recovery: { request_id: 'stuck-request', recovery_id: 'stuck-recovery', worker_name: 'worker-1',
+        owner_epoch: 1, owner_nonce: 'prior-owner', phase: 'reserved', state_revision: 3,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    }));
+    reserveRecoveryRequest(cwd, 'stuck-request', { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID }, 'stuck-recovery');
+    const attemptPath = absPath(cwd, TeamPaths.recoveryAttempt(teamName, 'stuck-recovery'));
+    mkdirSync(join(attemptPath, '..'), { recursive: true });
+    writeFileSync(attemptPath, JSON.stringify({ schema_version: 1, request_id: 'stuck-request',
+      recovery_id: 'stuck-recovery', worker_name: 'worker-1', replacement_generation: worker.recovery_id ? 1 : 2,
+      adoption_token: 'stable-token', created_at: new Date().toISOString() }));
+    writeIntent(teamName, 'stuck-request', 'stuck-recovery', ageMs);
+    tmuxMocks.setPaneDeadState('unknown');
+    tmuxMocks.setPaneLiveness('%1', 'unknown');
+  }
+
+  const execute = (teamName: string, requestId = 'stuck-request') =>
+    executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId, instanceId: TEAM_INSTANCE_ID });
+
+  it('keeps retrying a transient failure before the deadline', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-before-');
+    await seedElectedUnknownLiveness('deadline-before', BEFORE_DEADLINE_MS);
+
+    await expect(execute('deadline-before')).resolves.toMatchObject({ outcome: 'failed', error: 'worker_liveness_unknown' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toBeNull();
+    await expect(readRevisionedTeamConfig('deadline-before', cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'stuck-recovery' } },
+    });
+  });
+
+  it('fails an elected recovery past the deadline before any launch and releases active_recovery', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-elected-');
+    await seedElectedUnknownLiveness('deadline-elected', PAST_DEADLINE_MS);
+
+    await expect(execute('deadline-elected')).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+    expect(tmuxMocks.tmuxExecAsync.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+    // The final uses a code the existing reader accepts, so older CLIs read it.
+    const final = readRecoveryFinalState(cwd, 'stuck-request');
+    expect(final.kind).toBe('valid');
+    expect(final.kind === 'valid' && final.final).toMatchObject({ outcome: 'failed', recovery_id: 'stuck-recovery',
+      error: { code: 'recovery_request_timeout', message: expect.stringContaining('deadline exceeded') } });
+    const persisted = await readRevisionedTeamConfig('deadline-elected', cwd);
+    expect(persisted?.config.active_recovery).toBeUndefined();
+    expect(persisted?.config.last_recovery).toMatchObject({ recovery_id: 'stuck-recovery', phase: 'failed' });
+  });
+
+  it('keeps retrying past the deadline when a task record holds a reservation while the phase is still selected', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-task-reserved-');
+    const teamName = 'deadline-task-reserved';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    writeRecoveryPhase(cwd, { schema_version: 1, kind: 'phase', request_id: 'stuck-request', recovery_id: 'stuck-recovery',
+      team_name: teamName, worker_name: 'worker-1', phase: 'elected', continuation: 'selected', adoption: 'not_started',
+      services: 'not_started', manifest: 'not_started', updated_at: new Date().toISOString() });
+    const taskPath = absPath(cwd, TeamPaths.taskFile(teamName, '1'));
+    mkdirSync(join(taskPath, '..'), { recursive: true });
+    writeFileSync(taskPath, JSON.stringify({ id: '1', subject: 'reserved task', description: 'requeued for the replacement',
+      status: 'pending', version: 2, blocked_by: [], created_at: new Date().toISOString(),
+      recovery_reservation: { recovery_id: 'stuck-recovery', request_id: 'stuck-request', continuation_sequence: 1,
+        checkpoint_path: 'checkpoint.json', checkpoint_hash: 'a'.repeat(64), replacement_worker: 'worker-1',
+        replacement_generation: 2, adoption_token_hash: 'b'.repeat(64), reserved_at: new Date().toISOString() } }));
+
+    const result = await execute(teamName);
+    expect(result).not.toMatchObject({ error: 'recovery_request_timeout' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')?.kind).not.toBe('final');
+    await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'stuck-recovery' } },
+    });
+  });
+
+  it('keeps retrying past the deadline once a replacement is committed to the worker row', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-committed-');
+    await seedElectedUnknownLiveness('deadline-committed', PAST_DEADLINE_MS,
+      { pane_id: '%9', pane_attempt_id: 'attempt-a', recovery_id: 'stuck-recovery', replacement_generation: 1 });
+    tmuxMocks.setPaneLiveness('%9', 'unknown');
+
+    await expect(execute('deadline-committed')).resolves.toMatchObject({ outcome: 'failed', error: 'worker_liveness_unknown' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toBeNull();
+    await expect(readRevisionedTeamConfig('deadline-committed', cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'stuck-recovery' } },
+    });
+  });
+
+  it('fails a never-elected request past the deadline without touching the active recovery', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-unelected-');
+    const teamName = 'deadline-unelected';
+    await reserveFixtureInstance(teamName, cwd);
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, instance_id: TEAM_INSTANCE_ID, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, pane_id: '%1', replacement_generation: 1 }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 3,
+      active_recovery: { request_id: 'other-request', recovery_id: 'other-recovery', worker_name: 'worker-1',
+        owner_epoch: 1, owner_nonce: 'other-owner', phase: 'active', state_revision: 3,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    }));
+    reserveRecoveryRequest(cwd, 'waiting-request', { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID }, 'waiting-recovery');
+    writeIntent(teamName, 'waiting-request', 'waiting-recovery', PAST_DEADLINE_MS);
+
+    await expect(execute(teamName, 'waiting-request')).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+    expect(readRecoveryFinalState(cwd, 'waiting-request')).toMatchObject({ kind: 'valid',
+      final: { outcome: 'failed', recovery_id: 'waiting-recovery', error: { code: 'recovery_request_timeout' } } });
+    await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'other-recovery' } },
+    });
+  });
+
+  it('does not let a caller that is not the live owner finalize past the deadline', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-non-owner-');
+    const teamName = 'deadline-non-owner';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    // The parent process is alive, so it stands in for the detached owner.
+    const ownerStartedAt = currentProcessStartIdentity(process.ppid);
+    expect(ownerStartedAt).not.toBeNull();
+    publishOwnerEpoch(cwd, teamName, 1, { pid: process.ppid, processStartedAt: ownerStartedAt!, nonce: 'prior-owner' });
+
+    await expect(execute(teamName)).resolves.toMatchObject({ outcome: 'failed', error: 'runtime_owner_fence_lost' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toBeNull();
+    await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'stuck-recovery', owner_nonce: 'prior-owner' } },
+    });
+  });
 });

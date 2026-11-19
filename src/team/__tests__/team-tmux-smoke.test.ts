@@ -151,6 +151,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
   let runRoot = '';
   let runtimeCliPath = '';
   let cwd = '';
+  let binDir = '';
   let tracePath = '';
   let socketsBefore = new Set<string>();
   const savedEnv = new Map<string, string | undefined>();
@@ -168,7 +169,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     // Short root: tmux socket paths must stay under the Darwin sun_path limit.
     fixtureRoot = await mkdtemp(join(tmpdir(), 'omc-smoke-'));
     runRoot = await mkdtemp(join(SMOKE_CACHE, 'run-'));
-    const binDir = join(runRoot, 'bin');
+    binDir = join(runRoot, 'bin');
     // Every runtime-cli process names its entry in argv. A per-run link gives
     // the leftover scan a marker that concurrent runs in this checkout lack;
     // node resolves the link, so the bundle still loads from its real home.
@@ -347,4 +348,86 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       10_000,
     );
   }, 180_000);
+  it('ends a recovery whose worker liveness stays unknown, so shutdown is not blocked', async () => {
+    await writeExecutable(join(binDir, 'claude'), [
+      '#!/bin/sh',
+      `export PATH=${shellQuote(binDir)}:"$PATH"`,
+      'export OMC_FAKE_OUTLIVE_TERMINAL=1',
+      `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)} "$@"`,
+    ]);
+    const teamName = `tmux-smoke-${randomUUID().slice(0, 8)}`;
+    const runtime = await startTeamV2({
+      teamName,
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Smoke task', description: 'Claim this task, complete it, then wait for shutdown.' }],
+      pluginConfig: {},
+      cwd,
+    });
+    const leaderCwd = runtime.cwd;
+    expect(runtime.startupFailures, await traceDiagnostics()).toEqual([]);
+    await waitFor(
+      'task 1 to be completed through the worker API',
+      async () => {
+        const envelope = await executeTeamApiOperation('read-task', { team_name: runtime.teamName, task_id: '1' }, leaderCwd);
+        return envelope.ok ? (envelope.data.task as { status?: string }).status : null;
+      },
+      status => status === 'completed',
+      30_000,
+      traceDiagnostics,
+    );
+
+    // The launch wrapper runs the provider as its child. Killing it orphans a
+    // live provider in the launch process group, so the launch supervisor
+    // cannot prove cleanup and liveness stays unknown, as when a real claude
+    // outlived its killed wrapper.
+    const providerPid = (await readTrace())[0]!.pid;
+    const { stdout: ppid } = await execFileAsync('ps', ['-o', 'ppid=', '-p', String(providerPid)]);
+    const wrapperPid = Number(ppid.trim());
+    const { stdout: wrapperArgs } = await execFileAsync('ps', ['-o', 'args=', '-p', String(wrapperPid)]);
+    expect(wrapperArgs).toMatch(/^\/bin\/sh .*launch\.sh /);
+    process.kill(wrapperPid, 'SIGKILL');
+    await waitFor('launch wrapper to exit', () => isProcessAlive(wrapperPid), alive => !alive, 5_000);
+    expect(isProcessAlive(providerPid), await traceDiagnostics()).toBe(true);
+
+    const admittedAt = Date.now();
+    const recovered = await executeTeamApiOperation('recover-worker', {
+      team_name: runtime.teamName, worker: 'worker-1', request_id: 'smoke-liveness-unknown', timeout_ms: 180_000,
+    }, leaderCwd);
+    expect(recovered).toMatchObject({ ok: true, data: { result: { outcome: 'failed', error: 'recovery_request_timeout' } } });
+
+    // The owner keeps no request alive past the longest client wait.
+    const ended = await waitFor(
+      'the recovery owner to finalize the request and clear active_recovery',
+      async () => {
+        const config = await readTeamConfig(runtime.teamName, leaderCwd);
+        return { active: config?.active_recovery ?? null, last: config?.last_recovery?.phase ?? null };
+      },
+      state => state.active === null,
+      Math.max(0, admittedAt + 300_000 - Date.now()) + 30_000,
+      traceDiagnostics,
+    );
+    expect(ended.last).toBe('failed');
+    const replay = await executeTeamApiOperation('recover-worker', {
+      team_name: runtime.teamName, worker: 'worker-1', request_id: 'smoke-liveness-unknown', timeout_ms: 180_000,
+    }, leaderCwd);
+    expect(replay).toMatchObject({ ok: true, data: { result: { outcome: 'failed', error: 'recovery_request_timeout',
+      message: expect.stringContaining('deadline exceeded') } } });
+
+    // Shutdown now runs. It keeps state because the orphan is still alive.
+    const shutdown = await shutdownTeamV2(runtime.teamName, leaderCwd, {
+      instanceId: runtime.instanceId,
+      force: true,
+      timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS,
+    });
+    expect(shutdown).toEqual({ outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['worker-1'] });
+
+    // A preserved team keeps its recovery owner; stop it before cleanup
+    // removes the state it writes to.
+    const owner = (await readTeamConfig(runtime.teamName, leaderCwd))?.runtime_owner_epoch;
+    if (owner && observeProcessIdentity({ pid: owner.pid, process_started_at: owner.process_started_at }) === 'matching') {
+      process.kill(owner.pid, 'SIGKILL');
+      await waitFor('recovery owner to exit', () => isProcessAlive(owner.pid), alive => !alive, 5_000);
+    }
+  }, 480_000);
 });

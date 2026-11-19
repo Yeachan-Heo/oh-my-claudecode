@@ -788,6 +788,50 @@ describe('recovery owner bootstrap candidates', () => {
     }
   });
 
+  it('fails a bootstrap recovery past the owner deadline before its first attempt touches the worker', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-bootstrap-deadline-'));
+    try {
+      const teamName = 'recovery-team';
+      const requestId = 'bootstrap-deadline-request';
+      const recoveryId = 'bootstrap-deadline-recovery';
+      const payload = { operation: 'recover-worker' as const,
+        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: INSTANCE_ID };
+      const configPath = absPath(cwd, TeamPaths.config(teamName));
+      mkdirSync(join(configPath, '..'), { recursive: true });
+      writeFileSync(configPath, JSON.stringify(validV2Config(teamName)));
+      seedInstanceReservation(cwd, teamName);
+      reserveRecoveryRequest(cwd, requestId, payload, recoveryId);
+      const intentPath = absPath(cwd, TeamPaths.recoveryIntent(teamName, recoveryId));
+      mkdirSync(join(intentPath, '..'), { recursive: true });
+      writeFileSync(intentPath, JSON.stringify({ schema_version: 1, kind: 'recover-worker', request_id: requestId,
+        recovery_id: recoveryId, operation: payload.operation, workspace_hash: payload.workspaceHash,
+        payload_hash: canonicalRecoveryPayloadHash(payload), team_name: teamName, worker_name: 'worker-1',
+        instance_id: INSTANCE_ID, created_at: new Date(Date.now() - 301_000).toISOString() }));
+      const processStartedAt = currentProcessStartIdentity();
+      expect(processStartedAt).toBeTruthy();
+      const baseInput = { teamName, cwd, workerName: 'worker-1', requestId, instanceId: INSTANCE_ID };
+      const input: RecoverDeadWorkerOwnerInput = { ...baseInput, bootstrap: {
+        expectedEpoch: 1, predecessorEpoch: 0, predecessorNonce: null, predecessorPid: null,
+        predecessorProcessStartedAt: null, pid: process.pid, processStartedAt: processStartedAt!,
+        nonce: 'deadline-child', recoveryId,
+      } };
+      await recoveryOwnerBootstrapTestHooks.publishCandidate(baseInput, recoveryId, 1, 'deadline-child',
+        process.pid, processStartedAt!, null);
+      await expect(prepareRecoveryOwnerBootstrap(input)).resolves.toBeUndefined();
+
+      // Without the deadline this attempt reaches the worker lookup and fails
+      // with worker_not_found; past it, the owner stops before that.
+      await expect(executeRecoverDeadWorkerV2Owner(input)).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+      expect(readRecoveryOutcome(cwd, requestId)).toMatchObject({ kind: 'final', outcome: 'failed',
+        error: { code: 'recovery_request_timeout' } });
+      const finalized = JSON.parse(readFileSync(configPath, 'utf8')) as { active_recovery?: unknown; last_recovery?: { request_id: string; phase: string } };
+      expect(finalized.active_recovery).toBeUndefined();
+      expect(finalized.last_recovery).toMatchObject({ request_id: requestId, phase: 'failed' });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('times out missing bootstrap evidence without publishing owner, config, effects, or a final result', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-bootstrap-timeout-'));
     try {
