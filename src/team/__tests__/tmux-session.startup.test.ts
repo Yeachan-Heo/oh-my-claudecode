@@ -53,6 +53,8 @@ vi.mock('../../platform/process-utils.js', async importOriginal => ({
 const tmuxState = vi.hoisted(() => ({
   args: [] as string[][],
   captures: [] as Array<string | Error>,
+  captureAt: null as (() => string) | null,
+  sendTimes: [] as number[],
   paneStatus: '0 cmd\n',
   paneMode: '0\n',
   ownedPaneIds: '%2\n',
@@ -74,6 +76,7 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
       if (command === 'capture-pane') {
         if (commandIndex === 2) tmuxState.args.push(args.slice(commandIndex));
         if (tmuxState.captureError) throw tmuxState.captureError;
+        if (tmuxState.captureAt) return { stdout: tmuxState.captureAt(), stderr: '' };
         const next = tmuxState.captures.length > 1 ? tmuxState.captures.shift() : tmuxState.captures[0];
         if (next instanceof Error) throw next;
         return { stdout: next ?? '', stderr: '' };
@@ -194,6 +197,7 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
         const syntheticArgs = words.slice(0, words.indexOf('display-message'));
         if (nativeCommand === 'send-keys') {
           tmuxState.args.push(syntheticArgs);
+          tmuxState.sendTimes.push(Date.now());
           if (syntheticArgs.includes('-l')) {
             const commandText = syntheticArgs[syntheticArgs.indexOf('-l') + 1] ?? '';
             const descriptorMatch = commandText.match(/OMC_WORKER_LAUNCH_SPEC_FILE='([^']+)'/);
@@ -330,6 +334,8 @@ function restoreFixtureEnv(): void {
 beforeEach(() => {
   tmuxState.args = [];
   tmuxState.captures = [];
+  tmuxState.captureAt = null;
+  tmuxState.sendTimes = [];
   tmuxState.paneStatus = '0 cmd\n';
   tmuxState.paneMode = '0\n';
   tmuxState.ownedPaneIds = '%2\n';
@@ -1231,5 +1237,91 @@ describe('startup input after the provider exits to a shell prompt', () => {
 
     await expect(probeStartupPaneActivity(context)).resolves.toBe('dead');
     expect(sendKeys()).toEqual([]);
+  });
+});
+
+describe('startup readiness wait set by OMC_TEAM_READY_TIMEOUT_MS', () => {
+  const message = 'Read inbox.md, execute now.';
+  const framesRoot = join(__dirname, 'fixtures', 'pane-frames', 'claude');
+  let warnings: string[] = [];
+  let savedReadyTimeout: string | undefined;
+
+  beforeEach(() => {
+    savedReadyTimeout = process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    delete process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    warnings = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    if (savedReadyTimeout === undefined) delete process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    else process.env.OMC_TEAM_READY_TIMEOUT_MS = savedReadyTimeout;
+  });
+
+  // Advance the fake clock only while the code under test sleeps, so file I/O
+  // in the attempt checks never lets the deadline pass early.
+  async function settleOnFakeClock<T>(work: Promise<T>): Promise<T> {
+    let settled = false;
+    void work.then(() => { settled = true; }, () => { settled = true; });
+    while (!settled) {
+      if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync();
+      else await new Promise(resolve => setImmediate(resolve));
+    }
+    return work;
+  }
+
+  async function bannerThenIdle(bannerMs: number): Promise<number> {
+    const banner = await readFile(join(framesRoot, 'unversioned', 'startup-banner-bypass.txt'), 'utf8');
+    const idle = await readFile(join(framesRoot, '2.1.325', 'idle.txt'), 'utf8');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const startedAt = Date.now();
+    tmuxState.captureAt = () => (Date.now() - startedAt < bannerMs ? banner : idle);
+    return startedAt;
+  }
+
+  strictTmuxIt('waits out a 40s banner at 60000 and then sends the inbox once', async () => {
+    const context = await acceptedContext('claude');
+    process.env.OMC_TEAM_READY_TIMEOUT_MS = '60000';
+    const startedAt = await bannerThenIdle(40_000);
+
+    await expect(settleOnFakeClock(deliverStartupInbox(context, message)))
+      .resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    const literals = tmuxState.args.filter(args => args[0] === 'send-keys' && args.includes('-l'));
+    expect(literals.map(args => args.at(-1))).toEqual([message]);
+    expect(Math.min(...tmuxState.sendTimes) - startedAt).toBeGreaterThanOrEqual(40_000);
+    expect(warnings).toEqual([]);
+  });
+
+  strictTmuxIt.each([
+    [undefined, 30_000, 'OMC_TEAM_READY_TIMEOUT_MS unset (effective 30000ms'],
+    ['abc', 30_000, 'OMC_TEAM_READY_TIMEOUT_MS=abc (effective 30000ms'],
+    ['5000', 30_000, 'OMC_TEAM_READY_TIMEOUT_MS=5000 (effective 30000ms'],
+    ['600000', 120_000, 'OMC_TEAM_READY_TIMEOUT_MS=600000 (effective 120000ms'],
+  ] as const)('times out a banner that never clears at the clamped wait for %j', async (raw, waitMs, note) => {
+    const context = await acceptedContext('claude');
+    if (raw !== undefined) process.env.OMC_TEAM_READY_TIMEOUT_MS = raw;
+    const startedAt = await bannerThenIdle(Number.POSITIVE_INFINITY);
+
+    await expect(settleOnFakeClock(deliverStartupInbox(context, message)))
+      .resolves.toEqual({ ok: false, reason: 'readiness_timeout' });
+    expect(Date.now() - startedAt).toBe(waitMs);
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`timed out after ${waitMs}ms`);
+    expect(warnings[0]).toContain(note);
+  });
+
+  strictTmuxIt('reports the wait the caller passed, not one recomputed from the variable', async () => {
+    const context = await acceptedContext('claude');
+    await bannerThenIdle(Number.POSITIVE_INFINITY);
+
+    await expect(settleOnFakeClock(waitForStartupPaneReady(context, { timeoutMs: 50, pollIntervalMs: 1 })))
+      .resolves.toEqual({ ok: false, reason: 'readiness_timeout' });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('timed out after 50ms; OMC_TEAM_READY_TIMEOUT_MS unset (effective 50ms;');
   });
 });

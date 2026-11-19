@@ -35,6 +35,8 @@ const SHUTDOWN_ACK_TIMEOUT_MS = 30_000;
 // Live lanes pick a fake-team-provider.mjs scenario; only the default one
 // meets every assertion below.
 const FAKE_PROVIDER_SCENARIO = process.env.OMC_FAKE_PROVIDER_SCENARIO;
+// The worker environment is allowlisted, so the shim carries this setting.
+const FAKE_SLOW_BANNER_MS = process.env.OMC_FAKE_SLOW_BANNER_MS;
 const execFileAsync = promisify(execFile);
 
 type TraceEntry = {
@@ -184,6 +186,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       '#!/bin/sh',
       // Login shells may reorder PATH (macOS path_helper); pin the omc shim.
       `export PATH=${shellQuote(binDir)}:"$PATH"`,
+      ...(FAKE_SLOW_BANNER_MS ? [`export OMC_FAKE_SLOW_BANNER_MS=${shellQuote(FAKE_SLOW_BANNER_MS)}`] : []),
       `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)}${FAKE_PROVIDER_SCENARIO ? ` --scenario ${shellQuote(FAKE_PROVIDER_SCENARIO)}` : ''} "$@"`,
     ]);
     await writeExecutable(join(binDir, 'omc'), [

@@ -52,7 +52,7 @@ const stdinLines = stdin[Symbol.asyncIterator]();
 const FRAMES_ROOT = join(dirname(fileURLToPath(import.meta.url)), 'pane-frames');
 const CLEAR_SCREEN = '\x1b[H\x1b[J';
 const DOWN_KEYS = ['\x1b[B', '\x1bOB'];
-const SLOW_BANNER_MS = 3_000;
+const SLOW_BANNER_MS = Number(process.env.OMC_FAKE_SLOW_BANNER_MS) || 3_000;
 const BUSY_MS = 2_000;
 const PROVIDER_EXIT_MS = 1_000;
 

@@ -56,6 +56,10 @@ import {
 } from "./team-owner-epoch.js";
 import { getNativeContainedFs } from "../graph/runtime/native-contained-fs.js";
 import {
+  describeStartupReadyTimeout,
+  resolveStartupReadyTimeoutMs,
+} from "./ready-timeout.js";
+import {
   detectPaneTrustPromptKind,
   paneHasActiveTask,
   paneHasStartupBanner,
@@ -4683,6 +4687,10 @@ export async function waitForStartupPaneReady(
     if (paneLooksReady(captured, context.provider)) return { ok: true };
     await sleep(pollIntervalMs);
   }
+  console.warn(
+    `[tmux-session] waitForStartupPaneReady: pane ${safePaneDiagnosticToken(context.ownership.paneId)} ` +
+      `timed out after ${timeoutMs}ms; ${describeStartupReadyTimeout(process.env, timeoutMs)}`,
+  );
   return { ok: false, reason: "readiness_timeout" };
 }
 
@@ -4728,6 +4736,7 @@ export async function deliverStartupInbox(
 > {
   if (message.length > 200) return { ok: false, reason: "message_too_long" };
   const ready = await waitForStartupPaneReady(context, {
+    timeoutMs: resolveStartupReadyTimeoutMs(process.env),
     attemptAlreadyFenced: options.attemptAlreadyFenced,
   });
   if (!ready.ok) return { ok: false, reason: ready.reason };
