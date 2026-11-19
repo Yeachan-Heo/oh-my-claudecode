@@ -897,8 +897,9 @@ describe('worker pane startup safety', () => {
       declined: `${question}\n❯ No, exit\n  Yes, I trust this folder\nClaude Code didn't start because this folder isn't trusted.\n`,
       trusted: '❯ \n',
     };
-    // A busy Claude Code startup reads the keys sent between two captures
-    // together and applies them against the focus it drew before them.
+    // Hypothesis fitting the recorded failures: a busy Claude Code startup
+    // reads the keys sent between two captures together and applies them
+    // against the focus it drew before them.
     let focus: keyof typeof frames = 'no';
     let applied = 0;
     tmuxState.captureAt = () => {
@@ -922,6 +923,16 @@ describe('worker pane startup safety', () => {
       kind: 'attempted_unconfirmed',
     });
     expect(focus).toBe('trusted');
+  });
+
+  strictTmuxIt('sends Down, not Enter, when only a stale line above the live trust dialog shows Yes focused', async () => {
+    const context = await acceptedContext('claude');
+    const live = 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n';
+    tmuxState.captures = [` ❯ Yes, I trust this folder\n${live}`, '❯ ready\n'];
+
+    await deliverStartupInbox(context, 'Read inbox.md, execute now.');
+    const keys = tmuxState.args.filter(args => args[0] === 'send-keys' && !args.includes('-l')).map(args => args.at(-1));
+    expect(keys[0]).toBe('Down');
   });
 
   strictTmuxIt.each([

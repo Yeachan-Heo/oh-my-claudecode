@@ -10,6 +10,7 @@ import {
   PANE_PATTERNS,
   paneHasActiveTask,
   paneLooksReady,
+  paneShowsClaudeTrustYesFocused,
   type PaneSignals,
 } from '../pane-readiness.js';
 
@@ -223,5 +224,30 @@ describe('PANE_PATTERNS', () => {
       if (patterns.verifiedVersion === null) expect([...recorded], provider).toEqual([]);
       else expect(recorded.has(patterns.verifiedVersion), provider).toBe(true);
     }
+  });
+});
+
+describe('paneShowsClaudeTrustYesFocused', () => {
+  const read = (file: string) => readFileSync(join(CORPUS_ROOT, file), 'utf8');
+  const STALE_YES = ' ❯ Yes, I trust this folder\n';
+
+  it.each([
+    ['claude/2.1.328/trust-yes-focused.txt', true],
+    ['claude/2.1.325/trust.txt', false],
+    ['claude/2.1.310/trust-35col.txt', false],
+    ['claude/unversioned/trust-files-wrapped.txt', false],
+  ] as const)('%s -> %s', (file, focused) => {
+    expect(paneShowsClaudeTrustYesFocused(read(file))).toBe(focused);
+  });
+
+  it('reads the 35-column dialog once Down moved its focus', () => {
+    const moved = read('claude/2.1.310/trust-35col.txt')
+      .replace(' ❯ No, exit', '   No, exit')
+      .replace('   Yes, I trust this folder', ' ❯ Yes, I trust this folder');
+    expect(paneShowsClaudeTrustYesFocused(moved)).toBe(true);
+  });
+
+  it('ignores a stale focused Yes in the scrollback above a live dialog focused on No', () => {
+    expect(paneShowsClaudeTrustYesFocused(`${STALE_YES}${read('claude/2.1.325/trust.txt')}`)).toBe(false);
   });
 });

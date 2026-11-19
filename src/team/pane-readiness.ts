@@ -279,11 +279,13 @@ export function detectPaneTrustPromptKind(
   return detectTrustPrompt(paneLines(captured), patternsFor(provider).trustKinds);
 }
 
-// Claude Code marks the focused choice of its trust dialog with ❯.
+// Claude Code marks the focused choice of its trust dialog with ❯ and draws
+// "Yes" right below "No, exit". Only the last such pair is the live dialog;
+// an answered dialog can remain in the scrollback above it.
 export function paneShowsClaudeTrustYesFocused(captured: string): boolean {
-  return paneLines(captured)
-    .slice(-12)
-    .some((line) => /^\s*❯\s*Yes,\s*(?:proceed|I trust this folder)\b/i.test(line));
+  const lines = paneLines(captured);
+  const no = lines.findLastIndex((line) => /^\s*(?:❯\s*)?No,\s*exit\b/i.test(line));
+  return no >= 0 && /^\s*❯\s*Yes,\s*(?:proceed|I trust this folder)\b/i.test(lines[no + 1] ?? '');
 }
 
 export function paneHasTrustPrompt(
