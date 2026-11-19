@@ -329,6 +329,37 @@ describe('drop pass, the floor, host handoff and the after record (token cascade
   });
 });
 
+describe('predictions never go below zero (rates and the host usage may disagree)', () => {
+  // The host's count is smaller than what the rates say the removable results cost, or a rate override makes them dear.
+  const cands = () => Array.from({ length: 10 }, (_, k) => item(`r${k}`, { score: 0, resIdx: k + 1 }));
+
+  it('the cascade, the manual plan and the floor stop at zero tokens after', () => {
+    for (const target of [0, 500]) expect(cascade(cands(), 1000, target).predicted, `target ${target}`).toBe(0);
+    expect(manualPlan(cands(), 1000).predicted).toBe(0);
+    // Above zero nothing changes.
+    expect(cascade(cands(), 20000, 18000).predicted).toBeGreaterThan(0);
+    expect(manualPlan(cands(), 20000).predicted).toBeGreaterThan(0);
+  });
+
+  it('the record of a compaction with a dear RATE_OUT holds no negative token count, and the floor check still sees the unclamped floor', async () => {
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_RATES: '{"RATE_OUT":100}' };
+    const { record } = await compactRun(env);
+    expect(record).toMatchObject({ result: 'jev', cut: 'cascade' });
+    for (const key of ['tokens_before', 'tokens_after', 'tokens_after_pred', 'cascade_predicted_tokens', 'floor_pred']) expect(record[key], key).toBeGreaterThanOrEqual(0);
+    expect(record.floor_pred).toBe(0);
+    expect(record.tokens_after).toBe(0);
+    expect(record.cascade_predicted_tokens).toBe(0);
+  });
+
+  it('at the default rates the same compaction gives the numbers it gave', async () => {
+    const { record } = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' });
+    expect(record.floor_pred).toBeGreaterThan(0);
+    expect(record.tokens_after).toBeGreaterThan(0);
+    const manual = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' }, { trigger: 'manual' });
+    expect(Math.abs(manual.record.tokens_after - manual.record.tokens_after_pred)).toBeLessThanOrEqual(1);
+  });
+});
+
 describe('manual plan below the usual target (migrated rule: scores decide, no cascade)', () => {
   it('traces the forced results and the free results Jev scored under 0.5; a pinned call and the rest stay whole', () => {
     const cands = [

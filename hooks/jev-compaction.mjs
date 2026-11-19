@@ -2300,7 +2300,7 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES)
       setKeep(c, 'drop');
     }
   }
-  return { pass, target, predicted: Math.round(tokensBefore - removed) };
+  return { pass, target, predicted: Math.max(0, Math.round(tokensBefore - removed)) };
 }
 
 // The floor of the cascade: the predicted tokens when every removable result (every candidate but the pinned ones) is gone with its call.
@@ -2320,7 +2320,7 @@ export function manualPlan(candidates, tokensBefore, rates = DEFAULT_RATES) {
       removed += t.full - t.trace;
     }
   }
-  return { pass: 'manual', predicted: Math.round(tokensBefore - removed) };
+  return { pass: 'manual', predicted: Math.max(0, Math.round(tokensBefore - removed)) };
 }
 
 const removableChars = (candidates) => candidates.reduce((s, c) => s + Math.max(0, c.fullCost - c.traceCost), 0);
@@ -2418,6 +2418,7 @@ export function listTokens(api, rates = DEFAULT_RATES) {
     if (!a || typeof a !== 'object') continue;
     const blocks = typeof a.content === 'string' ? [{ type: 'text', text: a.content }] : Array.isArray(a.content) ? a.content.filter((b) => b && typeof b === 'object') : [];
     const hasResult = blocks.some((b) => b.type === 'tool_result');
+    const before = tok;
     for (const b of blocks) {
       const over = RATE_BLOCK + RATE_MESSAGE / blocks.length;
       if (b.type === 'text') {
@@ -2438,6 +2439,8 @@ export function listTokens(api, rates = DEFAULT_RATES) {
       } else if (b.type === 'image') tok += RATE_IMAGE;
       else tok += over;
     }
+    // RATE_MESSAGE is negative, so a message of few blocks with a low RATE_BLOCK override would cost less than nothing: a message costs zero at least.
+    if (tok < before) tok = before;
   }
   return tok;
 }
@@ -2508,7 +2511,7 @@ async function tokenAccounting($, e, cfg, messages, api, candidates, installedSt
   return {
     tokens_source: main ? 'usage' : 'estimate',
     tokens_before: tokensBefore,
-    tokens_after: Math.round(tokensBefore - removed),
+    tokens_after: Math.max(0, Math.round(tokensBefore - removed)),
     target_tokens: target,
     target_tokens_capped: ceiling === undefined ? target : Math.min(target, ceiling),
     window: win?.window ?? null,
@@ -3910,7 +3913,7 @@ async function decide($, e, cfg, record, started) {
         record.floor_agents_tokens = Math.round(agentsFloor);
       }
       const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor, cfg.rates);
-      record.floor_pred = Math.round(floor);
+      record.floor_pred = Math.max(0, Math.round(floor));
       if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
   }

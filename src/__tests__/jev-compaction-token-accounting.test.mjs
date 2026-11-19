@@ -190,6 +190,58 @@ describe('token accounting: prefix and estimate', () => {
   });
 });
 
+describe('token accounting: no estimate goes below zero', () => {
+  // The per-message term of the estimate is negative (RATE_MESSAGE), so a low RATE_BLOCK override would make a short message cost less than nothing.
+  const LOW_BLOCK = ['{"RATE_BLOCK":0.001}', '{"RATE_BLOCK":1}', '{"RATE_BLOCK":20}', '{"RATE_BLOCK":40.4}'];
+  const shortMessages = [
+    { role: 'user', content: '' },
+    { role: 'user', content: 'a' },
+    { role: 'assistant', content: 'ok' },
+    { role: 'user', content: [{ type: 'text', text: '' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'X', input: {} }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: '' }] },
+    { role: 'user', content: [{ type: 'text', text: 'note' }, { type: 'tool_result', tool_use_id: 't1', content: 'xy' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'one' }, { type: 'tool_use', id: 't2', name: 'Y', input: { a: 1 } }] },
+  ];
+
+  it('a message costs zero, never less, with any positive RATE_BLOCK', () => {
+    for (const raw of LOW_BLOCK) {
+      const rates = ratesFrom(raw);
+      for (const m of shortMessages) expect(listTokens([m], rates), `${raw} ${JSON.stringify(m)}`).toBeGreaterThanOrEqual(0);
+      expect(listTokens([{ role: 'user', content: [{ type: 'text', text: '' }] }], rates), raw).toBe(0);
+      expect(listTokens(Array.from({ length: 300 }, (_, k) => shortMessages[k % shortMessages.length]), rates), raw).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('a message that stays above zero keeps its estimate, and so does one at the default rates', () => {
+    const rates = ratesFrom('{"RATE_BLOCK":1}');
+    const long = 'y'.repeat(1000);
+    expect(listTokens([{ role: 'user', content: long }], rates)).toBeCloseTo(0.287 * 1000 + 1 - 40.5, 6);
+    expect(listTokens([{ role: 'user', content: [{ type: 'text', text: long }, { type: 'tool_result', tool_use_id: 't1', content: long }] }], rates))
+      .toBeCloseTo(0.363 * 1000 + 0.4502 * 1000 + 2 * 1 - 40.5, 6);
+    // One negative message does not take tokens off its neighbours.
+    expect(listTokens([{ role: 'user', content: '' }, { role: 'user', content: long }], rates)).toBeCloseTo(0.287 * 1000 + 1 - 40.5, 6);
+    for (const m of shortMessages) expect(listTokens([m])).toBeGreaterThan(0);
+  });
+
+  it('the estimate of a subagent (no usage of the host) is not negative with a low RATE_BLOCK, and neither is any prediction in the record', async () => {
+    const messages = conversation(30, 200);
+    for (const raw of LOW_BLOCK) {
+      for (const target of [{}, { OMC_JEV_COMPACT_TARGET_PERCENT: '20' }]) {
+        const fake = fakeDollar({ env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_RATES: raw, ...target }, usage: usageOf });
+        fake.$.session.messages = async () => messages;
+        const handlers = {};
+        register((event, hook) => { handlers[event] = hook; });
+        await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', agentId: 'agent-1', messages }), async () => ({ messages: [] }));
+        const [record] = fake.records();
+        const numbers = ['tokens_before', 'tokens_after', 'tokens_after_pred', 'cascade_predicted_tokens', 'floor_pred'].filter((key) => key in record);
+        expect(numbers.length, `${raw} ${JSON.stringify(target)}`).toBeGreaterThan(0);
+        for (const key of numbers) expect(record[key], `${raw} ${JSON.stringify(target)} ${key}`).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+});
+
 describe('token accounting: record of a compaction', () => {
   it('writes no token field while the switch is off (the default path)', async () => {
     const { record } = await compactRecord(ACTIVE_ENV);
