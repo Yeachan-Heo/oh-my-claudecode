@@ -5462,12 +5462,13 @@ export async function executeRecoverDeadWorkerV2Owner(
                     pending.agentType,
                   ),
                 };
-            } else if (pending.promptMode) {
-              // Idle prompt-mode recoveries (for example Gemini with no owned tasks)
-              // intentionally have no task/status progress to prove. At this point
+            } else if (pending.promptMode || continuations.length === 0) {
+              // An idle recovery (no owned tasks) has no task/status progress to
+              // prove: its only instruction tells the worker to wait. At this point
               // the activation gate has published launched evidence and the provider
               // identity has been verified live, so waiting for fabricated progress
-              // would turn a successful idle recovery into a deterministic timeout.
+              // would turn a successful idle recovery into a deterministic timeout
+              // that the owner retries forever while active_recovery blocks shutdown.
             } else {
               const recoveryTriggerMessage = buildStartupInboxTrigger(
                 input.cwd,
