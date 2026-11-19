@@ -603,7 +603,7 @@ fs.readlinkSync = function () { const e = new Error('injected readlink failure')
       { label: 'a link to a link, the other variable one level deeper', simulated: false, same: true, env: (d, c) => { link(path.join(c, '5.9.0'), path.join(d, 'alias1')); link(path.join(d, 'alias1'), path.join(d, 'alias2')); return { OMC_PLUGIN_ROOT: path.join(d, 'alias2'), CLAUDE_PLUGIN_ROOT: path.join(c, '5.9.0') }; } },
       { label: 'letter case only, win32', simulated: 'win32', same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
       { label: 'letter case only, darwin', simulated: 'darwin', same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
-      { label: 'letter case only, platform that does not fold case', simulated: false, same: folds, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
+      { label: 'letter case only, platform that does not fold case (where the volume tells the names apart the alias names no directory and takes no part)', simulated: false, same: true, env: (d, c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperOf(d, c) }) },
     ];
     for (const command of commands) {
       for (const { label, simulated, env, same } of aliases) {

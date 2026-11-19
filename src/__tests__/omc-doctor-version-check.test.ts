@@ -709,6 +709,30 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') + path.sep })).Installed).toBe('5.8.0');
     });
 
+    test('a root that is a link to the install, or lies inside it, or is set in both variables in two spellings, is the active entry', () => {
+      expect(run((dir) => {
+        symlinkSync(base(dir, '5.8.0'), path.join(dir, 'lnk'), 'junction');
+        return { CLAUDE_PLUGIN_ROOT: path.join(dir, 'lnk') };
+      }).Installed).toBe('5.8.0');
+      expect(run((dir) => {
+        mkdirSync(path.join(base(dir, '5.8.0'), 'scripts'), { recursive: true });
+        return { CLAUDE_PLUGIN_ROOT: path.join(base(dir, '5.8.0'), 'scripts') };
+      }).Installed).toBe('5.8.0');
+      expect(run((dir) => ({ OMC_PLUGIN_ROOT: base(dir, '5.8.0'), CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') + path.sep })).Installed).toBe('5.8.0');
+      // The parent of the versions is inside no entry's installPath.
+      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: path.dirname(base(dir, '5.8.0')) })).Installed).toBe('5.9.0');
+    });
+
+    test('each plugin ID follows the active root on its own, and a stale variable next to the active root of a supported entry changes nothing', () => {
+      // The output keeps the last plugin ID's lines, so the order of the registry decides which ID is read back.
+      const other = { 'oh-my-claudecode@oh-my-claudecode': [{ version: '6.0.0' }] };
+      const env = (dir: string) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') });
+      const cache = { omc: ['5.8.0', '5.9.0'] };
+      expect(step1({ plugins: (dir) => ({ ...other, ...entries(dir) }), cache, env })).toMatchObject({ Plugin: 'oh-my-claudecode@omc', Installed: '5.8.0' });
+      expect(step1({ plugins: (dir) => ({ ...entries(dir), ...other }), cache, env })).toMatchObject({ Plugin: 'oh-my-claudecode@oh-my-claudecode', Installed: '6.0.0' });
+      expect(run((dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'gone'), CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') })).Installed).toBe('5.8.0');
+    });
+
     test('the channel and the latest do not change, so the older active entry is outdated against its clone', () => {
       expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }))).toMatchObject({ Channel: 'marketplace omc', Installed: '5.8.0', Latest: '5.9.0 (marketplace clone)' });
     });
@@ -727,8 +751,11 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     });
 
     test('a root that matches no entry, or a stale one, leaves the highest entry as Installed', () => {
-      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: path.join(dir, 'gone') })).Installed).toBe('5.9.0');
-      expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }), (dir) => ({ 'oh-my-claudecode@omc': [{ version: '5.8.0' }, { version: '5.9.0', installPath: base(dir, '5.9.0') }] })).Installed).toBe('5.9.0');
+      // The cache holds only 5.8.0 here, so the highest entry cannot come from the cache listing.
+      const noNewest = (env: (dir: string) => Record<string, string>, plugins: (dir: string) => Record<string, unknown> = entries) =>
+        step1({ plugins, cache: { omc: ['5.8.0'] }, clone: { omc: '5.9.0' }, env }).Installed;
+      expect(noNewest((dir) => ({ CLAUDE_PLUGIN_ROOT: path.join(dir, 'gone') }))).toBe('5.9.0');
+      expect(noNewest((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }), (dir) => ({ 'oh-my-claudecode@omc': [{ version: '5.8.0' }, { version: '5.9.0', installPath: base(dir, '5.9.0') }] }))).toBe('5.9.0');
     });
   });
 

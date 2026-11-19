@@ -551,4 +551,26 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
       }
     }
   });
+
+  // A root variable that names no existing directory takes no part in the conflict check (as in Step 1), but a path it names
+  // inside a cached version still protects that version.
+  test('a stale plugin root variable next to an existing one is no conflict, two existing different directories are, and a stale path into a version still protects it', () => {
+    for (const command of commands) {
+      for (const [label, env, versions, moved] of [
+        ['stale OMC root, existing CLAUDE root', (dir: string) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'gone'), CLAUDE_PLUGIN_ROOT: dir }), '5.8.0', 1],
+        ['existing OMC root, stale CLAUDE root', (dir: string) => ({ OMC_PLUGIN_ROOT: dir, CLAUDE_PLUGIN_ROOT: path.join(dir, 'gone') }), '5.8.0', 1],
+        ['two different existing roots', (dir: string) => ({ OMC_PLUGIN_ROOT: dir, CLAUDE_PLUGIN_ROOT: path.join(dir, 'plugins') }), '5.7.0,5.8.0', 0],
+        ['a stale path inside a free version', (dir: string) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0', 'gone'), CLAUDE_PLUGIN_ROOT: dir }), '5.7.0,5.8.0', 0],
+      ] as const) {
+        const { dir, cache } = makeCache(['5.7.0', '5.8.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
+          const result = runCommand(command, dir, { env: env(dir) });
+          expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ label, status: 0, versions, moved });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
 });
