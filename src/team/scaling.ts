@@ -841,7 +841,12 @@ export async function scaleUpOwned(
             markPreserve();
             return false;
           }
+          // The pane's process tree is read right before the provider is terminated (the last argument of the retirement below) and signalled
+          // first here: a descendant that left the provider's process group is no longer below the pane's root once the provider is gone, and
+          // the kill of the pane reads the tree after that (OMC_TEAM_KILL_PANE_TREE).
+          let fencedTree: PaneProcessTree | null = null;
           const killPane = async (): Promise<boolean> => {
+            if (fencedTree) await terminatePaneProcessTree(fencedTree);
             if (
               ownership &&
               (await getOwnedWorkerLiveness(ownership).catch(
@@ -866,6 +871,17 @@ export async function scaleUpOwned(
                 launch.attempt,
                 "scale_up_rollback",
                 killPane,
+                async () => {
+                  if (
+                    process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
+                    ownership?.tmuxServerIdentity &&
+                    ownership.paneId.startsWith("%")
+                  )
+                    fencedTree = await capturePaneProcessTree(
+                      ownership.tmuxServerIdentity,
+                      ownership.paneId,
+                    );
+                },
               ).catch(() => false)
             : await killPane();
           if (cleaned) return true;

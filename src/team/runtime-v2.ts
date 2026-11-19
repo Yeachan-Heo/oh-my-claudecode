@@ -1178,6 +1178,35 @@ function configuredPaneOwnership(
   };
 }
 
+/**
+ * The two halves of the opt-in tree kill (OMC_TEAM_KILL_PANE_TREE) for a rollback that retires a launch attempt and then kills the pane: `read`
+ * is the last argument of retireAndCleanupCurrentWorkerLaunchAttempt, which runs it right before the provider is terminated, and `terminate` runs
+ * first in the cleanup, before anything asks whether the pane is still alive. A descendant that left the provider's process group is no longer
+ * below the pane's root once the provider is gone, and the kill of the pane reads the tree only after that.
+ */
+function paneTreeFence(ownership: WorkerPaneOwnership | null | undefined): {
+  read: () => Promise<void>;
+  terminate: () => Promise<void>;
+} {
+  let tree: PaneProcessTree | null = null;
+  return {
+    read: async () => {
+      if (
+        process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
+        ownership?.tmuxServerIdentity &&
+        ownership.paneId.startsWith("%")
+      )
+        tree = await capturePaneProcessTree(
+          ownership.tmuxServerIdentity,
+          ownership.paneId,
+        );
+    },
+    terminate: async () => {
+      if (tree) await terminatePaneProcessTree(tree);
+    },
+  };
+}
+
 /** The arguments with which a worker's pane is adopted (its ownership proved) from the config of the team. */
 function workerPaneOwnershipInput(
   config: TeamConfig,
@@ -2243,11 +2272,13 @@ async function spawnV2Worker(
     startupContext.attempt.attempt_id,
   );
   const cleanupStartedLaunch = async (reason: string): Promise<void> => {
+    const fence = paneTreeFence(ownership);
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
       startupContext.attempt,
       reason,
       async () => {
         try {
+          await fence.terminate();
           if ((await getOwnedWorkerLiveness(ownership)) === "dead") return true;
           await killOwnedWorkerPane(ownership);
           return (await getOwnedWorkerLiveness(ownership)) === "dead";
@@ -2255,6 +2286,7 @@ async function spawnV2Worker(
           return false;
         }
       },
+      fence.read,
     ).catch(() => false);
     if (!cleaned)
       throw new Error(
@@ -2625,17 +2657,20 @@ async function cleanupRecoveryPaneAttempt(
   // containment is unproven and the pane must be retained for investigation.
   let providerStopped = false;
   if (pending.startupContext) {
+    const fence = paneTreeFence(pending.ownership);
     providerStopped = await retireAndCleanupCurrentWorkerLaunchAttempt(
       pending.startupContext.attempt,
       reason,
       async () => {
         try {
+          await fence.terminate();
           await killOwnedWorkerPane(pending.ownership);
           return (await getOwnedWorkerLiveness(pending.ownership)) === "dead";
         } catch {
           return false;
         }
       },
+      fence.read,
     ).catch(() => false);
   }
   if (!providerStopped) {
@@ -4832,13 +4867,15 @@ export async function executeRecoverDeadWorkerV2Owner(
           return { ok: false, error: "worker_cleanup_incomplete" };
         }
         for (const priorLaunch of priorLaunches) {
+          const priorOwnership = configuredPaneOwnership(owner.config, {
+            pane_id: priorLaunch.pane_id,
+          });
+          const fence = paneTreeFence(priorOwnership);
           const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
             priorLaunch,
             "recovery_replacement",
             async () => {
-              const priorOwnership = configuredPaneOwnership(owner.config, {
-                pane_id: priorLaunch.pane_id,
-              });
+              await fence.terminate();
               let paneLiveness = priorOwnership
                 ? await getOwnedWorkerLiveness(priorOwnership).catch(
                     () => "unknown" as const,
@@ -4889,6 +4926,7 @@ export async function executeRecoverDeadWorkerV2Owner(
               }
               return false;
             },
+            fence.read,
           );
           if (!cleaned)
             return { ok: false, error: "worker_cleanup_incomplete" };
@@ -5849,30 +5887,31 @@ async function rollbackStartedNativeWorktreeStartup(args: {
           `worker_cleanup_incomplete:${worker.name}:launch_attempt_identity_unverified`,
         );
       }
+      const ownership: WorkerPaneOwnership = {
+        provider: providerForTeamTarget(args.sessionName, worker.paneId),
+        providerTarget: args.sessionName,
+        paneId: worker.paneId,
+        splitTarget: "",
+        leaderPaneId: args.leaderPaneId ?? "",
+        reservedPaneIds: args.workerPaneIds.filter((p) => p !== worker.paneId),
+        source: "adopted",
+        ...(worker.paneId.startsWith("%") && args.tmuxServerIdentity
+          ? { tmuxServerIdentity: args.tmuxServerIdentity }
+          : {}),
+      };
+      const fence = paneTreeFence(ownership);
       const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
         attempt,
         "startup_rollback",
         async () => {
-          const ownership: WorkerPaneOwnership = {
-            provider: providerForTeamTarget(args.sessionName, worker.paneId),
-            providerTarget: args.sessionName,
-            paneId: worker.paneId,
-            splitTarget: "",
-            leaderPaneId: args.leaderPaneId ?? "",
-            reservedPaneIds: args.workerPaneIds.filter(
-              (p) => p !== worker.paneId,
-            ),
-            source: "adopted",
-            ...(worker.paneId.startsWith("%") && args.tmuxServerIdentity
-              ? { tmuxServerIdentity: args.tmuxServerIdentity }
-              : {}),
-          };
+          await fence.terminate();
           if ((await getOwnedWorkerLiveness(ownership)) === "dead") return true;
           await killOwnedWorkerPane({
             ...ownership,
           });
           return (await getOwnedWorkerLiveness(ownership)) === "dead";
         },
+        fence.read,
       );
       if (cleaned !== true) {
         await writeStartedStartupRollbackEvidence({

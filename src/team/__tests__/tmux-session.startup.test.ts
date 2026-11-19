@@ -346,6 +346,7 @@ afterEach(async () => {
   delete process.env.MINGW_PREFIX;
   delete process.env.COMSPEC;
   delete process.env.TMUX;
+  delete process.env.OMC_TEAM_KILL_PANE_TREE;
   delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
   restoreFixtureEnv();
   if (cwd) await rm(cwd, { recursive: true, force: true });
@@ -1124,7 +1125,11 @@ describe('worker pane startup safety', () => {
     expect(diagnostic.length).toBeLessThan(500);
     stderr.mockRestore();
   });
-  strictTmuxIt('retires an accepted launch but preserves the pane when provider cleanup is unverified', async () => {
+  // With OMC_TEAM_KILL_PANE_TREE the failed launch reads the process tree of the pane (the root of the pane is asked for first) through the hook
+  // of the retirement, which runs under the launch lock right before the provider is terminated, so it is read even when the provider cannot
+  // be proved gone and the pane is never killed: a read made only when the pane is killed comes after the provider has ended.
+  strictTmuxIt.each([['without', false], ['with', true]])('retires an accepted launch but preserves the pane when provider cleanup is unverified, %s OMC_TEAM_KILL_PANE_TREE', async (_what, treeKill) => {
+    if (treeKill) process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     cwd = await createFixture('omc-startup-handoff-cleanup-');
     process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
     processMocks.isProcessIdentityLive.mockResolvedValue('dead');
@@ -1148,6 +1153,7 @@ describe('worker pane startup safety', () => {
     const files = await readdir(attemptsRoot, { recursive: true });
     expect(files.some(file => String(file).endsWith('decision.json.retired'))).toBe(true);
     expect(tmuxState.paneStatus).toBe('0 cmd\n');
+    expect(tmuxState.args.some(args => args.some(arg => arg.includes('#{pane_pid} #{pane_dead}')))).toBe(treeKill); // inside the guarded command
     delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
   });
 

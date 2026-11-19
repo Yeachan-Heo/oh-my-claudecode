@@ -33,6 +33,8 @@ const paneMocks = vi.hoisted(() => {
   setServerIdentity: (identity: { socket_path: string; server_pid: number; process_started_at: string }) => {
     state.serverIdentity = identity;
   },
+  capturePaneProcessTree: vi.fn(async (_identity: unknown, _paneId: string): Promise<unknown> => null),
+  terminatePaneProcessTree: vi.fn(async (_tree: unknown): Promise<void> => undefined),
   splitTeamWorkerPane: vi.fn(async () => '%2'),
   splitTeamWorkerPaneWithEvidence: vi.fn(async () => ({ commandSucceeded: true, provider: 'tmux' as const,
     splitTarget: '%0', direction: 'right' as const, rawOutput: '%2\n', stderr: '', paneId: '%2' as string | null,
@@ -256,6 +258,7 @@ async function activatePersistedTeamInstance(teamName: string, cwd: string, inst
 }
 
 afterEach(() => {
+  delete process.env.OMC_TEAM_KILL_PANE_TREE;
   vi.clearAllMocks();
   paneMocks.clearPaneLiveness();
   paneMocks.blockPane(undefined);
@@ -386,7 +389,11 @@ describe('recovery pane rollback evidence', () => {
     await expectRecoveryLockReleased(teamName, 'worker-1', 'cleanup-failure');
   });
 
-  it('preserves the recovery pane when provider containment cannot be verified', async () => {
+  // With OMC_TEAM_KILL_PANE_TREE the rollback of a recovery pane reads the tree of the pane through the hook of the real retirement, which
+  // runs it under the launch lock right before the provider is terminated: a read after that cannot find a descendant that left the
+  // provider's process group.
+  it.each([['without', false], ['with', true]])('preserves the recovery pane when provider containment cannot be verified, %s OMC_TEAM_KILL_PANE_TREE', async (_what, treeKill) => {
+    if (treeKill) process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     cwd = mkdtempSync(join(tmpdir(), 'recovery-provider-unverified-'));
     const teamName = 'provider-unverified-team';
     const requestId = 'provider-unverified-request';
@@ -443,6 +450,8 @@ describe('recovery pane rollback evidence', () => {
       reason: 'activation record failed:provider_cleanup_unverified',
       liveness: 'alive',
     });
+    if (treeKill) expect(paneMocks.capturePaneProcessTree).toHaveBeenCalledWith(fixtureTmuxServerIdentity(), '%2');
+    else expect(paneMocks.capturePaneProcessTree).not.toHaveBeenCalled();
   });
 
   it('reconciles an accepted initial launch pointer before treating the worker as already running', async () => {
