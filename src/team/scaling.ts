@@ -24,6 +24,10 @@ import {
   validateWorkerLaunchDescriptor,
   type CliAgentType,
 } from "./model-contract.js";
+import {
+  withProviderEventSettingsArgs,
+  writeProviderEventSettings,
+} from "./provider-events.js";
 import { CANONICAL_TEAM_ROLES } from "../shared/types.js";
 import type { CanonicalTeamRole } from "../shared/types.js";
 import { normalizeDelegationRole } from "../features/delegation-routing/types.js";
@@ -1258,7 +1262,14 @@ export async function scaleUpOwned(
                 ? { reasoningEffort: workerReasoningEffort }
                 : {}),
             });
-            launchArgs = args;
+            // Recovery relaunches from this saved argv, so the hook settings stay with it.
+            launchArgs = withProviderEventSettingsArgs(
+              workerAgentType,
+              args,
+              teamStateRoot,
+            );
+            if (launchArgs.length !== args.length)
+              await writeProviderEventSettings(teamStateRoot);
           } catch (error) {
             return await rollbackScaleUp(
               `Failed strict provider argv construction for ${workerName} (${workerAgentType}): ${error instanceof Error ? error.message : String(error)}`,

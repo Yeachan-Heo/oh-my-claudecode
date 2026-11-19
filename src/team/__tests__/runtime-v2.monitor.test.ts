@@ -216,6 +216,35 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     );
   });
 
+  it('shows the latest hook event of the current attempt and decides nothing from it', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-provider-event-'));
+    isolateFixtureRoot(cwd);
+    await writeConfigAndTask('pending');
+    const teamRoot = teamStateRoot(cwd, 'demo-team');
+    const config = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf-8'));
+    config.workers[0].launch_attempt_id = 'attempt-current';
+    await writeFile(join(teamRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+
+    const without = await monitorTeamV2('demo-team', cwd);
+    expect(without?.workers[0]?.providerEvent).toEqual({ event: 'none', ageSeconds: null });
+
+    const now = Date.now();
+    await writeFile(join(teamRoot, 'workers', 'worker-1', 'provider-events.jsonl'), [
+      { v: 1, event: 'SessionStart', at: now - 20_000, attempt: 'attempt-current' },
+      { v: 1, event: 'UserPromptSubmit', at: now - 12_000, attempt: 'attempt-current' },
+      { v: 1, event: 'Stop', at: now - 1_000, attempt: 'attempt-old' },
+    ].map(record => JSON.stringify(record)).join('\n') + '\n', 'utf-8');
+    const withEvents = await monitorTeamV2('demo-team', cwd);
+    const shown = withEvents?.workers[0]?.providerEvent;
+    expect(shown?.event).toBe('UserPromptSubmit');
+    expect(shown?.ageSeconds).toBeGreaterThanOrEqual(12);
+    expect(shown?.ageSeconds).toBeLessThan(60);
+    expect(withEvents?.recommendations).toEqual(without?.recommendations);
+    expect(withEvents?.nonReportingWorkers).toEqual(without?.nonReportingWorkers);
+    expect(withEvents?.deadWorkers).toEqual(without?.deadWorkers);
+  });
+
   it('does not flag a busy pane, even one whose output quotes a trust dialog', async () => {
     const snapshot = await monitorWithPane(
       'omc-runtime-v2-monitor-busy-trust-',
