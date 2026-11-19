@@ -1345,7 +1345,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(manifest.tmux_server_identity).toEqual(mocks.tmuxServerIdentity);
     const hookSettings = join(absPath(cwd, TeamPaths.root('dispatch-team')), 'provider-event-hooks.json');
     expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: ['--settings', hookSettings] });
-    expect(Object.keys(JSON.parse(await readFile(hookSettings, 'utf-8')).hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
+    expect(Object.keys(JSON.parse(await readFile(hookSettings, 'utf-8')).hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure']);
     expect(manifest.workers[0].launch_descriptor).toEqual(config.workers[0].launch_descriptor);
     expect(config.service_descriptor).toMatchObject({ schema_version: 1, auto_merge_enabled: false, cadence_policy: 'disabled' });
   });

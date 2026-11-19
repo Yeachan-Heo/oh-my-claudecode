@@ -1,5 +1,5 @@
 /**
- * Claude worker hook events (SessionStart, UserPromptSubmit, Stop).
+ * Claude worker hook events (SessionStart, UserPromptSubmit, Stop, StopFailure).
  *
  * Non-bare claude workers launch with `--settings <team state root>/provider-event-hooks.json`.
  * Its hooks run scripts/team-provider-event-hook.mjs, which appends one line
@@ -14,7 +14,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Hook events the worker records. Adding an event here is the whole change. */
-export const PROVIDER_EVENT_NAMES = ['SessionStart', 'UserPromptSubmit', 'Stop'] as const;
+export const PROVIDER_EVENT_NAMES = ['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure'] as const;
 export type ProviderEventName = (typeof PROVIDER_EVENT_NAMES)[number];
 
 export const PROVIDER_EVENT_SETTINGS_FILE = 'provider-event-hooks.json';

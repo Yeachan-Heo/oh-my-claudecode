@@ -26,6 +26,14 @@ describe('parseLatestProviderEvent', () => {
     expect(parseLatestProviderEvent(content, 'other')).toEqual({ event: 'Stop', at: 9000 });
   });
 
+  it('reads StopFailure as the latest event', () => {
+    const content = [
+      line({ v: 1, event: 'UserPromptSubmit', at: 1000, attempt: 'a1' }),
+      line({ v: 1, event: 'StopFailure', at: 1646, attempt: 'a1' }),
+    ].join('');
+    expect(parseLatestProviderEvent(content, 'a1')).toEqual({ event: 'StopFailure', at: 1646 });
+  });
+
   it('returns none when only other attempts wrote lines', () => {
     expect(parseLatestProviderEvent(line({ v: 1, event: 'Stop', at: 1, attempt: 'old' }), 'new'))
       .toEqual({ event: 'none' });
@@ -135,12 +143,12 @@ describe('provider event hook', () => {
     encoding: 'utf8',
   });
 
-  it('writes one settings file per team with the three events and no attempt id', async () => {
+  it('writes one settings file per team with the four events and no attempt id', async () => {
     const path = await writeProviderEventSettings(root);
     expect(path).toBe(join(root, 'provider-event-hooks.json'));
     const text = readFileSync(path, 'utf8');
     const settings = JSON.parse(text) as { hooks: Record<string, unknown> };
-    expect(Object.keys(settings.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
+    expect(Object.keys(settings.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure']);
     expect(text).not.toMatch(/attempt/i);
     const command = await hookCommand('Stop');
     expect(command.startsWith(`'${process.execPath}' `)).toBe(true);
@@ -152,7 +160,7 @@ describe('provider event hook', () => {
   it('appends one v1 line for the current attempt and prints nothing', async () => {
     mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
     const env = { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' };
-    for (const event of ['SessionStart', 'UserPromptSubmit', 'Stop']) {
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'StopFailure']) {
       const result = run(await hookCommand(event), env);
       expect(result.status).toBe(0);
       expect(result.stdout).toBe('');
@@ -160,14 +168,15 @@ describe('provider event hook', () => {
     }
     const lines = readFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8').trim().split('\n')
       .map(text => JSON.parse(text) as Record<string, unknown>);
-    expect(lines.map(record => record.event)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
+    expect(lines.map(record => record.event)).toEqual(['SessionStart', 'UserPromptSubmit', 'StopFailure']);
     for (const record of lines) {
       expect(Object.keys(record)).toEqual(['v', 'event', 'at', 'attempt']);
       expect(record.v).toBe(1);
       expect(record.attempt).toBe('a1');
       expect(typeof record.at).toBe('number');
     }
-    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toMatchObject({ event: 'Stop' });
+    // An API error ends the turn with StopFailure and no Stop (E0 scenario 4).
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toMatchObject({ event: 'StopFailure' });
   });
 
   it('exits 0 silently and creates nothing when it cannot write', async () => {
