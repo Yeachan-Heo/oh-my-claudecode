@@ -16,8 +16,9 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { boundExcerpts, classifyFailure, wellFormedBody, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass, tailRedacted } from '../../hooks/jev-compaction.mjs';
-import { admitRequest, breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
+import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
+import { admitRequest } from '../../scripts/lib/jev-breaker.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
 import { boundExcerpts as tsBoundExcerpts, excerptCharsFor, parseJevConfig } from '../hooks/jev/config.ts';
 import { JUDGMENT_POINTS } from '../hooks/jev/points.ts';
