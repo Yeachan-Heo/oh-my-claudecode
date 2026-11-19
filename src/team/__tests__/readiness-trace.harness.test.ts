@@ -18,6 +18,7 @@ const TRACE_SET = process.env.READINESS_TRACE_SET ?? 'r5';
 const FIXTURE_ROOT = process.env.READINESS_FIXTURE_ROOT
   ?? join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
 const STARTUP_MESSAGE = 'Read .omc/state/team/trace/workers/worker-1/inbox.md, execute now, report concrete progress.';
+const PENDING_TRIGGER = 'Read inbox.md, execute now.';
 
 vi.mock('../../platform/process-utils.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../platform/process-utils.js')>(),
@@ -32,7 +33,9 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
   };
 });
 
-import { deliverStartupInbox } from '../tmux-session.js';
+import { deliverStartupInbox, retryStartupInboxSubmit, sendToWorker } from '../tmux-session.js';
+import { DEFAULT_NUDGE_CONFIG, NudgeTracker, isPaneIdle } from '../idle-nudge.js';
+import { getWorkerStartupEvidencePolicy, settleStartupEvidence } from '../runtime-v2.js';
 import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
 import { awaitWorkerLaunchAcknowledgement, prepareWorkerLaunchAttempt } from '../worker-launch-ack.js';
 
@@ -93,6 +96,91 @@ function claudeTrustPane(noFocused: string, idle: string, mode: 'immediate' | 'b
   };
 }
 
+// Nudges sent in the running case; checkAndNudge reports them, not the tmux mock.
+let nudges: Array<{ at_ms: number }> = [];
+
+// Only on head; the base run never sees it. Nothing in set r6 hands it to the
+// paths under test, which is the point: their keys must not change.
+const providerEvents = await import('../provider-events.js').catch(() => null);
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Every startup-readiness and nudge path on one fixture, as dev drives them.
+function r6Cases(fixture: Fixture, context: StartupPaneContext): TraceCase[] {
+  const base = { fixture: fixture.file, eventState: null, env: {} };
+  const isControl = fixture.file === 'claude/2.1.325/idle.txt';
+  // Resubmit sends Enter only when the trigger still sits typed in the pane;
+  // startup-trigger-pending.txt shows this one, so it is the resubmit control.
+  const isResubmitControl = fixture.file === 'claude/unversioned/startup-trigger-pending.txt';
+  const resubmit = () => retryStartupInboxSubmit(context, PENDING_TRIGGER, { attemptAlreadyFenced: true });
+  return [
+    {
+      ...base,
+      case: `${fixture.file} deliverStartupInbox`,
+      fn: 'deliverStartupInbox',
+      control: isControl,
+      run: () => deliverStartupInbox(context, STARTUP_MESSAGE, { attemptAlreadyFenced: true }),
+    },
+    {
+      ...base,
+      case: `${fixture.file} retryStartupInboxSubmit`,
+      fn: 'retryStartupInboxSubmit',
+      control: isResubmitControl,
+      run: resubmit,
+    },
+    {
+      ...base,
+      case: `${fixture.file} settleStartupEvidence`,
+      fn: 'settleStartupEvidence',
+      control: isResubmitControl,
+      // No worker evidence ever appears; claude resubmits as runtime-v2 does.
+      run: () => settleStartupEvidence(
+        getWorkerStartupEvidencePolicy(fixture.provider),
+        async budgetMs => { await sleep(budgetMs); return false; },
+        fixture.provider === 'claude' ? resubmit : undefined,
+      ),
+    },
+    {
+      ...base,
+      case: `${fixture.file} isPaneIdle`,
+      fn: 'isPaneIdle',
+      control: false,
+      run: () => isPaneIdle(context.ownership),
+    },
+    {
+      ...base,
+      case: `${fixture.file} NudgeTracker.checkAndNudge`,
+      fn: 'NudgeTracker.checkAndNudge',
+      control: isControl,
+      run: async () => {
+        const { delayMs, maxCount } = DEFAULT_NUDGE_CONFIG;
+        const timelineMs = delayMs + maxCount * (delayMs + 5_000) + 10_000;
+        const identity = context.ownership.tmuxServerIdentity;
+        const tracker = new NudgeTracker();
+        const authority = {
+          instanceId: context.attempt.instance_id,
+          sessionName: context.ownership.providerTarget,
+          provider: 'tmux' as const,
+          tmuxServerIdentity: identity,
+          getPaneOwnership: (paneId: string) => (paneId === PANE_ID ? context.ownership : undefined),
+          getProviderLiveness: async () => 'alive' as const,
+          executeNudge: (paneId: string, message: string) => sendToWorker('trace', paneId, message, identity),
+        };
+        for (let at = 0; at <= timelineMs; at += 1_000) {
+          const nudged = await tracker.checkAndNudge([PANE_ID], '%1', authority);
+          for (const _pane of nudged) nudges.push({ at_ms: Date.now() - trace.startedAt });
+          await sleep(1_000);
+        }
+        // Clock-relative, so base and head runs compare.
+        return Object.fromEntries(Object.entries(tracker.getSummary()).map(([pane, { nudgeCount, lastNudgeAt }]) => [
+          pane,
+          { nudgeCount, last_nudge_ms: lastNudgeAt === null ? null : lastNudgeAt - trace.startedAt },
+        ]));
+      },
+    },
+  ];
+}
+
 // Each set lists its cases; later PRs add sets here and in readiness-diff.mjs.
 const SETS: Record<string, (fixtures: Fixture[], contexts: Map<string, StartupPaneContext>) => TraceCase[]> = {
   r5: (fixtures, contexts) => {
@@ -128,6 +216,7 @@ const SETS: Record<string, (fixtures: Fixture[], contexts: Map<string, StartupPa
       run: () => deliverStartupInbox(contexts.get(fixture.provider)!, STARTUP_MESSAGE, { attemptAlreadyFenced: true }),
     })));
   },
+  r6: (fixtures, contexts) => fixtures.flatMap(fixture => r6Cases(fixture, contexts.get(fixture.provider)!)),
 };
 
 // Advance the fake clock only while the code under test sleeps; between
@@ -224,6 +313,7 @@ describe.skipIf(!TRACE_OUT)('readiness trace harness', () => {
       trace.pane = traceCase.pane?.() ?? null;
       trace.keys = [];
       trace.unknown = [];
+      nudges = [];
       for (const [key, value] of Object.entries(traceCase.env)) {
         if (value === null) delete process.env[key];
         else process.env[key] = value;
@@ -245,6 +335,7 @@ describe.skipIf(!TRACE_OUT)('readiness trace harness', () => {
       results.push({
         ...described,
         keys: trace.keys,
+        nudges,
         result,
         wait_ms: waitMs,
         unknown_commands: trace.unknown,
@@ -255,7 +346,10 @@ describe.skipIf(!TRACE_OUT)('readiness trace harness', () => {
 
     writeFileSync(TRACE_OUT!, `${JSON.stringify({
       set: TRACE_SET,
-      loaded_modules: ['tmux-session', 'worker-launch-ack', 'team-owner-epoch'],
+      loaded_modules: [
+        'tmux-session', 'worker-launch-ack', 'team-owner-epoch', 'idle-nudge', 'runtime-v2',
+        ...(providerEvents ? ['provider-events'] : []),
+      ],
       cases: results,
     }, null, 2)}\n`);
   }, 30 * 60_000);
