@@ -311,15 +311,46 @@ const SUMMARY_RULES = [
  * A runner's own report that nothing ran: a run of zero tests proves nothing about the change.
  * `cargo test` prints `running 0 tests` for its doc-tests after real results, and `go test -run X`
  * prints `[no tests to run]` for skipped packages, so zero counts only without real results.
+ * Each report belongs to one runner's output (the `reader` name) and is read only for that runner.
  */
-const ZERO_TESTS = /Tests:\s+0 total\b|No tests found|\[no tests to run\]|running 0 tests\b|ℹ tests 0\b|no tests ran/i;
+const ZERO_TEST_REPORTS = [
+  { reader: 'jest', re: /Tests:\s+0 total\b|No tests found/i },
+  { reader: 'vitest', re: /No tests found/i },
+  { reader: 'pytest', re: /no tests ran/i },
+  { reader: 'node-test', re: /ℹ tests 0\b/i },
+  { reader: 'go', re: /\[no tests to run\]/i },
+  { reader: 'cargo', re: /running 0 tests\b/i },
+];
+
+/**
+ * Whose output a detected runner's result may be read as. A runner reads its own summary lines; the
+ * ruff rule also reads mypy and biome, which count the same way. A package manager or make runs a
+ * script of unknown content, so it reads the runners that fit the kind of the check (`npm run test`
+ * may print vitest, jest, node:test or pytest output, `npm run lint` eslint or ruff output). A summary
+ * line of any other runner, such as `Found 3 errors.` inside a passing vitest run or `All checks passed!`
+ * piped through `tail` after pytest, is output, not a verdict. A runner not listed reads nothing.
+ */
+const OWN_READERS = {
+  'node-test': ['node-test'], pytest: ['pytest'], vitest: ['vitest'], jest: ['jest'], eslint: ['eslint'], tsc: ['tsc'],
+  ruff: ['ruff'], mypy: ['ruff'], biome: ['ruff'], go: ['go'], cargo: ['cargo'], tox: ['pytest'], nox: ['pytest'],
+};
+const SCRIPT_RUNNERS = new Set(['npm', 'make']);
+const SCRIPT_READERS_BY_KIND = {
+  test: ['vitest', 'jest', 'node-test', 'pytest'], lint: ['eslint', 'ruff'], typecheck: ['tsc', 'ruff'], build: ['tsc'],
+};
+
+/** The set of reader names that may interpret the output of a classified check command. */
+function readersFor({ runner, kind }) {
+  return new Set(SCRIPT_RUNNERS.has(runner) ? SCRIPT_READERS_BY_KIND[kind] ?? [] : OWN_READERS[runner] ?? []);
+}
 
 /**
  * True when the zero-test report sits in the tail and no real result appears anywhere in the output.
  * The report is matched in the tail only, so an early "No tests found" line in a long green log does not count.
  */
-function ranNoTests(output) {
-  if (!ZERO_TESTS.test(output.slice(-SUMMARY_TAIL))) return false;
+function ranNoTests(output, readers) {
+  const tail = output.slice(-SUMMARY_TAIL);
+  if (!ZERO_TEST_REPORTS.some(({ reader, re }) => readers.has(reader) && re.test(tail))) return false;
   return !output.split('\n').some((line) => /^\s*running [1-9]\d* tests?\b/.test(line) || (/^\s*ok\s/.test(line) && !line.includes('[no tests to run]')));
 }
 
@@ -358,11 +389,12 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
   if (!cc.isCheck) {
     return { verdict: 'undetermined', reason: 'not a check command', rule: null };
   }
-  if (out !== '' && ranNoTests(out)) {
+  const readers = readersFor(cc);
+  if (out !== '' && ranNoTests(out, readers)) {
     return { verdict: 'undetermined', reason: 'runner summary reports zero tests', rule: 'zero-tests' };
   }
   // A failure summary wins over everything, including a zero exit status.
-  for (const entry of SUMMARY_RULES) {
+  for (const entry of SUMMARY_RULES.filter((rule) => readers.has(rule.runner))) {
     const verdict = entry.apply(tail);
     if (verdict === 'failed') {
       return { verdict: 'failed', reason: `runner summary failure (${entry.rule})`, rule: entry.rule };
@@ -385,7 +417,7 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
         ? { verdict: 'failed', reason: `printed exit code ${printed}`, rule: 'printed-exit-code' }
         : { verdict: 'passed', reason: 'printed exit code 0', rule: 'printed-exit-code' };
     }
-    for (const entry of SUMMARY_RULES) {
+    for (const entry of SUMMARY_RULES.filter((rule) => readers.has(rule.runner))) {
       const verdict = entry.apply(tail);
       if (verdict === 'passed') {
         return { verdict: 'passed', reason: `runner summary pass (${entry.rule})`, rule: entry.rule };

@@ -181,6 +181,55 @@ it('a failure summary beats a zero exit status', () => {
   assert.equal(checkResult('vitest run', 'Tests  2 failed | 4 passed (6)', 0).verdict, 'failed');
 });
 
+it('summary lines count only for the detected runner or a package manager child that fits the kind', () => {
+  // A summary-shaped line of another tool is output, not a verdict.
+  assert.equal(checkResult('vitest run', 'Found 3 errors.\nTests  3 passed (3)', 0).verdict, 'passed', 'ruff line in a vitest run');
+  assert.equal(checkResult('vitest run | tail', 'Found 3 errors.\nTests  3 passed (3)').verdict, 'passed');
+  assert.equal(checkResult('eslint src', 'Found 3 errors.', 0).verdict, 'passed', 'ruff line in an eslint run');
+  assert.equal(checkResult('pytest | tail', 'All checks passed!').verdict, 'undetermined', 'ruff pass line behind pytest');
+  assert.equal(checkResult('pytest | tail', 'Tests  3 passed (3)').verdict, 'undetermined', 'vitest pass line behind pytest');
+  assert.equal(checkResult('tsc --noEmit | tail', '✖ 3 problems (3 errors, 0 warnings)').verdict, 'undetermined');
+  assert.equal(checkResult('vitest run', 'src/a.ts:1:5 - error TS2322: nope', 0).verdict, 'passed', 'tsc line in a vitest run');
+  assert.equal(checkResult('go test ./... | tail', 'ℹ fail 2').verdict, 'undetermined', 'node:test line behind go test');
+  // The runner's own lines still decide; ruff's rule also reads mypy and biome.
+  assert.equal(checkResult('vitest run', 'Tests  2 failed | 1 passed (3)', 0).verdict, 'failed');
+  assert.equal(checkResult('mypy src', 'Found 3 errors in 1 file (checked 4 source files)', 0).verdict, 'failed');
+  assert.equal(checkResult('mypy src | tail', 'Success: no issues found in 4 source files').verdict, 'passed');
+  assert.equal(checkResult('biome check . | tail', 'Found 2 errors.', 1).verdict, 'failed');
+  assert.equal(checkResult('python -m pytest | tail', '===== 5 passed in 0.2s =====').verdict, 'passed', 'wrapper stripped first');
+  // A package manager runs an unknown script, so it reads the runners that fit the kind of the check.
+  assert.equal(checkResult('npm run test', 'Found 3 errors.\nTests  3 passed (3)', 0).verdict, 'passed');
+  assert.equal(checkResult('npm test | tail', 'Tests  3 passed (3)').verdict, 'passed', 'vitest child');
+  assert.equal(checkResult('npm test | tail', 'Tests  1 failed | 2 passed (3)', 1).verdict, 'failed', 'vitest child failure');
+  assert.equal(checkResult('pnpm test | tail', '===== 5 passed in 0.2s =====').verdict, 'passed', 'pytest child');
+  assert.equal(checkResult('npm test | tail', 'All checks passed!').verdict, 'undetermined', 'a lint line does not pass a test run');
+  assert.equal(checkResult('npm test | tail', '✖ 3 problems (3 errors, 0 warnings)').verdict, 'undetermined');
+  assert.equal(checkResult('npm run lint | tail', 'All checks passed!').verdict, 'passed', 'ruff child of a lint script');
+  assert.equal(checkResult('npm run lint | tail', '✖ 3 problems (3 errors, 0 warnings)', 1).verdict, 'failed', 'eslint child');
+  assert.equal(checkResult('npm run lint | tail', 'Tests  3 passed (3)').verdict, 'undetermined', 'a test line does not pass a lint run');
+  assert.equal(checkResult('npm run typecheck | tail', 'src/a.ts:1:5 - error TS2322: nope', 1).verdict, 'failed');
+  assert.equal(checkResult('npm run build | tail', 'src/a.ts:1:5 - error TS2322: nope', 1).verdict, 'failed');
+  assert.equal(checkResult('npm run build | tail', 'All checks passed!').verdict, 'undetermined');
+  // A runner without summary rules reads none, so a foreign summary cannot pass or fail it.
+  assert.equal(checkResult('mocha | tail', 'All checks passed!').verdict, 'undetermined');
+  assert.equal(checkResult('mocha', 'Found 3 errors.', 0).verdict, 'passed');
+});
+
+it('zero-test reports count only for the detected runner or a fitting package manager child', () => {
+  assert.equal(checkResult('pytest', 'no tests ran in 0.01s', 0).verdict, 'undetermined');
+  assert.equal(checkResult('node --test', 'ℹ tests 0\nℹ pass 0\nℹ fail 0', 0).verdict, 'undetermined');
+  assert.equal(checkResult('cargo test', 'running 0 tests', 0).verdict, 'undetermined');
+  assert.equal(checkResult('npm test', 'no tests ran in 0.01s', 0).verdict, 'undetermined', 'pytest child of a test script');
+  assert.equal(checkResult('npm test', 'Tests: 0 total', 0).verdict, 'undetermined', 'jest child of a test script');
+  // A zero-test line of another runner is output, not a report.
+  assert.equal(checkResult('vitest run', 'no tests ran in 0.01s', 0).verdict, 'passed');
+  assert.equal(checkResult('vitest run', 'ℹ tests 0', 0).verdict, 'passed');
+  assert.equal(checkResult('pytest', 'No tests found', 0).verdict, 'passed');
+  assert.equal(checkResult('eslint src', 'No tests found', 0).verdict, 'passed');
+  assert.equal(checkResult('npm run lint', 'No tests found', 0).verdict, 'passed', 'a lint script reads no test report');
+  assert.equal(checkResult('go test ./...', 'running 0 tests', 0).verdict, 'passed');
+});
+
 it('narrowed run: a visible failure is failed, a visible pass is undetermined', () => {
   assert.equal(checkResult('vitest run -t login', 'boom', 1).verdict, 'failed');
   assert.equal(checkResult('vitest run -t login', 'ok', 0).verdict, 'undetermined');
@@ -188,7 +237,7 @@ it('narrowed run: a visible failure is failed, a visible pass is undetermined', 
 
 it('zero-test runs stay undetermined; an early zero-test line in a long log does not count', () => {
   assert.equal(checkResult('vitest run', 'No tests found', 0).verdict, 'undetermined');
-  assert.equal(checkResult('vitest run', 'Tests: 0 total', 0).verdict, 'undetermined');
+  assert.equal(checkResult('jest', 'Tests: 0 total', 0).verdict, 'undetermined');
   assert.equal(checkResult('go test -run TestFoo ./...', 'ok  pkg 0.1s [no tests to run]', 0).verdict, 'undetermined');
   assert.equal(
     checkResult('vitest run', 'No tests found\n' + 'x\n'.repeat(4000) + 'Tests  3 passed (3)', 0).verdict,

@@ -853,8 +853,14 @@ import { classifyCommand, classifyCheckResult, isMutation } from './tools/diagno
 | `isMutation(toolName, toolInput)` | true for `Write`, `Edit`, `MultiEdit` and `NotebookEdit` on a code file, and for `Bash` commands that write a code file by redirection, `tee`, a here-document or in-place `sed` / `perl`. Documentation, images, lockfiles, logs, temp directories (`TEMP_DIRS`), `/dev/null` and `$TMPDIR` are not code |
 | `RULES_VERSION`, `TEMP_DIRS` | the rules version string and the temp directories whose writes hold no code |
 
-Runner summaries are read for node:test, pytest, vitest, eslint, ruff (the same rule reads mypy and biome counts) and tsc. Gradle
-and Maven are not recognized on purpose: their lifecycle goals can also publish, so an exit code proves less there.
+Runner summaries are read for node:test, pytest, vitest, eslint, ruff (the same rule reads mypy and biome counts) and tsc. A
+summary line counts only for the detected runner: a passing `vitest run` that prints `Found 3 errors.` is not a failure, and
+`All checks passed!` behind `pytest | tail` is not a pass. A package manager (`npm`, `pnpm`, `yarn`, `bun`) or `make` runs a
+script of unknown content, so it reads the runners that fit the kind of the check (`test`: vitest, jest, node:test, pytest;
+`lint`: eslint, ruff; `typecheck`: tsc, ruff; `build`: tsc). A runner that is not listed reads no summary, so only its visible
+exit status or a printed exit code decides. The zero-test reports (`Tests: 0 total`, `No tests found`, `no tests ran`,
+`ℹ tests 0`, `[no tests to run]`, `running 0 tests`) follow the same rule. Gradle and Maven are not recognized on purpose:
+their lifecycle goals can also publish, so an exit code proves less there.
 
 # Advisor event coverage
 
