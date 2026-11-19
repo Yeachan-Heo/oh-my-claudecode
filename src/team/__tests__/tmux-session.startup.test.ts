@@ -927,6 +927,37 @@ describe('worker pane startup safety', () => {
     expect(focus).toBe('trusted');
   });
 
+  strictTmuxIt('sends Down again when the first Down after the dialog draws is dropped', async () => {
+    const context = await acceptedContext('claude');
+    const question = 'Quick safety check: Is this a project you created or one you trust?';
+    const frames = {
+      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      trusted: '❯ \n',
+    };
+    // Measured on Claude Code 2.1.328: a Down sent right after the dialog
+    // first draws can be dropped. This pane drops the first Down.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    let downs = 0;
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys' && !args.includes('-l'))
+        .map(args => args.at(-1));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        if (key === 'Down' && ++downs > 1 && focus === 'no') focus = 'yes';
+        if (key === 'Enter' && focus === 'yes') focus = 'trusted';
+      }
+      return frames[focus];
+    };
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 3_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    expect(focus).toBe('trusted');
+    expect(downs).toBe(2);
+  });
+
   strictTmuxIt('sends Down, not Enter, when only a stale line above the live trust dialog shows Yes focused', async () => {
     const context = await acceptedContext('claude');
     const live = 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n';

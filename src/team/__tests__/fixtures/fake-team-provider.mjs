@@ -55,6 +55,7 @@ const SLOW_BANNER_MS = Number(process.env.OMC_FAKE_SLOW_BANNER_MS) || 3_000;
 const BUSY_MS = 2_000;
 const PROVIDER_EXIT_MS = 1_000;
 const TRUST_BUSY_MS = 1_000;
+const TRUST_IGNORE_MS = 600;
 // Down (normal and application cursor mode), then Enter.
 const SELECTOR_KEYS = ['\x1b[B', '\x1bOB', '\r', '\n'];
 
@@ -166,8 +167,10 @@ const writeShutdownAck = {
 // choice. Keys that arrive in one read act against the focus drawn before that
 // read, so a Down and an Enter read together still confirm "No, exit". That
 // is the hypothesis the recorded 2.1.328 failures fit, not observed behavior.
-// busyMs blocks the event loop after the first draw, as a busy startup does,
-// so keys sent meanwhile reach the selector in one read.
+// busyMs blocks the event loop after the first draw so keys sent meanwhile
+// reach the selector in one read (an unconfirmed hypothesis). ignoreMs drops
+// every key read that soon after the first draw, as Claude Code 2.1.328 was
+// measured to drop a Down sent right after the dialog appeared.
 function moveTrustFocus(frame) {
   const lines = frame.split('\n');
   const no = lines.findIndex(line => /❯\s*No, exit/.test(line));
@@ -178,7 +181,7 @@ function moveTrustFocus(frame) {
   return lines.join('\n');
 }
 
-function claudeTrustSelector(file, { busyMs = 0 } = {}) {
+function claudeTrustSelector(file, { busyMs = 0, ignoreMs = 0 } = {}) {
   return {
     name: 'await-trust-answer',
     run: () => new Promise((resolve, reject) => {
@@ -191,7 +194,9 @@ function claudeTrustSelector(file, { busyMs = 0 } = {}) {
         if (error) reject(error);
         else resolve();
       };
+      let drawnAt = Infinity;
       const onKeys = (chunk) => {
+        if (Date.now() - drawnAt < ignoreMs) return;
         const focusedBeforeRead = affirmativeFocused;
         for (let rest = String(chunk); rest; ) {
           const key = SELECTOR_KEYS.find(candidate => rest.startsWith(candidate));
@@ -205,6 +210,7 @@ function claudeTrustSelector(file, { busyMs = 0 } = {}) {
       };
       process.stdin.on('data', onKeys);
       process.stdout.write(`${CLEAR_SCREEN}${frame}`, () => {
+        drawnAt = Date.now();
         const busyUntil = Date.now() + busyMs;
         while (Date.now() < busyUntil);
       });
@@ -225,6 +231,9 @@ const SCENARIOS = {
   }),
   'claude-trust-busy-startup': lifecycle({
     startup: [claudeTrustSelector('claude/2.1.325/trust.txt', { busyMs: TRUST_BUSY_MS }), showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  'claude-trust-ignores-early-keys': lifecycle({
+    startup: [claudeTrustSelector('claude/2.1.325/trust.txt', { ignoreMs: TRUST_IGNORE_MS }), showFrame('idle-prompt', CLAUDE_IDLE)],
   }),
   'claude-slow-banner': lifecycle({
     startup: [showFrame('startup-banner', 'claude/unversioned/startup-banner-bypass.txt'), pause('slow-startup', SLOW_BANNER_MS), showFrame('idle-prompt', CLAUDE_IDLE)],

@@ -227,6 +227,18 @@ describe.skipIf(process.platform === 'win32')('fake team provider scenarios', ()
     expect(run.output()).toContain('fake-claude failed at await-trust-answer: trust_declined');
   });
 
+  it('claude-trust-ignores-early-keys: drops a Down sent right after the dialog draws, takes a later one', async () => {
+    const run = startFake('claude-trust-ignores-early-keys');
+    await run.waitForOutput(frame('claude/2.1.325/trust.txt'));
+    run.press(DOWN);
+    await new Promise(resolveSleep => setTimeout(resolveSleep, 800));
+    expect(run.output()).not.toContain('❯ Yes, ');
+    run.press(DOWN);
+    await run.waitForOutput('❯ Yes, ');
+    run.press('\r');
+    await run.waitForOutput(frame('claude/2.1.325/idle.txt'));
+  });
+
   it('claude-trust-busy-startup: keys sent while startup blocks are read together', async () => {
     const run = startFake('claude-trust-busy-startup');
     await run.waitForOutput(frame('claude/2.1.325/trust.txt'));
