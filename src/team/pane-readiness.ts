@@ -285,14 +285,16 @@ export function detectPaneTrustPromptKind(
 // Claude Code marks the focused choice of its trust dialog with ❯ and draws
 // "Yes" right below "No, exit". Only the pair after the latest question is the
 // live dialog: an answered dialog can remain in the scrollback above it. Null
-// while that pair is not drawn yet.
-export function claudeTrustFocus(captured: string): 'no' | 'yes' | null {
+// while that pair is not drawn yet; 'stale' when an input prompt is drawn
+// below it, so keys would reach that prompt instead of the dialog.
+export function claudeTrustFocus(captured: string): 'no' | 'yes' | 'stale' | null {
   const lines = paneLines(captured);
   const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
   if (question < 0) return null;
   const no = lines.findIndex((line, index) => index > question && /^\s*(?:❯\s*)?No,\s*exit\b/i.test(line));
   const yes = no >= 0 ? lines[no + 1] ?? '' : '';
   if (!/^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(yes)) return null;
+  if (lines.slice(no + 2).some((line) => patternsFor('claude').idlePromptLine.test(line))) return 'stale';
   return /^\s*❯/.test(yes) ? 'yes' : 'no';
 }
 

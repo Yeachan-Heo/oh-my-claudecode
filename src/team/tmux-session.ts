@@ -4622,8 +4622,12 @@ export async function waitForStartupPaneReady(
   const deadline = Date.now() + timeoutMs;
   const handledSelectors = new Set<PaneTrustPromptKind>();
   let claudeTrustDownSentAt = -Infinity;
+  // Set right after Enter answers Claude's trust dialog: the pane is read once
+  // more even when that Enter went out at the last poll before the deadline.
+  let readAfterTrustAnswer = false;
 
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline || readAfterTrustAnswer) {
+    readAfterTrustAnswer = false;
     if (!(await startupContextIsActive(context, opts.attemptAlreadyFenced)))
       return { ok: false, reason: "attempt_inactive" };
     if (await startupProviderExited(context))
@@ -4667,9 +4671,12 @@ export async function waitForStartupPaneReady(
       if (selector === "claude_directory") {
         // This dialog focuses "No, exit" first. Claude Code 2.1.328 was
         // measured to drop a Down sent right after the dialog drew, so Down is
-        // resent while "No" stays focused, and Enter waits until the pane shows
-        // the affirmative choice focused: Enter never confirms "No".
+        // resent while "No" stays focused, and Enter is sent only when the last
+        // capture showed the affirmative choice focused. An answered dialog
+        // above a live input prompt gets no key: it would reach the prompt.
         const focus = claudeTrustFocus(captured);
+        if (focus === "stale")
+          return { ok: false, reason: "selector_persistent" };
         if (focus !== "yes") {
           if (
             focus === "no" &&
@@ -4698,6 +4705,7 @@ export async function waitForStartupPaneReady(
         context.ownership.tmuxServerIdentity,
       );
       handledSelectors.add(selector);
+      readAfterTrustAnswer = selector === "claude_directory";
       await sleep(pollIntervalMs);
       continue;
     }
