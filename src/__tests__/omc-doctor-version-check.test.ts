@@ -345,6 +345,51 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     }
   });
 
+  // The entry rule of the cache commands applies under every key: an unrelated plugin's entry that is null, not an object,
+  // a nested array or has neither field is malformed, and the cache commands move nothing for a registry that holds one.
+  // Step 1 treats it like the other defects of an unrelated key (an empty or non-array list, a look-alike key): without a
+  // supported ID the registry is ambiguous and the channel is unknown, with one the good OMC entry still names its channel.
+  test('a malformed entry under an unrelated key gives an unknown channel without a supported ID and does not hide a good one, before or after it', () => {
+    const malformed: Array<[string, unknown[]]> = [
+      ['a null entry', [null]],
+      ['a string entry', ['junk']],
+      ['a nested array', [[{ version: '5.9.0' }]]],
+      ['an entry with neither version nor installPath', [{ scope: 'user' }]],
+      ['a blank installPath', [{ installPath: '' }]],
+      ['a version that is not a string', [{ version: 5 }]],
+      ['a valid entry and then a null entry', [{ version: '1.0.0' }, null]],
+    ];
+    for (const [label, entries] of malformed) {
+      for (const supported of [false, true]) {
+        for (const position of ['before', 'after'] as const) {
+          const pin = supported ? { 'oh-my-claudecode@omc': [{ version: '5.8.0' }] } : {};
+          const other = { 'some-other-plugin@market': entries };
+          const out = step1({ plugins: position === 'before' ? { ...other, ...pin } : { ...pin, ...other }, cache: { omc: ['5.9.0'] }, clone: { omc: '6.0.0' } });
+          if (supported) {
+            expect({ label, position, out }).toMatchObject({ label, position, out: { Plugin: 'oh-my-claudecode@omc', Channel: 'marketplace omc', Installed: '5.8.0' } });
+          } else {
+            expect({ label, position, keys: Object.keys(out) }).toEqual({ label, position, keys: ['Channel'] });
+            expect(out.Channel).toContain('unknown');
+          }
+        }
+      }
+    }
+  });
+
+  test('well-formed entries under an unrelated key keep the channel, and an explicit plugin root still answers first', () => {
+    const fine = { 'some-other-plugin@market': [{ version: '1.0.0' }, { installPath: '/nowhere' }, { version: null, installPath: '/nowhere' }] };
+    expect(step1({ plugins: { 'oh-my-claudecode@omc': [{ version: '5.8.0' }], ...fine }, clone: { omc: '5.8.0' } })).toMatchObject({ Channel: 'marketplace omc', Installed: '5.8.0' });
+    expect(step1({ plugins: fine, cache: { omc: ['5.9.0'] } })).toEqual({ Channel: 'npm', Installed: '5.9.0', Updater: 'omc update' });
+    const env = (dir: string) => {
+      const root = path.join(dir, 'checkout');
+      mkdirSync(root, { recursive: true });
+      writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '5.9.0' }));
+      return { OMC_PLUGIN_ROOT: root };
+    };
+    expect(step1({ plugins: { 'some-other-plugin@market': [null] }, env }).Channel).toBe('plugin-dir');
+    expect(step1({ plugins: { 'some-other-plugin@market': [{ scope: 'user' }] }, env: (dir) => ({ CLAUDE_PLUGIN_ROOT: env(dir).OMC_PLUGIN_ROOT }) }).Channel).toBe('plugin-dir');
+  });
+
   test('a good supported entry still names its channel when another key of the registry is ambiguous', () => {
     for (const other of [{ 'some-other-plugin@market': [] }, { 'some-other-plugin@market': null }, { 'oh-my-claudecode-fork@market': [{ version: '1.0.0' }] }]) {
       expect(step1({ plugins: { 'oh-my-claudecode@omc': [{ version: '5.8.0' }], ...other }, clone: { omc: '5.8.0' } })).toMatchObject({

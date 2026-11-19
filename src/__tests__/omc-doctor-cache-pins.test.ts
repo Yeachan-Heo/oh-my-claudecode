@@ -711,6 +711,77 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
       }
     }
   });
+  // An entry under a key that is not an OMC plugin ID is read like one under a supported ID: an entry that lost
+  // its installPath may have pointed into the cache, and a registry that cannot be read completely moves nothing.
+  test('a malformed entry under an unrelated plugin ID makes the registry unreadable, before or after the pin, in both commands', () => {
+    const shapes: Record<string, (cache: string) => unknown[]> = {
+      'a null entry': () => [null],
+      'a valid entry followed by a null entry': (cache) => [{ scope: 'user', installPath: path.join(cache, '5.9.0') }, null],
+      'a null entry followed by a valid entry': (cache) => [null, { scope: 'user', installPath: path.join(cache, '5.9.0') }],
+      'a string entry': () => ['junk'],
+      'a number entry': () => [42],
+      'a nested array': (cache) => [[{ scope: 'user', installPath: path.join(cache, '5.9.0') }]],
+      'an empty nested array': () => [[]],
+      'an object with neither version nor installPath': () => [{ scope: 'user' }],
+      'an object with null fields only': () => [{ version: null, installPath: null }],
+      'a blank installPath': () => [{ scope: 'user', installPath: '  ' }],
+      'an installPath that is not a string': () => [{ scope: 'user', installPath: 42 }],
+      'a version that is not a string': () => [{ scope: 'user', version: 5 }],
+      'a blank version beside a valid installPath': (cache) => [{ scope: 'user', version: '', installPath: path.join(cache, '5.9.0') }],
+    };
+    for (const command of commands) {
+      for (const [label, entries] of Object.entries(shapes)) {
+        for (const position of ['before', 'after'] as const) {
+          const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+          try {
+            const pin = { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] };
+            const other = { 'other-plugin@market': entries(cache) };
+            writeRegistry(dir, position === 'before' ? { ...other, ...pin } : { ...pin, ...other });
+            const result = runCommand(command, dir);
+            expect({ label, position, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
+              .toEqual({ label, position, status: 0, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+            expect(result.stdout).toMatch(/Nothing moved: .*could not be read completely/);
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+  });
+
+  test('well-formed entries under an unrelated plugin ID, with or without an installPath or with a null field, do not block the move', () => {
+    const ok = (dir: string): Record<string, unknown[]> => ({
+      'other-plugin@market': [{ scope: 'user', version: '1.0.0' }, { scope: 'user', installPath: path.join(dir, 'nowhere') }, { scope: 'user', version: '1.0.0', installPath: path.join(dir, 'nowhere') }, { scope: 'user', version: null, installPath: path.join(dir, 'nowhere') }, { scope: 'user', version: '1.0.0', installPath: null }],
+    });
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+      try {
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }], ...ok(dir) });
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.8.1');
+        expect(movedAside(dir)).toBe(2);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('the installPath of an unrelated plugin is trimmed like the others and still protects the version it points into', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+      try {
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }], 'other-plugin@market': [{ scope: 'user', installPath: `  ${path.join(cache, '5.9.0')}  ` }] });
+        const result = runCommand(command, dir);
+        expect(result.status).toBe(0);
+        expect(digitVersions(cache)).toBe('5.8.1,5.9.0');
+        expect(movedAside(dir)).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   // A preload that makes the K-th renameSync of the command throw, so the move
   // fails after K-1 versions were already moved (a chmod would not stop a root
   // user, and a directory that blocks the first move would not reach a later one).
