@@ -782,6 +782,24 @@ describe('recovery owner retry deadline', () => {
     });
   });
 
+  it('falls through to the executor past the deadline when the task records cannot be read', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-corrupt-task-');
+    const teamName = 'deadline-corrupt-task';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.workers = [{ ...config.workers[0], name: 'worker-2' }];
+    writeFileSync(configPath, JSON.stringify(config));
+    const taskPath = absPath(cwd, TeamPaths.taskFile(teamName, '9'));
+    mkdirSync(join(taskPath, '..'), { recursive: true });
+    writeFileSync(taskPath, '{ unrelated corrupt task');
+
+    // The executor without the deadline reads no task here and ends with worker_not_found.
+    await expect(execute(teamName)).resolves.toMatchObject({ outcome: 'failed', error: 'worker_not_found' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toMatchObject({ kind: 'final', error: { code: 'worker_not_found' } });
+    expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();
+  });
+
   it('fails a never-elected request past the deadline without touching the active recovery', async () => {
     cwd = mkdtempFixture('runtime-owner-deadline-unelected-');
     const teamName = 'deadline-unelected';
