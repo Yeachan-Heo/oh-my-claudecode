@@ -3,7 +3,7 @@
 // read from or written to. These tests swap them right after the real open.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -110,7 +110,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     const preload = join(root, 'swap-preload.mjs');
     writeFileSync(preload, [
       "import fsp from 'node:fs/promises';",
-      "import { linkSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';",
+      "import { existsSync, linkSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';",
       "import { dirname, join } from 'node:path';",
       "import { syncBuiltinESMExports } from 'node:module';",
       'const real = fsp.open;',
@@ -164,6 +164,18 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     // One inode, two names: the file is still empty under both.
     expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
     expect(readFileSync(path, 'utf8')).toBe('');
+  });
+
+  it('hook writes nothing on Windows, where O_NOFOLLOW cannot refuse a symlinked leaf', () => {
+    const preload = join(root, 'win32-preload.mjs');
+    writeFileSync(preload, "Object.defineProperty(process, 'platform', { value: 'win32' });\n");
+    const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, HOOK, 'Stop'], {
+      env: { PATH: process.env.PATH ?? '', OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' },
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    expectSilentExit(result);
+    expect(existsSync(path)).toBe(false);
   });
 
   it('hook appends one line through the same preload when nothing is swapped', () => {
