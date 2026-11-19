@@ -91,6 +91,11 @@ import { validateTeamName } from "./team-name.js";
 import { TASK_ID_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN } from "./contracts.js";
 import type { CliAgentType } from "./model-contract.js";
 import {
+  readLatestProviderEvent,
+  withProviderEventSettingsArgs,
+  writeProviderEventSettings,
+} from "./provider-events.js";
+import {
   buildValidatedWorkerLaunchDescriptor,
   clearResolvedPathCache,
   validateWorkerLaunchDescriptor,
@@ -932,6 +937,8 @@ export interface TeamSnapshotV2 {
     worktree_created?: boolean;
     team_state_root?: string;
     turnsWithoutProgress: number;
+    /** Display only: latest claude hook event of the current launch attempt. */
+    providerEvent: { event: string; ageSeconds: number | null };
   }>;
   tasks: {
     total: number;
@@ -6828,7 +6835,7 @@ export async function startTeamV2(
         const promptArgs = transportPrompt
           ? getPromptModeArgs(assignment.agentType, transportPrompt)
           : [];
-        const descriptor = buildValidatedWorkerLaunchDescriptor(
+        const builtDescriptor = buildValidatedWorkerLaunchDescriptor(
           assignment.agentType,
           {
             teamName: sanitized,
@@ -6840,6 +6847,17 @@ export async function startTeamV2(
           },
           promptArgs,
         );
+        // Recovery relaunches from this saved argv, so the hook settings stay with it.
+        const descriptor = {
+          ...builtDescriptor,
+          args: withProviderEventSettingsArgs(
+            assignment.agentType,
+            builtDescriptor.args,
+            teamStateRoot(leaderCwd, sanitized),
+          ),
+        };
+        if (descriptor.args.length !== builtDescriptor.args.length)
+          await writeProviderEventSettings(teamStateRoot(leaderCwd, sanitized));
         preparedLaunches.set(workerName, {
           agentType: assignment.agentType,
           ...(assignment.role ? { role: assignment.role } : {}),
@@ -8713,13 +8731,19 @@ export async function monitorTeamV2(
         worker,
       );
       const paneAlive = liveness === "alive";
-      const [status, heartbeat, paneCapture] = await Promise.all([
-        readWorkerStatus(sanitized, worker.name, cwd),
-        readWorkerHeartbeat(sanitized, worker.name, cwd),
-        paneAlive && ownership
-          ? captureOwnedTeamPane(ownership)
-          : Promise.resolve(""),
-      ]);
+      const [status, heartbeat, paneCapture, latestProviderEvent] =
+        await Promise.all([
+          readWorkerStatus(sanitized, worker.name, cwd),
+          readWorkerHeartbeat(sanitized, worker.name, cwd),
+          paneAlive && ownership
+            ? captureOwnedTeamPane(ownership)
+            : Promise.resolve(""),
+          readLatestProviderEvent(
+            config.team_state_root ?? teamStateRoot(cwd, sanitized),
+            worker.name,
+            worker.launch_attempt_id,
+          ),
+        ]);
       return {
         worker,
         alive: paneAlive,
@@ -8728,6 +8752,7 @@ export async function monitorTeamV2(
         status,
         heartbeat,
         paneCapture,
+        latestProviderEvent,
       };
     }),
   );
@@ -8741,6 +8766,7 @@ export async function monitorTeamV2(
     status,
     heartbeat,
     paneCapture,
+    latestProviderEvent,
   } of workerSignals) {
     const currentTask = status.current_task_id
       ? (taskById.get(status.current_task_id) ?? null)
@@ -8785,6 +8811,16 @@ export async function monitorTeamV2(
       worktree_created: w.worktree_created,
       team_state_root: w.team_state_root,
       turnsWithoutProgress,
+      providerEvent:
+        latestProviderEvent.event === "none"
+          ? { event: "none", ageSeconds: null }
+          : {
+              event: latestProviderEvent.event,
+              ageSeconds: Math.max(
+                0,
+                Math.floor((Date.now() - latestProviderEvent.at) / 1000),
+              ),
+            },
     });
 
     if (providerLiveness === "dead") {

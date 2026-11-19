@@ -1358,7 +1358,9 @@ describe('runtime v2 startup inbox dispatch', () => {
     const manifest = JSON.parse(await readFile(absPath(cwd, TeamPaths.manifest('dispatch-team')), 'utf-8'));
     expect(config.tmux_server_identity).toEqual(mocks.tmuxServerIdentity);
     expect(manifest.tmux_server_identity).toEqual(mocks.tmuxServerIdentity);
-    expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: [] });
+    const hookSettings = join(absPath(cwd, TeamPaths.root('dispatch-team')), 'provider-event-hooks.json');
+    expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: ['--settings', hookSettings] });
+    expect(Object.keys(JSON.parse(await readFile(hookSettings, 'utf-8')).hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
     expect(manifest.workers[0].launch_descriptor).toEqual(config.workers[0].launch_descriptor);
     expect(config.service_descriptor).toMatchObject({ schema_version: 1, auto_merge_enabled: false, cadence_policy: 'disabled' });
   });
@@ -1677,7 +1679,11 @@ describe('runtime v2 startup inbox dispatch', () => {
         launchArgs?: string[];
         envVars?: Record<string, string>;
       } | undefined;
-      expect(launchConfig?.launchArgs).toEqual(['--dangerously-skip-permissions']);
+      expect(launchConfig?.launchArgs).toEqual([
+        '--dangerously-skip-permissions',
+        '--settings',
+        join(absPath(cwd, TeamPaths.root('dispatch-team')), 'provider-event-hooks.json'),
+      ]);
       expect(launchConfig?.envVars).toMatchObject(values);
     } finally {
       for (const [key, value] of Object.entries(previous)) {
