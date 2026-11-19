@@ -3,7 +3,7 @@
 // subsequence of them, and never waits less.
 //
 // Usage (from any cwd):
-//   node scripts/dev/readiness-diff.mjs [--base origin/dev] --set r5|trust|trust-partial [--expect identical] [--out /tmp/readiness-diff-<set>]
+//   node scripts/dev/readiness-diff.mjs [--base origin/dev] --set r5|r6|trust|trust-partial [--expect identical] [--out /tmp/readiness-diff-<set>]
 //
 // --expect identical replaces the set's own criteria with "every case sends
 // the same keys, returns the same result and waits as long as on base": for a
@@ -38,7 +38,7 @@ const HARNESS_FILES = [HARNESS, join('src', 'team', '__tests__', 'helpers', 'rea
 const FIXTURE_ROOT = join(HEAD_ROOT, 'src', 'team', '__tests__', 'fixtures', 'pane-frames');
 
 // Modules head must load for a set; a miss means head ran the base path.
-const REQUIRED_HEAD_MODULES = { r5: [], trust: [], 'trust-partial': [] };
+const REQUIRED_HEAD_MODULES = { r5: [], r6: ['provider-events'], trust: [], 'trust-partial': [] };
 
 // Sets whose head may send keys the base did not, in cases where the base
 // failed: there head has to keep going to succeed.
@@ -188,6 +188,14 @@ const SET_CRITERIA = {
     }
     return failures;
   },
+  // R6 only adds a hook argv flag and a monitor field: every case must match dev exactly.
+  r6: (pairs) => pairs.flatMap(({ id, base, head, sameKeys, sameResult }) => [
+    ...(sameKeys ? [] : [`${id} key sequence differs from base`]),
+    ...(sameResult ? [] : [`${id} result differs from base`]),
+    ...(head.wait_ms === base.wait_ms ? [] : [`${id} wait_ms differs from base`]),
+    ...(isDeepStrictEqual((head.nudges ?? []).map(n => n.at_ms), (base.nudges ?? []).map(n => n.at_ms))
+      ? [] : [`${id} nudge times differ from base`]),
+  ]),
 };
 
 function expectIdentical(pairs) {
