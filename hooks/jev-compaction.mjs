@@ -3080,13 +3080,16 @@ const sha256Hex = async (text) =>
 // maskSecrets has patterns that are quadratic in the length of one long run of word characters that holds many KEY or TOKEN (30 000 characters of it take
 // about 0.6 s, 90 000 about 6 s), and a synchronous scan cannot be stopped by the compaction's deadline. The stages that move a text whole never cut it before
 // the check, so they check at most SCAN_MAX_CHARS of one text (`max`; a pasted tag: its own limit, which a user may raise) and SCAN_BUDGET_CHARS of all the
-// text one stage checks in one compaction (`budget`: {left}). A text beyond either is `unchecked` and stays word for word, as one that holds a secret
-// ('secret') does; '' means clear.
+// text one stage checks in one compaction (`budget`: {left, deadline}). A text beyond either is `unchecked` and stays word for word, as one that holds a secret
+// ('secret') does; '' means clear. A scan cannot be stopped once it has begun, so none begins at or after the deadline of the compaction ('timed_out': the text
+// stays too); what one compaction can run past the deadline is one scan of one text. A stage that plans the same rows twice in one compaction (the floor and the run
+// of the agent stage) scans each row once: the second plan takes the result of the first.
 const SCAN_MAX_CHARS = 30000;
 const SCAN_BUDGET_CHARS = 4 * SCAN_MAX_CHARS;
 function secretCheck(text, privatePaths, budget, max = SCAN_MAX_CHARS) {
   if (namesSecretPath(text, privatePaths)) return 'secret';
   if (text.length > max || text.length > budget.left) return 'unchecked';
+  if (budget.deadline !== undefined && Date.now() >= budget.deadline) return 'timed_out';
   budget.left -= text.length;
   return maskSecrets(text) !== text ? 'secret' : '';
 }
@@ -3128,7 +3131,7 @@ function ownerRows(messages, prefixes) {
 // The tags to ask about, the largest PASTE_MAX_ASKS that pass every check: [{row, tag, text, inner}]. What stays, and why, is counted in
 // `stats`; a reason says that nothing can move. A row that holds tool results or that a delivered block is anchored to is never rebuilt here: the
 // replacement is a plain user row, so it would lose the results, or the delivery that only the row's handle brings back.
-function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new Map()) {
+function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new Map(), deadline = undefined) {
   if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return []; }
   if (!sessionId) { stats.reason = 'no_session'; return []; }
   if (!api) { stats.reason = 'no_api_form'; return []; }
@@ -3163,7 +3166,7 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new
   }
   // Masking has quadratic patterns, so it runs on the largest tags only, until there are enough, and within the budget of the check.
   const jobs = [];
-  const budget = { left: Math.max(SCAN_BUDGET_CHARS, PASTE_MAX_ASKS * limit) };
+  const budget = { left: Math.max(SCAN_BUDGET_CHARS, PASTE_MAX_ASKS * limit), deadline };
   for (const job of found.sort((a, b) => b.text.length - a.text.length)) {
     if (jobs.length >= PASTE_MAX_ASKS) { stats.unasked++; continue; }
     const held = secretCheck(job.text, cfg.privatePaths, budget, limit);
@@ -3215,7 +3218,7 @@ function startPastes($, cfg, record, messages, api, keepFrom, deadline, queued) 
   const stats = { mode, tags: 0, small: 0, kept_whole: 0, too_long: 0, secret: 0, owner_marked: 0, result_rows: 0, queued_anchor: 0, unchecked: 0, too_short: 0, unasked: 0, asked: 0, held: 0, yes: 0, no: 0, unanswered: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, answers: [], ...(mode === 'active' ? { installed: false } : {}) };
   record.pastes = stats;
   let jobs = [];
-  try { jobs = planPastes(messages, api, keepFrom, cfg, record.session_id, stats, queued); } catch { stats.error = 1; }
+  try { jobs = planPastes(messages, api, keepFrom, cfg, record.session_id, stats, queued, deadline); } catch { stats.error = 1; }
   return { stats, jobs, asks: askPastes($, cfg, jobs, record.session_id, stats, deadline) };
 }
 
@@ -3392,7 +3395,7 @@ function nonTextAssistantRows(messages, api) {
 }
 
 // Plans the runs that may move: [{row, start, end, text, path, trace}]. What stays, and why, is counted in `stats`; a reason says that nothing can move.
-async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queued = new Map()) {
+async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queued = new Map(), deadline = undefined) {
   if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return []; }
   if (!sessionId) { stats.reason = 'no_session'; return []; }
   if (!api) { stats.reason = 'no_api_form'; return []; }
@@ -3411,7 +3414,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   const skip = nonTextAssistantRows(messages, api);
   const direct = directReplyRows(messages, users, delivered);
   const jobs = [];
-  const budget = { left: SCAN_BUDGET_CHARS };
+  const budget = { left: SCAN_BUDGET_CHARS, deadline };
   for (let row = 0; row < limit; row++) {
     const m = messages[row];
     if (m.role !== 'assistant' || !m.text) continue;
@@ -3443,7 +3446,7 @@ async function moveReplies($, cfg, record, messages, api, keepFrom, deadline, qu
   try {
     const gate = { deadline, stalled: false };
     const byRow = new Map();
-    for (const job of await planReplies(cfg, messages, api, keepFrom, record.session_id, stats, queued)) {
+    for (const job of await planReplies(cfg, messages, api, keepFrom, record.session_id, stats, queued, deadline)) {
       if (mode === 'active') {
         const saved = await savePaste($, gate, job.path, job.text);
         if (saved === 'written' || saved === 'reused') stats[saved]++;
@@ -3734,9 +3737,11 @@ export function agentTrace(path, text, statePattern) {
 const agentSecret = (text, privatePaths) => namesSecretPath(text, privatePaths) || maskSecrets(text) !== text;
 
 // Plans the rows that move and, with opts.write, writes their files. opts: sessionId, skipRows (a Set of rows the host cannot rebuild from text, with
-// `unmatched`), keepFrom, queuedRows, statePattern, write (default true), deadline, source (the rows before the trim: a file holds the row as it came, whatever
-// the trim cut from it; the tokens that leave the conversation are those of the row as the trim left it). Returns {rows: Map row -> rebuilt row, stats}; the tokens it saves
-// are RATE_MOVED * moved_chars - RATE_TRACE * trace_chars of the stats. Never rejects.
+// `unmatched`), keepFrom, queuedRows, statePattern, write (default true), deadline (of the writes, and of the checks for a secret: none begins after it, the row stays
+// and counts as timed out), source (the rows before the trim: a file holds the row as it came, whatever the trim cut from it; the tokens that leave the conversation are
+// those of the row as the trim left it), checked (a Map the caller keeps across calls on the same rows: a row that was checked once is not checked again, so the floor's
+// plan and the run of one compaction scan each row once). Returns {rows: Map row -> rebuilt row, stats}; the tokens it saves are RATE_MOVED * moved_chars - RATE_TRACE * trace_chars
+// of the stats. Never rejects.
 export async function moveAgentMessages($, cfg, messages, opts = {}) {
   const write = opts.write !== false;
   const stats = { mode: write ? 'active' : 'plan', agent_rows: 0, limit_row: 0, kept_last: 0, considered: 0, skipped_blocks: 0, owner_words: 0, lead: 0, queued_anchor: 0, pending_json: 0, secret: 0, unchecked: 0, too_short: 0, too_short_chars: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0 };
@@ -3763,7 +3768,8 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
     // another session started this one with it.
     const leads = new Set([AGENT_LEAD, ...(agentRows[0] === 0 ? senders.get(0).map((x) => x.who).filter(Boolean) : [])]);
     const jobs = [];
-    const budget = { left: SCAN_BUDGET_CHARS };
+    const budget = { left: SCAN_BUDGET_CHARS, deadline: opts.deadline };
+    const checked = opts.checked instanceof Map ? opts.checked : undefined;
     for (const i of agentRows) {
       if (i === 0 || i >= tail) continue;
       const m = messages[i];
@@ -3777,7 +3783,9 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
       const text = m.text;
       const file = typeof opts.source?.[i]?.text === 'string' ? opts.source[i].text : text; // the row as it came: what the file holds and the trace describes
       if (text.length < AGENT_MIN_CHARS) { stats.too_short++; stats.too_short_chars += text.length; continue; }
-      const held = secretCheck(file, cfg.privatePaths, budget);
+      const known = checked?.get(i);
+      const held = known?.file === file ? known.held : secretCheck(file, cfg.privatePaths, budget);
+      checked?.set(i, { file, held });
       if (held) { stats[held]++; continue; }
       const path = `${cfg.pasteDir}/${safeName(opts.sessionId)}/${(await sha256Hex(file)).slice(0, 32)}.txt`;
       const trace = agentTrace(path, file, state);
@@ -3870,7 +3878,7 @@ async function decide($, e, cfg, record, started) {
   const trimmed = trim && trim.rows.size ? messages.map((m, i) => trim.rows.get(i) ?? m) : messages;
   const trimTokens = trim ? cfg.rates.RATE_ATT * trim.stats.chars : 0;
   // Agent messages to files: decided on the rows as the trim leaves them, filed as they came (source); the window of rows and the files are the same in the plan and in the run.
-  const agentOpts = agentSkip ? { sessionId: record.session_id, source: messages, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates } : undefined;
+  const agentOpts = agentSkip ? { sessionId: record.session_id, source: messages, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates, checked: new Map() } : undefined;
   const movedTokens = (st) => cfg.rates.RATE_MOVED * st.moved_chars - cfg.rates.RATE_TRACE * st.trace_chars;
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) return { fallback: 'too_few_results' };
@@ -3911,7 +3919,7 @@ async function decide($, e, cfg, record, started) {
       // the reply stage is left out with it so that both are counted once, in the plan. A session that only those two stages would spare goes to the
       // host's summary here, which is the safe side.
       if (agentOpts && cfg.mode === 'active') {
-        const planned = await moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: false });
+        const planned = await moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: false, deadline });
         agentsFloor = Math.max(0, movedTokens(planned.stats));
         record.floor_agents_tokens = Math.round(agentsFloor);
       }
