@@ -4183,9 +4183,18 @@ export async function executeRecoverDeadWorkerV2Owner(
     readRecoveryRequestReservation(input.cwd, input.requestId)?.recovery_id ??
       input.requestId,
   ]);
-  const attempt = (recoveryOwnerAttempts.get(key) ?? Promise.resolve())
+  const previous = recoveryOwnerAttempts.get(key);
+  const attempt = (previous ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => runRecoverDeadWorkerV2OwnerAttempt(input));
+    .then(() => {
+      // An attempt that waited returns the final the one before it published.
+      const settled = previous
+        ? readRecoveryFinalState(input.cwd, input.requestId)
+        : null;
+      return settled?.kind === "valid"
+        ? settled.final.result
+        : runRecoverDeadWorkerV2OwnerAttempt(input);
+    });
   recoveryOwnerAttempts.set(key, attempt);
   try {
     return await attempt;
