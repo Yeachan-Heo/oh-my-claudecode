@@ -907,7 +907,7 @@ const ddTargets = (args) => args.filter((arg) => arg.startsWith('of=') && arg.le
  * (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep.
  */
 function shellWriteTargets(command, depth = 0) {
-  const QUOTED = String.raw`"[^"]*"|'[^']*'`;
+  const QUOTED = String.raw`"(?:[^"\\]|\\[\s\S])*"|'[^']*'`; // a double-quoted string may hold \"
   const WORD = String.raw`(?:${QUOTED}|\\[^\n]|[^\s;&|)<>"'\\])+`;
   const text = withoutHeredocBodies(command);
   const targets = [];

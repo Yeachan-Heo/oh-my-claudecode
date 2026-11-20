@@ -595,8 +595,10 @@ it('quoted write targets are read in linear time', () => {
     `echo x > ${long('"a b"')}`,
     `echo x | tee ${long("'a b' ")}README.md`,
     long('"> a" '),
+    long('"\\" '),
+    `echo ${long('"a\\" ')} > README.md`,
   ], 'isMutation', "isMutation('Bash', { command })");
-  assert.equal(got.length, 9);
+  assert.equal(got.length, 11);
   assert.equal(got[8], false, 'quoted text holds no redirection');
 });
 
@@ -629,6 +631,13 @@ it('nested shells: the string of `sh -c` is read for writes, ssh stays out', () 
   // Two levels are read, a third is not.
   assert.equal(edits('sh -c "bash -c \'echo x > src/a.ts\'"'), true);
   assert.equal(edits('sh -c "sh -c \\"sh -c \'echo x > src/a.ts\'\\""'), false);
+  // A \" inside the double-quoted string is a quote of the inner command, not the end of the string.
+  assert.equal(edits('bash -c "echo \\"x > src/a.ts\\""'), false, 'the text is a quoted argument of echo');
+  assert.equal(edits('sh -c "echo \\"x > src/a.ts\\"" > README.md'), false);
+  assert.equal(edits('bash -c "echo \\"x\\" > src/a.ts"'), true, 'the redirect is outside the inner quotes');
+  assert.equal(edits('sh -c "echo \\"x > README.md\\"; echo y > src/a.ts"'), true);
+  assert.equal(edits('echo "a \\" > src/a.ts"'), false, 'an escaped quote does not end the string at the top level either');
+  assert.equal(edits('echo "a \\"" > src/a.ts'), true);
   // Ignored targets and commands without a write stay no change.
   assert.equal(edits("sh -c 'echo x > README.md'"), false);
   assert.equal(edits("sudo bash -c 'echo x > docs/a.md'"), false);
