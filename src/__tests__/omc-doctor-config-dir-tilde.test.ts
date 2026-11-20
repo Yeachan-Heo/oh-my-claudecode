@@ -17,8 +17,8 @@ const step6 = commandWith("' version(s):'") ?? '';
 // The shell blocks as written (they are run), selected by what they read outside their `node -e` commands.
 const blocks = [...skill.matchAll(/```bash\n([\s\S]*?)\n```/g)].map((m) => m[1])
   .filter((b) => proseOf(b).split('\n').some((l) => !l.startsWith('node -e ') && !l.startsWith('#') && l.includes('CLAUDE_CONFIG_DIR')));
-const EXPAND = String.raw`const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim(); const configDir = !configured ? path.join(home, '.claude') : configured === '~' ? home : /^~[/\x5c]/.test(configured) ? path.join(home, configured.slice(2)) : configured;`;
-const PRELUDE = String.raw`C="${'${CLAUDE_CONFIG_DIR:-$HOME/.claude}'}"; C=${'${C#"${C%%[![:space:]]*}"}'}; C=${'${C%"${C##*[![:space:]]}"}'}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${'${C#??}'};; esac`;
+const EXPAND = String.raw`const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim(); const configDir = !configured ? path.join(home, '.claude') : configured === '~' ? home : /^~[/\x5c]/.test(configured) ? path.join(home, configured.slice(2)) : path.normalize(configured);`;
+const PRELUDE = String.raw`C="${'${CLAUDE_CONFIG_DIR:-$HOME/.claude}'}"; C=${'${C#"${C%%[![:space:]]*}"}'}; C=${'${C%"${C##*[![:space:]]}"}'}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${'${C#??}'};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L`;
 const posix = process.platform !== 'win32';
 
 type World = { root: string; home: string; cwd: string; alt: string };
@@ -39,6 +39,8 @@ const profile = (dir: string) => {
   mkdirSync(path.join(dir, 'plugins', 'marketplaces', 'omc', '.claude-plugin'), { recursive: true });
   writeFileSync(path.join(dir, 'plugins', 'marketplaces', 'omc', '.claude-plugin', 'marketplace.json'), JSON.stringify({ name: 'omc', plugins: [{ name: 'oh-my-claudecode', version: '5.9.0' }] }));
   writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:START -->\n<!-- OMC:VERSION:5.8.0 -->\n');
+  // Only this directory opts out: a probe that read another one (the default, the working directory) would print enabled.
+  writeFileSync(path.join(dir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
   mkdirSync(path.join(dir, 'hooks'), { recursive: true });
   writeFileSync(path.join(dir, 'hooks', 'keyword-detector.sh'), '#!/bin/bash\n');
 };
@@ -90,12 +92,14 @@ describe('omc-doctor: a config directory given as a home path reaches the real d
   const cases: Array<[string, string, string | undefined]> = [
     ['~/.claude-alt', '.claude-alt', undefined],
     ['~\\.claude-alt', '.claude-alt', 'win32'],
+    // The same form on the real platform name: the expansion must not depend on a process that reports win32.
+    ['~\\.claude-alt', '.claude-alt', undefined],
     ['  ~/.claude-alt  ', '.claude-alt', undefined],
     ['~', '', undefined],
   ];
 
   for (const [configured, below, platform] of cases) {
-    test(`${JSON.stringify(configured)}: Step 1, Steps 4 and 6 and both repair commands use the home directory`, () => {
+    test(`${JSON.stringify(configured)}${platform ? ` (the process reports ${platform})` : ''}: Step 1, Steps 4 and 6 and both repair commands use the home directory`, () => {
       const w = world();
       try {
         const dir = path.join(w.home, below);
@@ -106,7 +110,7 @@ describe('omc-doctor: a config directory given as a home path reaches the real d
         expect(step1).toContain('Installed: 5.8.0');
         expect(step1).toContain('Latest: 5.9.0');
         expect(step1).toContain('Updater: claude plugin');
-        expect(runNode(w, step4Opt, configured, platform)).toContain('CLAUDE.md management enabled');
+        expect(runNode(w, step4Opt, configured, platform)).toContain('CLAUDE.md management disabled by claudeMdEnabled: false');
         expect(runNode(w, step6, configured, platform)).toContain('2 version(s): ');
         // Step 4 is written for a shell (doubled backslashes), so it runs through bash where one exists.
         if (posix) {

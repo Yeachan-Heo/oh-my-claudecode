@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { commands, ageVersions, scriptOf, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
@@ -19,6 +19,9 @@ describe('omc-doctor cache commands on a synthetic config directory (occupancy, 
   function link(target: string, at: string, form: 'relative' | 'junction' = 'relative') {
     if (form === 'junction' || process.platform === 'win32') symlinkSync(path.resolve(path.dirname(at), target), at, 'junction');
     else symlinkSync(target, at);
+    // A link is dated itself: one made just now counts as a recent change and keeps its version alone, whatever protects it.
+    const then = new Date(Date.now() - 3_600_000);
+    lutimesSync(at, then, then);
   }
 
 
@@ -154,7 +157,7 @@ describe('omc-doctor cache commands on a synthetic config directory (occupancy, 
           [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }, { scope: 'user', installPath: path.join(dir, 'a'.repeat(300)) }],
         });
         const result = runCommand(command, dir);
-        expect(result.status).toBe(0);
+        expect(result.status).toBe(1);
         expect(digitVersions(cache)).toBe('5.8.0,5.8.1,5.9.0');
         expect(movedAside(dir)).toBe(0);
         expect(result.stdout).toMatch(/Nothing moved/);
@@ -349,7 +352,7 @@ process.kill = function (pid, signal) {
         expect(spawnSync('mkfifo', [registry]).status).toBe(0);
         const result = runCommand(command, dir, { timeout: 20_000 });
         expect(result.error).toBeUndefined();
-        expect(result.status).toBe(0);
+        expect(result.status).toBe(1);
         expect(result.stdout).toMatch(/could not be read completely/);
         expect(digitVersions(cache)).toBe('5.8.0,5.8.1');
         expect(movedAside(dir)).toBe(0);
@@ -506,7 +509,7 @@ process.kill = function (pid, signal) {
         writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }, { scope: 'user', version: '6.0.0' }] });
         const result = runCommand(command, dir);
         expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
-          .toEqual({ status: 0, versions: ['5.0.0', '5.1.0', ...names].sort().join(','), moved: 0 });
+          .toEqual({ status: 1, versions: ['5.0.0', '5.1.0', ...names].sort().join(','), moved: 0 });
         expect(result.stdout).toMatch(/Nothing moved: .*could not be read completely/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -527,7 +530,7 @@ fs.readlinkSync = function () { const e = new Error('injected readlink failure')
         writeFileSync(preload, failReadlinkPreload);
         const result = runCommand(command, dir, { preloads: [preload] });
         expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
-          .toEqual({ status: 0, versions: '5.0.0,5.1.0,5.8.0,5.9.0', moved: 0 });
+          .toEqual({ status: 1, versions: '5.0.0,5.1.0,5.8.0,5.9.0', moved: 0 });
         expect(result.stdout).toMatch(/Nothing moved: .*could not be read completely/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -548,7 +551,7 @@ fs.readlinkSync = function () { const e = new Error('injected readlink failure')
           const result = runCommand(command, dir);
           expect({ referenced, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
             .toEqual(referenced
-              ? { referenced, status: 0, versions: '5.1.0,5.7.0,5.8.0,5.9.0', moved: 0 }
+              ? { referenced, status: 1, versions: '5.1.0,5.7.0,5.8.0,5.9.0', moved: 0 }
               : { referenced, status: 0, versions: '5.1.0', moved: 3 });
           if (referenced) expect(result.stdout).toMatch(/Nothing moved: .*could not be read completely/);
         } finally {
@@ -588,7 +591,7 @@ fs.readlinkSync = function () { const e = new Error('injected readlink failure')
           expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
             expected === 'moved 1'
               ? { label, status: 0, versions: '5.8.0,5.9.0', moved: 1 }
-              : { label, status: 0, versions: '5.7.0,5.8.0,5.9.0', moved: 0 },
+              : { label, status: 1, versions: '5.7.0,5.8.0,5.9.0', moved: 0 },
           );
         } finally {
           rmSync(dir, { recursive: true, force: true });

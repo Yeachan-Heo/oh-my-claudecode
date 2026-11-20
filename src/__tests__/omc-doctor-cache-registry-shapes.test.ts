@@ -23,7 +23,7 @@ describe('omc-doctor cache commands on a synthetic config directory (registry sh
           writeRegistryFile(dir, content);
           const result = runCommand(command, dir);
           expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
-            .toEqual({ label, status: 0, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+            .toEqual({ label, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
           expect(result.stdout).toMatch(/Nothing moved: .*could not be read completely/);
         } finally {
           rmSync(dir, { recursive: true, force: true });
@@ -105,7 +105,7 @@ describe('omc-doctor cache commands on a synthetic config directory (registry sh
           breakIt(dir);
           const result = runCommand(command, dir);
           expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
-            .toEqual({ label, status: 0, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+            .toEqual({ label, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
           expect(result.stdout).toMatch(/Nothing moved/);
           expect(result.stdout).not.toMatch(/Moved \d/);
         } finally {
@@ -155,7 +155,7 @@ describe('omc-doctor cache commands on a synthetic config directory (registry sh
           writeRegistry(dir, registry(cache));
           const result = runCommand(command, dir);
           expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
-            .toEqual({ label, status: 0, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+            .toEqual({ label, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
           expect(result.stdout).toMatch(/Nothing moved: .*could not be read completely/);
         } finally {
           rmSync(dir, { recursive: true, force: true });
@@ -191,7 +191,7 @@ describe('omc-doctor cache commands on a synthetic config directory (registry sh
             writeRegistry(dir, position === 'before' ? { ...other, ...pin } : { ...pin, ...other });
             const result = runCommand(command, dir);
             expect({ label, position, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
-              .toEqual({ label, position, status: 0, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+              .toEqual({ label, position, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
             expect(result.stdout).toMatch(/Nothing moved: .*could not be read completely/);
           } finally {
             rmSync(dir, { recursive: true, force: true });
@@ -237,7 +237,8 @@ describe('omc-doctor cache commands on a synthetic config directory (registry sh
   // A preload that makes the K-th renameSync of the command throw, so the move
   // fails after K-1 versions were already moved (a chmod would not stop a root
   // user, and a directory that blocks the first move would not reach a later one).
-  // On Windows a directory that another process holds open fails the same way, with EPERM or EBUSY.
+  // On Windows a directory that another process holds open fails the same way, with EPERM or EBUSY; a backup directory on
+  // another volume than the cache fails with EXDEV, and stops the run the same way.
   const failRenamePreload = `const fs = require('fs'); const real = fs.renameSync; let calls = 0;
 fs.renameSync = function (...args) {
   calls += 1;
@@ -249,7 +250,7 @@ fs.renameSync = function (...args) {
   test('a move that fails at the first, a middle or the last version reports the count and leaves every version in exactly one place', () => {
     const all = ['5.5.0', '5.6.0', '5.7.0', '5.8.0', '5.9.0'];
     for (const command of commands) {
-      for (const [failAt, code] of [[1, 'EIO'], [2, 'EIO'], [3, 'EIO'], [2, 'EPERM'], [2, 'EBUSY']] as const) {
+      for (const [failAt, code] of [[1, 'EIO'], [2, 'EIO'], [3, 'EIO'], [2, 'EPERM'], [2, 'EBUSY'], [2, 'EXDEV']] as const) {
         const { dir, cache } = makeCache(all);
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }, { scope: 'user', version: '5.9.0' }] });
@@ -259,7 +260,7 @@ fs.renameSync = function (...args) {
           const moved = failAt - 1;
           const inBackup = readdirSync(backupDir(dir)).map((n) => n.replace(/-\d+$/, '')).sort();
           const inCache = readdirSync(cache).filter((n) => /^\d/.test(n)).sort();
-          expect({ failAt, code, status: result.status, moved: inBackup.length }).toEqual({ failAt, code, status: 0, moved });
+          expect({ failAt, code, status: result.status, moved: inBackup.length }).toEqual({ failAt, code, status: 1, moved });
           expect([...inBackup, ...inCache].sort()).toEqual(all);
           expect(inCache).toEqual(expect.arrayContaining(['5.8.0', '5.9.0']));
           for (const name of readdirSync(backupDir(dir))) expect(existsSync(path.join(backupDir(dir), name, 'package.json'))).toBe(true);

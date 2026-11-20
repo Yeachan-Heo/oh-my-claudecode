@@ -114,21 +114,25 @@ describe('omc-doctor: the version fields of the registry entries of OMC are vali
           clone: { omc: '5.9.0' },
         });
         expect({ version, channel: out.Channel, installed: out.Installed }).toEqual({ version, channel: 'marketplace omc', installed: '5.9.0' });
+        // The same entry with no entry of OMC beside it: the registry names no OMC install, so the cache decides.
+        const alone = step1({ plugins: { 'other@market': [{ version, installPath: '/elsewhere' }] }, cache: { omc: ['5.7.0'] } });
+        expect({ version, channel: alone.Channel, installed: alone.Installed }).toEqual({ version, channel: 'npm', installed: '5.7.0' });
       }
     });
 
-    test('a cache directory name keeps counting as a version directory, as the runtime lists it', () => {
-      expect(step1({ cache: { omc: ['5.9', '5.7.0'] } })).toMatchObject({ Channel: 'npm', Installed: '5.9' });
+    test('a cache directory name that is no semantic version takes no part: the real version beside it is Installed', () => {
+      expect(step1({ cache: { omc: ['5.9', '5.7.0'] } })).toMatchObject({ Channel: 'npm', Installed: '5.7.0' });
     });
   });
 
   describe('the cache commands', () => {
-    const snapshot = (versions: string[], plugins: Record<string, unknown>, command: string) => {
+    // status: 1 for a registry the command refuses to read, 0 otherwise.
+    const snapshot = (versions: string[], plugins: Record<string, unknown>, command: string, status = 0) => {
       const { dir, cache } = makeCache(versions);
       try {
         writeRegistry(dir, plugins);
         const result = runCommand(command, dir, { timeout: 60_000 });
-        expect(result.status).toBe(0);
+        expect(result.status).toBe(status);
         return { stdout: result.stdout, left: digitVersions(cache), moved: movedAside(dir) };
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -139,7 +143,7 @@ describe('omc-doctor: the version fields of the registry entries of OMC are vali
       for (const command of commands) {
         for (const version of bad) {
           for (const entries of [[{ scope: 'project', version }, { scope: 'user', version: '5.9.0' }], [{ scope: 'user', version: '5.9.0' }, { scope: 'project', version }]]) {
-            const out = snapshot(['5.7.0', '5.8.0', '5.9.0'], { [PLUGIN_ID]: entries }, command);
+            const out = snapshot(['5.7.0', '5.8.0', '5.9.0'], { [PLUGIN_ID]: entries }, command, 1);
             expect({ version, left: out.left, moved: out.moved }).toEqual({ version, left: '5.7.0,5.8.0,5.9.0', moved: 0 });
             expect(out.stdout).toMatch(/Nothing moved: installed_plugins\.json/);
           }
@@ -150,7 +154,7 @@ describe('omc-doctor: the version fields of the registry entries of OMC are vali
     test('a value that is not a string or is blank moves nothing, as before', () => {
       for (const command of commands) {
         for (const version of malformed) {
-          const out = snapshot(['5.8.0', '5.9.0'], { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }, { scope: 'project', version }] }, command);
+          const out = snapshot(['5.8.0', '5.9.0'], { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }, { scope: 'project', version }] }, command, 1);
           expect({ version, left: out.left, moved: out.moved }).toEqual({ version, left: '5.8.0,5.9.0', moved: 0 });
         }
       }

@@ -116,11 +116,12 @@ describe('omc-doctor: numeric parts of a version are ordered as digit strings of
       }
     });
 
-    test('cache names with leading zeros are the numbers they spell', () => {
-      expect(step1({ cache: { omc: [`5.${LOW}.0`, `5.0000${HIGH}.0`] } }).Installed).toBe(`5.0000${HIGH}.0`);
+    test('cache names with leading zeros are no versions, and a registry prerelease with zeros is the number it spells', () => {
+      // A numeric part with a leading zero is outside the grammar: such a name takes no part, whatever it would spell.
+      expect(step1({ cache: { omc: [`5.${LOW}.0`, `5.0000${HIGH}.0`] } }).Installed).toBe(`5.${LOW}.0`);
       expect(step1({ cache: { omc: [`5.${LOW}.0`, `5.00001.0`] } }).Installed).toBe(`5.${LOW}.0`);
-      // A long run of zeros before a small number does not make it the larger one (a registry version may carry them in a prerelease).
       expect(step1({ cache: { omc: [`5.${'0'.repeat(30)}1.0`, '5.2.0'] } }).Installed).toBe('5.2.0');
+      // A long run of zeros before a small number does not make it the larger one (a registry version may carry them in a prerelease).
       const registry = step1({ plugins: { [PLUGIN_ID]: [{ scope: 'user', version: `5.9.0-beta.${'0'.repeat(30)}1` }, { scope: 'project', version: '5.9.0-beta.2' }] }, clone: { omc: '9.9.9' } });
       expect(registry.Installed).toBe('5.9.0-beta.2');
     });

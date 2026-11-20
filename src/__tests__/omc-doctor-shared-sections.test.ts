@@ -9,16 +9,17 @@ import { versionCommand } from './helpers/omc-doctor-step1.js';
 const step4 = commandWith('Latest cached plugin version') ?? '';
 const step6 = commandWith("' version(s):'") ?? '';
 const probe = commandWith('claudeMdEnabled') ?? '';
+const npm = commandWith("'npm latest: '") ?? '';
 const [outdated, stale] = [commands[0] ?? '', commands[1] ?? ''];
 const step1 = versionCommand ?? '';
 
-const named: Array<[string, string]> = [['Step 1', step1], ['Step 4', step4], ['Step 6', step6], ['outdated plugin command', outdated], ['stale cache command', stale]];
+const named: Array<[string, string]> = [['Step 1', step1], ['npm latest command', npm], ['Step 4', step4], ['Step 6', step6], ['outdated plugin command', outdated], ['stale cache command', stale]];
 
 // Which commands carry which shared section.
 const MEMBERS: Record<string, string[]> = {
   'config dir': ['Step 1', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
   'plugin ids': ['Step 1', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
-  'version grammar': ['Step 1', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
+  'version grammar': ['Step 1', 'npm latest command', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
   'version order': ['Step 1', 'Step 4'],
   'read file': ['Step 1', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
   'registry marketplaces': ['Step 4', 'Step 6'],
@@ -33,8 +34,8 @@ const MEMBERS: Record<string, string[]> = {
 };
 
 describe('omc-doctor: the commands of the skill carry equal copies of their shared sections', () => {
-  test('the skill has the six commands, each found once', () => {
-    expect(skillCommands).toHaveLength(6);
+  test('the skill has the seven commands, each found once', () => {
+    expect(skillCommands).toHaveLength(7);
     for (const [label, command] of [...named, ['opt-out probe', probe]]) expect({ label, found: command !== '' }).toEqual({ label, found: true });
     expect(commands).toHaveLength(2);
     expect(outdated).not.toBe(stale);

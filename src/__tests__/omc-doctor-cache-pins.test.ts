@@ -240,7 +240,7 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
         // A file where the backup directory should go makes the move fail.
         writeFileSync(path.join(dir, 'plugins', 'backups'), 'not a directory');
         const result = runCommand(command, dir);
-        expect(result.status).toBe(0);
+        expect(result.status).toBe(1);
         expect(result.stdout).toMatch(/Cache move failed \(0 moved before the error\)/);
         expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean/);
         expect(digitVersions(cache)).toBe('5.8.0,5.9.0');
@@ -275,7 +275,7 @@ for (const name of ['statSync', 'readdirSync']) {
           const { dir, cache } = makeConfigDir(['5.8.0', '5.9.0'], '5.9.0');
           try {
             const result = runCommand(command, dir, { preloads: [failing(dir, [{ fn: 'readdirSync', path: cache, code }])] });
-            expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.8.0,5.9.0', moved: 0 });
+            expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 1, versions: '5.8.0,5.9.0', moved: 0 });
             expect(result.stdout).toContain(`Nothing moved: could not read ${cache} (${code})`);
             expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean/);
           } finally {
@@ -293,7 +293,7 @@ for (const name of ['statSync', 'readdirSync']) {
           mkdirSync(path.dirname(target), { recursive: true });
           writeFileSync(target, 'not a directory');
           const result = runCommand(command, dir);
-          expect(result.status).toBe(0);
+          expect(result.status).toBe(1);
           expect(result.stdout).toContain(`Nothing moved: could not read ${target} (ENOTDIR)`);
           expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean/);
         } finally {
@@ -313,7 +313,7 @@ for (const name of ['statSync', 'readdirSync']) {
           const rules = (['statSync', 'readdirSync'] as const).map((fn) => ({ fn, path: cache, code: 'EACCES' }));
           const result = runCommand(command, dir, { preloads: [failing(dir, rules)] });
           expect({ status: result.status, first: digitVersions(cache), second: digitVersions(other), moved: movedAside(dir) })
-            .toEqual({ status: 0, first: '5.8.0,5.9.0', second: '5.7.0,5.8.0', moved: 0 });
+            .toEqual({ status: 1, first: '5.8.0,5.9.0', second: '5.7.0,5.8.0', moved: 0 });
           expect(result.stdout).toContain(`omc: Nothing moved: could not read ${cache} (EACCES)`);
           expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean|Moved/);
         } finally {
@@ -351,9 +351,9 @@ for (const name of ['statSync', 'readdirSync']) {
     }
   });
 
-  test('pinned version is compared by equality (5.8 is not protected by a 5.8.1 pin)', () => {
+  test('pinned version is compared by equality (5.8.0 is not protected by a 5.8.1 pin)', () => {
     for (const command of commands) {
-      const { dir, cache } = makeConfigDir(['5.8', '5.8.1'], '5.8.1');
+      const { dir, cache } = makeConfigDir(['5.8.0', '5.8.1'], '5.8.1');
       try {
         const result = runCommand(command, dir);
         expect(result.status).toBe(0);
@@ -648,7 +648,7 @@ for (const name of ['statSync', 'readdirSync']) {
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
           const result = runCommand(command, dir, { env: env(dir) });
-          expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ label, status: 0, versions, moved });
+          expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ label, status: label === 'two different existing roots' ? 1 : 0, versions, moved });
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

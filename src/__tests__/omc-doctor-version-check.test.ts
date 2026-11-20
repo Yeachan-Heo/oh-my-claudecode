@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -16,8 +16,9 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     // The npm line has its own label, so an offline run never prints a second `Latest:` next to a marketplace one.
     const prose = proseOf(text);
     const block = prose.slice(prose.indexOf('### Step 1'), prose.indexOf('**Diagnosis**'));
-    expect(block).toContain('echo "npm latest: (unavailable)"');
-    expect(block).toContain('echo "npm latest: $latest"');
+    const npmCommand = commandWith("'npm latest: '") ?? '';
+    expect(scriptOf(npmCommand)).toContain("console.log('npm latest: ' + (latest || '(unavailable)'))");
+    expect(scriptOf(npmCommand)).not.toContain('Latest:');
     expect(block.split('\n').filter((l) => !l.startsWith('node -e ') && l.includes('Latest:') && !l.startsWith('#'))).toEqual([]);
   });
 
@@ -229,26 +230,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(code.match(/\.sort\(compareVersions\)/g)).toHaveLength(2);
   });
 
-  // The npm line runs in the shell, so the case runs it with a fake npm first on PATH.
-  test.skipIf(process.platform === 'win32')('the npm line is labelled on success and on failure, never a bare version', () => {
-    const line = text.split('\n').find((l) => l.startsWith('latest=$(npm view '));
-    expect(line).toBeDefined();
-    const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-npm-'));
-    try {
-      const run = (npm: string) => {
-        writeFileSync(path.join(dir, 'npm'), `#!/bin/sh\n${npm}\n`);
-        chmodSync(path.join(dir, 'npm'), 0o755);
-        const result = spawnSync('bash', ['-c', line ?? ''], { encoding: 'utf8', env: { ...process.env, PATH: dir + path.delimiter + (process.env.PATH ?? '') } });
-        return { status: result.status, stdout: result.stdout };
-      };
-      expect(run('echo 5.9.1')).toEqual({ status: 0, stdout: 'npm latest: 5.9.1\n' });
-      expect(run('exit 1')).toEqual({ status: 0, stdout: 'npm latest: (unavailable)\n' });
-      expect(run('exit 0')).toEqual({ status: 0, stdout: 'npm latest: (unavailable)\n' });
-      expect(run('echo 5.9.1; exit 3')).toEqual({ status: 0, stdout: 'npm latest: (unavailable)\n' });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  // The npm line is a command of its own: omc-doctor-npm-latest.test.ts runs it with a fake npm on success, on failure and on a hang.
 
   test('a bare plugin ID keeps the legacy omc marketplace', () => {
     expect(step1({ plugins: { 'oh-my-claudecode': [{ version: '5.8.0' }] }, clone: { omc: '5.8.0' } })).toMatchObject({
@@ -259,7 +241,8 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
   });
 
   test('an unreadable registry names no updater', () => {
-    for (const raw of ['{not json', '[]', 'null']) {
+    // The last one is valid JSON behind a byte order mark, which the installer's reader rejects too.
+    for (const raw of ['{not json', '[]', 'null', `\uFEFF${JSON.stringify({ plugins: { 'oh-my-claudecode@omc': [{ version: '5.9.0' }] } })}`]) {
       const out = step1({ raw, cache: { omc: ['5.9.0'] } });
       expect(Object.keys(out)).toEqual(['Channel']);
       expect(out.Channel).toContain('unknown');
@@ -704,7 +687,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(text).not.toMatch(/\/omc-setup\b.*\bnpm install\b/);
     const diagnosis = text.slice(text.indexOf('### Step 1'), text.indexOf('### Step 2'));
     expect(diagnosis).toContain('LATEST comes from the install channel the registry records');
-    expect(diagnosis).toContain('`npm view` (the `npm latest:` line) is consulted only for `Channel: npm`, so ignore that line for a marketplace install');
+    expect(diagnosis).toContain('`npm view` (the `npm latest:` line, printed by a command of its own that gives npm 20 seconds) is consulted only for `Channel: npm`, so ignore that line for a marketplace install');
     expect(diagnosis).toContain('never compared with an npm-only release');
     expect(diagnosis).toContain('If INSTALLED equals the channel\'s latest, there is no WARN');
     expect(diagnosis).toContain('Order versions as semantic versions, never as text');

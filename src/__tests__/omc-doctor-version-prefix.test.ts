@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { commands, commandWith, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptOf, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { ageVersions, commands, commandWith, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptOf, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
 
 // The runtime reads a version with an optional leading `v` as the same version (`parseSemver` in scripts/session-start.mjs,
@@ -104,6 +104,8 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
         const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
         try {
           mkdirSync(path.join(cache, 'v5.7.0'));
+          // Dated an hour back: a fresh directory is left alone whatever its name says, so only an old one proves the name.
+          ageVersions(cache);
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
           const result = runCommand(command, dir, { timeout: 20_000 });
           expect(result.status).toBe(0);

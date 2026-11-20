@@ -37,7 +37,7 @@ describe('omc-doctor: one path resolver in Step 1 and in both cache commands', (
 describe.skipIf(!POSIX)('omc-doctor: a protecting path that has `..` after a link is read as the file system reads it', { timeout: 120_000 }, () => {
   type Ctx = { dir: string; cache: string; at: (name: string) => string };
   // `protects` says whether the path ends in the cache version 5.9.0 or goes through it; `folded` says whether the same text
-  // folded as text lands in it (the runtime folds an occupancy record that way, so a record protects by both readings).
+  // folded as text lands in it (the runtime folds an occupancy record that way, so every carrier is read by both readings).
   const layouts: Array<{ label: string; protects: boolean; folded?: boolean; build: (c: Ctx) => string }> = [
     {
       label: 'a link to a directory inside the version, then ..',
@@ -79,6 +79,16 @@ describe.skipIf(!POSIX)('omc-doctor: a protecting path that has `..` after a lin
       build: (c) => {
         symlinkSync(path.join(c.cache, '5.9.0', 'nested'), c.at('shortcut'));
         return `${c.at('shortcut')}${path.sep}..${path.sep}`;
+      },
+    },
+    {
+      label: 'a link inside the version to a directory outside the cache, then ..',
+      protects: true,
+      build: (c) => {
+        mkdirSync(c.at(path.join('outside', 'a', 'b')), { recursive: true });
+        symlinkSync(c.at(path.join('outside', 'a', 'b')), path.join(c.cache, '5.9.0', 'ext'));
+        // Read by the file system this is <dir>/outside/a, no part of the cache; read as text it is <cache>/5.9.0.
+        return `${path.join(c.cache, '5.9.0', 'ext')}${path.sep}..`;
       },
     },
     {
@@ -154,7 +164,7 @@ describe.skipIf(!POSIX)('omc-doctor: a protecting path that has `..` after a lin
               expect(result.error).toBeUndefined();
               expect(result.status).toBe(0);
               // 5.8.1 is pinned and stays; 5.7.0 is free and moves; 5.9.0 stays only when the path protects it.
-              const keeps = layout.protects || (layout.folded === true && carrier === 'occupancy record');
+              const keeps = layout.protects || layout.folded === true;
               expect({ left: digitVersions(cache), moved: movedAside(dir) }).toEqual(keeps ? { left: '5.8.1,5.9.0', moved: 1 } : { left: '5.8.1', moved: 2 });
               if (layout.protects && carrier === 'installPath of a registry entry') expect(existsSync(target)).toBe(true);
               if (!keeps) expect(readdirSync(backupDir(dir)).map((n) => n.slice(0, 5)).sort()).toEqual(['5.7.0', '5.9.0']);

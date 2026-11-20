@@ -6,7 +6,7 @@ level: 3
 
 # Doctor Skill
 
-Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when that environment variable is set. Surrounding spaces are ignored and an empty value means `~/.claude`. A value that is `~`, or starts with `~/` or `~\`, means the home directory (OMC's runtime reads it that way; the shell does not expand a `~` stored in a variable), and a `~` anywhere else is literal. The `node -e` commands below expand it with one shared expression and each shell block starts with the same expansion line; expand a path you read or write yourself the same way. Run every `node -e` command exactly as written, whole and in one Bash call: its lines belong together, and the sections headed `// == <name> (shared) ==` are copies of the same text in every command that needs them.
+Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when that environment variable is set. Surrounding spaces are ignored and an empty value means `~/.claude`. A value that is `~`, or starts with `~/` or `~\`, means the home directory (OMC's runtime reads it that way; the shell does not expand a `~` stored in a variable), and a `~` anywhere else is literal. The `node -e` commands below expand it with one shared expression and each shell block starts with the same expansion line; expand a path you read or write yourself the same way. A `..` in the value is folded as text, as the runtime does, in the commands and in the shell blocks alike (a path that goes through a link and then `..` names the parent of the link, not of its target). Run every `node -e` command exactly as written, whole and in one Bash call: its lines belong together, and the sections headed `// == <name> (shared) ==` are copies of the same text in every command that needs them. Run every shell block whole too, in one Bash call: the tool keeps no variable from one call to the next, so a line that uses `$C` alone, without the first line of its block that sets it, sees an empty value.
 
 ## Task: Run Installation Diagnostics
 
@@ -22,7 +22,8 @@ node -e "
 // == config dir (shared) ==
 // CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
 // ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
-// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+// ~ and a backslash means the home directory, and any other value is used as given, normalized as text like the
+// runtime does (a .. after a link folds the link away, a ~ anywhere else is literal).
 const path = require('path');
 const fs = require('fs');
 const home = require('os').homedir();
@@ -33,7 +34,7 @@ const configDir = !configured
     ? home
     : /^~[/\x5c]/.test(configured)
       ? path.join(home, configured.slice(2))
-      : configured;
+      : path.normalize(configured);
 // == plugin ids (shared) ==
 // The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
 const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
@@ -54,9 +55,10 @@ const semver = (text) => {
   const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
   return grammar.test(trimmed) ? dropV(trimmed) : '';
 };
-// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
-// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
-const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// A cache directory is a version directory when its name is exactly a semantic version of that grammar (no v, no
+// spaces) and is not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>. A name that
+// is no version (1e3, 4.15.7L, v5.7.0) takes no part in the order and is never moved as a version.
+const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
 // == version order (shared) ==
 // Semantic version precedence as a comparison function. Numeric parts compare as digit strings (leading zeros
 // dropped, the longer one is larger, equal lengths compare as text), never as numbers: a number past 2^53 is not
@@ -254,6 +256,11 @@ const entryInstallPaths = (market, entry) =>
 // supported: [key, entries] of the supported plugin IDs. unreadable: the file is not usable. malformed: a
 // supported ID has an unusable entry list. ambiguous: another key could be an OMC install (a look-alike key, an
 // empty or non-array list, a malformed entry), so npm cannot be assumed.
+// Limits kept on purpose, because the installer reads the registry the same way (resolveInstalledOmcPluginRoots in
+// src/installer): an installPath is used as written (a relative one is not resolved against the configuration
+// directory), scope and projectPath are not read (every entry of a supported ID counts, so the highest version is
+// Installed, whichever project it was installed for), and two spellings of one plugin ID are two plugins that print
+// a block each. The Updater line carries no CLAUDE_CONFIG_DIR: run it in the environment that holds the profile.
 let unreadable = false;
 let malformed = false;
 let ambiguous = false;
@@ -278,6 +285,9 @@ try {
 
 // == plugin roots ==
 // The plugin root variables that name an existing directory. OMC_PLUGIN_ROOT (--plugin-dir) is the explicit one.
+// CLAUDE_PLUGIN_ROOT is only a locator here: Claude Code sets it for marketplace installs too, so it names a checkout
+// only when the registry holds no supported plugin ID. The installer's resolver also counts a lone CLAUDE_PLUGIN_ROOT
+// as an explicit root; the difference is deliberate, a marketplace install must not be reported as a checkout.
 const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT]
   .map((root) => (root || '').trim())
   .filter(Boolean)
@@ -354,7 +364,36 @@ if (roots.length > 1 && !sameDirectory(roots[0], roots[1])) {
 for (const line of out) console.log(line);
 "
 # npm latest: for a Channel: npm install only; a marketplace channel's latest is its own Latest: line above, never this one
-latest=$(npm view oh-my-claude-sisyphus version 2>/dev/null) && [ -n "$latest" ] && echo "npm latest: $latest" || echo "npm latest: (unavailable)"
+node -e "
+// omc-doctor Step 1, npm channel only: the latest version of the npm package, or (unavailable).
+// == version grammar (shared) ==
+// A leading v is dropped here and nowhere else.
+const dropV = (text) => text.replace(/^v(?=[0-9])/, '');
+// The grammar of parseSemver in scripts/session-start.mjs: an optional v, three numeric parts without leading
+// zeros, an optional prerelease and optional build metadata. Returns the bare version, or '' for anything else.
+const semver = (text) => {
+  const trimmed = text.trim();
+  const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
+  return grammar.test(trimmed) ? dropV(trimmed) : '';
+};
+// A cache directory is a version directory when its name is exactly a semantic version of that grammar (no v, no
+// spaces) and is not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>. A name that
+// is no version (1e3, 4.15.7L, v5.7.0) takes no part in the order and is never moved as a version.
+const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+
+// == npm latest ==
+// npm view gets 20 seconds: it normally answers in a few, and a hanging network must not stall the diagnosis. Only a
+// semantic version of the grammar above is an answer; an error, a timeout or anything else on stdout is
+// (unavailable), never a bare string.
+const { spawnSync } = require('child_process');
+const view = ['view', 'oh-my-claude-sisyphus', 'version'];
+const options = { encoding: 'utf8', timeout: 20000, killSignal: 'SIGKILL' };
+// npm is a .cmd file on Windows, which only a shell can start.
+const run =
+  process.platform == 'win32' ? spawnSync('npm ' + view.join(' '), { ...options, shell: true }) : spawnSync('npm', view, options);
+const latest = run.status === 0 ? semver(run.stdout) : '';
+console.log('npm latest: ' + (latest || '(unavailable)'));
+"
 ```
 
 **Diagnosis**:
@@ -362,8 +401,8 @@ latest=$(npm view oh-my-claude-sisyphus version 2>/dev/null) && [ -n "$latest" ]
 - If no version installed (`Installed: (none)` under `Channel: npm` or `Channel: marketplace`, never under `Channel: plugin-dir`): CRITICAL - plugin not installed
 - If `Channel: unknown`: CRITICAL - the install channel cannot be established, so the install cannot be diagnosed. Step 1 reads `installed_plugins.json` by the rules of the cache commands below: it must be a regular file (a FIFO is never opened) holding valid JSON, and every entry list under a supported plugin ID must be a non-empty array of entries that each have a non-blank string `version` or `installPath`, and a `version` there must be a semantic version of the grammar of the `Latest:` line below (`999x.0.0`, `1.2` and `1.2.3.4` are not), as must be the version an entry that has only an `installPath` gets from it when that path names one (the version `package.json` or `.claude-plugin/plugin.json` holds there); a `version` of an entry under another plugin's key is not an OMC version and has to be a non-blank string only; otherwise the channel is unknown (an existing `OMC_PLUGIN_ROOT` that is not a registry install answers first, see the next item). It is unknown too when the registry has no supported plugin ID but holds an empty or non-array entry list under some key, a malformed entry in a list under some other key (the rule of the cache commands, stricter than the installer's resolver, which skips the entries of other plugins: `null`, not an object, a nested array, neither field, or a blank or non-string one; a `null` field counts as missing), or a look-alike key such as `oh-my-claudecode-fork` (the installer's resolver calls that ambiguous, so npm is not assumed from it), unless `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` names the active checkout (next item); and when the two variables name different existing directories (two spellings of one directory are one directory, compared by filesystem identity, and two directories whose names differ only in letter case are two directories on a volume that tells letter case apart; a variable that names no existing directory is ignored, see the next item), whatever the registry holds. Say so, name no updater and do not compare versions
 - If `Channel: plugin-dir`: the session loads the checkout named by `OMC_PLUGIN_ROOT` (or `CLAUDE_PLUGIN_ROOT`). A variable whose path is not an existing directory names no checkout (the runtime wrapper skips it and falls through to the managed cache; it skips an existing root without a built HUD too, which Step 1 does not test), so Step 1 ignores it everywhere: it makes no plugin-dir install, no conflict and no channel, and an npm or marketplace install is diagnosed as if the variable were unset. `OMC_PLUGIN_ROOT` is the explicit override, the highest-priority root of the runtime resolution (`omc --plugin-dir` sets it; the runtime skips a root that does not exist), so Step 1 takes an existing one before the registry's channel, whatever the registry holds (a stale supported entry or a registry that cannot be read included), unless it names the install a supported entry pins: its `installPath`, or the cache directory `plugins/cache/<marketplace>/oh-my-claudecode/<version>` that its `version` names, compared by filesystem identity (by exact text where the file system reports inode 0) so that a link counts, and a letter-case alias counts where the volume ignores letter case. Every path Step 1 compares or reads (the variables, an `installPath`, a pinned version's directory) is resolved in the order the file system reads its components, so `<dir>/shortcut/..` with `shortcut` pointing to `5.9.0/nested` names `5.9.0`, the parent of the link's target, and not `<dir>`, the folder that holds the link (on win32 `..` is folded as text first, as Windows does). That is the registry's own install and the registry decides its channel. Where a directory lies excuses nothing else: another cache version than the pinned one (cache `5.7.0` while the registry pins `5.8.0`), a directory in the cache of another plugin and a path below a version are explicit roots like any other, so Step 1 reports `Channel: plugin-dir` for them, and the cache commands still keep that directory protected. Only when the registry cannot be read completely, a root inside `plugins/cache/` cannot be told from the pinned install, and Step 1 then says `Channel: unknown`. `CLAUDE_PLUGIN_ROOT` is only a locator (Claude Code sets it for marketplace installs too), so it names the checkout only when the registry parses and holds no supported plugin ID (a malformed entry under another key does not make it unreadable here). `Installed:` is the version in that checkout's `package.json` or `.claude-plugin/plugin.json` (`(none)` means it has neither, or that the version it holds is not a semantic version of that grammar, or that reading it failed), there is no channel latest, so no outdated WARN, and the `npm latest:` line is ignored. `Installed: (none)` here is an unknown version of a checkout the session is running, not a missing install: it is never `CRITICAL - plugin not installed`, the Plugin Version check is OK with the detail `plugin-dir checkout, version unknown`, and the report names the checkout (`Plugin root:`) and does not call the plugin absent
-- LATEST comes from the install channel the registry records, never from a fixed source: for `Channel: marketplace` it is the `Latest:` line the command prints (the version in that marketplace clone, accepted only when it is a semantic version in the grammar of the runtime's `parseSemver` in `scripts/session-start.mjs`: optional leading `v`, three numeric parts without leading zeros, optional prerelease and build metadata; Step 1 drops the `v`, and anything else, such as `999x.0.0`, `1.2`, `1.2.3.4` or `01.2.3`, is `Latest: (unavailable)`, which no update is recommended from), and `npm view` (the `npm latest:` line) is consulted only for `Channel: npm`, so ignore that line for a marketplace install. Only a latest version is a target an update is recommended to, so only a latest version must be a semantic version of that grammar: an `npm latest:` value that is not one is a damaged answer and counts as `(unavailable)`. The versions that report what is installed (a registry `version`, a cache directory name, the `version` of a checkout's `package.json` or `.claude-plugin/plugin.json`) are shown as recorded and ordered by the rule below, and are never a target. A version a user's data claims, a registry `version` under a supported plugin ID or the `version` of a `package.json` or `plugin.json`, must be a semantic version of that same grammar (one definition, `semver`, in the shared version grammar section of Step 1, Step 4, Step 6 and both cache commands) before it is ordered, because the order ranks a core that is not numeric above the numeric ones: an entry whose `version` is not one is a damaged registry (`Channel: unknown`, no update recommended, nothing moved by the cache commands), and a checkout whose `version` is not one has none (`Installed: (none)`). A cache directory name claims nothing: the cache commands, Step 1, Step 4 and Step 6 keep taking any name that starts with a digit as a version directory, which is what the runtime purge does, and for an entry that has only an `installPath` the last component of the path names the version only when it is one of that grammar (otherwise its `package.json` is read). A marketplace install is never compared with an npm-only release, because the marketplace update cannot install one. If Step 1 lists several plugin IDs, judge each against its own `Latest:` line
-- Order versions as semantic versions, never as text: numeric parts compare as numbers of any size (`5.10.0` is newer than `5.9.0`, and `5.1000000000000000000000.0` is newer than `5.999999999999999999999.0`: the commands compare digit strings, leading zeros dropped, the longer one is the larger number and equal lengths compare as text, because a number past 2^53 is not exact) and a prerelease is older than the stable release it precedes (`5.9.0-beta` is older than `5.9.0`, `5.9.0-beta.2` is older than `5.9.0-beta.10`). `Installed:` is the highest version in that order, among the registry entries of a plugin ID (among the cache versions of its marketplace when no entry of it names a version) or, for the npm channel, among the cache versions, and the `Latest cached plugin version` of Step 4 is chosen the same way. Steps 4 and 6 read the cache of the marketplace Step 1 names (`plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds: `omc` for the bare `oh-my-claudecode`, and when the registry holds none or cannot be read); with several IDs Step 4 takes the last one whose cache holds a version and Step 6 prints one line per marketplace, led by its name. A directory named `<version>.omc-stale-<pid>` (what an interrupted cache relink leaves) is no version in Step 1, Step 4, Step 6 or the cache commands: none of them lists, counts, names it as the newest, dates or moves it. When a plugin ID has entries for several scopes and `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` names an existing directory that is the `installPath` of some of them or lies inside it (compared by filesystem identity), `Installed:` comes from those entries alone, because the session runs that install and not a newer entry of another scope; if they name no version it is `(none)`, never the highest of the others or of the cache. Two names that are the same version in that order (`5.9` and `5.9.0`, or build metadata only) are told apart by their text, so the choice does not depend on the order of the directory listing. A leading `v` is dropped in one place (`dropV`), everywhere a version is compared, validated or named: `v5.8.0` and `5.8.0` are one version, as in the runtime (`parseSemver` in `scripts/session-start.mjs` and `parseVersion` in `src/utils/semver-compare.ts` both accept the optional `v`), so with the registry entries `v5.8.0` and `5.9.0` in different scopes `Installed:` is `5.9.0`. Step 1 prints the bare form on the `Installed:` line as it does on the `Latest:` line, which is how the runtime shows a version (its update notice writes `v` in front of a bare one). A cache directory is a version directory only when its name starts with a digit (the runtime lists no other and names the directory by the bare version), so a version `v5.8.0` recorded in the registry names the directory `5.8.0`, and Step 4 compares the `OMC:VERSION` marker with the cached version without the `v` of either
+- LATEST comes from the install channel the registry records, never from a fixed source: for `Channel: marketplace` it is the `Latest:` line the command prints (the version in that marketplace clone, accepted only when it is a semantic version in the grammar of the runtime's `parseSemver` in `scripts/session-start.mjs`: optional leading `v`, three numeric parts without leading zeros, optional prerelease and build metadata; Step 1 drops the `v`, and anything else, such as `999x.0.0`, `1.2`, `1.2.3.4` or `01.2.3`, is `Latest: (unavailable)`, which no update is recommended from), and `npm view` (the `npm latest:` line, printed by a command of its own that gives npm 20 seconds) is consulted only for `Channel: npm`, so ignore that line for a marketplace install. Only a latest version is a target an update is recommended to, so only a latest version must be a semantic version of that grammar: an `npm latest:` value that is not one is a damaged answer and counts as `(unavailable)`: the command itself prints `(unavailable)` for an error, a timeout or a value that is not one, so the line is never a bare string. The versions that report what is installed (a registry `version`, a cache directory name, the `version` of a checkout's `package.json` or `.claude-plugin/plugin.json`) are shown as recorded and ordered by the rule below, and are never a target. A version a user's data claims, a registry `version` under a supported plugin ID or the `version` of a `package.json` or `plugin.json`, must be a semantic version of that same grammar (one definition, `semver`, in the shared version grammar section of Step 1, Step 4, Step 6 and both cache commands) before it is ordered, because the order ranks a core that is not numeric above the numeric ones: an entry whose `version` is not one is a damaged registry (`Channel: unknown`, no update recommended, nothing moved by the cache commands), and a checkout whose `version` is not one has none (`Installed: (none)`). A cache directory is a version directory only when its name is exactly a semantic version of that grammar (without a `v` and without spaces): Step 1, Step 4, Step 6 and the cache commands take no other name for a version, so `1e3`, `4.15.7L` or `v5.7.0` takes no part in the order, is not counted and is never moved (the runtime reads such a name as 0 or below, never as the newest), and for an entry that has only an `installPath` the last component of the path names the version only when it is one of that grammar (otherwise its `package.json` is read). A marketplace install is never compared with an npm-only release, because the marketplace update cannot install one. If Step 1 lists several plugin IDs, judge each against its own `Latest:` line
+- Order versions as semantic versions, never as text: numeric parts compare as numbers of any size (`5.10.0` is newer than `5.9.0`, and `5.1000000000000000000000.0` is newer than `5.999999999999999999999.0`: the commands compare digit strings, leading zeros dropped, the longer one is the larger number and equal lengths compare as text, because a number past 2^53 is not exact) and a prerelease is older than the stable release it precedes (`5.9.0-beta` is older than `5.9.0`, `5.9.0-beta.2` is older than `5.9.0-beta.10`). `Installed:` is the highest version in that order, among the registry entries of a plugin ID (among the cache versions of its marketplace when no entry of it names a version) or, for the npm channel, among the cache versions, and the `Latest cached plugin version` of Step 4 is chosen the same way. Steps 4 and 6 read the cache of the marketplace Step 1 names (`plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds: `omc` for the bare `oh-my-claudecode`, and when the registry holds none or cannot be read); with several IDs Step 4 takes the last one whose cache holds a version and Step 6 prints one line per marketplace, led by its name. A directory named `<version>.omc-stale-<pid>` (what an interrupted cache relink leaves) is no version in Step 1, Step 4, Step 6 or the cache commands: none of them lists, counts, names it as the newest, dates or moves it. When a plugin ID has entries for several scopes and `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` names an existing directory that is the `installPath` of some of them or lies inside it (compared by filesystem identity), `Installed:` comes from those entries alone, because the session runs that install and not a newer entry of another scope; if they name no version it is `(none)`, never the highest of the others or of the cache. Two names that are the same version in that order (`5.9` and `5.9.0`, or build metadata only) are told apart by their text, so the choice does not depend on the order of the directory listing. A leading `v` is dropped in one place (`dropV`), everywhere a version is compared, validated or named: `v5.8.0` and `5.8.0` are one version, as in the runtime (`parseSemver` in `scripts/session-start.mjs` and `parseVersion` in `src/utils/semver-compare.ts` both accept the optional `v`), so with the registry entries `v5.8.0` and `5.9.0` in different scopes `Installed:` is `5.9.0`. Step 1 prints the bare form on the `Installed:` line as it does on the `Latest:` line, which is how the runtime shows a version (its update notice writes `v` in front of a bare one). A cache directory is named by the bare version, so a version `v5.8.0` recorded in the registry names the directory `5.8.0`, and Step 4 compares the `OMC:VERSION` marker with the cached version without the `v` of either
 - If INSTALLED is older than LATEST on the channel's own latest (same order): WARN - outdated plugin (it is updated through the `Updater:` line Step 1 printed for that plugin ID, see "Fix: Outdated Plugin"; the cache commands only clean up and never update it). If INSTALLED equals the channel's latest, there is no WARN, and there is none when it is newer than that latest either. If `Latest: (unavailable)` on a marketplace channel or `npm latest: (unavailable)` on the npm channel: report that the latest version could not be checked, not a WARN
 - If multiple versions exist: WARN - stale cache
 
@@ -414,7 +453,7 @@ For Node hooks, compare against the active plugin payload, any validated retaine
 ### Step 3: Check for Legacy Bash Hook Scripts
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L
 ls -la "$C"/hooks/*.sh 2>/dev/null
 ```
 
@@ -427,7 +466,7 @@ First check whether CLAUDE.md management is disabled. Read `${CLAUDE_CONFIG_DIR:
 
 ```bash
 # Check if the user opted out of global CLAUDE.md management (cross-platform; expands ~ in CLAUDE_CONFIG_DIR like getClaudeConfigDir)
-node -e "const path = require('path'); const fs = require('fs'); const home = require('os').homedir(); const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim(); const configDir = !configured ? path.join(home, '.claude') : configured === '~' ? home : /^~[/\x5c]/.test(configured) ? path.join(home, configured.slice(2)) : configured; let off = false; try { off = JSON.parse(fs.readFileSync(path.join(configDir, '.omc-config.json'), 'utf8')).claudeMdEnabled === false; } catch {} console.log(off ? 'CLAUDE.md management disabled by claudeMdEnabled: false' : 'CLAUDE.md management enabled');"
+node -e "const path = require('path'); const fs = require('fs'); const home = require('os').homedir(); const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim(); const configDir = !configured ? path.join(home, '.claude') : configured === '~' ? home : /^~[/\x5c]/.test(configured) ? path.join(home, configured.slice(2)) : path.normalize(configured); const readFile = (file) => { if (!fs.statSync(file).isFile()) throw 0; return fs.readFileSync(file, 'utf8'); }; let off = false; try { off = JSON.parse(readFile(path.join(configDir, '.omc-config.json'))).claudeMdEnabled === false; } catch {} console.log(off ? 'CLAUDE.md management disabled by claudeMdEnabled: false' : 'CLAUDE.md management enabled');"
 ```
 
 Continue with the CLAUDE.md checks below only when the probe printed exactly `CLAUDE.md management enabled`.
@@ -436,7 +475,7 @@ Continue with the CLAUDE.md checks below only when the probe printed exactly `CL
 - If it prints neither line, or the command fails (for example `node` is not on `PATH`, which Step 5 diagnoses), report WARN - could not check the `claudeMdEnabled` opt-out, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`.
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L
 # Check if CLAUDE.md exists
 ls -la "$C"/CLAUDE.md 2>/dev/null
 
@@ -449,7 +488,8 @@ node -e "
 // == config dir (shared) ==
 // CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
 // ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
-// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+// ~ and a backslash means the home directory, and any other value is used as given, normalized as text like the
+// runtime does (a .. after a link folds the link away, a ~ anywhere else is literal).
 const path = require('path');
 const fs = require('fs');
 const home = require('os').homedir();
@@ -460,7 +500,7 @@ const configDir = !configured
     ? home
     : /^~[/\x5c]/.test(configured)
       ? path.join(home, configured.slice(2))
-      : configured;
+      : path.normalize(configured);
 // == plugin ids (shared) ==
 // The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
 const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
@@ -481,9 +521,10 @@ const semver = (text) => {
   const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
   return grammar.test(trimmed) ? dropV(trimmed) : '';
 };
-// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
-// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
-const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// A cache directory is a version directory when its name is exactly a semantic version of that grammar (no v, no
+// spaces) and is not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>. A name that
+// is no version (1e3, 4.15.7L, v5.7.0) takes no part in the order and is never moved as a version.
+const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
 // == version order (shared) ==
 // Semantic version precedence as a comparison function. Numeric parts compare as digit strings (leading zeros
 // dropped, the longer one is larger, equal lengths compare as text), never as numbers: a number past 2^53 is not
@@ -542,12 +583,13 @@ const registryMarketplaces = (() => {
 })();
 
 // == CLAUDE.md sources ==
+// Only regular files are read (readFile), so a FIFO or a directory in place of one is skipped like a missing file.
 // The candidate files, in order: CLAUDE.md, the CLAUDE-*.md file it references, otherwise CLAUDE-omc.md and then
 // every CLAUDE-*.md of the config directory in name order.
 const base = path.join(configDir, 'CLAUDE.md');
 let baseContent = '';
 try {
-  baseContent = fs.readFileSync(base, 'utf8');
+  baseContent = readFile(base);
 } catch {}
 const candidates = [base];
 const referenced = baseContent.match(/CLAUDE-[^ )]*[.]md/);
@@ -572,7 +614,7 @@ let claudeVersion = '(missing)';
 let claudeSource = '(none)';
 for (const file of candidates) {
   try {
-    const marker = fs.readFileSync(file, 'utf8').match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
+    const marker = readFile(file).match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
     if (marker) {
       claudeVersion = marker[1];
       claudeSource = file;
@@ -631,7 +673,7 @@ grep -o "CLAUDE-[^ )]*\.md" "$C/CLAUDE.md" 2>/dev/null
 Ralph is an agent-driven persistence loop, not a compiled program: its only hard runtime prerequisites are the Node runtime that executes OMC's hook scripts (`persistent-mode.mjs`, `keyword-detector.mjs`) and a writable config directory for `.omc/state/` state files such as `ralph-state.json`.
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L
 node --version || echo "Node for Ralph: MISSING"
 mkdir -p "$C" 2>/dev/null
 touch "$C/.omc-write-probe" 2>/dev/null && rm -f "$C/.omc-write-probe" && echo "Config dir writable" || echo "Config dir NOT writable"
@@ -651,7 +693,8 @@ node -e "
 // == config dir (shared) ==
 // CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
 // ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
-// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+// ~ and a backslash means the home directory, and any other value is used as given, normalized as text like the
+// runtime does (a .. after a link folds the link away, a ~ anywhere else is literal).
 const path = require('path');
 const fs = require('fs');
 const home = require('os').homedir();
@@ -662,7 +705,7 @@ const configDir = !configured
     ? home
     : /^~[/\x5c]/.test(configured)
       ? path.join(home, configured.slice(2))
-      : configured;
+      : path.normalize(configured);
 // == plugin ids (shared) ==
 // The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
 const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
@@ -683,9 +726,10 @@ const semver = (text) => {
   const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
   return grammar.test(trimmed) ? dropV(trimmed) : '';
 };
-// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
-// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
-const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// A cache directory is a version directory when its name is exactly a semantic version of that grammar (no v, no
+// spaces) and is not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>. A name that
+// is no version (1e3, 4.15.7L, v5.7.0) takes no part in the order and is never moved as a version.
+const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
 // == read file (shared) ==
 // Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
 const readFile = (file) => {
@@ -731,7 +775,7 @@ Check for legacy agents, commands, and skills installed via curl (before plugin 
 **Important**: Only flag files whose names match actual plugin-provided names. Do NOT flag user's custom agents/commands/skills that are unrelated to OMC.
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L
 # Check for legacy agents directory
 ls -la "$C"/agents/ 2>/dev/null
 
@@ -820,7 +864,7 @@ After handling every relevant user/project settings file, re-check `${CLAUDE_CON
 ### Fix: Outdated Plugin
 **Update first**: moving cache directories does not update the plugin, and the installed version is normally pinned in `installed_plugins.json`, so the command below often has nothing to move. Tell the user to run the `Updater:` line that Step 1 printed for the active plugin ID, then restart Claude Code. The line is derived from the registry entry of that install (for a marketplace install it refreshes the marketplace clone named in the entry and then updates that plugin ID; for a `Channel: npm` install it is `omc update`), so do not substitute a fixed marketplace or plugin ID. If Step 1 printed `Channel: unknown`, say so and do not guess an updater; for `Channel: plugin-dir` there is no updater line to run, so tell the user to update and rebuild that checkout and run `omc setup --plugin-dir-mode`, and the cache command cannot update it (it only cleans up the other cached versions and keeps that directory when it lies in the cache); if it listed several plugin IDs, update the one that is enabled (resolved with the precedence rules of Step 2). Do not report the plugin as fixed until a later run of Step 1 shows INSTALLED equal to that channel's `Latest:`. The cache command below is only the cleanup of old cached versions afterwards.
 
-**Cache guard**: Diagnostics do not authorize removal or setup changes. Do not prune cache versions by age, lexical/version order, or presence of a newer version. A cache version is protected and must never be moved aside when it is pinned in `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` (by `version` or by `installPath`, under any supported OMC plugin ID: `oh-my-claudecode@omc`, `oh-my-claudecode` or `oh-my-claudecode@oh-my-claudecode`, in any letter case; the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level), when the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it, or when a running session occupies it (a record in `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc/cache-occupancy/` whose plugin root is that version or inside it; a record is ignored only when its owner is proven gone: the process id no longer exists, on Linux the process start time differs from the recorded one, or the record is dated more than 5 minutes in the future; an old date alone never ignores a record, and this command never deletes one). Paths are compared after resolving symlinks one link at a time, and every link on the way is protected, not only the final directory (a pin on `5.7.0` in `5.7.0 -> 5.8.0 -> 5.9.0` protects all three; more than 40 links or a loop counts as unresolvable; the components of a path are read in the order the file system reads them, so a `..` after a link (`<dir>/shortcut/..`, where `shortcut` points to `5.9.0/nested`) names the parent of the link's target, and a `..` in a link's own target is read the same way, never folded as text first, except on win32, where Windows folds `..` first; an occupancy record protects what it names read that way and also what the runtime reads from it, the same text folded; a pinned `version` written with a leading `v` also pins the directory of the bare version, `v5.8.0` pins `5.8.0`); a link that nothing refers to is not protected just because its target is. Paths that exist are also compared by filesystem identity (device and inode), so two spellings of one directory are that directory on a volume that ignores letter case even where the platform reports `linux` (WSL2 on a Windows drive), and two directories whose names differ only in letter case stay two directories on a volume that tells letter case apart even where the platform reports `darwin` or `win32` (a case-sensitive volume): letter case is never folded by the name of the platform; the one exception only adds protection: the SessionStart publisher stores the plugin root of an occupancy record in lower case on win32 and the runtime compares records in that form, so on win32 a record also protects the version it names or lies inside by a lower-case comparison. Where a file system reports inode 0 (or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path: a path is judged by its exact text only when that text lies inside a cache version (or above the cache directory, where it names no version), and on win32 an occupancy record is also judged by the lower-case form above; every other path that protects or may protect a version, whatever the source (the `installPath` of a pin or of another plugin, `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT`, an occupancy record, a link on the way, a pinned `version` that names no directory by its exact spelling but a directory by another letter case; a path that does not exist is judged by its nearest existing parent), could be another name of a cached version that cannot be ruled out, so the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system (two names of one directory that differ in letter case are then different, so the two variables naming one directory by two spellings count as a conflict and nothing moves). An exact spelling still protects the version it names and the free versions still move. If `installed_plugins.json`, an occupancy record or a path in them cannot be read or resolved completely (a path that does not exist adds no protection of its own, only through its nearest existing parent as described above; a key that contains `oh-my-claudecode` without being a supported ID, an empty or non-array entry list under any key, an entry under any key (also of an unrelated plugin) that is not an object or has neither a `version` nor an `installPath` or has one that is not a non-blank string (a `null` field counts as missing), and under a supported plugin ID a `version` that is not a semantic version (`999x.0.0`, `1.2`, `1.2.3.4`; the grammar of Step 1's `Latest:`, with the optional `v`; a `version` of another plugin has to be a non-blank string only), and `OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories (a variable that names no existing directory takes no part in that comparison, as in Step 1, but a path it names still protects the version it points into) all count as unreadable; the two variables are compared after resolving links and by filesystem identity, so two names of one directory are not a conflict), move nothing (the cause may be an entry of an unrelated plugin, which the message does not name). The registry pins, the occupancy records and the plugin root variables are read again just before each version is moved, and a version that has become protected, or whose protection can no longer be read completely, is skipped and reported; only the instant between that last read and the rename remains open, because a SessionStart that has not yet published its record cannot be seen and the command holds no lock shared with the publisher. A version directory is not moved either when it, or any entry anywhere below it, was modified in the last 10 minutes (the same threshold, `STALE_THRESHOLD_MS` in `src/utils/paths.ts`, that SessionStart's own cleanup uses to leave a directory alone while an update may still be installing it; every entry at any depth counts because an update that refreshes an existing version overwrites its files in place and need not change the date of the directory itself or of any level above the file; a link is dated itself and never followed, and so is the version directory when it is a link: a redirect that SessionStart created a moment ago, such as `5.7.0 -> 5.8.0`, is as new as the link whatever the dates in its target and is left in place, and an old one is moved as the link only, so its target, in or outside the cache, is not touched): it is left in place and reported, and the command can be run again later. A version with more than 20000 entries (a cached version holds about 9000), or one whose entries cannot all be read, cannot be judged: it is left in place and reported (`Could not judge`). The updater (`copyPluginSyncPayload` in `src/installer/index.ts`) copies into the version directory in place and leaves no marker or lock file that the command could test, so an update that starts writing after the date scan has read the files it rewrites, up to the rename (the rest of the scan and the re-read of the registry, the records and the root variables run in between), cannot be seen; closing that window needs a lock or marker shared with the updater, which is a change in `src/installer` and not in this skill. The registry is read before any cache directory is looked for: when it cannot be read completely the command says so and stops, whatever namespace the cache lies in. The cache directory is `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds (`omc` for the bare `oh-my-claudecode`, and when the registry holds none): every such directory that exists is handled in turn, a pinned version protects the version of that name in each of them, and a backup from a marketplace other than `omc` carries its name in front (`<marketplace>-<version>-<time>`), and when more than one such directory exists every report line starts with `<marketplace>:` and its counts are those of that directory. A directory named `<version>.omc-stale-<pid>` (a name ending in `.omc-stale-` and a pid, what an interrupted cache relink leaves beside a missing or unusable original path) is not a version: the command does not list, protect, date or move it, because the reconciliation of SessionStart's own purge (`purgeStalePluginCacheVersions` in `src/utils/paths.ts`) restores it as the only intact copy and moving it to `plugins/backups` would prevent that. A cache directory that exists but cannot be read (any error other than its absence, such as `EACCES` or `EIO`, or a file where the directory should be) is not an absent cache: the command prints `Nothing moved: could not read <directory> (<error code>)`, moves nothing and stops, and `No plugin cache found` or `No cache to clean` is printed only for a directory that does not exist (`ENOENT`). If every cached version is protected, move nothing and report the protection instead of running the command below. Backups go to `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/backups/oh-my-claudecode/`, outside `plugins/cache/`: OMC's stale cache purge can remove any cache directory that is not the active version, so a backup left inside the cache may not survive.
+**Cache guard**: Diagnostics do not authorize removal or setup changes. Do not prune cache versions by age, lexical/version order, or presence of a newer version. A cache version is protected and must never be moved aside when it is pinned in `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` (by `version` or by `installPath`, under any supported OMC plugin ID: `oh-my-claudecode@omc`, `oh-my-claudecode` or `oh-my-claudecode@oh-my-claudecode`, in any letter case; the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level), when the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it, or when a running session occupies it (a record in `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc/cache-occupancy/` whose plugin root is that version or inside it; a record is ignored only when its owner is proven gone: the process id no longer exists, on Linux the process start time differs from the recorded one, or the record is dated more than 5 minutes in the future; an old date alone never ignores a record, and this command never deletes one). Paths are compared after resolving symlinks one link at a time, and every link on the way is protected, not only the final directory (a pin on `5.7.0` in `5.7.0 -> 5.8.0 -> 5.9.0` protects all three; more than 40 links or a loop counts as unresolvable; the components of a path are read in the order the file system reads them, so a `..` after a link (`<dir>/shortcut/..`, where `shortcut` points to `5.9.0/nested`) names the parent of the link's target, and a `..` in a link's own target is read the same way, never folded as text first, except on win32, where Windows folds `..` first; every path that protects (the `installPath` of a pin or of another plugin, `OMC_PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, an occupancy record) protects what it names read that way and also what the runtime reads from it, the same text folded, so `<cache>/ext/../5.9.0`, where `ext` is a link to a directory outside the cache, protects `5.9.0` by its text; a pinned `version` written with a leading `v` also pins the directory of the bare version, `v5.8.0` pins `5.8.0`); a link that nothing refers to is not protected just because its target is. Paths that exist are also compared by filesystem identity (device and inode), so two spellings of one directory are that directory on a volume that ignores letter case even where the platform reports `linux` (WSL2 on a Windows drive), and two directories whose names differ only in letter case stay two directories on a volume that tells letter case apart even where the platform reports `darwin` or `win32` (a case-sensitive volume): letter case is never folded by the name of the platform; the one exception only adds protection: the SessionStart publisher stores the plugin root of an occupancy record in lower case on win32 and the runtime compares records in that form, so on win32 a record also protects the version it names or lies inside by a lower-case comparison. Where a file system reports inode 0 (or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path: a path is judged by its exact text only when that text lies inside a cache version (or above the cache directory, where it names no version), and on win32 an occupancy record is also judged by the lower-case form above; every other path that protects or may protect a version, whatever the source (the `installPath` of a pin or of another plugin, `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT`, an occupancy record, a link on the way, a pinned `version` that names no directory by its exact spelling but a directory by another letter case; a path that does not exist is judged by its nearest existing parent), could be another name of a cached version that cannot be ruled out, so the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system (two names of one directory that differ in letter case are then different, so the two variables naming one directory by two spellings count as a conflict and nothing moves). An exact spelling still protects the version it names and the free versions still move. If `installed_plugins.json`, an occupancy record or a path in them cannot be read or resolved completely (a path that does not exist adds no protection of its own, only through its nearest existing parent as described above; a key that contains `oh-my-claudecode` without being a supported ID, an empty or non-array entry list under any key, an entry under any key (also of an unrelated plugin) that is not an object or has neither a `version` nor an `installPath` or has one that is not a non-blank string (a `null` field counts as missing), and under a supported plugin ID a `version` that is not a semantic version (`999x.0.0`, `1.2`, `1.2.3.4`; the grammar of Step 1's `Latest:`, with the optional `v`; a `version` of another plugin has to be a non-blank string only), and, under a supported plugin ID, an `installPath` written as a Windows path (a drive letter such as `C:` followed by a backslash, or a UNC path) on a system other than Windows, where it names nothing that can be read (a registry written by Windows and read from WSL, say), and `OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories (a variable that names no existing directory takes no part in that comparison, as in Step 1, but a path it names still protects the version it points into) all count as unreadable; the two variables are compared after resolving links and by filesystem identity, so two names of one directory are not a conflict), move nothing, and the message names the first cause it found in the registry (the key and the `version` or `installPath` of the entry, or that the file is not a regular file or not JSON of the expected shape); the cause may also be an entry of an unrelated plugin, an occupancy record or a plugin root variable, which the message does not name. The registry pins, the occupancy records and the plugin root variables are read again just before each version is moved, and a version that has become protected, or whose protection can no longer be read completely, is skipped and reported; only the instant between that last read and the rename remains open, because a SessionStart that has not yet published its record cannot be seen and the command holds no lock shared with the publisher. A version directory is not moved either when it, or any entry anywhere below it, was modified in the last 10 minutes (the same threshold, `STALE_THRESHOLD_MS` in `src/utils/paths.ts`, that SessionStart's own cleanup uses to leave a directory alone while an update may still be installing it; every entry at any depth counts because an update that refreshes an existing version overwrites its files in place and need not change the date of the directory itself or of any level above the file; a link is dated itself and never followed, and so is the version directory when it is a link: a redirect that SessionStart created a moment ago, such as `5.7.0 -> 5.8.0`, is as new as the link whatever the dates in its target and is left in place, and an old one is moved as the link only, so its target, in or outside the cache, is not touched): it is left in place and reported, and the command can be run again later; a version with a modification date more than 5 minutes in the future (a wrong clock, or files extracted from an archive) is left in place too and reported as that, not as a recent change. A version with more than 20000 entries (a cached version holds about 9000), or one whose entries cannot all be read, cannot be judged: it is left in place and reported (`Could not judge`). The updater (`copyPluginSyncPayload` in `src/installer/index.ts`) copies into the version directory in place and leaves no marker or lock file that the command could test, so an update that starts writing after the date scan has read the files it rewrites, up to the rename (the rest of the scan and the re-read of the registry, the records and the root variables run in between), cannot be seen; closing that window needs a lock or marker shared with the updater, which is a change in `src/installer` and not in this skill. The registry is read before any cache directory is looked for: when it cannot be read completely the command says so and stops, whatever namespace the cache lies in. The cache directory is `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds (`omc` for the bare `oh-my-claudecode`, and when the registry holds none): every such directory that exists is handled in turn, a pinned version protects the version of that name in each of them, and a backup from a marketplace other than `omc` carries its name in front (`<marketplace>-<version>-<time>`), and when more than one such directory exists every report line starts with `<marketplace>:` and its counts are those of that directory. A directory named `<version>.omc-stale-<pid>` (a name ending in `.omc-stale-` and a pid, what an interrupted cache relink leaves beside a missing or unusable original path) is not a version: the command does not list, protect, date or move it, because the reconciliation of SessionStart's own purge (`purgeStalePluginCacheVersions` in `src/utils/paths.ts`) restores it as the only intact copy and moving it to `plugins/backups` would prevent that. A directory whose name is not a semantic version of the grammar of Step 1 (`1e3`, `4.15.7L`, `v5.7.0`) is no version either: the command does not list, protect, date or move it, and leaves it where it is. A cache directory that exists but cannot be read (any error other than its absence, such as `EACCES` or `EIO`, or a file where the directory should be) is not an absent cache: the command prints `Nothing moved: could not read <directory> (<error code>)`, moves nothing and stops, and `No plugin cache found` or `No cache to clean` is printed only for a directory that does not exist (`ENOENT`). Every refusal (`Nothing moved: ... could not be read completely`, `identity unavailable`, `could not read <directory>`) and a failed move (`Cache move failed`) ends the command with exit code 1, so that it cannot be taken for a success; a finished move, `Nothing to move`, `Nothing moved: no pinned ...` and a missing cache end with 0. If every cached version is protected, move nothing and report the protection instead of running the command below. Backups go to `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/backups/oh-my-claudecode/`, outside `plugins/cache/`: OMC's stale cache purge can remove any cache directory that is not the active version, so a backup left inside the cache may not survive.
 ```bash
 # Move unprotected cache versions to plugins/backups (cross-platform); keep versions pinned in installed_plugins.json; never delete
 node -e "
@@ -828,7 +872,8 @@ node -e "
 // == config dir (shared) ==
 // CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
 // ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
-// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+// ~ and a backslash means the home directory, and any other value is used as given, normalized as text like the
+// runtime does (a .. after a link folds the link away, a ~ anywhere else is literal).
 const path = require('path');
 const fs = require('fs');
 const home = require('os').homedir();
@@ -839,7 +884,7 @@ const configDir = !configured
     ? home
     : /^~[/\x5c]/.test(configured)
       ? path.join(home, configured.slice(2))
-      : configured;
+      : path.normalize(configured);
 // == plugin ids (shared) ==
 // The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
 const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
@@ -860,9 +905,10 @@ const semver = (text) => {
   const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
   return grammar.test(trimmed) ? dropV(trimmed) : '';
 };
-// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
-// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
-const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// A cache directory is a version directory when its name is exactly a semantic version of that grammar (no v, no
+// spaces) and is not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>. A name that
+// is no version (1e3, 4.15.7L, v5.7.0) takes no part in the order and is never moved as a version.
+const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
 // == read file (shared) ==
 // Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
 const readFile = (file) => {
@@ -952,19 +998,31 @@ const messages = {
 const backups = path.join(configDir, 'plugins', 'backups', 'oh-my-claudecode');
 const registryFile = path.join(configDir, 'plugins', 'installed_plugins.json');
 const occupancyDir = path.join(configDir, '.omc', 'cache-occupancy');
-const STOP_UNREADABLE =
-  'Nothing moved: installed_plugins.json, the cache occupancy records, the plugin root variables or a path in them could not be read completely; fix that first, then run this again';
+const stopUnreadable = (reason) =>
+  'Nothing moved: installed_plugins.json, the cache occupancy records, the plugin root variables or a path in them could not be read completely; fix that first, then run this again' +
+  (reason ? ' (cause: ' + reason + ')' : '');
 const STOP_NO_IDENTITY =
   'Nothing moved: identity unavailable (the file system reports no inode, or a stat failed, for a cache version or for a path that may protect one, and the spelling of that path does not place it inside a version, so it cannot be ruled out as another name of a cached version); keep the cache and every path that points into it spelled alike, or use a file system that reports inodes, then run this again';
 // The same threshold as STALE_THRESHOLD_MS in src/utils/paths.ts, which SessionStart's own cleanup uses.
 const FRESH_MS = 600000;
+// A modification date further ahead than this is a wrong clock or an archive, not an update in progress.
+const FUTURE_MS = 300000;
+// A refusal or a failure ends with exit code 1, so that it cannot be mistaken for a success.
+const refuse = (text) => {
+  process.exitCode = 1;
+  console.log(text);
+};
 
 // == repair registry (shared) ==
 // pins: the entries of the supported plugin IDs. other: the installPath of every entry of another plugin. ids: the
 // supported IDs. unreadable: the file is not a regular file, is not JSON of the expected shape, or holds a
-// malformed entry anywhere. A missing file is no pins and not unreadable.
+// malformed entry anywhere; reason names the first such entry. A missing file is no pins and not unreadable.
+// A Windows path (a drive letter or a UNC path) in the installPath of an entry of OMC cannot be read on another
+// system, so it counts as unreadable instead of protecting nothing.
+const foreignPath = (target) => process.platform != 'win32' && /^(?:[A-Za-z]:[/\x5c]|\x5c\x5c)/.test(target);
 const readRegistry = () => {
   let unreadable = false;
+  let reason = '';
   let pins = [];
   let other = [];
   let ids = [];
@@ -975,10 +1033,28 @@ const readRegistry = () => {
     for (const [key, entries] of Object.entries(plugins)) {
       const id = key.toLowerCase();
       const isSupported = OMC_IDS.includes(id);
-      if (!Array.isArray(entries) || !entries.length || (!isSupported && id.includes('oh-my-claudecode'))) throw 0;
+      if (!Array.isArray(entries) || !entries.length) {
+        reason = key + ' has no list of entries';
+        throw 0;
+      }
+      if (!isSupported && id.includes('oh-my-claudecode')) {
+        reason = key + ' looks like OMC but is not a plugin ID the installer accepts';
+        throw 0;
+      }
       if (isSupported) ids.push(id);
       for (const entry of entries) {
-        if (entryShapeBad(entry) || (isSupported && entry.version != undefined && !semver(entry.version))) throw 0;
+        if (entryShapeBad(entry)) {
+          reason = 'an entry of ' + key + ' has no usable version or installPath';
+          throw 0;
+        }
+        if (isSupported && entry.version != undefined && !semver(entry.version)) {
+          reason = 'an entry of ' + key + ' has version ' + JSON.stringify(entry.version) + ', which is not a semantic version';
+          throw 0;
+        }
+        if (isSupported && typeof entry.installPath == 'string' && foreignPath(entry.installPath.trim())) {
+          reason = 'an entry of ' + key + ' has the Windows path ' + JSON.stringify(entry.installPath) + ' as installPath, which this system cannot read';
+          throw 0;
+        }
         if (!isSupported) {
           if (typeof entry.installPath == 'string') other.push(entry.installPath.trim());
         } else pins.push(entry);
@@ -989,8 +1065,9 @@ const readRegistry = () => {
     other = [];
     ids = [];
     unreadable = !(error && error.code == 'ENOENT');
+    if (unreadable && !reason) reason = 'the file is not a regular file or not JSON of the expected shape';
   }
-  return { unreadable, pins, other, ids };
+  return { unreadable, reason, pins, other, ids };
 };
 
 // == occupancy records (shared) ==
@@ -1038,11 +1115,16 @@ const newestChange = (root) => {
 };
 
 // == protection (shared) ==
-// protectionOf(dir, versions) reads every source of protection again and returns { unreadable, noIdentity, pinned,
-// kept }: unreadable and noIdentity stop the command, pinned are the versions the registry pins (or a path of a pin
-// reaches), kept are all protected versions. dir is the cache directory and versions the version directory names in it.
+// protectionOf(dir, versions) reads every source of protection again and returns { unreadable, reason, noIdentity,
+// pinned, kept }: unreadable (with the reason, when the registry names one) and noIdentity stop the command, pinned
+// are the versions the registry pins (or a path of a pin reaches), kept are all protected versions. dir is the cache
+// directory and versions the version directory names in it.
 const protectionOf = (dir, versions) => {
   let unreadable = false;
+  // A path that goes through a link and then .. names the parent of the link target on the file system and the
+  // parent of the link as text. The chain reads it the first way, the runtime folds an occupancy record the second
+  // way, so every path that protects is read both ways, like a record.
+  const bothForms = (target) => [...new Set([target, path.resolve(target)])];
   const chainOf = (target) => {
     const chain = linkChain(target);
     if (chain.unreadable) unreadable = true;
@@ -1130,10 +1212,10 @@ const protectionOf = (dir, versions) => {
       if (listed) pinPaths.push(path.join(dir, listed));
       else if (identityOf(written) || lacksIdentity(written)) pinPaths.push(written);
     }
-    if (pin.installPath != undefined) pinPaths.push(pin.installPath.trim());
+    if (pin.installPath != undefined) pinPaths.push(...bothForms(pin.installPath.trim()));
   }
   const pinChains = pinPaths.flatMap(chainOf);
-  const otherChains = [...registry.other, ...held, ...rootVars].flatMap(chainOf);
+  const otherChains = [...registry.other.flatMap(bothForms), ...held, ...rootVars.flatMap(bothForms)].flatMap(chainOf);
   // The versions a list of paths protects: a path that is, or lies inside, the version directory (as written or
   // through the real cache path), or an ancestor of a path with the identity of the version directory. lowercase
   // are the paths of records, which on win32 also protect by a lower-case comparison.
@@ -1186,7 +1268,7 @@ const protectionOf = (dir, versions) => {
         isHeld = false;
       }
     });
-  return { unreadable, noIdentity, pinned, kept };
+  return { unreadable, reason: registry.unreadable ? registry.reason : '', noIdentity, pinned, kept };
 };
 
 // == repair run (shared) ==
@@ -1197,16 +1279,17 @@ const cleanCache = (market, dir, lead) => {
   let moved = 0;
   let skipped = 0;
   let fresh = 0;
+  let future = 0;
   let unjudged = 0;
   try {
     const versions = fs.readdirSync(dir).filter(isVersionDir);
     const state = protectionOf(dir, versions);
     if (state.unreadable) {
-      console.log(STOP_UNREADABLE);
+      refuse(stopUnreadable(state.reason));
       return true;
     }
     if (state.noIdentity) {
-      console.log(lead + STOP_NO_IDENTITY);
+      refuse(lead + STOP_NO_IDENTITY);
       return true;
     }
     const free = versions.filter((name) => !state.kept.includes(name));
@@ -1222,6 +1305,10 @@ const cleanCache = (market, dir, lead) => {
           newest = newestChange(path.join(dir, name));
         } catch (error) {
           unjudged++;
+          return;
+        }
+        if (newest - Date.now() > FUTURE_MS) {
+          future++;
           return;
         }
         if (Date.now() - newest < FRESH_MS) {
@@ -1245,19 +1332,24 @@ const cleanCache = (market, dir, lead) => {
       if (fresh) {
         console.log(lead + 'Left', fresh, 'version(s) modified in the last 10 minutes alone: an update may still be installing them; run this again later');
       }
+      if (future) {
+        console.log(lead + 'Left', future, 'version(s) alone that have a modification date more than 5 minutes in the future (a wrong clock, or files extracted from an archive): check the dates, then run this again');
+      }
     } else {
       console.log(lead + (state.pinned.length ? messages.allProtected : messages.noPin));
     }
   } catch (error) {
     const code = error && error.code;
-    console.log(
+    const text =
       lead +
-        (moveStarted
-          ? 'Cache move failed (' + moved + ' moved before the error): ' + error.message
-          : code == 'ENOENT'
-            ? messages.noCache + (market == 'omc' ? '' : ' in plugins/cache/' + market)
-            : 'Nothing moved: could not read ' + dir + ' (' + (code || 'unknown error') + ')'),
-    );
+      (moveStarted
+        ? 'Cache move failed (' + moved + ' moved before the error): ' + error.message
+        : code == 'ENOENT'
+          ? messages.noCache + (market == 'omc' ? '' : ' in plugins/cache/' + market)
+          : 'Nothing moved: could not read ' + dir + ' (' + (code || 'unknown error') + ')');
+    // A missing cache is nothing to clean, not a failure; a failed move or an unreadable directory is.
+    if (moveStarted || code != 'ENOENT') refuse(text);
+    else console.log(text);
     return true;
   }
   return false;
@@ -1277,7 +1369,7 @@ const caches = markets
     }
   });
 if (!caches.length) caches.push([markets[0], cacheDirOf(markets[0])]);
-if (registry.unreadable) console.log(STOP_UNREADABLE);
+if (registry.unreadable) refuse(stopUnreadable(registry.reason));
 else {
   for (const [market, dir] of caches) {
     if (cleanCache(market, dir, caches.length > 1 ? market + ': ' : '')) break;
@@ -1288,7 +1380,7 @@ if (messages.footer) console.log(messages.footer);
 ```
 
 ### Fix: Stale Cache (multiple versions)
-**Stale cache guard**: Diagnostics do not authorize removal or setup changes. Do not prune cache versions by age, lexical/version order, or presence of a newer version. A cache version is protected when it is pinned in `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` (by `version` or by `installPath`, under any supported OMC plugin ID: `oh-my-claudecode@omc`, `oh-my-claudecode` or `oh-my-claudecode@oh-my-claudecode`, in any letter case; the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level), when the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it, or when a running session occupies it (a record in `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc/cache-occupancy/` whose plugin root is that version or inside it; a record is ignored only when its owner is proven gone: the process id no longer exists, on Linux the process start time differs from the recorded one, or the record is dated more than 5 minutes in the future; an old date alone never ignores a record, and this command never deletes one); move aside only unprotected versions, and report the protected versions kept. Paths are compared after resolving symlinks one link at a time, and every link on the way is protected, not only the final directory (a pin on `5.7.0` in `5.7.0 -> 5.8.0 -> 5.9.0` protects all three; more than 40 links or a loop counts as unresolvable; the components of a path are read in the order the file system reads them, so a `..` after a link (`<dir>/shortcut/..`, where `shortcut` points to `5.9.0/nested`) names the parent of the link's target, and a `..` in a link's own target is read the same way, never folded as text first, except on win32, where Windows folds `..` first; an occupancy record protects what it names read that way and also what the runtime reads from it, the same text folded; a pinned `version` written with a leading `v` also pins the directory of the bare version, `v5.8.0` pins `5.8.0`); a link that nothing refers to is not protected just because its target is. Paths that exist are also compared by filesystem identity (device and inode), so two spellings of one directory are that directory on a volume that ignores letter case even where the platform reports `linux` (WSL2 on a Windows drive), and two directories whose names differ only in letter case stay two directories on a volume that tells letter case apart even where the platform reports `darwin` or `win32` (a case-sensitive volume): letter case is never folded by the name of the platform; the one exception only adds protection: the SessionStart publisher stores the plugin root of an occupancy record in lower case on win32 and the runtime compares records in that form, so on win32 a record also protects the version it names or lies inside by a lower-case comparison. Where a file system reports inode 0 (or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path: a path is judged by its exact text only when that text lies inside a cache version (or above the cache directory, where it names no version), and on win32 an occupancy record is also judged by the lower-case form above; every other path that protects or may protect a version, whatever the source (the `installPath` of a pin or of another plugin, `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT`, an occupancy record, a link on the way, a pinned `version` that names no directory by its exact spelling but a directory by another letter case; a path that does not exist is judged by its nearest existing parent), could be another name of a cached version that cannot be ruled out, so the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system (two names of one directory that differ in letter case are then different, so the two variables naming one directory by two spellings count as a conflict and nothing moves). An exact spelling still protects the version it names and the free versions still move. If `installed_plugins.json`, an occupancy record or a path in them cannot be read or resolved completely (a path that does not exist adds no protection of its own, only through its nearest existing parent as described above; a key that contains `oh-my-claudecode` without being a supported ID, an empty or non-array entry list under any key, an entry under any key (also of an unrelated plugin) that is not an object or has neither a `version` nor an `installPath` or has one that is not a non-blank string (a `null` field counts as missing), and under a supported plugin ID a `version` that is not a semantic version (`999x.0.0`, `1.2`, `1.2.3.4`; the grammar of Step 1's `Latest:`, with the optional `v`; a `version` of another plugin has to be a non-blank string only), and `OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories (a variable that names no existing directory takes no part in that comparison, as in Step 1, but a path it names still protects the version it points into) all count as unreadable; the two variables are compared after resolving links and by filesystem identity, so two names of one directory are not a conflict), move nothing (the cause may be an entry of an unrelated plugin, which the message does not name). The registry pins, the occupancy records and the plugin root variables are read again just before each version is moved, and a version that has become protected, or whose protection can no longer be read completely, is skipped and reported; only the instant between that last read and the rename remains open, because a SessionStart that has not yet published its record cannot be seen and the command holds no lock shared with the publisher. A version directory is not moved either when it, or any entry anywhere below it, was modified in the last 10 minutes (the same threshold, `STALE_THRESHOLD_MS` in `src/utils/paths.ts`, that SessionStart's own cleanup uses to leave a directory alone while an update may still be installing it; every entry at any depth counts because an update that refreshes an existing version overwrites its files in place and need not change the date of the directory itself or of any level above the file; a link is dated itself and never followed, and so is the version directory when it is a link: a redirect that SessionStart created a moment ago, such as `5.7.0 -> 5.8.0`, is as new as the link whatever the dates in its target and is left in place, and an old one is moved as the link only, so its target, in or outside the cache, is not touched): it is left in place and reported, and the command can be run again later. A version with more than 20000 entries (a cached version holds about 9000), or one whose entries cannot all be read, cannot be judged: it is left in place and reported (`Could not judge`). The updater (`copyPluginSyncPayload` in `src/installer/index.ts`) copies into the version directory in place and leaves no marker or lock file that the command could test, so an update that starts writing after the date scan has read the files it rewrites, up to the rename (the rest of the scan and the re-read of the registry, the records and the root variables run in between), cannot be seen; closing that window needs a lock or marker shared with the updater, which is a change in `src/installer` and not in this skill. The registry is read before any cache directory is looked for: when it cannot be read completely the command says so and stops, whatever namespace the cache lies in. The cache directory is `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds (`omc` for the bare `oh-my-claudecode`, and when the registry holds none): every such directory that exists is handled in turn, a pinned version protects the version of that name in each of them, and a backup from a marketplace other than `omc` carries its name in front (`<marketplace>-<version>-<time>`), and when more than one such directory exists every report line starts with `<marketplace>:` and its counts are those of that directory. A directory named `<version>.omc-stale-<pid>` (a name ending in `.omc-stale-` and a pid, what an interrupted cache relink leaves beside a missing or unusable original path) is not a version: the command does not list, protect, date or move it, because the reconciliation of SessionStart's own purge (`purgeStalePluginCacheVersions` in `src/utils/paths.ts`) restores it as the only intact copy and moving it to `plugins/backups` would prevent that. A cache directory that exists but cannot be read (any error other than its absence, such as `EACCES` or `EIO`, or a file where the directory should be) is not an absent cache: the command prints `Nothing moved: could not read <directory> (<error code>)`, moves nothing and stops, and `No plugin cache found` or `No cache to clean` is printed only for a directory that does not exist (`ENOENT`). Backups go to `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/backups/oh-my-claudecode/`, outside `plugins/cache/`: OMC's stale cache purge can remove any cache directory that is not the active version, so a backup left inside the cache may not survive.
+**Stale cache guard**: Diagnostics do not authorize removal or setup changes. Do not prune cache versions by age, lexical/version order, or presence of a newer version. A cache version is protected when it is pinned in `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` (by `version` or by `installPath`, under any supported OMC plugin ID: `oh-my-claudecode@omc`, `oh-my-claudecode` or `oh-my-claudecode@oh-my-claudecode`, in any letter case; the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level), when the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it, or when a running session occupies it (a record in `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc/cache-occupancy/` whose plugin root is that version or inside it; a record is ignored only when its owner is proven gone: the process id no longer exists, on Linux the process start time differs from the recorded one, or the record is dated more than 5 minutes in the future; an old date alone never ignores a record, and this command never deletes one); move aside only unprotected versions, and report the protected versions kept. Paths are compared after resolving symlinks one link at a time, and every link on the way is protected, not only the final directory (a pin on `5.7.0` in `5.7.0 -> 5.8.0 -> 5.9.0` protects all three; more than 40 links or a loop counts as unresolvable; the components of a path are read in the order the file system reads them, so a `..` after a link (`<dir>/shortcut/..`, where `shortcut` points to `5.9.0/nested`) names the parent of the link's target, and a `..` in a link's own target is read the same way, never folded as text first, except on win32, where Windows folds `..` first; every path that protects (the `installPath` of a pin or of another plugin, `OMC_PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, an occupancy record) protects what it names read that way and also what the runtime reads from it, the same text folded, so `<cache>/ext/../5.9.0`, where `ext` is a link to a directory outside the cache, protects `5.9.0` by its text; a pinned `version` written with a leading `v` also pins the directory of the bare version, `v5.8.0` pins `5.8.0`); a link that nothing refers to is not protected just because its target is. Paths that exist are also compared by filesystem identity (device and inode), so two spellings of one directory are that directory on a volume that ignores letter case even where the platform reports `linux` (WSL2 on a Windows drive), and two directories whose names differ only in letter case stay two directories on a volume that tells letter case apart even where the platform reports `darwin` or `win32` (a case-sensitive volume): letter case is never folded by the name of the platform; the one exception only adds protection: the SessionStart publisher stores the plugin root of an occupancy record in lower case on win32 and the runtime compares records in that form, so on win32 a record also protects the version it names or lies inside by a lower-case comparison. Where a file system reports inode 0 (or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path: a path is judged by its exact text only when that text lies inside a cache version (or above the cache directory, where it names no version), and on win32 an occupancy record is also judged by the lower-case form above; every other path that protects or may protect a version, whatever the source (the `installPath` of a pin or of another plugin, `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT`, an occupancy record, a link on the way, a pinned `version` that names no directory by its exact spelling but a directory by another letter case; a path that does not exist is judged by its nearest existing parent), could be another name of a cached version that cannot be ruled out, so the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system (two names of one directory that differ in letter case are then different, so the two variables naming one directory by two spellings count as a conflict and nothing moves). An exact spelling still protects the version it names and the free versions still move. If `installed_plugins.json`, an occupancy record or a path in them cannot be read or resolved completely (a path that does not exist adds no protection of its own, only through its nearest existing parent as described above; a key that contains `oh-my-claudecode` without being a supported ID, an empty or non-array entry list under any key, an entry under any key (also of an unrelated plugin) that is not an object or has neither a `version` nor an `installPath` or has one that is not a non-blank string (a `null` field counts as missing), and under a supported plugin ID a `version` that is not a semantic version (`999x.0.0`, `1.2`, `1.2.3.4`; the grammar of Step 1's `Latest:`, with the optional `v`; a `version` of another plugin has to be a non-blank string only), and, under a supported plugin ID, an `installPath` written as a Windows path (a drive letter such as `C:` followed by a backslash, or a UNC path) on a system other than Windows, where it names nothing that can be read (a registry written by Windows and read from WSL, say), and `OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories (a variable that names no existing directory takes no part in that comparison, as in Step 1, but a path it names still protects the version it points into) all count as unreadable; the two variables are compared after resolving links and by filesystem identity, so two names of one directory are not a conflict), move nothing, and the message names the first cause it found in the registry (the key and the `version` or `installPath` of the entry, or that the file is not a regular file or not JSON of the expected shape); the cause may also be an entry of an unrelated plugin, an occupancy record or a plugin root variable, which the message does not name. The registry pins, the occupancy records and the plugin root variables are read again just before each version is moved, and a version that has become protected, or whose protection can no longer be read completely, is skipped and reported; only the instant between that last read and the rename remains open, because a SessionStart that has not yet published its record cannot be seen and the command holds no lock shared with the publisher. A version directory is not moved either when it, or any entry anywhere below it, was modified in the last 10 minutes (the same threshold, `STALE_THRESHOLD_MS` in `src/utils/paths.ts`, that SessionStart's own cleanup uses to leave a directory alone while an update may still be installing it; every entry at any depth counts because an update that refreshes an existing version overwrites its files in place and need not change the date of the directory itself or of any level above the file; a link is dated itself and never followed, and so is the version directory when it is a link: a redirect that SessionStart created a moment ago, such as `5.7.0 -> 5.8.0`, is as new as the link whatever the dates in its target and is left in place, and an old one is moved as the link only, so its target, in or outside the cache, is not touched): it is left in place and reported, and the command can be run again later; a version with a modification date more than 5 minutes in the future (a wrong clock, or files extracted from an archive) is left in place too and reported as that, not as a recent change. A version with more than 20000 entries (a cached version holds about 9000), or one whose entries cannot all be read, cannot be judged: it is left in place and reported (`Could not judge`). The updater (`copyPluginSyncPayload` in `src/installer/index.ts`) copies into the version directory in place and leaves no marker or lock file that the command could test, so an update that starts writing after the date scan has read the files it rewrites, up to the rename (the rest of the scan and the re-read of the registry, the records and the root variables run in between), cannot be seen; closing that window needs a lock or marker shared with the updater, which is a change in `src/installer` and not in this skill. The registry is read before any cache directory is looked for: when it cannot be read completely the command says so and stops, whatever namespace the cache lies in. The cache directory is `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds (`omc` for the bare `oh-my-claudecode`, and when the registry holds none): every such directory that exists is handled in turn, a pinned version protects the version of that name in each of them, and a backup from a marketplace other than `omc` carries its name in front (`<marketplace>-<version>-<time>`), and when more than one such directory exists every report line starts with `<marketplace>:` and its counts are those of that directory. A directory named `<version>.omc-stale-<pid>` (a name ending in `.omc-stale-` and a pid, what an interrupted cache relink leaves beside a missing or unusable original path) is not a version: the command does not list, protect, date or move it, because the reconciliation of SessionStart's own purge (`purgeStalePluginCacheVersions` in `src/utils/paths.ts`) restores it as the only intact copy and moving it to `plugins/backups` would prevent that. A directory whose name is not a semantic version of the grammar of Step 1 (`1e3`, `4.15.7L`, `v5.7.0`) is no version either: the command does not list, protect, date or move it, and leaves it where it is. A cache directory that exists but cannot be read (any error other than its absence, such as `EACCES` or `EIO`, or a file where the directory should be) is not an absent cache: the command prints `Nothing moved: could not read <directory> (<error code>)`, moves nothing and stops, and `No plugin cache found` or `No cache to clean` is printed only for a directory that does not exist (`ENOENT`). Every refusal (`Nothing moved: ... could not be read completely`, `identity unavailable`, `could not read <directory>`) and a failed move (`Cache move failed`) ends the command with exit code 1, so that it cannot be taken for a success; a finished move, `Nothing to move`, `Nothing moved: no pinned ...` and a missing cache end with 0. Backups go to `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/backups/oh-my-claudecode/`, outside `plugins/cache/`: OMC's stale cache purge can remove any cache directory that is not the active version, so a backup left inside the cache may not survive.
 ```bash
 # Keep protected versions; never prune by age, lexical/version order, or presence of a newer version; move only unprotected versions to plugins/backups
 node -e "
@@ -1296,7 +1388,8 @@ node -e "
 // == config dir (shared) ==
 // CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
 // ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
-// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+// ~ and a backslash means the home directory, and any other value is used as given, normalized as text like the
+// runtime does (a .. after a link folds the link away, a ~ anywhere else is literal).
 const path = require('path');
 const fs = require('fs');
 const home = require('os').homedir();
@@ -1307,7 +1400,7 @@ const configDir = !configured
     ? home
     : /^~[/\x5c]/.test(configured)
       ? path.join(home, configured.slice(2))
-      : configured;
+      : path.normalize(configured);
 // == plugin ids (shared) ==
 // The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
 const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
@@ -1328,9 +1421,10 @@ const semver = (text) => {
   const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
   return grammar.test(trimmed) ? dropV(trimmed) : '';
 };
-// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
-// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
-const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// A cache directory is a version directory when its name is exactly a semantic version of that grammar (no v, no
+// spaces) and is not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>. A name that
+// is no version (1e3, 4.15.7L, v5.7.0) takes no part in the order and is never moved as a version.
+const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
 // == read file (shared) ==
 // Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
 const readFile = (file) => {
@@ -1420,19 +1514,31 @@ const messages = {
 const backups = path.join(configDir, 'plugins', 'backups', 'oh-my-claudecode');
 const registryFile = path.join(configDir, 'plugins', 'installed_plugins.json');
 const occupancyDir = path.join(configDir, '.omc', 'cache-occupancy');
-const STOP_UNREADABLE =
-  'Nothing moved: installed_plugins.json, the cache occupancy records, the plugin root variables or a path in them could not be read completely; fix that first, then run this again';
+const stopUnreadable = (reason) =>
+  'Nothing moved: installed_plugins.json, the cache occupancy records, the plugin root variables or a path in them could not be read completely; fix that first, then run this again' +
+  (reason ? ' (cause: ' + reason + ')' : '');
 const STOP_NO_IDENTITY =
   'Nothing moved: identity unavailable (the file system reports no inode, or a stat failed, for a cache version or for a path that may protect one, and the spelling of that path does not place it inside a version, so it cannot be ruled out as another name of a cached version); keep the cache and every path that points into it spelled alike, or use a file system that reports inodes, then run this again';
 // The same threshold as STALE_THRESHOLD_MS in src/utils/paths.ts, which SessionStart's own cleanup uses.
 const FRESH_MS = 600000;
+// A modification date further ahead than this is a wrong clock or an archive, not an update in progress.
+const FUTURE_MS = 300000;
+// A refusal or a failure ends with exit code 1, so that it cannot be mistaken for a success.
+const refuse = (text) => {
+  process.exitCode = 1;
+  console.log(text);
+};
 
 // == repair registry (shared) ==
 // pins: the entries of the supported plugin IDs. other: the installPath of every entry of another plugin. ids: the
 // supported IDs. unreadable: the file is not a regular file, is not JSON of the expected shape, or holds a
-// malformed entry anywhere. A missing file is no pins and not unreadable.
+// malformed entry anywhere; reason names the first such entry. A missing file is no pins and not unreadable.
+// A Windows path (a drive letter or a UNC path) in the installPath of an entry of OMC cannot be read on another
+// system, so it counts as unreadable instead of protecting nothing.
+const foreignPath = (target) => process.platform != 'win32' && /^(?:[A-Za-z]:[/\x5c]|\x5c\x5c)/.test(target);
 const readRegistry = () => {
   let unreadable = false;
+  let reason = '';
   let pins = [];
   let other = [];
   let ids = [];
@@ -1443,10 +1549,28 @@ const readRegistry = () => {
     for (const [key, entries] of Object.entries(plugins)) {
       const id = key.toLowerCase();
       const isSupported = OMC_IDS.includes(id);
-      if (!Array.isArray(entries) || !entries.length || (!isSupported && id.includes('oh-my-claudecode'))) throw 0;
+      if (!Array.isArray(entries) || !entries.length) {
+        reason = key + ' has no list of entries';
+        throw 0;
+      }
+      if (!isSupported && id.includes('oh-my-claudecode')) {
+        reason = key + ' looks like OMC but is not a plugin ID the installer accepts';
+        throw 0;
+      }
       if (isSupported) ids.push(id);
       for (const entry of entries) {
-        if (entryShapeBad(entry) || (isSupported && entry.version != undefined && !semver(entry.version))) throw 0;
+        if (entryShapeBad(entry)) {
+          reason = 'an entry of ' + key + ' has no usable version or installPath';
+          throw 0;
+        }
+        if (isSupported && entry.version != undefined && !semver(entry.version)) {
+          reason = 'an entry of ' + key + ' has version ' + JSON.stringify(entry.version) + ', which is not a semantic version';
+          throw 0;
+        }
+        if (isSupported && typeof entry.installPath == 'string' && foreignPath(entry.installPath.trim())) {
+          reason = 'an entry of ' + key + ' has the Windows path ' + JSON.stringify(entry.installPath) + ' as installPath, which this system cannot read';
+          throw 0;
+        }
         if (!isSupported) {
           if (typeof entry.installPath == 'string') other.push(entry.installPath.trim());
         } else pins.push(entry);
@@ -1457,8 +1581,9 @@ const readRegistry = () => {
     other = [];
     ids = [];
     unreadable = !(error && error.code == 'ENOENT');
+    if (unreadable && !reason) reason = 'the file is not a regular file or not JSON of the expected shape';
   }
-  return { unreadable, pins, other, ids };
+  return { unreadable, reason, pins, other, ids };
 };
 
 // == occupancy records (shared) ==
@@ -1506,11 +1631,16 @@ const newestChange = (root) => {
 };
 
 // == protection (shared) ==
-// protectionOf(dir, versions) reads every source of protection again and returns { unreadable, noIdentity, pinned,
-// kept }: unreadable and noIdentity stop the command, pinned are the versions the registry pins (or a path of a pin
-// reaches), kept are all protected versions. dir is the cache directory and versions the version directory names in it.
+// protectionOf(dir, versions) reads every source of protection again and returns { unreadable, reason, noIdentity,
+// pinned, kept }: unreadable (with the reason, when the registry names one) and noIdentity stop the command, pinned
+// are the versions the registry pins (or a path of a pin reaches), kept are all protected versions. dir is the cache
+// directory and versions the version directory names in it.
 const protectionOf = (dir, versions) => {
   let unreadable = false;
+  // A path that goes through a link and then .. names the parent of the link target on the file system and the
+  // parent of the link as text. The chain reads it the first way, the runtime folds an occupancy record the second
+  // way, so every path that protects is read both ways, like a record.
+  const bothForms = (target) => [...new Set([target, path.resolve(target)])];
   const chainOf = (target) => {
     const chain = linkChain(target);
     if (chain.unreadable) unreadable = true;
@@ -1598,10 +1728,10 @@ const protectionOf = (dir, versions) => {
       if (listed) pinPaths.push(path.join(dir, listed));
       else if (identityOf(written) || lacksIdentity(written)) pinPaths.push(written);
     }
-    if (pin.installPath != undefined) pinPaths.push(pin.installPath.trim());
+    if (pin.installPath != undefined) pinPaths.push(...bothForms(pin.installPath.trim()));
   }
   const pinChains = pinPaths.flatMap(chainOf);
-  const otherChains = [...registry.other, ...held, ...rootVars].flatMap(chainOf);
+  const otherChains = [...registry.other.flatMap(bothForms), ...held, ...rootVars.flatMap(bothForms)].flatMap(chainOf);
   // The versions a list of paths protects: a path that is, or lies inside, the version directory (as written or
   // through the real cache path), or an ancestor of a path with the identity of the version directory. lowercase
   // are the paths of records, which on win32 also protect by a lower-case comparison.
@@ -1654,7 +1784,7 @@ const protectionOf = (dir, versions) => {
         isHeld = false;
       }
     });
-  return { unreadable, noIdentity, pinned, kept };
+  return { unreadable, reason: registry.unreadable ? registry.reason : '', noIdentity, pinned, kept };
 };
 
 // == repair run (shared) ==
@@ -1665,16 +1795,17 @@ const cleanCache = (market, dir, lead) => {
   let moved = 0;
   let skipped = 0;
   let fresh = 0;
+  let future = 0;
   let unjudged = 0;
   try {
     const versions = fs.readdirSync(dir).filter(isVersionDir);
     const state = protectionOf(dir, versions);
     if (state.unreadable) {
-      console.log(STOP_UNREADABLE);
+      refuse(stopUnreadable(state.reason));
       return true;
     }
     if (state.noIdentity) {
-      console.log(lead + STOP_NO_IDENTITY);
+      refuse(lead + STOP_NO_IDENTITY);
       return true;
     }
     const free = versions.filter((name) => !state.kept.includes(name));
@@ -1690,6 +1821,10 @@ const cleanCache = (market, dir, lead) => {
           newest = newestChange(path.join(dir, name));
         } catch (error) {
           unjudged++;
+          return;
+        }
+        if (newest - Date.now() > FUTURE_MS) {
+          future++;
           return;
         }
         if (Date.now() - newest < FRESH_MS) {
@@ -1713,19 +1848,24 @@ const cleanCache = (market, dir, lead) => {
       if (fresh) {
         console.log(lead + 'Left', fresh, 'version(s) modified in the last 10 minutes alone: an update may still be installing them; run this again later');
       }
+      if (future) {
+        console.log(lead + 'Left', future, 'version(s) alone that have a modification date more than 5 minutes in the future (a wrong clock, or files extracted from an archive): check the dates, then run this again');
+      }
     } else {
       console.log(lead + (state.pinned.length ? messages.allProtected : messages.noPin));
     }
   } catch (error) {
     const code = error && error.code;
-    console.log(
+    const text =
       lead +
-        (moveStarted
-          ? 'Cache move failed (' + moved + ' moved before the error): ' + error.message
-          : code == 'ENOENT'
-            ? messages.noCache + (market == 'omc' ? '' : ' in plugins/cache/' + market)
-            : 'Nothing moved: could not read ' + dir + ' (' + (code || 'unknown error') + ')'),
-    );
+      (moveStarted
+        ? 'Cache move failed (' + moved + ' moved before the error): ' + error.message
+        : code == 'ENOENT'
+          ? messages.noCache + (market == 'omc' ? '' : ' in plugins/cache/' + market)
+          : 'Nothing moved: could not read ' + dir + ' (' + (code || 'unknown error') + ')');
+    // A missing cache is nothing to clean, not a failure; a failed move or an unreadable directory is.
+    if (moveStarted || code != 'ENOENT') refuse(text);
+    else console.log(text);
     return true;
   }
   return false;
@@ -1745,7 +1885,7 @@ const caches = markets
     }
   });
 if (!caches.length) caches.push([markets[0], cacheDirOf(markets[0])]);
-if (registry.unreadable) console.log(STOP_UNREADABLE);
+if (registry.unreadable) refuse(stopUnreadable(registry.reason));
 else {
   for (const [market, dir] of caches) {
     if (cleanCache(market, dir, caches.length > 1 ? market + ': ' : '')) break;
@@ -1770,7 +1910,7 @@ Do not move entire `agents/`, `commands/`, or `skills/` roots to resolve a mixed
 The only allowed cleanup is a reversible move to a sibling `.bak` copy (`mv`); deletion (`rm -rf`, `rm`) is never allowed. Move a whole root with `mv` only when every file inside matches a name shipped in the active plugin's own `agents/`, `commands/`, or `skills/` directory. A `commands/` root that also holds a custom (non-OMC) file is not moved as a whole: move only individually verified OMC-owned files, one by one, into `commands.bak/` and leave every other file in place. An `agents/` or `skills/` root that holds a custom file is only reported, as stated above: nothing in it is moved.
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L
 # Backup first (optional - ask user)
 # mv "$C"/agents "$C"/agents.bak
 # mv "$C"/commands "$C"/commands.bak

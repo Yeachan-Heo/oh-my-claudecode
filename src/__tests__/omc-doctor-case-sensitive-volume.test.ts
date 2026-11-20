@@ -104,7 +104,7 @@ describe.skipIf(volumeFoldsCase())('omc-doctor on a volume that tells letter cas
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
           const env = { OMC_PLUGIN_ROOT: makeRoot(dir, 'Foo', '1.0.0'), CLAUDE_PLUGIN_ROOT: makeRoot(dir, 'foo', '1.0.0') };
           const result = runCommand(command, dir, { env, preloads: [reportAs(dir, platform)] });
-          expect({ platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ platform, status: 0, versions: '5.7.0,5.8.0', moved: 0 });
+          expect({ platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ platform, status: 1, versions: '5.7.0,5.8.0', moved: 0 });
           expect(result.stdout).toContain('Nothing moved');
         } finally {
           rmSync(dir, { recursive: true, force: true });
@@ -232,7 +232,7 @@ describe('omc-doctor on a volume that ignores letter case and reports inode 0 fa
             const result = runCommand(command, dir, { env, preloads: [reportAs(dir, platform), ...volume(dir)] });
             const decided = source === 'occupancy record' && platform === 'win32';
             expect({ source, platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir), reason: result.stdout.includes(STOPPED) })
-              .toEqual({ source, platform, status: 0, versions: decided ? `5.1.0,${LIVE}` : `5.1.0,5.8.0,${LIVE}`, moved: decided ? 1 : 0, reason: !decided });
+              .toEqual({ source, platform, status: decided ? 0 : 1, versions: decided ? `5.1.0,${LIVE}` : `5.1.0,5.8.0,${LIVE}`, moved: decided ? 1 : 0, reason: !decided });
           } finally {
             rmSync(dir, { recursive: true, force: true });
           }
@@ -409,7 +409,7 @@ fs.mkdirSync = function (target, ...rest) {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
           const env = { OMC_PLUGIN_ROOT: path.join(cache, '5.9.0'), CLAUDE_PLUGIN_ROOT: upperBelow(dir, path.join(cache, '5.9.0')) };
           const result = runCommand(command, dir, { env, preloads: [reportAs(dir, platform), ...volume(dir)] });
-          expect({ platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ platform, status: 0, versions: '5.7.0,5.8.0,5.9.0', moved: 0 });
+          expect({ platform, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ platform, status: 1, versions: '5.7.0,5.8.0,5.9.0', moved: 0 });
           expect(result.stdout).toContain('Nothing moved');
         } finally {
           rmSync(dir, { recursive: true, force: true });

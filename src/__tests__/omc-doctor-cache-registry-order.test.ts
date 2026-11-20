@@ -30,7 +30,8 @@ describe('omc-doctor cache commands on a synthetic config directory (the order o
                 mkdirSync(checkout, { recursive: true });
                 const OMC_PLUGIN_ROOT = { unset: '', 'the pinned install': path.join(cache, '5.8.0'), 'a free version': path.join(cache, '5.7.0'), 'a checkout elsewhere': checkout }[root];
                 const result = runCommand(command, dir, { env: { OMC_PLUGIN_ROOT } });
-                expect(result.status).toBe(0);
+                // A registry that cannot be read is a refusal (exit code 1); a missing one or a valid one is not.
+                expect(result.status).toBe(registry === 'valid' || registry === 'missing' ? 0 : 1);
                 const got = { layout: layout.name, registry, root, versions: digitVersions(cache), moved: movedAside(dir) };
                 if (registry === 'valid') {
                   // 5.8.0 is pinned; 5.7.0 is free unless the root variable points into it.

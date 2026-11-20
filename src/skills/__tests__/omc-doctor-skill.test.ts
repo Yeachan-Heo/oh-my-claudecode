@@ -44,7 +44,8 @@ describe('omc-doctor skill package version diagnostic (issue #2981)', () => {
     const skillPath = join(process.cwd(), 'skills', 'omc-doctor', 'SKILL.md');
     const content = readFileSync(skillPath, 'utf8');
 
-    expect(content).toContain('npm view oh-my-claude-sisyphus version');
+    expect(content).toContain("const view = ['view', 'oh-my-claude-sisyphus', 'version'];");
+    expect(content).not.toContain("'view', 'oh-my-claudecode', 'version'");
     expect(content).not.toContain('npm view oh-my-claudecode version');
   });
 });

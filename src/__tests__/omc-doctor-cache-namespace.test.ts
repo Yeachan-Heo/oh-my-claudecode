@@ -57,7 +57,7 @@ describe('omc-doctor: the cache commands carry one definition of a version name 
 
   test('the version-name test is the same text everywhere and excludes a relink recovery directory', () => {
     const definitions = sources.map(([label, command]) => [label, (sharedSections(command).get('version grammar') ?? '').split('\n').find((l) => l.startsWith('const isVersionDir')) ?? ''] as const);
-    for (const [label, definition] of definitions) expect({ label, definition }).toEqual({ label, definition: String.raw`const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);` });
+    for (const [label, definition] of definitions) expect({ label, definition }).toEqual({ label, definition: String.raw`const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);` });
   });
 
   test('no command filters a cache listing by its own copy of the digit test', () => {
@@ -117,11 +117,11 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
   });
 
   // The relink reconciler recognises exactly `.omc-stale-` and a decimal pid at the end of the name; a name that only
-  // looks like it is an ordinary version, so it is judged like one.
+  // looks like it (and is a semantic version, a prerelease here) is an ordinary version, so it is judged like one.
   test('only a name that ends in .omc-stale- and a pid is a recovery directory', () => {
     for (const command of commands) {
       for (const platform of PLATFORMS) {
-        const { dir, cache } = makeCache(['5.9.0', '5.6.0.omc-stale-abc', '5.5.0.omc-stale-12.bak', '5.4.0.omc-stale-7', '5.3.0.omc-stale-0']);
+        const { dir, cache } = makeCache(['5.9.0', '5.6.0-omc-stale-abc', '5.5.0-omc-stale-12.bak', '5.4.0.omc-stale-7', '5.3.0.omc-stale-0']);
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
           const result = runCommand(command, dir, { preloads: [reportAs(dir, platform)] });

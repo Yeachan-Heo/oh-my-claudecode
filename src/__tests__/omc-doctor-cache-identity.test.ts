@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lutimesSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
@@ -11,6 +11,9 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
   function link(target: string, at: string) {
     if (process.platform === 'win32') symlinkSync(path.resolve(path.dirname(at), target), at, 'junction');
     else symlinkSync(target, at);
+    // A link is dated itself: one made just now counts as a recent change and keeps its version alone, whatever protects it.
+    const then = new Date(Date.now() - 3_600_000);
+    lutimesSync(at, then, then);
   }
   // An occupancy record of this live process; a record without a start identity is kept while its process is alive.
   function writeRecord(dir: string, root: string): string {
@@ -88,7 +91,7 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
             expect({ second, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
               second === '5.9.0'
                 ? { second, status: 0, versions: '5.8.0,5.9.0', moved: 1 }
-                : { second, status: 0, versions: '5.1.0,5.8.0,5.9.0', moved: 0 },
+                : { second, status: 1, versions: '5.1.0,5.8.0,5.9.0', moved: 0 },
             );
           } finally {
             rmSync(dir, { recursive: true, force: true });

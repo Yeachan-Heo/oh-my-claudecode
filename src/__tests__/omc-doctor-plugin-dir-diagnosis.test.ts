@@ -99,6 +99,9 @@ describe('omc-doctor: the missing-install diagnosis is channel-aware', { timeout
     expect(first).toBe(0);
     for (const word of ['`Installed:`', '`Latest:`', '`Updater:`']) expect(bullets[first]).toContain(word);
     expect(bullets[first]).toContain('`Channel: plugin-dir` is a loaded checkout');
+    // The rules read only the channels they name, and the two install channels are installs.
+    expect(bullets[first]).toContain('applies only to the channels it names');
+    expect(bullets[first]).toContain('`Channel: npm` and `Channel: marketplace` are installs');
     expect(applies).toContain('`Channel: npm` or `Channel: marketplace`');
     expect(channelsIn(applies).sort()).toEqual(['marketplace', 'npm']);
     expect(channelsIn(excluded)).toEqual(['plugin-dir']);
@@ -116,5 +119,7 @@ describe('omc-doctor: the missing-install diagnosis is channel-aware', { timeout
     expect(rule).toContain('is an unknown version of a checkout the session is running, not a missing install');
     expect(rule).toContain('never `CRITICAL - plugin not installed`');
     expect(rule).toContain('OK with the detail `plugin-dir checkout, version unknown`');
+    // The rule never makes the checkout a critical finding.
+    expect(rule).not.toMatch(/is CRITICAL/);
   });
 });
