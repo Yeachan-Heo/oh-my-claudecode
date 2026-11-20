@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -408,6 +408,54 @@ describe('scaleUp launch config', () => {
       const candidate = monitorMocks.saveTeamConfigAtRevision.mock.calls[index]?.[0] as TeamConfig;
       return candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting');
     })!).toBeLessThan(splitIndex);
+  });
+
+  it.each([
+    ['non-bare', ['/usr/bin/claude', '--dangerously-skip-permissions'], true],
+    ['--bare', ['/usr/bin/claude', '--dangerously-skip-permissions', '--bare'], false],
+  ] as const)('gives a %s claude scale-up worker the hook settings only when it does not run --bare', async (
+    _label: string,
+    workerArgv: readonly string[],
+    hooked: boolean,
+  ) => {
+    modelContractMocks.buildWorkerArgv.mockReturnValue(workerArgv);
+    const settingsPath = join(teamStateRoot(cwd, 'demo-team'), 'provider-event-hooks.json');
+    const expectedArgs = hooked
+      ? [...workerArgv.slice(1), '--settings', settingsPath]
+      : workerArgv.slice(1);
+
+    const result = await scaleUp(
+      'demo-team',
+      1,
+      'claude',
+      [{ subject: 'demo', description: 'demo task' }],
+      cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({ ok: true, newWorkerCount: 1 });
+    expect(tmuxSessionMocks.spawnOwnedWorkerInPane).toHaveBeenCalledWith(
+      'demo-session:0',
+      expect.anything(),
+      expect.objectContaining({ provider: 'claude', launchBinary: '/usr/bin/claude', launchArgs: expectedArgs }),
+    );
+    // Recovery relaunches from the saved descriptor, so it must carry the same argv.
+    const reservation = monitorMocks.saveTeamConfigAtRevision.mock.calls
+      .map(([candidate]) => candidate as TeamConfig)
+      .find(candidate => candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting'));
+    expect(reservation!.workers[0]!.launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: expectedArgs });
+    if (hooked) {
+      const settings = JSON.parse(await readFile(settingsPath, 'utf-8')) as {
+        hooks: Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>>;
+      };
+      expect(Object.keys(settings.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure']);
+      for (const [event, entries] of Object.entries(settings.hooks)) {
+        expect(entries[0]!.hooks[0]).toMatchObject({ type: 'command' });
+        expect(entries[0]!.hooks[0]!.command).toMatch(new RegExp(`team-provider-event-hook\\.mjs' ${event}$`));
+      }
+    } else {
+      expect(existsSync(settingsPath)).toBe(false);
+    }
   });
 
   it('passes the immutable team defaults to scale-up resolution', async () => {
