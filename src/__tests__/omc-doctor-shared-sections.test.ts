@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'vitest';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { commandWith, commands, flatCode, scriptOf, sharedSections, skillCommands, skillText } from './helpers/omc-doctor-cache-fixture.js';
 import { versionCommand } from './helpers/omc-doctor-step1.js';
 
@@ -88,5 +90,18 @@ describe('omc-doctor: no command contains anything a double-quoted shell string 
 
   test('the skill text never spells !==', () => {
     expect(skillText).not.toContain('!==');
+  });
+});
+
+// Every omc-doctor test file that runs a command of the skill handles paths and file systems, so it belongs in the step of
+// ci.yml that runs the path-handling tests on Windows. The same remark came back for every new file of this skill.
+const ciFile = fileURLToPath(new URL('../../.github/workflows/ci.yml', import.meta.url));
+describe.skipIf(!existsSync(ciFile))('omc-doctor: the test files run in the Windows path-handling step of ci.yml', () => {
+  test('every omc-doctor test file of src/__tests__ is listed in that step', () => {
+    const step = readFileSync(ciFile, 'utf8').split(/\n\s*- name: /).find((block) => block.startsWith('Run Windows path-handling tests')) ?? '';
+    expect(step).not.toBe('');
+    const files = readdirSync(fileURLToPath(new URL('.', import.meta.url))).filter((name) => /^omc-doctor-.*\.test\.ts$/.test(name));
+    expect(files.length).toBeGreaterThan(20);
+    expect(files.filter((name) => !step.includes(`src/__tests__/${name}`))).toEqual([]);
   });
 });
