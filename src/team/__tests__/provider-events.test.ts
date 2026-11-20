@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -48,10 +48,24 @@ describe('parseLatestProviderEvent', () => {
       line({ event: 'Stop', at: 5000, attempt: 'a1' }),
       line({ v: 1, event: 'PreToolUse', at: 5000, attempt: 'a1' }),
       line({ v: 1, event: 'Stop', at: '5000', attempt: 'a1' }),
+      '{"v":1,"event":"Stop","at":1e999,"attempt":"a1"}',
       'null',
       '',
     ].join('\n');
     expect(parseLatestProviderEvent(content, 'a1')).toEqual({ event: 'SessionStart', at: 1000 });
+  });
+
+  it('picks the latest time, not the last line, and the later line on a tie', () => {
+    const outOfOrder = [
+      line({ v: 1, event: 'UserPromptSubmit', at: 2000, attempt: 'a1' }),
+      line({ v: 1, event: 'SessionStart', at: 1000, attempt: 'a1' }),
+    ].join('');
+    expect(parseLatestProviderEvent(outOfOrder, 'a1')).toEqual({ event: 'UserPromptSubmit', at: 2000 });
+    const tie = [
+      line({ v: 1, event: 'UserPromptSubmit', at: 2000, attempt: 'a1' }),
+      line({ v: 1, event: 'Stop', at: 2000, attempt: 'a1' }),
+    ].join('');
+    expect(parseLatestProviderEvent(tie, 'a1')).toEqual({ event: 'Stop', at: 2000 });
   });
 
   it('returns none for empty content', () => {
@@ -71,8 +85,9 @@ describe.skipIf(process.platform === 'win32')('readLatestProviderEvent', () => {
 
   it('returns none without an attempt id', async () => {
     mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    // The second line has no attempt, so only the guard keeps it from matching an undefined id.
     writeFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'),
-      line({ v: 1, event: 'Stop', at: 1, attempt: 'a1' }));
+      line({ v: 1, event: 'Stop', at: 1, attempt: 'a1' }) + line({ v: 1, event: 'Stop', at: 2 }));
     expect(await readLatestProviderEvent(root, 'worker-1', undefined)).toEqual({ event: 'none' });
   });
 
@@ -229,7 +244,10 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       writeFileSync(target, '');
       symlinkSync(target, join(root, 'workers', 'worker-1', 'provider-events.jsonl'));
       symlinkSync(outside, join(root, 'workers', 'worker-2'));
-      for (const worker of ['worker-1', 'worker-2']) {
+      // A dangling leaf link: following it with O_CREAT would create its target outside the team.
+      mkdirSync(join(root, 'workers', 'worker-3'));
+      symlinkSync(join(outside, 'created.jsonl'), join(root, 'workers', 'worker-3', 'provider-events.jsonl'));
+      for (const worker of ['worker-1', 'worker-2', 'worker-3']) {
         const result = run(command, { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: `demo/${worker}`, OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' });
         expect(result.status).toBe(0);
         expect(result.stdout).toBe('');
@@ -237,6 +255,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       }
       expect(readFileSync(target, 'utf8')).toBe('');
       expect(existsSync(join(outside, 'provider-events.jsonl'))).toBe(false);
+      expect(existsSync(join(outside, 'created.jsonl'))).toBe(false);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
@@ -259,6 +278,29 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
     expect(lstatSync(fifo).isFIFO()).toBe(true);
   });
 
+  it.skipIf(process.platform === 'win32')('writes nothing into a FIFO that has a reader', async () => {
+    const command = await hookCommand('Stop');
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    const fifo = join(root, 'workers', 'worker-1', 'provider-events.jsonl');
+    execFileSync('mkfifo', [fifo]);
+    // The read-write descriptor is the reader, so the hook's non-blocking open succeeds.
+    const reader = openSync(fifo, constants.O_RDWR | constants.O_NONBLOCK);
+    try {
+      const result = run(command, { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' });
+      expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toEqual({ status: 0, stdout: '', stderr: '' });
+      let pending = '';
+      try {
+        const buffer = Buffer.alloc(4096);
+        pending = buffer.subarray(0, readSync(reader, buffer)).toString('utf8');
+      } catch (error) {
+        expect((error as NodeJS.ErrnoException).code).toBe('EAGAIN');
+      }
+      expect(pending).toBe('');
+    } finally {
+      closeSync(reader);
+    }
+  });
+
   it('exits 0 silently and creates nothing when it cannot write', async () => {
     const command = await hookCommand('Stop');
     const envs: Array<Record<string, string>> = [
@@ -274,5 +316,37 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       expect(result.stderr).toBe('');
     }
     expect(existsSync(join(root, 'workers'))).toBe(false);
+  });
+
+  it('writes nothing for a bad event name, a missing attempt or state root, or an unsafe worker name', () => {
+    const hook = join(__dirname, '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs');
+    for (const worker of ['worker-1', 'w..1']) mkdirSync(join(root, 'workers', worker), { recursive: true });
+    const good = { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' };
+    const cases: Array<{ event: string; env: Record<string, string> }> = [
+      { event: '', env: good },
+      { event: 'Not-An-Event', env: good },
+      { event: 'Stop', env: { ...good, OMC_WORKER_LAUNCH_ATTEMPT_ID: '' } },
+      // Run from the team root, so a relative fallback would land on workers/worker-1.
+      { event: 'Stop', env: { ...good, OMC_TEAM_STATE_ROOT: '' } },
+      // An empty worker name would put the file in workers/ itself.
+      { event: 'Stop', env: { ...good, OMC_TEAM_WORKER: 'demo/' } },
+      { event: 'Stop', env: { ...good, OMC_TEAM_WORKER: 'demo/w..1' } },
+    ];
+    for (const { event, env } of cases) {
+      const result = spawnSync(process.execPath, [hook, event], {
+        cwd: root,
+        env: { PATH: process.env.PATH ?? '', ...env },
+        encoding: 'utf8',
+      });
+      expect({ event, env, status: result.status, stdout: result.stdout, stderr: result.stderr })
+        .toEqual({ event, env, status: 0, stdout: '', stderr: '' });
+      for (const dir of ['workers', join('workers', 'worker-1'), join('workers', 'w..1')]) {
+        expect({ event, env, written: existsSync(join(root, dir, 'provider-events.jsonl')) })
+          .toEqual({ event, env, written: false });
+      }
+    }
+    // The same environment with a good event does write, so the cases above fail on their guard.
+    expect(spawnSync(process.execPath, [hook, 'Stop'], { cwd: root, env: { PATH: process.env.PATH ?? '', ...good } }).status).toBe(0);
+    expect(existsSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'))).toBe(true);
   });
 });
