@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.20.5';
+export const RULES_VERSION = '2026.11.20.6';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
@@ -607,7 +607,8 @@ export function classifyCommand(command) {
  * chosen for their stable summary lines. Other runners stay undetermined when their exit status is hidden.
  */
 const SUMMARY_RULES = [
-  // node:test: a `ℹ fail N` line with N above 0 is a failure, N equal 0 a pass.
+  // node:test: a `ℹ fail N` line with N above 0 is a failure, N equal 0 a pass, unless a test was cancelled (a timeout, a promise
+  // that never settles): the run exits 1 and the cancelled count, which stands behind the fail count, is the only sign of it.
   {
     runner: 'node-test',
     rule: 'node-test-fail-count',
@@ -615,37 +616,46 @@ const SUMMARY_RULES = [
       if (!/[ℹi] (?:tests|pass|fail) \d+/.test(tail)) return null;
       const m = /[ℹi] fail (\d+)/.exec(tail);
       if (!m) return null;
-      return Number(m[1]) > 0 ? 'failed' : 'passed';
+      return Number(m[1]) > 0 || /[ℹi] cancelled [1-9]\d*\b/.test(tail) ? 'failed' : 'passed';
     },
   },
-  // pytest: `===== 3 failed, 5 passed in 0.2s =====` / `===== 5 passed in 0.2s =====`.
+  // pytest: `===== 3 failed, 5 passed in 0.2s =====` / `===== 5 passed in 0.2s =====`. The counts stand in the order of pytest's
+  // own categories, so an error count may come behind the passed count (`1 passed, 1 error`: a teardown failed and the exit status
+  // is 1). The whole line is read for a failed or error count first; a pass needs a passed count and counts of nothing but words.
   {
     runner: 'pytest',
     rule: 'pytest-summary-line',
     apply: (tail) => {
-      const fail = /^=+ (\d+) (?:failed(?:, \d+ errors?)?|errors?)\b[\s\S]*? in [\d.]+s =*$/m.exec(tail);
-      if (fail) return 'failed';
-      const pass = /^=+ \d+ passed\b[\s\S]*? in [\d.]+s =*$/m.exec(tail);
-      return pass ? 'passed' : null;
+      let passed = false;
+      for (const line of tail.matchAll(/^=+ ([^=\n]*?) in [\d.]+s(?: \(\d+:\d{2}:\d{2}\))? =*$/gm)) {
+        const counts = line[1];
+        if (/(?:^|, )[1-9]\d* (?:[\w-]+ )*(?:failed|errors?)(?=,|$)/.test(counts)) return 'failed';
+        if (/^\d+ [a-z-]+(?: [a-z-]+)*(?:, \d+ [a-z-]+(?: [a-z-]+)*)*$/.test(counts) && /(?:^|, )[1-9]\d* passed(?=,|$)/.test(counts)) passed = true;
+      }
+      return passed ? 'passed' : null;
     },
   },
-  // vitest: a test file that failed to load (`Test Files N failed`) fails the run even when the
-  // `Tests` line reads as passed; then the counts on their own line, two spaces in, no colon.
+  // vitest: a test file that failed to load (`Test Files N failed`) fails the run even when the `Tests` line reads as passed, and
+  // so do the lines behind it that count unhandled errors (`Errors  1 error`), type errors and leaks; then the counts on their
+  // own line, two spaces in, no colon.
   {
     runner: 'vitest',
     rule: 'vitest-tests-line',
     apply: (tail) => {
       if (/^\s*(?:\S+:\s*)?Test Files\s+[^\n]*?\b[1-9]\d* failed\b/m.test(tail)) return 'failed';
+      if (/^\s*(?:\S+:\s*)?(?:(?:Type )?Errors|Leaks)\s+[1-9]\d* (?:errors?|leaks?|failed)\b/m.test(tail)) return 'failed';
       const m = /^\s*Tests\s{2,}([^\n]*\(\d+\))\s*$/m.exec(tail);
       if (!m) return null;
       return /\d+ failed/.test(m[1]) ? 'failed' : 'passed';
     },
   },
-  // eslint exits 0 on warnings alone, so the error count is the verdict, not the problem count.
+  // eslint exits 0 on warnings alone, so the error count is the verdict, not the problem count; with `--max-warnings` the warnings
+  // fail the run, which the line behind the summary says.
   {
     runner: 'eslint',
     rule: 'eslint-problems-line',
     apply: (tail) => {
+      if (/^ESLint found too many warnings\b/m.test(tail)) return 'failed';
       const m = /^[✖x✗] \d+ problems? \((\d+) errors?, (\d+) warnings?\)/m.exec(tail);
       if (!m) return null;
       return Number(m[1]) > 0 ? 'failed' : 'passed';

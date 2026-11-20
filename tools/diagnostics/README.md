@@ -908,7 +908,13 @@ summary line counts only for the detected runner: a passing `vitest run` that pr
 `All checks passed!` behind `pytest | tail` is not a pass. A package manager (`npm`, `pnpm`, `yarn`, `bun`) or `make` runs a
 script of unknown content, so it reads the runners that fit the kind of the check (`test`: vitest, jest, node:test, pytest;
 `lint`: eslint, ruff; `typecheck`: tsc, ruff; `build`: tsc). A runner that is not listed reads no summary, so only its visible
-exit status or a printed exit code decides. The zero-test reports (`Tests: 0 total`, `No tests found`, `no tests ran`,
+exit status or a printed exit code decides. A failure is looked for in the whole summary before a pass is accepted, because a count
+of failures can stand behind the count of passes: pytest's `1 passed, 1 error` (a teardown failed, exit 1) and the same with
+`xfailed`, `warnings` or `rerun` in between, vitest's `Errors  1 error`, `Type Errors  1 failed` and `Leaks  1 leak` behind a
+`Tests  2 passed (2)` line, a node:test run with `ℹ fail 0` and `ℹ cancelled 1`, and eslint's `ESLint found too many warnings`
+behind `0 errors, 2 warnings` (`--max-warnings`). Only the pytest summary line with the `=====` rules is read (not the `-q` form), and a time such as `61.00s (0:01:01)` is
+part of it. It counts as a pass only when it holds a passed count and nothing but counts of plain words (`5 passed, 1 skipped, 2 warnings`);
+a count of a word of another shape leaves the check undetermined, while a failed or error count anywhere in it fails the check. The zero-test reports (`Tests: 0 total`, `No tests found`, `no tests ran`,
 `ℹ tests 0`, `[no tests to run]`, `running 0 tests`) follow the same rule, and they stand only without real results in the output (a line that counts a test as passed, failed or skipped, such as `Tests  2 failed | 1 passed (3)`): `No tests found` printed by a test, or by one child of a script, does not hide the run. A report alone leaves the check `undetermined` whatever the exit status, because the runners exit nonzero themselves when they find no test. An option value that looks like a file (`--config vitest.config.ts`, `-c pytest.ini`) is read as a file operand and narrows a test run, because the classifier does not know which options take a value. Gradle and Maven are not recognized on purpose:
 their lifecycle goals can also publish, so an exit code proves less there. A command with several runners (`tsc; vitest run | tail`) is
 read for the last one, whose status is the command's, so the summary lines of an earlier runner do not count.

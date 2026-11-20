@@ -315,6 +315,51 @@ it('vitest summary: passed, failed, undetermined (hidden exit)', () => {
   );
 });
 
+// A failed or error count may stand behind the passed count of a summary, or on a line of its own behind the counts: the whole summary
+// is read for it before a pass is accepted. The exit status is hidden by the pipe, so the summary decides.
+const SUMMARIES: Array<[string, string, string, 'failed' | 'passed' | 'undetermined']> = [
+  // pytest: the categories come in pytest's order, the error count behind the passed count
+  ['pytest | tail -3', '===== 1 passed, 1 error in 0.02s =====', 'error count behind a passed count', 'failed'],
+  ['pytest | tail -3', '===== 3 passed, 1 skipped, 2 errors in 0.5s =====', 'errors behind passed and skipped', 'failed'],
+  ['pytest | tail -3', '===== 1 passed, 1 warning, 1 error in 0.02s =====', 'error behind a warning count', 'failed'],
+  ['pytest | tail -3', '===== 5 passed, 2 xfailed, 1 error in 1.2s =====', 'error behind xfailed', 'failed'],
+  ['pytest | tail -3', '===== 2 failed, 1 passed, 1 error in 0.1s =====', 'failed and error together', 'failed'],
+  ['pytest | tail -3', '===== 1 passed, 1 rerun, 1 failed in 3.00s =====', 'failed behind a rerun count', 'failed'],
+  ['pytest | tail -3', '===== 1 passed, 3 subtests failed in 0.1s =====', 'subtests failed', 'failed'],
+  ['pytest | tail -3', '===== 1 passed, 1 error in 61.00s (0:01:01) =====', 'a long run names its time twice', 'failed'],
+  ['pytest | tail -3', '===== 1 failed, 2 odd_thing in 0.1s =====', 'a failed count beside a word it does not know', 'failed'],
+  ['pytest | tail -3', '===== 1 error in 0.10s =====', 'an error count alone', 'failed'],
+  ['pytest | tail -3', '===== 5 passed in 0.2s =====', 'passed', 'passed'],
+  ['pytest | tail -3', '===== 5 passed, 1 skipped, 2 warnings in 0.2s =====', 'passed with skipped and warnings', 'passed'],
+  ['pytest | tail -3', '===== 5 passed, 1 xfailed, 1 xpassed, 3 deselected in 0.2s =====', 'passed with xfailed, xpassed, deselected', 'passed'],
+  ['pytest | tail -3', '===== 1 passed in 61.00s (0:01:01) =====', 'a long passed run', 'passed'],
+  ['pytest | tail -3', 'E   1 error\n===== 5 passed in 0.2s =====', 'an error count outside the summary line', 'passed'],
+  ['pytest | tail -3', '===== 5 passed, 2 odd_thing in 0.2s =====', 'a count of a word it does not know is no pass', 'undetermined'],
+  ['pytest | tail -3', '===== 2 skipped in 0.2s =====', 'nothing passed', 'undetermined'],
+  ['npm test | tail -3', '===== 1 passed, 1 error in 0.02s =====', 'a script that runs pytest', 'failed'],
+  // vitest: the lines behind the Tests line
+  ['vitest run | tail -9', 'Test Files  1 passed (1)\n      Tests  2 passed (2)\n     Errors  1 error\n   Start at  10:00:00', 'an unhandled error', 'failed'],
+  ['vitest run | tail -9', 'Test Files  1 passed (1)\n      Tests  2 passed (2)\n     Errors  3 errors', 'unhandled errors', 'failed'],
+  ['vitest run | tail -9', 'Test Files  1 passed (1)\n      Tests  2 passed (2)\n Type Errors  1 failed', 'a type error', 'failed'],
+  ['vitest run | tail -9', 'Test Files  1 passed (1)\n      Tests  2 passed (2)\n      Leaks  1 leak', 'a leak', 'failed'],
+  ['vitest run | tail -9', 'Test Files  1 passed (1)\n      Tests  2 passed (2)\n Type Errors  no errors\n   Start at  10:00:00', 'no type errors', 'passed'],
+  ['vitest run | tail -9', '\u001b[2m     Errors \u001b[22m \u001b[1m\u001b[31m1 error\u001b[39m\u001b[22m\nTests  2 passed (2)', 'a colored errors line', 'failed'],
+  ['npm test | tail -9', 'Tests  2 passed (2)\n     Errors  1 error', 'a script that runs vitest', 'failed'],
+  // node:test: the cancelled count behind the fail count
+  ['node --test | tail -12', 'ℹ tests 2\nℹ pass 1\nℹ fail 0\nℹ cancelled 1\nℹ skipped 0', 'a cancelled test', 'failed'],
+  ['node --test | tail -12', 'ℹ tests 2\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0', 'none cancelled', 'passed'],
+  // eslint: warnings that fail the run
+  ['eslint src | tail -3', '✖ 2 problems (0 errors, 2 warnings)\nESLint found too many warnings (maximum: 0).', 'too many warnings', 'failed'],
+];
+
+it('runner summaries: a failed or error count anywhere in the summary decides before a passed count', () => {
+  const wrong = SUMMARIES.flatMap(([command, output, label, want]) => {
+    const got = checkResult(command, output).verdict;
+    return got === want ? [] : [`${label}: ${command} on ${JSON.stringify(output)} gave ${got}, wanted ${want}`];
+  });
+  assert.deepEqual(wrong, []);
+});
+
 it('eslint summary: passed, failed, undetermined (hidden exit)', () => {
   assert.equal(checkResult('eslint src | tail', '✖ 2 problems (0 errors, 2 warnings)').verdict, 'passed', 'warnings alone pass');
   assert.equal(checkResult('eslint src | tail', '✖ 3 problems (3 errors, 0 warnings)', 1).verdict, 'failed');
