@@ -3,6 +3,7 @@ import { buildSync } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,7 +19,8 @@ describe.skipIf(process.platform === 'win32')('provider event hook from a bundle
   let bundled: typeof import('../provider-events.js');
 
   beforeAll(() => {
-    pkg = realpathSync(mkdtempSync(join(tmpdir(), 'provider-events-bundle-')));
+    // The quote in the package path checks the hook command's shell quoting.
+    pkg = realpathSync(mkdtempSync(join(tmpdir(), "provider-events-bundle-it's-")));
     stateRoot = join(pkg, 'state');
     mkdirSync(join(stateRoot, 'workers', 'worker-1'), { recursive: true });
     mkdirSync(join(pkg, 'scripts'));
@@ -39,6 +41,16 @@ describe.skipIf(process.platform === 'win32')('provider event hook from a bundle
       logLevel: 'silent',
     });
     bundled = createRequire(import.meta.url)(outfile) as typeof bundled;
+    // The npm package's dist/ is ESM, where packageRoot() falls back to import.meta.url.
+    buildSync({
+      entryPoints: [join(REPO_ROOT, 'src', 'team', 'provider-events.ts')],
+      bundle: true,
+      platform: 'node',
+      target: 'node18',
+      format: 'esm',
+      outfile: join(pkg, 'dist', 'team', 'provider-events.mjs'),
+      logLevel: 'silent',
+    });
   });
   afterAll(() => { rmSync(pkg, { recursive: true, force: true }); });
 
@@ -47,7 +59,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook from a bundle
       hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
     };
     const command = settings.hooks.Stop![0]!.hooks[0]!.command;
-    expect(command).toContain(`'${join(pkg, 'scripts', 'team-provider-event-hook.mjs')}'`);
+    expect(command).toContain(`'${join(pkg, 'scripts', 'team-provider-event-hook.mjs').replace(/'/g, `'"'"'`)}'`);
 
     const result = spawnSync('sh', ['-c', command], {
       env: {
@@ -61,5 +73,14 @@ describe.skipIf(process.platform === 'win32')('provider event hook from a bundle
     expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' });
     const record = JSON.parse(readFileSync(join(stateRoot, 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')) as Record<string, unknown>;
     expect(record).toMatchObject({ v: 1, event: 'Stop', attempt: 'a1' });
+  });
+
+  it('emits the same hook command from an ESM dist/team/*.js module', () => {
+    // A child process loads the module as plain ESM, without vitest's __dirname.
+    const esm = pathToFileURL(join(pkg, 'dist', 'team', 'provider-events.mjs')).href;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `const m = await import(${JSON.stringify(esm)}); process.stdout.write(m.providerEventHookCommand('Stop'));`], { encoding: 'utf8' });
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe(bundled.providerEventHookCommand('Stop'));
   });
 });
