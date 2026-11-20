@@ -609,13 +609,90 @@ function withoutHeredocBodies(text) {
   return out + text.slice(from);
 }
 
+/** Wrappers that run the command after them, with the options that take a value (`sudo -u root`). */
+const LAUNCH_WRAPPERS = new Map([
+  ['sudo', new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-T', '-R'])],
+  ['doas', new Set(['-u', '-C'])],
+  ['env', new Set(['-u', '-C', '-S', '--unset', '--chdir'])],
+  ['command', new Set()],
+  ['nohup', new Set()],
+  ['exec', new Set()],
+]);
+
+/** Shells whose `-c` argument is a command string, and the shell options that take a value. */
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+const SHELL_VALUE_OPTIONS = new Set(['-o', '+o', '-O', '+O', '--rcfile', '--init-file']);
+
+/** Command strings longer than this are not read again (nested shell text, limit of the extra work). */
+const NESTED_MAX_LENGTH = 100000;
+/** Levels of nested shell strings that are read: `sh -c "bash -c '...'"` is two. */
+const NESTED_MAX_DEPTH = 2;
+
+const baseName = (word) => word.slice(word.lastIndexOf('/') + 1);
+
+/**
+ * The command strings that a shell or `su` runs in `words` (from shellWords): `sh -c 'cmd'`, `bash -lc`,
+ * `sudo sh -c`, `env FOO=1 bash -c`, `su user -c 'cmd'`, also by absolute path. Only a word that starts a
+ * command counts, after launch wrappers; `ssh host '...'` runs elsewhere and is not read.
+ */
+function nestedCommandStrings(words) {
+  const found = [];
+  for (let i = 0; i < words.length; i += 1) {
+    if (words[i] === null || (i > 0 && words[i - 1] !== null)) continue;
+    let at = i;
+    for (;;) {
+      const values = words[at] === null || words[at] === undefined ? undefined : LAUNCH_WRAPPERS.get(baseName(words[at]));
+      if (values === undefined) break;
+      at += 1;
+      while (at < words.length && words[at] !== null) {
+        const option = words[at];
+        if (option === '--') {
+          at += 1;
+          break;
+        }
+        if (values.has(option)) at += 2;
+        else if (option.startsWith('-') || /^\w+=/.test(option)) at += 1;
+        else break;
+      }
+    }
+    const program = words[at] === null || words[at] === undefined ? '' : baseName(words[at]);
+    const isSu = program === 'su';
+    if (!isSu && !SHELLS.has(program)) continue;
+    let wantsString = false;
+    for (let k = at + 1; k < words.length && words[k] !== null; k += 1) {
+      const arg = words[k];
+      if (isSu && arg.startsWith('--command=')) {
+        found.push(arg.slice('--command='.length));
+      } else if (isSu && arg === '--command') {
+        wantsString = true;
+      } else if (arg === '--') {
+        if (!isSu) break;
+      } else if (!isSu && SHELL_VALUE_OPTIONS.has(arg)) {
+        k += 1;
+      } else if (arg.length > 1 && (arg[0] === '-' || arg[0] === '+') && arg[1] !== '-') {
+        if (/^-[A-Za-z]*c/.test(arg)) wantsString = true;
+      } else if (arg.startsWith('--')) {
+        continue;
+      } else if (wantsString) {
+        found.push(arg);
+        wantsString = false;
+        if (!isSu) break;
+      } else if (!isSu) {
+        break; // a script file: its text is not here
+      }
+    }
+  }
+  return found;
+}
+
 /**
  * Files a shell command writes by redirection, `tee`, a heredoc with a target, or an in-place
  * `sed`/`perl` (its file operands). One scan: a quoted string or an escaped character outside a target
  * holds text, not a redirection (`echo "a > b"`); a target is read as the shell reads it (quotes
  * removed, `\ ` a space), so `> "README.md"` and `tee 'my docs/a.md'` name the file, not the quotes.
+ * The string of a nested shell (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep.
  */
-function shellWriteTargets(command) {
+function shellWriteTargets(command, depth = 0) {
   const QUOTED = String.raw`"[^"]*"|'[^']*'`;
   const WORD = String.raw`(?:${QUOTED}|\\[^\n]|[^\s;&|)<>"'\\])+`;
   const text = withoutHeredocBodies(command);
@@ -639,6 +716,11 @@ function shellWriteTargets(command) {
     while (end < words.length && words[end] !== null) end += 1;
     targets.push(...inPlaceTargets(program, words.slice(i + 1, end)));
     i = end; // the words up to the boundary were its arguments
+  }
+  if (depth < NESTED_MAX_DEPTH) {
+    for (const nested of nestedCommandStrings(words)) {
+      if (nested.length <= NESTED_MAX_LENGTH) targets.push(...shellWriteTargets(nested, depth + 1));
+    }
   }
   return targets;
 }

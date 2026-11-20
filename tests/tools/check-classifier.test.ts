@@ -525,6 +525,66 @@ it('quoted write targets are read in linear time', () => {
   assert.equal(got[8], false, 'quoted text holds no redirection');
 });
 
+it('nested shells: the string of `sh -c` is read for writes, ssh stays out', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  // A write or in-place edit inside the string counts as a code change.
+  assert.equal(edits("sh -c 'sed -i s/a/b/ src/a.ts'"), true);
+  assert.equal(edits('bash -c "echo x > src/a.ts"'), true);
+  assert.equal(edits("bash -lc 'echo x > src/a.ts'"), true);
+  assert.equal(edits('/bin/bash -ec "echo x | tee src/a.ts"'), true);
+  assert.equal(edits("zsh -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("dash -c 'perl -pi -e s/a/b/ src/a.ts'"), true);
+  assert.equal(edits("ksh -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("bash -o pipefail -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("bash --noprofile -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits('bash -c "cat <<EOF > src/a.ts\nx\nEOF"'), true, 'a here-document inside the string');
+  assert.equal(edits("zsh -c 'echo x > README.md; echo y > src/a.ts'"), true, 'one code write among ignored ones');
+  assert.equal(edits("npm test && bash -c 'echo x > src/a.ts'"), true, 'a later piece');
+  // After launch wrappers, and with su.
+  assert.equal(edits("sudo sh -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("sudo -u root bash -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("env FOO=1 bash -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("env -u FOO bash -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("command bash -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("nohup sh -c 'echo x > src/a.ts' &"), true);
+  assert.equal(edits("su -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("su root -c 'perl -pi -e s/a/b/ src/a.ts'"), true);
+  assert.equal(edits("su -l root -c 'echo x > src/a.ts'"), true);
+  assert.equal(edits("su --command='echo x > src/a.ts'"), true);
+  // Two levels are read, a third is not.
+  assert.equal(edits('sh -c "bash -c \'echo x > src/a.ts\'"'), true);
+  assert.equal(edits('sh -c "sh -c \\"sh -c \'echo x > src/a.ts\'\\""'), false);
+  // Ignored targets and commands without a write stay no change.
+  assert.equal(edits("sh -c 'echo x > README.md'"), false);
+  assert.equal(edits("sudo bash -c 'echo x > docs/a.md'"), false);
+  assert.equal(edits("bash -c 'ls src'"), false);
+  assert.equal(edits("bash -c 'npm test'"), false);
+  assert.equal(edits("bash -c 'echo x > /tmp/x.ts'"), false);
+  assert.equal(edits("bash -c 'sed -i s/a/b/ README.md'"), false);
+  // Not a command string: a script file, a quoted word of another command, a remote shell.
+  assert.equal(edits("bash script.sh -c 'echo x > src/a.ts'"), false);
+  assert.equal(edits("echo bash -c 'echo x > src/a.ts'"), false);
+  assert.equal(edits("ssh host 'sed -i s/a/b/ src/a.ts'"), false, 'ssh runs elsewhere: a documented limit');
+  assert.equal(edits('ssh host "echo x > src/a.ts"'), false, 'ssh runs elsewhere: a documented limit');
+});
+
+it('nested shell strings are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const got = classifyInChild<boolean>([
+    `sh -c '${'a '.repeat(20000)}'`,
+    long("sh -c 'x' "),
+    long('sh -c '),
+    long('sudo '),
+    long("bash -c 'bash -c ' "),
+    `sh -c "${long('sh -c \\" ')}"`,
+    `sh -c '${long('a > "b.md" ')}echo x > README.md'`,
+    `bash -c '${'a '.repeat(80000)}'; echo x > src/a.ts`,
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.equal(got.length, 8);
+  assert.equal(got[6], false, 'ignored targets stay ignored in a long string');
+  assert.equal(got[7], true, 'a string over the size limit is skipped, the outer write still counts');
+});
+
 it('here-document and zero-test parsing is linear in the length of the input', () => {
   const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
   const tags = Array.from({ length: 4000 }, (_, index) => `<<t${index}\n`).join('');
