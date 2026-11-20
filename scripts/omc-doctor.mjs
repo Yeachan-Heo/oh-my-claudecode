@@ -264,23 +264,48 @@ const realPath = (target) => {
   const chain = linkChain(target);
   return chain.unreadable ? path.resolve(target) : chain.paths[chain.paths.length - 1];
 };
-// Whether two paths name one directory: the same real path, or the same identity (a link, another spelling).
-const sameDirectory = (a, b) => realPath(a) == realPath(b) || (!!identity(a) && identity(a) == identity(b));
-// Whether target is dir or lies inside it: by identity when dir has one (an ancestor of target has it too),
-// otherwise by the real paths.
-const isInside = (target, dir) => {
+// Whether a path exists and the file system gives it no identity (inode 0, or a stat that failed for another reason
+// than the path not existing).
+const blind = (target) => {
+  try {
+    return !fs.statSync(target, { bigint: true }).ino;
+  } catch (error) {
+    return !(error && ['ENOENT', 'ENOTDIR'].includes(error.code));
+  }
+};
+// A real path as a file system that ignores letter case or Unicode normalization reads it.
+const folded = (target) => target.normalize('NFC').toLowerCase();
+// The comparisons of paths answer 'yes', 'no' or 'unknown', and every decision that rests on one treats 'unknown' as
+// neither: it ends in a Channel: unknown line (see STEP1_BLIND). askSame(a, b) is whether two paths name one directory:
+// the same real path, or the same identity (a link, another spelling). askInside(target, dir) is whether target is dir
+// or lies inside it: by identity when dir has one (an ancestor of target has it too), otherwise by the real paths.
+// Without an identity a second spelling of a directory is told only by its text, and the one thing a file system
+// itself adds to a name is folding (letter case, Unicode normalization), so the answer is 'unknown' exactly when a
+// path that exists has no identity and the real paths agree after folding but not as written. Paths that differ after
+// folding are two directories (a bind mount or a Windows 8.3 name on a volume without inodes is not seen, as before).
+// The cache commands are stricter on purpose, see protectionOf: moving a version someone runs costs more than a
+// wrong label, so they refuse whenever a path that may protect one has no identity and its spelling does not place it.
+const askSame = (a, b) => {
+  const x = realPath(a);
+  const y = realPath(b);
+  if (x == y || (identity(a) && identity(a) == identity(b))) return 'yes';
+  return (blind(a) || blind(b)) && folded(x) == folded(y) ? 'unknown' : 'no';
+};
+const askInside = (target, dir) => {
+  const a = realPath(target);
+  const b = realPath(dir);
+  if (a == b || a.startsWith(b + path.sep)) return 'yes';
   const id = identity(dir);
-  let up = realPath(target);
-  for (let parent; id; up = parent) {
-    if (identity(up) == id) return true;
+  for (let up = a, parent; id; up = parent) {
+    if (identity(up) == id) return 'yes';
     parent = path.dirname(up);
     if (parent == up) break;
   }
-  const a = realPath(target);
-  const b = realPath(dir);
-  return a == b || a.startsWith(b + path.sep);
+  return blind(dir) && (folded(a) == folded(b) || folded(a).startsWith(folded(b) + path.sep)) ? 'unknown' : 'no';
 };
-const inCache = (target) => isInside(target, path.join(configDir, 'plugins', 'cache'));
+// The answer of several comparisons to one question: 'yes' when one says so, 'unknown' when none does and one cannot
+// tell, otherwise 'no'.
+const anyOf = (answers) => (answers.includes('yes') ? 'yes' : answers.includes('unknown') ? 'unknown' : 'no');
 // The cache directory a registry version names, as written and without a leading v.
 const versionDirPaths = (market, version) =>
   [...new Set([version, dropV(version)])].map((name) => cacheDirOf(market) + path.sep + name);
@@ -292,6 +317,15 @@ const entryInstallPaths = (market, entry) =>
   ]
     .filter((target) => typeof target == 'string' && target.trim())
     .map((target) => target.trim());
+// The entries of a plugin ID that the session runs: those whose install (entryInstallPaths) holds one of the existing
+// plugin roots. unknown is true when no entry certainly holds one and a comparison could not be made (askInside): which
+// install the session runs is then not known, and nothing is judged from the entries.
+const activeEntries = (id, entries, roots) => {
+  const answers = entries.map((entry) =>
+    anyOf(entryInstallPaths(marketplaceOf(id), entry).flatMap((target) => roots.map((root) => askInside(root, target)))),
+  );
+  return { active: entries.filter((entry, i) => answers[i] == 'yes'), unknown: anyOf(answers) == 'unknown' };
+};
 
 // == Step 1: the registry ==
 // supported: [id, entries] of the supported plugin IDs, the id in lower case. unreadable: the file is not usable.
@@ -331,6 +365,9 @@ const readChannelRegistry = () => {
 };
 
 // == Step 1: the install channel ==
+// The answer when a comparison of paths cannot be made (see askSame): no channel, no updater.
+const STEP1_BLIND =
+  'Channel: unknown (the file system gives no identity to a plugin root or an install path whose spelling differs from another only in letter case or Unicode form, so the two cannot be told apart; do not guess an updater)';
 const step1 = () => {
   const { unreadable, malformed, ambiguous, supported } = readChannelRegistry();
   // The plugin root variables that name an existing directory. OMC_PLUGIN_ROOT (--plugin-dir) is the explicit one.
@@ -344,20 +381,27 @@ const step1 = () => {
   const explicitRoot = (process.env.OMC_PLUGIN_ROOT || '').trim();
   // A loaded checkout: an existing OMC_PLUGIN_ROOT answers before the registry, whatever the registry holds, unless
   // it is the install a supported entry pins (its installPath, or the cache directory its version names), or the
-  // registry cannot be read completely and the root lies inside the plugin cache.
+  // registry cannot be read completely and the root lies inside the plugin cache. Whether it is one of those can be
+  // unknown (askSame), and that is no checkout either.
   const registryUnusable = unreadable || (supported.length > 0 && malformed);
-  const isPlugindir =
-    !!explicitRoot &&
-    isDirectory(explicitRoot) &&
-    !(registryUnusable && inCache(explicitRoot)) &&
-    !supported.some(
-      ([key, entries]) =>
-        Array.isArray(entries) &&
-        entries.some((entry) => entryInstallPaths(marketplaceOf(key), entry).some((target) => sameDirectory(target, explicitRoot))),
-    );
+  const rootIsInstall =
+    explicitRoot && isDirectory(explicitRoot)
+      ? anyOf([
+          ...(registryUnusable ? [askInside(explicitRoot, path.join(configDir, 'plugins', 'cache'))] : []),
+          ...supported.flatMap(([key, entries]) =>
+            (Array.isArray(entries) ? entries : []).flatMap((entry) =>
+              entryInstallPaths(marketplaceOf(key), entry).map((target) => askSame(target, explicitRoot)),
+            ),
+          ),
+        ])
+      : 'no';
+  const isPlugindir = !!explicitRoot && isDirectory(explicitRoot) && rootIsInstall == 'no';
   const out = [];
-  if (roots.length > 1 && !sameDirectory(roots[0], roots[1])) {
+  const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
+  if (sameRoots == 'no') {
     out.push('Channel: unknown (OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories; do not guess an updater)');
+  } else if (sameRoots == 'unknown' || rootIsInstall == 'unknown') {
+    out.push(STEP1_BLIND);
   } else if (!isPlugindir && registryUnusable) {
     out.push('Channel: unknown (installed_plugins.json could not be read completely; do not guess an updater)');
   } else if (isPlugindir || (!supported.length && roots.length)) {
@@ -376,13 +420,13 @@ const step1 = () => {
       'Installed: ' + (highestCached(cacheDirOf('omc')) || '(none)'),
       'Updater: omc update',
     );
+  } else if (supported.some(([id, entries]) => activeEntries(id, entries, roots).unknown)) {
+    out.push(STEP1_BLIND);
   } else {
     for (const [id, entries] of supported) {
       const market = marketplaceOf(id);
       // The entries the session runs: those whose install holds an existing plugin root. Without a match all count.
-      const active = entries.filter((entry) =>
-        entryInstallPaths(market, entry).some((target) => roots.some((root) => isInside(root, target))),
-      );
+      const { active } = activeEntries(id, entries, roots);
       const recorded = (active.length ? active : entries)
         .map((entry) =>
           typeof entry.version == 'string' && entry.version.trim() ? dropV(entry.version.trim()) : installPathVersion(entry),
@@ -738,7 +782,7 @@ const protectionOf = (dir, versions) => {
   ) {
     const first = chainOf(rootVars[0]).pop();
     const second = chainOf(rootVars[1]).pop();
-    if (path.resolve(first) != path.resolve(second) && !(identityOf(first) && identityOf(first) == identityOf(second))) unreadable = true;
+    if (askSame(first, second) != 'yes') unreadable = true;
   }
   const registry = readRegistry();
   unreadable = unreadable || registry.unreadable;

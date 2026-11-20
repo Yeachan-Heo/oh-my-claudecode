@@ -448,18 +448,120 @@ fs.lstatSync = function (target, options) {
     }
   });
 
-  // The two variables are diagnosed only by Step 1 and never decide a move: a registry install that Step 1 cannot tell from a
-  // checkout (another letter case of a path under plugins/cache where no inode is reported) reads as plugin-dir, which sends
-  // nobody to the cache commands; the commands judge every path themselves, as above.
-  test('Step 1: a root in another letter case than plugins/cache is a checkout there, the exact spelling is the registry install', () => {
+  // Step 1 compares paths: the plugin root variables with each other, with the install a registry entry names and with the
+  // plugin cache. Where the file system gives a path no identity, two spellings of one directory cannot be told from two
+  // directories by the file system, so each comparison answers yes, no or unknown: the same real path is yes, a path that
+  // differs from the other by more than letter case and Unicode form is no, and a pair that differs by those alone is
+  // unknown. Unknown is neither a checkout nor a registry install: the channel is unknown, so no label sends the user to
+  // the wrong update path (a checkout has none) and the lines a label would hide or show are not printed. The commands judge
+  // every path themselves, as above, and refuse in the same place.
+  const BLIND = /^unknown \(the file system gives no identity to a plugin root or an install path whose spelling differs from another only in letter case or Unicode form/;
+  const unknownChannel = (out: Record<string, string>) => ({ lines: Object.keys(out), blind: BLIND.test(out.Channel ?? '') });
+  const UNKNOWN = { lines: ['Channel'], blind: true };
+  const installAt = (dir: string, version = '5.8.0') => makeRoot(dir, `plugins/cache/omc/oh-my-claudecode/${version}`, version);
+  const entryOf = (install: string, version = '5.8.0') => ({ scope: 'user', version, installPath: install });
+  const pinned = (install: string, version = '5.8.0') => ({ [PLUGIN_ID]: [entryOf(install, version)] });
+  const withClone = (dir: string) => {
+    mkdirSync(path.join(dir, 'plugins', 'marketplaces', 'omc', '.claude-plugin'), { recursive: true });
+    writeFileSync(path.join(dir, 'plugins', 'marketplaces', 'omc', '.claude-plugin', 'marketplace.json'), JSON.stringify({ name: 'omc', plugins: [{ name: 'oh-my-claudecode', version: '5.9.0' }] }));
+  };
+  // The fixtures are real directories: a host that really is Windows names one only by a drive letter or a share, so no
+  // POSIX-style path can name it there. Skipped on purpose on such a host for the platform names it cannot be, not to hide a failure.
+  const hostCannot = (platform: string) => process.platform === 'win32' && platform !== 'win32';
+
+  test('Step 1: a root in another letter case than plugins/cache is unknown there, the exact spelling is the registry install', () => {
     for (const platform of PLATFORMS) {
       for (const spelling of ['exact', 'other letter case'] as const) {
         const out = step1(platform, (dir) => {
-          const install = makeRoot(dir, 'plugins/cache/omc/oh-my-claudecode/5.8.0', '5.8.0');
+          const install = installAt(dir);
           return { plugins: { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] }, env: { OMC_PLUGIN_ROOT: spelling === 'exact' ? install : upperBelow(dir, install) } };
         }, volume);
-        expect({ platform, spelling, channel: out.Channel }).toEqual({ platform, spelling, channel: spelling === 'exact' ? 'marketplace omc' : 'plugin-dir' });
+        if (spelling === 'exact') expect({ platform, channel: out.Channel }).toEqual({ platform, channel: 'marketplace omc' });
+        else expect({ platform, ...unknownChannel(out) }).toEqual({ platform, ...UNKNOWN });
       }
+    }
+  });
+
+  test('Step 1: the registry install named in another letter case by OMC_PLUGIN_ROOT is neither a checkout nor an install, whatever the entry names', () => {
+    for (const platform of PLATFORMS) {
+      if (hostCannot(platform)) continue;
+      const out = step1(platform, (dir) => {
+        withClone(dir);
+        return { plugins: pinned(installAt(dir)), env: { OMC_PLUGIN_ROOT: upperBelow(dir, path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0')) } };
+      }, volume);
+      expect({ platform, ...unknownChannel(out) }).toEqual({ platform, ...UNKNOWN });
+      expect(out.Channel).not.toContain('plugin-dir');
+    }
+  });
+
+  test('Step 1: the same real path is one directory whatever the identity, and a path that differs by more than letter case is another one', () => {
+    for (const platform of PLATFORMS) {
+      if (hostCannot(platform)) continue;
+      for (const spelled of ['exact', 'dot segment and trailing separator'] as const) {
+        const out = step1(platform, (dir) => {
+          withClone(dir);
+          const install = installAt(dir);
+          return { plugins: pinned(install), env: { OMC_PLUGIN_ROOT: spelled === 'exact' ? install : `${path.dirname(install)}${path.sep}.${path.sep}5.8.0${path.sep}` } };
+        }, volume);
+        expect({ platform, spelled, channel: out.Channel, installed: out.Installed, latest: out.Latest, updater: out.Updater })
+          .toEqual({ platform, spelled, channel: 'marketplace omc', installed: '5.8.0', latest: '5.9.0 (marketplace clone)', updater: 'claude plugin marketplace update omc && claude plugin update oh-my-claudecode@omc' });
+      }
+      // Another cache version is another directory: a checkout, as it was before the answer could be unknown.
+      const checkout = step1(platform, (dir) => {
+        installAt(dir, '5.7.0');
+        return { plugins: pinned(installAt(dir)), env: { OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0') } };
+      }, volume);
+      expect({ platform, channel: checkout.Channel }).toEqual({ platform, channel: 'plugin-dir' });
+      // CLAUDE_PLUGIN_ROOT is how Claude Code names the install it runs; the entry of another scope names another directory,
+      // which does not make the match unknown.
+      const live = step1(platform, (dir) => {
+        installAt(dir, '5.7.0');
+        const install = installAt(dir);
+        return { plugins: { [PLUGIN_ID]: [entryOf(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0'), '5.7.0'), entryOf(install)] }, env: { CLAUDE_PLUGIN_ROOT: install } };
+      }, volume);
+      expect({ platform, channel: live.Channel, installed: live.Installed }).toEqual({ platform, channel: 'marketplace omc', installed: '5.8.0' });
+    }
+  });
+
+  test('Step 1: the install Claude Code runs (CLAUDE_PLUGIN_ROOT) in another letter case than its registry entry cannot be matched to it', () => {
+    for (const platform of PLATFORMS) {
+      if (hostCannot(platform)) continue;
+      const out = step1(platform, (dir) => ({ plugins: pinned(installAt(dir)), env: { CLAUDE_PLUGIN_ROOT: upperBelow(dir, path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0')) } }), volume);
+      expect({ platform, ...unknownChannel(out) }).toEqual({ platform, ...UNKNOWN });
+    }
+  });
+
+  test('Step 1: the two root variables name one directory in two letter cases (unknown), two other directories (different) or one path (the same)', () => {
+    for (const platform of PLATFORMS) {
+      if (hostCannot(platform)) continue;
+      const roots = (second: (dir: string, install: string) => string) => step1(platform, (dir) => {
+        const install = installAt(dir);
+        installAt(dir, '5.7.0');
+        return { plugins: pinned(install), env: { OMC_PLUGIN_ROOT: install, CLAUDE_PLUGIN_ROOT: second(dir, install) } };
+      }, volume);
+      const alias = roots((dir, install) => upperBelow(dir, install));
+      expect({ platform, ...unknownChannel(alias) }).toEqual({ platform, ...UNKNOWN });
+      expect(alias.Channel).not.toContain('different directories');
+      expect({ platform, channel: roots((dir) => path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0')).Channel })
+        .toEqual({ platform, channel: 'unknown (OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories; do not guess an updater)' });
+      expect({ platform, channel: roots((dir, install) => install).Channel }).toEqual({ platform, channel: 'marketplace omc' });
+    }
+  });
+
+  test('Step 1: a registry that cannot be read leaves a root in another letter case under plugins/cache unknown and a checkout elsewhere a checkout', () => {
+    for (const platform of PLATFORMS) {
+      if (hostCannot(platform)) continue;
+      const unreadable = (dir: string) => writeFileSync(path.join(dir, 'plugins', 'installed_plugins.json'), '{not json');
+      const inCache = step1(platform, (dir) => {
+        unreadable(dir);
+        return { env: { OMC_PLUGIN_ROOT: upperBelow(dir, installAt(dir)) } };
+      }, volume);
+      expect({ platform, ...unknownChannel(inCache) }).toEqual({ platform, ...UNKNOWN });
+      const elsewhere = step1(platform, (dir) => {
+        unreadable(dir);
+        return { env: { OMC_PLUGIN_ROOT: makeRoot(dir, 'checkout', '9.9.0') } };
+      }, volume);
+      expect({ platform, channel: elsewhere.Channel, installed: elsewhere.Installed }).toEqual({ platform, channel: 'plugin-dir', installed: '9.9.0' });
     }
   });
 });
