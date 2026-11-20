@@ -1168,6 +1168,66 @@ describe('worker pane startup safety', () => {
     expect(shown).toBe('dismissed');
   });
 
+  // A first-run screen can also draw after the trigger text is typed, when only
+  // Enter is left to send. Enter would answer the dialog instead of submitting
+  // the trigger, so delivery stops there and the dialog gets no key at all.
+  const paneFrameCorpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+  const postInjectionDialogs = [
+    ['the fullscreen renderer offer', 'claude/2.1.328/fullscreen-renderer.txt', 'selector_persistent'],
+    ['Claude Code onboarding', 'claude/2.1.329/onboarding-theme.txt', 'claude_onboarding_required'],
+    ['the Bypass Permissions warning', 'claude/2.1.328/bypass-permissions.txt', 'claude_bypass_permissions_consent_required'],
+    ['the folder trust dialog', 'claude/2.1.328/trust-yes-focused.txt', 'selector_persistent'],
+  ] as const;
+
+  strictTmuxIt.each(postInjectionDialogs.flatMap(([dialog, file, reason]) => [
+    { dialog, stage: 'the first startup Enter', file, reason, enters: 0 },
+    { dialog, stage: 'the second startup Enter', file, reason, enters: 1 },
+  ]))(
+    'stops before $stage when $dialog draws after the trigger is typed, and sends it no key',
+    async ({ file, reason, enters }) => {
+      const context = await acceptedContext('claude');
+      const message = 'Read inbox.md, execute now.';
+      const idle = readFileSync(join(paneFrameCorpus, 'claude/2.1.325/idle.txt'), 'utf8');
+      const idleUntilDialog = Array.from({ length: enters }, () => idle);
+      // One capture for the readiness wait, one for the pre-input check, then
+      // one before each Enter: the dialog draws before the Enter under test.
+      tmuxState.captures = [idle, idle, ...idleUntilDialog, readFileSync(join(paneFrameCorpus, file), 'utf8')];
+
+      await expect(deliverStartupInbox(context, message)).resolves.toEqual({ ok: false, reason });
+      expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+        .toEqual([message, ...idleUntilDialog.map(() => 'Enter')]);
+    },
+  );
+
+  strictTmuxIt('stops before the first startup Enter when the renderer offer draws below the typed trigger', async () => {
+    const context = await acceptedContext('claude');
+    const message = 'Read inbox.md, execute now.';
+    const idle = readFileSync(join(paneFrameCorpus, 'claude/2.1.325/idle.txt'), 'utf8');
+    const offer = readFileSync(join(paneFrameCorpus, 'claude/2.1.328/fullscreen-renderer.txt'), 'utf8');
+    tmuxState.captures = [idle, idle, `❯ ${message}\n${offer}`];
+
+    await expect(deliverStartupInbox(context, message)).resolves.toEqual({
+      ok: false,
+      reason: 'selector_persistent',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+      .toEqual([message]);
+  });
+
+  strictTmuxIt('stops before the first startup Enter when only a first-run screen’s footer is on screen', async () => {
+    const context = await acceptedContext('claude');
+    const message = 'Read inbox.md, execute now.';
+    const idle = readFileSync(join(paneFrameCorpus, 'claude/2.1.325/idle.txt'), 'utf8');
+    tmuxState.captures = [idle, idle, `❯ ${message}\n\n  Enter to confirm · Esc to cancel\n`];
+
+    await expect(deliverStartupInbox(context, message)).resolves.toEqual({
+      ok: false,
+      reason: 'selector_persistent',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+      .toEqual([message]);
+  });
+
   strictTmuxIt('answers Claude Code’s fullscreen renderer offer with Not now, resending a dropped Down', async () => {
     const context = await acceptedContext('claude');
     const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
