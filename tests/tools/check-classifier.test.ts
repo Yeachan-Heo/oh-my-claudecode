@@ -63,8 +63,8 @@ const NEGATIVE_CASES = [
   ['npm run deploy', false, false, 'rejected: not a check'],
   ['git commit -m test', false, false, 'rejected: git and quoted text name no check'],
   ['echo npm test', false, false, 'rejected: the command prints'],
-  ['rm -rf x && npm test', true, false, 'relabelled: visible, the && chain reports the runner status on failure'],
-  ['npm test && rm -rf dist', true, false, 'relabelled: visible, a failing npm test fails the chain'],
+  ['rm -rf x && npm test', true, false, 'relabelled: visible, but a nonzero status of the && chain stays undetermined (chained)'],
+  ['npm test && rm -rf dist', true, false, 'relabelled: visible, but a nonzero status of the && chain stays undetermined (chained)'],
   ['`npm test`', false, false, 'rejected: substitution, not a command'],
   ['ls', false, false, 'rejected: not a check'],
 ];
@@ -106,6 +106,65 @@ it('pipefail: only a pipe into tail is made visible', () => {
   assert.equal(classifyCommand('set -o pipefail && npm test | tail -5; set +o pipefail').exitHidden, true, 'set +o pipefail');
   // A word in echo is not an option.
   assert.equal(classifyCommand('echo set -o pipefail').pipefail, false, 'echo does not set pipefail');
+});
+
+it('a nonzero exit status of an && chain stays undetermined unless the runner shows the failure', () => {
+  const undetermined = (command: string, output = 'x', exitCode: number | null = 1) => {
+    const got = checkResult(command, output, exitCode);
+    assert.equal(got.verdict, 'undetermined', `${command}: ${got.reason}`);
+    assert.equal(got.rule, 'chained-exit', `${command}: rule`);
+  };
+  // Another command of the chain may be the one that failed: `false && npm test` never runs the check.
+  for (const command of [
+    'npm test && false', 'false && npm test', 'cd v3 && npm test', 'npm run build && npm test', 'rm -rf x && npm test',
+    'npm test && rm -rf dist', 'npm test && npm run build', 'cd a && cd b && vitest run', 'source env.sh && pytest tests/',
+    'echo x > out.txt && npm test', 'set -o pipefail && cd v3 && npm test 2>&1 | tail -20',
+  ]) {
+    undetermined(command);
+    assert.equal(classifyCommand(command).chained, true, `${command}: chained`);
+    assert.equal(classifyCommand(command).exitHidden, false, `${command}: the status stays visible`);
+  }
+  // An errored result without an exit code is the same case.
+  assert.equal(checkResult('npm test && false', 'x', null, { isError: true }).rule, 'chained-exit');
+  // A zero status means every command passed.
+  for (const command of ['npm test && false', 'cd v3 && npm test', 'npm run build && npm test']) {
+    assert.equal(checkResult(command, 'ok', 0).verdict, 'passed', `${command}: zero status`);
+  }
+  // The runner's own failure line names the check, whatever the chain.
+  assert.equal(checkResult('pytest tests/ && false', '===== 3 failed, 5 passed in 0.2s =====', 1).verdict, 'failed');
+  assert.equal(checkResult('cd v3 && vitest run', 'Tests  2 failed | 1 passed (3)', 1).verdict, 'failed');
+  assert.equal(checkResult('eslint src && echo ok', 'x', 1).rule, 'exit-code', 'a printing command cannot fail');
+  // Commands that cannot fail in practice do not share the status.
+  for (const command of [
+    'export NODE_ENV=test && npm test', 'set -o pipefail && npm test | tail -5', 'echo start && npm test', 'npm test && echo done',
+    'true && npm test', ': && npm test', 'npm test && printf done', 'unset FOO && npm test', 'npm test | tail -5', 'cd v3; npm test',
+    'cd v3\nnpm test', 'npm test', 'cat x | npm test', 'sleep 1 & npm test',
+  ]) {
+    assert.equal(classifyCommand(command).chained, false, `${command}: not chained`);
+  }
+  assert.equal(checkResult('export NODE_ENV=test && npm test', 'x', 1).verdict, 'failed');
+  assert.equal(checkResult('npm test && echo done', 'x', 1).verdict, 'failed');
+  assert.equal(checkResult('echo x > out.txt && npm test', 'x', 1).rule, 'chained-exit', 'an echo with a redirect can fail');
+  // Under pipefail a command piped into the check can fail it; without pipefail it sets no status.
+  assert.equal(classifyCommand('set -o pipefail; cat x | npm test').chained, true);
+  undetermined('set -o pipefail; cat x | npm test');
+  assert.equal(checkResult('cat x | npm test', 'x', 1).verdict, 'failed');
+  // An alternation before the check can skip it: `true || npm test` exits 0 without running anything.
+  for (const command of ['true || npm test', 'npm run build || npm test', 'false || npm test']) {
+    assert.equal(classifyCommand(command).exitHidden, true, `${command}: hidden`);
+    assert.equal(checkResult(command, '', 0).verdict, 'undetermined', `${command}: zero status`);
+  }
+  assert.equal(checkResult('true || vitest run', 'Tests  3 passed (3)', 0).verdict, 'passed', 'a passing summary names the check');
+  assert.equal(classifyCommand('false || echo x; npm test').exitHidden, false, 'a semicolon ends the alternation');
+  // A printed exit code of a chain is no proof of the check; behind a pipe without pipefail only PIPESTATUS is.
+  undetermined('cd v3 && npm test; echo "EXIT=$?"', 'EXIT=1', null);
+  assert.equal(checkResult('cd v3 && npm test; echo "EXIT=$?"', 'EXIT=0', null).verdict, 'passed');
+  assert.equal(checkResult('npm test; echo "EXIT=$?"', 'EXIT=1', null).verdict, 'failed');
+  assert.equal(classifyCommand('npm test | tail; echo $?').piped, true);
+  assert.equal(classifyCommand('set -o pipefail; npm test | tail; echo $?').piped, false);
+  assert.equal(checkResult('npm test | tail; echo $?', '0', null).verdict, 'undetermined', '$? is the last command of the pipe');
+  assert.equal(checkResult('npm test | tail; echo ${PIPESTATUS[0]}', '1', null).verdict, 'failed');
+  assert.equal(checkResult('npm test | tail; echo ${PIPESTATUS[0]}', '0', null).verdict, 'passed');
 });
 
 it('narrowing and weakening produce narrowed=true', () => {
@@ -334,6 +393,22 @@ it('mutations: editing tools', () => {
   // Missing file_path: no mutation.
   assert.equal(isMutation('Write', {}), false);
   assert.equal(isMutation('Write', null), false);
+});
+
+it('a notebook edit is read from notebook_path; the other edit tools from file_path', () => {
+  assert.equal(isMutation('NotebookEdit', { notebook_path: 'analysis/model.ipynb' }), true);
+  assert.equal(isMutation('NotebookEdit', { notebook_path: '/repo/src/n.ipynb', cell_id: 'c1', new_source: 'x = 1' }), true);
+  assert.equal(isMutation('NotebookEdit', { notebook_path: 'docs/n.ipynb' }), false, 'a notebook under docs');
+  assert.equal(isMutation('NotebookEdit', { notebook_path: 'node_modules/p/n.ipynb' }), false, 'an installed package');
+  assert.equal(isMutation('NotebookEdit', { notebook_path: `${TEMP_DIRS[0]}/n.ipynb` }), false, 'a notebook in a temp directory');
+  assert.equal(isMutation('NotebookEdit', { notebook_path: '' }), false, 'an empty path');
+  assert.equal(isMutation('NotebookEdit', {}), false, 'no path');
+  assert.equal(isMutation('NotebookEdit', { file_path: 'n.ipynb' }), true, 'file_path still names the target when there is no notebook_path');
+  assert.equal(isMutation('NotebookEdit', { notebook_path: 5, file_path: 'n.ipynb' }), true, 'a non-string notebook_path is not a path');
+  assert.equal(isMutation('NotebookEdit', { notebook_path: 'docs/n.ipynb', file_path: 'src/a.ts' }), false, 'notebook_path decides for a notebook edit');
+  for (const tool of ['Edit', 'Write', 'MultiEdit']) {
+    assert.equal(isMutation(tool, { notebook_path: 'n.ipynb' }), false, `${tool} reads file_path only`);
+  }
 });
 
 it('mutations: bash shell writes', () => {
@@ -568,6 +643,67 @@ it('nested shells: the string of `sh -c` is read for writes, ssh stays out', () 
   assert.equal(edits('ssh host "echo x > src/a.ts"'), false, 'ssh runs elsewhere: a documented limit');
 });
 
+it('a write command counts only as the command word of a command, not among the arguments of another', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  // The name of a writing command in the arguments of a reading or printing command writes nothing.
+  for (const command of [
+    'rg tee src/a.ts', 'echo tee src/a.ts', 'grep tee src/a.ts', 'cat tee src/a.ts', 'man tee src/a.ts', 'ls tee src/a.ts',
+    'rg sed -i src/a.ts', 'echo sed -i x src/a.ts', "rg 'sed -i' src/a.ts", 'echo "perl -pi x" src/a.ts', 'grep mv src/a.ts',
+    'echo perl -pi -e s/a/b/ src/a.ts', 'git log --grep tee src/a.ts', 'npm test tee src/a.ts', 'which sed src/a.ts',
+    'echo "x" | rg tee src/a.ts', 'ls; rg sed -i src/a.ts', 'echo a | grep -i sed src/a.ts',
+  ]) {
+    assert.equal(edits(command), false, command);
+  }
+  // The command word of any command counts: first, after an operator, a newline, a group or a substitution.
+  for (const command of [
+    'tee src/a.ts', 'echo hi | tee src/a.ts', 'echo hi |tee src/a.ts', 'ls && tee src/a.ts', 'ls || tee src/a.ts', 'ls; tee src/a.ts',
+    'ls\ntee src/a.ts', 'ls & tee src/a.ts', '(cd x; tee src/a.ts)', 'echo $(tee src/a.ts)', 'echo `tee src/a.ts`', 'sed -i s/a/b/ src/a.ts',
+    'ls | sed -i s/a/b/ src/a.ts', 'cd x && perl -pi -e s/a/b/ src/a.ts', 'echo hi | tee -a src/a.ts', 'echo hi | tee -- src/a.ts',
+  ]) {
+    assert.equal(edits(command), true, command);
+  }
+  // After launch wrappers and reserved words, with their options, assignments and positional words.
+  for (const command of [
+    'sudo tee src/a.ts', 'sudo -u root tee src/a.ts', 'doas tee src/a.ts', 'env tee src/a.ts', 'env -u FOO FOO2=1 sed -i s/a/b/ src/a.ts',
+    'command tee src/a.ts', 'nohup tee src/a.ts', 'exec sed -i s/a/b/ src/a.ts', 'time tee src/a.ts', 'time -p sed -i s/a/b/ src/a.ts',
+    'nice -n 5 tee src/a.ts', 'timeout 5 tee src/a.ts', 'timeout -s KILL 5 sed -i s/a/b/ src/a.ts', 'FOO=1 tee src/a.ts', 'FOO=1 BAR=2 sed -i s/a/b/ src/a.ts',
+    'echo x | xargs tee src/a.ts', 'echo x | xargs -n 1 -I {} tee src/a.ts', 'echo x | xargs -0 sed -i s/a/b/', 'sudo env FOO=1 nohup tee src/a.ts',
+    'if true; then tee src/a.ts; fi', 'for f in a; do sed -i s/a/b/ $f; done', 'while true; do tee src/a.ts; done', '! tee src/a.ts',
+    '{ tee src/a.ts; }', "find . -name '*.ts' -exec sed -i s/a/b/ {} +", "find . -execdir sed -i s/a/b/ {} \\;",
+    "find . -ok perl -pi -e s/a/b/ {} \\;", 'sh -c "echo x | tee src/a.ts"',
+  ]) {
+    assert.equal(edits(command), true, command);
+  }
+  // Ignored targets stay ignored behind the same wrappers; a wrapper word alone is not a write command.
+  for (const command of [
+    'sudo tee README.md', 'echo x | xargs -n 1 tee docs/a.ts', 'timeout 5 sed -i s/a/b/ package-lock.json', 'sudo', 'timeout 5', 'xargs', 'env FOO=1',
+    "find . -exec ls {} \\;", "find . -name tee -exec echo sed -i {} \\;", 'time', 'sudo -u',
+  ]) {
+    assert.equal(edits(command), false, command);
+  }
+  // The echoed name after the wrapper is an argument: `sudo echo tee` and `xargs echo sed -i` run echo.
+  assert.equal(edits('sudo echo tee src/a.ts'), false);
+  assert.equal(edits('xargs echo sed -i x src/a.ts'), false);
+  assert.equal(edits('env FOO=tee echo src/a.ts'), false);
+  // A comment is text: it holds no command word and no redirection; a # inside a word is not a comment.
+  assert.equal(edits('ls # tee src/a.ts'), false);
+  assert.equal(edits('ls # x; tee src/a.ts'), false);
+  assert.equal(edits('echo x # > src/a.ts'), false);
+  assert.equal(edits('echo x # > src/a.ts\necho y > src/b.ts'), true, 'the next line is code again');
+  assert.equal(edits('echo a#b > src/a.ts'), true);
+  assert.equal(edits('echo $# > src/a.ts'), true);
+  assert.equal(edits('echo ${#x} > src/a.ts'), true);
+  assert.equal(edits('echo x > src/a.ts # tee README.md'), true);
+  assert.equal(edits('echo "# x" > src/a.ts'), true, 'a # in quotes is no comment');
+  assert.equal(edits("sed -i 's/#x/y/' src/a.ts"), true, 'a # in a script is no comment');
+  // The tee operands: options are skipped, an empty name is no file.
+  assert.equal(edits('echo x | tee -a README.md src/a.ts'), true);
+  assert.equal(edits('echo x | tee -p --output-error=warn README.md'), false);
+  assert.equal(edits('echo x | tee ""'), false);
+  assert.equal(edits('echo x | tee "src/my dir/a.ts"'), true);
+  assert.equal(edits('echo x | tee "my docs/a.md"'), false);
+});
+
 it('nested shell strings are read in linear time', () => {
   const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
   const got = classifyInChild<boolean>([
@@ -583,6 +719,33 @@ it('nested shell strings are read in linear time', () => {
   assert.equal(got.length, 8);
   assert.equal(got[6], false, 'ignored targets stay ignored in a long string');
   assert.equal(got[7], true, 'a string over the size limit is skipped, the outer write still counts');
+});
+
+it('command words, wrappers and comments are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const got = classifyInChild<boolean>([
+    long('sudo '),
+    long('xargs -n '),
+    long('timeout 5 '),
+    long('time -p '),
+    long('FOO=1 '),
+    long('env -u '),
+    long('if '),
+    long('find -exec '),
+    long('# '),
+    long('`'),
+    long('a;'),
+    `${long('sudo ')}tee README.md`,
+    `${long('xargs -n 1 ')}sed -i s/a/b/ src/a.ts`,
+    `${long('find x -exec ')}tee README.md ;`,
+    `echo x ${long('# a ')}\necho y > README.md`,
+    `echo x | tee ${long('-a ')}README.md`,
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.equal(got.length, 16);
+  assert.equal(got[11], false, 'a long run of wrappers still reaches tee with an ignored target');
+  assert.equal(got[12], true, 'a long run of xargs options still reaches sed');
+  assert.equal(got[14], false, 'a long comment holds no command');
+  assert.equal(got[15], false, 'a long run of tee options');
 });
 
 it('here-document and zero-test parsing is linear in the length of the input', () => {

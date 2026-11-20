@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.20.1';
+export const RULES_VERSION = '2026.11.20.2';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
@@ -190,7 +190,8 @@ function pieceNarrows(piece, kind) {
  * Whether the exit status of a runner piece reaches the agent, and if not, what hides it.
  * A backgrounding `&`, a pipe into anything but `tail` (or any pipe without pipefail: pipefail
  * only protects a pipe into `tail`, since `head` and `grep -q` end the runner early with SIGPIPE),
- * a `||`, or a `;`/newline with a non-empty successor hides the status. `&&` and redirects do not.
+ * a `||` before or after it (`build || npm test` exits 0 without running the check), or a `;`/newline
+ * with a non-empty successor hides the status. `&&` and redirects do not (see sharesExitStatus).
  */
 function exitHiddenCause(pieces, index, pipefail) {
   const own = pieces[index];
@@ -200,6 +201,9 @@ function exitHiddenCause(pieces, index, pipefail) {
     const intoTail = pipefail && next !== undefined && /^tail(\s|$)/.test(next.text);
     if (!intoTail) return 'pipe without pipefail into tail';
   }
+  for (let at = index - 1; at >= 0 && ['&&', '||', '|'].includes(pieces[at].sep); at -= 1) {
+    if (pieces[at].sep === '||') return 'alternation (||)';
+  }
   for (let at = index; at < pieces.length; at += 1) {
     const sep = pieces[at].sep;
     if (sep === '||') return 'alternation (||)';
@@ -208,13 +212,38 @@ function exitHiddenCause(pieces, index, pipefail) {
   return undefined;
 }
 
+/** Statements that cannot fail in practice: they never make a chain exit nonzero on their own. */
+const NEVER_FAILS = /^(?:(?:set|export|unset|true|tail)(?:\s|$)|:(?:\s|$)|(?:echo|printf)(?:\s[^>]*)?$)/;
+
+/**
+ * Whether a visible nonzero exit status may come from another command than the check: one joined to it by
+ * `&&` (`false && npm test` never runs the check, `npm test && false` fails after it), or one piped into it
+ * under pipefail (`false | npm test`). Without pipefail an earlier command of a pipe sets no status.
+ */
+function sharesExitStatus(pieces, index, pipefail) {
+  let from = index;
+  while (from > 0 && (pieces[from - 1].sep === '&&' || pieces[from - 1].sep === '|')) from -= 1;
+  let to = index;
+  while (to < pieces.length - 1 && (pieces[to].sep === '&&' || pieces[to].sep === '|')) to += 1;
+  for (let at = from; at <= to; at += 1) {
+    const piece = pieces[at];
+    if (at === index || piece.text === '' || NEVER_FAILS.test(piece.text)) continue;
+    if (at < index && piece.sep === '|' && !pipefail) continue;
+    return true;
+  }
+  return false;
+}
+
 /**
  * Classify a shell command: does it run a check (test/lint/typecheck/build), and can the check's
  * own exit status reach the tool result. Gradle/maven are deliberately unrecognized (goals can publish).
+ * `chained` is set when another command of an `&&` chain (or one piped into the check under pipefail) may be
+ * the one that failed; `piped` when the check feeds a pipe without pipefail, so `$?` after it is the last
+ * command's. The exit status stays visible in both cases: a zero status still means every command passed.
  */
 export function classifyCommand(command) {
   if (typeof command !== 'string' || command === '') {
-    return { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, pipefail: false, reason: 'empty or non-string command' };
+    return { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail: false, reason: 'empty or non-string command' };
   }
   const bare = executedText(joinContinuations(command));
   // Only a `set` statement changes the option; the last one wins.
@@ -233,14 +262,16 @@ export function classifyCommand(command) {
     // later runner pieces overwrite: the command's status belongs to the last segment
   }
   if (!check) {
-    return { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, pipefail, reason: 'no check runner in command' };
+    return { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail, reason: 'no check runner in command' };
   }
   const strippedCheck = stripWrappers(pieces[check.index].text);
   const narrowed = pieceNarrows(strippedCheck, check.kind);
   const reason = hidden
     ? `check exit code hidden (${hidden})`
     : 'check command recognized';
-  return { isCheck: true, kind: check.kind, runner: check.runner, narrowed, exitHidden: hidden !== undefined, pipefail, reason };
+  const chained = sharesExitStatus(pieces, check.index, pipefail);
+  const piped = pieces[check.index].sep === '|' && !pipefail;
+  return { isCheck: true, kind: check.kind, runner: check.runner, narrowed, exitHidden: hidden !== undefined, chained, piped, pipefail, reason };
 }
 
 /**
@@ -366,20 +397,22 @@ function ranNoTests(output, readers) {
   return !active.some(({ ran }) => ran.test(text));
 }
 
-/** The variable an echo/printf prints for a runner's own exit code. */
+/** The variables an echo/printf prints for a runner's own exit code; behind a pipe without pipefail, `$?` is not one. */
 const EXIT_VAR = /\$\?|\$\{PIPESTATUS\[0\]\}/;
+const PIPE_EXIT_VAR = /\$\{PIPESTATUS\[0\]\}/;
 
 /**
  * The last number an echo/printf in the command printed for the runner's exit code, read from
  * the output tail (`echo "EXIT=$?"` printing `EXIT=3`). Only a hidden exit status needs it.
  */
-function printedExitCode(command, tail) {
+function printedExitCode(command, tail, piped) {
   let last;
+  const exitVar = piped ? PIPE_EXIT_VAR : EXIT_VAR;
   const echoRe = /(?:^|[;&|\n]\s*)(?:echo|printf)\s+(['"]?)([^;'"|\n]*)\1(?=\s*[;&|\n]|$)/g;
   for (const m of command.matchAll(echoRe)) {
     const literal = m[2] ?? '';
-    if (!EXIT_VAR.test(literal)) continue;
-    const parts = literal.replace(/\\n/g, '').split(EXIT_VAR);
+    if (!exitVar.test(literal)) continue;
+    const parts = literal.replace(/\\n/g, '').split(exitVar);
     if (parts.length < 2) continue;
     const escaped = parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(\\d+)');
     const re = new RegExp(`^\\s*${escaped}\\s*$`, 'mg');
@@ -390,9 +423,11 @@ function printedExitCode(command, tail) {
 
 /**
  * Classify a check's tool result. The command decides whether this is a check at all; a visible
- * exit status decides directly (a nonzero exit and an errored result are not skipped); when the
- * status is hidden by a pipe, the anchored runner summary rules in the output tail decide, failure
- * before pass; narrowing or a zero-test run stays undetermined unless a failure rule fires.
+ * exit status decides directly (a nonzero exit and an errored result are not skipped), except that a
+ * nonzero status of an `&&` chain stays undetermined: another command of the chain may have failed, and
+ * only a failure line of the runner (above) names the check; when the status is hidden by a pipe, the
+ * anchored runner summary rules in the output tail decide, failure before pass; narrowing or a zero-test
+ * run stays undetermined unless a failure rule fires.
  */
 export function classifyCheckResult({ command, output, isError, exitCode }) {
   const out = typeof output === 'string' ? output : '';
@@ -419,6 +454,9 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
   // A visible failing exit status decides even for a narrowed check: a narrowed run that failed
   // is still a failed run, and only a passing one is weakened evidence.
   if (!cc.exitHidden && (isError === true || (typeof exitCode === 'number' && exitCode !== 0))) {
+    if (cc.chained) {
+      return { verdict: 'undetermined', reason: 'nonzero exit status of an && chain: another command may have failed', rule: 'chained-exit' };
+    }
     return { verdict: 'failed', reason: `nonzero exit status${typeof exitCode === 'number' ? ` ${exitCode}` : ''}`, rule: 'exit-code' };
   }
   if (cc.narrowed) {
@@ -427,11 +465,12 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
   if (cc.exitHidden) {
     // The tool result's exit status belongs to the pipe, not the runner: a printed exit code
     // (echo $?) or a passing runner summary decides, otherwise undetermined.
-    const printed = printedExitCode(command, tail);
+    const printed = printedExitCode(command, tail, cc.piped);
     if (printed !== undefined) {
-      return printed !== 0
-        ? { verdict: 'failed', reason: `printed exit code ${printed}`, rule: 'printed-exit-code' }
-        : { verdict: 'passed', reason: 'printed exit code 0', rule: 'printed-exit-code' };
+      if (printed === 0) return { verdict: 'passed', reason: 'printed exit code 0', rule: 'printed-exit-code' };
+      return cc.chained
+        ? { verdict: 'undetermined', reason: `printed exit code ${printed} of an && chain: another command may have failed`, rule: 'chained-exit' }
+        : { verdict: 'failed', reason: `printed exit code ${printed}`, rule: 'printed-exit-code' };
     }
     for (const entry of SUMMARY_RULES.filter((rule) => readers.has(rule.runner))) {
       const verdict = entry.apply(tail);
@@ -459,8 +498,9 @@ const TEMP_TARGET = new RegExp(
 
 /**
  * Split shell text into words, one pass. Quotes and backslashes are removed from a word (a quoted empty
- * string is an empty word); `null` marks where an unquoted `;`, `&`, `|`, `(`, `)`, newline or redirection
- * ends the words of a command (a file descriptor digit before `<` or `>` is dropped with it).
+ * string is an empty word); `null` marks where an unquoted `;`, `&`, `|`, `(`, `)`, backtick, newline or
+ * redirection ends the words of a command (a file descriptor digit before `<` or `>` is dropped with it).
+ * A `#` that starts a word begins a comment, which runs to the end of the line.
  */
 function shellWords(text) {
   const out = [];
@@ -497,7 +537,10 @@ function shellWords(text) {
       }
       word = (word ?? '') + inner;
       i = end;
-    } else if (ch === '\n' || ';&|()'.includes(ch)) {
+    } else if (ch === '#' && word === null) {
+      const lineEnd = text.indexOf('\n', i);
+      i = lineEnd === -1 ? text.length : lineEnd - 1; // the newline itself is a boundary
+    } else if (ch === '\n' || ';&|()`'.includes(ch)) {
       boundary();
     } else if (ch === '<' || ch === '>') {
       if (word !== null && /^\d+$/.test(word)) word = null;
@@ -609,15 +652,29 @@ function withoutHeredocBodies(text) {
   return out + text.slice(from);
 }
 
-/** Wrappers that run the command after them, with the options that take a value (`sudo -u root`). */
+/**
+ * Words that run the command after them: launch wrappers and the reserved words that start a command
+ * (`then`, `do`, `!`, `{` ...). Each has the options that take a value (`sudo -u root`) and the positional
+ * words it takes before the command (`timeout 5`).
+ */
+const launcher = (values = [], positional = 0) => ({ values: new Set(values), positional });
 const LAUNCH_WRAPPERS = new Map([
-  ['sudo', new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-T', '-R'])],
-  ['doas', new Set(['-u', '-C'])],
-  ['env', new Set(['-u', '-C', '-S', '--unset', '--chdir'])],
-  ['command', new Set()],
-  ['nohup', new Set()],
-  ['exec', new Set()],
+  ['sudo', launcher(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-T', '-R'])],
+  ['doas', launcher(['-u', '-C'])],
+  ['env', launcher(['-u', '-C', '-S', '--unset', '--chdir'])],
+  ['command', launcher()],
+  ['nohup', launcher()],
+  ['exec', launcher()],
+  ['time', launcher(['-f', '-o', '--format', '--output'])],
+  ['nice', launcher(['-n', '--adjustment'])],
+  ['timeout', launcher(['-s', '-k', '--signal', '--kill-after'], 1)],
+  ['xargs', launcher(['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s', '--arg-file', '--delimiter', '--eof', '--max-args', '--max-lines', '--max-procs', '--max-chars'])],
+  ...['!', '{', 'if', 'then', 'elif', 'else', 'do', 'while', 'until'].map((word) => [word, launcher()]),
 ]);
+
+/** Words after which `find` runs a command of its own, and the words that end that command. */
+const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);
+const FIND_EXEC_END = new Set([';', '+']);
 
 /** Shells whose `-c` argument is a command string, and the shell options that take a value. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
@@ -631,35 +688,76 @@ const NESTED_MAX_DEPTH = 2;
 const baseName = (word) => word.slice(word.lastIndexOf('/') + 1);
 
 /**
- * The command strings that a shell or `su` runs in `words` (from shellWords): `sh -c 'cmd'`, `bash -lc`,
- * `sudo sh -c`, `env FOO=1 bash -c`, `su user -c 'cmd'`, also by absolute path. Only a word that starts a
- * command counts, after launch wrappers; `ssh host '...'` runs elsewhere and is not read.
+ * The index of the program word of a command that starts at `start`: assignments (`FOO=1`), launch wrappers
+ * with their options (`sudo -u root`, `env -i`, `timeout 5`, `xargs -n 1`) and reserved words (`then`, `do`)
+ * are skipped. A word that is not a string (a boundary or the end) ends the command.
  */
-function nestedCommandStrings(words) {
-  const found = [];
-  for (let i = 0; i < words.length; i += 1) {
-    if (words[i] === null || (i > 0 && words[i - 1] !== null)) continue;
-    let at = i;
-    for (;;) {
-      const values = words[at] === null || words[at] === undefined ? undefined : LAUNCH_WRAPPERS.get(baseName(words[at]));
-      if (values === undefined) break;
+function programAt(words, start) {
+  let at = start;
+  for (;;) {
+    const word = words[at];
+    if (typeof word !== 'string') return at;
+    if (/^[A-Za-z_]\w*=/.test(word)) {
       at += 1;
-      while (at < words.length && words[at] !== null) {
-        const option = words[at];
-        if (option === '--') {
-          at += 1;
-          break;
-        }
-        if (values.has(option)) at += 2;
-        else if (option.startsWith('-') || /^\w+=/.test(option)) at += 1;
-        else break;
-      }
+      continue;
     }
-    const program = words[at] === null || words[at] === undefined ? '' : baseName(words[at]);
+    const wrapper = LAUNCH_WRAPPERS.get(baseName(word));
+    if (wrapper === undefined) return at;
+    at += 1;
+    let positional = wrapper.positional;
+    while (typeof words[at] === 'string') {
+      const option = words[at];
+      if (option === '--') {
+        at += 1;
+        break;
+      }
+      if (wrapper.values.has(option)) at += typeof words[at + 1] === 'string' ? 2 : 1;
+      else if (option.startsWith('-') || /^\w+=/.test(option)) at += 1;
+      else if (positional > 0) {
+        positional -= 1;
+        at += 1;
+      } else break;
+    }
+  }
+}
+
+/**
+ * The commands in `words` (from shellWords) as `{ at, end }`: the program word and the end of its arguments.
+ * A command starts at the beginning of the text and after every boundary (`;`, `&`, `|`, `(`, a newline ...),
+ * and `find -exec ...` starts one more. This is the one place where a word counts as a command: a command name
+ * that only appears among the arguments of another command (`rg tee`, `echo sed -i`) is no command.
+ */
+function commandPrograms(words) {
+  const found = [];
+  const add = (start, stop) => {
+    const at = programAt(words, start);
+    if (typeof words[at] !== 'string') return;
+    let end = at;
+    while (typeof words[end] === 'string' && !(stop && stop.has(words[end]))) end += 1;
+    found.push({ at, end });
+    if (stop === undefined && baseName(words[at]) === 'find') {
+      for (let k = at + 1; k < end; k += 1) if (FIND_EXEC.has(words[k])) add(k + 1, FIND_EXEC_END);
+    }
+  };
+  for (let i = 0; i < words.length; i += 1) {
+    if (words[i] !== null && (i === 0 || words[i - 1] === null)) add(i);
+  }
+  return found;
+}
+
+/**
+ * The command strings that a shell or `su` runs in `programs` (from commandPrograms): `sh -c 'cmd'`, `bash -lc`,
+ * `sudo sh -c`, `env FOO=1 bash -c`, `su user -c 'cmd'`, also by absolute path; `ssh host '...'` runs elsewhere
+ * and is not read.
+ */
+function nestedCommandStrings(words, programs) {
+  const found = [];
+  for (const { at, end } of programs) {
+    const program = baseName(words[at]);
     const isSu = program === 'su';
     if (!isSu && !SHELLS.has(program)) continue;
     let wantsString = false;
-    for (let k = at + 1; k < words.length && words[k] !== null; k += 1) {
+    for (let k = at + 1; k < end; k += 1) {
       const arg = words[k];
       if (isSu && arg.startsWith('--command=')) {
         found.push(arg.slice('--command='.length));
@@ -685,12 +783,24 @@ function nestedCommandStrings(words) {
   return found;
 }
 
+/** The files `tee` writes: its operands, once the options (and `--`) are skipped. */
+function teeTargets(args) {
+  const files = [];
+  let options = true;
+  for (const arg of args) {
+    if (options && arg === '--') options = false;
+    else if (arg !== '' && (!options || !arg.startsWith('-'))) files.push(arg);
+  }
+  return files;
+}
+
 /**
  * Files a shell command writes by redirection, `tee`, a heredoc with a target, or an in-place
- * `sed`/`perl` (its file operands). One scan: a quoted string or an escaped character outside a target
- * holds text, not a redirection (`echo "a > b"`); a target is read as the shell reads it (quotes
- * removed, `\ ` a space), so `> "README.md"` and `tee 'my docs/a.md'` name the file, not the quotes.
- * The string of a nested shell (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep.
+ * `sed`/`perl` (its file operands). A redirection is read by one scan: a quoted string, an escaped character or
+ * a comment outside a target holds text, not a redirection (`echo "a > b"`); a target is read as the shell reads
+ * it (quotes removed, `\ ` a space), so `> "README.md"` names the file, not the quotes. `tee`, `sed` and
+ * `perl` count only as the command word of a command (see commandPrograms), so `rg tee src/a.ts` writes
+ * nothing. The string of a nested shell (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep.
  */
 function shellWriteTargets(command, depth = 0) {
   const QUOTED = String.raw`"[^"]*"|'[^']*'`;
@@ -699,26 +809,21 @@ function shellWriteTargets(command, depth = 0) {
   const targets = [];
   const unquote = (raw) => shellWords(raw).find((word) => word !== null && word !== '');
   const scan = new RegExp(
-    String.raw`${QUOTED}|\\[^\n]|(?<=^|[\s;&|("'])\d?>{1,2}\s*(${WORD})|\btee((?:[ \t]+${WORD})+)`,
+    String.raw`${QUOTED}|\\[^\n]|(?<=^|\s)#[^\n]*|(?<=^|[\s;&|("'])\d?>{1,2}\s*(${WORD})`,
     'g',
   );
   for (const m of text.matchAll(scan)) {
     if (m[1] !== undefined) targets.push(unquote(m[1]));
-    else if (m[2] !== undefined) {
-      for (const raw of m[2].match(new RegExp(WORD, 'g')) ?? []) if (!raw.startsWith('-')) targets.push(unquote(raw));
-    }
   }
   const words = shellWords(text);
-  for (let i = 0; i < words.length; i += 1) {
-    const program = words[i] === null ? undefined : /(?:^|\/)(sed|perl)$/.exec(words[i])?.[1];
-    if (program === undefined) continue;
-    let end = i + 1;
-    while (end < words.length && words[end] !== null) end += 1;
-    targets.push(...inPlaceTargets(program, words.slice(i + 1, end)));
-    i = end; // the words up to the boundary were its arguments
+  const programs = commandPrograms(words);
+  for (const { at, end } of programs) {
+    const program = baseName(words[at]);
+    if (program === 'tee') targets.push(...teeTargets(words.slice(at + 1, end)));
+    else if (program === 'sed' || program === 'perl') targets.push(...inPlaceTargets(program, words.slice(at + 1, end)));
   }
   if (depth < NESTED_MAX_DEPTH) {
-    for (const nested of nestedCommandStrings(words)) {
+    for (const nested of nestedCommandStrings(words, programs)) {
       if (nested.length <= NESTED_MAX_LENGTH) targets.push(...shellWriteTargets(nested, depth + 1));
     }
   }
@@ -727,7 +832,8 @@ function shellWriteTargets(command, depth = 0) {
 
 /**
  * Whether a tool call changes code. Write/Edit/MultiEdit/NotebookEdit change code unless the
- * file is ignored (docs, logs, lockfiles). Bash changes code when its command writes files by
+ * file is ignored (docs, logs, lockfiles); NotebookEdit names its target in `notebook_path`, the others
+ * in `file_path`. Bash changes code when its command writes files by
  * redirection, `tee`, heredoc with a target, or in-place `sed`/`perl`, unless every target is
  * ignored or a temp target (TEMP_DIRS, /dev/null, $TMPDIR) holds no code either.
  * The project folder is not checked: the contract passes no working directory.
@@ -736,7 +842,8 @@ export function isMutation(toolName, toolInput) {
   if (typeof toolName !== 'string' || !toolName) return false;
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
   if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(toolName)) {
-    const path = typeof input.file_path === 'string' ? input.file_path : '';
+    const named = toolName === 'NotebookEdit' && typeof input.notebook_path === 'string' ? input.notebook_path : input.file_path;
+    const path = typeof named === 'string' ? named : '';
     if (path === '') return false; // no path: nothing to mutate
     return !IGNORE.test(path) && !TEMP_TARGET.test(path) && !LOCKFILE.test(path);
   }
