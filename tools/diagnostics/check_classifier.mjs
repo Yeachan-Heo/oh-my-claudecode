@@ -620,20 +620,24 @@ function readCommand(command) {
 
 /**
  * Runner summary rules: anchored rules read from the tail of tool output. Deliberately narrow:
- * only node:test, pytest, ruff (with mypy and biome counts), eslint, tsc and vitest, the runners
+ * only node:test, pytest, ruff (with mypy and biome counts), eslint, tsc, vitest and the failures of jest, the runners
  * chosen for their stable summary lines. Other runners stay undetermined when their exit status is hidden.
+ * The output can hold several summaries (a script that runs two commands, a package manager that runs several packages, a loop),
+ * and each rule reads all of them in the tail: a failure in any one decides `failed` however many passed summaries stand before
+ * it, and a pass needs a summary with no failure among them. The rules of different runners are all read before a pass is taken.
  */
 const SUMMARY_RULES = [
-  // node:test: a `ℹ fail N` line with N above 0 is a failure, N equal 0 a pass, unless a test was cancelled (a timeout, a promise
-  // that never settles): the run exits 1 and the cancelled count, which stands behind the fail count, is the only sign of it.
+  // node:test: a `ℹ fail N` line (the spec reporter, which a terminal gets) or a `# fail N` line (the TAP reporter, the default
+  // when the output is piped) with N above 0 is a failure, N equal 0 a pass, unless a test was cancelled (a timeout, a promise
+  // that never settles): the run exits 1 and the cancelled count, which stands behind the fail count, is the only sign of it. A
+  // script that runs node:test twice prints two summaries, so every fail and cancelled count is read, not the first.
   {
     runner: 'node-test',
     rule: 'node-test-fail-count',
     apply: (tail) => {
-      if (!/[ℹi] (?:tests|pass|fail) \d+/.test(tail)) return null;
-      const m = /[ℹi] fail (\d+)/.exec(tail);
-      if (!m) return null;
-      return Number(m[1]) > 0 || /[ℹi] cancelled [1-9]\d*\b/.test(tail) ? 'failed' : 'passed';
+      const fails = [...tail.matchAll(/(?:[ℹi] |^[ \t]*# )fail (\d+)/gm)];
+      if (fails.length === 0) return null;
+      return fails.some((m) => Number(m[1]) > 0) || /(?:[ℹi] |^[ \t]*# )cancelled [1-9]\d*\b/m.test(tail) ? 'failed' : 'passed';
     },
   },
   // pytest: `===== 3 failed, 5 passed in 0.2s =====` / `===== 5 passed in 0.2s =====`. The counts stand in the order of pytest's
@@ -661,10 +665,17 @@ const SUMMARY_RULES = [
     apply: (tail) => {
       if (/^\s*(?:\S+:\s*)?Test Files\s+[^\n]*?\b[1-9]\d* failed\b/m.test(tail)) return 'failed';
       if (/^\s*(?:\S+:\s*)?(?:(?:Type )?Errors|Leaks)\s+[1-9]\d* (?:errors?|leaks?|failed)\b/m.test(tail)) return 'failed';
-      const m = /^\s*Tests\s{2,}([^\n]*\(\d+\))\s*$/m.exec(tail);
-      if (!m) return null;
-      return /\d+ failed/.test(m[1]) ? 'failed' : 'passed';
+      const lines = [...tail.matchAll(/^\s*Tests\s{2,}([^\n]*\(\d+\))\s*$/gm)];
+      if (lines.length === 0) return null;
+      return lines.some((m) => /\d+ failed/.test(m[1])) ? 'failed' : 'passed';
     },
+  },
+  // jest has no pass rule (its pass stays with the exit status), but a failure in its summary is read, so that a script which runs it
+  // behind a passed node:test or vitest summary is not taken for a pass: `Tests:       1 failed, 1 passed, 2 total`.
+  {
+    runner: 'jest',
+    rule: 'jest-summary-failure',
+    apply: (tail) => (/^[ \t]*Test(?:s| Suites):[^\n]*?\b[1-9]\d* failed\b/m.test(tail) ? 'failed' : null),
   },
   // eslint exits 0 on warnings alone, so the error count is the verdict, not the problem count; with `--max-warnings` the warnings
   // fail the run, which the line behind the summary says.
@@ -673,9 +684,9 @@ const SUMMARY_RULES = [
     rule: 'eslint-problems-line',
     apply: (tail) => {
       if (/^ESLint found too many warnings\b/m.test(tail)) return 'failed';
-      const m = /^[✖x✗] \d+ problems? \((\d+) errors?, (\d+) warnings?\)/m.exec(tail);
-      if (!m) return null;
-      return Number(m[1]) > 0 ? 'failed' : 'passed';
+      const lines = [...tail.matchAll(/^[✖x✗] \d+ problems? \((\d+) errors?, (\d+) warnings?\)/gm)];
+      if (lines.length === 0) return null;
+      return lines.some((m) => Number(m[1]) > 0) ? 'failed' : 'passed';
     },
   },
   // ruff, mypy and biome all count the same way, so one rule reads all three; a failure is looked for before a pass is accepted.
@@ -712,7 +723,7 @@ const ZERO_TEST_REPORTS = [
     zero: /no tests ran/i,
     ran: /^[= ]*(?=(?:\d+ \w+, )*[1-9]\d* (?:passed|failed|skipped|xfailed|xpassed|errors?)\b)(?:\d+ \w+, )*\d+ \w+ in \d[\d.]*s\b/m,
   },
-  { reader: 'node-test', zero: /ℹ tests 0\b/i, ran: /ℹ tests [1-9]\d*\b/ },
+  { reader: 'node-test', zero: /(?:ℹ|^#) tests 0\b/im, ran: /(?:ℹ|^#) tests [1-9]\d*\b/m },
   { reader: 'go', zero: /\[no tests to run\]/i, ran: /^[ \t]*ok[ \t](?![^\n]*\[no tests to run\])/m },
   { reader: 'cargo', zero: /running 0 tests\b/i, ran: /^[ \t]*running [1-9]\d* tests?\b/m },
 ];
