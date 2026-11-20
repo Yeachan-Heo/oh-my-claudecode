@@ -154,7 +154,7 @@ node tools/maintenance/worktree_report.mjs [--repo <path>]... [--repos-file <fil
 | `--json` | JSON output instead of a text table |
 
 Exit codes: `0` report printed (also when some repositories were skipped), `2` usage error (unknown option, missing value,
-missing repository list file).
+missing or unreadable repository list file; the message names the file).
 
 Facts per worktree:
 

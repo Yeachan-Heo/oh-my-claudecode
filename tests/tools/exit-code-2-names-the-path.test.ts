@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 // Messages that are not about a path (a bad time, a bad number, a missing option) are not listed, and neither are the
 // refusals to overwrite an output file of the tools whose documented exit code for it is 1 (their message names the path too).
 
-const TOOLS = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'tools', 'diagnostics');
+const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'tools');
+const TOOLS = join(ROOT, 'diagnostics');
 const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
 
 let base = '';
@@ -71,6 +72,7 @@ const BASE: Record<string, () => Args> = {
   'hook_latency_p95.mjs': () => ['--dir', base],
   'denial_log_summary.mjs': () => ['--dir', base],
   'wilson_threshold.mjs': () => ['--input', emptyFile, '--target', '0.9'],
+  'worktree_report.mjs': () => ['--repo', base],
 };
 
 function withOption(args: Args, option: string, value: string): Args {
@@ -120,10 +122,13 @@ const CASES: Array<[string, string, () => string]> = [
   ['hook_latency_p95.mjs', '--dir', () => existing],
   ['denial_log_summary.mjs', '--dir', () => missing],
   ['wilson_threshold.mjs', '--input', () => emptyFile],
+  ['worktree_report.mjs', '--repos-file', () => missing],
+  ['worktree_report.mjs', '--repos-file', () => directory],
 ];
 
 function run(script: string, args: Args) {
-  const command = script.endsWith('.mjs') ? ['node', [join(TOOLS, script), ...args]] as const : ['python3', ['-I', '-B', join(TOOLS, script), ...args]] as const;
+  const file = join(script === 'worktree_report.mjs' ? join(ROOT, 'maintenance') : TOOLS, script);
+  const command = script.endsWith('.mjs') ? ['node', [file, ...args]] as const : ['python3', ['-I', '-B', file, ...args]] as const;
   return spawnSync(command[0], [...command[1]], { encoding: 'utf8', timeout: 120000, cwd: base });
 }
 

@@ -17,7 +17,7 @@
 //                   worktree (reason git_timeout, kept) or, for a repository-level call, the whole repository
 // --json            JSON output instead of a text table
 // Exit code: 0 report printed (also when some repositories were skipped), 2 usage error (unknown option, missing
-// value, missing repository list file). Node 20+, built-in modules only; needs git.
+// value, missing or unreadable repository list file). Node 20+, built-in modules only; needs git.
 //
 // Decision per worktree, first matching rule wins (this order is the documented, stable reason order):
 //   keep   locked            the worktree is locked
@@ -276,7 +276,9 @@ function main() {
     repos.push(...opts.repos.map((p) => resolve(p)));
     if (opts.reposFile) {
       if (!existsSync(opts.reposFile)) throw new UsageError(`missing repository list file: ${opts.reposFile}`);
-      for (const repo of parseRepoList(readFileSync(opts.reposFile, 'utf8'))) repos.push(repo); // a spread of a long list overflows the call stack
+      let listText;
+      try { listText = readFileSync(opts.reposFile, 'utf8'); } catch (e) { throw new UsageError(`cannot read repository list file: ${opts.reposFile} (${e.code ?? e.message})`); }
+      for (const repo of parseRepoList(listText)) repos.push(repo); // a spread of a long list overflows the call stack
     }
     if (!repos.length) repos.push(process.cwd());
   } catch (e) {
