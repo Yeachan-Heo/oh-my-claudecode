@@ -699,6 +699,50 @@ describe('user prohibitions after compaction', () => {
     expect(result).toEqual(cases);
   });
 
+  it('a redirection and its target are no command word: the command after leading redirections still counts, the words after a target do not open a command', () => {
+    const operators = ['>f', '> f', '>>f', '2>f', '2> f', '2>&1', '2>&-', '&>f', '&>>f', '<f', '< f', '>|f', '>| f', '>&2', '<&3', '3<f',
+      '{fd}>f', '<<<x', '<> f', '> "f x"', '>f\\ x'];
+    const prefixes = ['', 'FOO=1 ', 'sudo ', 'env A=b ', 'time ', 'nohup ', 'command ', 'timeout 5 ', 'FOO=1 sudo ', 'xargs '];
+    const forms: string[] = [];
+    for (const redirect of operators) for (const prefix of prefixes) forms.push(`${prefix}${redirect} git commit -m x`);
+    const found = pyEval('[module.command_matches("commit", c) for c in argument]', forms);
+    forms.forEach((form, index) => expect(found[index], form).toBe(true));
+    // The target and the words after it belong to the command before the redirection.
+    const arguments_ = [
+      'echo hi > git commit', 'echo hi >git commit', 'echo hi >> git commit', 'echo hi 2> git commit', 'echo hi &> git commit', 'echo hi >| git commit',
+      'echo hi >& git commit', 'cat < git commit', 'cat <<< git commit', 'echo hi 2>&1 git commit', 'echo hi > f git commit',
+      'FOO=1 echo hi > git commit', 'sudo echo hi > git commit', 'echo > out git commit', '> out echo git commit',
+    ];
+    const missing = pyEval('[module.command_matches("commit", c) for c in argument]', arguments_);
+    arguments_.forEach((form, index) => expect(missing[index], form).toBe(false));
+    // A boundary after the target opens a command again, and a process substitution is a command of its own.
+    const opened = ['echo hi > f; git commit', 'echo hi > f && git commit', 'echo hi > f | git commit', 'echo hi > f\ngit commit',
+      'echo hi > >(git commit)', 'diff <(git commit) b', 'echo hi > f & git commit'];
+    const got = pyEval('[module.command_matches("commit", c) for c in argument]', opened);
+    opened.forEach((form, index) => expect(got[index], form).toBe(true));
+    // The other command classes read the same way.
+    const classes = pyEval(
+      '[[module.command_matches("push", c), module.command_matches("restart", c), module.has_delete(c), module.has_install(c), module.has_delete_or_move(c)] for c in argument]',
+      ['> out git push', 'echo > git push', '2>&1 systemctl restart web', 'echo > systemctl restart web', '> out rm x', 'echo > rm x',
+        '2>&1 npm install x', 'echo > npm install x', '< in sed -i s/a/b/ f', 'echo hi > sed -i s/a/b/ f'],
+    );
+    expect(classes).toEqual([
+      [true, false, false, false, false], [false, false, false, false, false], [false, true, false, false, false], [false, false, false, false, false],
+      [false, false, true, false, true], [false, false, false, false, false], [false, false, false, true, false], [false, false, false, false, false],
+      [false, false, false, false, true], [false, false, false, false, false],
+    ]);
+  });
+
+  it('the read-only command classifier skips leading redirections and sees the write forms of a redirection', () => {
+    const cases: Record<string, boolean> = {
+      '< in cat': true, '2>&1 ls': true, '2>/dev/null ls': true, '<in cat': true, '3< in cat': true, '> out ls': false, '>out ls': false,
+      '>> out ls': false, '2> err ls': false, '&> out ls': false, '>| out ls': false, '>&out ls': false, 'ls >&out': false,
+      'ls >&2': true, 'ls >&-': true, 'ls 2>&1': true, 'FOO=1 > out ls': false, 'FOO=1 < in cat': true, 'FOO=1 2>&1 sudo ls': true,
+      '< in rm x': false, '2>&1 git status': true, '< in git commit': false, 'echo > git commit': false,
+    };
+    expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);
+  });
+
   it('git options: the value of -C, -c and the long options is not the subcommand, and the subcommand is a whole word', () => {
     const cases: Array<[string, string, boolean]> = [
       // An option value that reads like the subcommand, or a subcommand that only starts like it.
@@ -897,11 +941,16 @@ describe('user prohibitions after compaction', () => {
     const words = pyEval('[module.shell_words(text) for text in argument]', [
       'git commit -m "a b"', "echo 'x y' z\\ w", 'a;b|c&&d', 'ls # c\nnpm test', 'echo a#b $# ${#x}', 'cat <<EOF > f\nx\nEOF', 'echo x 2>&1',
       '(a) `b`', 'x=$(c d)', 'echo ""', 'a \\\nb', "echo '",
+      '> out tee f', 'echo hi > out more', '2>&1 git commit', '{fd}>f cmd', 'echo x >| f y', 'echo x &>f y', 'cat <(a) b', 'a > >(b)', 'echo >', 'echo > ; ls',
+      'cat <<< "a b" c', 'echo a>b c', 'echo 12 > f',
     ]);
     expect(words).toEqual([
       ['git', 'commit', '-m', 'a b'], ['echo', 'x y', 'z w'], ['a', null, 'b', null, 'c', null, 'd'], ['ls', null, 'npm', 'test'],
-      ['echo', 'a#b', '$#', '${#x}'], ['cat', null, 'EOF', null, 'f', null, 'x', null, 'EOF'], ['echo', 'x', null, '1'],
+      ['echo', 'a#b', '$#', '${#x}'], ['cat', null, 'x', null, 'EOF'], ['echo', 'x'],
       [null, 'a', null, 'b', null], ['x=$', null, 'c', 'd', null], ['echo', ''], ['a', 'b'], ['echo', ''],
+      // A redirection and its target are dropped and end no command; a process substitution is a command of its own.
+      ['tee', 'f'], ['echo', 'hi', 'more'], ['git', 'commit'], ['cmd'], ['echo', 'x', 'y'], ['echo', 'x', 'y'],
+      ['cat', null, 'a', null, 'b'], ['a', null, 'b', null], ['echo'], ['echo', null, 'ls'], ['cat', 'c'], ['echo', 'a', 'c'], ['echo', '12'],
     ]);
     // A here-document body is cut and its operator line stays; a here-string and an operator with no terminator line are left alone.
     const cut = pyEval('[module.without_heredoc_bodies(text) for text in argument]', [
@@ -937,6 +986,10 @@ describe('user prohibitions after compaction', () => {
           "ssh " + "-p 1 " * 8000 + "h git commit",
           "\\\\" * 40000 + "git commit",
           '"' * 40001 + "git commit",
+          "> out " * 8000 + "git commit",
+          "2>&1 " * 20000 + "git commit",
+          "FOO=1 > a " * 8000 + "git commit",
+          "echo " + "> f " * 8000 + "git commit",
         ]
       ],
       "general": [
@@ -953,6 +1006,7 @@ describe('user prohibitions after compaction', () => {
     // arguments of echo, a third level of ssh, a glued run of backslashes and an open quote do not make one.
     expect(result.answers).toEqual([
       true, true, true, true, true, true, true, true, true, true, true, false, true, true, true, true, true, false, true, false, false,
+      true, true, true, false,
     ]);
     expect(result.general).toEqual([false, true, false, true, true, true, false]);
   });

@@ -648,7 +648,10 @@ measurement. In short:
   `find -exec`, and in the string of `sh -c`, `su -c` or `ssh host '...'` (two levels deep). A command name in the
   arguments of another command, in quotes, in a `#` comment or in a here-document body is text, so `echo "git commit"`,
   `rg 'git commit' README.md`, `grep rm f` and `echo "npm install x"` give no candidate, while `bash -c "git commit"`,
-  `timeout 30 git push` and `ssh host 'systemctl restart web'` do. A here-document that a shell takes as its input
+  `timeout 30 git push` and `ssh host 'systemctl restart web'` do. A redirection (`>f`, `>>f`, `>|f`, `&>f`, `<f`, `2>&1`,
+  with or without a file descriptor and a blank) and its target are no command word and end no command: `> out git commit`
+  runs `git`, and `echo hi > git commit` runs only `echo` (`commit` is one more argument), so it gives no candidate. A
+  here-document that a shell takes as its input
   (`bash <<EOF`), a command substitution inside double quotes (`echo "$(git commit)"`; an unquoted `$(...)` and
   backticks are read, and so is the usual `git commit -m "$(cat <<'EOF' ... EOF)"`, whose `git` stands outside the
   quotes) and `docker exec` or `kubectl exec` are not read. The general `deploy` class also counts the word
@@ -656,8 +659,9 @@ measurement. In short:
   `grep deploy README.md`).
 - Rule 2 cuts more fragment kinds (counted in `removed_fragments`), flags a prohibition revoked in its own
   message, matches general prohibitions by the kind of call (a `Bash` command is read-only or state-changing by
-  its first word, and a `>` or `>>` redirection to a file outside quotes and comments makes it state-changing:
-  `echo '>'`, `grep ">" README.md` and `ls # > x` are still read-only), and counts pairs (prohibition, call); `--locators` then has one row
+  its first word, taken after leading assignments and redirections (`< in cat` is read-only), and a `>`, `>>`, `>|` or
+  `>&file` redirection to a file outside quotes and comments makes it state-changing:
+  `echo '>'`, `grep ">" README.md`, `ls >&2` and `ls # > x` are still read-only), and counts pairs (prohibition, call); `--locators` then has one row
   per prohibition with a candidate and a `history_group` hash that copies of the same message share. Rule 3 (the
   default) changes only the revocation check: explicit permission only, no revocation in a question, none after a
   negation.

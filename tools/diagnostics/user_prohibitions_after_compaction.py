@@ -66,8 +66,10 @@ e. Candidate. A tool call in the same session and in the period, whose time is s
    and xargs with their options, and VAR=x assignments) or reserved words (if, then, do, !, {), after find -exec, and
    in the string of sh -c, su -c or ssh host '...' (two levels deep, 100000 characters at most). A command name in
    the arguments of another command, in a quoted string, in a # comment or in a here-document body is text:
-   "echo 'git commit'", "rg 'git commit' README.md" and "grep rm f" run no git and no rm. Not read: a here-document
-   that a shell takes as its input (bash <<EOF), a command substitution inside double quotes (echo "$(git commit)"; an
+   "echo 'git commit'", "rg 'git commit' README.md" and "grep rm f" run no git and no rm. A redirection (>f, >>f, >|f,
+   &>f, <f, 2>&1, with or without a file descriptor and a blank) and its target are no command word and end no
+   command: "> out git commit" runs git, "echo hi > git commit" runs only echo. Not read: a here-document that a
+   shell takes as its input (bash <<EOF), a command substitution inside double quotes (echo "$(git commit)"; an
    unquoted $(...) and backticks are read) and remote execution by docker exec or kubectl exec (amended, for
    every rule version: any git, rm or systemctl word of the command used to count, quoted or not).
    Each call is counted once, for the earliest matching prohibition.
@@ -337,29 +339,60 @@ for _word in ("!", "{", "if", "then", "elif", "else", "do", "while", "until"):
 HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?[ \t]*\\?(['\"]?)(\w+)\1")
 
 
+FILE_DESCRIPTOR_RE = re.compile(r"[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\}")
+
+
+def redirection_operator(text, at):
+    """Length of the redirection operator that starts at text[at], or 0: "<", ">", ">>", ">|", ">&", "<&", "<>", "<<",
+    "<<-", "<<<", "&>" and "&>>". "<(" and ">(" start a process substitution, which is a command of its own."""
+    char = text[at]
+    following = text[at + 1:at + 2]
+    if char == "&":
+        if following != ">":
+            return 0
+        return 3 if text[at + 2:at + 3] == ">" else 2
+    if char == ">":
+        if following == "(":
+            return 0
+        return 2 if following and following in ">|&" else 1
+    if char != "<" or following == "(":
+        return 0
+    if following == "<":
+        return 3 if text[at + 2:at + 3] in ("<", "-") else 2
+    return 2 if following in ("&", ">") else 1
+
+
 def shell_words(text):
     """Split shell text into words in one pass: quotes and backslashes are removed from a word (a quoted empty string
-    is an empty word) and None marks where an unquoted ";", "&", "|", "(", ")", a backtick, a newline or a redirection
-    ends the words of a command (a file descriptor digit before "<" or ">" is dropped with it). A "#" that starts a
-    word begins a comment that runs to the end of the line."""
+    is an empty word) and None marks where an unquoted ";", "&", "|", "(", ")", a backtick or a newline ends the words
+    of a command. A redirection is no word and ends nothing: its operator, a file descriptor before it ("2>", "{fd}>")
+    and the word that is its target are dropped, and the other words stay one command (`> out tee f` is `tee f`,
+    `echo hi > out more` is `echo hi more`). A "#" that starts a word begins a comment that runs to the end of the
+    line."""
     out = []
     parts = None  # the characters of the word being read, or None between words
+    target = False  # a redirection operator was read and its target word has not been
     length = len(text)
     index = 0
 
     def flush():
-        nonlocal parts
+        nonlocal parts, target
         if parts is not None:
-            out.append("".join(parts))
+            if not target:
+                out.append("".join(parts))
+            target = False
         parts = None
 
     def boundary():
+        nonlocal target
         flush()
+        target = False
         if not out or out[-1] is not None:
             out.append(None)
 
     while index < length:
         char = text[index]
+        operator = redirection_operator(text, index) if char in "<>&" else 0
         if char == "\\":
             following = text[index + 1] if index + 1 < length else ""
             if following == "\n" or (following == "\r" and text[index + 2:index + 3] == "\n"):
@@ -388,11 +421,14 @@ def shell_words(text):
         elif char == "#" and parts is None:
             line_end = text.find("\n", index)
             index = length if line_end == -1 else line_end - 1  # the newline itself is a boundary
-        elif char == "\n" or char in ";&|()`":
-            boundary()
-        elif char in "<>":
-            if parts is not None and re.fullmatch(r"[0-9]+", "".join(parts)):
+        elif operator:
+            if parts is not None and FILE_DESCRIPTOR_RE.fullmatch("".join(parts)):
                 parts = None
+            else:
+                flush()
+            target = True
+            index += operator - 1
+        elif char == "\n" or char in ";&|()`<>":
             boundary()
         elif char in " \t\r":
             flush()
@@ -626,8 +662,8 @@ READ_ONLY_GIT_SUBCOMMANDS = frozenset(("status", "log", "diff", "show", "branch"
 FIND_ACTION_OPTIONS = frozenset(("-delete", "-exec", "-execdir", "-ok", "-okdir"))
 ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SED_IN_PLACE_RE = re.compile(r"-[A-Za-z]*i")  # -i, -ni, -i.bak
-# A write redirection to a file: ">" or ">>" not followed by "&" and not aimed at /dev/null.
-REDIRECT_WRITE_RE = re.compile(r"(?<!>)>{1,2}(?![>&])\s*(?!/dev/null(?:\s|$))\S")
+# A write redirection to a file: ">", ">>", ">|" or ">&file" (not ">&2" or ">&-", which name a descriptor), not aimed at /dev/null.
+REDIRECT_WRITE_RE = re.compile(r"(?<!>)(?:>{1,2}(?![>&])|>&(?![0-9-]))\s*(?!/dev/null(?:\s|$))\S")
 # Quoted strings, escaped characters and comments (a "#" that starts a word, to the end of the line) are text, not
 # shell syntax: each one becomes a single "_" before the redirection is looked for, so a quoted file name after
 # ">" still counts as a target.
@@ -989,14 +1025,65 @@ def match_candidates(session, boundaries, prohibitions):
     return found
 
 
+ASSIGNMENT_START_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+REDIRECTION_START_RE = re.compile(r"(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)(?!\()")
+
+
+def skip_word(text, index):
+    """The index where the shell word that starts at text[index] ends: a quoted string and an escaped character
+    (an escaped space too) belong to the word; an unquoted blank, newline, ";", "&", "|", "(", ")", "<" or ">" ends it."""
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 2
+        elif char == "'":
+            close = text.find("'", index + 1)
+            index = length if close == -1 else close + 1
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+            index += 1
+        elif char in " \t\r\n;&|()<>":
+            break
+        else:
+            index += 1
+    return min(index, length)
+
+
+def skip_prefix(text):
+    """The text of a Bash command without the assignments (`FOO=1`) and the redirections (`> out`, `2>&1`, `< in`) that
+    stand before its command word, in any order. The value of an assignment and the target of a redirection are one
+    shell word, so they may hold quotes and escaped spaces."""
+    length = len(text)
+    index = 0
+    while True:
+        while index < length and text[index] in " \t\r":
+            index += 1
+        match = ASSIGNMENT_START_RE.match(text, index)
+        if match is not None:
+            index = skip_word(text, match.end())
+            continue
+        match = REDIRECTION_START_RE.match(text, index)
+        if match is None:
+            return text[index:]
+        start = match.end()
+        while start < length and text[start] in " \t\r":
+            start += 1
+        end = skip_word(text, start)
+        if end == start:
+            return text[index:]
+        index = end
+
+
 def is_read_only_command(command):
-    """Rule c, v2: True when a Bash command only reads state. Judged by its first word, after environment
-    assignments and sudo; a write redirection to a file (outside quotes) makes any command state-changing."""
+    """Rule c, v2: True when a Bash command only reads state. Judged by its first word, after the leading environment
+    assignments and redirections and after sudo; a write redirection to a file (outside quotes) makes any command
+    state-changing."""
     if REDIRECT_WRITE_RE.search(QUOTED_OR_ESCAPED_RE.sub("_", command)):
         return False
-    words = command.split()
-    while words and ENV_ASSIGNMENT_RE.match(words[0]):
-        words.pop(0)
+    words = skip_prefix(command).split()
     if words and words[0] == "sudo":
         words.pop(0)
         while words and words[0].startswith("-"):
