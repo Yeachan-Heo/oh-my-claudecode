@@ -1353,8 +1353,8 @@ it('a wrapper with no command behind it, a stop option, a bad duration and an op
     'sudo -l npm test', 'sudo -v npm test', 'sudo -e npm test', 'sudo -K npm test', 'sudo -V npm test', 'sudo --help npm test', 'sudo -u', 'sudo -u root', 'sudo', 'nohup',
     'nohup --version npm test', 'command -v npm test', 'command -V npm test', 'exec -a', 'nice -n', 'timeout npm test', 'timeout 5', 'timeout', 'timeout abc npm test',
     'timeout 5x npm test', 'timeout 5S npm test', 'timeout -s', 'timeout 5 -- npm test', 'env -0 npm test', 'env -u', 'sudo -n sudo -l npm test',
-    // an option that is not in the table: nothing is guessed
-    'nohup -x npm test', 'sudo -z npm test', 'sudo --no-such-option npm test', 'timeout --no-such 5 npm test', 'sudo -E -z npm test', 'timeout 5 sudo -z npm test',
+    // an option that is not in the table: nothing is guessed (`env` and `timeout` are the exception, see the test below)
+    'nohup -x npm test', 'sudo -z npm test', 'sudo --no-such-option npm test', 'nice -z npm test', 'time -z npm test', 'sudo -E -z npm test', 'timeout 5 sudo -z npm test',
     // an assignment behind a wrapper that takes none is the command the shell runs
     'nohup A=1 npm test', 'timeout 5 A=1 npm test', 'nice A=1 npm test', 'command A=1 npm test', 'exec A=1 npm test',
   ]) {
@@ -1364,6 +1364,16 @@ it('a wrapper with no command behind it, a stop option, a bad duration and an op
   assert.equal(classifyCommand('FOO=1 sudo -l npm test').isCheck, false);
   assert.equal(classifyCommand('echo hi && sudo -l npm test').isCheck, false);
   assert.equal(classifyCommand('sudo -l npm test; npm test').isCheck, true, 'the next command of the line is read on its own');
+});
+
+it('an option outside the table is a flag for `env` and `timeout` as before the table, and ends the reading for every other wrapper', () => {
+  for (const command of ['timeout --no-such 5 npm test', 'timeout -z 5 npm test', 'timeout -zz 5 npm test', 'env -z npm test', 'env --no-such npm test', 'env -zz npm test']) {
+    assert.equal(classifyCommand(command).isCheck, true, `${command}: read as before the table`);
+    assert.equal(classifyCommand(command.replace('npm test', 'pytest tests/a.py')).narrowed, true, `${command}: the arguments narrow it`);
+  }
+  for (const command of ['sudo -z npm test', 'nohup -z npm test', 'nice -z npm test', 'time -z npm test', 'command -z npm test', 'exec -z npm test']) {
+    assert.equal(classifyCommand(command).isCheck, false, `${command}: not read`);
+  }
 });
 
 it('the options of every wrapper that do not change which command runs are taken off, `--` ends them', () => {

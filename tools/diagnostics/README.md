@@ -207,8 +207,9 @@ Top level: `tasks`, `summary_by_provider`, `coverage` (`with_transcript`, `total
   substitution), a redirection with its target (`> out`, `2>&1`, `< in`) and the launch wrappers `sudo`, `nohup`, `command`,
   `exec`, `nice`, `time`, `timeout` and `env` with their options are skipped, so `MODE="a b" pytest`, `> out pytest` and
   `sudo -u root pytest` and `sudo -n pytest` run `pytest` (the options are the table in "Launch wrappers" below). A wrapper with no
-  command behind it (`sudo -l pytest`, `command -v pytest`), an option outside the table (`sudo -z pytest`) and a `timeout` with
-  no duration end the reading: the wrapper stays the program and nothing behind it is a test run.
+  command behind it (`sudo -l pytest`, `command -v pytest`), an option outside the table (`sudo -z pytest`, except for `env` and
+  `timeout`, see "Launch wrappers") and a `timeout` with no duration end the reading: the wrapper stays the program and nothing
+  behind it is a test run.
   The target of a redirection and a command substitution are never a command word (`echo hi > pytest` and
   `echo $(date) pytest` run only `echo`), and the body of a substitution is not read. The body of a here-document (`<<EOF`, `<<-EOF`
   with a tab-indented terminator) is cut line by line, and an operator inside quotes or a `#` comment (`echo "<<EOF"`) opens no body.
@@ -986,10 +987,12 @@ taken off by every tool.
 
 No command runs, so none is read, when the wrapper has no command behind it, after a `stop` option, when the duration of
 `timeout` is missing or is not a number (`timeout 5x`), when an option that takes a value has none, and when an assignment stands
-behind a wrapper that takes none (`nohup A=1 cmd`). An option that is not in the table is the one case in which the tools differ,
-as they did before the table: the check reading, advisor event coverage and the executor outcome metrics read nothing (`sudo -z
-pytest` is no test run), while the write reading, the user prohibitions tool and its read-only judgement skip the option as a flag
-without a value (`sudo -z tee src/a.ts` is still a write). `env -S` is read as a flag: its string is split into words that
+behind a wrapper that takes none (`nohup A=1 cmd`). An option that is not in the table is read as it was before the table,
+and so the tools differ: the write reading and the commit reading skip it as a flag without a value for every wrapper (`sudo -z
+tee src/a.ts` is still a write); the check reading and the executor outcome metrics skip it for `env` and `timeout` only
+(`timeout --no-such 5 pytest` is still a test run) and read nothing behind it for the other wrappers (`sudo -z pytest` is no
+test run); the read-only judgement skips it for `sudo` only, so `nohup -z ls` is not read-only; advisor event coverage read no
+wrapper before the table and reads nothing behind such an option (`sudo -z ask-advisor` is no consultation). `env -S` is read as a flag: its string is split into words that
 come before the rest of the command, so `env -S pytest` runs `pytest`.
 
 # Shell syntax the tools do not read

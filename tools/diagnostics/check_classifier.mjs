@@ -265,6 +265,8 @@ function launchCommandIndex(wordAt, at, skipUnknown) {
   }
 }
 
+const SKIP_UNKNOWN_OPTION = new Set(['env', 'timeout']);
+
 /** Take one launch wrapper and its options off the front of `text`; the text is returned as it is when it starts with none, or none runs a command. */
 function stripLaunchWrapper(text) {
   const found = [];
@@ -279,7 +281,8 @@ function stripLaunchWrapper(text) {
   };
   const first = wordAt(0);
   if (first === undefined || !LAUNCH_TABLE.has(baseName(first))) return text;
-  const command = launchCommandIndex(wordAt, 0, false);
+  // As before the table, `env` and `timeout` take any option that starts with a dash as a flag; the others end the reading at one that is not in the table.
+  const command = launchCommandIndex(wordAt, 0, SKIP_UNKNOWN_OPTION.has(baseName(first)));
   return command === -1 ? text : text.slice(found[command].index);
 }
 

@@ -695,9 +695,10 @@ describe('user prohibitions after compaction', () => {
       // Launch wrappers and their options of the table are skipped, also an option with a value (`sudo -u root`), an option that is
       // not in the table and `--`. A wrapper behind which no command runs (a bare one, `sudo -l`, `command -v`) changes nothing.
       'sudo -u root cat f': true, 'sudo -E ls': true, 'sudo -n cat f': true, 'sudo -- cat f': true, 'nice -5 cat f': true, 'timeout --foreground 5 ls': true,
-      'sudo --no-such-option cat f': true, 'nohup cat f': true, 'time -p ls': true, 'timeout 5 ls': true, 'time ls': true, 'sudo -l ls': true, 'command -v git': true,
+      'sudo --no-such-option cat f': true, 'nohup -z cat f': false, 'env -z cat f': false, 'timeout --no-such 5 cat f': false, 'time -z cat f': false, 'nohup cat f': true, 'time -p ls': true, 'timeout 5 ls': true, 'time ls': true, 'sudo -l ls': true, 'command -v git': true,
       'timeout -s KILL 5 ls': true, 'nice -n 5 cat f': true, 'env -i A=1 ls': true, 'env -u A cat f': true, 'command -p ls': true, 'exec -a x ls': true,
       'exec -a x tee f': false, 'sudo -u root rm x': false, 'sudo -u root git commit -m x': false, 'timeout 5 tee f': false, 'sudo -n rm x': false,
+      'timeout "5" rm -rf build': false, "timeout '1m' rm -rf build": false, "timeout '5' ls": true, 'sudo -u "root" rm x': false, 'env "A=1" rm x': false,
       'sudo': true, 'sudo -u root': true, 'nohup': true,
       // The words that start a command, xargs and doas are not wrappers of the table: the first word decides.
       'if grep -q x f; then rm -rf build; fi': false, '{ cat f; rm -rf build; }': false, '! grep -q x f || rm -rf build': false, 'xargs ls': false, 'doas ls': false,

@@ -694,9 +694,10 @@ def option_width(word, spec):
     return 1
 
 
-def launch_command_index(words, at):
+def launch_command_index(words, at, skip_unknown=True):
     """The index of the command word behind the launch wrapper of LAUNCH_TABLE at words[at] and its options, or None when no
-    command runs behind it. A word that is None (a boundary) ends the command. An option that is not in the table is skipped as a flag without a value."""
+    command runs behind it. A word that is None (a boundary) ends the command. An option that is not in the table is skipped as
+    a flag without a value, or, when `skip_unknown` is not set, ends the reading with -1."""
     spec = LAUNCH_TABLE[os.path.basename(words[at])]
     durations = 1 if spec["duration"] else 0
     options = True
@@ -710,6 +711,8 @@ def launch_command_index(words, at):
         elif options and word.startswith("-") and (len(word) > 1 or word in spec["flag"]):
             width = option_width(word, spec)
             if width < 0:
+                if not skip_unknown:
+                    return -1
                 width = 1
             if width == 0 or (width == 2 and (index + 1 >= count or words[index + 1] is None)):
                 return None
@@ -1367,6 +1370,13 @@ def skip_prefix(text):
         index = end
 
 
+def unquoted_word(word):
+    """The shell word that `word` stands for, without its quotes and backslashes; the text as it stands when it is no
+    single word (a boundary or an unterminated quote in it)."""
+    parts = shell_words(word)
+    return parts[0] if len(parts) == 1 and parts[0] is not None else word
+
+
 def is_read_only_command(command):
     """Rule c, v2: True when a Bash command only reads state. Judged by its first word, after the leading environment
     assignments and redirections and after launch wrappers; a write redirection to a file (outside quotes) makes any command
@@ -1374,17 +1384,24 @@ def is_read_only_command(command):
     if REDIRECT_WRITE_RE.search(QUOTED_OR_ESCAPED_RE.sub("_", command)):
         return False
     words = skip_prefix(command).split()
+    # The wrappers are read on the words as the shell passes them on: `timeout "5" rm -rf build` runs `rm`, so the duration
+    # is read without its quotes. A word that holds a boundary or more than one shell word is kept as it stands.
+    plain = [unquoted_word(word) for word in words]
     # The launch wrappers of LAUNCH_TABLE and their options are skipped; a wrapper behind which no command runs (`sudo -l`,
     # `command -v`, a bare `sudo`) changes nothing. Reserved words (`if`, `then`, `!`, `{`), `xargs` and `doas` are not
     # skipped: the first word is then no read-only command, as `if grep -q x f; then rm -rf build; fi` is not read-only.
     index = 0
     wrappers = 0
     while index < len(words):
-        if ENV_ASSIGNMENT_RE.match(words[index]):
+        if ENV_ASSIGNMENT_RE.match(plain[index]):
             index += 1
-        elif wrappers < MAX_WRAPPERS and os.path.basename(words[index]) in LAUNCH_TABLE:
+        elif wrappers < MAX_WRAPPERS and os.path.basename(plain[index]) in LAUNCH_TABLE:
             wrappers += 1
-            index = launch_command_index(words, index)
+            # As before the table, only `sudo` takes any option that starts with a dash as a flag: behind another wrapper with
+            # an option outside the table the first word is the wrapper, which is no read-only command.
+            index = launch_command_index(plain, index, os.path.basename(plain[index]) == "sudo")
+            if index == -1:
+                return False
             if index is None:
                 return True
         else:

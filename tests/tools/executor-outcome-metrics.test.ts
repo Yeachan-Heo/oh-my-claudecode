@@ -536,6 +536,12 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
         'nice -5 pytest', 'env --chdir=sub pytest', 'env -S pytest', 'time -f %e pytest', 'exec -cl pytest', 'sudo -nu root pytest', 'timeout 1e1 pytest'];
       const read = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(wrapped)}]`) as string[];
       assert.deepEqual(read, wrapped.map(() => 'S'));
+      // An option outside the table is a flag for `env` and `timeout`, as before the table; behind any other wrapper it ends the reading.
+      const unknownRead = ['timeout --no-such 5 pytest', 'timeout -z 5 pytest', 'env -z pytest', 'env --no-such-option pytest'];
+      const unknownKinds = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(unknownRead)}]`) as string[];
+      assert.deepEqual(unknownKinds, unknownRead.map(() => 'S'));
+      const unknownPrograms = pyEval(`[[p[0] for p in m.split_command(c)] for c in ${JSON.stringify(['sudo -z pytest', 'nice -z pytest', 'time -z pytest', 'timeout -z 5 git push'])}]`);
+      assert.deepEqual(unknownPrograms, [['sudo'], ['nice'], ['time'], ['git']]);
       // A long run of prefixes is read in one pass.
       const long = pyEval('[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ["A=\\"b c\\" " * 20000 + "pytest", "> o " * 20000 + "pytest", "$(a) " * 20000 + "pytest"]]');
       assert.deepEqual(long, ['S', 'S', null]);

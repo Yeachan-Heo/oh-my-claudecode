@@ -59,6 +59,9 @@ const PREFIXES: Array<[string, Reads]> = [
   // `--` ends the options of a wrapper, and the command stands behind it
   ['sudo -- ', ALL], ['env -- ', ALL], ['nice -- ', ALL], ['command -- ', ALL], ['nohup -- ', ALL], ['time -- ', ALL], ['exec -- ', ALL], ['timeout -- 5 ', ALL],
   ['sudo -u root -- ', ALL], ['env -i -- ', ALL],
+  // the words of a wrapper may be quoted: the shell removes the quotes before the wrapper reads them
+  ['timeout "5" ', ALL], ["timeout '1m' ", ALL], ['sudo -u "root" ', ALL], ["sudo -u 'root' ", ALL], ['nice -n "5" ', ALL], ['env "A=1" ', ALL],
+  ['timeout "5" env A=1 ', ALL], ['"sudo" ', ALL], ["'timeout' '5' ", ALL],
 ];
 
 // The command words each reading looks for, as the text that follows the prefix.
@@ -91,10 +94,16 @@ const NO_COMMAND_RUNS: string[] = [
 // A value option with no value takes the command word as its value (`sudo -u rm`), and `--` after the duration is the command itself; the
 // word behind is then no command of the table, and the judgement of the first word (readonly) sees a word that is not read-only.
 const EATS_THE_COMMAND: string[] = ['timeout -s ', 'timeout 5 -- ', 'nice -n ', 'exec -a ', 'sudo -u ', 'env -u '];
-// An option that is not in the table: the readings that claim a check, a consultation or a test run read nothing; the readings that look for
-// a command that writes or commits, and the read-only judgement, skip the option as a flag and find the command behind it.
-const UNKNOWN_OPTION: string[] = ['sudo -z ', 'sudo --no-such-option ', 'nohup -x ', 'timeout --no-such 5 ', 'nice -z ', 'env -z ', 'exec -z ', 'time -z ', 'command -z ', 'sudo -E -z '];
-const SKIPS_UNKNOWN_OPTION: Column[] = ['write', 'commit', 'readonly'];
+// An option that is not in the table is read as before the table: the readings that look for a command that writes or commits skip it
+// as a flag for every wrapper; `env` and `timeout` are skipped so by the check and the metrics readings too (the read-only judgement does
+// so for `sudo`, and its word `rm` is state-changing behind any wrapper, so the column is true everywhere); the consultation reading
+// read no wrapper and reads nothing behind such an option. Nothing else is read behind it: nothing is guessed.
+const UNKNOWN_OPTION: Array<[string, Reads]> = [
+  ['sudo -z ', except('check', 'consult', 'metrics')], ['sudo --no-such-option ', except('check', 'consult', 'metrics')], ['sudo -E -z ', except('check', 'consult', 'metrics')],
+  ['nohup -x ', except('check', 'consult', 'metrics')], ['nice -z ', except('check', 'consult', 'metrics')], ['exec -z ', except('check', 'consult', 'metrics')],
+  ['time -z ', except('check', 'consult', 'metrics')], ['command -z ', except('check', 'consult', 'metrics')],
+  ['timeout --no-such 5 ', except('consult')], ['timeout -z 5 ', except('consult')], ['env -z ', except('consult')], ['env --no-such-option ', except('consult')],
+];
 // A wrapper with no command behind it is no command at all.
 const BARE_WRAPPER: string[] = ['sudo', 'nohup', 'time', 'command', 'exec', 'nice', 'env', 'env A=1', 'timeout', 'timeout 5', 'sudo -u root', 'sudo -E', 'nice -n 5', 'exec -a x', 'sudo env A=1 nohup'];
 // The command word itself is the target of the redirection: `echo hi > git commit` runs echo and writes a file named git.
@@ -177,7 +186,7 @@ function casesFor(column: Column): Case[] {
   for (const prefix of TABLE.reads) add(prefix, true);
   for (const prefix of [...NO_COMMAND_RUNS, ...TABLE.none]) if (column !== 'readonly' || !WRITES_A_FILE.test(prefix)) add(prefix, false);
   if (column !== 'readonly') for (const prefix of EATS_THE_COMMAND) add(prefix, false);
-  for (const prefix of UNKNOWN_OPTION) add(prefix, SKIPS_UNKNOWN_OPTION.includes(column));
+  for (const [prefix, reads] of UNKNOWN_OPTION) add(prefix, reads[column]);
   for (const command of BARE_WRAPPER) cases.push({ command, word: '', want: false, row: command });
   if (column === 'readonly') return cases; // the rows below hold a redirection, a boundary or a here-document: state-changing or text for the judgement of its first word
   const negatives = column === 'write' ? ARGUMENT_OF : [...ARGUMENT_OF, ...TARGET_IS_THE_WORD];

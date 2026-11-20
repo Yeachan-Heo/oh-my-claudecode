@@ -775,9 +775,15 @@ def option_width(word, spec):
     return 1
 
 
-def launch_command_index(words, at):
+# As before the table, `env` and `timeout` take any option that starts with a dash as a flag; the others end the reading at one
+# that is not in the table.
+SKIP_UNKNOWN_OPTION = frozenset(("env", "timeout"))
+
+
+def launch_command_index(words, at, skip_unknown=False):
     """The index of the command word behind the launch wrapper of LAUNCH_TABLE at words[at] and its options, or None when no
-    command runs behind it. A word that is None (a boundary) ends the command. An option that is not in the table ends the reading."""
+    command runs behind it. A word that is None (a boundary) ends the command. An option that is not in the table ends the
+    reading, or is skipped as a flag without a value when `skip_unknown` is set."""
     spec = LAUNCH_TABLE[os.path.basename(words[at])]
     durations = 1 if spec["duration"] else 0
     options = True
@@ -791,7 +797,9 @@ def launch_command_index(words, at):
         elif options and word.startswith("-") and (len(word) > 1 or word in spec["flag"]):
             width = option_width(word, spec)
             if width < 0:
-                return None
+                if not skip_unknown:
+                    return None
+                width = 1
             if width == 0 or (width == 2 and (index + 1 >= count or words[index + 1] is None)):
                 return None
             index += width
@@ -824,7 +832,7 @@ def program_of_segment(words):
             i += 3
         elif os.path.basename(word) in LAUNCH_TABLE:
             wrappers += 1
-            behind = None if wrappers > MAX_WRAPPERS else launch_command_index(words, i)
+            behind = None if wrappers > MAX_WRAPPERS else launch_command_index(words, i, os.path.basename(word) in SKIP_UNKNOWN_OPTION)
             if behind is None:
                 break
             i = behind

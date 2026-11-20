@@ -468,13 +468,23 @@ def launch_command_index(words, at):
     return None
 
 
+QUOTED_WORD_RE = re.compile(r"""(["'])([^"'$`\\]*)\1\Z""")
+
+
+def unquoted_word(word):
+    """The word without the quotes that enclose all of it; a word that holds anything else a shell would read is kept."""
+    found = QUOTED_WORD_RE.match(word)
+    return word if found is None else found.group(2)
+
+
 def strip_launch_wrapper(text):
     """The text behind one launch wrapper and its options (see LAUNCH_TABLE_TEXT), or None when the text starts with no
     wrapper, or when no command runs behind it."""
     first = WORD_RE.match(text)
-    if first is None or os.path.basename(first.group(1)) not in LAUNCH_TABLE:
+    if first is None or os.path.basename(unquoted_word(first.group(1))) not in LAUNCH_TABLE:
         return None
     words = []
+    plain = []  # the words as the shell passes them on: `timeout "5" cmd` has the duration 5
     starts = []
     position = 0
     while True:
@@ -482,10 +492,14 @@ def strip_launch_wrapper(text):
         if found is None:
             break
         words.append(found.group(1))
+        plain.append(unquoted_word(found.group(1)))
         starts.append(found.start(1))
         position = found.end()
-    command = launch_command_index(words, 0)
-    return None if command is None else text[starts[command]:]
+    command = launch_command_index(plain, 0)
+    # A quoted assignment (`env "A=1" cmd`) is one for the wrapper, but the caller skips only those it can read as such.
+    while command is not None and command < len(words) and words[command] != plain[command] and ASSIGNMENT_START_RE.match(plain[command]):
+        command += 1
+    return None if command is None or command >= len(words) else text[starts[command]:]
 
 
 def strip_wrappers(text):
