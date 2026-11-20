@@ -126,6 +126,7 @@ jobs:
           src/__tests__/omc-doctor-cache-identity.test.ts
           src/__tests__/omc-doctor-version-check.test.ts
           src/__tests__/omc-doctor-cache-links-occupancy.test.ts
+          src/__tests__/omc-doctor-explicit-root.test.ts
           src/installer/__tests__/claude-md-transaction.test.ts
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts
