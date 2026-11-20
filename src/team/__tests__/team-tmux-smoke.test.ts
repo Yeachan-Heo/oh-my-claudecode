@@ -242,7 +242,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       const owner = (await readTeamConfig(ownerTeam.teamName, ownerTeam.cwd).catch(() => null))?.runtime_owner_epoch;
       ownerTeam = null;
       if (owner && observeProcessIdentity({ pid: owner.pid, process_started_at: owner.process_started_at }) === 'matching') {
-        process.kill(owner.pid, 'SIGKILL');
+        try { process.kill(owner.pid, 'SIGKILL'); } catch { /* exited concurrently */ }
         await waitFor('recovery owner to exit', () => isProcessAlive(owner.pid), alive => !alive, 5_000)
           .catch(() => leftovers.push(`recovery owner pid ${owner.pid} still alive`));
       }
