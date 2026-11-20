@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CliAgentType } from '../model-contract.js';
 import {
-  claudeTrustFocus,
+  claudeDialogFocus,
   classifyPane,
   detectPaneTrustPromptKind,
   observePane,
@@ -61,8 +61,14 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/2.1.325/idle.txt': 'idlePrompt',
   'claude/2.1.325/trust-just-answered.txt': '',
   'claude/2.1.325/trust.txt': 'trust:claude_directory idlePrompt',
+  'claude/2.1.328/bypass-permissions-yes-focused.txt': 'trust:claude_bypass_permissions idlePrompt',
+  'claude/2.1.328/bypass-permissions.txt': 'trust:claude_bypass_permissions idlePrompt',
+  'claude/2.1.328/fullscreen-renderer-not-now-focused.txt': 'trust:claude_fullscreen_renderer idlePrompt',
+  'claude/2.1.328/fullscreen-renderer.txt': 'trust:claude_fullscreen_renderer idlePrompt',
+  'claude/2.1.328/idle-after-fullscreen-renderer.txt': 'idlePrompt',
   'claude/2.1.328/trust-yes-focused.txt': 'trust:claude_directory idlePrompt',
   'claude/synthetic/loading-in-scrollback.txt': 'bootstrapping idlePrompt',
+  'claude/synthetic/output-quoting-first-run-dialogs.txt': 'idlePrompt',
   'claude/synthetic/prompt-glyph-in-output.txt': 'idlePrompt',
   'claude/synthetic/shell-prompt-after-exit-dollar.txt': '',
   'claude/synthetic/shell-prompt-after-exit-heavy-angle.txt': 'idlePrompt',
@@ -227,38 +233,90 @@ describe('PANE_PATTERNS', () => {
   });
 });
 
-describe('claudeTrustFocus', () => {
+describe('claudeDialogFocus', () => {
   const read = (file: string) => readFileSync(join(CORPUS_ROOT, file), 'utf8');
   const STALE_YES = ' ❯ Yes, I trust this folder\n';
   const trust = read('claude/2.1.325/trust.txt');
   const midDraw = trust.slice(0, trust.indexOf('Security guide') + 'Security guide'.length);
 
   it.each([
-    ['claude/2.1.328/trust-yes-focused.txt', 'yes'],
-    ['claude/2.1.325/trust.txt', 'no'],
-    ['claude/2.1.310/trust-35col.txt', 'no'],
-    ['claude/unversioned/trust-files-wrapped.txt', 'no'],
+    ['claude/2.1.328/trust-yes-focused.txt', 'second'],
+    ['claude/2.1.325/trust.txt', 'first'],
+    ['claude/2.1.310/trust-35col.txt', 'first'],
+    ['claude/unversioned/trust-files-wrapped.txt', 'first'],
   ] as const)('%s -> %s', (file, focus) => {
-    expect(claudeTrustFocus(read(file))).toBe(focus);
+    expect(claudeDialogFocus(read(file), 'claude_directory')).toBe(focus);
   });
 
   it('reads the 35-column dialog once Down moved its focus', () => {
     const moved = read('claude/2.1.310/trust-35col.txt')
       .replace(' ❯ No, exit', '   No, exit')
       .replace('   Yes, I trust this folder', ' ❯ Yes, I trust this folder');
-    expect(claudeTrustFocus(moved)).toBe('yes');
+    expect(claudeDialogFocus(moved, 'claude_directory')).toBe('second');
   });
 
   it('ignores a stale focused Yes in the scrollback above a live dialog focused on No', () => {
-    expect(claudeTrustFocus(`${STALE_YES}${trust}`)).toBe('no');
+    expect(claudeDialogFocus(`${STALE_YES}${trust}`, 'claude_directory')).toBe('first');
   });
 
   it('reads an answered dialog with the input prompt drawn below its choices as stale', () => {
-    expect(claudeTrustFocus(read('claude/unversioned/trust-files-then-idle.txt'))).toBe('stale');
+    expect(claudeDialogFocus(read('claude/unversioned/trust-files-then-idle.txt'), 'claude_directory')).toBe('stale');
   });
 
   it('reads no focus while a new dialog below an answered one has not drawn its choices', () => {
-    expect(claudeTrustFocus(midDraw)).toBeNull();
-    expect(claudeTrustFocus(`${read('claude/2.1.328/trust-yes-focused.txt')}\n${midDraw}`)).toBeNull();
+    expect(claudeDialogFocus(midDraw, 'claude_directory')).toBeNull();
+    expect(claudeDialogFocus(`${read('claude/2.1.328/trust-yes-focused.txt')}\n${midDraw}`, 'claude_directory')).toBeNull();
+  });
+});
+
+describe('Claude Code first-run dialogs', () => {
+  const read = (file: string) => readFileSync(join(CORPUS_ROOT, file), 'utf8');
+
+  it.each([
+    ['claude/2.1.328/bypass-permissions.txt', 'claude_bypass_permissions', 'first'],
+    ['claude/2.1.328/bypass-permissions-yes-focused.txt', 'claude_bypass_permissions', 'second'],
+    ['claude/2.1.328/fullscreen-renderer.txt', 'claude_fullscreen_renderer', 'first'],
+    ['claude/2.1.328/fullscreen-renderer-not-now-focused.txt', 'claude_fullscreen_renderer', 'second'],
+  ] as const)('%s is %s with the %s choice focused', (file, kind, focus) => {
+    expect(detectPaneTrustPromptKind(read(file), 'claude')).toBe(kind);
+    expect(detectPaneTrustPromptKind(read(file))).toBe(kind);
+    expect(claudeDialogFocus(read(file), kind)).toBe(focus);
+  });
+
+  it('reads neither dialog once a reply quoting them has the input prompt drawn below', () => {
+    const quoted = read('claude/synthetic/output-quoting-first-run-dialogs.txt');
+    expect(detectPaneTrustPromptKind(quoted, 'claude')).toBeNull();
+    expect(claudeDialogFocus(quoted, 'claude_bypass_permissions')).toBe('stale');
+    expect(claudeDialogFocus(quoted, 'claude_fullscreen_renderer')).toBe('stale');
+  });
+
+  it('reads the pane after Not now, and the trust dialogs, as before', () => {
+    expect(detectPaneTrustPromptKind(read('claude/2.1.328/idle-after-fullscreen-renderer.txt'), 'claude')).toBeNull();
+    expect(detectPaneTrustPromptKind(read('claude/2.1.325/trust.txt'), 'claude')).toBe('claude_directory');
+    expect(claudeDialogFocus(read('claude/2.1.325/trust.txt'), 'claude_bypass_permissions')).toBeNull();
+  });
+
+  it('reads the bypass warning wrapped to a 35-column pane', () => {
+    const wrapped = [
+      'WARNING: Claude Code running in',
+      'Bypass Permissions mode',
+      'By proceeding, you accept all',
+      'responsibility for actions taken.',
+      '❯ No, exit',
+      '  Yes, I accept',
+      'Enter to confirm · Esc to cancel',
+    ].join('\n');
+    expect(detectPaneTrustPromptKind(wrapped, 'claude')).toBe('claude_bypass_permissions');
+  });
+
+  it('reads both dialogs drawn wider than a 39-column pane, which wraps them mid-word', () => {
+    const hardWrap = (text: string) => text.split('\n').flatMap(line => line.match(/.{1,39}/gu) ?? ['']).join('\n');
+    expect(detectPaneTrustPromptKind(hardWrap(read('claude/2.1.328/bypass-permissions.txt')), 'claude')).toBe('claude_bypass_permissions');
+    expect(detectPaneTrustPromptKind(hardWrap(read('claude/2.1.328/fullscreen-renderer.txt')), 'claude')).toBe('claude_fullscreen_renderer');
+  });
+
+  it('is not read for another provider', () => {
+    expect(detectPaneTrustPromptKind(read('claude/2.1.328/bypass-permissions.txt'), 'codex')).toBeNull();
+    expect(detectPaneTrustPromptKind(read('claude/2.1.328/fullscreen-renderer.txt'), 'codex')).toBeNull();
   });
 });

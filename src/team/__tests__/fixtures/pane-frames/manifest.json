@@ -249,6 +249,81 @@
     "note": "Launched without --dangerously-skip-permissions plus a --settings hook file, so the footer reads \"auto mode on\", not the worker's \"bypass permissions on\". Exact argv was not recorded."
   },
   {
+    "file": "claude/2.1.328/bypass-permissions-yes-focused.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "bypass-permissions-yes-focused",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/6-plugin/diag-accept-bypass/frames.txt#2",
+    "note": "The same warning after one Down: only the ❯ moved."
+  },
+  {
+    "file": "claude/2.1.328/bypass-permissions.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "bypass-permissions",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/6-plugin/diag-accept-bypass/frames.txt#1",
+    "note": "First launch with a fresh CLAUDE_CONFIG_DIR, after the trust dialog: No, exit is focused."
+  },
+  {
+    "file": "claude/2.1.328/fullscreen-renderer-not-now-focused.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "fullscreen-renderer-not-now-focused",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/6-plugin/diag-dismiss-onboarding/frames.txt#2",
+    "note": "The same offer after one Down: only the ❯ moved."
+  },
+  {
+    "file": "claude/2.1.328/fullscreen-renderer.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "fullscreen-renderer",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/6-plugin/diag-dismiss-onboarding/frames.txt#1",
+    "note": "Shown after the bypass warning was accepted, 15ms after SessionStart fired."
+  },
+  {
+    "file": "claude/2.1.328/idle-after-fullscreen-renderer.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "idle-after-fullscreen-renderer",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/6-plugin/diag-dismiss-onboarding/frames.txt#3",
+    "note": "The pane right after Enter on Not now."
+  },
+  {
     "file": "claude/2.1.328/trust-yes-focused.txt",
     "provider": "claude",
     "version": "2.1.328",
@@ -274,6 +349,18 @@
     "source": "synthetic",
     "origin": "hand-written for R1",
     "note": "An idle Claude pane whose scrollback mentions \"loading\"."
+  },
+  {
+    "file": "claude/synthetic/output-quoting-first-run-dialogs.txt",
+    "provider": "claude",
+    "version": "synthetic",
+    "state": "output-quoting-first-run-dialogs",
+    "cols": null,
+    "rows": null,
+    "launch_args": null,
+    "source": "synthetic",
+    "origin": "hand-written for the first-run dialogs",
+    "note": "A reply quoting the bypass warning and the fullscreen renderer offer, with the live input prompt below."
   },
   {
     "file": "claude/synthetic/prompt-glyph-in-output.txt",

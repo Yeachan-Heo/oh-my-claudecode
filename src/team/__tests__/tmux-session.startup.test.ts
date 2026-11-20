@@ -1045,12 +1045,62 @@ describe('worker pane startup safety', () => {
     expect(keysAfterStage).toEqual([[], ['Down'], ['Enter']]);
   });
 
+  strictTmuxIt('fails at once on Claude Code’s Bypass Permissions warning and sends it no key', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    tmuxState.captures = [readFileSync(join(corpus, 'claude/2.1.328/bypass-permissions.txt'), 'utf8')];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'claude_bypass_permissions_consent_required',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    expect(tmuxState.args.filter(args => args[0] === 'capture-pane')).toHaveLength(1);
+  });
+
+  strictTmuxIt('answers Claude Code’s fullscreen renderer offer with Not now, resending a dropped Down', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const read = (file: string) => readFileSync(join(corpus, file), 'utf8');
+    const frames = {
+      offered: read('claude/2.1.328/fullscreen-renderer.txt'),
+      notNow: read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      accepted: 'fullscreen renderer on\n',
+      dismissed: read('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    };
+    // Drops the first Down, like Claude Code 2.1.328's trust dialog; Enter
+    // confirms the choice focused when it arrives.
+    let shown: keyof typeof frames = 'offered';
+    let applied = 0;
+    let downs = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys' && !args.includes('-l'))
+        .map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && ++downs > 1 && shown === 'offered') shown = 'notNow';
+        if (key === 'Enter' && (shown === 'offered' || shown === 'notNow')) shown = shown === 'notNow' ? 'dismissed' : 'accepted';
+      }
+      return frames[shown];
+    };
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 5_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    expect(shown).toBe('dismissed');
+    expect(keysSeenOn).toEqual([['offered', 'Down'], ['offered', 'Down'], ['notNow', 'Enter']]);
+  });
+
   strictTmuxIt.each([
     ['Cursor workspace trust', 'Workspace Trust Required\nDo you trust the contents of this directory?\nPass --trust, --yolo, or -f to skip this prompt.\n'],
     ['Claude files trust', 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed\n'],
     ['Claude quick safety check', 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n'],
     ['directory trust', 'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n'],
     ['Codex hooks review', 'Hooks need review\n› 3. Continue without trusting\nPress enter to confirm or esc to go back\n'],
+    ['Claude Bypass Permissions warning', 'WARNING: Claude Code running in Bypass Permissions mode\n❯ No, exit\n  Yes, I accept\nEnter to confirm · Esc to cancel\n'],
+    ['Claude fullscreen renderer offer', 'Try the new fullscreen renderer?\n❯ 1. Yes, try it\n  2. Not now\nEnter to confirm · Esc to cancel\n'],
   ] as const)('guarded direct send refuses to type into a %s prompt', async (_label, capture) => {
     const context = await acceptedContext('claude');
     const identity = context.ownership.tmuxServerIdentity;

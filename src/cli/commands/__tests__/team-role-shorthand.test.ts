@@ -211,6 +211,25 @@ describe('teamCommand role-only shorthand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('tells the user how to accept Claude Code’s Bypass Permissions warning once', async () => {
+    runtimeV2Mocks.startTeamV2.mockResolvedValueOnce({
+      teamName: 'fix-the-bug',
+      sessionName: 'team-session',
+      instanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      config: { worker_count: 1 },
+      startupFailures: [{ worker: 'worker-1', reason: 'worker_notify_failed:claude_bypass_permissions_consent_required' }],
+    });
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['1:claude:executor', 'reply with exactly: PONG']);
+
+    const stderr = errorSpy.mock.calls.flat().join('\n');
+    expect(stderr).toContain('startup_failure worker=worker-1 reason=worker_notify_failed:claude_bypass_permissions_consent_required');
+    expect(stderr).toContain('claude --dangerously-skip-permissions');
+    expect(stderr).toContain('Yes, I accept');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('prints a claim error line beside a pane-busy startup failure', async () => {
     runtimeV2Mocks.startTeamV2.mockResolvedValueOnce({
       teamName: 'fix-the-bug',
