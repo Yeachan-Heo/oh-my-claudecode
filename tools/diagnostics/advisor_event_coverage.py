@@ -25,8 +25,11 @@ c. Consultation. A block tool_use or server_tool_use named "advisor" is a consul
    on the whole first word, not on a prefix. A value of an assignment is one shell word: it may be quoted
    (MODE="deep analysis"), hold an escaped space (MODE=deep\\ analysis), be empty (MODE=) or be a command substitution
    (MODE=$(date), MODE=`date`); a redirection (> out, 2>&1, < in, &> out, with or without a file descriptor) and its
-   target are skipped the same way. A command with no word after them is not a consultation. Launch wrappers (sudo,
-   env, command, nohup, time, timeout) are not read: `sudo ask-advisor` is not a consultation.
+   target are skipped the same way. A command with no word after them is not a consultation. Launch wrappers are taken off
+   with their options (sudo -E and -u USER, nohup, command -p, exec -a NAME, nice -n N, time -p, timeout -s SIGNAL -k
+   DURATION DURATION, env -i and -u NAME; the table is at LAUNCH_WRAPPERS), so `sudo ask-advisor` and `timeout 60 ask-advisor`
+   are consultations; an option outside the table (`sudo -n`), `--`, a wrapper with no command and a timeout with no
+   duration leave the wrapper as the first word, and the command is not a consultation.
    A block counts once (first occurrence of its id). Separately, the declaration lines: lines of assistant text
    that start with the --declaration-prefix (default "ADVISOR:", after leading whitespace) are counted beside the
    consultations; they are not consultations.
@@ -118,6 +121,41 @@ TODO_TOOL = "TodoWrite"
 ASSIGNMENT_START_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
 EMPTY_SUBSTITUTION_RE = re.compile(r"\$\([ \t]*\)|`[ \t]*`")  # expands to nothing
 REDIRECTION_START_RE = re.compile(r"(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)(?!\()")
+
+# Launch wrappers that are taken off in front of the command word, and the options each one is known by. A wrapper does not
+# change what the command behind it does, so `sudo ask-advisor` is read like `ask-advisor`. The same table is in
+# check_classifier.mjs and in the other Python tools of this directory that look for a command word (each tool is a
+# standalone script):
+#
+#   sudo     -E | --preserve-env[=LIST]    -u USER | --user USER | --user=USER
+#   nohup    (no options)
+#   command  -p
+#   exec     -a NAME
+#   nice     -n N | -nN | --adjustment N | --adjustment=N
+#   time     -p
+#   timeout  -s SIGNAL | --signal SIGNAL | --signal=SIGNAL    -k DURATION | --kill-after DURATION | --kill-after=DURATION
+#            then DURATION (a number with an optional s, m, h or d)
+#   env      -i | --ignore-environment    -u NAME | --unset NAME | --unset=NAME    (NAME=VALUE words follow, see below)
+#
+# The options are those of `--help` of sudo 1.9.16 and GNU coreutils 9.7 (nice, timeout, env) and of `help` of bash 5.2
+# (command, exec, time). Assignments and redirections may stand in front of a wrapper and between two of them
+# (skip_prefix), which is also where the `NAME=VALUE` words of `env` and `sudo` go. An option that is not in the table
+# (`sudo -n`, `timeout --foreground`, `nice -5`, `env -S`), the end-of-options word `--`, a wrapper with no command and a
+# `timeout` with no duration end the stripping: the command is left as it is, so it is not read and nothing is guessed. At
+# most eight wrappers in a row are taken off, so a degenerate chain reads nothing.
+MAX_WRAPPERS = 8
+DURATION_RE = re.compile(r"(?:\d+\.?\d*|\.\d+)[smhd]?\Z")
+WORD_RE = re.compile(r"(\S+)\s*")
+LAUNCH_WRAPPERS = {
+    "sudo": {"flags": {"-E"}, "values": {"-u", "--user"}, "optional_value": {"--preserve-env"}, "duration": False},
+    "nohup": {"flags": set(), "values": set(), "optional_value": set(), "duration": False},
+    "command": {"flags": {"-p"}, "values": set(), "optional_value": set(), "duration": False},
+    "exec": {"flags": set(), "values": {"-a"}, "optional_value": set(), "duration": False},
+    "nice": {"flags": set(), "values": {"-n", "--adjustment"}, "optional_value": set(), "duration": False},
+    "time": {"flags": {"-p"}, "values": set(), "optional_value": set(), "duration": False},
+    "timeout": {"flags": set(), "values": {"-s", "--signal", "-k", "--kill-after"}, "optional_value": set(), "duration": True},
+    "env": {"flags": {"-i", "--ignore-environment"}, "values": {"-u", "--unset"}, "optional_value": set(), "duration": False},
+}
 PLAN = "plan"
 FAILURES = "failures"
 END = "end"
@@ -345,6 +383,61 @@ def skip_prefix(text):
         index = end
 
 
+def glued_option(word, spec):
+    """Whether word is an option of the wrapper with its value glued on: `-nN`, `-uUSER`, `--user=USER`, `--preserve-env=LIST`."""
+    if word.startswith("--"):
+        name, equals, _value = word.partition("=")
+        return equals == "=" and (name in spec["values"] or name in spec["optional_value"])
+    return len(word) > 2 and word.startswith("-") and word[:2] in spec["values"]
+
+
+def strip_launch_wrapper(text):
+    """The text behind one launch wrapper and its options (see LAUNCH_WRAPPERS), or None when the text starts with no
+    wrapper, or with one that cannot be read to its command (an option outside the table, no command, no duration)."""
+    first = WORD_RE.match(text)
+    if first is None:
+        return None
+    spec = LAUNCH_WRAPPERS.get(os.path.basename(first.group(1)))
+    if spec is None:
+        return None
+    position = first.end()
+    durations = 1 if spec["duration"] else 0
+    while True:
+        found = WORD_RE.match(text, position)
+        if found is None:
+            return None  # a wrapper with no command behind it
+        word = found.group(1)
+        if word in spec["flags"] or word in spec["optional_value"] or glued_option(word, spec):
+            position = found.end()
+        elif word in spec["values"]:
+            value = WORD_RE.match(text, found.end())
+            if value is None:
+                return None
+            position = value.end()
+        elif word.startswith("-"):
+            return None  # an option outside the table, or `--`
+        elif durations > 0:
+            if DURATION_RE.match(word) is None:
+                return None
+            durations -= 1
+            position = found.end()
+        else:
+            return text[position:]
+
+
+def strip_wrappers(text):
+    """The text of a Bash command from its command word on: the assignments and redirections that stand in front of it and
+    the launch wrappers (with their options, see LAUNCH_WRAPPERS) are taken off, in any order. A wrapper that cannot be read
+    stays in front of the command, so the first word of the result is then the wrapper."""
+    for _ in range(MAX_WRAPPERS):
+        text = skip_prefix(text)
+        stripped = strip_launch_wrapper(text)
+        if stripped is None:
+            return text
+        text = stripped
+    return skip_prefix(text)
+
+
 class Config:
     """Conventions of the transcripts being measured: consult commands and the two line prefixes."""
 
@@ -362,7 +455,7 @@ def consult_kind(name, tool_input, config):
         command = tool_input.get("command")
         if isinstance(command, str):
             # The first word must equal a consult command, not just start with it.
-            words = skip_prefix(command).split()
+            words = strip_wrappers(command).split()
             if words and words[0] in config.consult_commands:
                 return "bash-" + words[0]
     return None

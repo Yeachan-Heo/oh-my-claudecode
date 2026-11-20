@@ -345,8 +345,6 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
     const misses = [
       'echo $(date) ask-advisor', 'echo `date` ask-advisor', 'echo hi > ask-advisor', 'echo hi 2>&1 ask-advisor', 'cat < ask-advisor', 'echo $(ask-advisor)',
       'MODE="a b" echo ask-advisor', 'MODE="a b" ask-advisor-extra', '> ask-advisor', 'MODE="a b"', '2>&1', 'MODE="a b" > ',
-      // Launch wrappers are not read: the first word is the wrapper.
-      'sudo ask-advisor', 'env A=1 ask-advisor', 'command ask-advisor', 'nohup ask-advisor', 'time ask-advisor', 'timeout 5 ask-advisor',
     ];
     const calls = [...hits, ...misses].map((command, index) => assistant(index + 1, [bash(`b${index}`, command)]));
     const report = runReport(makeTree('prefix-forms', { 'proj/s1.jsonl': calls }), ['--consult-command', 'ask-advisor']);
@@ -363,6 +361,41 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
       ['--consult-command', 'ask-advisor'],
     );
     expect(long.consultations['bash-ask-advisor'].total).toBe(2);
+  });
+
+  it('launch wrappers are taken off with the options of the table, and the command behind them is the consultation', () => {
+    const hits = [
+      'sudo ', 'sudo -E ', 'sudo --preserve-env ', 'sudo --preserve-env=PATH ', 'sudo -u root ', 'sudo --user root ', 'sudo --user=root ', 'sudo -uroot ', 'nohup ',
+      'command ', 'command -p ', 'exec ', 'exec -a name ', 'nice ', 'nice -n 5 ', 'nice -n5 ', 'nice --adjustment 5 ', 'nice --adjustment=5 ', 'time ', 'time -p ',
+      'timeout 5 ', 'timeout 1.5m ', 'timeout .5 ', 'timeout -s KILL 5 ', 'timeout --signal=KILL 5 ', 'timeout -k 2 5 ', 'timeout -s KILL -k 2s 5 ', 'timeout --kill-after 2 5 ',
+      'env ', 'env -i ', 'env --ignore-environment ', 'env -u NAME ', 'env --unset NAME ', 'env --unset=NAME ', 'env A=1 ', 'sudo env A=1 nohup ', 'sudo A=1 ',
+      'nice -n 5 timeout 5 sudo -u root env -i A=1 ', '/usr/bin/env ', '/usr/bin/sudo ', 'sudo > out.log ', 'A="b c" sudo ', '> out.log sudo ',
+    ].map((prefix) => `${prefix}ask-advisor --ask`);
+    const misses = [
+      // An option outside the table, `--`, a wrapper with no command and a timeout with no duration read nothing.
+      'sudo -n ask-advisor', 'sudo -k ask-advisor', 'sudo -- ask-advisor', 'sudo -u', 'sudo -u root', 'sudo', 'nohup', 'nohup -- ask-advisor', 'command -v ask-advisor',
+      'command -- ask-advisor', 'exec -c ask-advisor', 'exec -a', 'nice -5 ask-advisor', 'nice -n', 'time -v ask-advisor', 'time -f %e ask-advisor', 'timeout ask-advisor',
+      'timeout 5', 'timeout', 'timeout abc ask-advisor', 'timeout --foreground 5 ask-advisor', 'timeout -s', 'env -S x ask-advisor', 'env -0 ask-advisor', 'env -- ask-advisor',
+      'env -u', 'sudo -E -n ask-advisor', 'timeout 5 sudo -n ask-advisor', 'sudo echo ask-advisor', 'sudo ask-advisor-extra',
+      // Only the first command of the text counts: the wrapper is no boundary.
+      'sudo -n true; ask-advisor', 'echo hi && sudo ask-advisor',
+    ];
+    const calls = [...hits, ...misses].map((command, index) => assistant(index + 1, [bash(`w${index}`, command)]));
+    const report = runReport(makeTree('wrappers', { 'proj/s1.jsonl': calls }), ['--consult-command', 'ask-advisor']);
+    expect(report.consultations['bash-ask-advisor'].total).toBe(hits.length);
+    // A long run of wrappers and options is read in linear time, and a chain longer than eight reads nothing.
+    const started = Date.now();
+    const long = runReport(
+      makeTree('long-wrappers', { 'proj/s1.jsonl': [
+        assistant(1, [bash('l1', 'sudo -E '.repeat(5000) + 'ask-advisor')]),
+        assistant(2, [bash('l2', 'sudo -E ' + '-n '.repeat(13000) + 'ask-advisor')]),
+        assistant(3, [bash('l3', 'sudo '.repeat(7) + 'ask-advisor')]),
+        assistant(4, [bash('l4', 'sudo '.repeat(9) + 'ask-advisor')]),
+      ] }),
+      ['--consult-command', 'ask-advisor'],
+    );
+    expect(long.consultations['bash-ask-advisor'].total).toBe(1);
+    expect(Date.now() - started).toBeLessThan(20000);
   });
 
   it("the first plan has no consultation; the second plan's range starts after the first event", () => {

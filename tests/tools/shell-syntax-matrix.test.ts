@@ -26,8 +26,8 @@ type Column = 'check' | 'write' | 'commit' | 'consult' | 'metrics';
 type Reads = Record<Column, boolean>;
 const ALL: Reads = { check: true, write: true, commit: true, consult: true, metrics: true };
 const except = (...columns: Column[]): Reads => ({ ...ALL, ...Object.fromEntries(columns.map((column) => [column, false])) });
-// advisor_event_coverage reads no launch wrapper: the first word after assignments and redirections is the command.
-const NO_WRAPPER = ['consult'] as const;
+// advisor_event_coverage reads the first command of the text only, so a command after `;`, `&&` or a newline is no consultation.
+const FIRST_COMMAND_ONLY = ['consult'] as const;
 
 const PREFIXES: Array<[string, Reads]> = [
   ['', ALL],
@@ -42,15 +42,15 @@ const PREFIXES: Array<[string, Reads]> = [
   // assignments and redirections together, in both orders
   ['A=1 > out.log ', ALL], ['> out.log A=1 ', ALL], ['A="b c" 2>&1 ', ALL], ['> out.log 2>&1 A=$(d) ', ALL], ['A=1 B="c d" < in.txt 2> err.log ', ALL],
   // launch wrappers: every wrapper of the table is read by the check reading; the metrics reading does not read sudo and nohup
-  ['env ', except(...NO_WRAPPER)], ['env A=1 ', except(...NO_WRAPPER)], ['time ', except(...NO_WRAPPER)], ['timeout 5 ', except(...NO_WRAPPER)],
-  ['command ', except(...NO_WRAPPER)], ['exec ', except(...NO_WRAPPER)], ['nice -n 5 ', except(...NO_WRAPPER)],
-  ['sudo ', except('metrics', ...NO_WRAPPER)], ['nohup ', except('metrics', ...NO_WRAPPER)], ['sudo -u root ', except('metrics', ...NO_WRAPPER)],
+  ['env ', ALL], ['env A=1 ', ALL], ['time ', ALL], ['timeout 5 ', ALL],
+  ['command ', ALL], ['exec ', ALL], ['nice -n 5 ', ALL],
+  ['sudo ', except('metrics')], ['nohup ', except('metrics')], ['sudo -u root ', except('metrics')],
   // wrappers with assignments and redirections, and wrappers with each other
-  ['A=1 env ', except(...NO_WRAPPER)], ['A="b c" time ', except(...NO_WRAPPER)], ['env > out.log ', except(...NO_WRAPPER)], ['> out.log env ', except(...NO_WRAPPER)],
-  ['time > out.log ', except(...NO_WRAPPER)], ['env A=1 time ', except(...NO_WRAPPER)], ['A=1 sudo ', except('metrics', ...NO_WRAPPER)],
-  ['sudo A=1 ', except('metrics', ...NO_WRAPPER)], ['> out.log sudo ', except('metrics', ...NO_WRAPPER)], ['sudo > out.log ', except('metrics', ...NO_WRAPPER)],
-  ['sudo env A=1 nohup ', except('metrics', ...NO_WRAPPER)], ['time sudo ', except('metrics', ...NO_WRAPPER)], ['env sudo ', except('metrics', ...NO_WRAPPER)],
-  ['command nohup ', except('metrics', ...NO_WRAPPER)],
+  ['A=1 env ', ALL], ['A="b c" time ', ALL], ['env > out.log ', ALL], ['> out.log env ', ALL],
+  ['time > out.log ', ALL], ['env A=1 time ', ALL], ['A=1 sudo ', except('metrics')],
+  ['sudo A=1 ', except('metrics')], ['> out.log sudo ', except('metrics')], ['sudo > out.log ', except('metrics')],
+  ['sudo env A=1 nohup ', except('metrics')], ['time sudo ', except('metrics')], ['env sudo ', except('metrics')],
+  ['command nohup ', except('metrics')],
 ];
 
 // The command words each reading looks for, as the text that follows the prefix.
@@ -78,11 +78,11 @@ const TARGET_IS_THE_WORD: string[] = [
   'A="b c" echo hi > ', '> out.log echo hi > ', 'A=$(date) echo hi > ', 'sudo echo hi > ', 'env A=1 echo hi > ', 'time echo hi > ',
 ];
 
-// Boundary rows: the end of a command opens a new one. advisor_event_coverage reads the first command word only.
+// Boundary rows: the end of a command opens a new one. advisor_event_coverage reads the first command only.
 const AFTER_BOUNDARY: Array<[string, Reads]> = [
-  ['echo hi > f; ', except(...NO_WRAPPER)], ['echo hi > f && ', except(...NO_WRAPPER)], ['echo hi > f\n', except(...NO_WRAPPER)],
-  ['echo $(date); ', except(...NO_WRAPPER)], ['echo $(date) && ', except(...NO_WRAPPER)], ['echo "$(date)" && ', except(...NO_WRAPPER)],
-  ['A=$(date) true; ', except(...NO_WRAPPER)], ['echo hi 2>&1 && ', except(...NO_WRAPPER)],
+  ['echo hi > f; ', except(...FIRST_COMMAND_ONLY)], ['echo hi > f && ', except(...FIRST_COMMAND_ONLY)], ['echo hi > f\n', except(...FIRST_COMMAND_ONLY)],
+  ['echo $(date); ', except(...FIRST_COMMAND_ONLY)], ['echo $(date) && ', except(...FIRST_COMMAND_ONLY)], ['echo "$(date)" && ', except(...FIRST_COMMAND_ONLY)],
+  ['A=$(date) true; ', except(...FIRST_COMMAND_ONLY)], ['echo hi 2>&1 && ', except(...FIRST_COMMAND_ONLY)],
 ];
 
 // Here-document rows: the body of a here-document is input, not shell, so the command word inside it is read by no reading.
@@ -159,7 +159,7 @@ describe('shell syntax matrix: the prefix of a command, for every tool that read
     verify('commit', cases, pyEval('user_prohibitions_after_compaction.py', '[module.command_matches("commit", c) for c in argument]', cases.map((c) => c.command)));
   });
 
-  it.skipIf(!hasPython3)('consult: a consultation is the first word after assignments and redirections, and no wrapper is read', () => {
+  it.skipIf(!hasPython3)('consult: a consultation is the first command, found behind assignments, redirections and the wrappers that are read', () => {
     const cases = casesFor('consult');
     const expression = '[module.consult_kind("Bash", {"command": c}, module.Config(["ask-advisor"], "ADVISOR:", "STATUS:")) == "bash-ask-advisor" for c in argument]';
     verify('consult', cases, pyEval('advisor_event_coverage.py', expression, cases.map((c) => c.command)));
