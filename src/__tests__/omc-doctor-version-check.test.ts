@@ -687,7 +687,9 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       const command = scriptOf(versionCommand ?? '');
       const from = command.indexOf('sv=x=>');
       expect(from).toBeGreaterThan(0);
-      const sv = new Function(`const ${command.slice(from, command.indexOf(',rp=x=>', from))}; return sv;`)() as (v: string) => string;
+      // `sv` drops the optional `v` through the shared `nv` of the command, so that definition comes along.
+      const nv = command.slice(command.indexOf('nv=x=>'), command.indexOf(',cv=(a,c)=>'));
+      const sv = new Function(`const ${nv}, ${command.slice(from, command.indexOf(',rp=x=>', from))}; return sv;`)() as (v: string) => string;
       const grid = ['5.9.0', '0.0.0', '1.2', '1', '1.2.3.4', '01.2.3', '1.02.3', '1.2.03', 'v1.2.3', 'V1.2.3', 'vv1.2.3', '999x.0.0', '1.2.3-', '1.2.3+', '1.2.3-a', '1.2.3-a.b', '1.2.3-a..b', '1.2.3-01', '1.2.3-a+b', '1.2.3+b.c', '1.2.3+b..c', '1.2.3+-', '1.2.3-+b', '1.2.3-a_b', ' 1.2.3 ', '1.2.3\n', '\n1.2.3', '1.2.3\n4', '1.2.3 4', '١.٢.٣', '1.2.3-é', '', ' ', '-1.2.3', '1.-2.3', '1.2.3-0.0', '10.20.30-rc.1+meta-1', '1.2.3-alpha.1.2.3.4.5.6.7.8.9'];
       for (const value of grid) expect({ value, accepted: sv(value) !== '' }).toEqual({ value, accepted: parseSemver(value) !== null });
     });
