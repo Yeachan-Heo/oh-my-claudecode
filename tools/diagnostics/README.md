@@ -978,6 +978,9 @@ command substitution. These constructs stay outside the scope of every tool, so 
 - The check reading of the check classifier finds a runner only at the start of a piece of the command: a runner in a
   subshell (`(npm test)`), in a brace group, in an `if` branch or in a `bash -c` string is not found, although the write
   reading and the user prohibitions tool read those.
+- The polling exception of the tool call repeats tool does not split the command: it matches the start of the command text
+  (`sleep`, `gh run watch`, `tail -f`, `git status` and each `--poll-prefix`), so a leading assignment, a redirection or a
+  launch wrapper (`A=1 sleep 5`, `time sleep 5`) hides the prefix and that call is not polling.
 - A launch wrapper that a tool does not read hides the command behind it. The wrappers differ per tool: `sudo` is read by the
   user prohibitions tool and by the write reading, not by the check reading, advisor event coverage or the executor
   outcome metrics.
