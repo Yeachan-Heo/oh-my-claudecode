@@ -329,4 +329,23 @@ describe('jev_outcome_labels', () => {
     expect(points).toContain('agent-type');
     expect(j.points.find((p: { point: string }) => p.point === 'agent-type').total.n).toBe(5);
   });
+
+  it('200000 journal rows are summarised: the periods are not taken with a spread into Math.min or Math.max', () => {
+    const count = 200_000;
+    const start = Date.UTC(2026, 10, 14, 10, 0, 0);
+    // The rows come in a scrambled order, so the first and the last row are neither the earliest nor the latest.
+    const rows = Array.from({ length: count }, (_, i) =>
+      JSON.stringify({ ts: new Date(start + ((i * 7919) % count) * 5).toISOString(), point: 'learner-extraction', applied: {} }));
+    writeFileSync(join(journal, 'applied.jsonl'), `${rows.join('\n')}\n`);
+    const started = Date.now();
+    const w = run(['--json']);
+    expect(w.code, w.stderr).toBe(0);
+    const j = JSON.parse(w.stdout);
+    const period = { from: new Date(start).toISOString(), to: new Date(start + (count - 1) * 5).toISOString() };
+    expect(j.period, 'the period of the whole journal').toEqual(period);
+    expect(j.points[0].period, 'the period of the point').toEqual(period);
+    expect(j.points[0].groups[0].period, 'the period of the group').toEqual(period);
+    expect(j.points[0].groups[0].n).toBe(count);
+    expect(Date.now() - started, 'read in a reasonable time').toBeLessThan(30_000);
+  }, 120_000);
 });

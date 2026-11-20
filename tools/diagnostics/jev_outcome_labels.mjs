@@ -101,6 +101,9 @@ function parseOptions(argv) {
 
 const toMs = (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? t : null; };
 const toIso = (t) => new Date(t).toISOString();
+// Math.min(...values) takes every element as an argument and overflows the call stack on a long array (about 150000 elements).
+const minOf = (values) => values.reduce((least, v) => (v < least ? v : least), Infinity);
+const maxOf = (values) => values.reduce((most, v) => (v > most ? v : most), -Infinity);
 const round4 = (x, places = 4) => Math.round(x * 10 ** places) / 10 ** places;
 const percentText = (k, n) => (n > 0 ? `${(100 * k / n).toLocaleString('en-US', { maximumFractionDigits: 1 })} %` : 'not counted');
 const textOf = (x) => (x === undefined || x === null ? '' : String(x));
@@ -393,7 +396,7 @@ function main() {
         window_incomplete: w.filter((r) => r.windowIncomplete === true).length,
         would_deny: w.filter((r) => r.mode === 'shadow').length,
         outside_verdict: w.filter((r) => MODES_OUTSIDE_VERDICT.has(r.mode)).length,
-        period: { from: times.length ? toIso(Math.min(...times)) : null, to: times.length ? toIso(Math.max(...times)) : null },
+        period: { from: times.length ? toIso(minOf(times)) : null, to: times.length ? toIso(maxOf(times)) : null },
         coverage: { k: labelled, n, share: n > 0 ? round4(labelled / n) : null },
         executed_share: { k: executed, n: labelled, share: labelled > 0 ? round4(executed / labelled) : null, assessment: labelled >= MIN_SUPPORT ? percentText(executed, labelled) : 'too little data' },
         thresholds: {
@@ -421,12 +424,12 @@ function main() {
         assessment: labelledTotal >= MIN_SUPPORT ? percentText(executedTotal, labelledTotal) : 'too little data',
       },
       groups,
-      period: { from: pointTimes.length ? toIso(Math.min(...pointTimes)) : null, to: pointTimes.length ? toIso(Math.max(...pointTimes)) : null },
+      period: { from: pointTimes.length ? toIso(minOf(pointTimes)) : null, to: pointTimes.length ? toIso(maxOf(pointTimes)) : null },
     };
   });
 
   const allTimes = journalRows.map(({ t }) => t).filter((x) => x !== null);
-  const totalPeriod = { from: allTimes.length ? toIso(Math.min(...allTimes)) : null, to: allTimes.length ? toIso(Math.max(...allTimes)) : null };
+  const totalPeriod = { from: allTimes.length ? toIso(minOf(allTimes)) : null, to: allTimes.length ? toIso(maxOf(allTimes)) : null };
 
   // decision timeline of one session (--session): all applied rows (all points) and agent-type rows of the session in ts order
   const timeline = options.session === null ? null : journalRows
