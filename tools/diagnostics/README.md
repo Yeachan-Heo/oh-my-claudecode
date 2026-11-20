@@ -956,3 +956,30 @@ the run created). The output directories are checked before the input is read.
   `too little data` and the counts stay.
 - Copies of one history (forked and resumed sessions) count once for the whole run: the first file in sorted path order owns a call id or a text;
   skipped copies are counted in `duplicates`. Positions and distances are still numbered over the whole file.
+
+# Shell syntax the tools do not read
+
+The tools that read a Bash command (the check classifier, the user prohibitions tool, advisor event coverage and the
+executor outcome metrics) split it into words with a reader of their own, not with a shell. The section of each tool lists
+what that tool reads in front of a command word: leading assignments, leading redirections, launch wrappers, quoting and
+command substitution. These constructs stay outside the scope of every tool, so a command written that way is not counted:
+
+- `eval '...'` and `source script.sh`: the string or the script that is run is not read.
+- A command word that comes from an expansion: no word is expanded (`$CMD commit`, `{git,commit} -m x`).
+- An alias or a shell function at its call: `g` after `alias g='git commit'` and `f` after `f() { git commit; }` are no
+  `git commit`. The user prohibitions tool and the write reading of the check classifier read the body of a function where
+  it is written, as a part of the command that holds it.
+- A command substitution inside double quotes (`echo "$(git commit)"`) is quoted text.
+- `docker exec` and `kubectl exec`: the command that runs in the container is not read.
+- `ssh host '...'` runs on another machine: only the user prohibitions tool reads the string (two levels deep); the check
+  classifier, advisor event coverage and the executor outcome metrics do not.
+- The check reading of the check classifier finds a runner only at the start of a piece of the command: a runner in a
+  subshell (`(npm test)`), in a brace group, in an `if` branch or in a `bash -c` string is not found, although the write
+  reading and the user prohibitions tool read those.
+- A launch wrapper that a tool does not read hides the command behind it. The wrappers differ per tool: `sudo` is read by the
+  user prohibitions tool and by the write reading, not by the check reading, advisor event coverage or the executor
+  outcome metrics.
+
+`tests/tools/shell-syntax-matrix.test.ts` holds one table of the prefixes that a command can have (assignments,
+redirections, wrappers and their mixes) and says for each tool whether the command word is found behind it; a new variant of
+the syntax is one more row of that table.
