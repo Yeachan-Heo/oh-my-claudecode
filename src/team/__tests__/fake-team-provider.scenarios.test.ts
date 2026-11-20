@@ -249,6 +249,15 @@ describe.skipIf(process.platform === 'win32')('fake team provider scenarios', ()
     expect(run.output()).toContain('fake-claude failed at await-trust-answer: trust_declined');
   });
 
+  it('claude-onboarding: Enter on the theme picker answers onboarding and fails', async () => {
+    const run = startFake('claude-onboarding');
+    await run.waitForOutput(frame('claude/2.1.329/onboarding-theme.txt'));
+    expect(await traceSteps()).not.toContain('selector-read');
+    run.press('\r');
+    expect(await run.exitCode).toBe(1);
+    expect(run.output()).toContain('fake-claude failed at await-onboarding-answer: onboarding_answered');
+  });
+
   it('claude-bypass-permissions: Enter alone takes the default "No, exit" and quits', async () => {
     const run = startFake('claude-bypass-permissions');
     await run.waitForOutput(frame('claude/2.1.328/bypass-permissions.txt'));

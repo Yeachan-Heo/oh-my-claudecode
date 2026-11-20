@@ -1074,6 +1074,36 @@ describe('worker pane startup safety', () => {
     },
   );
 
+  strictTmuxIt.each(['onboarding-theme.txt', 'onboarding-security-notes.txt'])(
+    'fails at once on Claude Code onboarding (%s) and sends it no key',
+    async (file) => {
+      const context = await acceptedContext('claude');
+      const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+      tmuxState.captures = [readFileSync(join(corpus, 'claude/2.1.329', file), 'utf8')];
+
+      await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+        ok: false,
+        reason: 'claude_onboarding_required',
+      });
+      expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    },
+  );
+
+  strictTmuxIt('fails with the onboarding reason when onboarding first shows at the check before the trigger is typed', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    tmuxState.captures = [
+      readFileSync(join(corpus, 'claude/2.1.325/idle.txt'), 'utf8'),
+      readFileSync(join(corpus, 'claude/2.1.329/onboarding-theme.txt'), 'utf8'),
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'claude_onboarding_required',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
   strictTmuxIt('does not resubmit with Enter while the Bypass Permissions warning focuses Yes, I accept', async () => {
     const context = await acceptedContext('claude');
     const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');

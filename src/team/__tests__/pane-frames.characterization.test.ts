@@ -78,6 +78,9 @@ const TABLE: Readonly<Record<string, Row>> = {
   'claude/2.1.328/fullscreen-renderer.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/2.1.328/idle-after-fullscreen-renderer.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/2.1.328/trust-yes-focused.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
+  // Claude Code's onboarding is read only by the startup wait (detectClaudeStartupDialog).
+  'claude/2.1.329/onboarding-security-notes.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
+  'claude/2.1.329/onboarding-theme.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/synthetic/loading-in-scrollback.txt': { ready: false, busy: false, trust: null, known_wrong: true, reason: '"loading" anywhere in scrollback reads as bootstrapping, so an idle pane is never ready', state: 'idle' },
   'claude/synthetic/output-quoting-first-run-dialogs.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/synthetic/prompt-glyph-in-output.txt': { ready: true, busy: false, trust: null, known_wrong: true, reason: 'a quoted "> " line in model output reads as an idle prompt before any input box exists', state: 'idle', state_wrong: 'a quoted "> " line in model output reads as an idle prompt' },

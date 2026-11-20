@@ -339,6 +339,34 @@
     "note": "The same dialog as trust.txt after one Down: only the ❯ moved."
   },
   {
+    "file": "claude/2.1.329/onboarding-security-notes.txt",
+    "provider": "claude",
+    "version": "2.1.329",
+    "state": "onboarding-security-notes",
+    "cols": 39,
+    "rows": null,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/first-run-real/run1/frames-shim.log#3 (omc capture-pane -p -S -80 during a real omc team start)",
+    "note": "The onboarding step after the theme picker. The worker bootstrap command above it was dropped."
+  },
+  {
+    "file": "claude/2.1.329/onboarding-theme.txt",
+    "provider": "claude",
+    "version": "2.1.329",
+    "state": "onboarding-theme",
+    "cols": 39,
+    "rows": null,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/first-run-real/run1/frames-shim.log#0 (omc capture-pane -p -S -80 during a real omc team start)",
+    "note": "First launch with no hasCompletedOnboarding: the theme picker, drawn before the trust dialog. The worker bootstrap command above it was dropped."
+  },
+  {
     "file": "claude/synthetic/loading-in-scrollback.txt",
     "provider": "claude",
     "version": "synthetic",

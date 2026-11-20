@@ -47,6 +47,8 @@ const FRAMES = {
   rendererYes: 'claude/2.1.328/fullscreen-renderer.txt',
   rendererNotNow: 'claude/2.1.328/fullscreen-renderer-not-now-focused.txt',
   afterRenderer: 'claude/2.1.328/idle-after-fullscreen-renderer.txt',
+  onboardingTheme: 'claude/2.1.329/onboarding-theme.txt',
+  onboardingNotes: 'claude/2.1.329/onboarding-security-notes.txt',
   quoting: 'claude/synthetic/output-quoting-first-run-dialogs.txt',
   idle: 'claude/2.1.325/idle.txt',
 } as const;
@@ -131,6 +133,7 @@ const supported = currentStrictProcessStartIdentity() !== null
   && (process.platform === 'darwin' || process.platform === 'linux');
 
 const CONSENT = { ok: false, reason: 'claude_bypass_permissions_consent_required' };
+const ONBOARDING = { ok: false, reason: 'claude_onboarding_required' };
 const TIMEOUT = { ok: false, reason: 'readiness_timeout' };
 const DELIVERED = { ok: true, kind: 'attempted_unconfirmed' };
 
@@ -245,6 +248,24 @@ describe.skipIf(!supported)(`Claude first-run dialogs across pane sizes (${TMUX 
           const choiceVisible = /No,exit|Yes,Iaccept/.test(squeeze(frame));
           const expected = { result: choiceVisible ? CONSENT : TIMEOUT, reached: [] };
           if (JSON.stringify(outcome) !== JSON.stringify(expected)) misses.push(`${name}@${size}: ${JSON.stringify(outcome)}`);
+        }
+      }
+      expect(misses).toEqual([]);
+    },
+    300_000,
+  );
+
+  // Onboarding gets no key at any size, and any part of it on screen names it.
+  it.each([['width', widthSizes], ['height', shortSizes]] as const)(
+    'stops at Claude Code onboarding without a key (%s sweep)',
+    async (_sweep, sizes) => {
+      const misses: string[] = [];
+      for (const name of ['onboardingTheme', 'onboardingNotes'] as const) {
+        for (const size of sizes) {
+          const frame = frameAt(name, size);
+          const outcome = await deliver({ capture: () => frame, send: () => undefined });
+          dump[`${name}@${size}`] = outcome;
+          if (JSON.stringify(outcome) !== JSON.stringify({ result: ONBOARDING, reached: [] })) misses.push(`${name}@${size}: ${JSON.stringify(outcome)}`);
         }
       }
       expect(misses).toEqual([]);

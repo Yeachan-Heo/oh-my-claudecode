@@ -69,6 +69,8 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/2.1.328/fullscreen-renderer.txt': 'idlePrompt',
   'claude/2.1.328/idle-after-fullscreen-renderer.txt': 'idlePrompt',
   'claude/2.1.328/trust-yes-focused.txt': 'trust:claude_directory idlePrompt',
+  'claude/2.1.329/onboarding-security-notes.txt': '',
+  'claude/2.1.329/onboarding-theme.txt': 'idlePrompt',
   'claude/synthetic/loading-in-scrollback.txt': 'bootstrapping idlePrompt',
   'claude/synthetic/output-quoting-first-run-dialogs.txt': 'idlePrompt',
   'claude/synthetic/prompt-glyph-in-output.txt': 'idlePrompt',
@@ -297,6 +299,16 @@ describe('Claude Code first-run dialogs', () => {
   it('reads the focus of the latest copy when the offer drawn before Down is still above it', () => {
     const stacked = `${read('claude/2.1.328/fullscreen-renderer.txt')}\n${read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt')}`;
     expect(claudeDialogFocus(stacked, 'claude_fullscreen_renderer')).toBe('second');
+  });
+
+  it.each(['claude/2.1.329/onboarding-theme.txt', 'claude/2.1.329/onboarding-security-notes.txt'])(
+    '%s is Claude Code onboarding', (file) => {
+      expect(detectClaudeStartupDialog(read(file))).toBe('claude_onboarding');
+    },
+  );
+
+  it('does not read onboarding text quoted in a reply above the input prompt', () => {
+    expect(detectClaudeStartupDialog('⏺ It said: Security notes: ... Press Enter to continue, then Choose the text style.\n────\n❯ \n────\n')).toBeNull();
   });
 
   it('reads the bypass warning by its choices alone, with no heading on screen', () => {

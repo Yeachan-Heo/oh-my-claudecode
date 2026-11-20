@@ -236,6 +236,13 @@ const claudeBypassWarning = claudeSelector('claude/2.1.328/bypass-permissions.tx
   choices: [/❯\s*No, exit/, /^\s*Yes, I accept/],
   firstChoiceError: 'bypass_declined',
 });
+// Claude Code 2.1.329 on a config with no completed onboarding, before the
+// trust dialog. Enter on the focused theme answers the picker for the user.
+const claudeOnboardingThemePicker = claudeSelector('claude/2.1.329/onboarding-theme.txt', {
+  name: 'await-onboarding-answer',
+  choices: [/❯ ✔ Auto \(match terminal\)/, /^\s+Dark mode$/],
+  firstChoiceError: 'onboarding_answered',
+});
 const claudeFullscreenRendererOffer = claudeSelector('claude/2.1.328/fullscreen-renderer.txt', {
   name: 'await-renderer-answer',
   choices: [/❯\s*1\. Yes, try it/, /^\s*2\. Not now/],
@@ -258,6 +265,9 @@ const SCENARIOS = {
   }),
   'claude-trust-ignores-early-keys': lifecycle({
     startup: [claudeSelector('claude/2.1.325/trust.txt', { ignoreMs: TRUST_IGNORE_MS }), showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  'claude-onboarding': lifecycle({
+    startup: [claudeOnboardingThemePicker, showFrame('idle-prompt', CLAUDE_IDLE)],
   }),
   'claude-bypass-permissions': lifecycle({
     startup: [claudeBypassWarning, showFrame('idle-prompt', CLAUDE_IDLE)],
