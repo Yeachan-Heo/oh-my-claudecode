@@ -65,7 +65,7 @@ import {
   paneHasStartupBanner,
   paneHasTrustPrompt,
   paneLooksReady,
-  claudeTrustFocus,
+  claudeDialogFocus,
   type PaneTrustPromptKind,
 } from "./pane-readiness.js";
 
@@ -4538,6 +4538,7 @@ export type StartupPaneReadyResult =
         | "selector_persistent"
         | "cursor_workspace_untrusted"
         | "codex_workspace_untrusted"
+        | "claude_bypass_permissions_consent_required"
         | "pane_busy"
         | "provider_exited"
         | "readiness_timeout";
@@ -4658,28 +4659,37 @@ export async function waitForStartupPaneReady(
       if (selector === "cursor_workspace_trust") {
         return { ok: false, reason: "cursor_workspace_untrusted" };
       }
+      // Accepting Bypass Permissions mode is the user's call, and the warning
+      // focuses "No, exit", so any key could also end the session. Send none.
+      if (selector === "claude_bypass_permissions")
+        return { ok: false, reason: "claude_bypass_permissions_consent_required" };
+      const claudeDialog =
+        selector === "claude_directory" ||
+        selector === "claude_fullscreen_renderer";
       const providerSupportsSelector =
         selector === "codex_hooks"
           ? context.provider === "codex"
-          : selector === "claude_directory"
+          : claudeDialog
             ? context.provider === "claude"
             : context.provider === "codex" || context.provider === "claude";
       if (!providerSupportsSelector)
         return { ok: false, reason: "selector_unsupported" };
       if (handledSelectors.has(selector))
         return { ok: false, reason: "selector_persistent" };
-      if (selector === "claude_directory") {
-        // This dialog focuses "No, exit" first. Claude Code 2.1.328 was
-        // measured to drop a Down sent right after the dialog drew, so Down is
-        // resent while "No" stays focused, and Enter is sent only when the last
-        // capture showed the affirmative choice focused. An answered dialog
-        // above a live input prompt gets no key: it would reach the prompt.
-        const focus = claudeTrustFocus(captured);
+      if (claudeDialog) {
+        // Both dialogs are answered with their second choice: "Yes, I trust
+        // this folder" and the renderer offer's "Not now". Each focuses its
+        // first choice. Claude Code 2.1.328 was measured to drop a Down sent
+        // right after the trust dialog drew, so Down is resent while the first
+        // choice stays focused, and Enter is sent only when the last capture
+        // showed the second choice focused. An answered dialog above a live
+        // input prompt gets no key: it would reach the prompt.
+        const focus = claudeDialogFocus(captured, selector);
         if (focus === "stale")
           return { ok: false, reason: "selector_persistent" };
-        if (focus !== "yes") {
+        if (focus !== "second") {
           if (
-            focus === "no" &&
+            focus === "first" &&
             Date.now() - claudeTrustDownSentAt >= CLAUDE_TRUST_DOWN_RESEND_MS
           ) {
             await sendTeamPaneKey(
@@ -4705,7 +4715,7 @@ export async function waitForStartupPaneReady(
         context.ownership.tmuxServerIdentity,
       );
       handledSelectors.add(selector);
-      readAfterTrustAnswer = selector === "claude_directory";
+      readAfterTrustAnswer = claudeDialog;
       await sleep(pollIntervalMs);
       continue;
     }

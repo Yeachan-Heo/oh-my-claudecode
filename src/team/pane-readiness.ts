@@ -3,6 +3,8 @@ import type { CliAgentType } from './model-contract.js';
 export type PaneTrustPromptKind =
   | 'directory'
   | 'claude_directory'
+  | 'claude_bypass_permissions'
+  | 'claude_fullscreen_renderer'
   | 'codex_directory'
   | 'codex_hooks'
   | 'cursor_workspace_trust';
@@ -79,7 +81,12 @@ const SHARED_PATTERNS = {
 export const PANE_PATTERNS: Readonly<Record<CliAgentType, ProviderPanePatterns>> = {
   claude: {
     ...SHARED_PATTERNS,
-    trustKinds: ['claude_directory', ...SHARED_PATTERNS.trustKinds],
+    trustKinds: [
+      'claude_bypass_permissions',
+      'claude_fullscreen_renderer',
+      'claude_directory',
+      ...SHARED_PATTERNS.trustKinds,
+    ],
     verifiedVersion: '2.1.325',
   },
   codex: {
@@ -104,6 +111,8 @@ const UNKNOWN_PROVIDER_PATTERNS: ProviderPanePatterns = {
   trustKinds: [
     'codex_directory',
     'cursor_workspace_trust',
+    'claude_bypass_permissions',
+    'claude_fullscreen_renderer',
     'claude_directory',
     ...SHARED_PATTERNS.trustKinds,
   ],
@@ -167,6 +176,66 @@ function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): b
   );
 }
 
+// True when the heading starts the line at index and ends within the next two.
+// Whitespace is ignored: Claude Code wraps a heading at a space to fit a narrow
+// pane, and a frame drawn wider than the pane wraps mid-word.
+function headingStartsAt(lines: readonly string[], index: number, heading: string): boolean {
+  const squeeze = (text: string) => text.replace(/\s+/g, '');
+  return squeeze(lines.slice(index, index + 3).join('')).startsWith(squeeze(heading));
+}
+
+// Claude Code's two-choice dialogs: a heading, then the two choices on
+// adjacent lines with the first focused. The trust dialog comes first on every
+// launch in an untrusted folder; the other two follow it on the first launch
+// with a fresh config directory (recorded on 2.1.328).
+export type ClaudeDialogKind = Extract<
+  PaneTrustPromptKind,
+  'claude_directory' | 'claude_bypass_permissions' | 'claude_fullscreen_renderer'
+>;
+
+const CLAUDE_DIALOGS: Readonly<
+  Record<ClaudeDialogKind, { headingStartsAt: (lines: readonly string[], index: number) => boolean; first: RegExp; second: RegExp }>
+> = {
+  claude_directory: {
+    headingStartsAt: claudeTrustQuestionStartsAt,
+    first: /^\s*(?:❯\s*)?No,\s*exit\b/i,
+    second: /^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i,
+  },
+  claude_bypass_permissions: {
+    headingStartsAt: (lines, index) => headingStartsAt(lines, index, 'WARNING: Claude Code running in Bypass Permissions mode'),
+    first: /^\s*(?:❯\s*)?No,\s*exit$/i,
+    second: /^\s*(?:❯\s*)?Yes,\s*I accept$/i,
+  },
+  claude_fullscreen_renderer: {
+    headingStartsAt: (lines, index) => headingStartsAt(lines, index, 'Try the new fullscreen renderer?'),
+    first: /^\s*(?:❯\s*)?1\.\s*Yes,\s*try it$/i,
+    second: /^\s*(?:❯\s*)?2\.\s*Not now$/i,
+  },
+};
+
+// Only the choice pair after the latest heading is the live dialog: an
+// answered dialog can remain in the scrollback above it. Null while that pair
+// is not drawn yet; 'stale' when an input prompt is drawn below it, as below a
+// reply that quotes the dialog, so keys would reach that prompt instead.
+function claudeDialogFocusIn(
+  lines: readonly string[],
+  kind: ClaudeDialogKind,
+): 'first' | 'second' | 'stale' | null {
+  const dialog = CLAUDE_DIALOGS[kind];
+  const heading = lines.findLastIndex((_, index) => dialog.headingStartsAt(lines, index));
+  if (heading < 0) return null;
+  const first = lines.findIndex((line, index) => index > heading && dialog.first.test(line));
+  const second = first >= 0 ? lines[first + 1] ?? '' : '';
+  if (!dialog.second.test(second)) return null;
+  if (lines.slice(first + 2).some((line) => PANE_PATTERNS.claude.idlePromptLine.test(line))) return 'stale';
+  return /^\s*❯/.test(second) ? 'second' : 'first';
+}
+
+function claudeDialogIsLive(lines: readonly string[], kind: ClaudeDialogKind): boolean {
+  const focus = claudeDialogFocusIn(lines, kind);
+  return focus === 'first' || focus === 'second';
+}
+
 function detectTrustPrompt(
   lines: readonly string[],
   kinds: readonly PaneTrustPromptKind[],
@@ -191,6 +260,11 @@ function detectTrustPrompt(
       tailHas(/Do you trust the contents of this directory\?/i))
   ) {
     return 'cursor_workspace_trust';
+  }
+
+  // Checked before the trust dialog, which they follow on screen.
+  for (const kind of ['claude_bypass_permissions', 'claude_fullscreen_renderer'] as const) {
+    if (kinds.includes(kind) && claudeDialogIsLive(lines, kind)) return kind;
   }
 
   // Claude Code wraps the question to the pane width. In a 35-column pane it
@@ -282,20 +356,12 @@ export function detectPaneTrustPromptKind(
   return detectTrustPrompt(paneLines(captured), patternsFor(provider).trustKinds);
 }
 
-// Claude Code marks the focused choice of its trust dialog with ❯ and draws
-// "Yes" right below "No, exit". Only the pair after the latest question is the
-// live dialog: an answered dialog can remain in the scrollback above it. Null
-// while that pair is not drawn yet; 'stale' when an input prompt is drawn
-// below it, so keys would reach that prompt instead of the dialog.
-export function claudeTrustFocus(captured: string): 'no' | 'yes' | 'stale' | null {
-  const lines = paneLines(captured);
-  const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
-  if (question < 0) return null;
-  const no = lines.findIndex((line, index) => index > question && /^\s*(?:❯\s*)?No,\s*exit\b/i.test(line));
-  const yes = no >= 0 ? lines[no + 1] ?? '' : '';
-  if (!/^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(yes)) return null;
-  if (lines.slice(no + 2).some((line) => patternsFor('claude').idlePromptLine.test(line))) return 'stale';
-  return /^\s*❯/.test(yes) ? 'yes' : 'no';
+// Which choice of a Claude Code dialog is focused (marked with ❯).
+export function claudeDialogFocus(
+  captured: string,
+  kind: ClaudeDialogKind,
+): 'first' | 'second' | 'stale' | null {
+  return claudeDialogFocusIn(paneLines(captured), kind);
 }
 
 export function paneHasTrustPrompt(

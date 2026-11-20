@@ -833,6 +833,13 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
       const claimError = failure.claimError ? ` claim_error=${failure.claimError}` : '';
       console.error(`startup_failure worker=${failure.worker} reason=${failure.reason}${claimError}`);
     }
+    if (startupFailures.some(failure => failure.reason.endsWith('claude_bypass_permissions_consent_required'))) {
+      console.error(
+        'Claude Code asks once per config directory to accept Bypass Permissions mode, and omc team does not accept it for you. '
+        + 'Run `claude --dangerously-skip-permissions` once in a terminal with the same CLAUDE_CONFIG_DIR, '
+        + 'choose "Yes, I accept", exit Claude Code, then run omc team again.',
+      );
+    }
     return;
   }
 
