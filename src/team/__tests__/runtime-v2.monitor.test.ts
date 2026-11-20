@@ -249,6 +249,45 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     expect(withEvents?.deadWorkers).toEqual(without?.deadWorkers);
   });
 
+  it('reads the hook events under the cwd team root when the config records no state root', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-provider-event-root-'));
+    isolateFixtureRoot(cwd);
+    await writeConfigAndTask('pending');
+    const teamRoot = teamStateRoot(cwd, 'demo-team');
+    const config = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf-8'));
+    config.workers[0].launch_attempt_id = 'attempt-current';
+    delete config.team_state_root;
+    await writeFile(join(teamRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+    await writeFile(join(teamRoot, 'workers', 'worker-1', 'provider-events.jsonl'),
+      `${JSON.stringify({ v: 1, event: 'Stop', at: Date.now() - 5_000, attempt: 'attempt-current' })}\n`, 'utf-8');
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+
+    const shown = (await monitorTeamV2('demo-team', cwd))?.workers[0]?.providerEvent.event;
+    expect(shown).toBe(process.platform === 'win32' ? 'none' : 'Stop');
+  });
+
+  it.skipIf(process.platform === 'win32')('shows hook event ages as whole seconds, never below zero', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-provider-event-age-'));
+    isolateFixtureRoot(cwd);
+    await writeConfigAndTask('pending');
+    const teamRoot = teamStateRoot(cwd, 'demo-team');
+    const config = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf-8'));
+    config.workers[0].launch_attempt_id = 'attempt-current';
+    await writeFile(join(teamRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+    const ageFor = async (at: number) => {
+      await writeFile(join(teamRoot, 'workers', 'worker-1', 'provider-events.jsonl'),
+        `${JSON.stringify({ v: 1, event: 'Stop', at, attempt: 'attempt-current' })}\n`, 'utf-8');
+      return (await monitorTeamV2('demo-team', cwd))?.workers[0]?.providerEvent.ageSeconds;
+    };
+
+    // A clock that ran ahead of the monitor's shows age 0, not a negative age.
+    expect(await ageFor(Date.now() + 60_000)).toBe(0);
+    const age = await ageFor(Date.now() - 12_500);
+    expect(Number.isInteger(age)).toBe(true);
+    expect(age).toBeGreaterThanOrEqual(12);
+  });
+
   it('does not flag a busy pane, even one whose output quotes a trust dialog', async () => {
     const snapshot = await monitorWithPane(
       'omc-runtime-v2-monitor-busy-trust-',
