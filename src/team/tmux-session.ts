@@ -4541,6 +4541,7 @@ export type StartupPaneReadyResult =
         | "cursor_workspace_untrusted"
         | "codex_workspace_untrusted"
         | "claude_bypass_permissions_consent_required"
+        | "claude_onboarding_required"
         | "pane_busy"
         | "provider_exited"
         | "readiness_timeout";
@@ -4667,6 +4668,9 @@ export async function waitForStartupPaneReady(
       // focuses "No, exit", so any key could also end the session. Send none.
       if (selector === "claude_bypass_permissions")
         return { ok: false, reason: "claude_bypass_permissions_consent_required" };
+      // Onboarding (theme, security notes) is the user's to finish. Send none.
+      if (selector === "claude_onboarding")
+        return { ok: false, reason: "claude_onboarding_required" };
       // A first-run dialog with its choices off screen: wait for them, and
       // type nothing into it meanwhile.
       if (selector === "claude_startup_dialog_unidentified") {
@@ -4771,6 +4775,7 @@ async function startupPaneSubmitBlockReason(
       : null;
   if (startupDialog === "claude_bypass_permissions")
     return "claude_bypass_permissions_consent_required";
+  if (startupDialog === "claude_onboarding") return "claude_onboarding_required";
   if (startupDialog) return "claude_startup_dialog_pending";
   const selector = detectPaneTrustPromptKind(
     observation.captured,

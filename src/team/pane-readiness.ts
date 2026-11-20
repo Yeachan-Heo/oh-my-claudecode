@@ -167,11 +167,14 @@ function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): b
   );
 }
 
-// The dialogs Claude Code shows after the trust dialog on the first launch
-// with a fresh config directory (recorded on 2.1.328). Only the Claude startup
-// wait reads them; every other pane reader sees what it saw before them.
-// 'claude_startup_dialog_unidentified' is a dialog whose choices are off screen.
+// The screens Claude Code shows on the first launch with a fresh config
+// directory: onboarding before the trust dialog (recorded on 2.1.329), the
+// bypass warning and the renderer offer after it (recorded on 2.1.328). Only
+// the Claude startup wait reads them; every other pane reader sees what it saw
+// before them. 'claude_startup_dialog_unidentified' is a dialog whose choices
+// are off screen.
 export type ClaudeStartupDialogKind =
+  | 'claude_onboarding'
   | 'claude_bypass_permissions'
   | 'claude_fullscreen_renderer'
   | 'claude_startup_dialog_unidentified';
@@ -187,11 +190,28 @@ const CLAUDE_STARTUP_CHOICES = {
   claude_fullscreen_renderer: ['1.Yes,tryit', '2.Notnow'],
 } as const;
 const CLAUDE_TRUST_CHOICES = ['Yes,Itrustthisfolder', 'Yes,proceed'];
+// Onboarding's theme picker and security notes, in parts that each survive a
+// pane too short for the whole screen.
+const CLAUDE_THEME_CHOICES = ['Auto(matchterminal)', 'Darkmode', 'Lightmode'];
+const CLAUDE_ONBOARDING_TEXT = [
+  "Let'sgetstarted.",
+  'Choosethetextstyle',
+  'Tochangethislater,run/theme',
+  ...CLAUDE_THEME_CHOICES,
+  'Syntaxtheme:',
+  '(ctrl+ttodisable)',
+  'Securitynotes:',
+  'Claudecanmakemistakes',
+  'Duetopromptinjectionrisks',
+  'PressEntertocontinue',
+];
 // The footer below the trust dialog and both first-run dialogs.
 const CLAUDE_DIALOG_FOOTER = 'Entertoconfirm·Esctocancel';
 const CLAUDE_CHOICES: readonly string[] = [
   ...Object.values(CLAUDE_STARTUP_CHOICES).flat(),
   ...CLAUDE_TRUST_CHOICES,
+  ...CLAUDE_THEME_CHOICES,
+  ...CLAUDE_THEME_CHOICES.map((choice) => `✔${choice}`),
 ];
 
 // The squeezed capture after the last live input prompt: a ❯ that does not
@@ -206,8 +226,8 @@ function claudeDialogTail(captured: string): string {
   return stream.slice(start);
 }
 
-// The dialog whose choice is drawn last is the live one: an answered dialog
-// can remain above it. "No, exit" alone is the bypass warning only with the
+// The dialog whose choice (or onboarding text) is drawn last is the live one:
+// an answered dialog can remain above it. "No, exit" alone is the bypass warning only with the
 // footer, as the trust dialog draws it too.
 function claudeStartupDialogIn(tail: string, captured: string): ClaudeStartupDialogKind | null {
   const footer = tail.includes(CLAUDE_DIALOG_FOOTER);
@@ -215,11 +235,13 @@ function claudeStartupDialogIn(tail: string, captured: string): ClaudeStartupDia
   const accept = tail.lastIndexOf('Yes,Iaccept');
   const trust = lastOf(CLAUDE_TRUST_CHOICES);
   const renderer = lastOf(CLAUDE_STARTUP_CHOICES.claude_fullscreen_renderer);
-  const latest = Math.max(accept, trust, renderer);
+  const onboarding = lastOf(CLAUDE_ONBOARDING_TEXT);
+  const latest = Math.max(accept, trust, renderer, onboarding);
   if (latest < 0) {
     if (!footer) return null;
     return tail.includes('No,exit') ? 'claude_bypass_permissions' : 'claude_startup_dialog_unidentified';
   }
+  if (latest === onboarding) return 'claude_onboarding';
   if (latest === accept) return 'claude_bypass_permissions';
   // The trust dialog (#5108) is left to the trust detector while it reads it.
   if (latest === trust) {
