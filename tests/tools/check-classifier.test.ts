@@ -977,6 +977,100 @@ it('command words, wrappers and comments are read in linear time', () => {
   assert.equal(got[15], false, 'a long run of tee options');
 });
 
+it('a redirection is no command word and no argument: the command after leading redirections is still the command', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  // Every form of redirection in front of the command word, bare or after assignments and launch wrappers.
+  const operators = ['>f.log', '> f.log', '>>f.log', '>> f.log', '2>f.log', '2> f.log', '2>&1', '2>&-', '&>f.log', '&> f.log', '&>>f.log', '<f.log', '< f.log', '>|f.log', '>| f.log', '>&2', '<&3', '3<f.log', '{fd}>f.log', '<<<x', '<<< x', '<> f.log', '> "f x.log"', '>f\\ x.log'];
+  for (const redirect of operators) {
+    for (const prefix of ['', 'FOO=1 ', 'sudo ', 'env A=b ', 'time ', 'nohup ', 'command ', 'timeout 5 ', 'FOO=1 sudo ', 'sudo -u root ']) {
+      assert.equal(edits(`${prefix}${redirect} tee src/a.ts`), true, `${prefix}${redirect} tee src/a.ts: tee is the command`);
+      assert.equal(edits(`${prefix}${redirect} cp a src/a.ts`), true, `${prefix}${redirect} cp: cp is the command`);
+      assert.equal(edits(`${prefix}${redirect} tee README.md`), false, `${prefix}${redirect} tee README.md: an ignored target`);
+    }
+  }
+  // Several redirections, assignments between them, and redirections after the command word.
+  assert.equal(edits('> README.md > /dev/null 2>&1 tee src/a.ts'), true);
+  assert.equal(edits('> README.md A=1 > /dev/null tee src/a.ts'), true);
+  assert.equal(edits('tee > README.md src/a.ts'), true, 'a redirection between the words of the command');
+  assert.equal(edits('tee src/a.ts > README.md'), true);
+  // A redirection target and the words after it are the arguments of the command, not a command of their own.
+  assert.equal(edits('echo hi > README.md tee src/a.ts'), false, 'tee is an argument of echo');
+  assert.equal(edits('echo hi > README.md; tee src/a.ts'), true, 'a boundary starts a new command');
+  assert.equal(edits('echo > README.md cp a src/a.ts'), false);
+  assert.equal(edits('echo x > /dev/null tee src/a.ts'), false);
+  assert.equal(edits('cat < in.txt tee src/a.ts'), false, 'the redirection target is not a command either');
+  // The other write forms of the redirection: clobber, both streams, and a descriptor.
+  assert.equal(edits('echo x >| src/a.ts'), true);
+  assert.equal(edits('echo x >&src/a.ts'), true);
+  assert.equal(edits('echo x >& src/a.ts'), true);
+  assert.equal(edits('echo x &>> src/a.ts'), true);
+  assert.equal(edits('{ echo x; } 3> src/a.ts'), true);
+  assert.equal(edits('echo x >&2'), false);
+  assert.equal(edits('echo x >&-'), false);
+  assert.equal(edits('echo x 2>&1'), false);
+  assert.equal(edits('echo x >| README.md'), false);
+  // Process substitution is no redirection: its command still runs.
+  assert.equal(edits('echo x > >(tee src/a.ts)'), true);
+  assert.equal(edits('diff <(tee src/a.ts) b'), true);
+  // The same reading for the check commands: leading redirections hide no runner, and a target is no file operand.
+  for (const redirect of operators) {
+    for (const prefix of ['', 'CI=1 ', 'env A=b ', 'time ', 'timeout 5 ', 'npx ']) {
+      const got = classifyCommand(`${prefix}${redirect} npm test`);
+      assert.equal(got.isCheck, true, `${prefix}${redirect} npm test: a check`);
+      assert.equal(got.runner, 'npm', `${prefix}${redirect} npm test: the runner`);
+      assert.equal(got.narrowed, false, `${prefix}${redirect} npm test: not narrowed`);
+      assert.equal(got.exitHidden, false, `${prefix}${redirect} npm test: the exit status stays visible`);
+    }
+  }
+  for (const cmd of [
+    'pytest > out.txt', 'pytest >out.txt', 'pytest 2> err.log', 'pytest &>all.log', 'pytest < in.txt', 'pytest >> /tmp/x.log', 'pytest >| out.txt',
+    'pytest "tests/" > out.txt', 'pytest > out.txt 2>&1', 'pytest>out.txt', 'npm test > "out file.txt"', 'npm test <&3', 'npm test >| out',
+  ]) {
+    const got = classifyCommand(cmd);
+    assert.equal(got.isCheck, true, `${cmd}: a check`);
+    assert.equal(got.narrowed, false, `${cmd}: the target of a redirection is no file operand`);
+    assert.equal(got.exitHidden, false, `${cmd}: no pipe in ${cmd}`);
+  }
+  assert.equal(classifyCommand('pytest > out.txt tests/a.py').narrowed, true, 'a file operand after a redirection still narrows');
+  assert.equal(classifyCommand('> a.txt pytest tests/a.py').narrowed, true);
+  assert.equal(classifyCommand('pytest -m smoke > out.txt').narrowed, true);
+  assert.equal(classifyCommand('npm test >| out | tail').exitHidden, true, 'a real pipe after a clobber redirection still hides the status');
+  assert.equal(classifyCommand('echo hi > npm test').isCheck, false, 'npm test is no command after a redirection target');
+  assert.equal(classifyCommand('echo hi > out.txt npm test').isCheck, false, 'echo prints the words');
+  assert.equal(checkResult('> out.txt npm test', 'boom', 1).verdict, 'failed');
+  assert.equal(checkResult('2>&1 npm test', 'ok', 0).verdict, 'passed');
+});
+
+it('leading redirections, assignments and wrappers are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const got = classifyInChild<boolean>([
+    `${long('> a.log ')}tee src/a.ts`,
+    `${long('2>&1 ')}tee README.md`,
+    `${long('FOO=1 > a.log ')}tee README.md`,
+    `${long('>| a.log ')}cp a src/a.ts`,
+    `${long('<<< ')}tee src/a.ts`,
+    long('{fd}>'),
+    long('>&'),
+    `echo x ${long('> a.log ')}tee src/a.ts`,
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.equal(got.length, 8);
+  assert.equal(got[0], true, 'a long run of redirections still reaches tee');
+  assert.equal(got[1], false, 'an ignored target after a long run of redirections');
+  assert.equal(got[2], false);
+  assert.equal(got[3], true);
+  assert.equal(got[7], false, 'tee is an argument of echo, whatever the number of redirections before it');
+  const classes = classifyInChild<{ isCheck: boolean; narrowed: boolean }>([
+    `${long('> out.txt ')}npm test`,
+    `${long('2>&1 ')}pytest`,
+    `pytest ${long('> out.txt ')}`,
+    `${long('FOO=1 > a.log ')}npm test`,
+  ]);
+  assert.equal(classes[0].isCheck, true);
+  assert.equal(classes[1].isCheck, true);
+  assert.equal(classes[2].narrowed, false, 'redirection targets narrow nothing');
+  assert.equal(classes[3].isCheck, true);
+});
+
 it('many different here-document tags with no terminator line are read in linear time', () => {
   const lines = (count: number, line: (index: number) => string) => Array.from({ length: count }, (_, index) => line(index)).join('');
   // About 600000 characters: each tag is looked up once and never found. A search of the rest of the text

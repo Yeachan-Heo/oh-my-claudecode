@@ -42,12 +42,12 @@ const joinContinuations = (command) => command.replace(/\\\r?\n/g, '');
 
 /**
  * Split a shell command into pieces with the operator that follows each piece:
- * `|`, `||`, `&&`, `;`, newline, `&`. Redirection `2>&1` and `&>` are not splits
- * (`&` is skipped right after `>` or right before `>`).
+ * `|`, `||`, `&&`, `;`, newline, `&`. The redirections `2>&1`, `<&3`, `&>` and `>|` are not splits
+ * (`&` is skipped right after `>` or `<` and right before `>`, `|` right after `>`).
  */
 function shellPieces(command) {
   const list = [];
-  const op = /\|\||&&|;|\n|(?<!>)&(?!>)|\|/g;
+  const op = /\|\||&&|;|\n|(?<![<>])&(?!>)|(?<!>)\|/g;
   let start = 0;
   let m;
   while ((m = op.exec(command)) !== null) {
@@ -67,9 +67,18 @@ const ASKS_ONLY = /\s--(?:version|help)\b/;
 /** `! npm test` exits 0 when the tests fail. */
 const NEGATED = /^\s*!/;
 
+/**
+ * One redirection: an optional descriptor (`2`, `{fd}`), the operator and its target word, which may hold an
+ * escaped space. A redirection is no argument and no command word: its target names a file, never a program.
+ */
+const REDIRECTION = String.raw`(?:\d+|\{[A-Za-z_]\w*\})?(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)(?!\()\s*(?:\\[\s\S]|[^\s\\])+`;
+const ASSIGNMENT = String.raw`[A-Za-z_][A-Za-z0-9_]*=\S*`;
+const LEADING_REDIRECTIONS = new RegExp(String.raw`^(?:(?:${ASSIGNMENT}|${REDIRECTION})\s+)+`);
+const ALL_REDIRECTIONS = new RegExp(REDIRECTION, 'g');
+
 /** Launch wrappers stripped before runner matching. */
 const WRAPPERS = [
-  /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, // env assignments (`CI=1 npm test`)
+  LEADING_REDIRECTIONS, // env assignments and redirections before the command word (`CI=1 npm test`, `> out npm test`)
   /^env\s+(?:-\S+\s+)*/,
   /^timeout\s+(?:-\S+\s+)*\S+\s+/,
   /^time\s+(?:-p\s+)?/,
@@ -270,7 +279,7 @@ const FILE_TOKEN = /^\S+\.\w{1,8}(?:::\S*)?$/;
 
 /** Whether one stripped piece of a `runner` narrows or weakens its check. */
 function pieceNarrows(piece, kind, runner) {
-  const tokens = piece.split(/\s+/).filter(Boolean);
+  const tokens = piece.replace(ALL_REDIRECTIONS, ' ').split(/\s+/).filter(Boolean);
   if (tokens.some((t) => WEAKEN.test(t))) return true;
   if (kind !== 'test') return false;
   if (tokens.some((t) => selectsSubset(t, runner))) return true;
@@ -590,24 +599,44 @@ const TEMP_TARGET = new RegExp(
 );
 
 /**
+ * Length of the redirection operator that starts at `at`, or 0: `<`, `>`, `>>`, `>|`, `>&`, `<&`, `<>`, `<<`,
+ * `<<-`, `<<<`, `&>` and `&>>`. `<(` and `>(` start a process substitution, which is a command of its own.
+ */
+function redirectionOperator(text, at) {
+  const ch = text[at];
+  const next = text[at + 1];
+  if (ch === '&') return next === '>' ? (text[at + 2] === '>' ? 3 : 2) : 0;
+  if (ch === '>') return next === '(' ? 0 : '>|&'.includes(next ?? ' ') ? 2 : 1;
+  if (ch !== '<' || next === '(') return 0;
+  if (next === '<') return text[at + 2] === '<' || text[at + 2] === '-' ? 3 : 2;
+  return next === '&' || next === '>' ? 2 : 1;
+}
+
+/**
  * Split shell text into words, one pass. Quotes and backslashes are removed from a word (a quoted empty
- * string is an empty word); `null` marks where an unquoted `;`, `&`, `|`, `(`, `)`, backtick, newline or
- * redirection ends the words of a command (a file descriptor digit before `<` or `>` is dropped with it).
- * A `#` that starts a word begins a comment, which runs to the end of the line.
+ * string is an empty word); `null` marks where an unquoted `;`, `&`, `|`, `(`, `)`, backtick or newline ends
+ * the words of a command. A redirection is no word and ends nothing: its operator, a file descriptor before it
+ * (`2>`, `{fd}>`) and the word that is its target are dropped, and the other words stay one command
+ * (`> out tee f` is `tee f`, `echo hi > out more` is `echo hi more`). A `#` that starts a word begins a
+ * comment, which runs to the end of the line.
  */
 function shellWords(text) {
   const out = [];
   let word = null;
+  let target = false; // a redirection operator was read and its target word has not been
   const flush = () => {
-    if (word !== null) out.push(word);
+    if (word !== null && !target) out.push(word);
+    if (word !== null) target = false;
     word = null;
   };
   const boundary = () => {
     flush();
+    target = false;
     if (out.at(-1) !== null) out.push(null);
   };
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
+    const operator = ch === '<' || ch === '>' || ch === '&' ? redirectionOperator(text, i) : 0;
     if (ch === '\\') {
       const next = text[i + 1] ?? '';
       if (next === '\n' || (next === '\r' && text[i + 2] === '\n')) i += next === '\n' ? 1 : 2; // a continuation joins lines
@@ -633,10 +662,12 @@ function shellWords(text) {
     } else if (ch === '#' && word === null) {
       const lineEnd = text.indexOf('\n', i);
       i = lineEnd === -1 ? text.length : lineEnd - 1; // the newline itself is a boundary
-    } else if (ch === '\n' || ';&|()`'.includes(ch)) {
-      boundary();
-    } else if (ch === '<' || ch === '>') {
-      if (word !== null && /^\d+$/.test(word)) word = null;
+    } else if (operator > 0) {
+      if (word !== null && /^(?:\d+|\{[A-Za-z_]\w*\})$/.test(word)) word = null;
+      else flush();
+      target = true;
+      i += operator - 1;
+    } else if (ch === '\n' || ';&|()`<>'.includes(ch)) {
       boundary();
     } else if (ch === ' ' || ch === '\t' || ch === '\r') {
       flush();
@@ -1013,11 +1044,13 @@ function shellWriteTargets(command, depth = 0) {
   const targets = [];
   const unquote = (raw) => shellWords(raw).find((word) => word !== null && word !== '');
   const scan = new RegExp(
-    String.raw`${QUOTED}|\\[^\n]|(?<=^|\s)#[^\n]*|(?<=^|[\s;&|("'])\d?>{1,2}\s*(${WORD})`,
+    String.raw`${QUOTED}|\\[^\n]|(?<=^|\s)#[^\n]*|(?<=^|[\s;&|("'])(?:\d+|\{[A-Za-z_]\w*\})?(>>|>\||>&|>)\s*(${WORD})`,
     'g',
   );
   for (const m of text.matchAll(scan)) {
-    if (m[1] !== undefined) targets.push(unquote(m[1]));
+    if (m[2] === undefined) continue;
+    if (m[1] === '>&' && /^(?:\d+-?|-)$/.test(m[2])) continue; // `>&2` and `>&-` name a descriptor, not a file
+    targets.push(unquote(m[2]));
   }
   const words = shellWords(text);
   const programs = commandPrograms(words);
