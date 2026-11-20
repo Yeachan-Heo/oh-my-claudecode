@@ -8738,8 +8738,10 @@ export async function monitorTeamV2(
           paneAlive && ownership
             ? captureOwnedTeamPane(ownership)
             : Promise.resolve(""),
+          // The binding's root: config.team_state_root may be relative, and
+          // instance validation already proved it names this directory.
           readLatestProviderEvent(
-            config.team_state_root ?? teamStateRoot(cwd, sanitized),
+            monitorInstance.state_root,
             worker.name,
             worker.launch_attempt_id,
           ),

@@ -249,21 +249,38 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     expect(withEvents?.deadWorkers).toEqual(without?.deadWorkers);
   });
 
-  it('reads the hook events under the cwd team root when the config records no state root', async () => {
+  it('reads the hook events under the team root whether the config records it absolute, relative or not at all', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-provider-event-root-'));
     isolateFixtureRoot(cwd);
     await writeConfigAndTask('pending');
     const teamRoot = teamStateRoot(cwd, 'demo-team');
     const config = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf-8'));
     config.workers[0].launch_attempt_id = 'attempt-current';
-    delete config.team_state_root;
-    await writeFile(join(teamRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
     await writeFile(join(teamRoot, 'workers', 'worker-1', 'provider-events.jsonl'),
       `${JSON.stringify({ v: 1, event: 'Stop', at: Date.now() - 5_000, attempt: 'attempt-current' })}\n`, 'utf-8');
     const { monitorTeamV2 } = await import('../runtime-v2.js');
-
-    const shown = (await monitorTeamV2('demo-team', cwd))?.workers[0]?.providerEvent.event;
-    expect(shown).toBe(process.platform === 'win32' ? 'none' : 'Stop');
+    const shownWith = async (stateRoot: string | undefined) => {
+      if (stateRoot === undefined) delete config.team_state_root;
+      else config.team_state_root = stateRoot;
+      await writeFile(join(teamRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+      return (await monitorTeamV2('demo-team', cwd))?.workers[0]?.providerEvent.event;
+    };
+    // The process runs elsewhere, so a root left relative would resolve against the wrong directory.
+    const elsewhere = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-elsewhere-'));
+    const previousCwd = process.cwd();
+    process.chdir(elsewhere);
+    try {
+      const shown = {
+        absolute: await shownWith(teamRoot),
+        relative: await shownWith('.omc/state/team/demo-team'),
+        unset: await shownWith(undefined),
+      };
+      const expected = process.platform === 'win32' ? 'none' : 'Stop';
+      expect(shown).toEqual({ absolute: expected, relative: expected, unset: expected });
+    } finally {
+      process.chdir(previousCwd);
+      await rm(elsewhere, { recursive: true, force: true });
+    }
   });
 
   it.skipIf(process.platform === 'win32')('shows hook event ages as whole seconds, never below zero', async () => {
