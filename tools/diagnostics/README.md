@@ -917,7 +917,9 @@ the run created). The output directories are checked before the input is read.
 - Events: `plan` (`ExitPlanMode`, a `Write` or `Edit` of a plan or brief file, the first `TodoWrite`), `failures` (the second and each further
   consecutive `tool_result` with `is_error`, one event per series) and `end` (the last assistant text and each text with a report line).
 - Distance: calls between the event and the nearest consultation of the same session, looking back for `plan` and `end` (after the previous event of that class)
-  and forward for `failures` (before the next one). Coverage is reported for the windows 1, 2, 3, 5, 10, 20 and unlimited calls, with the
-  one-sided lower Wilson bound for z = 1.645; below 30 events the share and the bound read `too little data` and the counts stay.
+  and forward for `failures` (before the next one). Events of one class at the same call position (two text blocks with no call between them) keep their
+  order: the earlier is the previous event of the later, so one consultation covers only the first of them. Coverage is reported for the windows
+  1, 2, 3, 5, 10, 20 and unlimited calls, with the one-sided lower Wilson bound for z = 1.645; below 30 events the share and the bound read
+  `too little data` and the counts stay.
 - Copies of one history (forked and resumed sessions) count once for the whole run: the first file in sorted path order owns a call id or a text;
   skipped copies are counted in `duplicates`. Positions and distances are still numbered over the whole file.

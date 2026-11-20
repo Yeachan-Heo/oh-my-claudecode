@@ -39,11 +39,13 @@ d. Events and positions. The position of a tool call is its number among the cou
 e. Coverage. The distance is a difference of positions, counted in calls. Looking back (plan, end): a
    consultation c is in range when previous < c <= position of the event, previous being the position of the
    previous event of the same class (0 at the start of the session); the distance is position - c for the
-   nearest such c. Looking forward (failures): a consultation c is in range when position < c < position of the
-   next failures event (or the end of the session); the distance is c - position for the nearest such c. Every
-   consultation of the session counts for coverage, whatever its time. An event is covered for window K when its
-   distance is at most K; for K = None (no limit) when any consultation is in range. WINDOWS = [1, 2, 3, 5, 10,
-   20, None]. Distribution over covered events: min, median, p75, p90, max; percentiles by nearest rank
+   nearest such c. Events of one class at the same position (two text blocks with no call between them) keep
+   their file order and their number: the earlier one is the previous event of the later one, so a consultation
+   is in range for the first of them only. Looking forward (failures): a consultation c is in range when
+   position < c < position of the next failures event (or the end of the session); the distance is c - position
+   for the nearest such c. Every consultation of the session counts for coverage, whatever its time. An event
+   is covered for window K when its distance is at most K; for K = None (no limit) when any consultation is in
+   range. WINDOWS = [1, 2, 3, 5, 10, 20, None]. Distribution over covered events: min, median, p75, p90, max; percentiles by nearest rank
    (element number ceil(p * n / 100) of the sorted list). Per window: the count of covered events, the number
    of events n, the share and the one-sided lower Wilson bound for z = 1.645. With n below MIN_SUPPORT (30) the
    share and the bound read "too little data" and the counts stay. The windows are fixed and are not chosen from
@@ -414,18 +416,19 @@ def scan_session(path, window, totals, claims, config):
     return scan
 
 
-def nearest_distance_back(position, class_positions, consult_positions):
-    index = bisect.bisect_left(class_positions, position)
-    lower = class_positions[index - 1] if index > 0 else 0
+def nearest_distance_back(position, rank, class_positions, consult_positions):
+    """class_positions: the positions of all events of the class in order, one entry per event (events at one
+    position repeat); rank: the place of this event in that list, so the previous event of the class is the entry
+    before it, even when it has the same position."""
+    lower = class_positions[rank - 1] if rank > 0 else 0
     found = bisect.bisect_right(consult_positions, position) - 1
     if found >= 0 and consult_positions[found] > lower:
         return position - consult_positions[found]
     return None
 
 
-def nearest_distance_forward(position, class_positions, consult_positions):
-    index = bisect.bisect_right(class_positions, position)
-    upper = class_positions[index] if index < len(class_positions) else None
+def nearest_distance_forward(position, rank, class_positions, consult_positions):
+    upper = class_positions[rank + 1] if rank + 1 < len(class_positions) else None
     found = bisect.bisect_right(consult_positions, position)
     if found < len(consult_positions) and (upper is None or consult_positions[found] < upper):
         return consult_positions[found] - position
@@ -434,17 +437,22 @@ def nearest_distance_forward(position, class_positions, consult_positions):
 
 def event_distances(scan):
     """(event class, in_window, moment, distance or None, owned) for every event of the session.
-    Distances use the whole file, copies included; only owned events are counted by the caller."""
+    Distances use the whole file, copies included; only owned events are counted by the caller.
+    Events of one class that share a position (two text blocks with no call between them) keep their order and
+    their number: the second one has the first as its previous event, so a consultation covers only the first."""
     consult_positions = [item[0] for item in scan.consults]
     class_positions = {}
     for cls in EVENT_CLASSES:
-        class_positions[cls] = sorted({position for event_cls, position, _, _, _ in scan.events if event_cls == cls})
+        class_positions[cls] = sorted(position for event_cls, position, _, _, _ in scan.events if event_cls == cls)
+    seen = Counter()
     result = []
     for cls, position, in_window, moment, owned in scan.events:
+        rank = bisect.bisect_left(class_positions[cls], position) + seen[(cls, position)]
+        seen[(cls, position)] += 1
         if cls == FAILURES:
-            distance = nearest_distance_forward(position, class_positions[cls], consult_positions)
+            distance = nearest_distance_forward(position, rank, class_positions[cls], consult_positions)
         else:
-            distance = nearest_distance_back(position, class_positions[cls], consult_positions)
+            distance = nearest_distance_back(position, rank, class_positions[cls], consult_positions)
         result.append((cls, in_window, moment, distance, owned))
     return result
 

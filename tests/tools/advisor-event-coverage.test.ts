@@ -362,6 +362,40 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
     expect(cell(grp, 'K=unlimited').covered).toBe(1);
   });
 
+  it('end events at one call position keep their order: a consultation covers only the first of them', () => {
+    // The report-prefix block and the last text block, with no call between them: both sit after call 2.
+    const cases: Record<string, Row[]> = {
+      'same-message': [assistant(1, [advisor('c1')]), assistant(2, [bash('b2', 'ls')]),
+        assistant(3, [text('STATUS: done'), text('closing words')])],
+      'two-messages': [assistant(1, [advisor('c1')]), assistant(2, [bash('b2', 'ls')]),
+        assistant(3, [text('STATUS: done')]), assistant(4, [text('closing words')])],
+    };
+    for (const [name, rows] of Object.entries(cases)) {
+      const grp = group(runReport(makeTree(`end-same-position-${name}`, { 'proj/s1.jsonl': rows })), 'end');
+      expect(grp.n, name).toBe(2);
+      expect(cell(grp, 'K=unlimited').covered, name).toBe(1);
+      expect(cell(grp, 'K=1').covered, name).toBe(1);
+      expect(grp.distance_distribution, name).toEqual({ min: 1, median: 1, p75: 1, p90: 1, max: 1 });
+    }
+    // Three events at one position: only the first can be covered; a later position starts a new range.
+    const three = [assistant(1, [bash('b1', 'ls')]), assistant(2, [text('STATUS: early')]),
+      assistant(3, [advisor('c2')]), assistant(4, [bash('b3', 'ls')]),
+      assistant(5, [text('STATUS: a'), text('STATUS: b'), text('last')])];
+    const grp3 = group(runReport(makeTree('end-same-position-three', { 'proj/s1.jsonl': three })), 'end');
+    expect(grp3.n).toBe(4);
+    expect(cell(grp3, 'K=unlimited').covered).toBe(1);
+    expect(grp3.distance_distribution).toEqual({ min: 1, median: 1, p75: 1, p90: 1, max: 1 });
+    // The same rule in both directions, on events built by hand: a forward range ends at the next event, also at one position.
+    const snippet = [
+      'scan = module.SessionScan()',
+      'scan.consults = [(4, "advisor", True, None, True)]',
+      'scan.events = [(module.FAILURES, 3, True, None, True), (module.FAILURES, 3, True, None, True),',
+      '               (module.PLAN, 5, True, None, True), (module.PLAN, 5, True, None, True)]',
+      'print(json.dumps([item[3] for item in module.event_distances(scan)]))',
+    ].join('\n');
+    expect(inProcess(snippet)).toEqual([null, 1, 1, null]);
+  });
+
   it('n 30: numbers, nearest-rank distribution, lower Wilson bound equal to the shared Wilson helper within 1e-9', () => {
     const grp = group(runReport(makeTree('n30', planSessions(30))), 'plan');
     expect(grp.n).toBe(30);
