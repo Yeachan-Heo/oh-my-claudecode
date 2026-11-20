@@ -204,6 +204,12 @@ describe('readiness-diff set r6', () => {
     expect(summary).toMatch(/RESULT FAIL$/);
   });
 
+  it('fails when head differs from base only in the result', () => {
+    const summary = runR6(r6Trace({ ...r6Case(4_000, [2_000]), result: { ok: false, kind: 'attempted_unconfirmed' } }));
+    expect(summary).toContain(`failure: ${IDLE} r6 result differs from base`);
+    expect(summary).toMatch(/RESULT FAIL$/);
+  });
+
   it('fails when head does not load provider-events', () => {
     const summary = runR6(r6Trace(r6Case(4_000, [2_000]), ['tmux-session']));
     expect(summary).toContain('failure: head did not load provider-events');
