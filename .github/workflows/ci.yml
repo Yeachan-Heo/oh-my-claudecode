@@ -131,6 +131,7 @@ jobs:
           src/__tests__/omc-doctor-cache-link-dating.test.ts
           src/__tests__/omc-doctor-registry-version-grammar.test.ts
           src/__tests__/omc-doctor-plugin-dir-diagnosis.test.ts
+          src/__tests__/omc-doctor-config-dir-tilde.test.ts
           src/__tests__/omc-doctor-cache-links-occupancy.test.ts
           src/__tests__/omc-doctor-explicit-root.test.ts
           src/__tests__/omc-doctor-case-sensitive-volume.test.ts
