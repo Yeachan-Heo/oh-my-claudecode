@@ -318,6 +318,17 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
     expect(existsSync(join(root, 'workers'))).toBe(false);
   });
 
+  it('writes nothing when the event argument is omitted', () => {
+    const hook = join(__dirname, '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs');
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    const result = spawnSync(process.execPath, [hook], {
+      env: { PATH: process.env.PATH ?? '', OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' },
+      encoding: 'utf8',
+    });
+    expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toEqual({ status: 0, stdout: '', stderr: '' });
+    expect(existsSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'))).toBe(false);
+  });
+
   it('writes nothing for a bad event name, a missing attempt or state root, or an unsafe worker name', () => {
     const hook = join(__dirname, '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs');
     for (const worker of ['worker-1', 'w..1']) mkdirSync(join(root, 'workers', worker), { recursive: true });
