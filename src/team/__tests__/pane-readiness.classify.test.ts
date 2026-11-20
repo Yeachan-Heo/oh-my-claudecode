@@ -319,6 +319,19 @@ describe('Claude Code first-run dialogs', () => {
     expect(detectClaudeStartupDialog(`⏺ The worker pane showed:\n${notes}\n\n${prompt} `)).toBeNull();
   });
 
+  it.each([
+    ['claude/2.1.328/bypass-permissions.txt', 'claude_bypass_permissions'],
+    ['claude/2.1.328/bypass-permissions-yes-focused.txt', 'claude_bypass_permissions'],
+    ['claude/2.1.328/fullscreen-renderer.txt', 'claude_fullscreen_renderer'],
+  ] as const)('reads %s below a shell prompt ruled like an input box', (file, kind) => {
+    const shell = `${'─'.repeat(120)}\n❯ 'env' OMC_WORKER_LAUNCH_SPEC_FILE='/private/tmp/w/bootstrap.json' node runtime-cli.cjs --worker-launch\n`;
+    expect(detectClaudeStartupDialog(`${shell}${read(file)}`)).toBe(kind);
+  });
+
+  it.each(['onboarding-theme.txt', 'onboarding-security-notes.txt'])('reads %s below an earlier Claude input box', (file) => {
+    expect(detectClaudeStartupDialog(`${read('claude/2.1.325/idle.txt').trimEnd()}\n${read(`claude/2.1.329/${file}`)}`)).toBe('claude_onboarding');
+  });
+
   it('still reads onboarding from the theme options alone, the rest scrolled away', () => {
     const options = read('claude/2.1.329/onboarding-theme.txt').split('\n').filter(line => /mode|Auto/.test(line)).join('\n');
     expect(detectClaudeStartupDialog(options)).toBe('claude_onboarding');

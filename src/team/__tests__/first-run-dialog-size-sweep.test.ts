@@ -55,6 +55,8 @@ const FRAMES = {
 // Recorded frames edited into panes that must not read as a first-run screen:
 // a cwd named "Dark mode" in the banner and in the HUD below the live prompt,
 // and a reply quoting the security notes above a > or › input prompt.
+const recorded = (name: keyof typeof FRAMES) => readFileSync(join(CORPUS, FRAMES[name]), 'utf8');
+const SHELL_LAUNCH = `${'─'.repeat(120)}\n❯ 'env' OMC_WORKER_LAUNCH_SPEC_FILE='/private/tmp/w/bootstrap.json' '/bin/zsh' '-lc' 'exec "$@"' '--' node runtime-cli.cjs --worker-launch\n`;
 const securityNotesQuoted = () => readFileSync(join(CORPUS, FRAMES.onboardingNotes), 'utf8')
   .trimEnd().split('\n').map(line => `  ${line}`).join('\n');
 const DERIVED = {
@@ -63,6 +65,15 @@ const DERIVED = {
     .replace('[OMC#5.8.4] |', '[OMC#5.8.4] | /private/tmp/omc-proto-X5IS/work/Dark mode |'),
   quoteAboveGreaterThan: () => `⏺ The worker pane showed:\n${securityNotesQuoted()}\n\n> `,
   quoteAboveChevron: () => `⏺ The worker pane showed:\n${securityNotesQuoted()}\n\n› `,
+  // First-run screens below what could pass for an input box: a shell theme
+  // that rules a line above its ❯ prompt, with the worker launch command, or an
+  // earlier Claude input box left in the scrollback.
+  shellBypassNo: () => `${SHELL_LAUNCH}${recorded('bypassNo')}`,
+  shellBypassYes: () => `${SHELL_LAUNCH}${recorded('bypassYes')}`,
+  shellRendererYes: () => `${SHELL_LAUNCH}${recorded('rendererYes')}`,
+  shellRendererNotNow: () => `${SHELL_LAUNCH}${recorded('rendererNotNow')}`,
+  boxOnboardingTheme: () => `${recorded('idle').trimEnd()}\n${recorded('onboardingTheme')}`,
+  boxOnboardingNotes: () => `${recorded('idle').trimEnd()}\n${recorded('onboardingNotes')}`,
 } as const;
 type FrameName = keyof typeof FRAMES | keyof typeof DERIVED;
 type Size = `${number}x${number}`;
@@ -260,7 +271,7 @@ describe.skipIf(!supported)(`Claude first-run dialogs across pane sizes (${TMUX 
     'fails at the Bypass Permissions warning without a key (%s sweep)',
     async (_sweep, sizes) => {
       const misses: string[] = [];
-      for (const name of ['bypassNo', 'bypassYes'] as const) {
+      for (const name of ['bypassNo', 'bypassYes', 'shellBypassNo', 'shellBypassYes'] as const) {
         for (const size of sizes) {
           const frame = frameAt(name, size);
           const outcome = await deliver({ capture: () => frame, send: () => undefined });
@@ -280,7 +291,7 @@ describe.skipIf(!supported)(`Claude first-run dialogs across pane sizes (${TMUX 
     'stops at Claude Code onboarding without a key (%s sweep)',
     async (_sweep, sizes) => {
       const misses: string[] = [];
-      for (const name of ['onboardingTheme', 'onboardingNotes'] as const) {
+      for (const name of ['onboardingTheme', 'onboardingNotes', 'boxOnboardingTheme', 'boxOnboardingNotes'] as const) {
         for (const size of sizes) {
           const frame = frameAt(name, size);
           const outcome = await deliver({ capture: () => frame, send: () => undefined });
@@ -303,11 +314,11 @@ describe.skipIf(!supported)(`Claude first-run dialogs across pane sizes (${TMUX 
     async (_sweep, sizes) => {
       const misses: string[] = [];
       const counts = { delivered: 0, answeredThenTimedOut: 0, untouched: 0 };
-      for (const size of sizes) {
+      for (const [prefix, yes, notNow] of [['', 'rendererYes', 'rendererNotNow'], ['shell', 'shellRendererYes', 'shellRendererNotNow']] as const) for (const size of sizes) {
         let shown: 'offered' | 'notNow' | 'accepted' | 'dismissed' = 'offered';
         const frames = {
-          offered: frameAt('rendererYes', size),
-          notNow: frameAt('rendererNotNow', size),
+          offered: frameAt(yes, size),
+          notNow: frameAt(notNow, size),
           accepted: 'fullscreen renderer on\n',
           dismissed: frameAt('afterRenderer', size),
         };
@@ -321,19 +332,19 @@ describe.skipIf(!supported)(`Claude first-run dialogs across pane sizes (${TMUX 
             if (key === 'Enter' && shown === 'notNow') shown = 'dismissed';
           },
         });
-        dump[`renderer@${size}`] = outcome;
+        dump[`${prefix}renderer@${size}`] = outcome;
         const answered = ['offered:Down', 'notNow:Enter'];
         const said = JSON.stringify(outcome);
         const alone = await deliver({ capture: () => frames.dismissed, send: () => undefined });
         if (squeeze(frames.offered).includes('❯1.Yes,tryit')) {
           const then = alone.reached.map(key => key.replace('static:', 'dismissed:'));
-          if (said !== JSON.stringify({ result: alone.result, reached: [...answered, ...then] })) misses.push(`renderer@${size}: ${said}`);
-          else if (alone.result.ok) counts.delivered++;
-          else counts.answeredThenTimedOut++;
+          if (said !== JSON.stringify({ result: alone.result, reached: [...answered, ...then] })) misses.push(`${prefix}renderer@${size}: ${said}`);
+          else if (!prefix && alone.result.ok) counts.delivered++;
+          else if (!prefix) counts.answeredThenTimedOut++;
         } else if (said === JSON.stringify({ result: TIMEOUT, reached: [] })) {
-          counts.untouched++;
+          if (!prefix) counts.untouched++;
         } else {
-          misses.push(`renderer@${size}: ${said}`);
+          misses.push(`${prefix}renderer@${size}: ${said}`);
         }
       }
       dump[`renderer-counts@${_sweep}`] = counts;
