@@ -3118,6 +3118,38 @@ async function publishSavedRecoveryTimeout(
 }
 
 /**
+ * last_recovery is the only record of a saved timeout until its final is
+ * published, so publish it before anything replaces or deletes the slot.
+ * Returns the recovery id whose final is still unpublished, or null.
+ */
+async function publishPendingRecoveryTimeout(
+  teamName: string,
+  cwd: string,
+  instanceId: string,
+): Promise<string | null> {
+  const saved = (await readRevisionedTeamConfig(teamName, cwd))?.config
+    .last_recovery;
+  if (
+    saved?.failure_reason !== "recovery_request_timeout" ||
+    readRecoveryFinalState(cwd, saved.request_id).kind === "valid"
+  )
+    return null;
+  await publishSavedRecoveryTimeout(
+    {
+      teamName,
+      cwd,
+      workerName: saved.worker_name,
+      requestId: saved.request_id,
+      instanceId,
+    },
+    saved.recovery_id,
+  ).catch(() => null);
+  return readRecoveryFinalState(cwd, saved.request_id).kind === "valid"
+    ? null
+    : saved.recovery_id;
+}
+
+/**
  * Past the deadline, the fenced owner fails a recovery that has nothing to
  * hand over instead of running another attempt. Returns null to keep today's
  * retry: before the deadline, without the fence, or once a task reservation,
@@ -3876,6 +3908,9 @@ async function ensureRecoveryOwner(
   if (!current) current = await migrateTeamConfigRevision(teamName, cwd);
   if (!current) throw new Error("invalid_persisted_state");
   await assertTeamInstanceUnderLock(instance);
+  // An election replaces last_recovery when its recovery ends.
+  if (await publishPendingRecoveryTimeout(teamName, cwd, instance.instance_id))
+    throw new Error("recovery_final_unpublished");
 
   const processStartedAt = currentProcessStartIdentity();
   if (!processStartedAt) throw new Error("process_start_identity_unavailable");
@@ -9737,28 +9772,18 @@ export async function shutdownTeamV2(
     async () => {
       await assertTeamInstanceUnderLock(shutdownInstance);
       await commitStoppedFenceUnderLock();
-      // Disposal deletes last_recovery, the only record of a saved timeout
-      // whose owner died before publishing the request final.
-      const savedTimeout = (await readRevisionedTeamConfig(sanitized, cwd))
-        ?.config.last_recovery;
-      if (savedTimeout?.failure_reason === "recovery_request_timeout") {
-        await publishSavedRecoveryTimeout(
-          {
-            teamName: sanitized,
-            cwd,
-            workerName: savedTimeout.worker_name,
-            requestId: savedTimeout.request_id,
-            instanceId: shutdownInstance.instance_id,
-          },
-          savedTimeout.recovery_id,
-        ).catch(() => null);
-        if (readRecoveryFinalState(cwd, savedTimeout.request_id).kind !== "valid")
-          return {
-            outcome: "failed",
-            reason: "state_cleanup_failed",
-            detail: `recovery_final_unpublished:${savedTimeout.recovery_id}`,
-          };
-      }
+      // Disposal deletes last_recovery.
+      const unpublished = await publishPendingRecoveryTimeout(
+        sanitized,
+        cwd,
+        shutdownInstance.instance_id,
+      );
+      if (unpublished)
+        return {
+          outcome: "failed",
+          reason: "state_cleanup_failed",
+          detail: `recovery_final_unpublished:${unpublished}`,
+        };
       let worktreeCleanupFailure: string | null = null;
       let preservedWorktrees = 0;
       try {
