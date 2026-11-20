@@ -511,7 +511,7 @@ python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 
 
 | Option | Meaning |
 |---|---|
-| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool (including the default journal: `OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory; with `OMC_STATE_DIR` set, pass `--compact` or set `OMC_JEV_LOG_DIR`). A `--transcript` path that cannot be read (missing, a directory, no permission) exits 2 with a message that names it, and so does a `--projects` directory that is missing or cannot be read when the transcripts are searched; a transcript found by the search that cannot be read is skipped with a warning on stderr |
+| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool (including the default journal: `OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory; with `OMC_STATE_DIR` set, pass `--compact` or set `OMC_JEV_LOG_DIR`). A `--transcript` path that cannot be read (missing, a directory, no permission) exits 2 with a message that names it, and so does a `--projects` directory that is missing or cannot be read when the transcripts are searched, a directory below it and a transcript found by the search that cannot be read, a `.jsonl` link whose target is gone included (the message names the path, and no count covers a part of the transcripts) |
 | `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
 | `--ask-loss-threshold X` | the threshold the upper Wilson bound is compared with (default 0.05) |
 | `--details` | add the list of units (without ask contents) |
