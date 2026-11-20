@@ -672,9 +672,9 @@ const LAUNCH_WRAPPERS = new Map([
   ...['!', '{', 'if', 'then', 'elif', 'else', 'do', 'while', 'until'].map((word) => [word, launcher()]),
 ]);
 
-/** Words after which `find` runs a command of its own, and the words that end that command. */
+/** Words after which `find` runs a command of its own, and the words that end that command (a terminator, or the next one). */
 const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);
-const FIND_EXEC_END = new Set([';', '+']);
+const FIND_EXEC_END = new Set([';', '+', ...FIND_EXEC]);
 
 /** Shells whose `-c` argument is a command string, and the shell options that take a value. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);

@@ -61,6 +61,14 @@ e. Candidate. A tool call in the same session and in the period, whose time is s
      notebook_path equals a target or ends with "/" + target; or a Bash command with rm, mv or sed -i that
      contains a target;
    - run, install, deploy (targets required): a Bash command that contains a target.
+   A Bash command is read as the shell reads it: a word is a command only at the start of the text or after ;, &, |,
+   (, ), a backtick or a newline, after launch wrappers (sudo, doas, env, command, nohup, exec, time, nice, timeout
+   and xargs with their options, and VAR=x assignments) or reserved words (if, then, do, !, {), after find -exec, and
+   in the string of sh -c, su -c or ssh host '...' (two levels deep, 100000 characters at most). A command name in
+   the arguments of another command, in a quoted string, in a # comment or in a here-document body is text:
+   "echo 'git commit'", "rg 'git commit' README.md" and "grep rm f" run no git and no rm. Not read: a here-document
+   that a shell takes as its input (bash <<EOF) and remote execution by docker exec or kubectl exec (amended, for
+   every rule version: any git, rm or systemctl word of the command used to count, quoted or not).
    Each call is counted once, for the earliest matching prohibition.
 
 f. Output. --out (JSON, template compaction-report/1): period, number of transcript files and subagent
@@ -89,10 +97,12 @@ b. Revocation in the same message. A user message that matches a prohibition pat
    (prohibitions.revoked_in_same_message) but gives no candidate.
 c. Candidates for general prohibitions (no targets) and for class other. Matching by class:
    - edit: every Edit, Write, MultiEdit or NotebookEdit call;
-   - delete: Bash with rm, rmdir, unlink, git rm, find ... -delete or shred;
+   - delete: Bash with rm, rmdir, unlink, git rm, find ... -delete or shred (as commands, see rule e above);
    - install: Bash with npm (i|install|ci), pnpm (i|install|add), yarn add, pip3? install, apt(-get)? install,
      cargo install, go install or brew install;
-   - deploy: Bash with deploy, systemctl (enable|start), docker (compose )?up or kubectl apply;
+   - deploy: Bash with systemctl (enable|start), docker (compose )?up or kubectl apply as a command, or with the
+     word deploy in the name or the arguments of a command that is not read-only (npm run deploy, ./deploy.sh; not
+     grep deploy README.md or echo deploy);
    - run and other: every call that changes state: an edit call, or a Bash call whose first command word
      (after environment assignments and sudo) is not in READ_ONLY_COMMANDS. A write redirection to a file makes
      any Bash call state-changing; a > inside quotes, after a backslash or in a # comment is text (amended after
@@ -145,6 +155,7 @@ empty or missing before.)
 """
 import argparse
 import bisect
+import functools
 import hashlib
 import json
 import os
@@ -284,87 +295,325 @@ def load_patterns(path):
 
 set_patterns({})
 
-# Command shapes per class (English names). Git options may precede the subcommand: those that take their value
-# as the next word are listed (git 2.47: -C <path>, -c <name>=<value>, --git-dir, --work-tree, --namespace,
-# --config-env, --attr-source), the other options stand alone, with or without "=value".
-# The subcommand is a whole word: the next character must end the word or be a shell operator.
-GIT_SUBCOMMAND_RES = {name: re.compile(name + r"(?=$|[\s;&|()<>`'\"])") for name in ("commit", "push", "merge")}
-GIT_WORD_RE = re.compile(r"\bgit\Z")
-GIT_OPTION_RE = re.compile(r"-[\w-]+(?:=\S*)?")
+# Command shapes per class (English names). A Bash command is read as the shell reads it: a word counts as a
+# command only where the shell would run it (see shell_commands), not among the arguments of another command, so
+# `echo "git commit"` and `rg 'git commit' README.md` run no git. Git options may precede the subcommand: those that
+# take their value as the next word are listed (git 2.47: -C <path>, -c <name>=<value>, --git-dir, --work-tree,
+# --namespace, --config-env, --attr-source), the other options stand alone, with or without "=value".
+# The subcommand is a whole word.
+GIT_OPTION_RE = re.compile(r"-[\w-]+(?:=.*)?", re.DOTALL)
 GIT_VALUE_OPTIONS = frozenset(("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source"))
 # Options after which git prints something and exits: nothing that follows runs as a subcommand.
 GIT_EXIT_OPTIONS = frozenset(("-v", "--version", "-h", "--help", "--exec-path", "--html-path", "--man-path", "--info-path"))
-RESTART_RE = re.compile(r"\bsystemctl\s+(?:restart|stop)\b|\bdocker\s+(?:restart|stop|rm)\b|\bkill\b")
+RESTART_RE = re.compile(r"(?:systemctl\s+(?:restart|stop)|docker\s+(?:restart|stop|rm)|kill)\b")
+
+# The one rule set that finds the commands of a shell text (the same as the check classifier of this directory,
+# except for ssh): launch wrappers and reserved words run the command after them, with the options that take a value
+# and the positional words they take before it; `find -exec` starts a command; the string of `sh -c`, `su -c` and
+# `ssh host '...'` is read again, two levels deep.
+NESTED_MAX_DEPTH = 2
+NESTED_MAX_LENGTH = 100000
+SHELLS = frozenset(("sh", "bash", "zsh", "dash", "ksh"))
+SHELL_VALUE_OPTIONS = frozenset(("-o", "+o", "-O", "+O", "--rcfile", "--init-file"))
+SSH_VALUE_OPTIONS = frozenset(("-B", "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o",
+                               "-p", "-Q", "-R", "-S", "-W", "-w"))
+FIND_EXEC = frozenset(("-exec", "-execdir", "-ok", "-okdir"))
+FIND_EXEC_END = frozenset((";", "+")) | FIND_EXEC  # a terminator, or the next -exec (so each word is read once)
+# Launch wrappers and reserved words: name -> (options that take a value, positional words before the command).
+LAUNCH_WRAPPERS = {
+    "sudo": (frozenset(("-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R")), 0),
+    "doas": (frozenset(("-u", "-C")), 0),
+    "env": (frozenset(("-u", "-C", "-S", "--unset", "--chdir")), 0),
+    "command": (frozenset(), 0), "nohup": (frozenset(), 0), "exec": (frozenset(), 0),
+    "time": (frozenset(("-f", "-o", "--format", "--output")), 0),
+    "nice": (frozenset(("-n", "--adjustment")), 0),
+    "timeout": (frozenset(("-s", "-k", "--signal", "--kill-after")), 1),
+    "xargs": (frozenset(("-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s", "--arg-file", "--delimiter", "--eof",
+                         "--max-args", "--max-lines", "--max-procs", "--max-chars")), 0),
+}
+for _word in ("!", "{", "if", "then", "elif", "else", "do", "while", "until"):
+    LAUNCH_WRAPPERS[_word] = (frozenset(), 0)
+HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?[ \t]*\\?(['\"]?)(\w+)\1")
 
 
-def quote_state(token, state):
-    """The quote (' or " or None) still open after reading token that starts in the given state; a backslash
-    escapes the next character outside single quotes."""
-    escaped = False
-    for char in token:
-        if escaped:
-            escaped = False
-        elif char == "\\" and state != "'":
-            escaped = True
-        elif state is None:
-            if char in "'\"":
-                state = char
-        elif char == state:
-            state = None
-    return state
+def shell_words(text):
+    """Split shell text into words in one pass: quotes and backslashes are removed from a word (a quoted empty string
+    is an empty word) and None marks where an unquoted ";", "&", "|", "(", ")", a backtick, a newline or a redirection
+    ends the words of a command (a file descriptor digit before "<" or ">" is dropped with it). A "#" that starts a
+    word begins a comment that runs to the end of the line."""
+    out = []
+    parts = None  # the characters of the word being read, or None between words
+    length = len(text)
+    index = 0
+
+    def flush():
+        nonlocal parts
+        if parts is not None:
+            out.append("".join(parts))
+        parts = None
+
+    def boundary():
+        flush()
+        if not out or out[-1] is not None:
+            out.append(None)
+
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            following = text[index + 1] if index + 1 < length else ""
+            if following == "\n" or (following == "\r" and text[index + 2:index + 3] == "\n"):
+                index += 1 if following == "\n" else 2  # a continuation joins lines
+            else:
+                parts = [] if parts is None else parts
+                parts.append(following)
+                index += 1
+        elif char == "'":
+            close = text.find("'", index + 1)
+            end = length if close == -1 else close
+            parts = [] if parts is None else parts
+            parts.append(text[index + 1:end])
+            index = end
+        elif char == '"':
+            end = index + 1
+            inner = []
+            while end < length and text[end] != '"':
+                if text[end] == "\\" and end + 1 < length:
+                    end += 1
+                inner.append(text[end])
+                end += 1
+            parts = [] if parts is None else parts
+            parts.append("".join(inner))
+            index = end
+        elif char == "#" and parts is None:
+            line_end = text.find("\n", index)
+            index = length if line_end == -1 else line_end - 1  # the newline itself is a boundary
+        elif char == "\n" or char in ";&|()`":
+            boundary()
+        elif char in "<>":
+            if parts is not None and re.fullmatch(r"[0-9]+", "".join(parts)):
+                parts = None
+            boundary()
+        elif char in " \t\r":
+            flush()
+        else:
+            parts = [] if parts is None else parts
+            parts.append(char)
+        index += 1
+    flush()
+    return out
 
 
-def shell_word_ends(tokens):
-    """For every token, the index of the first token after the shell word that starts there. Tokens come from a
-    split on whitespace, so a quoted value with spaces ("A B") spans several of them: a quote that a token leaves
-    open runs on to the token that closes it (to the end when none does). Computed from the right, so the cost is
-    linear however many quotes are open."""
-    count = len(tokens)
-    closes = {"'": [count] * (count + 1), '"': [count] * (count + 1)}  # first token after the one that closes the quote
-    ends = [count] * (count + 1)
-    for index in range(count - 1, -1, -1):
-        for quote in closes:
-            state = quote_state(tokens[index], quote)
-            closes[quote][index] = index + 1 if state is None else closes[state][index + 1]
-        state = quote_state(tokens[index], None)
-        ends[index] = index + 1 if state is None else closes[state][index + 1]
-    return ends
+def without_heredoc_bodies(text):
+    """Cut here-document bodies and their terminator lines out of shell text, so body text is never read as shell.
+    The rest of the line with the "<<TAG" operator stays (`cat <<EOF > f`); several operators on one line take their
+    bodies in order; an operator with no terminator line is left alone, and "<<<" is a here-string. One forward pass
+    over the operators; a tag with no terminator line is searched for once."""
+    edits = []  # (start, end, replacement), sorted by start before they are applied
+    missing = set()  # tags with no terminator line after the position being read
+    line_end = -1  # the newline that ends the line of the operators being read
+    resume = -1  # the newline before the next body of that line
+    for match in HEREDOC_RE.finditer(text):
+        if line_end < match.start() < resume:
+            continue  # inside a body that is already cut
+        if match.start() > line_end:
+            line_end = text.find("\n", match.end())
+            if line_end == -1:
+                break  # no line follows, so no body
+            resume = line_end
+        tag = match.group(2)
+        if tag in missing:
+            continue
+        found = re.compile(r"\n[ \t]*" + re.escape(tag) + r"\b").search(text, resume)
+        if found is None:
+            missing.add(tag)
+            continue
+        edits.append((match.start(), match.end(), "<< " + tag + " "))
+        edits.append((resume, found.end(), ""))
+        resume = found.end()
+    out = []
+    position = 0
+    for start, end, replacement in sorted(edits):
+        out.append(text[position:start])
+        out.append(replacement)
+        position = end
+    out.append(text[position:])
+    return "".join(out)
+
+
+def program_index(words, start):
+    """The index of the program word of the command that starts at start: assignments (FOO=1), launch wrappers with
+    their options and reserved words are skipped. A word that is not a string (a boundary or the end) ends it."""
+    index = start
+    while True:
+        if index >= len(words) or words[index] is None:
+            return index
+        word = words[index]
+        if ENV_ASSIGNMENT_RE.match(word):
+            index += 1
+            continue
+        wrapper = LAUNCH_WRAPPERS.get(os.path.basename(word))
+        if wrapper is None:
+            return index
+        values, positional = wrapper
+        index += 1
+        while index < len(words) and words[index] is not None:
+            option = words[index]
+            if option == "--":
+                index += 1
+                break
+            if option in values:
+                index += 2 if index + 1 < len(words) and words[index + 1] is not None else 1
+            elif option.startswith("-") or re.match(r"\w+=", option):
+                index += 1
+            elif positional > 0:
+                positional -= 1
+                index += 1
+            else:
+                break
+
+
+def command_programs(words):
+    """The commands in words (from shell_words) as (program index, end index): a command starts at the beginning
+    of the text and after every boundary, and `find -exec ...` starts one more."""
+    found = []
+
+    def add(start, stop=None):
+        at = program_index(words, start)
+        if at >= len(words) or words[at] is None:
+            return
+        end = at
+        while end < len(words) and words[end] is not None and not (stop is not None and words[end] in stop):
+            end += 1
+        found.append((at, end))
+        if stop is None and os.path.basename(words[at]) == "find":
+            for k in range(at + 1, end):
+                if words[k] in FIND_EXEC:
+                    add(k + 1, FIND_EXEC_END)
+
+    for index, word in enumerate(words):
+        if word is not None and (index == 0 or words[index - 1] is None):
+            add(index)
+    return found
+
+
+def nested_command_strings(words, at, end):
+    """The command strings that the command at words[at:end] runs: `sh -c 'cmd'`, `bash -lc`, `su user -c 'cmd'` and
+    the command of `ssh host 'cmd'` (a prohibition on commit or restart covers a remote one too)."""
+    program = os.path.basename(words[at])
+    found = []
+    if program == "ssh":
+        index = at + 1
+        while index < end:
+            if words[index] in SSH_VALUE_OPTIONS:
+                index += 2
+            elif words[index].startswith("-"):
+                index += 1
+            else:
+                break
+        rest = [word for word in words[index + 1:end]]
+        if rest[:1] == ["--"]:
+            rest = rest[1:]
+        if rest:
+            found.append(" ".join(rest))
+        return found
+    is_su = program == "su"
+    if not is_su and program not in SHELLS:
+        return found
+    wants_string = False
+    index = at + 1
+    while index < end:
+        arg = words[index]
+        if is_su and arg.startswith("--command="):
+            found.append(arg[len("--command="):])
+        elif is_su and arg == "--command":
+            wants_string = True
+        elif arg == "--":
+            if not is_su:
+                break
+        elif not is_su and arg in SHELL_VALUE_OPTIONS:
+            index += 1
+        elif len(arg) > 1 and arg[0] in "-+" and arg[1] != "-":
+            if re.match(r"-[A-Za-z]*c", arg):
+                wants_string = True
+        elif arg.startswith("--"):
+            pass
+        elif wants_string:
+            found.append(arg)
+            wants_string = False
+            if not is_su:
+                break
+        elif not is_su:
+            break  # a script file: its text is not here
+        index += 1
+    return found
+
+
+def read_commands(text, depth):
+    """The commands of a shell text, each as the tuple of its words (the program first), nested strings included."""
+    words = shell_words(without_heredoc_bodies(text))
+    found = []
+    for at, end in command_programs(words):
+        found.append(tuple(words[at:end]))
+        if depth < NESTED_MAX_DEPTH:
+            for nested in nested_command_strings(words, at, end):
+                if len(nested) <= NESTED_MAX_LENGTH:
+                    found.extend(read_commands(nested, depth + 1))
+    return found
+
+
+@functools.lru_cache(maxsize=4096)
+def shell_commands(text):
+    """Every command the shell would run in a Bash command (see read_commands); cached, because every prohibition
+    of a session is matched against the same calls."""
+    return tuple(read_commands(text, 0))
+
+
+def command_text(command):
+    """One command of shell_commands as text: the base name of its program and its arguments, joined by spaces."""
+    return " ".join((os.path.basename(command[0]),) + command[1:])
+
+
+def git_subcommand(args):
+    """The git subcommand in the words after "git": options come first, those of GIT_VALUE_OPTIONS take the next word
+    as their value, and the options after which git exits end the search; None when there is no subcommand."""
+    index = 0
+    while index < len(args):
+        word = args[index]
+        if word in GIT_EXIT_OPTIONS or word.startswith("--list-cmds="):
+            return None
+        if word in GIT_VALUE_OPTIONS:
+            index += 2
+        elif GIT_OPTION_RE.fullmatch(word) is not None:
+            index += 1
+        else:
+            return word
+    return None
 
 
 def git_subcommand_follows(command, subcommand):
-    """Whether a "git" word is followed by any number of options and then the subcommand. An option is "-" and word
-    characters or dashes, with "=value" for some; the options of GIT_VALUE_OPTIONS also take the next word as their
-    value, so "git -C commit status" and "git -c commit.gpgSign=false status" have no commit. Done over tokens from
-    the right (the answer for a token depends on the tokens after it only), so the cost is linear however many
-    options follow."""
+    """Whether a Bash command runs git with the given subcommand (a whole word after any git options)."""
     if "git" not in command:
         return False
-    tokens = re.findall(r"\S+", command)
-    count = len(tokens)
-    ends = shell_word_ends(tokens)
-    subcommand_re = GIT_SUBCOMMAND_RES[subcommand]
-    reaches = [False] * (count + 1)
-    for index in range(count - 1, -1, -1):
-        token = tokens[index]
-        if subcommand_re.match(token) is not None:
-            reaches[index] = True
-        elif token in GIT_EXIT_OPTIONS or token.startswith("--list-cmds="):
-            reaches[index] = False
-        elif token in GIT_VALUE_OPTIONS:
-            reaches[index] = reaches[ends[ends[index]]]
-        elif GIT_OPTION_RE.fullmatch(token) is not None:
-            reaches[index] = reaches[ends[index]]
-    return any(reaches[index + 1] for index in range(count) if GIT_WORD_RE.search(tokens[index]))
+    return any(os.path.basename(item[0]) == "git" and git_subcommand(item[1:]) == subcommand
+               for item in shell_commands(command))
 
 
 def command_matches(klass, command):
     """Whether a Bash command has the shape of a command class (commit, push, merge, restart)."""
     if klass == "restart":
-        return RESTART_RE.search(command) is not None
+        return any(RESTART_RE.match(command_text(item)) is not None for item in shell_commands(command))
     return git_subcommand_follows(command, klass)
 
 
-DELETE_OR_MOVE_RE = re.compile(r"(?:^|[\s;&|(])(?:rm|mv)\s|\bsed\s+-i\b")
+def has_delete_or_move(command):
+    """Whether a Bash command runs rm or mv with an argument, or sed -i (rule e, classes edit and delete)."""
+    for item in shell_commands(command):
+        program = os.path.basename(item[0])
+        if len(item) > 1 and (program in ("rm", "mv") or (program == "sed" and SED_I_RE.match(item[1]))):
+            return True
+    return False
+
+
 
 # Rule v2 command checks (rule c). Commands are judged by their first word; these lists and patterns are data.
 # Read-only first words of the contract; sed, awk, find and git have their own checks in is_read_only_command.
@@ -382,36 +631,43 @@ REDIRECT_WRITE_RE = re.compile(r"(?<!>)>{1,2}(?![>&])\s*(?!/dev/null(?:\s|$))\S"
 # shell syntax: each one becomes a single "_" before the redirection is looked for, so a quoted file name after
 # ">" still counts as a target.
 QUOTED_OR_ESCAPED_RE = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(?:^|(?<=\s))#[^\n]*""", re.DOTALL)
-# Bash commands that match the general classes (rule c, v2).
-DELETE_GENERAL_RE = re.compile(r"\b(?:rm|rmdir|unlink|shred)\b|\bgit\s+rm\b")
-FIND_WORD_RE = re.compile(r"\bfind\b")
-FIND_DELETE_TAIL_RE = re.compile(r"\s-delete\b")
-
-
-def has_find_delete(command):
-    """Whether the command has "find" followed on the same line by "-delete" (the whitespace before it may be the
-    line break). Only the first "find" of a line can start a match that a later one cannot, and the "-delete"
-    search is reused while it still lies ahead, so the scan is linear in the length of the command."""
-    position = 0
-    tail = None
-    while True:
-        word = FIND_WORD_RE.search(command, position)
-        if word is None:
-            return False
-        if tail is None or tail.start() < word.end():
-            tail = FIND_DELETE_TAIL_RE.search(command, word.end())
-            if tail is None:
-                return False
-        line_end = command.find("\n", word.end())
-        if line_end == -1 or tail.start() <= line_end:
-            return True
-        position = line_end + 1
+SED_I_RE = re.compile(r"-i(?!\w)")  # sed -i, sed -i.bak
+# Bash commands that match the general classes (rule c, v2): each pattern is matched against the text of one command
+# (command_text), so a command word in the arguments of another command (`echo "npm install x"`, `grep rm f`) is no command.
+DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "shred"))
 INSTALL_GENERAL_RE = re.compile(
-    r"\b(?:npm\s+(?:i|install|ci)|pnpm\s+(?:i|install|add)|yarn\s+add|pip3?\s+install"
+    r"(?:(?:python[\d.]*\s+-m|uv)\s+)?(?:npm\s+(?:i|install|ci)|pnpm\s+(?:i|install|add)|yarn\s+add|pip3?\s+install"
     r"|apt(?:-get)?\s+install|cargo\s+install|go\s+install|brew\s+install)\b")
-DEPLOY_GENERAL_RE = re.compile(
-    r"deploy|\bsystemctl\s+(?:enable|start)\b|\bdocker\s+(?:compose\s+)?up\b|\bkubectl\s+apply\b",
-    re.IGNORECASE)
+DEPLOY_COMMAND_RE = re.compile(r"(?:systemctl\s+(?:enable|start)|docker\s+(?:compose\s+)?up|kubectl\s+apply)\b", re.IGNORECASE)
+DEPLOY_WORD_RE = re.compile(r"deploy", re.IGNORECASE)
+
+
+def has_delete(command):
+    """Rule c, v2, class delete: a command that runs rm, rmdir, unlink or shred, git rm, or find with -delete."""
+    for item in shell_commands(command):
+        program = os.path.basename(item[0])
+        if (program in DELETE_PROGRAMS or (program == "find" and "-delete" in item[1:])
+                or (program == "git" and git_subcommand(item[1:]) == "rm")):
+            return True
+    return False
+
+
+def has_install(command):
+    """Rule c, v2, class install: a command that installs a package (the commands of INSTALL_GENERAL_RE)."""
+    return any(INSTALL_GENERAL_RE.match(command_text(item)) is not None for item in shell_commands(command))
+
+
+def has_deploy(command):
+    """Rule c, v2, class deploy: a command that is systemctl enable or start, docker (compose) up or kubectl apply, or
+    any command that has the word deploy in its name or arguments (`npm run deploy`, `./deploy.sh`) unless the command
+    only reads (`grep deploy README.md`, `echo deploy`: the tool's own read-only test of rule c)."""
+    for item in shell_commands(command):
+        text = command_text(item)
+        if DEPLOY_COMMAND_RE.match(text) is not None:
+            return True
+        if DEPLOY_WORD_RE.search(text) is not None and not is_read_only_command(" ".join(item)):
+            return True
+    return False
 
 # Target extraction: backtick text, absolute paths, file names with an extension.
 BACKTICK_RE = re.compile(r"`([^`\n]{1,300})`")
@@ -530,7 +786,7 @@ def call_matches(klass, targets, tool, tool_input):
     command = tool_input.get("command")
     if not isinstance(command, str):
         return False
-    if klass in ("edit", "delete") and DELETE_OR_MOVE_RE.search(command) is None:
+    if klass in ("edit", "delete") and not has_delete_or_move(command):
         return False
     return any(item in command for item in targets)
 
@@ -732,21 +988,6 @@ def match_candidates(session, boundaries, prohibitions):
     return found
 
 
-def git_subcommand(words):
-    """First git word that is not an option; the options of GIT_VALUE_OPTIONS take a value (rule c, v2)."""
-    ends = shell_word_ends(words)
-    index = 1
-    while index < len(words):
-        word = words[index]
-        if word in GIT_VALUE_OPTIONS:
-            index = ends[ends[index]]
-        elif word.startswith("-"):
-            index = ends[index]
-        else:
-            return word
-    return None
-
-
 def is_read_only_command(command):
     """Rule c, v2: True when a Bash command only reads state. Judged by its first word, after environment
     assignments and sudo; a write redirection to a file (outside quotes) makes any command state-changing."""
@@ -770,7 +1011,8 @@ def is_read_only_command(command):
     if first == "find":
         return not any(word in FIND_ACTION_OPTIONS for word in words)
     if first == "git":
-        return git_subcommand(words) in READ_ONLY_GIT_SUBCOMMANDS
+        rest = shell_words(" ".join(words[1:]))
+        return git_subcommand(rest[:rest.index(None)] if None in rest else rest) in READ_ONLY_GIT_SUBCOMMANDS
     return False
 
 
@@ -800,11 +1042,11 @@ def call_matches_v2(klass, targets, tool, tool_input):
     if tool != "Bash" or not isinstance(command, str):
         return False
     if klass == "delete":
-        return DELETE_GENERAL_RE.search(command) is not None or has_find_delete(command)
+        return has_delete(command)
     if klass == "install":
-        return INSTALL_GENERAL_RE.search(command) is not None
+        return has_install(command)
     if klass == "deploy":
-        return DEPLOY_GENERAL_RE.search(command) is not None
+        return has_deploy(command)
     return False
 
 

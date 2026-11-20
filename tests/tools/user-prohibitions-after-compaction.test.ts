@@ -796,6 +796,166 @@ describe('user prohibitions after compaction', () => {
     }
   });
 
+  it('a command word counts only where the shell runs it, not in the arguments of another command', () => {
+    const cases: Array<[string, string, boolean]> = [
+      // The command name in quoted or plain text of another command runs nothing.
+      ['commit', 'echo "git commit"', false], ['commit', "rg 'git commit' README.md", false], ['commit', 'echo git commit', false],
+      ['commit', 'grep -n git commit.txt', false], ['push', 'echo "git push origin main"', false], ['merge', "echo 'git merge x'", false],
+      ['commit', 'man git commit', false], ['commit', 'ls # git commit', false], ['commit', 'ls; # git commit; git commit', false],
+      ['commit', 'cat > notes.sh <<EOF\ngit commit -m x\nEOF', false], ['commit', 'sh -c \'echo "git commit"\'', false],
+      ['restart', 'echo "systemctl restart web"', false], ['restart', 'grep kill notes.txt', false], ['restart', 'echo kill', false],
+      ['restart', 'docker run --rm img', false], ['restart', "rg 'docker stop' README.md", false],
+      // The command word, first or after an operator, a newline, a group, a substitution or a here-document line.
+      ['commit', 'git commit -m x', true], ['commit', 'cd /r && git commit -m x', true], ['commit', 'ls || git commit', true],
+      ['commit', 'ls | git commit', true], ['commit', 'ls\ngit commit', true], ['commit', 'ls & git commit', true],
+      ['commit', '(git commit)', true], ['commit', 'x=$(git commit -m y)', true], ['commit', 'echo `git commit`', true],
+      ['commit', 'git commit -F - <<EOF\nmessage\nEOF', true], ['commit', 'cat <<EOF > f\nx\nEOF\ngit commit', true],
+      ['commit', '/usr/bin/git commit', true], ['commit', 'if true; then git commit; fi', true],
+      ['commit', 'for f in a; do git commit; done', true], ['commit', '{ git commit; }', true], ['commit', '! git commit', true],
+      // After launch wrappers, assignments and positional words.
+      ['commit', 'sudo git commit', true], ['commit', 'sudo -u root git commit', true], ['commit', 'doas git commit', true],
+      ['commit', 'env FOO=1 git commit', true], ['commit', 'env -u FOO git commit', true], ['commit', 'FOO=1 git commit', true],
+      ['commit', 'command git commit', true], ['commit', 'nohup git commit &', true], ['commit', 'exec git commit', true],
+      ['commit', 'time git commit', true], ['commit', 'time -p git commit', true], ['commit', 'nice -n 5 git commit', true],
+      ['push', 'timeout 30 git push origin main', true], ['push', 'timeout -s KILL 30 git push', true],
+      ['commit', 'echo x | xargs git commit', true], ['commit', 'echo x | xargs -n 1 -I {} git commit -m {}', true],
+      ['commit', 'sudo env FOO=1 nohup git commit', true], ['restart', 'sudo kill -9 12', true], ['restart', 'xargs kill', true],
+      ['restart', "find . -name x -exec git commit -m y {} \\;", false], ['commit', "find . -exec git commit {} \\;", true],
+      // A wrapper word alone, or a wrapper before another word, runs no git.
+      ['commit', 'sudo', false], ['commit', 'timeout 5', false], ['commit', 'sudo echo git commit', false],
+      ['commit', 'xargs echo git commit', false], ['commit', 'env FOO=git echo commit', false],
+      // Nested strings: a shell or su with -c, and ssh (a prohibition covers a remote command too).
+      ['commit', 'bash -c "git commit -m x"', true], ['commit', "sh -c 'git commit'", true], ['commit', "bash -lc 'cd /r && git commit'", true],
+      ['commit', "sudo sh -c 'git commit'", true], ['commit', "su -c 'git commit' root", true], ['commit', "su root -c 'git commit'", true],
+      ['commit', "ssh host 'git commit -m x'", true], ['commit', "ssh -p 22 -i key host 'cd /r && git commit'", true],
+      ['commit', 'ssh host git commit', true], ['commit', "ssh -c aes128-ctr host 'git commit'", true], ['commit', 'ssh -c git host', false],
+      ['commit', 'ssh host', false], ['restart', "ssh host 'systemctl restart web'", true], ['commit', "bash script.sh -c 'git commit'", false],
+      ['commit', "echo bash -c 'git commit'", false], ['commit', 'sh -c "sh -c \\"git commit\\""', true],
+      ['commit', 'sh -c "sh -c \\"sh -c \'git commit\'\\""', false], // a third level is not read
+    ];
+    const result = pyEval(
+      '[module.call_matches(klass, [], "Bash", {"command": command}) for klass, command in argument]', cases.map(([k, c]) => [k, c]),
+    );
+    const wrong = cases.filter((item, index) => result[index] !== item[2]).map((item) => item[1]);
+    expect(wrong).toEqual([]);
+  });
+
+  it('the other command classes read commands the same way: delete, install, deploy and the target rules', () => {
+    const general: Array<[string, string, boolean]> = [
+      ['delete', 'echo "rm x"', false], ['delete', 'grep rm notes.txt', false], ['delete', 'docker run --rm img', false],
+      ['delete', 'echo find . -delete', false], ['delete', "rg 'git rm' README.md", false],
+      ['delete', 'rm -rf build', true], ['delete', 'ls && rmdir d', true], ['delete', 'sudo unlink f', true], ['delete', 'find . -name x -delete', true],
+      ['delete', 'git rm f', true], ['delete', 'git -C /r rm f', true], ['delete', "find . -exec rm {} \\;", true], ['delete', 'xargs shred', true],
+      ['delete', "bash -c 'rm x'", true],
+      ['install', 'echo "npm install x"', false], ['install', "grep 'npm install' README.md", false], ['install', 'cat pip install.txt', false],
+      ['install', 'npm install left-pad', true], ['install', 'npm i x', true], ['install', 'cd app && pnpm add x', true], ['install', 'sudo apt-get install x', true],
+      ['install', 'pip3 install x', true], ['install', 'python -m pip install x', true], ['install', 'python3.12 -m pip install x', true],
+      ['install', 'uv pip install x', true], ['install', 'yarn add x', true], ['install', 'cargo install x', true], ['install', 'brew install x', true],
+      ['install', 'go install x', true], ['install', "ssh host 'npm ci'", true], ['install', 'npm run install-docs', false],
+      ['deploy', 'grep deploy README.md', false], ['deploy', 'echo deploy', false], ['deploy', 'cat deploy.sh', false],
+      ['deploy', 'git log --grep deploy', false], ['deploy', "echo 'kubectl apply'", false], ['deploy', 'rg "docker compose up" docs', false],
+      ['deploy', 'npm run deploy', true], ['deploy', 'make deploy', true], ['deploy', './deploy.sh', true], ['deploy', 'bash deploy.sh', true],
+      ['deploy', 'kubectl apply -f x.yaml', true], ['deploy', 'systemctl start web', true], ['deploy', 'systemctl enable web', true],
+      ['deploy', 'docker compose up -d', true], ['deploy', 'docker up', true], ['deploy', 'sudo systemctl start web', true],
+    ];
+    const result = pyEval(
+      '[module.call_matches_v2(klass, [], "Bash", {"command": command}) for klass, command in argument]', general.map(([k, c]) => [k, c]),
+    );
+    expect(general.filter((item, index) => result[index] !== item[2]).map((item) => item[1])).toEqual([]);
+    // With targets, a Bash command still has to name the target, and now also run rm, mv or sed -i.
+    const targeted: Array<[string, string, boolean]> = [
+      ['delete', 'rm src/a.py', true], ['edit', 'mv src/a.py src/b.py', true], ['edit', 'sed -i s/a/b/ src/a.py', true],
+      ['delete', 'sudo rm src/a.py', true], ['edit', "find . -exec mv src/a.py x \\;", true], ['edit', 'cd x && sed -i.bak s/a/b/ src/a.py', true],
+      ['delete', 'grep mv src/a.py', false], ['edit', "rg 'sed -i' src/a.py", false], ['delete', 'echo rm src/a.py', false],
+      ['edit', 'echo "mv a b" src/a.py', false], ['delete', 'ls src/a.py', false], ['edit', 'rm', false], ['edit', 'sed -n 1p src/a.py', false],
+      ['run', 'cat src/a.py', true], ['install', 'echo src/a.py', true],
+    ];
+    const hit = pyEval(
+      '[module.call_matches(klass, ["src/a.py"], "Bash", {"command": command}) for klass, command in argument]', targeted.map(([k, c]) => [k, c]),
+    );
+    expect(targeted.filter((item, index) => hit[index] !== item[2]).map((item) => item[1])).toEqual([]);
+  });
+
+  it('commands that only mention a command name give no candidate; a real command does', () => {
+    const calls = [
+      'echo "git commit"', "rg 'git commit' README.md", 'echo git push', 'grep -n kill log.txt', "echo 'rm -rf x'", 'echo "npm install x"',
+      'git commit -m x', 'timeout 30 git push origin main', 'sudo systemctl restart web', 'cd app && npm install x', 'rm -rf build',
+    ];
+    const rows = (text: string) => [user(1, text), host(2), ...calls.map((command, index) => call(3 + index, 'Bash', { command }, `m${index}`))];
+    const lines = (name: string, text: string, rule: number) =>
+      run(name, { [`p/${name}.jsonl`]: rows(text) }, { rule }).locators.flatMap((item) => item.call_lines ?? [item.call_line]);
+    // Rule 1 and 3 by command class: the call lines are 3 + the index in `calls`.
+    expect(lines('mention-commit', "Don't commit anything", 1)).toEqual([9]);
+    expect(lines('mention-push', "Don't push anything", 1)).toEqual([10]);
+    expect(lines('mention-restart', "Don't restart anything", 3)).toEqual([11]);
+    expect(lines('mention-install', "Don't install anything", 3)).toEqual([12]);
+    expect(lines('mention-delete', "Don't delete anything", 3)).toEqual([13]);
+  });
+
+  it('shell words and here-documents: quotes, comments and bodies', () => {
+    const words = pyEval('[module.shell_words(text) for text in argument]', [
+      'git commit -m "a b"', "echo 'x y' z\\ w", 'a;b|c&&d', 'ls # c\nnpm test', 'echo a#b $# ${#x}', 'cat <<EOF > f\nx\nEOF', 'echo x 2>&1',
+      '(a) `b`', 'x=$(c d)', 'echo ""', 'a \\\nb', "echo '",
+    ]);
+    expect(words).toEqual([
+      ['git', 'commit', '-m', 'a b'], ['echo', 'x y', 'z w'], ['a', null, 'b', null, 'c', null, 'd'], ['ls', null, 'npm', 'test'],
+      ['echo', 'a#b', '$#', '${#x}'], ['cat', null, 'EOF', null, 'f', null, 'x', null, 'EOF'], ['echo', 'x', null, '1'],
+      [null, 'a', null, 'b', null], ['x=$', null, 'c', 'd', null], ['echo', ''], ['a', 'b'], ['echo', ''],
+    ]);
+    // A here-document body is cut and its operator line stays; a here-string and an operator with no terminator line are left alone.
+    const cut = pyEval('[module.without_heredoc_bodies(text) for text in argument]', [
+      'cat <<EOF > f\nbody\nEOF\nnext', 'cat <<-EOF\n\tx\n\tEOF', 'cat <<A; cat <<B\nx\nA\ny\nB\nz', 'cat <<< x', 'echo $((1<<3))', 'cat <<EOF\nno end',
+    ]);
+    expect(cut).toEqual(['cat << EOF  > f\nnext', 'cat << EOF ', 'cat << A ; cat << B \nz', 'cat <<< x', 'echo $((1<<3))', 'cat <<EOF\nno end']);
+  });
+
+  it('shell reading is linear in the length of the command and keeps its result', () => {
+    const expression = `{
+      "t0": __import__("time").perf_counter(),
+      "answers": [
+        module.call_matches("commit", [], "Bash", {"command": command})
+        for command in [
+          "sudo " * 20000 + "git commit",
+          "xargs -n 1 " * 8000 + "git commit",
+          "timeout 5 " * 8000 + "git commit",
+          "FOO=1 " * 8000 + "git commit",
+          "env -u X " * 8000 + "git commit",
+          "if " * 20000 + "git commit",
+          "find -exec " * 8000 + "git commit ;",
+          "# " * 20000 + "\\ngit commit",
+          chr(96) * 40000 + "git commit",
+          "a;" * 20000 + "git commit",
+          "(" * 40000 + "git commit",
+          "echo " + "'a b' " * 8000 + "git commit",
+          "echo " + '"a b" ' * 8000 + "; git commit",
+          "cat <<EOF\\n" * 4000 + "git commit",
+          "".join("cat <<t%d\\nx\\nt%d\\n" % (n, n) for n in range(3000)) + "git commit",
+          "env " * 8000 + "bash -c 'git commit'",
+          "bash -c '" + "x; " * 13000 + "git commit'",
+          "ssh h " * 8000 + "git commit",
+          "ssh " + "-p 1 " * 8000 + "h git commit",
+          "\\\\" * 40000 + "git commit",
+          '"' * 40001 + "git commit",
+        ]
+      ],
+      "general": [
+        module.call_matches_v2(klass, [], "Bash", {"command": command})
+        for klass, command in [("deploy", "echo " * 20000 + "deploy"), ("deploy", "npm run " * 8000 + "deploy"), ("install", "echo " * 20000 + "npm install x"),
+                               ("delete", "xargs " * 20000 + "rm x"), ("restart", "sudo " * 20000 + "kill 1"), ("delete", "find " * 8000 + "-delete"),
+                               ("install", "npm " * 20000 + "install x")]
+      ],
+      "t1": __import__("time").perf_counter(),
+    }`;
+    const result = pyEval(expression, null);
+    expect(result.t1 - result.t0).toBeLessThan(4);
+    // Wrappers, assignments, reserved words, unquoted separators and a nested string reach the command; words among the
+    // arguments of echo, a third level of ssh, a glued run of backslashes and an open quote do not make one.
+    expect(result.answers).toEqual([
+      true, true, true, true, true, true, true, true, true, true, true, false, true, true, true, true, true, false, true, false, false,
+    ]);
+    expect(result.general).toEqual([false, true, false, true, true, true, false]);
+  });
+
   it('long runs of git options and of find words match in linear time and keep their result', () => {
     const expression = `{
       "t0": __import__("time").perf_counter(),
@@ -834,10 +994,12 @@ describe('user prohibitions after compaction', () => {
     // The earlier patterns needed minutes for these inputs; the bound is generous so a loaded host stays green.
     // The clock runs inside the interpreter, so its start-up and the compile of the module are not timed.
     expect(result.t1 - result.t0).toBeLessThan(2);
-    // The quoted-value runs (9 to 11) hold paired quotes, so an earlier `git` reaches the final `commit`.
+    // The quoted-value runs (9 to 11) hold paired quotes: only the first `git` is a command, and its subcommand is the
+    // next `git` word after the first value (the later `git` words are arguments, as in the shell), so none is a commit.
     // `git -C commit` has no subcommand: "commit" is the value of -C (the earlier pattern read it as the subcommand).
-    expect(result.answers).toEqual([true, false, false, false, false, true, true, false, false, true, true, true, false, false, false]);
+    expect(result.answers).toEqual([true, false, false, false, false, true, true, false, false, false, false, false, false, false, false]);
     expect(result.redirects).toEqual([true, true, true, true, true, true, false, false, true, true]);
-    expect(result.delete).toEqual([false, false, false, true, true, false]);
+    // A new line starts a new command, so `-delete` on the line after `find x` is no find option.
+    expect(result.delete).toEqual([false, false, false, true, false, false]);
   });
 });
