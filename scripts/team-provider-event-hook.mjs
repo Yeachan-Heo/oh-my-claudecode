@@ -14,14 +14,17 @@
 // builds the settings), so a new event needs no change here.
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 
 try {
   const at = Date.now();
   const event = process.argv[2] ?? '';
   const attempt = process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID ?? '';
-  const stateRoot = process.env.OMC_TEAM_STATE_ROOT ?? '';
+  const rawRoot = process.env.OMC_TEAM_STATE_ROOT ?? '';
+  // Lexical only (not realpath, which would hide a symlink): lstat of a root
+  // ending in a slash would follow a symlinked root.
+  const stateRoot = rawRoot && resolve(rawRoot);
   // OMC_TEAM_WORKER is `<team>/<worker>`.
   const worker = (process.env.OMC_TEAM_WORKER ?? '').split('/').pop() ?? '';
   if (process.platform !== 'win32' && /^[A-Za-z]+$/.test(event) && attempt && stateRoot && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(worker) && !worker.includes('..')) {
