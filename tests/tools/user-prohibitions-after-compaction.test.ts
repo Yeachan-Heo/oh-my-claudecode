@@ -692,6 +692,10 @@ describe('user prohibitions after compaction', () => {
       'git -C /srv/r status': true, 'git commit -m x': false, 'sed -n 1p f': true, 'sed -i s/a/b/ f': false,
       'find . -name x': true, 'find . -delete': false, "awk '{print}' f": true, "awk '{print}' f > g": false,
       'FOO=1 sudo ls': true, "python3 -c 'print(1)'": false, 'tee out.txt': false,
+      // Launch wrappers and their options are skipped, also an option with a value (`sudo -u root`) and one outside the table.
+      'sudo -u root cat f': true, 'sudo -E ls': true, 'sudo -n cat f': true, 'sudo -- cat f': true, 'nohup cat f': true, 'time -p ls': true, 'timeout 5 ls': true,
+      'timeout -s KILL 5 ls': true, 'nice -n 5 cat f': true, 'env -i A=1 ls': true, 'env -u A cat f': true, 'command -p ls': true, 'exec -a x ls': true,
+      'exec -a x tee f': false, 'sudo -u root rm x': false, 'sudo -u root git commit -m x': false, 'timeout 5 tee f': false, 'sudo': false, 'sudo -u root': false, 'nohup': false,
       // A compound command is judged by its first word (a documented limit).
       'git status && rm x': true,
     };
@@ -894,7 +898,7 @@ describe('user prohibitions after compaction', () => {
       // After launch wrappers, assignments and positional words.
       ['commit', 'sudo git commit', true], ['commit', 'sudo -u root git commit', true], ['commit', 'doas git commit', true],
       ['commit', 'env FOO=1 git commit', true], ['commit', 'env -u FOO git commit', true], ['commit', 'FOO=1 git commit', true],
-      ['commit', 'command git commit', true], ['commit', 'nohup git commit &', true], ['commit', 'exec git commit', true],
+      ['commit', 'command git commit', true], ['commit', 'nohup git commit &', true], ['commit', 'exec git commit', true], ['commit', 'exec -a x git commit', true],
       ['commit', 'time git commit', true], ['commit', 'time -p git commit', true], ['commit', 'nice -n 5 git commit', true],
       ['push', 'timeout 30 git push origin main', true], ['push', 'timeout -s KILL 30 git push', true],
       ['commit', 'echo x | xargs git commit', true], ['commit', 'echo x | xargs -n 1 -I {} git commit -m {}', true],

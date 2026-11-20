@@ -107,7 +107,7 @@ c. Candidates for general prohibitions (no targets) and for class other. Matchin
      word deploy in the name or the arguments of a command that is not read-only (npm run deploy, ./deploy.sh; not
      grep deploy README.md or echo deploy);
    - run and other: every call that changes state: an edit call, or a Bash call whose first command word
-     (after environment assignments and sudo) is not in READ_ONLY_COMMANDS. A write redirection to a file makes
+     (after environment assignments and launch wrappers) is not in READ_ONLY_COMMANDS. A write redirection to a file makes
      any Bash call state-changing; a > inside quotes, after a backslash or in a # comment is text (amended after
      review, for every rule version: a quoted > used to count as a redirection, and >>/dev/null as a write). Class other is matched this way whether or not the prohibition names targets.
      READ_ONLY_COMMANDS holds ls, cat, head, tail, grep, rg, wc, stat, echo, pwd, which, date, file, printf, du,
@@ -328,7 +328,7 @@ LAUNCH_WRAPPERS = {
     "sudo": (frozenset(("-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R")), 0),
     "doas": (frozenset(("-u", "-C")), 0),
     "env": (frozenset(("-u", "-C", "-S", "--unset", "--chdir")), 0),
-    "command": (frozenset(), 0), "nohup": (frozenset(), 0), "exec": (frozenset(), 0),
+    "command": (frozenset(), 0), "nohup": (frozenset(), 0), "exec": (frozenset(("-a",)), 0),
     "time": (frozenset(("-f", "-o", "--format", "--output")), 0),
     "nice": (frozenset(("-n", "--adjustment")), 0),
     "timeout": (frozenset(("-s", "-k", "--signal", "--kill-after")), 1),
@@ -1180,15 +1180,15 @@ def skip_prefix(text):
 
 def is_read_only_command(command):
     """Rule c, v2: True when a Bash command only reads state. Judged by its first word, after the leading environment
-    assignments and redirections and after sudo; a write redirection to a file (outside quotes) makes any command
+    assignments and redirections and after launch wrappers; a write redirection to a file (outside quotes) makes any command
     state-changing."""
     if REDIRECT_WRITE_RE.search(QUOTED_OR_ESCAPED_RE.sub("_", command)):
         return False
     words = skip_prefix(command).split()
-    if words and words[0] == "sudo":
-        words.pop(0)
-        while words and words[0].startswith("-"):
-            words.pop(0)
+    # Launch wrappers and their options (sudo -u root, nohup, nice -n 5, timeout 5, env -i ...) are skipped by the same rule that
+    # finds a command: it reads through an option that is not in its table, so a read-only command behind `sudo -n` still counts
+    # as read-only (the direction of this tool is to count less, see the notes of the report).
+    words = words[program_index(words, 0):]
     if not words:
         return False
     first = os.path.basename(words[0])
@@ -1383,7 +1383,7 @@ LIMITS = [
 
 LIMITS_V2 = [
     "A candidate is a call that matches a prohibition after a boundary, not proof of a breach; the user's review decides.",
-    "A Bash command is judged by its first word (after environment variables and sudo); a compound command such as `ls && rm x` is treated as read-only, so it is not counted (undercount).",
+    "A Bash command is judged by its first word (after environment variables and launch wrappers); a compound command such as `ls && rm x` is treated as read-only, so it is not counted (undercount).",
     "Under rule v2 `git branch` is read-only, so `git branch -D` gives no candidate (undercount).",
     "A write redirection to a file (`>`, `>>`, not to /dev/null, not inside quotes or comments) makes any command state-changing; this extends the awk rule of the contract.",
     "The revocation check of rule v2 looks only in the same message; a bare permission word can match a question and revoke a prohibition that was not lifted.",
