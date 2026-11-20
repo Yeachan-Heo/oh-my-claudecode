@@ -626,6 +626,43 @@ it('here-documents: the redirections on the operator line count, the body text d
   assert.equal(edits('cat <<EOF > README.md'), false);
 });
 
+it('a here-document operator inside quotes or a comment opens no body', () => {
+  // The shell runs `tee` here: the operator is text, so the line that starts with the tag is no terminator.
+  for (const command of [
+    'echo "<<EOF"\ntee src/a.ts\nEOF', "echo '<<EOF'\ntee src/a.ts\nEOF", 'echo hi # <<EOF\ntee src/a.ts\nEOF', 'echo "it\'s <<EOF"\ntee src/a.ts\nEOF',
+    "echo 'say \"hi\" <<EOF'\ntee src/a.ts\nEOF", 'echo "<<-EOF"\ntee src/a.ts\nEOF',
+  ]) {
+    assert.equal(isMutation('Bash', { command }), true, JSON.stringify(command));
+  }
+  assert.equal(classifyCommand('echo "<<EOF"\nnpm test\nEOF').isCheck, true);
+  // A real operator is still read: in the commit message idiom (inside `"$(...)"`) and after a body with an apostrophe in it.
+  assert.equal(isMutation('Bash', { command: 'git commit -m "$(cat <<\'EOF\'\ntee src/a.ts\nEOF\n)"' }), false);
+  assert.equal(isMutation('Bash', { command: "cat <<EOF\nit's\ntee src/a.ts\nEOF\ncat <<EOF\nx\nEOF" }), false);
+  assert.equal(isMutation('Bash', { command: 'cat <<EOF\ntee src/a.ts\nEOF' }), false);
+});
+
+it('the body of a command substitution is read as a command of its own, eight levels deep', () => {
+  const nest = (levels: number) => Array.from({ length: levels }).reduce<string>((inner) => `echo $(${inner})`, 'tee src/a.ts');
+  assert.equal(isMutation('Bash', { command: nest(3) }), true);
+  assert.equal(isMutation('Bash', { command: nest(8) }), true);
+  assert.equal(isMutation('Bash', { command: nest(9) }), false);
+  // The levels of nested shell strings are counted apart: a substitution inside `sh -c` and a `sh -c` inside a substitution are read.
+  assert.equal(isMutation('Bash', { command: "sh -c 'echo $(tee src/a.ts)'" }), true);
+  assert.equal(isMutation('Bash', { command: 'echo $(sh -c "tee src/a.ts")' }), true);
+  assert.equal(isMutation('Bash', { command: `sh -c "sh -c 'sh -c \\"tee src/a.ts\\"'"` }), false);
+});
+
+it('an apostrophe or a quote inside a quoted string does not hide a substitution that follows', () => {
+  for (const command of [
+    `git commit -m "don't" && A=$(git rev-parse HEAD) npm test`, `git commit -m "wip" && A=$(git rev-parse HEAD) npm test`,
+    `echo 'say "hi"' && A=$(git rev-parse HEAD) npm test`, `echo "it's" "o'clock" && A=$(date) npm test`,
+  ]) {
+    const got = classifyCommand(command);
+    assert.equal(got.isCheck, true, command);
+    assert.equal(got.narrowed, false, command);
+  }
+});
+
 it('here-documents: the body is input, so a runner name or a summary line in it is no check', () => {
   const isCheck = (command: string) => classifyCommand(command).isCheck;
   // The body of a printing command, of a shell reading its input and in a command substitution, with every delimiter form.

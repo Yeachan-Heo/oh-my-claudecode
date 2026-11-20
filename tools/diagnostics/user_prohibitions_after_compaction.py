@@ -317,6 +317,7 @@ RESTART_RE = re.compile(r"(?:systemctl\s+(?:restart|stop)|docker\s+(?:restart|st
 # and the positional words they take before it; `find -exec` starts a command; the string of `sh -c`, `su -c` and
 # `ssh host '...'` is read again, two levels deep.
 NESTED_MAX_DEPTH = 2
+SUBSTITUTION_MAX_DEPTH = 8  # command substitutions inside command substitutions, counted apart from the nested shell strings
 NESTED_MAX_LENGTH = 100000
 SHELLS = frozenset(("sh", "bash", "zsh", "dash", "ksh"))
 SHELL_VALUE_OPTIONS = frozenset(("-o", "+o", "-O", "+O", "--rcfile", "--init-file"))
@@ -571,18 +572,78 @@ def shell_words(text):
     return out
 
 
+class QuoteScan:
+    """Reads shell text forward and tells whether a position holds text, not shell: inside single quotes, inside double quotes
+    (a `$(` there opens a command again, so `"$(cat <<EOF ...)"` keeps its here-document) or in a `#` comment. Positions come in
+    increasing order, and the ranges given to skip() (cut here-document bodies) are not read, so a quote in a body opens no string."""
+
+    def __init__(self, text):
+        self.text = text
+        self.at = 0
+        self.frames = []  # "'", '"' or "(" for each open construct
+        self.comment_end = 0
+        self.jumps = []  # (start, end) ranges that are not read
+
+    def skip(self, start, end):
+        self.jumps.append((start, end))
+
+    def inert(self, to):
+        text = self.text
+        frames = self.frames
+        if to < self.comment_end:
+            return True
+        while self.at < to:
+            if self.jumps and self.at >= self.jumps[0][0]:
+                self.at = max(self.at, self.jumps.pop(0)[1])
+                continue
+            char = text[self.at]
+            top = frames[-1] if frames else ""
+            if top == "'":
+                if char == "'":
+                    frames.pop()
+            elif top == '"':
+                if char == "\\":
+                    self.at += 1
+                elif char == '"':
+                    frames.pop()
+                elif char == "$" and text[self.at + 1:self.at + 2] == "(":
+                    frames.append("(")
+                    self.at += 1
+            elif char == "\\":
+                self.at += 1
+            elif char in "'\"":
+                frames.append(char)
+            elif char == "(":
+                frames.append("(")
+            elif char == ")":
+                if frames:
+                    frames.pop()
+            elif char == "#" and (self.at == 0 or text[self.at - 1].isspace() or text[self.at - 1] in ";&|("):
+                newline = text.find("\n", self.at)
+                self.comment_end = len(text) if newline == -1 else newline
+                self.at = self.comment_end
+                if to < self.comment_end:
+                    return True
+                continue
+            self.at += 1
+        return bool(frames) and frames[-1] in ("'", '"')
+
+
 def without_heredoc_bodies(text):
     """Cut here-document bodies and their terminator lines out of shell text, so body text is never read as shell.
     The rest of the line with the "<<TAG" operator stays (`cat <<EOF > f`); several operators on one line take their
     bodies in order; an operator with no terminator line is left alone, and "<<<" is a here-string. One forward pass
     over the operators; a tag with no terminator line is searched for once."""
     edits = []  # (start, end, replacement), sorted by start before they are applied
+    quotes = QuoteScan(text)
     missing = set()  # tags with no terminator line after the position being read
     line_end = -1  # the newline that ends the line of the operators being read
     resume = -1  # the newline before the next body of that line
     for match in HEREDOC_RE.finditer(text):
         if line_end < match.start() < resume:
             continue  # inside a body that is already cut
+        if quotes.inert(match.start()):
+            continue  # `echo "<<EOF"` and `# <<EOF` hold text, not an operator
         if match.start() > line_end:
             line_end = text.find("\n", match.end())
             if line_end == -1:
@@ -597,6 +658,7 @@ def without_heredoc_bodies(text):
             continue
         edits.append((match.start(), match.end(), "<< " + tag + " "))
         edits.append((resume, found.end(), ""))
+        quotes.skip(resume, found.end())
         resume = found.end()
     out = []
     position = 0
@@ -781,8 +843,9 @@ def nested_command_strings(words, at, end):
     return found
 
 
-def read_commands(text, depth):
-    """The commands of a shell text, each as the tuple of its words (the program first), nested strings included."""
+def read_commands(text, depth, substitutions=0):
+    """The commands of a shell text, each as the tuple of its words (the program first), nested strings and the bodies of
+    command substitutions included."""
     text, bodies = split_substitutions(without_heredoc_bodies(text))
     words = shell_words(text)
     found = []
@@ -791,11 +854,11 @@ def read_commands(text, depth):
         if depth < NESTED_MAX_DEPTH:
             for nested in nested_command_strings(words, at, end):
                 if len(nested) <= NESTED_MAX_LENGTH:
-                    found.extend(read_commands(nested, depth + 1))
-    if depth < NESTED_MAX_DEPTH:
+                    found.extend(read_commands(nested, depth + 1, substitutions))
+    if substitutions < SUBSTITUTION_MAX_DEPTH:
         for body in bodies:
             if len(body) <= NESTED_MAX_LENGTH:
-                found.extend(read_commands(body, depth + 1))
+                found.extend(read_commands(body, depth, substitutions + 1))
     return found
 
 

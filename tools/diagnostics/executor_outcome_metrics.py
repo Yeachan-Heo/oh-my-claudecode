@@ -111,6 +111,9 @@ for _line in LAUNCH_TABLE_TEXT.split("\n"):
 DURATION_RE = re.compile(r"\+?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?)[smhd]?\Z")
 NUMBER_OPTION_RE = re.compile(r"--?[0-9]+\Z")
 MAX_WRAPPERS = 8
+SHLEX_MAX_LENGTH = 100000  # only a command longer than this is checked for a very long word
+SHLEX_MAX_WORD = 50000  # a command with a longer word is split on whitespace and operators, without reading quotes
+WORD_RE = re.compile(r"""(?:[^\s'"\\]|\\.|'[^']*'|"(?:[^"\\]|\\.)*")+""", re.DOTALL)
 SEGMENT_OPERATORS = ("&&", "||", ";", "|", "&")
 AGENT_FILE = re.compile(r"^agent-(.+)\.jsonl$")
 SUBAGENT_DIR = "subagents"
@@ -544,7 +547,64 @@ def strip_comments(line):
     return line
 
 
-HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z0-9_][A-Za-z0-9_-]*)\1")  # not a here-string (<<<)
+HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)\s*(['\"]?)([A-Za-z0-9_][A-Za-z0-9_-]*)\2")  # not a here-string (<<<)
+
+
+class QuoteScan:
+    """Reads shell text forward and tells whether a position holds text, not shell: inside single quotes, inside double quotes
+    (a `$(` there opens a command again, so `"$(cat <<EOF ...)"` keeps its here-document) or in a `#` comment. Positions come in
+    increasing order, and the ranges given to skip() (cut here-document bodies) are not read, so a quote in a body opens no string."""
+
+    def __init__(self, text):
+        self.text = text
+        self.at = 0
+        self.frames = []  # "'", '"' or "(" for each open construct
+        self.comment_end = 0
+        self.jumps = []  # (start, end) ranges that are not read
+
+    def skip(self, start, end):
+        self.jumps.append((start, end))
+
+    def inert(self, to):
+        text = self.text
+        frames = self.frames
+        if to < self.comment_end:
+            return True
+        while self.at < to:
+            if self.jumps and self.at >= self.jumps[0][0]:
+                self.at = max(self.at, self.jumps.pop(0)[1])
+                continue
+            char = text[self.at]
+            top = frames[-1] if frames else ""
+            if top == "'":
+                if char == "'":
+                    frames.pop()
+            elif top == '"':
+                if char == "\\":
+                    self.at += 1
+                elif char == '"':
+                    frames.pop()
+                elif char == "$" and text[self.at + 1:self.at + 2] == "(":
+                    frames.append("(")
+                    self.at += 1
+            elif char == "\\":
+                self.at += 1
+            elif char in "'\"":
+                frames.append(char)
+            elif char == "(":
+                frames.append("(")
+            elif char == ")":
+                if frames:
+                    frames.pop()
+            elif char == "#" and (self.at == 0 or text[self.at - 1].isspace() or text[self.at - 1] in ";&|("):
+                newline = text.find("\n", self.at)
+                self.comment_end = len(text) if newline == -1 else newline
+                self.at = self.comment_end
+                if to < self.comment_end:
+                    return True
+                continue
+            self.at += 1
+        return bool(frames) and frames[-1] in ("'", '"')
 
 
 def drop_heredocs(command):
@@ -560,13 +620,23 @@ def drop_heredocs(command):
             if comparable == delimiter:
                 expected.popleft()
             continue
+        # The operators are found from the end of the previous one, and the line is joined once: no operator costs a pass over the line.
+        pieces = []
+        position = 0
+        search = 0
+        quotes = QuoteScan(line)
         while True:
-            match = HEREDOC.search(line)
+            match = HEREDOC.search(line, search)
             if not match:
                 break
-            expected.append((match.group(2), match.group(1) == "-"))
-            line = line[:match.start()] + line[match.end():]
-        kept.append(line)
+            search = match.end()
+            if quotes.inert(match.start()):
+                continue  # `echo "<<EOF"` and `# <<EOF` hold text, not an operator
+            expected.append((match.group(3), match.group(1) == "-"))
+            pieces.append(line[position:match.start()])
+            position = match.end()
+        pieces.append(line[position:])
+        kept.append("".join(pieces))
     return "\n".join(kept)
 
 
@@ -647,6 +717,11 @@ def mask_substitutions(text):
     return "".join(out)
 
 
+def longest_word(text):
+    """The length of the longest shell word of the text (a quoted string is part of its word), read in one pass."""
+    return max((match.end() - match.start() for match in WORD_RE.finditer(text)), default=0)
+
+
 def command_segments(command):
     """Segments of a Bash command as word lists, split at && || ; | & and new lines.
     Comments and heredoc bodies are removed first. shlex is used; on a shlex error a plain split is used."""
@@ -654,6 +729,8 @@ def command_segments(command):
     text = mask_substitutions(drop_heredocs(text))
     text = text.replace("\n", ";")
     try:
+        if len(text) > SHLEX_MAX_LENGTH and longest_word(text) > SHLEX_MAX_WORD:
+            raise ValueError("word too long for shlex")  # shlex is quadratic in the length of a word: such a command is split plainly
         lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         lexer.commenters = ""

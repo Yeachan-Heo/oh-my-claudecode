@@ -1002,6 +1002,26 @@ describe('user prohibitions after compaction', () => {
     expect(cut).toEqual(['cat << EOF  > f\nnext', 'cat << EOF ', 'cat << A ; cat << B \nz', 'cat <<< x', 'echo $((1<<3))', 'cat <<EOF\nno end']);
   });
 
+  it('a here-document operator inside quotes or a comment opens no body, and a real one still does', () => {
+    const cut = pyEval('[module.without_heredoc_bodies(text) for text in argument]', [
+      'echo "<<EOF"\ngit commit -m x\nEOF', "echo '<<EOF'\ngit commit -m x\nEOF", 'echo hi # <<EOF\ngit commit -m x\nEOF', 'echo "it\'s <<EOF"\ngit commit\nEOF',
+      'git commit -m "$(cat <<\'EOF\'\nit\'s\nEOF\n)"', "cat <<A\nit's\nA\ncat <<B\nx\nB\nz",
+    ]);
+    expect(cut).toEqual([
+      'echo "<<EOF"\ngit commit -m x\nEOF', "echo '<<EOF'\ngit commit -m x\nEOF", 'echo hi # <<EOF\ngit commit -m x\nEOF', 'echo "it\'s <<EOF"\ngit commit\nEOF',
+      'git commit -m "$(cat << EOF \n)"', 'cat << A \ncat << B \nz',
+    ]);
+    expect(pyEval('[module.command_matches("commit", text) for text in argument]', ['echo "<<EOF"\ngit commit -m x\nEOF', 'cat <<EOF\ngit commit -m x\nEOF'])).toEqual([true, false]);
+  });
+
+  it('the body of a command substitution is read as a command of its own, eight levels deep, apart from the nested shell strings', () => {
+    const nest = (levels: number) => Array.from({ length: levels }).reduce<string>((inner) => `echo $(${inner})`, 'git commit -m x');
+    const got = pyEval('[module.command_matches("commit", text) for text in argument]', [
+      nest(3), nest(8), nest(9), "sh -c 'echo $(git commit -m x)'", 'echo $(sh -c "git commit -m x")', `sh -c "sh -c 'sh -c \\"git commit -m x\\"'"`,
+    ]);
+    expect(got).toEqual([true, true, false, true, true, false]);
+  });
+
   it('shell reading is linear in the length of the command and keeps its result', () => {
     const expression = `{
       "t0": __import__("time").perf_counter(),

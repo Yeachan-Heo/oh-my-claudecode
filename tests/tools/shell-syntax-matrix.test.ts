@@ -120,6 +120,15 @@ const HEREDOC_BODY: Array<(word: string) => string> = [
   (word) => `sudo bash <<'EOF'\n${word}\nEOF`, (word) => `echo "$(cat <<'EOF'\n${word}\nEOF\n)"`, (word) => `cat <<EOF\nline \\\n${word}\nEOF`,
   (word) => `cat <<'EOF'\nline \\\n${word}\nEOF`,
 ];
+// A here-document operator in quotes or in a comment is text: the line that starts with the tag is no terminator, so the shell runs
+// the command in the middle. The rows are templates as above; a tab-indented terminator and a command behind it are read too.
+const HEREDOC_AS_TEXT: Array<(word: string) => string> = [
+  (word) => `echo "<<EOF"\n${word}\nEOF`, (word) => `echo '<<EOF'\n${word}\nEOF`, (word) => `echo hi # <<EOF\n${word}\nEOF`,
+  (word) => `echo "it's <<EOF"\n${word}\nEOF`,
+];
+const AFTER_HEREDOC: Array<(word: string) => string> = [
+  (word) => `cat <<-EOF\n\tx\n\tEOF\n${word}`, (word) => `cat <<EOF\nx\nEOF\n${word}`, (word) => `cat <<A <<-B\nx\nA\n\ty\n\tB\n${word}`,
+];
 
 interface Case { command: string; word: string; want: boolean; row: string }
 
@@ -176,6 +185,9 @@ function casesFor(column: Column): Case[] {
   for (const [prefix, reads] of AFTER_BOUNDARY) add(prefix, reads[column]);
   for (const template of HEREDOC_BODY) {
     for (const word of WORDS[column]) cases.push({ command: template(word), word, want: false, row: template('<word>') });
+  }
+  for (const template of [...HEREDOC_AS_TEXT, ...AFTER_HEREDOC]) {
+    for (const word of WORDS[column]) cases.push({ command: template(word), word, want: !column.startsWith('consult'), row: template('<word>') });
   }
   return cases;
 }

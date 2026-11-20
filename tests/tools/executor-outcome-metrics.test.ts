@@ -541,6 +541,25 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.deepEqual(long, ['S', 'S', null]);
     });
 
+    it('a here-document body is cut, with a tab-indented terminator and with the operator in quotes or a comment left alone', () => {
+      const commands = [
+        'cat <<-EOF\n\tx\n\tEOF\npytest', 'cat <<EOF\nx\nEOF\npytest', 'cat <<-"EOF" > f\n\tpytest\n\tEOF\npytest', 'cat <<A <<-B\nx\nA\n\ty\n\tB\npytest',
+        'echo "<<EOF"\npytest\nEOF', "echo '<<EOF'\npytest\nEOF", 'echo hi # <<EOF\npytest\nEOF', 'git commit -m "$(cat <<\'EOF\'\npytest\nEOF\n)"',
+        'cat <<EOF\npytest\nEOF',
+      ];
+      const got = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(commands)}]`) as Array<string | null>;
+      assert.deepEqual(got, ['S', 'S', 'S', 'S', 'S', 'S', 'S', null, null]);
+    });
+
+    it('many here-document operators on one line and one very long word are read in a short time', () => {
+      const started = Date.now();
+      const got = pyEval(
+        `[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ["cat " + "<<A " * 25000 + "\\n" + "A\\n" * 25000 + "pytest", "pytest " + "1" * 1000000, "A=\\"b c\\" " * 20000 + "pytest"]]`,
+      ) as Array<string | null>;
+      assert.deepEqual(got, ['S', 'S', 'S']);
+      assert.ok(Date.now() - started < 5_000, `read in ${Date.now() - started} ms`);
+    });
+
     it('--test-pattern replaces the built-in list of test runners', () => {
       const lines = [...failed(1, 'a', 'npm test'), ...failed(3, 'b', 'make check'), ...failed(5, 'c', 'make check')];
       const task = taskOf(lines, ['--test-pattern', 'make check']);

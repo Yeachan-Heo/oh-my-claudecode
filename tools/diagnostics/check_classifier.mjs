@@ -97,13 +97,14 @@ function splitSubstitutions(text, placeholder) {
  * a check (`true # npm test` and `git commit -m "npm test"` name nothing) while a quoted operand is still an
  * argument (`pytest "tests/a.py"` narrows the run). A quoted string keeps its text, but whitespace and
  * shell operators inside it become `_`: it stays one word and cannot split the command, start a comment
- * or join the words around it into a runner name. A `#` after an escaped space stays part of a word. A
+ * or join the words around it into a runner name, and a quote inside it (the apostrophe of `"don't"`) cannot open a string of
+ * its own. A `#` after an escaped space stays part of a word. A
  * command substitution outside quotes (`$(...)`, backticks) becomes `_` as a whole, so `A=$(x y) npm test`
  * keeps `npm test` as its command and the check inside a substitution (`echo $(npm test)`) names none.
  */
 function executedText(command) {
   const plain = command
-    .replace(/"[^"]*"|'[^']*'/g, (quoted) => quoted.slice(1, -1).replace(/[\s;&|#!<>()]/g, '_'))
+    .replace(/"[^"]*"|'[^']*'/g, (quoted) => quoted.slice(1, -1).replace(/[\s;&|#!<>()'"]/g, '_'))
     .replace(/(^|(?<!\\)\s)#[^\n]*/g, '$1');
   return splitSubstitutions(plain, '_').text;
 }
@@ -965,6 +966,61 @@ function inPlaceTargets(program, args) {
 }
 
 /**
+ * Reads shell text forward and tells whether a position holds text, not shell: inside single quotes, inside double quotes
+ * (a `$(` there opens a command again, so `"$(cat <<EOF ...)"` keeps its here-document) or in a `#` comment. Positions come in
+ * increasing order, and the bodies that are cut out are skipped, so a quote in a body opens no string.
+ */
+class QuoteScan {
+  constructor(text) {
+    this.text = text;
+    this.at = 0;
+    this.frames = []; // "'", '"' or '(' for each open construct
+    this.commentEnd = 0;
+    this.jumps = []; // [from, to] ranges that are not read
+  }
+
+  skip(from, to) {
+    this.jumps.push([from, to]);
+  }
+
+  inert(to) {
+    const { text, frames } = this;
+    if (to < this.commentEnd) return true;
+    while (this.at < to) {
+      if (this.jumps.length > 0 && this.at >= this.jumps[0][0]) {
+        this.at = Math.max(this.at, this.jumps.shift()[1]);
+        continue;
+      }
+      const ch = text[this.at];
+      const top = frames[frames.length - 1];
+      if (top === "'") {
+        if (ch === "'") frames.pop();
+      } else if (top === '"') {
+        if (ch === '\\') this.at += 1;
+        else if (ch === '"') frames.pop();
+        else if (ch === '$' && text[this.at + 1] === '(') {
+          frames.push('(');
+          this.at += 1;
+        }
+      } else if (ch === '\\') this.at += 1;
+      else if (ch === "'" || ch === '"') frames.push(ch);
+      else if (ch === '(') frames.push('(');
+      else if (ch === ')') frames.pop();
+      else if (ch === '#' && (this.at === 0 || /[\s;&|(]/.test(text[this.at - 1]))) {
+        const newline = text.indexOf('\n', this.at);
+        this.commentEnd = newline === -1 ? text.length : newline;
+        this.at = this.commentEnd;
+        if (to < this.commentEnd) return true;
+        continue;
+      }
+      this.at += 1;
+    }
+    const top = frames[frames.length - 1];
+    return top === "'" || top === '"';
+  }
+}
+
+/**
  * Cut here-document bodies and their terminator lines out of shell text, so body text is never read as
  * shell. The rest of the line that holds the `<<TAG` operator stays (`cat <<EOF > src/a.ts`,
  * `cat <<EOF | tee f`): it still carries the redirections. Several operators on one line take their bodies
@@ -975,12 +1031,14 @@ function inPlaceTargets(program, args) {
  */
 function withoutHeredocBodies(text) {
   const operator = /(?<!<)<<(?!<)-?[ \t]*\\?(['"]?)(\w+)\1/g;
+  const quotes = new QuoteScan(text);
   const edits = []; // [start, end, replacement], sorted by start before they are applied
   let terminators = null; // tag -> { lines: [{ index, end }], next } for the lines `[ \t]*TAG` after a newline
   let lineEnd = -1; // the newline that ends the line of the operators being read
   let resume = -1; // the newline before the next body of that line
   for (let m = operator.exec(text); m !== null; m = operator.exec(text)) {
     if (m.index > lineEnd && m.index < resume) continue; // inside a body that is already cut
+    if (quotes.inert(m.index)) continue; // `echo "<<EOF"` and `# <<EOF` hold text, not an operator
     if (m.index > lineEnd) {
       lineEnd = text.indexOf('\n', m.index + m[0].length);
       if (lineEnd === -1) break; // no line follows, so no body
@@ -1001,6 +1059,7 @@ function withoutHeredocBodies(text) {
     const found = entry.lines[entry.next];
     if (found === undefined) continue;
     edits.push([m.index, m.index + m[0].length, `<< ${tag} `], [resume, found.end, '']);
+    quotes.skip(resume, found.end);
     resume = found.end;
   }
   let out = '';
@@ -1036,6 +1095,8 @@ const SHELL_VALUE_OPTIONS = new Set(['-o', '+o', '-O', '+O', '--rcfile', '--init
 const NESTED_MAX_LENGTH = 100000;
 /** Levels of nested shell strings that are read: `sh -c "bash -c '...'"` is two. */
 const NESTED_MAX_DEPTH = 2;
+/** Command substitutions inside command substitutions are read this deep, apart from the nested shell strings above. */
+const SUBSTITUTION_MAX_DEPTH = 8;
 
 const baseName = (word) => word.slice(word.lastIndexOf('/') + 1);
 
@@ -1264,9 +1325,10 @@ const ddTargets = (args) => args.filter((arg) => arg.startsWith('of=') && arg.le
  * (`echo "a > b"`); a target is read as the shell reads it (quotes removed, `\ ` a space), so `> "README.md"`
  * names the file, not the quotes. The named commands count only as the command word of a command (see
  * commandPrograms), so `rg tee src/a.ts` and `echo cp a src/b.ts` write nothing. The string of a nested shell
- * (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep.
+ * (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep; the body of a command substitution is read again
+ * as a command of its own, eight levels deep, counted apart from the nested shell strings.
  */
-function shellWriteTargets(command, depth = 0) {
+function shellWriteTargets(command, depth = 0, substitutions = 0) {
   const QUOTED = String.raw`"(?:[^"\\]|\\[\s\S])*"|'[^']*'`; // a double-quoted string may hold \"
   const WORD = String.raw`(?:${QUOTED}|\\[^\n]|[^\s;&|)<>"'\\])+`;
   const { text, bodies } = splitSubstitutions(withoutHeredocBodies(command), '_');
@@ -1292,8 +1354,13 @@ function shellWriteTargets(command, depth = 0) {
     else if (program === 'dd') pushAll(targets, ddTargets(words.slice(at + 1, end)));
   }
   if (depth < NESTED_MAX_DEPTH) {
-    for (const nested of [...nestedCommandStrings(words, programs), ...bodies]) {
-      if (nested.length <= NESTED_MAX_LENGTH) targets.push(...shellWriteTargets(nested, depth + 1));
+    for (const nested of nestedCommandStrings(words, programs)) {
+      if (nested.length <= NESTED_MAX_LENGTH) targets.push(...shellWriteTargets(nested, depth + 1, substitutions));
+    }
+  }
+  if (substitutions < SUBSTITUTION_MAX_DEPTH) {
+    for (const body of bodies) {
+      if (body.length <= NESTED_MAX_LENGTH) targets.push(...shellWriteTargets(body, depth, substitutions + 1));
     }
   }
   return targets;
