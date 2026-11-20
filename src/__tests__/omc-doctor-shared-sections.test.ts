@@ -25,6 +25,17 @@ describe('omc-doctor: the skill calls the script through one locator, and holds 
     }
   });
 
+  // The one inline program left in the skill asks npm for its global root, and only inside the locator line: node runs
+  // npm with a limit, because the plain command has none (and `timeout` of the shell is not on every system).
+  test('the only inline program of the skill is the global package lookup of the locator, and it has a time limit', () => {
+    const inline = skillText.split('\n').filter((line) => /\bnode -[pe]\b/.test(line));
+    expect(inline).toHaveLength(6);
+    for (const line of inline) expect(line).toBe(locatorLine);
+    expect(locatorLine).toContain('spawnSync("npm root -g",');
+    expect(locatorLine).toContain('timeout:5000');
+    expect(locatorLine).not.toMatch(/\$\(npm /);
+  });
+
   test('the locator line is one text, in every shell block that runs the script, before the first call', () => {
     expect(locatorLine).not.toBe('');
     const withLocator = bashBlocks().filter((block) => block.split('\n').some((line) => line.startsWith('S=; ')));
@@ -163,6 +174,29 @@ describe.skipIf(!posix)('omc-doctor: the locator line finds the script, or says 
         }
       }
       expect(readdirSync(config)).toEqual(['plugins']);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  // npm is asked only when neither variable has the file, and then with a limit of 5 seconds: a npm that hangs does not
+  // hold the block (before, the block waited as long as npm did), and the answer is the message of a missing file.
+  test('a global npm that hangs ends the block within the limit with the message, and is not asked when a variable has the file', () => {
+    const { base, config } = world();
+    try {
+      const stubBin = path.join(base, 'hang-bin');
+      mkdirSync(stubBin);
+      writeFileSync(path.join(stubBin, 'npm'), '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 });
+      const hanging = { PATH: `${stubBin}${path.delimiter}${process.env.PATH ?? ''}` };
+      const started = Date.now();
+      const result = locate('claude-md-optout', config, { ...hanging, CLAUDE_PLUGIN_ROOT: '', OMC_PLUGIN_ROOT: '' }, base);
+      expect({ status: result.status, first: result.stdout.split('\n')[0].slice(0, MISSING.length), lines: result.stdout.trim().split('\n').length, stderr: result.stderr }).toEqual({ status: 1, first: MISSING, lines: 1, stderr: '' });
+      expect(Date.now() - started).toBeLessThan(20_000);
+      const first = stub(base, 'first', 'first');
+      const quick = Date.now();
+      const found = locate('claude-md-optout', config, { ...hanging, CLAUDE_PLUGIN_ROOT: first, OMC_PLUGIN_ROOT: '' }, base);
+      expect({ status: found.status, out: found.stdout.trim() }).toEqual({ status: 0, out: 'first:claude-md-optout' });
+      expect(Date.now() - quick).toBeLessThan(4_000);
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
