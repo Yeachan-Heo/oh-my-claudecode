@@ -96,7 +96,8 @@ describe('omc-doctor skill claudeMdEnabled opt-out probe fails closed', () => {
     expect(fixSection).toContain('could not check the opt-out');
   });
 
-  it('probe prints neither status line when node is not on PATH', () => {
+  // The probe is a bash block (the locator line is bash), so these two cases run where bash does, not on Windows runners.
+  it.skipIf(process.platform === 'win32')('probe prints neither status line when node is not on PATH', () => {
     expect(probe).toBeDefined();
     const emptyBin = mkdtempSync(join(tmpdir(), 'omc-doctor-probe-nopath-'));
     const configDir = mkdtempSync(join(tmpdir(), 'omc-doctor-probe-config-'));
@@ -104,13 +105,16 @@ describe('omc-doctor skill claudeMdEnabled opt-out probe fails closed', () => {
       const result = runProbe([emptyBin], configDir);
       expect(result.stdout).not.toContain('CLAUDE.md management enabled');
       expect(result.stdout).not.toContain('CLAUDE.md management disabled by claudeMdEnabled: false');
+      // The locator found the script (the plugin root is this checkout); it is the call of node that failed.
+      expect(result.stdout).not.toContain('plugin files not found');
+      expect(result.stderr).toContain('node');
     } finally {
       rmSync(emptyBin, { recursive: true, force: true });
       rmSync(configDir, { recursive: true, force: true });
     }
   });
 
-  it('probe prints a status line when node is on PATH', () => {
+  it.skipIf(process.platform === 'win32')('probe prints a status line when node is on PATH', () => {
     expect(probe).toBeDefined();
     const configDir = mkdtempSync(join(tmpdir(), 'omc-doctor-probe-config-'));
     try {

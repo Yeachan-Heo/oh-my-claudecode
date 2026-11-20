@@ -138,6 +138,11 @@ describe.skipIf(!posix)('omc-doctor: the locator line finds the script, or says 
     try {
       const bare = path.join(base, 'no-scripts');
       mkdirSync(bare);
+      // A stub npm that prints nothing keeps the 35 runs of this case fast: only the global-package case below asks the real one.
+      const stubBin = path.join(base, 'stub-bin');
+      mkdirSync(stubBin);
+      writeFileSync(path.join(stubBin, 'npm'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      const stubbed = { PATH: `${stubBin}${path.delimiter}${process.env.PATH ?? ''}` };
       mkdirSync(path.join(base, 'other'));
       const settings: Array<[string, Record<string, string>]> = [
         ['both unset', { CLAUDE_PLUGIN_ROOT: '', OMC_PLUGIN_ROOT: '' }],
@@ -148,7 +153,7 @@ describe.skipIf(!posix)('omc-doctor: the locator line finds the script, or says 
       ];
       for (const [label, env] of settings) {
         for (const command of allCommands) {
-          const result = locate(command, config, env, base);
+          const result = locate(command, config, { ...stubbed, ...env }, base);
           expect({ label, command, status: result.status, first: result.stdout.split('\n')[0].slice(0, MISSING.length) }).toEqual({ label, command, status: 1, first: MISSING });
           // The message names the way out, and nothing else is printed (the checks and the cache commands never started).
           expect(result.stdout).toContain('Reinstall or update the plugin (omc update, or claude plugin update oh-my-claudecode)');
