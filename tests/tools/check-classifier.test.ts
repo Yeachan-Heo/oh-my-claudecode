@@ -489,6 +489,25 @@ it('ruff summary: the errors a run fixed are not the errors that remain', () => 
   assert.equal(checkResult('ruff check --fix . | tail', 'Found 2 errors (1 fixed, 1 remaining).\nAll checks passed!').verdict, 'failed', 'a remaining error before a pass line');
 });
 
+it('a pass behind a hidden status is read from the summary of the last runner of the command only', () => {
+  const unittestFailed = 'All checks passed!\nFAIL: test_a (x.T)\nRan 3 tests in 0.001s\n\nFAILED (failures=1)\n';
+  const vitestPassed = 'Test Files  1 passed (1)\n     Tests  2 passed (2)';
+  // the summary of an earlier runner says nothing about the last one
+  assert.equal(checkResult('ruff check . && python3 -m unittest discover 2>&1 | tail -5', unittestFailed).verdict, 'undetermined', 'ruff passed, unittest failed');
+  assert.equal(checkResult('ruff check . ; python3 -m unittest discover 2>&1 | tail -5', unittestFailed).verdict, 'undetermined', 'the same behind a semicolon');
+  assert.equal(checkResult('ruff check . && vitest run | tail -5', 'All checks passed!\nstarting vitest').verdict, 'undetermined', 'ruff passed, vitest printed no summary');
+  assert.equal(checkResult('node --test && ruff check . | tail -5', 'ℹ tests 3\nℹ pass 3\nℹ fail 0\nrunning ruff').verdict, 'undetermined', 'node:test passed, ruff printed no summary');
+  assert.equal(checkResult('vitest run && ruff check . | tail -5', `${vitestPassed}\nrunning ruff`).verdict, 'undetermined', 'vitest passed, ruff printed no summary');
+  // the last runner with a rule of its own decides, whatever stands in front of it
+  assert.equal(checkResult('ruff check . && vitest run | tail -5', `All checks passed!\n${vitestPassed}`).verdict, 'passed', 'both passed');
+  assert.equal(checkResult('ruff check . && vitest run | tail -5', 'All checks passed!\nTests  1 failed | 1 passed (2)').verdict, 'failed', 'a failure is still read in every runner');
+  // a runner in front that no rule reads has its status behind `&&` only: a `;` or `||` lets it fail unseen
+  assert.equal(checkResult('python3 -m unittest discover && ruff check . | tail -5', 'All checks passed!').verdict, 'passed', 'unittest passed, or ruff would not have run');
+  assert.equal(checkResult('python3 -m unittest discover ; ruff check . | tail -5', 'All checks passed!').verdict, 'undetermined', 'unittest may have failed in front of a semicolon');
+  assert.equal(checkResult('python3 -m unittest discover || ruff check . | tail -5', 'All checks passed!').verdict, 'undetermined', 'ruff ran because unittest failed');
+  assert.equal(checkResult('python3 -m unittest discover ; node --test | tail -5', 'ℹ tests 3\nℹ pass 3\nℹ fail 0').verdict, 'undetermined', 'node:test passed, unittest unseen');
+});
+
 it('tsc: passed on a visible zero exit, failed on an error code, undetermined in silence behind a pipe', () => {
   assert.equal(checkResult('tsc --noEmit', '', 0).verdict, 'passed', 'visible zero exit');
   assert.equal(checkResult('tsc --noEmit | tail -3', 'src/a.ts:1:5 - error TS2322: nope', 1).verdict, 'failed');

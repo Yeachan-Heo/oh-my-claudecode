@@ -742,7 +742,7 @@ function readCommand(command) {
     const m = runnerMatch(stripped);
     if (!m || asksInformation(stripped, m)) continue;
     check = { ...m, index: i };
-    checks.push({ runner: m.runner, kind: m.kind });
+    checks.push({ runner: m.runner, kind: m.kind, index: i });
     hidden = exitHiddenCause(pieces, i, pipefail);
     // later runner pieces overwrite: the command's status belongs to the last segment
   }
@@ -898,6 +898,12 @@ const SCRIPT_READERS_BY_KIND = {
 /** The set of reader names that may interpret the output of a classified check command. */
 function readersFor({ runner, kind }) {
   return new Set(SCRIPT_RUNNERS.has(runner) ? SCRIPT_READERS_BY_KIND[kind] ?? [] : OWN_READERS[runner] ?? []);
+}
+
+/** Whether a runner piece has a summary rule to be read by: its own readers include a runner of SUMMARY_RULES. */
+function hasSummaryRule(check) {
+  const readers = readersFor(check);
+  return SUMMARY_RULES.some((entry) => readers.has(entry.runner));
 }
 
 /**
@@ -1057,10 +1063,20 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
         ? { verdict: 'undetermined', reason: `printed exit code ${printed.code} of an && chain: another command may have failed`, rule: 'chained-exit' }
         : { verdict: 'failed', reason: `printed exit code ${printed.code}`, rule: 'printed-exit-code' };
     }
-    for (const entry of SUMMARY_RULES.filter((rule) => readers.has(rule.runner))) {
-      const verdict = entry.apply(tail);
-      if (verdict === 'passed') {
-        return pass(`runner summary pass (${entry.rule})`, entry.rule);
+    // A pass is read from the summary of the last runner of the command only: the output that ends the stream is its output, and the
+    // summary of an earlier runner (`ruff check . && python3 -m unittest | tail`) says nothing about it. An earlier runner that no rule
+    // reads has its status behind `&&` only: when a `;`, a `||` or a pipe stands between it and the last runner, it may have failed unseen.
+    const last = read.checks.at(-1);
+    let cut = last.index - 1;
+    while (cut >= 0 && read.pieces[cut].sep === '&&') cut -= 1;
+    const unseen = read.checks.some((check) => check !== last && check.index <= cut && !hasSummaryRule(check));
+    if (!unseen) {
+      const lastReaders = readersFor(last);
+      for (const entry of SUMMARY_RULES.filter((rule) => lastReaders.has(rule.runner))) {
+        const verdict = entry.apply(tail);
+        if (verdict === 'passed') {
+          return pass(`runner summary pass (${entry.rule})`, entry.rule);
+        }
       }
     }
     return { verdict: 'undetermined', reason: 'check exit code hidden without pipefail and no runner summary', rule: null };
