@@ -83,13 +83,14 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
   test('the cache commands leave it in place beside a missing version, and still move a free version next to it', () => {
     for (const command of commands) {
       for (const platform of PLATFORMS) {
-        // 5.7.0 is missing, 5.7.0-beta.1.omc-stale-4242 is its recovery copy; 5.9.0 is pinned, 5.8.0 is free.
-        const { dir, cache } = makeCache(['5.9.0', '5.8.0', '5.7.0-beta.1.omc-stale-4242']);
+        // 5.7.0 is missing, 5.7.0.omc-stale-4242 is its recovery copy and 5.7.0-beta.1.omc-stale-4242 the recovery copy of
+        // a prerelease (a semantic version by its name, so only the exclusion keeps it out); 5.9.0 is pinned, 5.8.0 is free.
+        const { dir, cache } = makeCache(['5.9.0', '5.8.0', '5.7.0.omc-stale-4242', '5.7.0-beta.1.omc-stale-4242']);
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
           const result = runCommand(command, dir, { preloads: [reportAs(dir, platform)] });
           expect({ platform, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) })
-            .toEqual({ platform, status: 0, left: ['5.7.0-beta.1.omc-stale-4242', '5.9.0'], moved: 1 });
+            .toEqual({ platform, status: 0, left: ['5.7.0-beta.1.omc-stale-4242', '5.7.0.omc-stale-4242', '5.9.0'], moved: 1 });
           expect(readdirSync(backupDir(dir))[0]).toMatch(/^5\.8\.0-/);
           expect(result.stdout).not.toContain('omc-stale');
         } finally {
@@ -102,12 +103,12 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
   test('nothing is moved when the recovery directory is the only other entry', () => {
     for (const command of commands) {
       for (const platform of PLATFORMS) {
-        const { dir, cache } = makeCache(['5.9.0', '5.7.0-beta.1.omc-stale-4242']);
+        const { dir, cache } = makeCache(['5.9.0', '5.7.0.omc-stale-4242', '5.7.0-beta.1.omc-stale-4242']);
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
           const result = runCommand(command, dir, { preloads: [reportAs(dir, platform)] });
           expect({ platform, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) })
-            .toEqual({ platform, status: 0, left: ['5.7.0-beta.1.omc-stale-4242', '5.9.0'], moved: 0 });
+            .toEqual({ platform, status: 0, left: ['5.7.0-beta.1.omc-stale-4242', '5.7.0.omc-stale-4242', '5.9.0'], moved: 0 });
           expect(result.stdout).toContain('Nothing to move');
         } finally {
           rmSync(dir, { recursive: true, force: true });
@@ -119,16 +120,20 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
   // The relink reconciler recognises exactly `.omc-stale-` and a decimal pid at the end of the name; a name that only
   // looks like it (and is a semantic version, a prerelease here) is an ordinary version, so it is judged like one.
   // The recovery directory of a prerelease is a semantic version by its name, so only the exclusion keeps it out; the
-  // recovery directory of a release (5.7.0.omc-stale-4242) is no version by the grammar alone (omc-doctor-cache-names.test.ts).
+  // recovery directory of a release is no version by the grammar alone. Both forms are used throughout this file.
   test('only a name that ends in .omc-stale- and a pid is a recovery directory', () => {
     for (const command of commands) {
       for (const platform of PLATFORMS) {
-        const { dir, cache } = makeCache(['5.9.0', '5.6.0-beta.1.omc-stale-abc', '5.5.0-beta.1.omc-stale-12.bak', '5.4.0-beta.1.omc-stale-7', '5.3.0-beta.1.omc-stale-0']);
+        const { dir, cache } = makeCache([
+          '5.9.0',
+          '5.6.0-omc-stale-abc', '5.5.0-omc-stale-12.bak', '5.4.0.omc-stale-7', '5.3.0.omc-stale-0',
+          '5.6.0-beta.1.omc-stale-abc', '5.5.0-beta.1.omc-stale-12.bak', '5.4.0-beta.1.omc-stale-7', '5.3.0-beta.1.omc-stale-0',
+        ]);
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
           const result = runCommand(command, dir, { preloads: [reportAs(dir, platform)] });
           expect({ platform, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) })
-            .toEqual({ platform, status: 0, left: ['5.3.0-beta.1.omc-stale-0', '5.4.0-beta.1.omc-stale-7', '5.9.0'], moved: 2 });
+            .toEqual({ platform, status: 0, left: ['5.3.0-beta.1.omc-stale-0', '5.3.0.omc-stale-0', '5.4.0-beta.1.omc-stale-7', '5.4.0.omc-stale-7', '5.9.0'], moved: 4 });
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }
@@ -138,22 +143,24 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
 
   test('Step 1 does not name it as the newest version', () => {
     for (const platform of PLATFORMS) {
-      expect(step1({ platform, cache: { omc: ['5.8.0', '5.9.0-beta.1.omc-stale-12'] } })).toEqual({ Channel: 'npm', Installed: '5.8.0', Updater: 'omc update' });
-      expect(step1({ platform, plugins: { [OMC]: [{ installPath: '/nowhere/current' }] }, cache: { omc: ['5.8.0', '5.9.0-beta.1.omc-stale-12'] } }).Installed).toBe('5.8.0');
+      expect(step1({ platform, cache: { omc: ['5.8.0', '5.9.0.omc-stale-12', '5.9.0-beta.1.omc-stale-12'] } })).toEqual({ Channel: 'npm', Installed: '5.8.0', Updater: 'omc update' });
+      expect(step1({ platform, plugins: { [OMC]: [{ installPath: '/nowhere/current' }] }, cache: { omc: ['5.8.0', '5.9.0.omc-stale-12', '5.9.0-beta.1.omc-stale-12'] } }).Installed).toBe('5.8.0');
       // An installPath that names the recovery directory gives no version by its name; the version is read from the package.
-      const out = step1({
-        platform,
-        plugins: (dir) => ({ [OMC]: [{ installPath: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.9.0-beta.1.omc-stale-12') }] }),
-        setup: (dir) => writeFileSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.9.0-beta.1.omc-stale-12', 'package.json'), JSON.stringify({ version: '5.9.0' })),
-        cache: { omc: ['5.9.0-beta.1.omc-stale-12'] },
-      });
-      expect({ platform, installed: out.Installed }).toEqual({ platform, installed: '5.9.0' });
+      for (const recovery of ['5.9.0.omc-stale-12', '5.9.0-beta.1.omc-stale-12']) {
+        const out = step1({
+          platform,
+          plugins: (dir) => ({ [OMC]: [{ installPath: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', recovery) }] }),
+          setup: (dir) => writeFileSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', recovery, 'package.json'), JSON.stringify({ version: '5.9.0' })),
+          cache: { omc: [recovery] },
+        });
+        expect({ platform, recovery, installed: out.Installed }).toEqual({ platform, recovery, installed: '5.9.0' });
+      }
     }
   });
 
   test.skipIf(process.platform === 'win32')('Step 4 does not name it as the newest version', () => {
     for (const platform of PLATFORMS) {
-      const { dir } = makeCache(['5.8.0', '5.9.0-beta.1.omc-stale-12']);
+      const { dir } = makeCache(['5.8.0', '5.9.0.omc-stale-12', '5.9.0-beta.1.omc-stale-12']);
       try {
         expect({ platform, out: claudeMd(dir, '5.8.0', platform)[2] }).toEqual({ platform, out: 'Latest cached plugin version: 5.8.0' });
       } finally {
@@ -164,7 +171,7 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
 
   test('Step 6 does not count it', () => {
     for (const platform of PLATFORMS) {
-      const { dir } = makeCache(['5.8.0', '5.9.0-beta.1.omc-stale-12']);
+      const { dir } = makeCache(['5.8.0', '5.9.0.omc-stale-12', '5.9.0-beta.1.omc-stale-12']);
       try {
         expect({ platform, out: count(dir, undefined, platform) }).toEqual({ platform, out: ['1 version(s): 5.8.0'] });
       } finally {
