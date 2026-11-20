@@ -607,7 +607,7 @@ const WRITE_ROWS: Array<[string, 0 | 1, 0 | 1]> = [
 const FIRST_WORD_ONLY = new Set(['echo x|tee src/a.ts', 'echo x|tee -a src/a.ts']);
 
 describe('shell write oracle: the files a command writes, as bash wrote them', () => {
-  it('write: isMutation finds the code file of every command that wrote one, and none of the others', () => {
+  it('write: isMutation finds the code file of every command of the table that wrote one, and none of the other rows of the table', () => {
     const wrong = WRITE_ROWS.flatMap(([command, code]) => (isMutation('Bash', { command }) === (code === 1) ? [] : [`${JSON.stringify(command)}: bash wrote ${code === 1 ? 'a code file' : 'no code file'}, isMutation says ${!(code === 1)}`]));
     expect(wrong, wrong.join('\n')).toEqual([]);
     expect(WRITE_ROWS.filter(([, code]) => code === 1).length).toBeGreaterThan(60);
