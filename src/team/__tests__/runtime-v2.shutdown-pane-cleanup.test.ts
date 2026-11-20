@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { isProcessAlive } from '../../platform/process-utils.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { resolveRuntimeCliPath } from '../runtime-owner-client.js';
-import { reserveTeamInstance } from '../team-instance.js';
+import { assertTeamInstanceUnderLock, reserveTeamInstance, withTeamInstanceLifecycleLock } from '../team-instance.js';
 import { createHash } from 'node:crypto';
 import { readRecoveryFinalState, reserveRecoveryRequest } from '../recovery-request-store.js';
 import { readRevisionedTeamConfig, saveTeamConfigAtRevision } from '../monitor.js';
@@ -226,8 +226,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     }
   });
 
-  it('publishes a saved recovery timeout final before shutdown disposes the team state', async () => {
-    const teamName = 'saved-timeout-team';
+  async function seedSavedRecoveryTimeout(teamName: string): Promise<string> {
     await reserveTeamInstance({ teamName, cwd, instanceId: TEAM_INSTANCE_ID });
     const teamRoot = join(getOmcRoot(cwd), 'state', 'team', teamName);
     const now = new Date().toISOString();
@@ -244,7 +243,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     reserveRecoveryRequest(cwd, 'saved-request', { operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID },
     'saved-recovery');
-    const { finalizeRecoveryOwnerResult, shutdownTeamV2 } = await import('../runtime-v2.js');
+    const { finalizeRecoveryOwnerResult } = await import('../runtime-v2.js');
     // The owner saves the timeout to config and dies before publishing the final.
     await finalizeRecoveryOwnerResult({ teamName, cwd, workerName: 'worker-1', requestId: 'saved-request', instanceId: TEAM_INSTANCE_ID },
       'saved-recovery', { outcome: 'failed', committed: false, error: 'recovery_request_timeout',
@@ -256,11 +255,47 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
       });
     expect((await readRevisionedTeamConfig(teamName, cwd))?.config.last_recovery).toMatchObject({ phase: 'failed' });
     expect(readRecoveryFinalState(cwd, 'saved-request').kind).toBe('missing');
+    return teamRoot;
+  }
+
+  it('publishes a saved recovery timeout final before shutdown disposes the team state', async () => {
+    const teamName = 'saved-timeout-team';
+    const teamRoot = await seedSavedRecoveryTimeout(teamName);
+    const { shutdownTeamV2 } = await import('../runtime-v2.js');
 
     await expect(shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true })).resolves.toMatchObject({ outcome: 'cleaned' });
     await expect(readFile(join(teamRoot, 'config.json'), 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(readRecoveryFinalState(cwd, 'saved-request')).toMatchObject({ kind: 'valid',
       final: { outcome: 'failed', error: { code: 'recovery_request_timeout' } } });
   });
+
+  // chmod cannot deny writes on Windows or to root.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'keeps the team state when shutdown cannot publish a saved recovery timeout final', async () => {
+      const teamName = 'saved-timeout-team';
+      const teamRoot = await seedSavedRecoveryTimeout(teamName);
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      const byRequest = join(getOmcRoot(cwd), 'state', 'team-recovery', 'by-request');
+      const instance = { teamName, cwd, instanceId: TEAM_INSTANCE_ID };
+
+      await chmod(byRequest, 0o555);
+      try {
+        await expect(shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true })).resolves.toEqual({
+          outcome: 'failed', reason: 'state_cleanup_failed', detail: 'recovery_final_unpublished:saved-recovery' });
+      } finally {
+        await chmod(byRequest, 0o755);
+      }
+      const retained = await readRevisionedTeamConfig(teamName, cwd);
+      expect(retained?.config).toMatchObject({ lifecycle_state: 'stopped',
+        last_recovery: { recovery_id: 'saved-recovery', failure_reason: 'recovery_request_timeout' } });
+      await expect(withTeamInstanceLifecycleLock(cwd, teamName, () => assertTeamInstanceUnderLock(instance)))
+        .resolves.toMatchObject({ observed_state: 'bound' });
+      expect(readRecoveryFinalState(cwd, 'saved-request').kind).toBe('missing');
+
+      await expect(shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true })).resolves.toMatchObject({ outcome: 'cleaned' });
+      await expect(readFile(join(teamRoot, 'config.json'), 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(readRecoveryFinalState(cwd, 'saved-request')).toMatchObject({ kind: 'valid',
+        final: { outcome: 'failed', error: { code: 'recovery_request_timeout' } } });
+    });
 
 });
