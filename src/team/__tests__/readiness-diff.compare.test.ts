@@ -279,45 +279,45 @@ describe('readiness-diff set r6', () => {
   const r6Trace = (traceCase: TraceCase, loaded = ['tmux-session', 'provider-events']): Trace =>
     ({ set: 'r6', loaded_modules: loaded, cases: [traceCase] });
   const runR6 = (head: Trace) =>
-    summarize({ set: 'r6', baseSha: 'base', headSha: 'head', base: r6Trace(r6Case(1_000, [2_000]), ['tmux-session']), head });
+    summarize({ set: 'r6', baseSha: 'base', headSha: 'head', base: r6Trace(r6Case(4_000, [2_000]), ['tmux-session']), head });
 
   it('passes when head matches base exactly and loads provider-events', () => {
-    expect(runR6(r6Trace(r6Case(1_000, [2_000])))).toMatch(/RESULT PASS$/);
+    expect(runR6(r6Trace(r6Case(4_000, [2_000])))).toMatch(/RESULT PASS$/);
   });
 
   it('fails when head waits longer than base', () => {
-    const summary = runR6(r6Trace(r6Case(1_250, [2_000])));
+    const summary = runR6(r6Trace(r6Case(4_250, [2_000])));
     expect(summary).toContain(`failure: ${IDLE} r6 wait_ms differs from base`);
     expect(summary).toMatch(/RESULT FAIL$/);
   });
 
   it('fails when head nudges later than base', () => {
-    const summary = runR6(r6Trace(r6Case(1_000, [2_250])));
+    const summary = runR6(r6Trace(r6Case(4_000, [2_250])));
     expect(summary).toContain(`failure: ${IDLE} r6 nudge times differ from base`);
     expect(summary).toMatch(/RESULT FAIL$/);
   });
 
   it('fails when head sends an extra nudge', () => {
-    const summary = runR6(r6Trace(r6Case(1_000, [2_000, 3_000])));
+    const summary = runR6(r6Trace(r6Case(4_000, [2_000, 3_000])));
     expect(summary).toContain(`failure: ${IDLE} r6 nudge times differ from base`);
     expect(summary).toMatch(/RESULT FAIL$/);
   });
 
   it('fails when head drops the nudge', () => {
-    const summary = runR6(r6Trace(r6Case(1_000, [])));
+    const summary = runR6(r6Trace(r6Case(4_000, [])));
     expect(summary).toContain(`failure: ${IDLE} r6 nudge times differ from base`);
     expect(summary).toContain('failure: nudge_missing=1');
     expect(summary).toMatch(/RESULT FAIL$/);
   });
 
   it('fails when head sends an extra key', () => {
-    const summary = runR6(r6Trace(r6Case(1_000, [2_000], [['-l', 'Read inbox.md'], ['Enter'], ['Enter']])));
+    const summary = runR6(r6Trace(r6Case(4_000, [2_000], [['-l', 'Read inbox.md'], ['Enter'], ['Enter']])));
     expect(summary).toContain(`failure: ${IDLE} r6 key sequence differs from base`);
     expect(summary).toMatch(/RESULT FAIL$/);
   });
 
   it('fails when head does not load provider-events', () => {
-    const summary = runR6(r6Trace(r6Case(1_000, [2_000]), ['tmux-session']));
+    const summary = runR6(r6Trace(r6Case(4_000, [2_000]), ['tmux-session']));
     expect(summary).toContain('failure: head did not load provider-events');
     expect(summary).toMatch(/RESULT FAIL$/);
   });
