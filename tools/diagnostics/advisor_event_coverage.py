@@ -708,6 +708,8 @@ def main(argv):
         return fail("--consult-command must be a single word")
     if not os.path.isdir(args.projects):
         return fail("--projects is not a directory")
+    if not os.access(args.projects, os.R_OK | os.X_OK):
+        return fail("--projects cannot be read")
     if args.out is not None and os.path.lexists(args.out):
         return fail("--out already exists")
     if args.sessions_out is not None:

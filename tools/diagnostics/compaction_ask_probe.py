@@ -70,7 +70,8 @@ RULE (written before the measurement; do not change after seeing the results):
   message text by design.
 
 Exit codes: 0 a valid run; 1 --out or --export-labeling write refused (the file exists); 2 a usage error,
-a missing --compact file or a missing --labels file.
+a missing --compact file, a missing --labels file or a --transcript path that cannot be read (a transcript found
+by the search that cannot be read is skipped with a warning on standard error).
 
 Blind labelling of binding and stale instructions (optional; without --export-labeling and --labels the
 output is the one described above):
@@ -1082,6 +1083,12 @@ def main(argv=None):
     if args.transcript:
         files = []
         for p in args.transcript:
+            try:
+                with open(p, "rb"):
+                    pass
+            except OSError as error:
+                print(f"error: --transcript: {error}", file=sys.stderr)
+                return 2
             parts = p.replace(os.sep, "/").split("/")
             base = os.path.basename(p)
             if "subagents" in parts and base.startswith("agent-") and base.endswith(".jsonl"):

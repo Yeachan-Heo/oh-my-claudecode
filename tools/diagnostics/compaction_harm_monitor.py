@@ -52,7 +52,8 @@ RULE (written before any measurement; do not change after seeing a result):
   differs from the probe's is refused (exit 2). Unit keys that built from file paths only match when both
   scripts get the same transcript paths.
 
-Exit codes: 0 ok; 2 usage error, missing or unusable input file.
+Exit codes: 0 ok; 2 usage error, missing or unusable input file (a --transcript path that cannot be read stops the
+run; a transcript found by the search that cannot be read is skipped with a warning on standard error).
 
 """
 
@@ -578,6 +579,9 @@ def main(argv=None):
         try:
             session_id, boundaries, file_input = scan_transcript(path, args.window, args.tool_window)
         except OSError as error:
+            if args.transcript:
+                print(f"error: --transcript: {error}", file=sys.stderr)
+                return 2
             print(f"warning: skipping an unreadable transcript: {error.strerror}", file=sys.stderr)
             continue
         transcript_input["rows"] += file_input["rows"]

@@ -511,6 +511,25 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
     expect(JSON.parse(readFileSync(fresh, 'utf8')).template).toBe('advisor-event-coverage/1');
   });
 
+  it('a --projects directory that cannot be read exits 2 instead of giving an empty report', () => {
+    const root = makeTree('unreadable-projects', { 'proj/s1.jsonl': [assistant(1, [call('p1', 'ExitPlanMode')])] });
+    // The test may run as a user that can read every directory, so the permission test is answered by the snippet.
+    const [granted, code, message] = inProcess([
+      'err = io.StringIO()',
+      'real_access = os.access',
+      'os.access = lambda path, mode: False if path == sys.argv[2] else real_access(path, mode)',
+      'with contextlib.redirect_stderr(err):',
+      '    code = module.main(["--projects", sys.argv[2], "--label", sys.argv[3]])',
+      'os.access = real_access',
+      'with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):',
+      '    granted = module.main(["--projects", sys.argv[2], "--label", sys.argv[3]])',
+      'print(json.dumps([granted, code, err.getvalue()]))',
+    ].join('\n'), root, LABEL);
+    expect(code).toBe(2);
+    expect(message).toContain('--projects cannot be read');
+    expect(granted).toBe(0);
+  });
+
   it('wilson_lower equals the shared Wilson helper (k, n, 1.645) for 10 pairs, difference below 1e-9', () => {
     const pairs = [[0, 30], [1, 30], [6, 30], [12, 30], [18, 30], [30, 30], [0, 100], [37, 100], [250, 300], [1, 31]];
     const values: number[] = inProcess('print(json.dumps([module.wilson_lower(k, n) for k, n in json.loads(sys.argv[2])]))', JSON.stringify(pairs));

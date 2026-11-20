@@ -459,6 +459,25 @@ describe('compaction_ask_probe', () => {
     }
   });
 
+  it('an explicit --transcript path that cannot be read exits 2 with a message that names it', () => {
+    const env = makeEnv();
+    try {
+      writeFileSync(env.compactFile, '');
+      const absent = join(env.dir, 'absent-transcript.jsonl');
+      const directory = env.projects;
+      for (const [label, bad] of [['missing', absent], ['directory', directory]] as const) {
+        const p = spawnSync('python3', ['-I', SCRIPT, '--compact', env.compactFile, '--transcript', bad, '--json'], { encoding: 'utf8' });
+        expect(p.status, `${label}: ${p.stderr}`).toBe(2);
+        expect(p.stdout, label).toBe('');
+        expect(p.stderr, label).toContain('--transcript');
+        expect(p.stderr, label).toContain(bad);
+        expect(p.stderr, label).not.toMatch(/skipping|Traceback/);
+      }
+    } finally {
+      rmSync(env.dir, { recursive: true, force: true });
+    }
+  });
+
   it('2 usage errors: a missing compact file and a bad date', () => {
     const env = makeEnv();
     try {

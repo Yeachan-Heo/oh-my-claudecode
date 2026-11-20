@@ -495,7 +495,7 @@ python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 
 
 | Option | Meaning |
 |---|---|
-| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool (including the default journal: `OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory; with `OMC_STATE_DIR` set, pass `--compact` or set `OMC_JEV_LOG_DIR`) |
+| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool (including the default journal: `OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory; with `OMC_STATE_DIR` set, pass `--compact` or set `OMC_JEV_LOG_DIR`). A `--transcript` path that cannot be read (missing, a directory, no permission) exits 2 with a message that names it; a transcript found by the search that cannot be read is skipped with a warning on stderr |
 | `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
 | `--ask-loss-threshold X` | the threshold the upper Wilson bound is compared with (default 0.05) |
 | `--details` | add the list of units (without ask contents) |
@@ -557,7 +557,10 @@ standard output carries only numbers and group names. It is a standalone offline
 python3 -I tools/diagnostics/compaction_harm_monitor.py [--projects <dir>] [--transcript <file>]... [--compact <file>] [--to <ISO>] [--days 7] [--probe <file>] [--json]
 ```
 
-`--transcript <file>` (repeatable) replaces the search under `--projects`.
+`--transcript <file>` (repeatable) replaces the search under `--projects`. A `--transcript` path that cannot be read
+(missing, a directory, no permission) stops the run with exit 2 and a message that names it, before any report is
+printed, so a mistyped path never gives an empty report; a transcript found by the search that cannot be read is
+skipped with a warning on stderr.
 
 ## Units and signals
 
@@ -899,7 +902,7 @@ python3 -I tools/diagnostics/advisor_event_coverage.py --projects <dir> --label 
 
 | Option | Meaning |
 |---|---|
-| `--projects <dir>` | required: transcripts laid out `<dir>/<any depth>/<session>.jsonl`; files with a `subagents` directory on the path are counted and never read |
+| `--projects <dir>` | required: transcripts laid out `<dir>/<any depth>/<session>.jsonl`; files with a `subagents` directory on the path are counted and never read. A directory that is missing, is not a directory or cannot be read exits 2 |
 | `--label <text>` | required: written to the field `label` of the report |
 | `--since`, `--until` | ISO 8601 window `[since, until)`; without an offset the time is UTC. The window limits what is counted, not the numbering of calls |
 | `--consult-command <name>` | Bash command that counts as a consultation (kind `bash-<name>`); repeatable, none by default. It matches the first word of the command after leading `NAME=value` assignments, never a prefix |

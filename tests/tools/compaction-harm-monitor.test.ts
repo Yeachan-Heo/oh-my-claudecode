@@ -386,6 +386,34 @@ describe('compaction harm monitor', () => {
     }
   });
 
+  it('an explicit --transcript path that cannot be read stops the run with exit 2; a searched file is not an explicit path', () => {
+    const env = makeEnv();
+    try {
+      const good = addUnit(env, 'q1', { i: 0, tail: call('q1', 0, 'q1-a', 'text'), log: 'jev' });
+      const absent = join(env.dir, 'absent-transcript.jsonl');
+      const directory = join(env.projects, '-demo');
+      for (const [label, bad] of [['missing', absent], ['directory', directory]] as const) {
+        for (const order of [[bad], [good, bad], [bad, good]]) {
+          const extra = order.flatMap((path) => ['--transcript', path]);
+          const stopped = runMonitor(env, extra);
+          expect(stopped.status, `${label} ${order.length}: ${stopped.stderr}`).toBe(2);
+          expect(stopped.stdout, label).toBe('');
+          expect(stopped.stderr, label).toContain(`--transcript`);
+          expect(stopped.stderr, label).toContain(bad);
+          expect(stopped.stderr, label).not.toMatch(/skipping|Traceback/);
+        }
+      }
+      const only = runMonitor(env, ['--transcript', good, '--json']);
+      expect(only.status, only.stderr).toBe(0);
+      expect(JSON.parse(only.stdout).units).toBe(1);
+      const searched = runMonitor(env, ['--json']);
+      expect(searched.status, searched.stderr).toBe(0);
+      expect(JSON.parse(searched.stdout).units).toBe(1);
+    } finally {
+      cleanup(env);
+    }
+  });
+
   it('unreadable lines are counted per input and a journal without a JSON object warns', () => {
     const env = makeEnv();
     try {
