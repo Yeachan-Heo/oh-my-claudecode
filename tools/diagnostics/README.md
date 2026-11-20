@@ -993,7 +993,9 @@ tee src/a.ts` is still a write); the check reading and the executor outcome metr
 (`timeout --no-such 5 pytest` is still a test run) and read nothing behind it for the other wrappers (`sudo -z pytest` is no
 test run); the read-only judgement skips it for `sudo` only, so `nohup -z ls` is not read-only; advisor event coverage read no
 wrapper before the table and reads nothing behind such an option (`sudo -z ask-advisor` is no consultation). `env -S` is read as a flag: its string is split into words that
-come before the rest of the command, so `env -S pytest` runs `pytest`.
+come before the rest of the command, so `env -S pytest` runs `pytest`. The attached forms (`-Spytest`, `--split-string=pytest`)
+hold the string in the same word, so the words behind them are arguments of that command, but the tools read the first of them
+as the command.
 
 # Shell syntax the tools do not read
 
