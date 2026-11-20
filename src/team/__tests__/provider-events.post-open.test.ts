@@ -71,6 +71,13 @@ const SWAPS = {
     mkdirSync(workerDir);
     linkSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), path);
   },
+  // The team root becomes a symlink to its own moved directory, so the path
+  // still names the opened file: only the team root check can catch this.
+  teamRoot: (path: string) => {
+    const teamRoot = dirname(dirname(dirname(path)));
+    renameSync(teamRoot, `${teamRoot}.moved`);
+    symlinkSync(`${teamRoot}.moved`, teamRoot);
+  },
 };
 
 describe.skipIf(process.platform === 'win32')('provider events after a swap between open and re-check', () => {
@@ -92,6 +99,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     swap.closed = 0;
     swap.failClose = false;
     rmSync(root, { recursive: true, force: true });
+    rmSync(`${root}.moved`, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
   });
 
@@ -116,6 +124,12 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   it('reader returns none when the worker directory becomes another real directory linking the same file after the open', async () => {
     writeFileSync(path, EVENT_LINE);
     swap.afterOpen = opened => SWAPS.parentHardLink(opened);
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+  });
+
+  it('reader returns none when the team root becomes a symlink after the open', async () => {
+    writeFileSync(path, EVENT_LINE);
+    swap.afterOpen = opened => SWAPS.teamRoot(opened);
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
   });
 
@@ -179,6 +193,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
       "    if (kind === 'parent') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(outside, dir); }",
       "    if (kind === 'parentSameLeaf') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(`${dir}.moved`, dir); }",
       "    if (kind === 'parentHardLink') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); mkdirSync(dir); linkSync(join(`${dir}.moved`, 'provider-events.jsonl'), path); }",
+      "    if (kind === 'teamRoot') { const dir = dirname(dirname(dirname(path))); renameSync(dir, `${dir}.moved`); symlinkSync(`${dir}.moved`, dir); }",
       '  }',
       '  return handle;',
       '};',
@@ -219,6 +234,11 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     // One inode, two names: the file is still empty under both.
     expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
     expect(readFileSync(path, 'utf8')).toBe('');
+  });
+
+  it('hook appends nothing when the team root becomes a symlink after the open', () => {
+    expectSilentExit(runHook('teamRoot'));
+    expect(readFileSync(join(`${root}.moved`, 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')).toBe('');
   });
 
   it('hook writes nothing on Windows, where O_NOFOLLOW cannot refuse a symlinked leaf', () => {
