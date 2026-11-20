@@ -1224,6 +1224,13 @@ def pair_journal_rows(session, journal_rows):
     return boundaries
 
 
+def reject_dangling(path):
+    """A link to a transcript that is gone is a read error, never a file that is left out or only counted: os.stat follows the
+    link and raises OSError, which names the link."""
+    if os.path.islink(path):
+        os.stat(path)
+
+
 def list_transcripts(projects):
     """Main session transcripts and subagent transcripts (the latter are only counted)."""
     main, subagent = [], []
@@ -1233,6 +1240,8 @@ def list_transcripts(projects):
             continue
         for entry in sorted(os.listdir(project_dir)):
             entry_path = os.path.join(project_dir, entry)
+            if entry.endswith(".jsonl"):
+                reject_dangling(entry_path)
             if entry.endswith(".jsonl") and os.path.isfile(entry_path):
                 main.append(entry_path)
             elif os.path.isdir(entry_path):
@@ -1241,7 +1250,10 @@ def list_transcripts(projects):
                     names = sorted(os.listdir(sub_dir))
                 except (FileNotFoundError, NotADirectoryError):
                     continue  # no subagents here; a directory that cannot be read is an error, never a skip
-                subagent += [os.path.join(sub_dir, name) for name in names if name.endswith(".jsonl")]
+                for name in names:
+                    if name.endswith(".jsonl"):
+                        reject_dangling(os.path.join(sub_dir, name))
+                        subagent.append(os.path.join(sub_dir, name))
     return main, subagent
 
 

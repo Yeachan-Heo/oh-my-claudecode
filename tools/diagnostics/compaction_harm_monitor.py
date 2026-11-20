@@ -282,6 +282,13 @@ def scan_transcript(path, window, tool_window):
     return session_id, boundaries, {"rows": good, "bad_lines": bad}
 
 
+def reject_dangling(path):
+    """A link to a transcript that is gone is a read error, never a file that is left out or only counted: os.stat follows the
+    link and raises OSError, which names the link."""
+    if os.path.islink(path):
+        os.stat(path)
+
+
 def find_transcripts(projects):
     """(path, thread, agent_id): <projects>/<dir>/<id>.jsonl and <projects>/<dir>/<id>/subagents/agent-*.jsonl."""
     files = []
@@ -292,8 +299,10 @@ def find_transcripts(projects):
         if not os.path.isdir(full) or directory.startswith("."):
             continue
         for name in sorted(os.listdir(full)):
-            if name.endswith(".jsonl") and os.path.isfile(os.path.join(full, name)):
-                files.append((os.path.join(full, name), "main", None))
+            if name.endswith(".jsonl"):
+                reject_dangling(os.path.join(full, name))
+                if os.path.isfile(os.path.join(full, name)):
+                    files.append((os.path.join(full, name), "main", None))
         for name in sorted(os.listdir(full)):
             sub = os.path.join(full, name, "subagents")
             try:

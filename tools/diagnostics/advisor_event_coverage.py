@@ -264,6 +264,13 @@ def raise_error(error):
     raise error
 
 
+def reject_dangling(path):
+    """A link to a transcript that is gone is a read error, never a file that is left out or only counted: os.stat follows the
+    link and raises OSError, which names the link."""
+    if os.path.islink(path):
+        os.stat(path)
+
+
 def iter_transcripts(root):
     """Yield (path, is_subagent) for every .jsonl file below root, in sorted order. A directory below root that cannot
     be read raises OSError: it is not skipped, so the counts are never made over a part of the tree."""
@@ -273,6 +280,7 @@ def iter_transcripts(root):
         is_subagent = SUBAGENT_DIR in relative.split(os.sep)
         for name in sorted(filenames):
             if name.endswith(".jsonl"):
+                reject_dangling(os.path.join(dirpath, name))
                 yield os.path.join(dirpath, name), is_subagent
 
 

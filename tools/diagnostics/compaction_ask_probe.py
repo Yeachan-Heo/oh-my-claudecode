@@ -1016,6 +1016,13 @@ def text_report(report, verdicts):
         lines.append(f"  verdict {g}: head_lost {v['head_lost']}, ask_lost {v['ask_lost']}, upper bounds {v['head_upper_bound']} / {v['ask_upper_bound']}")
     lines.extend(command_text_lines(report.get("command_measure")))
     return "\n".join(lines)
+def reject_dangling(path):
+    """A link to a transcript that is gone is a read error, never a file that is left out or only counted: os.stat follows the
+    link and raises OSError, which names the link."""
+    if os.path.islink(path):
+        os.stat(path)
+
+
 def find_transcripts(projects):
     """Transcripts: main <projects>/<dir>/<id>.jsonl and subagent <projects>/<dir>/<id>/subagents/agent-*.jsonl."""
     files = []
@@ -1026,8 +1033,10 @@ def find_transcripts(projects):
         if not os.path.isdir(dir_path) or entry.startswith("."):
             continue
         for name in sorted(os.listdir(dir_path)):
-            if name.endswith(".jsonl") and os.path.isfile(os.path.join(dir_path, name)):
-                files.append((os.path.join(dir_path, name), "main", None))
+            if name.endswith(".jsonl"):
+                reject_dangling(os.path.join(dir_path, name))
+                if os.path.isfile(os.path.join(dir_path, name)):
+                    files.append((os.path.join(dir_path, name), "main", None))
         for sub_entry in sorted(os.listdir(dir_path)):
             sub = os.path.join(dir_path, sub_entry, "subagents")
             try:

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,6 +176,37 @@ describe.skipIf(!hasPython3)('a directory or a transcript that cannot be read st
         expect(r.stdout, 'no result is printed').toBe('');
       });
     });
+  }
+});
+
+// A `*.jsonl` link whose target is gone is a transcript that cannot be read: it stops the run like a file that refuses access.
+// It is no missing file that is left out of the counts, so every tool that searches the transcripts names it and exits 2, for a
+// main transcript and for a subagent transcript.
+describe.skipIf(!hasPython3)('a dangling link to a transcript stops every tool that searches the transcripts', () => {
+  const trees: Array<[string, string, string]> = [
+    ['main', join('proj', 's2.jsonl'), 's2.jsonl'],
+    ['subagent', join('proj', 's1', 'subagents', 'agent-a2.jsonl'), 'agent-a2.jsonl'],
+  ];
+  const tree = (kind: string) => join(base, `linked-${kind}`);
+  beforeAll(() => {
+    for (const [kind, link] of trees) {
+      mkdirSync(join(tree(kind), 'proj', 's1', 'subagents'), { recursive: true });
+      writeFileSync(join(tree(kind), 'proj', 's1.jsonl'), TRANSCRIPT);
+      symlinkSync(join(base, 'no-such-transcript.jsonl'), join(tree(kind), link));
+    }
+  });
+
+  for (const [kind, , name] of trees) {
+    // The eight tools that search the transcripts; the join of decisions and the outcome labels open only the transcripts that their journal names.
+    for (const tool of PYTHON_TOOLS.filter((entry) => entry.script !== 'decision_outcome_join.py')) {
+      it(`${tool.script}: a dangling ${kind} link exits 2 and names it`, () => {
+        const r = runPython(tool.script, tool.args().map((arg) => (arg === projects ? tree(kind) : arg)), 'none', '');
+        expect(r.status, r.stderr).toBe(2);
+        expect(r.stderr).toContain(name);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(r.stdout, 'no result is printed').toBe('');
+      });
+    }
   }
 });
 

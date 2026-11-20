@@ -273,6 +273,13 @@ def raise_error(error):
     raise error
 
 
+def reject_dangling(path):
+    """A link to a transcript that is gone is a read error, never a file that is left out or only counted: os.stat follows the
+    link and raises OSError, which names the link."""
+    if os.path.islink(path):
+        os.stat(path)
+
+
 def find_transcripts(projects):
     """List of (path, agent_id) transcript files under --projects, sorted by path.
 
@@ -285,6 +292,7 @@ def find_transcripts(projects):
             if not name.endswith(".jsonl"):
                 continue
             path = os.path.join(parent, name)
+            reject_dangling(path)
             rel = os.path.relpath(path, projects)
             parts = rel.split(os.sep)
             if len(parts) == 2 and parts[1].endswith(".jsonl"):
