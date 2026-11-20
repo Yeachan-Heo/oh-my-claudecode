@@ -734,11 +734,11 @@ fs.mkdirSync = function (target, ...rest) {
     }
   });
 
-  // What the node subprocess runs must be what bash runs: nothing in the line may be changed by a double-quoted shell string.
+  // What the node subprocess runs must be what bash runs: nothing in the line may be changed by a double-quoted shell string (`\d` and `\x5c` pass through).
   test('the command lines contain nothing that a double-quoted shell string would change', () => {
     for (const command of commands) {
       expect(command.startsWith('node -e "') && command.endsWith('"')).toBe(true);
-      expect(scriptOf(command)).not.toMatch(/["`$]|\\(?!d)/);
+      expect(scriptOf(command)).not.toMatch(/["`$]|\\(?!d|x5c)/);
     }
   });
 

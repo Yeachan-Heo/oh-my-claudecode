@@ -213,7 +213,8 @@ describe('HUD Windows Compatibility', () => {
       // Should use path.join for constructing paths
       expect(content).toContain("p.join(d,'plugins','cache','omc','oh-my-claudecode')");
       expect(content).not.toContain('ls ~/.claude/CLAUDE-*.md');
-      expect(content).toContain("find \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null");
+      // The shell blocks expand CLAUDE_CONFIG_DIR into $C first (a stored `~` is not expanded by the shell).
+      expect(content).toContain("find \"$C\" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null");
     });
 
     it('hud skill should use cross-platform Node.js commands for plugin detection', () => {
