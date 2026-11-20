@@ -943,21 +943,14 @@ function withoutHeredocBodies(text) {
 }
 
 /**
- * Words that run the command after them: launch wrappers and the reserved words that start a command
- * (`then`, `do`, `!`, `{` ...). Each has the options that take a value (`sudo -u root`) and the positional
- * words it takes before the command (`timeout 5`).
+ * Words that run the command after them and are not in the table of launch wrappers (LAUNCH_TABLE): `doas`, `xargs` and the
+ * reserved words that start a command (`then`, `do`, `!`, `{` ...). Each has the options that take a value (`xargs -n 1`) and
+ * the positional words it takes before the command. The wrappers of the table are read by the rule of stripLaunchWrapper, in
+ * programAt, so an option outside the table ends them there too.
  */
 const launcher = (values = [], positional = 0) => ({ values: new Set(values), positional });
 const LAUNCH_WRAPPERS = new Map([
-  ['sudo', launcher(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-T', '-R'])],
   ['doas', launcher(['-u', '-C'])],
-  ['env', launcher(['-u', '-C', '-S', '--unset', '--chdir'])],
-  ['command', launcher()],
-  ['nohup', launcher()],
-  ['exec', launcher(['-a'])],
-  ['time', launcher(['-f', '-o', '--format', '--output'])],
-  ['nice', launcher(['-n', '--adjustment'])],
-  ['timeout', launcher(['-s', '-k', '--signal', '--kill-after'], 1)],
   ['xargs', launcher(['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s', '--arg-file', '--delimiter', '--eof', '--max-args', '--max-lines', '--max-procs', '--max-chars'])],
   ...['!', '{', 'if', 'then', 'elif', 'else', 'do', 'while', 'until'].map((word) => [word, launcher()]),
 ]);
@@ -978,6 +971,34 @@ const NESTED_MAX_DEPTH = 2;
 const baseName = (word) => word.slice(word.lastIndexOf('/') + 1);
 
 /**
+ * The index of the word behind the launch wrapper of LAUNCH_TABLE at `words[at]` and its options, by the rule of
+ * stripLaunchWrapper; -1 when the wrapper cannot be read to its command.
+ */
+function afterTableWrapper(words, at) {
+  const spec = LAUNCH_TABLE.get(baseName(words[at]));
+  let index = at + 1;
+  let durations = spec.duration ? 1 : 0;
+  for (;;) {
+    const word = words[index];
+    if (typeof word !== 'string') return -1;
+    if (spec.flags.has(word) || spec.optionalValue.has(word) || gluedOption(word, spec)) {
+      index += 1;
+    } else if (spec.values.has(word)) {
+      if (typeof words[index + 1] !== 'string') return -1;
+      index += 2;
+    } else if (word.startsWith('-')) {
+      return -1;
+    } else if (durations > 0) {
+      if (!DURATION.test(word)) return -1;
+      durations -= 1;
+      index += 1;
+    } else {
+      return index;
+    }
+  }
+}
+
+/**
  * The index of the program word of a command that starts at `start`: assignments (`FOO=1`), launch wrappers
  * with their options (`sudo -u root`, `env -i`, `timeout 5`, `xargs -n 1`) and reserved words (`then`, `do`)
  * are skipped. A word that is not a string (a boundary or the end) ends the command.
@@ -989,6 +1010,12 @@ function programAt(words, start) {
     if (typeof word !== 'string') return at;
     if (/^[A-Za-z_]\w*\+?=/.test(word)) {
       at += 1;
+      continue;
+    }
+    if (LAUNCH_TABLE.has(baseName(word))) {
+      const behind = afterTableWrapper(words, at);
+      if (behind === -1) return at; // an option outside the table, `--`, no command or no duration: the wrapper stays the program
+      at = behind;
       continue;
     }
     const wrapper = LAUNCH_WRAPPERS.get(baseName(word));
