@@ -699,6 +699,100 @@ describe('user prohibitions after compaction', () => {
     expect(result).toEqual(cases);
   });
 
+  it('git options: the value of -C, -c and the long options is not the subcommand, and the subcommand is a whole word', () => {
+    const cases: Array<[string, string, boolean]> = [
+      // An option value that reads like the subcommand, or a subcommand that only starts like it.
+      ['commit', 'git -c commit.gpgSign=false status', false], ['commit', 'git -C commit status', false],
+      ['commit', 'git --git-dir commit status', false], ['commit', 'git --work-tree commit status', false],
+      ['commit', 'git --namespace commit status', false], ['commit', 'git --config-env commit.x=VAR status', false],
+      ['commit', 'git --attr-source commit status', false], ['commit', 'git -c commit.x=y -C commit status', false],
+      ['commit', 'git -c "commit x=y" status', false], ['commit', 'git commit-tree abc', false], ['commit', 'git commit.x', false],
+      ['push', 'git -c push.default=simple status', false], ['merge', 'git -C merge status', false],
+      // Git options that exit after printing do not run what follows.
+      ['commit', 'git --exec-path commit', false], ['commit', 'git --html-path commit', false],
+      ['commit', 'git --version commit', false], ['commit', 'git -h commit', false], ['commit', 'git --help commit', false],
+      ['commit', 'git --list-cmds=main commit', false],
+      // The subcommand after every kind of option, values with spaces, glued shell operators.
+      ['commit', 'git -c core.x=y commit -m x', true], ['commit', 'git -C /r commit', true],
+      ['commit', 'git --git-dir=/x commit', true], ['commit', 'git --git-dir /x commit', true],
+      ['commit', 'git --work-tree=/w --git-dir=/x commit', true], ['commit', 'git --work-tree /w --namespace n commit', true],
+      ['commit', 'git --config-env=core.x=VAR commit', true], ['commit', 'git --attr-source HEAD commit', true],
+      ['commit', 'git --exec-path=/x commit', true], ['commit', 'git --no-pager -c a=b -C /r commit', true],
+      ['commit', 'git -c user.name="A B" commit', true], ["commit", "git -c 'user.name=A B' commit", true],
+      ['commit', 'git -C "/srv/my repo" commit', true], ['commit', 'git --work-tree="/a b" commit', true],
+      ['push', 'git -C "/srv/my repo" -c "a b=c d" push origin', true],
+      ['commit', 'bash -c "git commit -m x"', true], ['commit', "ssh host 'git -c a=b commit -m x'", true],
+      ['commit', 'git commit;', true], ['commit', '(git commit)', true], ['commit', 'git commit&&git push', true],
+      ['push', 'git commit&&git push', true], ['merge', 'git merge|cat', true], ['commit', 'git commit', true],
+      ['commit', 'git -ccore.x=y commit', false], // not an option of git (it exits with "unknown option")
+      ['commit', 'git -c "a commit', false], // an open quote runs to the end of the command
+      ['commit', 'git -c "a" commit', true],
+    ];
+    const result = pyEval(
+      '[module.call_matches(klass, [], "Bash", {"command": command}) for klass, command in argument]', cases.map(([k, c]) => [k, c]),
+    );
+    expect(result).toEqual(cases.map(([, , expected]) => expected));
+  });
+
+  it('read-only git commands keep their subcommand behind options with values', () => {
+    const cases: Record<string, boolean> = {
+      'git -c commit.gpgSign=false status': true, 'git -C commit status': true, 'git -C "/srv/my repo" status': true,
+      'git --git-dir /x status': true, 'git --git-dir=/x status': true, 'git --work-tree /w log': true,
+      'git --namespace n diff': true, 'git -c "a b=c" show': true, 'git --no-pager log': true,
+      'git -C /srv/r commit -m x': false, 'git --git-dir /x commit': false, 'git -C "/a b" push': false,
+    };
+    expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);
+  });
+
+  it('read-only git commands after a commit prohibition give no candidate; a real commit does', () => {
+    const rows = [
+      user(1, "Don't commit this yet"), host(2),
+      call(3, 'Bash', { command: 'git -c commit.gpgSign=false status' }, 'c1'),
+      call(4, 'Bash', { command: 'git -C commit status' }, 'c2'),
+      call(5, 'Bash', { command: 'git --git-dir=/x commit -m x' }, 'c3'),
+    ];
+    const { report, locators } = run('git-values', { 'p/gv.jsonl': rows });
+    expect(report.candidates.by_class).toEqual({ commit: 1 });
+    expect(locators.map((item) => item.call_line)).toEqual([5]);
+    const states = [
+      user(1, 'Do not run anything'), host(2),
+      call(3, 'Bash', { command: 'git -c commit.gpgSign=false status' }, 's1'),
+      call(4, 'Bash', { command: 'git -C commit status' }, 's2'),
+    ];
+    expect(run('git-values-general', { 'p/gv2.jsonl': states }, { rule: 3 }).report.candidates.total).toBe(0);
+  });
+
+  it('a quoted or escaped > is text, not a redirection', () => {
+    const cases: Record<string, boolean> = {
+      // Text that only holds the character.
+      "echo '>'": true, 'grep ">" README.md': true, 'echo ">>"': true, "echo '2> err'": true, 'echo "a \\" > b"': true,
+      'echo a\\>b': true, 'echo "a > b" "c > d"': true, 'grep -n ">" a "b > c"': true, "echo '\"' '>'": true,
+      // Real redirections, quoted target included.
+      'echo x > f': false, 'echo x >> f': false, 'cmd 2> err': false, 'cmd &> f': false, 'cmd &>> f': false, 'cmd >| f': false,
+      'echo x > "f g"': false, "echo x >'f'": false, 'echo "a" > f': false, 'echo ">" > f': false, "echo '>' >> f": false,
+      'echo x > >(tee f)': false, 'echo x > /dev/nullx': false,
+      // Not a write to a file, as before.
+      'echo hi 2>&1': true, 'echo hi 2>/dev/null': true, 'echo x > /dev/null': true, 'echo x >> /dev/null': true,
+      'echo x >>/dev/null': true, 'echo a >&2': true, 'cat <(ls)': true,
+    };
+    expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);
+  });
+
+  it('commands that only print or search for > give no candidate under a general prohibition; a redirect does', () => {
+    const rows = [
+      user(1, 'Do not run anything'), host(2),
+      call(3, 'Bash', { command: "echo '>'" }, 'q1'),
+      call(4, 'Bash', { command: 'grep ">" README.md' }, 'q2'),
+      call(5, 'Bash', { command: 'echo x > out.txt' }, 'q3'),
+    ];
+    for (const rule of [2, 3]) {
+      const { report, locators } = run(`quoted-redirect-${rule}`, { 'p/qr.jsonl': rows }, { rule });
+      expect(report.candidates.total, `rule ${rule}`).toBe(1);
+      expect(report.candidates.by_class, `rule ${rule}`).toEqual({ run: 1 });
+      expect(locators.flatMap((item) => item.call_lines ?? [item.call_line]), `rule ${rule}`).toEqual([5]);
+    }
+  });
+
   it('long runs of git options and of find words match in linear time and keep their result', () => {
     const expression = `{
       "t0": __import__("time").perf_counter(),
@@ -714,7 +808,18 @@ describe('user prohibitions after compaction', () => {
           ("push", "git -C /srv/r -c a=b --no-pager push origin"),
           ("commit", "git -C commit"),
           ("commit", "git -c git " * 8000),
+          ("commit", 'git -c "a ' * 8000 + "commit"),
+          ("commit", "git -c 'a " * 8000 + "x' commit"),
+          ("commit", "git --work-tree=\\"/a " * 8000 + "commit"),
+          ("commit", "git -C " * 20000 + "commit"),
+          ("commit", "git " + '"' * 40000 + " commit"),
+          ("commit", "git " + "\\\\" * 40000 + " commit"),
         ]
+      ],
+      "redirects": [
+        module.is_read_only_command(command)
+        for command in ["echo " + "'" * 40000, "echo " + '"' * 40000, "echo " + "\\\\" * 40000, "echo " + '"a ' * 8000,
+                        "echo " + '\\\\"' * 20000, "echo '" + "a " * 20000, ">" * 40000, "> " * 20000, "echo " + "'>' " * 10000]
       ],
       "delete": [
         module.call_matches_v2("delete", [], "Bash", {"command": command})
@@ -726,7 +831,10 @@ describe('user prohibitions after compaction', () => {
     // The earlier patterns needed minutes for these inputs; the bound is generous so a loaded host stays green.
     // The clock runs inside the interpreter, so its start-up and the compile of the module are not timed.
     expect(result.t1 - result.t0).toBeLessThan(2);
-    expect(result.answers).toEqual([true, false, false, false, false, true, true, true, false]);
+    // The quoted-value runs (9 to 11) hold paired quotes, so an earlier `git` reaches the final `commit`.
+    // `git -C commit` has no subcommand: "commit" is the value of -C (the earlier pattern read it as the subcommand).
+    expect(result.answers).toEqual([true, false, false, false, false, true, true, false, false, true, true, true, false, false, false]);
+    expect(result.redirects).toEqual([true, true, true, true, true, true, false, false, true]);
     expect(result.delete).toEqual([false, false, false, true, true, false]);
   });
 });

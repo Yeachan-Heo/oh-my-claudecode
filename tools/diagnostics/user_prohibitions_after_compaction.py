@@ -53,8 +53,9 @@ e. Candidate. A tool call in the same session and in the period, whose time is s
    from assistant rows, tool_use blocks deduplicated by id (first occurrence counts), and assistant rows with
    message.model "<synthetic>" are skipped. Matching:
    - commit, push, merge, restart (general or with targets): a Bash command running git commit, git push or
-     git merge (git options such as -C DIR may come before the subcommand), or systemctl restart|stop,
-     docker restart|stop|rm, or kill;
+     git merge (git options may come before the subcommand; -C, -c and the long options with a value, such as
+     --git-dir, take the next word as their value, and the subcommand must be a whole word), or systemctl
+     restart|stop, docker restart|stop|rm, or kill;
    - edit, delete (targets required): an Edit, Write, MultiEdit or NotebookEdit call whose file_path or
      notebook_path equals a target or ends with "/" + target; or a Bash command with rm, mv or sed -i that
      contains a target;
@@ -93,12 +94,12 @@ c. Candidates for general prohibitions (no targets) and for class other. Matchin
    - deploy: Bash with deploy, systemctl (enable|start), docker (compose )?up or kubectl apply;
    - run and other: every call that changes state: an edit call, or a Bash call whose first command word
      (after environment assignments and sudo) is not in READ_ONLY_COMMANDS. A write redirection to a file makes
-     any Bash call state-changing. Class other is matched this way whether or not the prohibition names targets.
+     any Bash call state-changing; a > inside quotes or after a backslash is text. Class other is matched this way whether or not the prohibition names targets.
      READ_ONLY_COMMANDS holds ls, cat, head, tail, grep, rg, wc, stat, echo, pwd, which, date, file, printf, du,
      df, whoami and uname. Also read-only: sed -n without an in-place flag (-i), awk without a redirection, find
      without -delete, -exec, -execdir, -ok or -okdir, and git with the subcommand status, log, diff, show,
      branch, rev-parse or merge-base. A write redirection is > or >> not followed by & and not aimed at /dev/null
-     (2>&1 and 2>/dev/null do not count). Words are split on whitespace; a compound command such as "ls && rm x"
+     (2>&1, 2>/dev/null and >>/dev/null do not count). Words are split on whitespace; a compound command such as "ls && rm x"
      is judged by its first word only.
    Classes with targets, and commit, push, merge and restart, match as in rule v1.
 d. Overlaps. A call that matches several prohibitions is a candidate for each of them. Records are pairs
@@ -281,29 +282,76 @@ def load_patterns(path):
 
 set_patterns({})
 
-# Command shapes per class (English names). Git options such as "-C DIR" or "-c key=value" may precede the subcommand.
-GIT_SUBCOMMAND_RES = {name: re.compile(name + r"\b") for name in ("commit", "push", "merge")}
+# Command shapes per class (English names). Git options may precede the subcommand: those that take their value
+# as the next word are listed (git 2.47: -C <path>, -c <name>=<value>, --git-dir, --work-tree, --namespace,
+# --config-env, --attr-source), the other options stand alone, with or without "=value".
+# The subcommand is a whole word: the next character must end the word or be a shell operator.
+GIT_SUBCOMMAND_RES = {name: re.compile(name + r"(?=$|[\s;&|()<>`'\"])") for name in ("commit", "push", "merge")}
 GIT_WORD_RE = re.compile(r"\bgit\Z")
-GIT_OPTION_RE = re.compile(r"-[\w-]+")
-GIT_VALUE_OPTIONS = ("-C", "-c")
+GIT_OPTION_RE = re.compile(r"-[\w-]+(?:=\S*)?")
+GIT_VALUE_OPTIONS = frozenset(("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source"))
+# Options after which git prints something and exits: nothing that follows runs as a subcommand.
+GIT_EXIT_OPTIONS = frozenset(("-v", "--version", "-h", "--help", "--exec-path", "--html-path", "--man-path", "--info-path"))
 RESTART_RE = re.compile(r"\bsystemctl\s+(?:restart|stop)\b|\bdocker\s+(?:restart|stop|rm)\b|\bkill\b")
+
+
+def quote_state(token, state):
+    """The quote (' or " or None) still open after reading token that starts in the given state; a backslash
+    escapes the next character outside single quotes."""
+    escaped = False
+    for char in token:
+        if escaped:
+            escaped = False
+        elif char == "\\" and state != "'":
+            escaped = True
+        elif state is None:
+            if char in "'\"":
+                state = char
+        elif char == state:
+            state = None
+    return state
+
+
+def shell_word_ends(tokens):
+    """For every token, the index of the first token after the shell word that starts there. Tokens come from a
+    split on whitespace, so a quoted value with spaces ("A B") spans several of them: a quote that a token leaves
+    open runs on to the token that closes it (to the end when none does). Computed from the right, so the cost is
+    linear however many quotes are open."""
+    count = len(tokens)
+    closes = {"'": [count] * (count + 1), '"': [count] * (count + 1)}  # first token after the one that closes the quote
+    ends = [count] * (count + 1)
+    for index in range(count - 1, -1, -1):
+        for quote in closes:
+            state = quote_state(tokens[index], quote)
+            closes[quote][index] = index + 1 if state is None else closes[state][index + 1]
+        state = quote_state(tokens[index], None)
+        ends[index] = index + 1 if state is None else closes[state][index + 1]
+    return ends
 
 
 def git_subcommand_follows(command, subcommand):
     """Whether a "git" word is followed by any number of options and then the subcommand. An option is "-" and word
-    characters or dashes; "-C" and "-c" may also take the next token as their value. Done over tokens from the right
-    (the answer for a token depends on the tokens after it only), so the cost is linear however many options follow."""
+    characters or dashes, with "=value" for some; the options of GIT_VALUE_OPTIONS also take the next word as their
+    value, so "git -C commit status" and "git -c commit.gpgSign=false status" have no commit. Done over tokens from
+    the right (the answer for a token depends on the tokens after it only), so the cost is linear however many
+    options follow."""
     if "git" not in command:
         return False
     tokens = re.findall(r"\S+", command)
     count = len(tokens)
+    ends = shell_word_ends(tokens)
     subcommand_re = GIT_SUBCOMMAND_RES[subcommand]
-    reaches = [False] * (count + 2)
+    reaches = [False] * (count + 1)
     for index in range(count - 1, -1, -1):
         token = tokens[index]
-        reaches[index] = (subcommand_re.match(token) is not None
-                          or (GIT_OPTION_RE.fullmatch(token) is not None and reaches[index + 1])
-                          or (token in GIT_VALUE_OPTIONS and reaches[index + 2]))
+        if subcommand_re.match(token) is not None:
+            reaches[index] = True
+        elif token in GIT_EXIT_OPTIONS or token.startswith("--list-cmds="):
+            reaches[index] = False
+        elif token in GIT_VALUE_OPTIONS:
+            reaches[index] = reaches[ends[ends[index]]]
+        elif GIT_OPTION_RE.fullmatch(token) is not None:
+            reaches[index] = reaches[ends[index]]
     return any(reaches[index + 1] for index in range(count) if GIT_WORD_RE.search(tokens[index]))
 
 
@@ -327,7 +375,10 @@ FIND_ACTION_OPTIONS = frozenset(("-delete", "-exec", "-execdir", "-ok", "-okdir"
 ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SED_IN_PLACE_RE = re.compile(r"-[A-Za-z]*i")  # -i, -ni, -i.bak
 # A write redirection to a file: ">" or ">>" not followed by "&" and not aimed at /dev/null.
-REDIRECT_WRITE_RE = re.compile(r">{1,2}(?!&)\s*(?!/dev/null(?:\s|$))\S")
+REDIRECT_WRITE_RE = re.compile(r"(?<!>)>{1,2}(?![>&])\s*(?!/dev/null(?:\s|$))\S")
+# Quoted strings and escaped characters are text, not shell syntax: each one becomes a single "_" before the
+# redirection is looked for, so a quoted file name after ">" still counts as a target.
+QUOTED_OR_ESCAPED_RE = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|\\.""", re.DOTALL)
 # Bash commands that match the general classes (rule c, v2).
 DELETE_GENERAL_RE = re.compile(r"\b(?:rm|rmdir|unlink|shred)\b|\bgit\s+rm\b")
 FIND_WORD_RE = re.compile(r"\bfind\b")
@@ -679,14 +730,15 @@ def match_candidates(session, boundaries, prohibitions):
 
 
 def git_subcommand(words):
-    """First git word that is not an option; -C and -c take a value (rule c, v2)."""
+    """First git word that is not an option; the options of GIT_VALUE_OPTIONS take a value (rule c, v2)."""
+    ends = shell_word_ends(words)
     index = 1
     while index < len(words):
         word = words[index]
-        if word in ("-C", "-c"):
-            index += 2
+        if word in GIT_VALUE_OPTIONS:
+            index = ends[ends[index]]
         elif word.startswith("-"):
-            index += 1
+            index = ends[index]
         else:
             return word
     return None
@@ -694,8 +746,8 @@ def git_subcommand(words):
 
 def is_read_only_command(command):
     """Rule c, v2: True when a Bash command only reads state. Judged by its first word, after environment
-    assignments and sudo; a write redirection to a file makes any command state-changing."""
-    if REDIRECT_WRITE_RE.search(command):
+    assignments and sudo; a write redirection to a file (outside quotes) makes any command state-changing."""
+    if REDIRECT_WRITE_RE.search(QUOTED_OR_ESCAPED_RE.sub("_", command)):
         return False
     words = command.split()
     while words and ENV_ASSIGNMENT_RE.match(words[0]):
@@ -899,7 +951,7 @@ LIMITS_V2 = [
     "A candidate is a call that matches a prohibition after a boundary, not proof of a breach; the user's review decides.",
     "A Bash command is judged by its first word (after environment variables and sudo); a compound command such as `ls && rm x` is treated as read-only, so it is not counted (undercount).",
     "Under rule v2 `git branch` is read-only, so `git branch -D` gives no candidate (undercount).",
-    "A write redirection to a file (`>`, `>>`, not to /dev/null) makes any command state-changing; this extends the awk rule of the contract.",
+    "A write redirection to a file (`>`, `>>`, not to /dev/null, not inside quotes) makes any command state-changing; this extends the awk rule of the contract.",
     "The revocation check of rule v2 looks only in the same message; a bare permission word can match a question and revoke a prohibition that was not lifted.",
     "Prohibitions of classes edit, delete, run, install and deploy with a target match calls as in rule v1; without a target they match by the general patterns of rule v2.",
     "Copies of user messages rebuilt after a compaction in user rows are not removed; they count like ordinary messages.",
