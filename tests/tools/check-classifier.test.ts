@@ -91,6 +91,12 @@ it('the empty string and non-string inputs never throw and are not checks', () =
 it('quotes and comments name nothing', () => {
   assert.equal(classifyCommand('git commit -m "npm test"').isCheck, false, 'runner inside quotes');
   assert.equal(classifyCommand('true # npm test').isCheck, false, 'runner inside a comment');
+  // An operator inside quotes does not split the command, so the word after it is not a command word.
+  assert.equal(classifyCommand('"a;npm" test').isCheck, false, 'a ; inside quotes');
+  assert.equal(classifyCommand("'a&&npm' test").isCheck, false, 'a && inside quotes');
+  assert.equal(classifyCommand('"a|npm" test').isCheck, false, 'a | inside quotes');
+  assert.equal(classifyCommand('"a\nnpm" test').isCheck, false, 'a newline inside quotes');
+  assert.equal(classifyCommand('echo "a;b"; npm test').isCheck, true, 'the real operator after the quoted one still splits');
 });
 
 it('pipefail: only a pipe into tail is made visible', () => {
@@ -540,6 +546,10 @@ it('here-documents: the redirections on the operator line count, the body text d
   assert.equal(edits('cat <<A > README.md; cat <<B > docs/b.ts\nx\nA\ny\nB\necho z > src/z.ts'), true, 'a line after both');
   // Not a here-document: a here-string, an arithmetic shift, an operator with no terminator line.
   assert.equal(edits('cat <<< "x" > src/a.ts'), true);
+  assert.equal(edits('cat <<<EOF > src/a.ts'), true, 'a here-string with no space and a redirect');
+  assert.equal(edits('cat <<<EOF\necho y > src/a.ts\nEOF'), true, 'a here-string takes no body: the next line is a command');
+  assert.equal(edits('cat <<<EOF > README.md\necho y > src/a.ts\nEOF'), true);
+  assert.equal(edits('cat <<<EOF\necho y > README.md\nEOF'), false, 'the lines are commands, and they write an ignored file');
   assert.equal(edits('cat <<< "x" > README.md\necho a > src/a.ts'), true);
   assert.equal(edits('x=$((1<<3))\necho hi > src/a.ts'), true);
   assert.equal(edits('cat <<EOF > README.md\nx > src/a.ts'), true, 'no terminator: nothing is cut');
@@ -855,6 +865,13 @@ it('copy, truncate and dd arguments are read in linear time', () => {
   assert.equal(got[13], false, 'a long list of ignored files');
   assert.equal(got[14], false, 'a long run of dd inputs ending at an ignored target');
   assert.equal(got[15], false, 'a long comment holds no command');
+});
+
+it('nested shell strings are read up to the size limit and skipped above it', () => {
+  const nested = (length: number) => `sh -c '${'echo x > src/a.ts;'.padEnd(length, ' ')}'`;
+  const got = [nested(100000), nested(100001), `${nested(100001)} && echo y > src/b.ts`, `${nested(100001)} > README.md`].map((command) => isMutation('Bash', { command }));
+  assert.deepEqual(got, [true, false, true, false], 'the limit is 100000 characters of the string; the outer command is still read');
+  assert.equal(isMutation('Bash', { command: nested(99999) }), true);
 });
 
 it('nested shell strings are read in linear time', () => {

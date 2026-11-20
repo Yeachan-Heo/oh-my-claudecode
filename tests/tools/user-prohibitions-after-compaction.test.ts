@@ -705,6 +705,7 @@ describe('user prohibitions after compaction', () => {
       ['commit', 'git -c commit.gpgSign=false status', false], ['commit', 'git -C commit status', false],
       ['commit', 'git --git-dir commit status', false], ['commit', 'git --work-tree commit status', false],
       ['commit', 'git --namespace commit status', false], ['commit', 'git --config-env commit.x=VAR status', false],
+      ['commit', 'git --config-env commit status', false],
       ['commit', 'git --attr-source commit status', false], ['commit', 'git -c commit.x=y -C commit status', false],
       ['commit', 'git -c "commit x=y" status', false], ['commit', 'git commit-tree abc', false], ['commit', 'git commit.x', false],
       ['push', 'git -c push.default=simple status', false], ['merge', 'git -C merge status', false],
