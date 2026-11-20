@@ -238,6 +238,14 @@ def evidence_account(evidence, file_path):
     return evidence.setdefault(file_path, {'taskstops': [], 'notifications': []})
 
 
+def check_tree(dir_path):
+    """Raises OSError that names a directory below dir_path that cannot be read: glob would skip it without a word."""
+    def stop(error):
+        raise error
+    for _dirpath, _dirs, _files in os.walk(dir_path, onerror=stop):
+        pass
+
+
 def scan_sessions(dir_path, rng):
     """Scan of the transcripts directory: <dir>/<project>/<session>.jsonl and subagent
     transcripts <dir>/<project>/<session>/subagents/(<child>/)agent-*.jsonl. Returns
@@ -255,6 +263,7 @@ def scan_sessions(dir_path, rng):
     seen_tids = set()
     # Main sessions and subagent transcripts as sources of Agent/Task calls: a subagent
     # can issue its own Agent calls; the timestamp field, fallback ts.
+    check_tree(dir_path)
     files = [
         (sorted(glob.glob(os.path.join(dir_path, '*', '*.jsonl'))), 'sessions'),
         (sorted(glob.glob(os.path.join(dir_path, '*', '*', 'subagents', 'agent-*.jsonl'))), 'subagents'),
@@ -268,11 +277,7 @@ def scan_sessions(dir_path, rng):
                 counters['subagent_transcripts'] += 1
             rel = os.path.relpath(path, dir_path)
             account = evidence_account(evidence, rel)
-            try:
-                f = open(path, encoding='utf8', errors='replace')
-            except OSError:
-                continue
-            with f:
+            with open(path, encoding='utf8', errors='replace') as f:  # a transcript that cannot be read raises OSError
                 for line in f:
                     if not line.strip():
                         continue
@@ -783,7 +788,11 @@ def main():
         usage_error(f'--to is not an ISO date: {args.date_to}')
     rng = (o, d)
 
-    c0 = part_transcripts(args.transcripts, rng, args.min_support, intent_map) if args.transcripts else None
+    try:
+        c0 = part_transcripts(args.transcripts, rng, args.min_support, intent_map) if args.transcripts else None
+    except OSError as error:
+        print(f'error: cannot read {error.filename or args.transcripts}: {error.strerror}', file=sys.stderr)
+        return 2
     ca = part_team(args.teams, rng, args.min_support) if args.teams else None
 
     def sum_entry(part):

@@ -221,6 +221,7 @@ the npm package.
 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The journals and transcripts are only read. The only files written are the `--tsv` and `--json` outputs, if given.
+- A directory below the transcripts directory or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A transcript that does not exist is `undetermined`, as before.
 
 ```
 python3 -I tools/diagnostics/decision_outcome_join.py --journal <jev dir> --transcripts <transcript dir> --prices prices.json
@@ -322,6 +323,7 @@ It is a standalone diagnostic run by hand. It does not change OMC behaviour and 
 ## Requirements and usage
 
 - Node 20 or later, built-in modules only.
+- A directory below the transcripts directory or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A session with no transcript is `undetermined`, as before.
 
 ```
 node tools/diagnostics/jev_outcome_labels.mjs --journal <journal dir> --transcripts <transcript dir> [--from <ISO>] [--to <ISO>] [--session <id>] [--tsv <file>] [--json]
@@ -361,6 +363,7 @@ run by hand: it does not change OMC behaviour, has no switch, and is not shipped
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The transcripts are only read. The only files written are the `--tsv` and `--json` files, if given. They are opened for
   writing as given, so an existing file is overwritten and a symbolic link is followed: point them at a new path.
+- A directory below the transcripts directory or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts.
 
 ```
 python3 -I tools/diagnostics/tool_call_repeats.py --transcripts <dir> [--from <ISO>] [--to <ISO>]
@@ -410,6 +413,7 @@ It is a standalone offline diagnostic run by hand: it does not change OMC behavi
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The only files written are the `--tsv` and `--json` files, if given. They are opened for
   writing as given, so an existing file is overwritten and a symbolic link is followed: point them at a new path.
+- A directory below the transcripts directory or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts.
 
 ```
 python3 -I tools/diagnostics/empty_results.py --transcripts <dir> [--teams <dir>] [--from <ISO>] [--to <ISO>]
@@ -454,6 +458,7 @@ behaviour, has no switch, is not run by any hook, and is not shipped in the npm 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The transcripts and the journal are only read. The only file written is the `--out` file, if given
   (a new file with mode `0600`; an existing file is an error).
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts.
 - The journal is read from `OMC_JEV_LOG_DIR`, else from `.omc/state/jev` under the current directory (run the tool from
   the project root), unless `--compact` is given. With `OMC_STATE_DIR` set, the Jev log directory has a project identifier
   in its path, so pass the journal with `--compact` (or set `OMC_JEV_LOG_DIR`). The projects directory defaults to
@@ -493,6 +498,7 @@ change OMC behaviour, has no switch, and is not shipped in the npm package.
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The files written are the `--out` file and, with `--export-labeling`, the export file (new files with mode `0600`). The result and the `--out` file carry no ask or state content; the opt-in export file holds human message text by design, and also the transcript path (`file`) and the `session_id` of each unit.
 - This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts.
 
 ```
 python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 7] [--ask-loss-threshold 0.05] [--json]
@@ -565,8 +571,8 @@ python3 -I tools/diagnostics/compaction_harm_monitor.py [--projects <dir>] [--tr
 `--transcript <file>` (repeatable) replaces the search under `--projects`. A `--transcript` path that cannot be read
 (missing, a directory, no permission) stops the run with exit 2 and a message that names it, before any report is
 printed, so a mistyped path never gives an empty report; the same holds for a `--projects` directory that is missing
-or cannot be read when the transcripts are searched (no `--transcript`); a transcript found by the search that
-cannot be read is skipped with a warning on stderr.
+or cannot be read when the transcripts are searched (no `--transcript`); so do a directory below it and a transcript found
+by the search that cannot be read (the message names the path, and no count covers a part of the transcripts).
 
 ## Units and signals
 
@@ -624,7 +630,7 @@ python3 -I tools/diagnostics/user_prohibitions_after_compaction.py [--projects <
 ```
 
 Without `--out` the JSON report goes to standard output and the summary line to standard error. Exit codes: 0,
-2 (a usage error, an unreadable input, a bad `--patterns` file or an output file that already exists).
+2 (a usage error, an unreadable input, which includes a directory below `--projects` or a transcript in it that cannot be read (the message names the path; it is never left out of the counts), a bad `--patterns` file or an output file that already exists).
 
 ## What is counted
 
@@ -710,6 +716,7 @@ no switch, and is not shipped in the npm package.
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The only file written is the `--out` file, if given.
 - This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts.
 - Prices come only from the file given with `--prices`; without it every USD figure is reported as
   unavailable and the cache measurements still run. The file is JSON, with prices in USD per million
   tokens:
@@ -915,7 +922,7 @@ python3 -I tools/diagnostics/advisor_event_coverage.py --projects <dir> --label 
 
 | Option | Meaning |
 |---|---|
-| `--projects <dir>` | required: transcripts laid out `<dir>/<any depth>/<session>.jsonl`; files with a `subagents` directory on the path are counted and never read. A directory that is missing, is not a directory or cannot be read exits 2 |
+| `--projects <dir>` | required: transcripts laid out `<dir>/<any depth>/<session>.jsonl`; files with a `subagents` directory on the path are counted and never read. A directory that is missing, is not a directory or cannot be read exits 2, and so does a directory below it or a transcript in it that cannot be read (the message names the path) |
 | `--label <text>` | required: written to the field `label` of the report |
 | `--since`, `--until` | ISO 8601 window `[since, until)`; without an offset the time is UTC. The window limits what is counted, not the numbering of calls |
 | `--consult-command <name>` | Bash command that counts as a consultation (kind `bash-<name>`); repeatable, none by default. It matches the first word of the command after leading `NAME=value` assignments and redirections, never a prefix; the value of an assignment is one shell word, so it may be quoted, hold an escaped space, be empty or be a command substitution (`MODE="deep analysis" my-advisor`, `A=$(date) my-advisor`). Launch wrappers (`sudo`, `env`, `command`, `nohup`, `time`) are not read: `sudo my-advisor` is no consultation |

@@ -71,8 +71,9 @@ RULE (written before the measurement; do not change after seeing the results):
 
 Exit codes: 0 a valid run; 1 --out or --export-labeling write refused (the file exists); 2 a usage error,
 a missing --compact file, a missing --labels file, a --transcript path that cannot be read, or a --projects
-directory that is missing or cannot be read when the transcripts are searched (a transcript found by the search
-that cannot be read is skipped with a warning on standard error).
+directory that is missing or cannot be read when the transcripts are searched, a directory below it that cannot be
+read or a transcript found by the search that cannot be read (the error names the path, and no counts are made over
+a part of the transcripts).
 
 Blind labelling of binding and stale instructions (optional; without --export-labeling and --labels the
 output is the one described above):
@@ -1100,7 +1101,18 @@ def main(argv=None):
         if not os.path.isdir(args.projects) or not os.access(args.projects, os.R_OK | os.X_OK):
             print(f"error: --projects is not a readable directory: {args.projects}", file=sys.stderr)
             return 2
-        files = find_transcripts(args.projects)
+        try:
+            files = find_transcripts(args.projects)
+        except OSError as error:
+            print(f"error: cannot read {error.filename or args.projects}: {error.strerror}", file=sys.stderr)
+            return 2
+    try:
+        for path, _role, _agent_id in files:  # a transcript that cannot be read stops the run
+            with open(path, "rb"):
+                pass
+    except OSError as error:
+        print(f"error: cannot read {error.filename or 'a transcript'}: {error.strerror}", file=sys.stderr)
+        return 2
     files.sort(key=lambda x: x[0])
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     analysis = main_analysis(files, journal_data, from_e, to_e, keep_asks=bool(args.export_labeling or args.labels))

@@ -204,7 +204,11 @@ function transcriptEntries(path) {
       }
     }
     result.sort((a, b) => a.t - b.t);
-  } catch { result = null; }
+  } catch (error) {
+    // A transcript that exists and cannot be read stops the run: it is not counted as an absent one.
+    if (typeof error?.code === 'string' && error.code !== 'ENOENT') throw error;
+    result = null;
+  }
   transcriptCache.set(path, result);
   return result;
 }
@@ -299,11 +303,26 @@ function isAnalysedRow(row, source) {
   return row.point === 'agent-type' && (row.decision === 'deny' || row.decision === 'would-deny');
 }
 
+/**
+ * Throws when a directory below `dir` cannot be read (the message names it): a transcript in such a directory
+ * would be looked up as absent and its rows counted as undetermined, so the counts would cover a part of the tree.
+ */
+function assertReadableTree(dir) {
+  const pending = [dir];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (entry.isDirectory()) pending.push(join(current, entry.name));
+    }
+  }
+}
+
 function main() {
   const options = parseOptions(process.argv.slice(2));
   for (const [name, path] of [['--journal', options.journal], ['--transcripts', options.transcripts]]) {
     if (!existsSync(path)) throw new Error(`directory ${name} does not exist: ${path}`);
   }
+  assertReadableTree(options.transcripts);
   const unreadable = { count: 0 };
   const stats = {};
   const applied = readJournal(options.journal, 'applied.jsonl', unreadable, stats);

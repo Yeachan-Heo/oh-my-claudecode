@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Offline coverage of advisor consultations by events, for the rule "call the advisor on events, not on a feeling
 of uncertainty". The script reads session transcripts (JSONL) and writes counts only. Message text, commands and
-file paths never reach the report or an error message. Tests use synthetic transcripts only.
+file paths never reach the report (the paths of --sessions-out apart); an error message names only the directory or
+file that cannot be read. Tests use synthetic transcripts only.
 
 It is a standalone diagnostic run by hand: it does not change OMC behaviour and is not shipped in the npm package
 (tools/ is not in the "files" list of package.json).
@@ -201,9 +202,14 @@ def iter_rows(path, counters):
             yield row
 
 
+def raise_error(error):
+    raise error
+
+
 def iter_transcripts(root):
-    """Yield (path, is_subagent) for every .jsonl file below root, in sorted order."""
-    for dirpath, dirnames, filenames in os.walk(root):
+    """Yield (path, is_subagent) for every .jsonl file below root, in sorted order. A directory below root that cannot
+    be read raises OSError: it is not skipped, so the counts are never made over a part of the tree."""
+    for dirpath, dirnames, filenames in os.walk(root, onerror=raise_error):
         dirnames.sort()
         relative = os.path.relpath(dirpath, root)
         is_subagent = SUBAGENT_DIR in relative.split(os.sep)
@@ -823,8 +829,8 @@ def main(argv):
                 return fail("cannot write %s" % option)
     try:
         report, sessions = build_report(args, Window(since, until))
-    except OSError:
-        return fail("cannot read the input")
+    except OSError as error:
+        return fail("cannot read %s: %s" % (error.filename or "the input", error.strerror))
     text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     outputs = []
     if args.sessions_out is not None:

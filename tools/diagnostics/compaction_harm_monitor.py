@@ -53,8 +53,9 @@ RULE (written before any measurement; do not change after seeing a result):
   scripts get the same transcript paths.
 
 Exit codes: 0 ok; 2 usage error, missing or unusable input file (a --transcript path that cannot be read stops the
-run, and so does a --projects directory that is missing or cannot be read when the transcripts are searched; a
-transcript found by the search that cannot be read is skipped with a warning on standard error).
+run, and so does a --projects directory that is missing or cannot be read when the transcripts are searched, a
+directory below it that cannot be read and a transcript found by the search that cannot be read: the error names
+the path, and no counts are made over a part of the transcripts).
 
 """
 
@@ -575,7 +576,11 @@ def main(argv=None):
         if not os.path.isdir(args.projects) or not os.access(args.projects, os.R_OK | os.X_OK):
             print(f"error: --projects is not a readable directory: {args.projects}", file=sys.stderr)
             return 2
-        files = find_transcripts(args.projects)
+        try:
+            files = find_transcripts(args.projects)
+        except OSError as error:
+            print(f"error: cannot read {error.filename or args.projects}: {error.strerror}", file=sys.stderr)
+            return 2
     files.sort(key=lambda item: item[0])
     occurrences = []
     transcript_input = {"rows": 0, "bad_lines": 0}
@@ -585,9 +590,9 @@ def main(argv=None):
         except OSError as error:
             if args.transcript:
                 print(f"error: --transcript: {error}", file=sys.stderr)
-                return 2
-            print(f"warning: skipping an unreadable transcript: {error.strerror}", file=sys.stderr)
-            continue
+            else:
+                print(f"error: cannot read {error.filename or path}: {error.strerror}", file=sys.stderr)
+            return 2
         transcript_input["rows"] += file_input["rows"]
         transcript_input["bad_lines"] += file_input["bad_lines"]
         for boundary in boundaries:

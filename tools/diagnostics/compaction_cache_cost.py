@@ -367,6 +367,10 @@ def merge_response(current, tokens, iteration, breakdown, write_5m, no_ttl, advi
         current.advisor = advisor
 
 
+def raise_error(error):
+    raise error
+
+
 def load_calls(files):
     """API responses from the transcripts: global dedup by (message.id, requestId) and dedup within each file.
 
@@ -864,12 +868,22 @@ def main(argv):
     if a.transcript:
         files = list(a.transcript)
     else:
-        project_dirs = [k for k in a.projects.glob("*") if k.is_dir()]
-        files = [p for k in project_dirs for p in k.rglob("*.jsonl")]
-        files.sort(key=lambda p: (p.stat().st_mtime, str(p)))
+        try:
+            for _dirpath, _dirs, _files in os.walk(a.projects, onerror=raise_error):  # glob skips an unreadable directory
+                pass
+            project_dirs = [k for k in a.projects.glob("*") if k.is_dir()]
+            files = [p for k in project_dirs for p in k.rglob("*.jsonl")]
+            files.sort(key=lambda p: (p.stat().st_mtime, str(p)))
+        except OSError as error:
+            print(f"error: cannot read {error.filename or a.projects}: {error.strerror}", file=sys.stderr)
+            return 2
 
-    calls_all, gaps_t, rows_t, bad_t, file_calls = load_calls(files)
-    boundaries, rows_full, bad_full = boundaries_from_files(files)
+    try:
+        calls_all, gaps_t, rows_t, bad_t, file_calls = load_calls(files)
+        boundaries, rows_full, bad_full = boundaries_from_files(files)
+    except OSError as error:  # a transcript that cannot be read stops the run: it is not left out of the counts
+        print(f"error: cannot read {error.filename or 'a transcript'}: {error.strerror}", file=sys.stderr)
+        return 2
     compact_rows, _after, rows_c, bad_c, gaps_c = load_compact(a.compact)
 
     in_range = [z for z in calls_all if z.time is not None and start <= z.time <= end]

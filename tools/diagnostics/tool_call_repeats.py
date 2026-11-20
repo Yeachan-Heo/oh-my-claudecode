@@ -239,6 +239,14 @@ def is_polling(tool, inp, commands, extra_tools):
     return None
 
 
+def check_tree(dir_path):
+    """Raises OSError that names a directory below dir_path that cannot be read: glob would skip it without a word."""
+    def stop(error):
+        raise error
+    for _dirpath, _dirs, _files in os.walk(dir_path, onerror=stop):
+        pass
+
+
 def load_contexts(dir_path, rng, poll_commands, extra_tools):
     """Sessions and subagents from the transcripts directory as separate contexts. Returns
     (contexts, stats). Context: {'context': label, 'file': path, 'calls': [c]}.
@@ -246,6 +254,7 @@ def load_contexts(dir_path, rng, poll_commands, extra_tools):
     sig (call signature), result_sig (result digest or None without a received result),
     error (is_error), result_pos (tool_result line number or None), polling (bool),
     polling_kind, subagent_type, prompt. Call order: file line order."""
+    check_tree(dir_path)
     patterns = [
         os.path.join(dir_path, '*', '*', 'subagents', '**', 'agent-*.jsonl'),
         os.path.join(dir_path, '*', '*.jsonl'),
@@ -331,7 +340,7 @@ def load_contexts(dir_path, rng, poll_commands, extra_tools):
                                     if tid and tid not in results:
                                         results[tid] = (position, block.get('content'), block.get('is_error') is True)
             except OSError:
-                continue
+                raise  # a transcript that cannot be read stops the run: it is not left out of the counts
             for w in calls:
                 result = results.get(w['id'])
                 if result is not None:
@@ -888,7 +897,10 @@ def main():
         'min_support': args.min_support,
     }
 
-    contexts, stats = load_contexts(args.transcripts, (o, d), poll_commands, extra_tools)
+    try:
+        contexts, stats = load_contexts(args.transcripts, (o, d), poll_commands, extra_tools)
+    except OSError as err:
+        usage_error(f'cannot read {err.filename or args.transcripts}: {err.strerror}')
     ranged = calls_in_range(contexts, (o, d))
     total_calls = sum(len(v) for v in ranged.values())
     stats['calls'] = total_calls

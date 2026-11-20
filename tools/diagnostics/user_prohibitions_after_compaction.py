@@ -1539,7 +1539,7 @@ def main(argv):
     except OSError as error:
         for path in created:
             remove_quietly(path)
-        return fail("cannot read or write a file: " + (error.strerror or "unknown error"))
+        return fail("cannot read or write a file: " + (error.filename + ": " if error.filename else "") + (error.strerror or "unknown error"))
     # Summary line on standard error only, so standard output stays pure JSON when --out is not given.
     print(f"candidates: {totals['candidates_total']}; prohibitions: {totals['prohibitions_total']}; "
           f"user messages: {totals['messages_in_period']}; sessions: {totals['sessions']}; "

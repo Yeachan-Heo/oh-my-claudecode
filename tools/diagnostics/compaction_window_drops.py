@@ -268,13 +268,18 @@ def default_projects_dir():
     return os.path.join(base, "projects")
 
 
+def raise_error(error):
+    raise error
+
+
 def find_transcripts(projects):
     """List of (path, agent_id) transcript files under --projects, sorted by path.
 
-    Main: <projects>/<dir>/<id>.jsonl; subagents: <projects>/<dir>/<id>/subagents/agent-*.jsonl.
+    Main: <projects>/<dir>/<id>.jsonl; subagents: <projects>/<dir>/<id>/subagents/agent-*.jsonl. A directory below
+    --projects that cannot be read raises OSError: it is not skipped.
     """
     found = []
-    for parent, _dirs, files in os.walk(projects):
+    for parent, _dirs, files in os.walk(projects, onerror=raise_error):
         for name in files:
             if not name.endswith(".jsonl"):
                 continue
@@ -891,12 +896,24 @@ def main(argv):
         if not os.path.isdir(args.projects):
             print("error: missing --projects dir: " + args.projects, file=sys.stderr)
             return 2
-        for path, agent_id in find_transcripts(args.projects):
+        try:
+            found = find_transcripts(args.projects)
+        except OSError as error:
+            print(f"error: cannot read {error.filename or args.projects}: {error.strerror}", file=sys.stderr)
+            return 2
+        for path, agent_id in found:
             try:
                 if os.path.getmtime(path) >= from_f:
                     files.append((path, agent_id))
             except OSError:
                 continue
+    try:
+        for path, _agent_id in files:  # a transcript that cannot be read stops the run, it is not left out of the counts
+            with open(path, "rb"):
+                pass
+    except OSError as error:
+        print(f"error: cannot read {error.filename or 'a transcript'}: {error.strerror}", file=sys.stderr)
+        return 2
     files.sort(key=lambda p: p[0])
     journal_data = load_journal(args.compact)
     journal_dict = {}
