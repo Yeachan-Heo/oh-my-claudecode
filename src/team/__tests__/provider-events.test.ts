@@ -15,6 +15,22 @@ import {
 
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
 
+// The team root and its state/ and state/team/ parents lie below the storage
+// anchor, where assertTeamStatePathSafe() refuses a symlink. Builds
+// <root>/.omc/state/team/demo with `component` a symlink into `outside`, which
+// holds workers/worker-1/provider-events.jsonl; returns the team root.
+const TEAM_PATH = ['state', 'team', 'demo'] as const;
+function linkTeamPathComponent(root: string, outside: string, component: (typeof TEAM_PATH)[number], content: string): string {
+  const at = TEAM_PATH.indexOf(component);
+  const realParent = join(root, '.omc', ...TEAM_PATH.slice(0, at));
+  const workerDir = join(outside, ...TEAM_PATH.slice(at), 'workers', 'worker-1');
+  mkdirSync(realParent, { recursive: true });
+  mkdirSync(workerDir, { recursive: true });
+  writeFileSync(join(workerDir, 'provider-events.jsonl'), content);
+  symlinkSync(join(outside, component), join(realParent, component));
+  return join(root, '.omc', ...TEAM_PATH);
+}
+
 describe('parseLatestProviderEvent', () => {
   it('returns the latest event of the current attempt only', () => {
     const content = [
@@ -115,6 +131,16 @@ describe.skipIf(process.platform === 'win32')('readLatestProviderEvent', () => {
       writeFileSync(join(outside, 'provider-events.jsonl'), line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
       symlinkSync(outside, join(root, 'workers', 'worker-2'));
       expect(await readLatestProviderEvent(root, 'worker-2', 'a1')).toEqual({ event: 'none' });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.each(TEAM_PATH)('returns none when the %s directory above the worker is a symlink', async component => {
+    const outside = mkdtempSync(join(tmpdir(), 'provider-events-outside-'));
+    try {
+      const teamRoot = linkTeamPathComponent(root, outside, component, line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
+      expect(await readLatestProviderEvent(teamRoot, 'worker-1', 'a1')).toEqual({ event: 'none' });
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
@@ -256,6 +282,21 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       expect(readFileSync(target, 'utf8')).toBe('');
       expect(existsSync(join(outside, 'provider-events.jsonl'))).toBe(false);
       expect(existsSync(join(outside, 'created.jsonl'))).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.each(TEAM_PATH)('does not write when the %s directory above the worker is a symlink', async component => {
+    const outside = mkdtempSync(join(tmpdir(), 'provider-event-hook-outside-'));
+    try {
+      const command = await hookCommand('Stop');
+      const teamRoot = linkTeamPathComponent(root, outside, component, '');
+      const result = run(command, { OMC_TEAM_STATE_ROOT: teamRoot, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('');
+      expect(readFileSync(join(outside, ...TEAM_PATH.slice(TEAM_PATH.indexOf(component)), 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')).toBe('');
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
