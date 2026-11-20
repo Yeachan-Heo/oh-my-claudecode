@@ -1645,6 +1645,23 @@ describe('runtime v2 startup inbox dispatch', () => {
     }
   });
 
+  it('writes no hook settings and adds no --settings for a codex worker', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-no-hook-settings-');
+    await useActualModelContractLaunchBuilder();
+    const { startTeamV2 } = await import('../runtime-v2.js');
+    await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['codex'],
+      tasks: [{ subject: 'No hooks', description: 'Codex takes no claude hook settings.' }],
+      cwd,
+    });
+    const launchConfig = mocks.spawnWorkerInPane.mock.calls[0]?.[2] as { launchArgs?: string[] } | undefined;
+    expect(launchConfig?.launchArgs).not.toContain('--settings');
+    await expect(lstat(join(absPath(cwd, TeamPaths.root('dispatch-team')), 'provider-event-hooks.json')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('forwards Claude provider and tier environment variables at the launch boundary', async () => {
     cwd = await mkdtempFixture('omc-runtime-v2-claude-env-matrix-');
     await useActualModelContractLaunchBuilder();
