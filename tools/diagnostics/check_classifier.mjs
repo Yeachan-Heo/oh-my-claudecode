@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.15.2';
+export const RULES_VERSION = '2026.11.20.1';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
