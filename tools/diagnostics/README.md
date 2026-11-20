@@ -762,11 +762,11 @@ node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [
 
 | Option | Meaning |
 |---|---|
-| `--file <path>` | a journal file; repeatable. Plain arguments are taken as files too, and (unlike `--file`) do not turn off the default directory. A file given on the command line that does not exist is reported with a warning on stderr; the summary and the exit code do not change |
+| `--file <path>` | a journal file; repeatable. Plain arguments are taken as files too, and (unlike `--file`) do not turn off the default directory. A file given on the command line that does not exist, is a directory, cannot be read or is not valid UTF-8 stops the run with exit `2` and one line that names it |
 | `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`) |
 | `--json` | JSON output |
 
-With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `state/jev` under the state root of the current directory (run the tool from the project root). The state root is resolved with `scripts/lib/state-root.mjs`, the resolver the hooks use, so it follows `OMC_STATE_DIR`; if it cannot be resolved the tool exits with `2` and asks for `--dir` (or `OMC_JEV_LOG_DIR`). This tool and `compaction_review.mjs` resolve the state root; the `compaction_*.py` tools do not. Exit codes: `0` summary printed, `2` no journal file found.
+With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `state/jev` under the state root of the current directory (run the tool from the project root). The state root is resolved with `scripts/lib/state-root.mjs`, the resolver the hooks use, so it follows `OMC_STATE_DIR`; if it cannot be resolved the tool exits with `2` and asks for `--dir` (or `OMC_JEV_LOG_DIR`). This tool and `compaction_review.mjs` resolve the state root; the `compaction_*.py` tools do not. A journal found in the directory that cannot be read stops the run the same way (it is never left out of the counts; a file found in a directory is decoded leniently, because a rotated part may end in the middle of a character). Exit codes: `0` summary printed, `2` no journal file found or a journal file that cannot be read.
 
 ## What is counted
 

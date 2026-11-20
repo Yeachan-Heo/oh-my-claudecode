@@ -153,9 +153,9 @@ describe('denial_log_summary.mjs summary', () => {
     expect(result.outOfSchema).toBe(2);
   });
 
-  it('does not fail on a missing file', () => {
-    const result = summarize([join(dir, 'no-such-file.jsonl')]);
-    expect(result.rows).toBe(0);
+  it('throws an error that names a file that cannot be read', () => {
+    const missing = join(dir, 'no-such-file.jsonl');
+    expect(() => summarize([missing])).toThrow(missing);
   });
 
   it('separates a subagent from its session and names a row without a session', () => {
@@ -408,19 +408,16 @@ describe('denial_log_summary.mjs command line', () => {
     expect(r.stdout).toContain('files: 1, rows: 1');
   });
 
-  it('warns on stderr for a file given with --file that does not exist, without changing the summary or the exit code', () => {
+  it('exits 2 and names a file given with --file that does not exist, with no summary', () => {
     const existing = writeJournal('cli/warn/denials.jsonl', [decision({ key: 'abababababababab' })]);
     const missing = join(dir, 'cli/warn/typo.jsonl');
     const r = run(['--file', missing, '--file', existing]);
-    expect(r.status).toBe(0);
-    expect(r.stderr).toContain(`warning: file not found: ${missing}`);
-    expect(r.stdout).toContain('files: 2, rows: 1');
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(`cannot read ${missing}`);
+    expect(r.stdout).toBe('');
     const quiet = run(['--file', existing]);
+    expect(quiet.status).toBe(0);
     expect(quiet.stderr).toBe('');
-    const onlyMissing = run(['--file', missing]);
-    expect(onlyMissing.status).toBe(0);
-    expect(onlyMissing.stdout).toContain('files: 1, rows: 0');
-    expect(onlyMissing.stderr).toContain('file not found');
   });
 
   it('exits 2 when no journal file is found', () => {
