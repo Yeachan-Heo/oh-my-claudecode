@@ -84,7 +84,7 @@ function splitSubstitutions(text, placeholder) {
       const end = ch === '`' ? closingBacktick(text, i + 1) : matchingParenthesis(text, i + 2);
       const body = text.slice(i + open, end);
       out += text.slice(from, i) + (body.trim() === '' ? '' : placeholder); // an empty substitution expands to nothing
-      bodies.push(body);
+      if (!(ch === '$' && body.startsWith('(') && body.endsWith(')'))) bodies.push(body); // `$((1>2))` is arithmetic, not a command
       i = end + 1;
       from = i;
     } else i += 1;
@@ -808,7 +808,7 @@ function printedExitCode(pieces, index, pipefail, tail) {
   const printed = pieces[last + 1];
   if (printed === undefined || /[<>]/.test(printed.text)) return undefined;
   const literal = printedText(printed.text);
-  if (literal === undefined) return undefined;
+  if (literal === undefined || literal.length > 1000) return undefined; // a longer text is no print of a status, and its pattern would be huge
   const hasStatus = (text) => /^(?:\S*\/)?(?:echo|printf)\s/.test(text) && new RegExp(STATUS_VAR.source).test(text);
   if (pieces.slice(last + 2).some((piece) => hasStatus(piece.text))) return undefined;
   let source = '';
@@ -1422,12 +1422,17 @@ function shellWriteTargets(command, depth = 0, substitutions = 0) {
   const { text, bodies } = splitSubstitutions(withoutHeredocBodies(command), '_');
   const targets = [];
   const unquote = (raw) => shellWords(raw).find((word) => word !== null && word !== '');
+  // A redirection operator outside quotes needs nothing before it: `printf x>src/a.ts` writes the file, and the digits before it name a
+  // descriptor only as a word of their own, which makes no difference to the target. Text that holds `>` without a redirection is
+  // read first and skipped: a parameter expansion (`${x//>/-}`), an arithmetic command and a conditional (`(( a>b ))`, `[[ a>b ]]`). The
+  // expansion and the conditional are looked for within 300 characters, so that a text with many unclosed ones is read in linear time.
   const scan = new RegExp(
-    String.raw`${QUOTED}|\\[^\n]|(?<=^|\s)#[^\n]*|(?<=^|[\s;&|("'])(?:\d+|\{[A-Za-z_]\w*\})?(>>|>\||>&|>)\s*(${WORD})`,
+    String.raw`${QUOTED}|\\[^\n]|\$\{[^}]{0,300}\}|\(\((?:[^()]|\([^()]*\))*\)\)|\[\[[^\n]{0,300}?\]\]|(?<=^|[\s;&|(])#[^\n]*|(>>|>\||>&|>)\s*(${WORD})`,
     'g',
   );
   for (const m of text.matchAll(scan)) {
     if (m[2] === undefined) continue;
+    if (text[m.index + m[1].length] === '(' && m.index > 0 && !/[\s;&|("']/.test(text[m.index - 1])) continue; // `echo a>(cat)`: a process substitution is no target
     if (m[1] === '>&' && /^(?:\d+-?|-)$/.test(m[2])) continue; // `>&2` and `>&-` name a descriptor, not a file
     targets.push(unquote(m[2]));
   }

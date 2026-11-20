@@ -69,8 +69,8 @@ const WORDS: Record<Column, string[]> = {
   check: ['npm test', 'pytest'],
   write: ['tee src/a.ts', 'cp a src/a.ts'],
   commit: ['git commit -m x'],
-  consult: ['ask-advisor --ask'],
-  metrics: ['pytest', 'ask-advisor --ask'],
+  consult: ['ask-advisor --ask', 'ask-advisor'],
+  metrics: ['pytest', 'ask-advisor --ask', 'ask-advisor'],
   readonly: ['rm -rf build'],
 };
 
@@ -139,6 +139,14 @@ const AFTER_HEREDOC: Array<(word: string) => string> = [
   (word) => `cat <<-EOF\n\tx\n\tEOF\n${word}`, (word) => `cat <<EOF\nx\nEOF\n${word}`, (word) => `cat <<A <<-B\nx\nA\n\ty\n\tB\n${word}`,
 ];
 
+// A redirection or an operator needs no blank before it: it glues to the last word of the command (`ask-advisor>out.log`, `git commit -m x;ls`),
+// and the command is still the same command. A digit before the operator is part of the last word here (`npm test2>f` has the word `test2`), so
+// no descriptor is glued in these rows.
+const GLUED = [
+  '>out.log', '>>out.log', ' 2>err.log', '&>all.log', '&>>all.log', '<in.txt', '>|out.log', '>&2', ' 2>&1', ';ls', '&&ls', '||ls', '|cat', '>out.log;ls', '>out.log&&ls',
+  '<in.txt>out.log',
+];
+
 interface Case { command: string; word: string; want: boolean; row: string }
 
 // The table of launch wrappers is the text in check_classifier.mjs (the same text is in the Python tools, see launch-wrapper-table.test.ts).
@@ -187,6 +195,7 @@ function casesFor(column: Column): Case[] {
   for (const prefix of [...NO_COMMAND_RUNS, ...TABLE.none]) if (column !== 'readonly' || !WRITES_A_FILE.test(prefix)) add(prefix, false);
   if (column !== 'readonly') for (const prefix of EATS_THE_COMMAND) add(prefix, false);
   for (const [prefix, reads] of UNKNOWN_OPTION) add(prefix, reads[column]);
+  for (const word of WORDS[column]) for (const suffix of GLUED) cases.push({ command: word + suffix, word, want: true, row: `<word>${suffix}` });
   for (const command of BARE_WRAPPER) cases.push({ command, word: '', want: false, row: command });
   if (column === 'readonly') return cases; // the rows below hold a redirection, a boundary or a here-document: state-changing or text for the judgement of its first word
   const negatives = column === 'write' ? ARGUMENT_OF : [...ARGUMENT_OF, ...TARGET_IS_THE_WORD];
@@ -399,6 +408,164 @@ describe('shell status oracle: the exit status and the printed status of a check
     });
     expect(wrong, wrong.join('\n')).toEqual([]);
     expect(STATUS_ROWS.length).toBeGreaterThan(100);
+  });
+});
+
+// Writes, as a real bash did them (5.2, an empty directory with `src/`): the second column is 1 when the command wrote a file that is code
+// (anything but a .md, .log or .txt file), the third when it wrote any file. Every row is a way to glue a redirection to a word, to quote
+// or escape the operator so that it is text, or to put it where it is no redirection (arithmetic, a conditional, a parameter expansion,
+// a comment, a here-document body, a process substitution).
+const WRITE_ROWS: Array<[string, 0 | 1, 0 | 1]> = [
+  ['printf x>src/a.ts', 1, 1],
+  ['echo x>>src/a.ts', 1, 1],
+  ['echo x>|src/a.ts', 1, 1],
+  ['echo x&>src/a.ts', 1, 1],
+  ['echo x&>>src/a.ts', 1, 1],
+  ['echo x>&src/a.ts', 1, 1],
+  ['echo x<>src/a.ts', 1, 1],
+  ['echo a2>src/a.ts', 1, 1],
+  ['echo 2>src/a.ts', 1, 1],
+  ['echo a 2>src/a.ts', 1, 1],
+  ['cat a 1>src/a.ts', 1, 1],
+  ['cat a>src/a.ts', 1, 1],
+  ['cat a>>src/a.ts', 1, 1],
+  ['cat<a>src/a.ts', 1, 1],
+  ['cat <a>src/a.ts', 1, 1],
+  ['x=1>src/a.ts', 1, 1],
+  ['x=a>src/a.ts', 1, 1],
+  ['echo "x">src/a.ts', 1, 1],
+  ['echo \'x\'>src/a.ts', 1, 1],
+  ['echo x>"src/a.ts"', 1, 1],
+  ['echo x>\'src/a.ts\'', 1, 1],
+  ['echo x>src/a\\.ts', 1, 1],
+  ['echo x>src/a.ts;echo y', 1, 1],
+  ['echo x>src/a.ts&&echo y', 1, 1],
+  ['echo x>src/a.ts||echo y', 1, 1],
+  ['echo x>src/a.ts|cat', 1, 1],
+  ['echo y;echo x>src/a.ts', 1, 1],
+  ['{ echo x>src/a.ts; }', 1, 1],
+  ['(echo x>src/a.ts)', 1, 1],
+  ['echo $(echo x>src/a.ts)', 1, 1],
+  ['echo `echo x>src/a.ts`', 1, 1],
+  ['bash -c \'echo x>src/a.ts\'', 1, 1],
+  ['sh -c "echo x>src/a.ts"', 1, 1],
+  ['echo x>src/a.ts 2>&1', 1, 1],
+  ['echo x 2>&1>src/a.ts', 1, 1],
+  ['echo x>src/a.ts>src/b.ts', 1, 1],
+  ['echo x>src/a.ts<in.txt', 1, 1],
+  ['cat<in.txt>src/a.ts', 1, 1],
+  ['echo x>out.log>src/a.ts', 1, 1],
+  ['echo x{,}>src/a.ts', 1, 1],
+  ['f(){ echo x>src/a.ts; }; f', 1, 1],
+  ['if true; then echo x>src/a.ts; fi', 1, 1],
+  ['for i in 1; do echo $i>src/a.ts; done', 1, 1],
+  ['echo x>src/a.ts #', 1, 1],
+  ['echo x>src/a.ts # >other', 1, 1],
+  ['echo x>src/a.ts\necho y', 1, 1],
+  ['echo\\ x>src/a.ts', 1, 1],
+  ['echo a\\>b>src/a.ts', 1, 1],
+  ['echo -n>src/a.ts', 1, 1],
+  ['echo $RANDOM>src/a.ts', 1, 1],
+  ['time echo x>src/a.ts', 1, 1],
+  ['env A=1 echo x>src/a.ts', 1, 1],
+  ['sudo echo x>src/a.ts', 1, 1],
+  ['ls>src/a.ts', 1, 1],
+  ['grep x a>src/a.ts', 1, 1],
+  ['sed s/h/j/ a>src/a.ts', 1, 1],
+  ['true>src/a.ts', 1, 1],
+  [':>src/a.ts', 1, 1],
+  ['>src/a.ts', 1, 1],
+  ['> src/a.ts', 1, 1],
+  ['>>src/a.ts', 1, 1],
+  ['echo x >src/a.ts', 1, 1],
+  ['echo x> src/a.ts', 1, 1],
+  ['echo x >> src/a.ts', 1, 1],
+  ['echo x >| src/a.ts', 1, 1],
+  ['echo x &> src/a.ts', 1, 1],
+  ['echo x >& src/a.ts', 1, 1],
+  ['3>src/a.ts', 1, 1],
+  ['exec 3>src/a.ts', 1, 1],
+  ['echo x 3>src/a.ts', 1, 1],
+  ['echo x {fd}>src/a.ts', 1, 1],
+  ['echo x{fd}>src/a.ts', 1, 1],
+  ['echo "x>src/a.ts"', 0, 0],
+  ['echo \'x>src/a.ts\'', 0, 0],
+  ['echo x\\>src/a.ts', 0, 0],
+  ['echo "a>b">README.md', 0, 1],
+  ['echo $((1>2))', 0, 0],
+  ['echo $(( 3>2 ))', 0, 0],
+  ['(( 3>2 ))', 0, 0],
+  ['[[ b>a ]]', 0, 0],
+  ['[[ b > a ]]', 0, 0],
+  ['x=ab; echo ${x//>/-}', 0, 0],
+  ['x=a>b; true', 1, 1],
+  ['echo a\\>src/a.ts', 0, 0],
+  ['echo \'>src/a.ts\'', 0, 0],
+  ['cat <<EOF\nx>src/a.ts\nEOF', 0, 0],
+  ['cat <<\'EOF\'\n>src/a.ts\nEOF', 0, 0],
+  ['cat <<EOF >src/a.ts\nx\nEOF', 1, 1],
+  ['cat <<EOF>src/a.ts\nx\nEOF', 1, 1],
+  ['cat<<EOF>src/a.ts\nx\nEOF', 1, 1],
+  ['cat<<-EOF>src/a.ts\n	x\n	EOF', 1, 1],
+  ['cat <<< x>src/a.ts', 1, 1],
+  ['cat<<<x>src/a.ts', 1, 1],
+  ['echo x # >src/a.ts', 0, 0],
+  ['echo x #>src/a.ts', 0, 0],
+  ['echo x;# >src/a.ts', 0, 0],
+  ['echo a#b>src/a.ts', 1, 1],
+  ['echo x >&2', 0, 0],
+  ['echo x>&2', 0, 0],
+  ['echo x 2>&1', 0, 0],
+  ['echo x>&1', 0, 0],
+  ['echo x 1>&2', 0, 0],
+  ['echo x>&-', 0, 0],
+  ['echo x<src/a.ts', 0, 0],
+  ['cat <a', 0, 0],
+  ['cat<a', 0, 0],
+  ['cat a<in.txt', 0, 0],
+  ['echo x|cat', 0, 0],
+  ['echo $((1<2))', 0, 0],
+  ['cat <(echo x)', 0, 0],
+  ['echo x>(cat)', 0, 0],
+  ['diff <(echo a) <(echo b)', 0, 0],
+  ['tee >(cat) src/a.ts', 1, 1],
+  ['echo hi | tee >(cat) src/a.ts', 1, 1],
+  ['cat a | tee >(cat >out.log) src/a.ts', 1, 1],
+  ['echo x>README.md', 0, 1],
+  ['echo x>>README.md', 0, 1],
+  ['echo x&>README.md', 0, 1],
+  ['echo x>docs/n.md', 0, 1],
+  ['printf x>notes.txt', 0, 1],
+  ['echo x>out.log', 0, 1],
+  ['echo x 2>err.log', 0, 1],
+  ['echo x>&README.md', 0, 1],
+  ['echo x|tee src/a.ts', 1, 1],
+  ['echo x|tee -a src/a.ts', 1, 1],
+  ['cp a src/a.ts', 1, 1],
+  ['cp a src/', 1, 1],
+  ['cp -t src a', 1, 1],
+  ['mv a src/a.ts', 1, 1],
+  ['install a src/a.ts', 1, 1],
+  ['truncate -s 0 src/a.ts', 1, 1],
+  ['dd if=a of=src/a.ts 2>err.log', 1, 1],
+  ['sed -i s/h/j/ a.js', 1, 1],
+  ['sed -i.bak s/h/j/ a.js', 1, 1],
+];
+// The read-only judgement reads the first word of the command, so a pipe into `tee` is outside it (documented in the README).
+const FIRST_WORD_ONLY = new Set(['echo x|tee src/a.ts', 'echo x|tee -a src/a.ts']);
+
+describe('shell write oracle: the files a command writes, as bash wrote them', () => {
+  it('write: isMutation finds the code file of every command that wrote one, and none of the others', () => {
+    const wrong = WRITE_ROWS.flatMap(([command, code]) => (isMutation('Bash', { command }) === (code === 1) ? [] : [`${JSON.stringify(command)}: bash wrote ${code === 1 ? 'a code file' : 'no code file'}, isMutation says ${!(code === 1)}`]));
+    expect(wrong, wrong.join('\n')).toEqual([]);
+    expect(WRITE_ROWS.filter(([, code]) => code === 1).length).toBeGreaterThan(60);
+  });
+
+  it.skipIf(!hasPython3)('readonly: a command that wrote a file is not read-only', () => {
+    const rows = WRITE_ROWS.filter(([command, , any]) => any === 1 && !FIRST_WORD_ONLY.has(command));
+    const got = pyEval('user_prohibitions_after_compaction.py', '[not module.is_read_only_command(c) for c in argument]', rows.map(([command]) => command));
+    const wrong = rows.flatMap(([command], index) => (got[index] ? [] : [`${JSON.stringify(command)}: bash wrote a file, the command is judged read-only`]));
+    expect(wrong, wrong.join('\n')).toEqual([]);
   });
 });
 

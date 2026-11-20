@@ -531,10 +531,12 @@ def consult_kind(name, tool_input, config):
     if name == BASH_TOOL:
         command = tool_input.get("command")
         if isinstance(command, str):
-            # The first word must equal a consult command, not just start with it.
-            words = strip_wrappers(command).split()
-            if words and words[0] in config.consult_commands:
-                return "bash-" + words[0]
+            # The first word must equal a consult command, not just start with it. It ends at a blank or at an operator, so
+            # `my-advisor>out.log` and `my-advisor;ls` are the command, as the shell reads them.
+            text = strip_wrappers(command).lstrip()
+            word = text[:skip_word(text, 0)]
+            if word in config.consult_commands:
+                return "bash-" + word
     return None
 
 

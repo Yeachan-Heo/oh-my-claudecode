@@ -1396,6 +1396,29 @@ it('a long run of digits is read in linear time by every reading', () => {
   assert.equal(classifyInChild<boolean>([`tee ${digits} > ${digits}`], 'isMutation', `isMutation('Bash', { command })`).length, 1);
 });
 
+it('the text that holds a ">" without a redirection, and the printed status, are read in linear time', () => {
+  // Unclosed `${`, `[[` and `((` are looked for within a bounded stretch, so many of them cost one pass; a redirection behind them is still found.
+  const got = classifyInChild<boolean>([
+    `${'${'.repeat(100000)} > src/a.ts`,
+    `echo ${'${a '.repeat(50000)}> src/a.ts`,
+    `${'[[ '.repeat(50000)}> src/a.ts`,
+    `${'(( a '.repeat(50000)}> src/a.ts`,
+    `${'a>'.repeat(50000)}src/a.ts`,
+    `${'$((1>2)) '.repeat(20000)}> src/a.ts`,
+    `echo ${'${a>b}'.repeat(20000)}`,
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.deepEqual(got, [true, true, true, true, true, true, false]);
+  // A print with a very long text, and very many prints, give a result and no error.
+  const verdicts = classifyInChild<{ verdict: string }>([
+    `npm test; echo "${'a b '.repeat(25000)}$?"`,
+    `npm test; ${'echo "EXIT=$?"; '.repeat(7000)}`,
+    `npm test | ${'cat | '.repeat(15000)}tail; echo \${PIPESTATUS[0]}`,
+    `npm test; printf ${'%s'.repeat(50000)} $?`,
+  ], 'classifyCheckResult', "classifyCheckResult({ command, output: 'EXIT=0\\n', isError: false, exitCode: 0 })");
+  assert.equal(verdicts.length, 4);
+  for (const { verdict } of verdicts) assert.equal(typeof verdict, 'string');
+});
+
 it('a redirection with a digit descriptor is no argument, glued to the word or not', () => {
   assert.equal(classifyCommand('npm test 2>&1').narrowed, false);
   assert.equal(classifyCommand('npm test 1>out.txt').narrowed, false);
