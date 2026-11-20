@@ -1046,10 +1046,11 @@ at its first operand when no `-e` gave the script. A long option of sed may be s
 option gave it).
 
 Where the words cannot show what the program does: an edit with no file operand edits nothing (sed stops with an error, perl reads
-standard input), so the write reading takes it for an edit only behind `xargs` (`xargs sed -i 's/a/b/' < list`), which hands it the
-files, while the user prohibitions tool takes the in-place option alone for an edit (the prohibition must name a target that stands in
-the command text anyway). `perl -pie 's/a/b/' f` has the suffix `e` and takes `s/a/b/` as the name of a script file, which does not
-exist, so perl dies and writes nothing; both readings take it for an edit of `f`. A `w` command or a `-i` inside a sed script is not
+standard input), so both readings take it for an edit only behind `xargs` (`xargs sed -i 's/a/b/' < list`), which hands it the
+files; the user prohibitions tool looks for the word `xargs` in the command text, since its command splitter drops the wrapper words.
+`perl -pie 's/a/b/' f` has the suffix `e` and takes `s/a/b/` as the name of a script file, which does not exist, so perl dies and
+writes nothing, and `sed -if script.sed f` has the suffix `f` and takes `script.sed` for the script, which sed cannot parse; both
+readings take them for an edit of `f`, since the words do not show that the script is wrong. A `w` command or a `-i` inside a sed script is not
 read. `tests/tools/shell-syntax-matrix.test.ts` holds the rows (`EDIT_ROWS`), each run once by the real programs; a new form is one
 more row there, and one more option is one more word in the table.
 

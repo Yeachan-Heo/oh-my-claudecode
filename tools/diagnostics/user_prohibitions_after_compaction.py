@@ -936,6 +936,7 @@ perl octal -0 -l
 perl script -e -E
 perl inplace -i
 perl stop -V -h -v"""
+XARGS_RE = re.compile(r"(?<![\w.-])xargs(?![\w.-])")
 EDIT_TABLE = {}
 for _line in EDIT_TABLE_TEXT.split("\n"):
     _name, _kind, *_options = _line.split(" ")
@@ -945,14 +946,17 @@ for _line in EDIT_TABLE_TEXT.split("\n"):
 
 
 def edit_options(program, args):
-    """(in place, quiet) for the words after `sed` or `perl`: whether they edit files in place (EDIT_TABLE_TEXT) and whether
-    sed is told to print nothing by itself (`-n`, `--quiet`, `--silent`). A program that prints text and exits edits nothing."""
+    """(in place, quiet, files) for the words after `sed` or `perl`: whether they edit files in place (EDIT_TABLE_TEXT), whether
+    sed is told to print nothing by itself (`-n`, `--quiet`, `--silent`) and how many file operands there are (the operands
+    but the script, which is the first one when no option gave it). A program that prints text and exits edits nothing."""
     spec = EDIT_TABLE[program]
     in_place = quiet = scripted = False
+    operands = 0
     index = 0
     while index < len(args):
         arg = args[index]
         if arg == "--":
+            operands += len(args) - index - 1
             break
         if arg.startswith("--"):
             if program == "sed":
@@ -960,7 +964,7 @@ def edit_options(program, args):
                 named = [given] if given in spec["long"] else [full for full in spec["long"] if full.startswith(given)]
                 if len(named) == 1:
                     if named[0] in spec.get("stop", ()):
-                        return False, False
+                        return False, False, 0
                     in_place = in_place or named[0] in spec.get("inplace", ())
                     quiet = quiet or named[0] in spec.get("quiet", ())
                     scripted = scripted or named[0] in spec.get("script", ())
@@ -972,7 +976,7 @@ def edit_options(program, args):
                 option = "-" + arg[at]
                 rest = arg[at + 1:]
                 if option in spec.get("stop", ()):
-                    return False, False
+                    return False, False, 0
                 in_place = in_place or option in spec.get("inplace", ())
                 quiet = quiet or option in spec.get("quiet", ())
                 scripted = scripted or option in spec.get("script", ())
@@ -988,18 +992,26 @@ def edit_options(program, args):
                     at += len(re.match(r"[0-7]*", rest).group())
                 at += 1
         elif program == "perl" and not scripted:
+            operands += len(args) - index
             break  # the first operand is the script file, and perl reads no option behind it
+        else:
+            operands += 1
         index += 1
-    return in_place, quiet
+    return in_place, quiet, max(operands - (0 if scripted else 1), 0)
 
 
 def has_delete_or_move(command):
-    """Whether a Bash command runs rm or mv with an argument, or sed or perl with an in-place option (rule e, classes edit
-    and delete)."""
+    """Whether a Bash command runs rm or mv with an argument, or sed or perl with an in-place option and a file to edit (rule e,
+    classes edit and delete). An in-place edit with no file operand stops with an error or reads standard input, so it counts
+    only in a command that has `xargs`, which hands it the files."""
     for item in shell_commands(command):
         program = os.path.basename(item[0])
-        if len(item) > 1 and (program in ("rm", "mv") or (program in ("sed", "perl") and edit_options(program, item[1:])[0])):
+        if len(item) > 1 and program in ("rm", "mv"):
             return True
+        if len(item) > 1 and program in ("sed", "perl"):
+            in_place, _quiet, files = edit_options(program, item[1:])
+            if in_place and (files > 0 or XARGS_RE.search(command) is not None):
+                return True
     return False
 
 
@@ -1499,7 +1511,7 @@ def is_read_only_command(command):
     if first in READ_ONLY_COMMANDS or first == "awk":
         return True
     if first == "sed":
-        in_place, quiet = edit_options("sed", plain[index + 1:])
+        in_place, quiet, _files = edit_options("sed", plain[index + 1:])
         return quiet and not in_place
     if first == "find":
         return not any(word in FIND_ACTION_OPTIONS for word in words)

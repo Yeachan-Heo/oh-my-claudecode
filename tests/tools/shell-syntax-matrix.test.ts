@@ -624,8 +624,8 @@ describe('shell write oracle: the files a command writes, as bash wrote them', (
 // The files an in-place `sed` or `perl` writes. Every row was run in an empty directory that held `config.py` and `notes.md` (both
 // `x = 1`), by GNU sed 4.9 and perl 5.40 under bash; `code` says that `config.py` changed, `any` that one of the two files did. A
 // markdown file holds no code, so a write to `notes.md` alone is `code` 0. The third element names a row whose reading the words
-// cannot settle: `stdin` is an edit with no file operand (sed stops with an error, perl reads standard input), which the Python
-// reading still takes for an edit; `script-file` is `-pie` and `-i.e`, where the suffix is `e` and the first operand is a script
+// cannot settle: `stdin` is an edit with no file operand (sed stops with an error, perl reads standard input), which both readings
+// take for an edit only behind `xargs`; `script-file` is `-pie` and `-i.e`, where the suffix is `e` and the first operand is a script
 // file that does not exist, so perl dies. Both readings take that for an edit of the file behind it.
 const EDIT_ROWS: Array<[string, 0 | 1, 0 | 1, ('stdin' | 'script-file')?]> = [
   ["sed -i 's/1/2/' config.py", 1, 1],
@@ -818,7 +818,7 @@ describe('in-place edit oracle: sed and perl, as the programs ran them', () => {
   });
 
   it.skipIf(!hasPython3)('the edit prohibitions tool: an edit of any file is an edit, a command that edited one is not read-only', () => {
-    const rows = settled.filter(([, , , note]) => note !== 'stdin');
+    const rows = settled;
     const edits = pyEval('user_prohibitions_after_compaction.py', '[module.has_delete_or_move(c) for c in argument]', rows.map(([command]) => command));
     const wrongEdit = rows.flatMap(([command, , any], index) => (edits[index] === (any === 1) ? [] : [`${JSON.stringify(command)}: the program ${any === 1 ? 'edited' : 'did not edit'} a file, has_delete_or_move says ${edits[index]}`]));
     expect(wrongEdit, wrongEdit.join('\n')).toEqual([]);
