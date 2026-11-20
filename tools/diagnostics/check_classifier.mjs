@@ -560,6 +560,16 @@ function sharesExitStatus(pieces, index, pipefail) {
   return false;
 }
 
+/** Whether a command that stands before the pipeline of the check in its `&&` chain can fail (`cd v3 && npm test | tail`). */
+function sharesExitStatusBefore(pieces, index) {
+  let first = index;
+  while (first > 0 && pieces[first - 1].sep === '|') first -= 1;
+  for (let at = first - 1; at >= 0 && pieces[at].sep === '&&'; at -= 1) {
+    if (pieces[at].text !== '' && !NEVER_FAILS.test(pieces[at].text)) return true;
+  }
+  return false;
+}
+
 /**
  * Classify a shell command: does it run a check (test/lint/typecheck/build), and can the check's
  * own exit status reach the tool result. Gradle/maven are deliberately unrecognized (goals can publish).
@@ -568,8 +578,13 @@ function sharesExitStatus(pieces, index, pipefail) {
  * command's. The exit status stays visible in both cases: a zero status still means every command passed.
  */
 export function classifyCommand(command) {
+  return readCommand(command).result;
+}
+
+/** The classification of a command with what classifyCheckResult reads next to it: the shell pieces and the index of the check in them. */
+function readCommand(command) {
   if (typeof command !== 'string' || command === '') {
-    return { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail: false, reason: 'empty or non-string command' };
+    return { pieces: [], checkIndex: -1, result: { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail: false, reason: 'empty or non-string command' } };
   }
   // A here-document body is input, not shell (it is cut out before the lines are joined, as isMutation reads it).
   const bare = executedText(joinContinuations(withoutHeredocBodies(command)));
@@ -589,16 +604,18 @@ export function classifyCommand(command) {
     // later runner pieces overwrite: the command's status belongs to the last segment
   }
   if (!check) {
-    return { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail, reason: 'no check runner in command' };
+    return { pieces, checkIndex: -1, result: { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail, reason: 'no check runner in command' } };
   }
   const strippedCheck = stripWrappers(pieces[check.index].text);
   const narrowed = pieceNarrows(strippedCheck, check.kind, check.runner);
+  // A `trap` can end the shell with a status of its own (`trap 'exit 0' EXIT; npm test`): no exit status is the check's then.
+  if (hidden === undefined && pieces.some((piece) => /^trap(?:\s|$)/.test(piece.text))) hidden = 'trap';
   const reason = hidden
     ? `check exit code hidden (${hidden})`
     : 'check command recognized';
   const chained = sharesExitStatus(pieces, check.index, pipefail);
   const piped = pieces[check.index].sep === '|' && !pipefail;
-  return { isCheck: true, kind: check.kind, runner: check.runner, narrowed, exitHidden: hidden !== undefined, chained, piped, pipefail, reason };
+  return { pieces, checkIndex: check.index, result: { isCheck: true, kind: check.kind, runner: check.runner, narrowed, exitHidden: hidden !== undefined, chained, piped, pipefail, reason } };
 }
 
 /**
@@ -734,28 +751,83 @@ function ranNoTests(output, readers) {
   return !active.some(({ ran }) => ran.test(text));
 }
 
-/** The variables an echo/printf prints for a runner's own exit code; behind a pipe without pipefail, `$?` is not one. */
-const EXIT_VAR = /\$\?|\$\{PIPESTATUS\[0\]\}/;
-const PIPE_EXIT_VAR = /\$\{PIPESTATUS\[0\]\}/;
+/**
+ * The variables that hold a status: `$?` (also `${?}`) and the element of `PIPESTATUS` (`${PIPESTATUS[1]}`; `$PIPESTATUS` and
+ * `${PIPESTATUS}` are element 0).
+ */
+const STATUS_VAR = /\$\?|\$\{\?\}|\$\{PIPESTATUS\[(\d+)\]\}|\$\{PIPESTATUS\}|\$PIPESTATUS(?![A-Za-z0-9_])/g;
 
 /**
- * The last number an echo/printf in the command printed for the runner's exit code, read from
- * the output tail (`echo "EXIT=$?"` printing `EXIT=3`). Only a hidden exit status needs it.
+ * What an `echo` or `printf` piece prints, with the status variables left in the text; undefined when the piece prints no
+ * such text or cannot be told. The words are those of the neutralized command (executedText), where a quoted space is `_`.
+ * `printf` is read with the conversions `%s`, `%d`, `%i` and `%%`, each `%s`, `%d` and `%i` taking one argument.
  */
-function printedExitCode(command, tail, piped) {
-  let last;
-  const exitVar = piped ? PIPE_EXIT_VAR : EXIT_VAR;
-  const echoRe = /(?:^|[;&|\n]\s*)(?:echo|printf)\s+(['"]?)([^;'"|\n]*)\1(?=\s*[;&|\n]|$)/g;
-  for (const m of command.matchAll(echoRe)) {
-    const literal = m[2] ?? '';
-    if (!exitVar.test(literal)) continue;
-    const parts = literal.replace(/\\n/g, '').split(exitVar);
-    if (parts.length < 2) continue;
-    const escaped = parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(\\d+)');
-    const re = new RegExp(`^\\s*${escaped}\\s*$`, 'mg');
-    for (const mm of tail.matchAll(re)) last = Number(mm[1]);
+function printedText(text) {
+  const words = text.split(/\s+/);
+  const program = baseName(words[0]);
+  let literal;
+  if (program === 'echo') {
+    let at = 1;
+    while (/^-[neE]+$/.test(words[at] ?? '')) at += 1;
+    literal = words.slice(at).join(' ');
+  } else if (program === 'printf') {
+    const [, format = '', ...args] = words;
+    let used = 0;
+    let known = true;
+    literal = format.replace(/%(.)/g, (whole, spec) => {
+      if (spec === '%') return '%';
+      if (spec !== 's' && spec !== 'd' && spec !== 'i') known = false;
+      else if (args[used] === undefined) known = false;
+      else return args[used++];
+      return whole;
+    });
+    if (!known || used !== args.length) return undefined;
+  } else return undefined;
+  return literal.replace(/\\n/g, '');
+}
+
+/**
+ * The status a command prints for the check, read from the output tail (`echo "EXIT=$?"` printing `EXIT=3`), or undefined. Only a
+ * hidden exit status needs it, and only a print that belongs to the check is read: the check, or the pipeline it stands in, must
+ * be followed directly by the print (after `;`, a newline or `&&`), so that nothing runs in between that sets `$?` (`true`,
+ * `cd`, `echo`, a block, another command), the check must run whatever comes before it (`true || npm test` never runs it), and
+ * the print writes to the output (a redirection sends it away). `$?` is the status of the last command of a pipeline, so it
+ * belongs to the check when the check is that command or `pipefail` is set; `${PIPESTATUS[n]}` belongs to it when n is the
+ * position of the check in its pipeline. A second print of a status later in the command could repeat the text, so it makes the
+ * output ambiguous. `viaPipestatus` is set when the number is the element of `PIPESTATUS`, which is the check's own status.
+ */
+function printedExitCode(pieces, index, pipefail, tail) {
+  let first = index;
+  while (first > 0 && pieces[first - 1].sep === '|') first -= 1;
+  let last = index;
+  while (last < pieces.length - 1 && pieces[last].sep === '|') last += 1;
+  if (!['&&', ';', '\n'].includes(pieces[last].sep)) return undefined; // `&` backgrounds the check, `||` runs the print for a failure only
+  for (let at = first - 1; at >= 0 && ['&&', '||'].includes(pieces[at].sep); at -= 1) {
+    if (pieces[at].sep === '||') return undefined;
   }
-  return last;
+  const printed = pieces[last + 1];
+  if (printed === undefined || /[<>]/.test(printed.text)) return undefined;
+  const literal = printedText(printed.text);
+  if (literal === undefined) return undefined;
+  const hasStatus = (text) => /^(?:\S*\/)?(?:echo|printf)\s/.test(text) && new RegExp(STATUS_VAR.source).test(text);
+  if (pieces.slice(last + 2).some((piece) => hasStatus(piece.text))) return undefined;
+  let source = '';
+  let from = 0;
+  const own = []; // for each group of the pattern: how the variable belongs to the check, or null
+  const part = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[\\s;&|#!<>()\'"_]'); // `_` stands for any neutralized character
+  for (const match of literal.matchAll(STATUS_VAR)) {
+    source += `${part(literal.slice(from, match.index))}(\\d+)`;
+    from = match.index + match[0].length;
+    if (match[0].includes('PIPESTATUS')) own.push(Number(match[1] ?? 0) === index - first ? 'pipestatus' : null);
+    else own.push(last === index || pipefail ? 'last' : null);
+  }
+  if (own.every((kind) => kind === null)) return undefined;
+  source += part(literal.slice(from));
+  const preferred = own.includes('pipestatus') ? 'pipestatus' : 'last';
+  const group = own.indexOf(preferred) + 1;
+  let code;
+  for (const found of tail.matchAll(new RegExp(`^\\s*${source}\\s*$`, 'mg'))) code = Number(found[group]);
+  return code === undefined ? undefined : { code, viaPipestatus: preferred === 'pipestatus' };
 }
 
 /**
@@ -769,7 +841,8 @@ function printedExitCode(command, tail, piped) {
 export function classifyCheckResult({ command, output, isError, exitCode }) {
   const out = typeof output === 'string' ? output : '';
   const tail = stripEsc(out.slice(-SUMMARY_TAIL));
-  const cc = classifyCommand(command);
+  const read = readCommand(command);
+  const cc = read.result;
   if (!cc.isCheck) {
     return { verdict: 'undetermined', reason: 'not a check command', rule: null };
   }
@@ -802,12 +875,14 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
   if (cc.exitHidden) {
     // The tool result's exit status belongs to the pipe, not the runner: a printed exit code
     // (echo $?) or a passing runner summary decides, otherwise undetermined.
-    const printed = printedExitCode(command, tail, cc.piped);
+    const printed = printedExitCode(read.pieces, read.checkIndex, cc.pipefail, tail);
     if (printed !== undefined) {
-      if (printed === 0) return { verdict: 'passed', reason: 'printed exit code 0', rule: 'printed-exit-code' };
-      return cc.chained
-        ? { verdict: 'undetermined', reason: `printed exit code ${printed} of an && chain: another command may have failed`, rule: 'chained-exit' }
-        : { verdict: 'failed', reason: `printed exit code ${printed}`, rule: 'printed-exit-code' };
+      // The element of PIPESTATUS is the status of the check itself: only the commands before its pipeline can have failed in its place.
+      const chained = printed.viaPipestatus ? sharesExitStatusBefore(read.pieces, read.checkIndex) : cc.chained;
+      if (printed.code === 0) return { verdict: 'passed', reason: 'printed exit code 0', rule: 'printed-exit-code' };
+      return chained
+        ? { verdict: 'undetermined', reason: `printed exit code ${printed.code} of an && chain: another command may have failed`, rule: 'chained-exit' }
+        : { verdict: 'failed', reason: `printed exit code ${printed.code}`, rule: 'printed-exit-code' };
     }
     for (const entry of SUMMARY_RULES.filter((rule) => readers.has(rule.runner))) {
       const verdict = entry.apply(tail);

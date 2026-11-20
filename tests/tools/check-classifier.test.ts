@@ -384,6 +384,50 @@ it('printed exit code behind a hidden status: failed, passed, undetermined', () 
   assert.equal(checkResult('npm test; echo done', 'done').verdict, 'undetermined', 'an echo without the status');
 });
 
+// A printed status is used only when it belongs to the check: the print follows the check or its pipeline directly, nothing between them
+// sets `$?`, and the variable is the status of the check (`$?` of the last command of a pipeline, `${PIPESTATUS[n]}` of the n-th).
+const PRINTED: Array<[string, string, number, 'passed' | 'failed' | 'undetermined', string]> = [
+  ['npm test | tail -3; echo "rc=${PIPESTATUS[0]}"', 'rc=1', 0, 'failed', 'PIPESTATUS of the check, tail last'],
+  ['npm test | cat | tail -3; echo "rc=${PIPESTATUS[0]}"', 'rc=0', 0, 'passed', 'PIPESTATUS of the check, two commands behind it'],
+  ['npm test | cat; echo ${PIPESTATUS[0]}', '1', 0, 'failed', 'a command that cannot fail the check in its place'],
+  ['echo hi | npm test | tail -3; echo "rc=${PIPESTATUS[0]}"', 'rc=0', 0, 'undetermined', 'element 0 is the echo, not the check'],
+  ['echo hi | npm test | tail -3; echo "rc=${PIPESTATUS[1]}"', 'rc=1', 0, 'failed', 'element 1 is the check'],
+  ['npm test | tail -3; echo "rc=${PIPESTATUS[1]}"', 'rc=0', 0, 'undetermined', 'element 1 is tail'],
+  ['npm test | tail -3; echo "rc=$PIPESTATUS"', 'rc=1', 0, 'failed', '$PIPESTATUS is element 0'],
+  ['npm test | tail -3; echo "rc=$?"', 'rc=0', 0, 'undetermined', '$? after a pipe is the last command'],
+  ['set -o pipefail; npm test | tail -3; echo "rc=$?"', 'rc=1', 0, 'failed', '$? after a pipe under pipefail'],
+  ['npm test; printf "EXIT=%s\\n" $?', 'EXIT=2', 0, 'failed', 'printf with %s'],
+  ['npm test; printf "EXIT=%d\\n" "$?"', 'EXIT=0', 0, 'passed', 'printf with %d'],
+  ['npm test; printf %s $?', '2', 0, 'failed', 'printf of the number alone'],
+  ['npm test; printf "%5s" $?', '    2', 0, 'undetermined', 'a conversion that is not read'],
+  ['npm test; /bin/echo "EXIT=${?}"', 'EXIT=2', 0, 'failed', 'a path to echo and ${?}'],
+  ['npm test && echo "EXIT=$?"', 'EXIT=0', 0, 'passed', 'the print behind &&'],
+  ['npm test; echo "EXIT=$?"', 'EXIT=0', 0, 'passed', 'the plain form'],
+  ['true; echo "EXIT=$?"; npm test', 'EXIT=0', 1, 'failed', 'a print before the check is no status of it (the exit status decides)'],
+  ['npm test; true; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'true in between'],
+  ['npm test; cd .; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'cd in between'],
+  ['npm test; echo x; echo "EXIT=$?"', 'x\nEXIT=0', 0, 'undetermined', 'echo in between'],
+  ['npm test; [ 1 = 1 ]; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'test in between'],
+  ['npm test || true; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'a list with an alternative in between'],
+  ['npm test || :; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'the colon alternative'],
+  ['true || npm test; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'the check is skipped'],
+  ['npm test & echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'a backgrounded check'],
+  ['npm test; echo "EXIT=$?"; echo "EXIT=$?"', 'EXIT=1\nEXIT=0', 0, 'undetermined', 'a second print repeats the text'],
+  ['npm test; echo "EXIT=$?" > log.txt', 'EXIT=0', 0, 'undetermined', 'the print goes to a file'],
+  ['npm test; code=$?; echo "EXIT=$code"', 'EXIT=1', 0, 'undetermined', 'a status in a variable'],
+  ['{ npm test; }; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'a block is no check of its own'],
+  ['trap \'exit 0\' EXIT; npm test', 'boom', 0, 'undetermined', 'a trap ends the shell with its own status'],
+  ['cd v3 && npm test | cat; echo ${PIPESTATUS[0]}', '1', 0, 'undetermined', 'cd may have failed in its place'],
+];
+
+it('a printed exit code is used only when it belongs to the check', () => {
+  const wrong = PRINTED.flatMap(([command, output, exitCode, want, label]) => {
+    const got = checkResult(command, output, exitCode).verdict;
+    return got === want ? [] : [`${label}: ${command} printing ${JSON.stringify(output)} gave ${got}, wanted ${want}`];
+  });
+  assert.deepEqual(wrong, []);
+});
+
 it('visible exit status decides: a green run with an exit-code line in the log stays passed', () => {
   assert.equal(
     checkResult('vitest run', 'process exited with code 1\nTests  3 passed (3)', 0).verdict,
