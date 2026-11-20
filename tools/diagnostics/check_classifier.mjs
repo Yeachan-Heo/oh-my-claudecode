@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.20.7';
+export const RULES_VERSION = '2026.11.20.8';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
@@ -135,6 +135,128 @@ const PRINTS_OR_INSPECTS = /^\s*(?:echo|printf|cat|grep|rg|ls|which|type|command
 
 /** `--version`/`--help` anywhere in the piece: the command ran, but it checked nothing. */
 const ASKS_ONLY = /\s--(?:version|help)\b/;
+
+/**
+ * What each runner is asked to print, list or simulate instead of checking, one line per kind of word of a runner (the same text
+ * form as the tables of the wrappers and of the in-place options). `info` is a word that makes the run print and check nothing
+ * (`pytest -h`, `tsc --showConfig`, `eslint --env-info`); it counts alone or with `=value` (`--print-config=a.js`). `twice` is a
+ * word that does so only when given twice (`pytest -VV`: a single `-V` runs the tests of pytest 9.0.3). `word` is a subcommand of
+ * its own that prints or does nothing, read only as the first word behind the runner (`vitest list`, `webpack help`). `value` is an
+ * option that takes the next word as its value, which is no option (`pytest -k -h`, `-o cache_dir=x -h`); `cluster` says that short
+ * options may be glued (`-xh` is `-x -h`, and the first one that takes a value ends the word: `-kh` is `-k h`); `after` that the words
+ * behind `--` are read too, because they go to a program behind the runner. The same short word means different things in different
+ * programs (`-v` is the version of eslint, tsc, vitest, prettier and webpack, and the verbosity of pytest, cargo and `go test`;
+ * `-V` is the version of mypy and mocha, and a single `-V` of pytest runs the tests), so a word counts only for the runners that
+ * list it. A runner that is not listed is read for `-h` and for the long `--help` and `--version` of ASKS_ONLY. The words are those
+ * of `--help` of pytest 9.0.3, ruff 0.15.12, mypy 2.4.1, black 26.10.1, flake8 7.5.0, pylint 4.1.4, tox 4.67.15, nox 2026.10.20,
+ * vitest 4.1.11, eslint 9.39.2, tsc 5.9.3, prettier 3.8.1, jest 30.5.2, mocha 12.0.3, webpack 5.113.0 (webpack-cli 7.3.1), esbuild 0.27.2, vite 8.2.2 and node 20.19.2, and each was run
+ * once to see that the program checks nothing with it (and, for each option of `value`, that the program takes `-h` as its value).
+ * Not run, taken from the documentation of the program: cargo (`cargo test --help`; the words of the test harness behind `--`) and
+ * go (`go help testflag`: `-c`, `-n`; the flag package gives a value to every option that is no boolean). Forms that list or collect
+ * the tests without running them (`--collect-only`, `--list`, `--no-run`, `--dry-run`) are options that run no test, so they narrow the
+ * run (SUBSET_OPTIONS): a failing exit status of one still decides, a zero one proves nothing.
+ */
+const INFO_TABLE_TEXT = `pytest info -h --markers --fixtures --funcargs --fixtures-per-test --cache-show --setup-plan --setup-only
+pytest twice -V
+pytest cluster
+pytest value -k -m -c -p -o -W -r --rootdir --maxfail --tb --junitxml --deselect --ignore --ignore-glob --durations --basetemp --override-ini --config-file --import-mode --capture --color --log-level
+ruff info -h --show-settings --show-files --add-noqa --diff
+ruff value --select --ignore --extend-select --extend-ignore --config --target-version --line-length --output-format --exclude --per-file-ignores
+ruff-format info -h
+mypy info -h -V
+mypy cluster
+mypy value -p -m --python-version --config-file --python-executable --cache-dir --exclude
+black info -h
+black cluster
+black value -l -t --line-length --target-version --config --include --exclude --extend-exclude --force-exclude --workers
+flake8 info -h --bug-report
+flake8 cluster
+flake8 value --max-line-length --select --ignore --extend-ignore --exclude --config -j --jobs --format --output-file --max-complexity
+pylint info -h --long-help --list-msgs --list-msgs-enabled --list-groups --list-conf-levels --list-extensions --generate-rcfile --generate-toml-config --full-documentation --help-msg
+pylint cluster
+pylint value --rcfile -j --jobs --disable --enable --ignore --output-format -f --py-version --reports
+tox info -h --help-ini -l --listenvs -a --listenvs-all --notest --showconfig --sdistonly
+tox cluster
+tox value -e -c --workdir -x --discover --colored --result-json
+nox info -h -l --list --list-sessions --install-only
+nox cluster
+nox value -s -k -t -f --noxfile --keywords --tags --report --default-venv-backend -db --download-python
+vitest info -h -v --clearCache
+vitest word list complete
+vitest value -t --dir --project --shard --testNamePattern --exclude
+eslint info -h -v --env-info --print-config --fix-dry-run
+eslint value -c -f -o --config --format --output-file --rule --parser --ext --plugin --max-warnings --stdin-filename
+prettier info -h -v --file-info --support-info --find-config-path
+tsc info -h -v -V --all -all --showConfig --listFilesOnly --init --dry --clean
+jest info -h -v --showConfig --clearCache
+jest value -t --testNamePattern --testPathPattern
+mocha info -h -V --list-reporters --list-interfaces
+mocha value -g -f -R -r -t -s --grep --fgrep --reporter --require --timeout --slow --config --spec
+webpack info -h -v
+webpack word help version info configtest
+webpack value -c --config --mode --env --stats --entry -o --output-path
+esbuild info -h
+node-test info -h -v --v8-options --completion-bash
+node-check info -h -v --v8-options --completion-bash
+cargo info -h
+cargo after
+go info -h -help -c -n
+go value -run -bench -count -timeout -tags -parallel -cpu -skip -coverprofile -covermode -ldflags -gcflags -vet -p -o`;
+const INFO_TABLE = new Map();
+for (const line of INFO_TABLE_TEXT.split('\n')) {
+  const [name, kind, ...words] = line.split(' ');
+  const spec = INFO_TABLE.get(name) ?? { info: new Set(), twice: new Set(), word: new Set(), value: new Set(), cluster: false, after: false };
+  if (kind === 'cluster' || kind === 'after') spec[kind] = true;
+  else for (const word of words) spec[kind].add(word);
+  INFO_TABLE.set(name, spec);
+}
+/** What a runner that is not in INFO_TABLE is read for: the short help words, which no runner of the rules below uses otherwise. */
+const GENERIC_INFO = { info: new Set(['-h', '-?']), twice: new Set(), word: new Set(), value: new Set(), cluster: false, after: false };
+/** A package manager or make runs a script of unknown content: the words behind its `--` go to the program of the script. */
+const SCRIPT_INFO = { ...GENERIC_INFO, after: true };
+
+/**
+ * Whether the words behind a runner ask for information instead of a check (INFO_TABLE): the piece is a run that prints, lists or
+ * simulates, so a zero exit status proves nothing about the code. `table` names the lines of the table the runner reads (`ruff format
+ * --check` reads `ruff-format`: `--diff` prints the diff of `ruff check` and is a check of the format), `length` is the length of the
+ * runner in the piece. The words are those after it; the words behind `--` are positional (`pytest -- -h` runs the tests of a file named `-h`), except for the runners
+ * that pass them on (`after`).
+ */
+function asksInformation(piece, { runner, table, length }) {
+  const spec = INFO_TABLE.get(table) ?? (SCRIPT_RUNNERS.has(runner) ? SCRIPT_INFO : GENERIC_INFO);
+  const words = piece.slice(length).split(/\s+/).filter(Boolean);
+  let twice = 0;
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i];
+    if (word === '--') {
+      if (!spec.after) break;
+    } else if (i === 0 && spec.word.has(word)) {
+      return true;
+    } else if (word.startsWith('-') && word !== '-') {
+      const name = word.replace(/=[\s\S]*$/, '');
+      if (spec.info.has(name)) return true;
+      if (spec.twice.has(name)) {
+        twice += 1;
+        if (twice > 1) return true;
+      } else if (spec.value.has(word)) {
+        i += 1;
+      } else if (spec.cluster && /^-[A-Za-z]{2,}$/.test(word)) {
+        for (let at = 1; at < word.length; at += 1) {
+          const option = `-${word[at]}`;
+          if (spec.info.has(option)) return true;
+          if (spec.twice.has(option)) {
+            twice += 1;
+            if (twice > 1) return true;
+          } else if (spec.value.has(option)) {
+            if (at === word.length - 1) i += 1; // the value is the next word
+            break;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
 
 /** `! npm test` exits 0 when the tests fail. */
 const NEGATED = /^\s*!/;
@@ -354,7 +476,8 @@ const RUNNER_RULES = [
   { kind: 'typecheck', runner: 'pyright', re: /^pyright\b/ },
   { kind: 'lint', runner: 'eslint', re: /^eslint\b/ },
   { kind: 'lint', runner: 'biome', re: /^biome\s+check\b/ },
-  { kind: 'lint', runner: 'ruff', re: /^ruff\s+(?:check|format\s+--check)\b/ },
+  { kind: 'lint', runner: 'ruff', re: /^ruff\s+check\b/ },
+  { kind: 'lint', runner: 'ruff', table: 'ruff-format', re: /^ruff\s+format\s+--check\b/ },
   { kind: 'lint', runner: 'flake8', re: /^flake8\b/ },
   { kind: 'lint', runner: 'pylint', re: /^pylint\b/ },
   { kind: 'lint', runner: 'black', re: /^black\s+--check\b/ },
@@ -376,7 +499,8 @@ const RUNNER_RULES = [
 /** Match a runner rule at the start of a (wrapper-stripped) piece. */
 function runnerMatch(piece) {
   for (const rule of RUNNER_RULES) {
-    if (rule.re.test(piece)) return { kind: rule.kind, runner: rule.runner };
+    const found = rule.re.exec(piece);
+    if (found !== null) return { kind: rule.kind, runner: rule.runner, table: rule.table ?? rule.runner, length: found[0].length };
   }
   return null;
 }
@@ -599,7 +723,7 @@ function readCommand(command) {
     if (stripped === null) continue;
     if (PRINTS_OR_INSPECTS.test(stripped) || ASKS_ONLY.test(stripped) || NEGATED.test(stripped)) continue;
     const m = runnerMatch(stripped);
-    if (!m) continue;
+    if (!m || asksInformation(stripped, m)) continue;
     check = { ...m, index: i };
     checks.push({ runner: m.runner, kind: m.kind });
     hidden = exitHiddenCause(pieces, i, pipefail);

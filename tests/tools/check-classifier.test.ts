@@ -99,6 +99,45 @@ it('quotes and comments name nothing', () => {
   assert.equal(classifyCommand('echo "a;b"; npm test').isCheck, true, 'the real operator after the quoted one still splits');
 });
 
+// Runs that print, list or simulate instead of checking, per program (each word was run with the program: the text of the table names the
+// versions). The same short word means something else in another program, so the rows hold both sides of a word.
+const INFORMATION_ROWS = [
+  // [command, is it a check]
+  ['pytest -h', false], ['pytest -xh', false], ['pytest -hx', false], ['pytest -vh', false], ['pytest -o cache_dir=x -h', false],
+  ['pytest -p no:cacheprovider -h', false], ['pytest --rootdir . -h tests', false], ['pytest --markers', false], ['pytest --fixtures', false],
+  ['pytest --setup-plan', false], ['pytest -VV', false], ['pytest -V -V', false],
+  ['pytest -V', true], ['pytest -v', true], ['pytest -vv', true], ['pytest -x tests', true], ['pytest -k "-h"', true], ['pytest -k -h', true],
+  ['pytest -m -h tests', true], ['pytest -- -h', true], ['python -m pytest -h', false], ['python -m pytest -q', true],
+  ['ruff check -h', false], ['ruff check --show-settings', false], ['ruff check --diff', false], ['ruff check --add-noqa', false], ['ruff check .', true],
+  ['ruff check --fix', true], ['ruff check --select -h', true], ['ruff format --check -h', false], ['ruff format --check .', true], ['ruff format --check --diff .', true],
+  ['mypy -V', false], ['mypy -h', false], ['mypy src', true], ['mypy -p -h', true], ['black --check -h', false], ['black --check .', true],
+  ['flake8 --bug-report', false], ['flake8 -h', false], ['flake8 src', true], ['pylint --list-msgs', false], ['pylint --generate-rcfile', false], ['pylint src', true],
+  ['tox -l', false], ['tox -a', false], ['tox --showconfig', false], ['tox -e py312', true], ['nox -l', false], ['nox --list-sessions', false], ['nox -s tests', true],
+  ['tsc -h', false], ['tsc -v', false], ['tsc -V', false], ['tsc --showConfig', false], ['tsc --listFilesOnly', false], ['tsc --init', false], ['tsc -b --dry', false],
+  ['tsc --noEmit', true], ['tsc -p .', true], ['eslint -h', false], ['eslint -v', false], ['eslint --env-info', false], ['eslint --print-config src/a.ts', false],
+  ['eslint --print-config=src/a.ts', false], ['eslint src', true], ['prettier --check -v', false], ['prettier --check --file-info a.js', false], ['prettier --check .', true],
+  ['vitest -v', false], ['vitest run -h', false], ['vitest list', false], ['vitest run -t -h', true], ['vitest run', true], ['jest -h', false], ['jest --showConfig', false],
+  ['jest --clearCache', false], ['jest', true], ['mocha -V', false], ['mocha --list-reporters', false], ['mocha', true], ['webpack -v', false], ['webpack help', false], ['webpack build', true],
+  ['node --test -h', false], ['node --test --v8-options', false], ['node --test', true], ['node --check -v', false], ['node --check a.js', true],
+  ['cargo test -h', false], ['cargo test', true], ['go test -c', false],
+  ['go test -n ./...', false], ['go test ./...', true], ['go test -run -h ./...', true],
+  // a program that is not in the table: the long words of every program and the short help word, not -v and -V
+  ['make test -h', false], ['make test -?', false], ['make test -v', true], ['npm test -- --help', false], ['npm test -- -h', false], ['npm test -V', true],
+  ['pytest -- --help', false],
+];
+
+it('a run that prints, lists or simulates is no check, per program, and the same word still checks in another', () => {
+  const wrong = INFORMATION_ROWS.flatMap(([command, want]) => {
+    const got = classifyCommand(command as string).isCheck;
+    return got === want ? [] : [`${command}: isCheck ${got}, wanted ${want}`];
+  });
+  assert.deepEqual(wrong, []);
+  assert.equal(classifyCommand('ruff format --check .').runner, 'ruff', 'the format check keeps the name of its runner');
+  assert.equal(checkResult('pytest -h', 'usage: pytest [options] [file_or_dir]', 0).verdict, 'undetermined', 'help of pytest with exit 0');
+  assert.equal(checkResult('pytest -V -V', 'This is pytest version 9.0.3', 0).verdict, 'undetermined', 'the version of pytest, twice requested');
+  assert.equal(checkResult('pytest tests', '1 passed in 0.02s', 0).verdict, 'passed', 'a run of the tests still passes');
+});
+
 it('pipefail: only a pipe into tail is made visible', () => {
   assert.equal(classifyCommand('npm test | tail -5').exitHidden, true, 'pipe without pipefail hides');
   assert.equal(classifyCommand('npm test | head -20').exitHidden, true, 'head hides without pipefail');
