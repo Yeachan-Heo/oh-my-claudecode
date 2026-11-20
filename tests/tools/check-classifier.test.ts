@@ -471,6 +471,60 @@ it('here-documents: the redirections on the operator line count, the body text d
   assert.equal(edits('cat <<EOF > README.md'), false);
 });
 
+it('write targets are read as the shell reads them: quotes and escaped spaces do not hide an ignored file', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  // An ignored target stays ignored in quotes (docs, lockfiles, temp directories).
+  assert.equal(edits('echo x > "README.md"'), false);
+  assert.equal(edits("echo x > 'README.md'"), false);
+  assert.equal(edits('cat <<EOF > "docs/a.md"\nx\nEOF'), false);
+  assert.equal(edits('echo x | tee "package-lock.json"'), false);
+  assert.equal(edits('echo x | tee -a \'README.md\''), false);
+  assert.equal(edits("sed -i 's/a/b/' \"README.md\""), false);
+  assert.equal(edits('printf x >> "/tmp/x.ts"'), false);
+  assert.equal(edits('echo x 2> "err.log"'), false);
+  assert.equal(edits('echo x > "/dev/null"'), false);
+  assert.equal(edits('echo x>"README.md"'), false, 'no space before the target');
+  assert.equal(edits('echo "x">README.md'), false, 'a quoted word right before the operator');
+  // A code file stays code in quotes, and an unquoted target works as before.
+  assert.equal(edits('echo x > "src/a.ts"'), true);
+  assert.equal(edits("echo x > 'src/a.ts'"), true);
+  assert.equal(edits('echo x | tee "src/a.ts"'), true);
+  assert.equal(edits('echo x | tee "README.md" "src/a.ts"'), true, 'one of several targets is code');
+  assert.equal(edits('echo x | tee "src/a.ts" "README.md"'), true);
+  assert.equal(edits('echo x > src/a.ts'), true);
+  assert.equal(edits('echo x > README.md'), false);
+  // A path with a space is one target, quoted or with an escaped space.
+  assert.equal(edits('echo x > "my docs/a.md"'), false);
+  assert.equal(edits('echo x > "src/my dir/a.ts"'), true);
+  assert.equal(edits('echo x | tee "my docs/a.md"'), false);
+  assert.equal(edits('echo x > my\\ docs/a.md'), false);
+  assert.equal(edits('echo x > docs/my\\ dir/a.ts'), false);
+  assert.equal(edits('echo x > src/my\\ dir/a.ts'), true);
+  assert.equal(edits('echo x > "docs/my dir/a.ts"'), false);
+  // The quoted text around a target is still text, not a redirection.
+  assert.equal(edits('echo "a > src/a.ts"'), false);
+  assert.equal(edits("echo 'tee src/a.ts'"), false);
+  assert.equal(edits('echo a\\> src/a.ts'), false, 'an escaped > is a character');
+  assert.equal(edits('echo "a > b" > src/a.ts'), true);
+});
+
+it('quoted write targets are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const got = classifyInChild<boolean>([
+    long('> "'),
+    long('> "a" '),
+    long('tee "a" '),
+    long('\\ '),
+    long('>'),
+    long('tee '),
+    `echo x > ${long('"a b"')}`,
+    `echo x | tee ${long("'a b' ")}README.md`,
+    long('"> a" '),
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.equal(got.length, 9);
+  assert.equal(got[8], false, 'quoted text holds no redirection');
+});
+
 it('here-document and zero-test parsing is linear in the length of the input', () => {
   const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
   const tags = Array.from({ length: 4000 }, (_, index) => `<<t${index}\n`).join('');

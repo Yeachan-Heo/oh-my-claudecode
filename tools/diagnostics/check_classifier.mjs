@@ -611,20 +611,25 @@ function withoutHeredocBodies(text) {
 
 /**
  * Files a shell command writes by redirection, `tee`, a heredoc with a target, or an in-place
- * `sed`/`perl` (its file operands). Quoted strings hold text, not redirections, except a file name
- * quoted right after `>` or `tee`.
+ * `sed`/`perl` (its file operands). One scan: a quoted string or an escaped character outside a target
+ * holds text, not a redirection (`echo "a > b"`); a target is read as the shell reads it (quotes
+ * removed, `\ ` a space), so `> "README.md"` and `tee 'my docs/a.md'` name the file, not the quotes.
  */
 function shellWriteTargets(command) {
   const QUOTED = String.raw`"[^"]*"|'[^']*'`;
+  const WORD = String.raw`(?:${QUOTED}|\\[^\n]|[^\s;&|)<>"'\\])+`;
   const text = withoutHeredocBodies(command);
-  const shell = text.replace(new RegExp(`(>\\s*|\\btee\\s+(?:-[ai]+\\s+)*)?(${QUOTED})`, 'g'), (m, keep) => (keep ? m : ''));
   const targets = [];
-  const redirect = new RegExp(String.raw`(?:^|[\s;&|(])\d?>{1,2}\s*(?:${QUOTED}|[^\s;&|)<>]+)`, 'g');
-  const quotedRedirect = new RegExp(String.raw`(?:^|[\s;&|(])\d?>{1,2}\s*(${QUOTED})`, 'g');
-  for (const m of shell.matchAll(redirect)) targets.push(m[0].replace(/^[\s;&|(]*\d?>{1,2}\s*/, ''));
-  for (const m of shell.matchAll(quotedRedirect)) targets.push(m[1].replace(/^["']|["']$/g, ''));
-  for (const m of shell.matchAll(/\btee[ \t]+([^;&|)<>\n]+)/g)) {
-    for (const t of m[1].split(/\s+/)) if (t && !t.startsWith('-')) targets.push(t);
+  const unquote = (raw) => shellWords(raw).find((word) => word !== null && word !== '');
+  const scan = new RegExp(
+    String.raw`${QUOTED}|\\[^\n]|(?<=^|[\s;&|("'])\d?>{1,2}\s*(${WORD})|\btee((?:[ \t]+${WORD})+)`,
+    'g',
+  );
+  for (const m of text.matchAll(scan)) {
+    if (m[1] !== undefined) targets.push(unquote(m[1]));
+    else if (m[2] !== undefined) {
+      for (const raw of m[2].match(new RegExp(WORD, 'g')) ?? []) if (!raw.startsWith('-')) targets.push(unquote(raw));
+    }
   }
   const words = shellWords(text);
   for (let i = 0; i < words.length; i += 1) {
