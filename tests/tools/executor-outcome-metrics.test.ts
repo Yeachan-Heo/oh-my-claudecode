@@ -618,13 +618,11 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.equal(task.metrics.test_runs_no_result, 0);
     });
 
-    it('an unreadable file gives an unmeasured task with a reason and exit code 0', () => {
+    it('a transcript that cannot be read stops the run with exit 2 and a message that names it', () => {
       const p = run(['--transcript', '/proc/self/mem', '--json']);
-      assert.equal(p.status, 0, p.stderr);
-      const task = JSON.parse(p.stdout).tasks[0];
-      assert.equal(task.transcript, 'unreadable');
-      assert.equal(task.metrics.assistant_steps, 'unmeasured');
-      assert.equal(task.reasons.assistant_steps, 'transcript unreadable');
+      assert.equal(p.status, 2, p.stderr);
+      assert.match(p.stderr, /transcript file \/proc\/self\/mem: /);
+      assert.equal(p.stdout, '');
     });
 
     it('date filter: tasks outside the range are dropped; tasks without a date are counted as no_date', () => {

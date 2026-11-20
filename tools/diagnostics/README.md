@@ -135,7 +135,7 @@ python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript A.jsonl --
 | `--error-field-status NAME=CODE` | HTTP status for an `error` field value, used when the error text has no status (repeatable; there is no built-in mapping) |
 | `--json` | JSON output instead of text |
 
-Exit codes: `0` success (whatever the numbers), `2` usage error (missing file, bad date, bad
+Exit codes: `0` success (whatever the numbers), `2` usage error (a missing file, a transcript that is a directory, cannot be read or is not valid UTF-8, bad date, bad
 `--provider-map` entry, bad regular expression, a threshold below its minimum, a bad `--error-field-status` entry).
 
 ## Input format

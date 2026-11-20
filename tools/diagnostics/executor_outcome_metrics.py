@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import codecs
 import json
 import os
 import re
@@ -74,6 +75,23 @@ METRIC_KEYS = [
 ]
 DICT_METRIC_KEYS = ["exhaustion_api_by_status", "api_errors_by_error_field"]  # not summed per provider
 FINAL_FLAGS = ("empty", "cut_off", "odd_fences", "repeated_line", "ended_with_api_error")
+
+
+def input_problem(path):
+    """Why a file named on the command line cannot be used (it cannot be read, or its bytes are not UTF-8), or None.
+    The files found in a directory are read leniently, but a file the caller named is checked whole before any result."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1 << 20)
+                decoder.decode(chunk, final=not chunk)
+                if not chunk:
+                    return None
+    except OSError as error:
+        return error.strerror or str(error)
+    except UnicodeDecodeError:
+        return "not valid UTF-8"
 
 
 def fail(message):
@@ -1039,6 +1057,9 @@ def main(argv):
     for path in args.transcript:
         if not os.path.isfile(path):
             return fail(f"transcript file does not exist: {path}")
+        problem = input_problem(path)
+        if problem is not None:
+            return fail(f"transcript file {path}: {problem}")
     for label, value in (("--from", args.date_from), ("--to", args.date_to)):
         if value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
             return fail(f"{label} expects YYYY-MM-DD, got: {value}")

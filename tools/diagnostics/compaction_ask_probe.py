@@ -89,6 +89,7 @@ output is the one described above):
 """
 
 import argparse
+import codecs
 import json
 import math
 import os
@@ -1039,6 +1040,23 @@ def find_transcripts(projects):
     return files
 
 
+def input_problem(path):
+    """Why a file named on the command line cannot be used (it cannot be read, or its bytes are not UTF-8), or None.
+    The files found in a directory are read leniently, but a file the caller named is checked whole before any result."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1 << 20)
+                decoder.decode(chunk, final=not chunk)
+                if not chunk:
+                    return None
+    except OSError as error:
+        return error.strerror or str(error)
+    except UnicodeDecodeError:
+        return "not valid UTF-8"
+
+
 def main(argv=None):
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -1068,6 +1086,10 @@ def main(argv=None):
     if args.labels and not os.path.isfile(args.labels):
         print(f"error: --labels: no file {args.labels}", file=sys.stderr)
         return 2
+    problem = input_problem(args.labels) if args.labels else None
+    if problem is not None:
+        print(f"error: --labels {args.labels}: {problem}", file=sys.stderr)
+        return 2
     if args.days < 0:
         print("error: --days must not be negative", file=sys.stderr)
         return 2
@@ -1081,6 +1103,10 @@ def main(argv=None):
     from_dt = to_dt - timedelta(days=args.days)
     from_e = from_dt.timestamp()
     to_e = to_dt.timestamp()
+    problem = input_problem(args.compact) if os.path.isfile(args.compact) else None
+    if problem is not None:
+        print(f"error: --compact {args.compact}: {problem}", file=sys.stderr)
+        return 2
     journal_data, message = read_journal(args.compact, from_e, to_e)
     if message is not None:
         print(f"error: {message}", file=sys.stderr)
@@ -1088,11 +1114,9 @@ def main(argv=None):
     if args.transcript:
         files = []
         for p in args.transcript:
-            try:
-                with open(p, "rb"):
-                    pass
-            except OSError as error:
-                print(f"error: --transcript: {error}", file=sys.stderr)
+            problem = input_problem(p)
+            if problem is not None:
+                print(f"error: --transcript {p}: {problem}", file=sys.stderr)
                 return 2
             parts = p.replace(os.sep, "/").split("/")
             base = os.path.basename(p)

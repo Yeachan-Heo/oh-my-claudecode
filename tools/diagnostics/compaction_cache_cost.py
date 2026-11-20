@@ -26,6 +26,7 @@ price is 1.25 x the input price for a 5-minute write and 2.0 x for a 1-hour writ
 """
 
 import argparse
+import codecs
 import json
 import os
 import sys
@@ -829,6 +830,23 @@ def write_result(path: Path, data: dict):
     return True, None
 
 
+def input_problem(path):
+    """Why a file named on the command line cannot be used (it cannot be read, or its bytes are not UTF-8), or None.
+    The files found in a directory are read leniently, but a file the caller named is checked whole before any result."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1 << 20)
+                decoder.decode(chunk, final=not chunk)
+                if not chunk:
+                    return None
+    except OSError as error:
+        return error.strerror or str(error)
+    except UnicodeDecodeError:
+        return "not valid UTF-8"
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--compact", type=Path, default=default_compact_path(), metavar="FILE", help="the compaction journal (default: compaction.jsonl in $OMC_JEV_LOG_DIR, else in .omc/state/jev under the current directory; with OMC_STATE_DIR set, pass the file or set OMC_JEV_LOG_DIR)")
@@ -855,9 +873,17 @@ def main(argv):
     if not a.compact.is_file():
         print(f"error: no --compact file: {a.compact}", file=sys.stderr)
         return 2
+    problem = input_problem(a.compact)
+    if problem is not None:
+        print(f"error: --compact {a.compact}: {problem}", file=sys.stderr)
+        return 2
     for t in a.transcript or []:
         if not t.is_file():
             print(f"error: no transcript file: {t}", file=sys.stderr)
+            return 2
+        problem = input_problem(t)
+        if problem is not None:
+            print(f"error: --transcript {t}: {problem}", file=sys.stderr)
             return 2
     try:
         prices = load_prices(a.prices)

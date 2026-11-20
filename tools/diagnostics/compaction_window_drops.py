@@ -27,6 +27,7 @@ The control arm n is the number of drops in files without any compact row in the
 """
 
 import argparse
+import codecs
 import json
 import math
 import os
@@ -872,6 +873,23 @@ def agent_from_path(path):
     return None
 
 
+def input_problem(path):
+    """Why a file named on the command line cannot be used (it cannot be read, or its bytes are not UTF-8), or None.
+    The files found in a directory are read leniently, but a file the caller named is checked whole before any result."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1 << 20)
+                decoder.decode(chunk, final=not chunk)
+                if not chunk:
+                    return None
+    except OSError as error:
+        return error.strerror or str(error)
+    except UnicodeDecodeError:
+        return "not valid UTF-8"
+
+
 def main(argv):
     args = parse_args(argv)
     if args.to:
@@ -885,11 +903,19 @@ def main(argv):
     if not os.path.isfile(args.compact):
         print("error: missing --compact file: " + args.compact, file=sys.stderr)
         return 2
+    problem = input_problem(args.compact)
+    if problem is not None:
+        print(f"error: --compact {args.compact}: {problem}", file=sys.stderr)
+        return 2
     files = []
     if args.transcript:
         for path in args.transcript:
             if not os.path.isfile(path):
                 print("error: missing --transcript file: " + path, file=sys.stderr)
+                return 2
+            problem = input_problem(path)
+            if problem is not None:
+                print(f"error: --transcript {path}: {problem}", file=sys.stderr)
                 return 2
             files.append((path, agent_from_path(path)))
     else:

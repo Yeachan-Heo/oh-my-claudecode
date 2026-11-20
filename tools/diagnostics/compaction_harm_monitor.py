@@ -60,6 +60,7 @@ the path, and no counts are made over a part of the transcripts).
 """
 
 import argparse
+import codecs
 import json
 import math
 import os
@@ -506,6 +507,23 @@ def text_report(report):
     return "\n".join(lines)
 
 
+def input_problem(path):
+    """Why a file named on the command line cannot be used (it cannot be read, or its bytes are not UTF-8), or None.
+    The files found in a directory are read leniently, but a file the caller named is checked whole before any result."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1 << 20)
+                decoder.decode(chunk, final=not chunk)
+                if not chunk:
+                    return None
+    except OSError as error:
+        return error.strerror or str(error)
+    except UnicodeDecodeError:
+        return "not valid UTF-8"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Offline monitor of cheap post-compaction harm signals.", allow_abbrev=False)
     ap.add_argument("--projects", default=default_projects_dir(), help="directory with Claude Code projects")
@@ -558,6 +576,10 @@ def main(argv=None):
     if not os.path.isfile(args.compact):
         print(f"error: compaction log not found: {args.compact}", file=sys.stderr)
         return 2
+    problem = input_problem(args.compact)
+    if problem is not None:
+        print(f"error: compaction log {args.compact}: {problem}", file=sys.stderr)
+        return 2
     try:
         compact_rows, journal_input = load_compact(args.compact)
     except OSError as error:
@@ -570,6 +592,10 @@ def main(argv=None):
     if args.transcript:
         files = []
         for path in args.transcript:
+            problem = input_problem(path)
+            if problem is not None:
+                print(f"error: --transcript {path}: {problem}", file=sys.stderr)
+                return 2
             name = os.path.basename(path)
             if "subagents" in path.replace(os.sep, "/").split("/") and name.startswith("agent-") and name.endswith(".jsonl"):
                 files.append((path, "subagent", name[6:-6]))

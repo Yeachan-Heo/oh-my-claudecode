@@ -157,6 +157,7 @@ compaction-report/1 template. (Amended after review, for every rule version: the
 empty or missing before.)
 """
 import argparse
+import codecs
 import bisect
 import functools
 import hashlib
@@ -1465,6 +1466,23 @@ def remove_quietly(path):
         pass
 
 
+def input_problem(path):
+    """Why a file named on the command line cannot be used (it cannot be read, or its bytes are not UTF-8), or None.
+    The files found in a directory are read leniently, but a file the caller named is checked whole before any result."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1 << 20)
+                decoder.decode(chunk, final=not chunk)
+                if not chunk:
+                    return None
+    except OSError as error:
+        return error.strerror or str(error)
+    except UnicodeDecodeError:
+        return "not valid UTF-8"
+
+
 def fail(message):
     print("error: " + message, file=sys.stderr)
     return 2
@@ -1500,6 +1518,9 @@ def main(argv):
         return fail("--projects is not a directory: " + args.projects)
     if args.compact_log is not None and not os.path.isfile(args.compact_log):
         return fail("--compact-log is not a file: " + args.compact_log)
+    problem = input_problem(args.compact_log) if args.compact_log is not None else None
+    if problem is not None:
+        return fail("--compact-log " + args.compact_log + ": " + problem)
     if args.patterns is not None:
         try:
             set_patterns(load_patterns(args.patterns))

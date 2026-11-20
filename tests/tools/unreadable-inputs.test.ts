@@ -55,16 +55,50 @@ interface Entry {
   invalid: Buffer;
 }
 
+const ROW_USER = { type: 'user', timestamp: '2026-11-14T10:00:00.000Z', sessionId: 's1', message: { role: 'user', content: 'hello' } };
+const ROW_ASSISTANT = {
+  type: 'assistant', timestamp: '2026-11-14T10:00:01.000Z', sessionId: 's1', requestId: 'r1',
+  message: { id: 'm1', model: 'claude-test', role: 'assistant', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1, output_tokens: 1 } },
+};
+const TRANSCRIPT = `${JSON.stringify(ROW_USER)}\n${JSON.stringify(ROW_ASSISTANT)}\n`;
+const BAD_TRANSCRIPT = withBadByte(TRANSCRIPT.slice(0, TRANSCRIPT.indexOf('hello') + 1), TRANSCRIPT.slice(TRANSCRIPT.indexOf('hello') + 1));
+const PRICES = JSON.stringify({ models: { 'claude-test': { input_per_mtok: 1, output_per_mtok: 1 } } });
+const BAD_PRICES = withBadByte('{"models":{"claude-test":{"input_per_mtok":1,"output_per_mtok":1}},"note":"a', 'b"}');
+const JOURNAL = '';
+const BAD_JOURNAL = withBadByte('{"event":"compact","note":"a', 'b"}\n');
+
+// Files that the runs share: a transcript, an empty compaction journal and a projects directory that holds the transcript.
+let sharedTranscript = '';
+let sharedJournal = '';
+let sharedProjects = '';
+const PERIOD = ['--to', '2026-11-15T00:00:00Z', '--days', '7'];
+const CACHE_COST = ['--deployed-at', '2026-11-01T00:00:00Z', '--to', '2026-11-15T00:00:00Z', '--days', '30', '--json'];
+
 const DENIAL_ROW = (note: string) => `{"kind":"state","id":"0123456789abcdef","note":"${note}"}\n`;
 
 const ENTRIES: Entry[] = [
   { tool: 'denial_log_summary.mjs', runner: 'node', option: '--file', args: (file) => ['--file', file], valid: DENIAL_ROW('ok'), invalid: withBadByte('{"kind":"state","note":"a', 'b"}\n') },
   { tool: 'denial_log_summary.mjs', runner: 'node', option: 'a plain argument', args: (file) => [file], valid: DENIAL_ROW('ok'), invalid: withBadByte('{"kind":"state","note":"a', 'b"}\n') },
+  { tool: 'compaction_harm_monitor.py', runner: 'python', option: '--compact', args: (file) => ['--transcript', sharedTranscript, '--compact', file, ...PERIOD], valid: JOURNAL, invalid: BAD_JOURNAL },
+  { tool: 'compaction_harm_monitor.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file, '--compact', sharedJournal, ...PERIOD], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
+  { tool: 'compaction_ask_probe.py', runner: 'python', option: '--compact', args: (file) => ['--transcript', sharedTranscript, '--compact', file, '--json'], valid: JOURNAL, invalid: BAD_JOURNAL },
+  { tool: 'compaction_ask_probe.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file, '--compact', sharedJournal, '--json'], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
+  { tool: 'compaction_ask_probe.py', runner: 'python', option: '--labels', args: (file) => ['--transcript', sharedTranscript, '--compact', sharedJournal, '--json', '--labels', file], valid: JOURNAL, invalid: BAD_JOURNAL },
+  { tool: 'user_prohibitions_after_compaction.py', runner: 'python', option: '--compact-log', args: (file) => ['--projects', sharedProjects, '--compact-log', file], valid: JOURNAL, invalid: BAD_JOURNAL },
+  { tool: 'user_prohibitions_after_compaction.py', runner: 'python', option: '--patterns', args: (file) => ['--projects', sharedProjects, '--patterns', file], valid: '{}', invalid: withBadByte('{"permission_words":["a', 'b"]}') },
+  { tool: 'compaction_window_drops.py', runner: 'python', option: '--compact', args: (file) => ['--transcript', sharedTranscript, '--compact', file], valid: JOURNAL, invalid: BAD_JOURNAL },
+  { tool: 'compaction_window_drops.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file, '--compact', sharedJournal], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
+  { tool: 'compaction_cache_cost.py', runner: 'python', option: '--compact', args: (file) => ['--transcript', sharedTranscript, '--compact', file, ...CACHE_COST], valid: JOURNAL, invalid: BAD_JOURNAL },
+  { tool: 'compaction_cache_cost.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file, '--compact', sharedJournal, ...CACHE_COST], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
+  { tool: 'compaction_cache_cost.py', runner: 'python', option: '--prices', args: (file) => ['--transcript', sharedTranscript, '--compact', sharedJournal, '--prices', file, ...CACHE_COST], valid: PRICES, invalid: BAD_PRICES },
+  { tool: 'executor_outcome_metrics.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
   {
     tool: 'hook_latency_p95.mjs', runner: 'node', option: '--hooks-json', args: (file, base) => ['--dir', base, '--shell-checks-dir', base, '--hooks-json', file],
     valid: '{"hooks":{}}\n', invalid: withBadByte('{"hooks":{},"note":"a', 'b"}\n'),
   },
 ];
+
+const entryOf = (tool: string) => ENTRIES.find((entry) => entry.tool === tool) as Entry;
 
 let base = '';
 let harness = '';
@@ -76,6 +110,12 @@ beforeAll(() => {
   writeFileSync(harness, PYTHON_HARNESS);
   preload = join(base, 'preload.cjs');
   writeFileSync(preload, NODE_PRELOAD);
+  sharedProjects = join(base, 'projects');
+  mkdirSync(join(sharedProjects, 'proj'), { recursive: true });
+  sharedTranscript = join(sharedProjects, 'proj', 's1.jsonl');
+  writeFileSync(sharedTranscript, TRANSCRIPT);
+  sharedJournal = join(base, 'compact.jsonl');
+  writeFileSync(sharedJournal, JOURNAL);
 });
 afterAll(() => rmSync(base, { recursive: true, force: true }));
 
@@ -143,14 +183,14 @@ describe('denial_log_summary.mjs: a journal found in a directory that cannot be 
     mkdirSync(dir, { recursive: true });
     const file = join(dir, 'denials.jsonl');
     writeFileSync(file, DENIAL_ROW('ok'));
-    expectStopped(run(ENTRIES[0], ['--dir', dir], file), file);
+    expectStopped(run(entryOf('denial_log_summary.mjs'), ['--dir', dir], file), file);
   });
 
   it('names a journal that is a directory', () => {
     const dir = join(base, 'discovered-directory');
     const file = join(dir, 'denials.jsonl');
     mkdirSync(file, { recursive: true });
-    expectStopped(run(ENTRIES[0], ['--dir', dir], null), file);
+    expectStopped(run(entryOf('denial_log_summary.mjs'), ['--dir', dir], null), file);
   });
 });
 
@@ -159,6 +199,6 @@ describe('hook_latency_p95.mjs: a log file in --dir that cannot be read stops th
     const dir = join(base, 'hook-logs');
     const file = join(dir, 'hook-timing.jsonl');
     mkdirSync(file, { recursive: true });
-    expectStopped(run(ENTRIES[2], ['--dir', dir, '--shell-checks-dir', dir], null), file);
+    expectStopped(run(entryOf('hook_latency_p95.mjs'), ['--dir', dir, '--shell-checks-dir', dir], null), file);
   });
 });
