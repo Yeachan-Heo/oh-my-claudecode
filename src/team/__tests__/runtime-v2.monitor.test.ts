@@ -298,11 +298,17 @@ describe('monitorTeamV2 pane-based stall inference', () => {
       return (await monitorTeamV2('demo-team', cwd))?.workers[0]?.providerEvent.ageSeconds;
     };
 
-    // A clock that ran ahead of the monitor's shows age 0, not a negative age.
-    expect(await ageFor(Date.now() + 60_000)).toBe(0);
-    const age = await ageFor(Date.now() - 12_500);
-    expect(Number.isInteger(age)).toBe(true);
-    expect(age).toBeGreaterThanOrEqual(12);
+    // Only Date is frozen, so the monitor's file I/O and timers still run.
+    const now = Date.parse('2026-11-20T12:00:00.000Z');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    try {
+      // A clock that ran ahead of the monitor's shows age 0, not a negative age.
+      expect(await ageFor(now + 60_000)).toBe(0);
+      expect(await ageFor(now - 12_500)).toBe(12);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not flag a busy pane, even one whose output quotes a trust dialog', async () => {
