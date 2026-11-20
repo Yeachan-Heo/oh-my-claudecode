@@ -511,7 +511,7 @@ function runnerMatch(piece) {
  * less. The subset options are listed per runner (SUBSET_OPTIONS); a token names one when it equals the
  * option or starts with `option=` or `option:` (`-run=X`, `-only-testing:Suite`).
  */
-const WEAKEN = /^(?:--passWithNoTests|--exclude|--testPathIgnorePatterns)(?:=|$)/;
+const WEAKEN = /^(?:--passWithNoTests|--pass-on-no-patterns|--exclude|--testPathIgnorePatterns|--exit-zero|--noCheck)(?:=|$)/;
 
 /** go flags take one or two dashes and an optional `test.` prefix: `-run`, `--run`, `-test.run`. */
 const goOptions = (names) => names.flatMap((name) => [`-${name}`, `--${name}`, `-test.${name}`, `--test.${name}`]);

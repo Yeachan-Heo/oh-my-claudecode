@@ -138,6 +138,16 @@ it('a run that prints, lists or simulates is no check, per program, and the same
   assert.equal(checkResult('pytest tests', '1 passed in 0.02s', 0).verdict, 'passed', 'a run of the tests still passes');
 });
 
+it('an option that makes a check exit 0 or skip its work weakens it', () => {
+  for (const command of ['flake8 --exit-zero src', 'pylint --exit-zero src', 'ruff check --exit-zero .', 'tsc --noEmit --noCheck', 'eslint --pass-on-no-patterns', 'eslint --pass-on-no-patterns=true']) {
+    const got = classifyCommand(command);
+    assert.equal(got.isCheck, true, `${command}: a run`);
+    assert.equal(got.narrowed, true, `${command}: weakened`);
+    assert.equal(checkResult(command, '', 0).verdict, 'undetermined', `${command}: a zero status proves nothing`);
+  }
+  assert.equal(classifyCommand('flake8 src').narrowed, false, 'the plain run is not weakened');
+});
+
 it('pipefail: only a pipe into tail is made visible', () => {
   assert.equal(classifyCommand('npm test | tail -5').exitHidden, true, 'pipe without pipefail hides');
   assert.equal(classifyCommand('npm test | head -20').exitHidden, true, 'head hides without pipefail');
