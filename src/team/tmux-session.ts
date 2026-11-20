@@ -66,6 +66,8 @@ import {
   paneHasTrustPrompt,
   paneLooksReady,
   claudeDialogFocus,
+  detectClaudeStartupDialog,
+  type ClaudeStartupDialogKind,
   type PaneTrustPromptKind,
 } from "./pane-readiness.js";
 
@@ -4621,7 +4623,7 @@ export async function waitForStartupPaneReady(
       ? Number(opts.pollIntervalMs)
       : 250;
   const deadline = Date.now() + timeoutMs;
-  const handledSelectors = new Set<PaneTrustPromptKind>();
+  const handledSelectors = new Set<PaneTrustPromptKind | ClaudeStartupDialogKind>();
   let claudeTrustDownSentAt = -Infinity;
   // Set right after Enter answers Claude's trust dialog: the pane is read once
   // more even when that Enter went out at the last poll before the deadline.
@@ -4647,7 +4649,9 @@ export async function waitForStartupPaneReady(
     });
     if (!observation.ok) return { ok: false, reason: "capture_failed" };
     const captured = observation.captured;
-    const selector = detectPaneTrustPromptKind(captured, context.provider);
+    const selector =
+      (context.provider === "claude" ? detectClaudeStartupDialog(captured) : null) ??
+      detectPaneTrustPromptKind(captured, context.provider);
     if (selector) {
       // This Codex dialog persists workspace trust and can enable folder
       // settings. Never type a task or grant that trust on the user's behalf.
@@ -4735,7 +4739,9 @@ async function startupPaneSubmitBlockReason(
   context: StartupPaneContext,
   attemptAlreadyFenced: boolean,
 ): Promise<
-  Extract<StartupPaneReadyResult, { ok: false }>["reason"] | undefined
+  | Extract<StartupPaneReadyResult, { ok: false }>["reason"]
+  | "claude_fullscreen_renderer_offered"
+  | undefined
 > {
   if (!(await startupContextIsActive(context, attemptAlreadyFenced)))
     return "attempt_inactive";
@@ -4753,6 +4759,13 @@ async function startupPaneSubmitBlockReason(
       : {}),
   });
   if (!observation.ok || !observation.captured.trim()) return "capture_failed";
+  const startupDialog =
+    context.provider === "claude"
+      ? detectClaudeStartupDialog(observation.captured)
+      : null;
+  if (startupDialog === "claude_bypass_permissions")
+    return "claude_bypass_permissions_consent_required";
+  if (startupDialog) return "claude_fullscreen_renderer_offered";
   const selector = detectPaneTrustPromptKind(
     observation.captured,
     context.provider,
@@ -4778,10 +4791,25 @@ export async function deliverStartupInbox(
   });
   if (!ready.ok) return { ok: false, reason: ready.reason };
   try {
-    const preInputBlockReason = await startupPaneSubmitBlockReason(
+    let preInputBlockReason = await startupPaneSubmitBlockReason(
       context,
       options.attemptAlreadyFenced ?? false,
     );
+    // The offer can draw after the wait saw the input prompt. Nothing is typed
+    // yet, so it is answered like any startup dialog, once.
+    if (preInputBlockReason === "claude_fullscreen_renderer_offered") {
+      const answered = await waitForStartupPaneReady(context, {
+        timeoutMs: resolveStartupReadyTimeoutMs(process.env),
+        attemptAlreadyFenced: options.attemptAlreadyFenced,
+      });
+      if (!answered.ok) return { ok: false, reason: answered.reason };
+      preInputBlockReason = await startupPaneSubmitBlockReason(
+        context,
+        options.attemptAlreadyFenced ?? false,
+      );
+    }
+    if (preInputBlockReason === "claude_fullscreen_renderer_offered")
+      return { ok: false, reason: "selector_persistent" };
     if (preInputBlockReason) return { ok: false, reason: preInputBlockReason };
     await sendLiteralPaneText(
       context.ownership.paneId,
@@ -4794,6 +4822,9 @@ export async function deliverStartupInbox(
         context,
         options.attemptAlreadyFenced ?? false,
       );
+      // The trigger is typed: Enter would now answer the offer, not submit it.
+      if (submitBlockReason === "claude_fullscreen_renderer_offered")
+        return { ok: false, reason: "selector_persistent" };
       if (submitBlockReason) return { ok: false, reason: submitBlockReason };
       await sendTeamPaneKey(
         context.ownership.paneId,
@@ -4899,6 +4930,8 @@ export async function retryStartupInboxSubmit(
   });
   if (
     !observation.ok ||
+    (context.provider === "claude" &&
+      detectClaudeStartupDialog(observation.captured)) ||
     detectPaneTrustPromptKind(observation.captured, context.provider)
   )
     return "unavailable";

@@ -3,8 +3,6 @@ import type { CliAgentType } from './model-contract.js';
 export type PaneTrustPromptKind =
   | 'directory'
   | 'claude_directory'
-  | 'claude_bypass_permissions'
-  | 'claude_fullscreen_renderer'
   | 'codex_directory'
   | 'codex_hooks'
   | 'cursor_workspace_trust';
@@ -81,12 +79,7 @@ const SHARED_PATTERNS = {
 export const PANE_PATTERNS: Readonly<Record<CliAgentType, ProviderPanePatterns>> = {
   claude: {
     ...SHARED_PATTERNS,
-    trustKinds: [
-      'claude_bypass_permissions',
-      'claude_fullscreen_renderer',
-      'claude_directory',
-      ...SHARED_PATTERNS.trustKinds,
-    ],
+    trustKinds: ['claude_directory', ...SHARED_PATTERNS.trustKinds],
     verifiedVersion: '2.1.325',
   },
   codex: {
@@ -111,8 +104,6 @@ const UNKNOWN_PROVIDER_PATTERNS: ProviderPanePatterns = {
   trustKinds: [
     'codex_directory',
     'cursor_workspace_trust',
-    'claude_bypass_permissions',
-    'claude_fullscreen_renderer',
     'claude_directory',
     ...SHARED_PATTERNS.trustKinds,
   ],
@@ -176,25 +167,30 @@ function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): b
   );
 }
 
-// True when the heading starts the line at index and ends within the next two.
-// Whitespace is ignored: Claude Code wraps a heading at a space to fit a narrow
-// pane, and a frame drawn wider than the pane wraps mid-word.
+// True when the heading starts the line at index, over as many lines as it
+// wraps to. Whitespace is ignored: Claude Code wraps a heading at a space to
+// fit a narrow pane, and a frame drawn wider than the pane wraps mid-word.
 function headingStartsAt(lines: readonly string[], index: number, heading: string): boolean {
   const squeeze = (text: string) => text.replace(/\s+/g, '');
-  return squeeze(lines.slice(index, index + 3).join('')).startsWith(squeeze(heading));
+  const wanted = squeeze(heading);
+  let text = '';
+  for (let line = index; line < lines.length && text.length < wanted.length; line++) text += squeeze(lines[line]!);
+  return text.startsWith(wanted);
 }
 
-// Claude Code's two-choice dialogs: a heading, then the two choices on
-// adjacent lines with the first focused. The trust dialog comes first on every
-// launch in an untrusted folder; the other two follow it on the first launch
-// with a fresh config directory (recorded on 2.1.328).
-export type ClaudeDialogKind = Extract<
-  PaneTrustPromptKind,
-  'claude_directory' | 'claude_bypass_permissions' | 'claude_fullscreen_renderer'
->;
+// The dialogs Claude Code shows after the trust dialog on the first launch
+// with a fresh config directory (recorded on 2.1.328). Only the Claude startup
+// wait reads them; every other pane reader sees what it saw before them.
+export type ClaudeStartupDialogKind = 'claude_bypass_permissions' | 'claude_fullscreen_renderer';
+
+// Claude Code's two-choice dialogs: the two choices on adjacent lines with the
+// first focused, below a heading. The bypass warning has no heading entry: its
+// choice pair is unique to it, and its heading wraps over many lines in a
+// narrow pane.
+export type ClaudeDialogKind = 'claude_directory' | ClaudeStartupDialogKind;
 
 const CLAUDE_DIALOGS: Readonly<
-  Record<ClaudeDialogKind, { headingStartsAt: (lines: readonly string[], index: number) => boolean; first: RegExp; second: RegExp }>
+  Record<ClaudeDialogKind, { headingStartsAt?: (lines: readonly string[], index: number) => boolean; first: RegExp; second: RegExp }>
 > = {
   claude_directory: {
     headingStartsAt: claudeTrustQuestionStartsAt,
@@ -202,7 +198,6 @@ const CLAUDE_DIALOGS: Readonly<
     second: /^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i,
   },
   claude_bypass_permissions: {
-    headingStartsAt: (lines, index) => headingStartsAt(lines, index, 'WARNING: Claude Code running in Bypass Permissions mode'),
     first: /^\s*(?:❯\s*)?No,\s*exit$/i,
     second: /^\s*(?:❯\s*)?Yes,\s*I accept$/i,
   },
@@ -213,27 +208,39 @@ const CLAUDE_DIALOGS: Readonly<
   },
 };
 
-// Only the choice pair after the latest heading is the live dialog: an
-// answered dialog can remain in the scrollback above it. Null while that pair
-// is not drawn yet; 'stale' when an input prompt is drawn below it, as below a
-// reply that quotes the dialog, so keys would reach that prompt instead.
+// Only the choice pair after the latest heading (or the latest pair, without
+// one) is the live dialog: an answered dialog can remain in the scrollback
+// above it. Null while that pair is not drawn yet; 'stale' when an input prompt
+// is drawn below it, as below a reply that quotes the dialog, so keys would
+// reach that prompt instead.
 function claudeDialogFocusIn(
   lines: readonly string[],
   kind: ClaudeDialogKind,
 ): 'first' | 'second' | 'stale' | null {
   const dialog = CLAUDE_DIALOGS[kind];
-  const heading = lines.findLastIndex((_, index) => dialog.headingStartsAt(lines, index));
-  if (heading < 0) return null;
-  const first = lines.findIndex((line, index) => index > heading && dialog.first.test(line));
+  const isPairAt = (index: number) => dialog.first.test(lines[index]!) && dialog.second.test(lines[index + 1] ?? '');
+  let first: number;
+  if (dialog.headingStartsAt) {
+    const heading = lines.findLastIndex((_, index) => dialog.headingStartsAt!(lines, index));
+    if (heading < 0) return null;
+    first = lines.findIndex((line, index) => index > heading && dialog.first.test(line));
+  } else {
+    first = lines.findLastIndex((_, index) => isPairAt(index));
+  }
   const second = first >= 0 ? lines[first + 1] ?? '' : '';
   if (!dialog.second.test(second)) return null;
   if (lines.slice(first + 2).some((line) => PANE_PATTERNS.claude.idlePromptLine.test(line))) return 'stale';
   return /^\s*❯/.test(second) ? 'second' : 'first';
 }
 
-function claudeDialogIsLive(lines: readonly string[], kind: ClaudeDialogKind): boolean {
-  const focus = claudeDialogFocusIn(lines, kind);
-  return focus === 'first' || focus === 'second';
+// Read only by the Claude startup wait, before it reads the trust dialogs.
+export function detectClaudeStartupDialog(captured: string): ClaudeStartupDialogKind | null {
+  const lines = paneLines(captured);
+  for (const kind of ['claude_bypass_permissions', 'claude_fullscreen_renderer'] as const) {
+    const focus = claudeDialogFocusIn(lines, kind);
+    if (focus === 'first' || focus === 'second') return kind;
+  }
+  return null;
 }
 
 function detectTrustPrompt(
@@ -260,11 +267,6 @@ function detectTrustPrompt(
       tailHas(/Do you trust the contents of this directory\?/i))
   ) {
     return 'cursor_workspace_trust';
-  }
-
-  // Checked before the trust dialog, which they follow on screen.
-  for (const kind of ['claude_bypass_permissions', 'claude_fullscreen_renderer'] as const) {
-    if (kinds.includes(kind) && claudeDialogIsLive(lines, kind)) return kind;
   }
 
   // Claude Code wraps the question to the pane width. In a 35-column pane it

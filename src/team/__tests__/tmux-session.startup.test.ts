@@ -1074,6 +1074,17 @@ describe('worker pane startup safety', () => {
     },
   );
 
+  strictTmuxIt('does not resubmit with Enter while the Bypass Permissions warning focuses Yes, I accept', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const warning = readFileSync(join(corpus, 'claude/2.1.328/bypass-permissions-yes-focused.txt'), 'utf8');
+    tmuxState.captures = [`❯ Read inbox.md, execute now.\n${warning}`];
+
+    await expect(retryStartupInboxSubmit(context, 'Read inbox.md, execute now.', { attemptAlreadyFenced: true }))
+      .resolves.toBe('unavailable');
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
   strictTmuxIt('fails with the consent reason when the Bypass Permissions warning first shows at the check before the trigger is typed', async () => {
     const context = await acceptedContext('claude');
     const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
