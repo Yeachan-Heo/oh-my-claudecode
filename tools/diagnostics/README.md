@@ -980,7 +980,7 @@ option: `flag` (no value), `value` (the next word, or the rest of the word: `-ur
 (`NAME=VALUE` words may follow the options: `env`, `sudo`, `time`; behind the others the shell runs `NAME=VALUE` as a command) and
 `duration` (`timeout`: a number as `strtod` reads it, such as `5`, `1.5m`, `1e1`, `0x5` or `inf`, with an optional `s`, `m`, `h` or
 `d`; ASCII digits only). The options come from `--help` of sudo 1.9.16, GNU coreutils 9.7 (`timeout`, `nice`, `env`, `nohup`), from
-`help command` and `help exec` of bash 5.2 and from the man page of time(1) (GNU time in `/usr/bin/time`; the table reads its
+`help command` and `help exec` of bash 5.2 and from `--help` of GNU time 1.9 (`/usr/bin/time`; the table reads its
 options after the shell keyword `time` too). A short option may be glued to the next one (`sudo -nu root`), a long option may be
 shortened to a name that is unique in the wrapper (`nice --adj=3`), `--` ends the options, and at most eight wrappers in a row are
 taken off by every tool.

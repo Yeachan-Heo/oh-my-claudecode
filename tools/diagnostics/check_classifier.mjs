@@ -183,7 +183,7 @@ nice stop --help --version
 time assign
 time flag -a -p -q -v --append --portability --quiet --verbose
 time value -f -o --format --output
-time stop -V --help --version
+time stop -V -h --help --version
 timeout duration
 timeout flag -f -p -v --foreground --preserve-status --verbose
 timeout value -k -s --kill-after --signal
