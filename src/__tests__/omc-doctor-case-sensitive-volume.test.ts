@@ -593,4 +593,35 @@ fs.lstatSync = function (target, options) {
       }
     }
   });
+
+  // Among the entries of one plugin ID a certain match decides, but a match that is unknown for another plugin ID leaves open
+  // which marketplace the session runs: Step 1 and Step 4 both say so, whichever ID comes first in the registry.
+  test('with two plugin IDs, a match that is unknown for one makes Step 1 and Step 4 unknown although the other is certain', () => {
+    const OWN = 'oh-my-claudecode@oh-my-claudecode';
+    for (const platform of PLATFORMS) {
+      if (hostCannot(platform)) continue;
+      for (const order of [[PLUGIN_ID, OWN], [OWN, PLUGIN_ID]]) {
+        const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-case-'));
+        try {
+          mkdirSync(path.join(dir, 'plugins'), { recursive: true });
+          const install = installAt(dir);
+          const entries: Record<string, unknown[]> = { [PLUGIN_ID]: [entryOf(install)], [OWN]: [entryOf(upperBelow(dir, install))] };
+          writeRegistry(dir, Object.fromEntries(order.map((id) => [id, entries[id]])));
+          writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.8.0 -->\n');
+          const preloads = [reportAs(dir, platform), ...volume(dir)];
+          const env = { CLAUDE_PLUGIN_ROOT: install };
+          const channel = runCommand(step1Command, dir, { env, preloads, timeout: 20_000 });
+          expect({ platform, order, lines: channel.stdout.trim().split('\n').length, blind: BLIND.test(channel.stdout.trim().replace(/^Channel: /, '')) }).toEqual({ platform, order, lines: 1, blind: true });
+          const drift = runCommand(CLAUDE_MD_VERSION, dir, { env, preloads, timeout: 20_000 });
+          expect({ platform, order, lines: drift.stdout.trim().split('\n').slice(2) }).toEqual({
+            platform,
+            order,
+            lines: ['Latest cached plugin version: (unknown)', 'VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen'],
+          });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
 });

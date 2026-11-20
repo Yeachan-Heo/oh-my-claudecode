@@ -571,11 +571,13 @@ const claudeMdVersion = () => {
   const states = readChannelRegistry().supported.map(([id, entries]) => [marketplaceOf(id), activeEntries(id, entries, roots)]);
   const running = [...new Set(states.filter(([, state]) => state.active.length).map(([market]) => market))];
   let pluginVersion = '(none)';
-  if (running.length) {
+  if (states.some(([, state]) => state.unknown)) {
+    // As in Step 1: among the entries of one plugin ID a certain match decides, but a match that is unknown for any ID
+    // leaves open which marketplace the session runs.
+    pluginVersion = '(unknown)';
+  } else if (running.length) {
     // With roots in two marketplaces the highest of their caches names it.
     pluginVersion = running.map((market) => highestCached(cacheDirOf(market))).filter(Boolean).sort(compareVersions).pop() ?? '(none)';
-  } else if (states.some(([, state]) => state.unknown)) {
-    pluginVersion = '(unknown)';
   } else {
     for (const market of markets) pluginVersion = highestCached(cacheDirOf(market)) ?? pluginVersion;
   }
