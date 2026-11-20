@@ -473,6 +473,22 @@ it('ruff summary: passed, failed, undetermined (hidden exit)', () => {
   assert.equal(checkResult('ruff check . | tail', 'Found 0 errors.').verdict, 'undetermined');
 });
 
+it('ruff summary: the errors a run fixed are not the errors that remain', () => {
+  const fixed = 'Found 1 error (1 fixed, 0 remaining).';
+  assert.equal(checkResult('ruff check --fix .', fixed, 0).verdict, 'passed', 'everything fixed, visible zero exit');
+  assert.equal(checkResult('ruff check --fix --exit-non-zero-on-fix .', fixed, 1).verdict, 'failed', 'a failing exit status of a fixing run');
+  assert.equal(checkResult('ruff check --fix . | tail', fixed).verdict, 'undetermined', 'everything fixed, status hidden');
+  assert.equal(checkResult('ruff check --fix . | tail', 'Found 5 errors (3 fixed, 2 remaining).').verdict, 'failed', 'errors remain');
+  assert.equal(checkResult('ruff check --fix .', 'Found 5 errors (3 fixed, 2 remaining).', 1).verdict, 'failed', 'errors remain, visible status');
+  assert.equal(checkResult('ruff check --fix --show-fixes . | tail', 'Fixed 2 errors:\n- a.py:\n    1 × F401 (unused-import)\n\n' + fixed).verdict, 'undetermined', 'fixes listed');
+  assert.equal(checkResult('ruff check . | tail', 'Found 3 errors.').verdict, 'failed', 'a plain count is as before');
+  assert.equal(checkResult('ruff check --statistics . | tail', 'Found 3 errors.\n[*] 2 fixable with the `--fix` option.').verdict, 'failed', 'a count with the fixable line');
+  assert.equal(checkResult('mypy src | tail', 'Found 3 errors in 1 file (checked 4 source files)').verdict, 'failed', 'a count of mypy');
+  assert.equal(checkResult('ruff check --diff . | tail', 'Would fix 3 errors.').verdict, 'undetermined', 'a diff is no check');
+  assert.equal(checkResult('ruff format --check . | tail', 'Would fix 3 errors.').verdict, 'failed', 'the line of a diff names files that would change');
+  assert.equal(checkResult('ruff check --fix . | tail', 'Found 2 errors (1 fixed, 1 remaining).\nAll checks passed!').verdict, 'failed', 'a remaining error before a pass line');
+});
+
 it('tsc: passed on a visible zero exit, failed on an error code, undetermined in silence behind a pipe', () => {
   assert.equal(checkResult('tsc --noEmit', '', 0).verdict, 'passed', 'visible zero exit');
   assert.equal(checkResult('tsc --noEmit | tail -3', 'src/a.ts:1:5 - error TS2322: nope', 1).verdict, 'failed');
