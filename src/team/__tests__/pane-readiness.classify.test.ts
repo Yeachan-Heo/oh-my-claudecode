@@ -307,6 +307,24 @@ describe('Claude Code first-run dialogs', () => {
     },
   );
 
+  it('does not read a cwd named "Dark mode" in the banner or the HUD below the live prompt as onboarding', () => {
+    const hud = read('claude/2.1.325/idle-hud.txt')
+      .replace('/private/tmp/omc-proto-X5IS/work', '/private/tmp/omc-proto-X5IS/work/Dark mode')
+      .replace('[OMC#5.8.4] |', '[OMC#5.8.4] | /private/tmp/omc-proto-X5IS/work/Dark mode |');
+    expect(detectClaudeStartupDialog(hud)).toBeNull();
+  });
+
+  it.each(['>', '›'])('does not read the security notes quoted above a %s input prompt as onboarding', (prompt) => {
+    const notes = read('claude/2.1.329/onboarding-security-notes.txt').trimEnd().split('\n').map(line => `  ${line}`).join('\n');
+    expect(detectClaudeStartupDialog(`⏺ The worker pane showed:\n${notes}\n\n${prompt} `)).toBeNull();
+  });
+
+  it('still reads onboarding from the theme options alone, the rest scrolled away', () => {
+    const options = read('claude/2.1.329/onboarding-theme.txt').split('\n').filter(line => /mode|Auto/.test(line)).join('\n');
+    expect(detectClaudeStartupDialog(options)).toBe('claude_onboarding');
+    expect(detectClaudeStartupDialog('     Light mode (ANSI colors only)\n\n ╌╌╌╌\n  Syntax theme: Monokai Extended\n (ctrl+t to disable)\n')).toBe('claude_onboarding');
+  });
+
   it('does not read onboarding text quoted in a reply above the input prompt', () => {
     expect(detectClaudeStartupDialog('⏺ It said: Security notes: ... Press Enter to continue, then Choose the text style.\n────\n❯ \n────\n')).toBeNull();
   });

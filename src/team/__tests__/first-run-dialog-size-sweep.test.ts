@@ -52,7 +52,19 @@ const FRAMES = {
   quoting: 'claude/synthetic/output-quoting-first-run-dialogs.txt',
   idle: 'claude/2.1.325/idle.txt',
 } as const;
-type FrameName = keyof typeof FRAMES;
+// Recorded frames edited into panes that must not read as a first-run screen:
+// a cwd named "Dark mode" in the banner and in the HUD below the live prompt,
+// and a reply quoting the security notes above a > or › input prompt.
+const securityNotesQuoted = () => readFileSync(join(CORPUS, FRAMES.onboardingNotes), 'utf8')
+  .trimEnd().split('\n').map(line => `  ${line}`).join('\n');
+const DERIVED = {
+  hudDarkMode: () => readFileSync(join(CORPUS, FRAMES.idle.replace('idle.txt', 'idle-hud.txt')), 'utf8')
+    .replace('/private/tmp/omc-proto-X5IS/work', '/private/tmp/omc-proto-X5IS/work/Dark mode')
+    .replace('[OMC#5.8.4] |', '[OMC#5.8.4] | /private/tmp/omc-proto-X5IS/work/Dark mode |'),
+  quoteAboveGreaterThan: () => `⏺ The worker pane showed:\n${securityNotesQuoted()}\n\n> `,
+  quoteAboveChevron: () => `⏺ The worker pane showed:\n${securityNotesQuoted()}\n\n› `,
+} as const;
+type FrameName = keyof typeof FRAMES | keyof typeof DERIVED;
 type Size = `${number}x${number}`;
 
 const TMUX = spawnSync('tmux', ['-V']).status === 0;
@@ -77,9 +89,9 @@ function awaitDrawn(tmux: ReturnType<typeof tmuxIn>, target: string): void {
 
 // One server per frame: draw it at 120x50, then shrink the window one column
 // at a time and capture what a worker capture (-p -S -80) would read.
-function widthReflows(file: string, dir: string): Map<Size, string> {
+function widthReflows(path: string, dir: string): Map<Size, string> {
   const tmux = tmuxIn(dir);
-  tmux('new-session', '-d', '-x', '120', '-y', '50', `cat ${JSON.stringify(join(CORPUS, file))}; exec sleep 600`);
+  tmux('new-session', '-d', '-x', '120', '-y', '50', `cat ${JSON.stringify(path)}; exec sleep 600`);
   try {
     awaitDrawn(tmux, '0');
     const reflows = new Map<Size, string>();
@@ -96,10 +108,10 @@ function widthReflows(file: string, dir: string): Map<Size, string> {
 // One server with history-limit 0 per frame, one session per size: the frame,
 // without its trailing blank lines, is drawn into the small pane, so the lines
 // that scroll off its top are gone from the capture.
-function shortPanes(file: string, dir: string): Map<Size, string> {
+function shortPanes(path: string, dir: string): Map<Size, string> {
   const tmux = tmuxIn(dir);
   const drawn = join(dir, `${randomUUID().slice(0, 8)}.txt`);
-  const text = readFileSync(join(CORPUS, file), 'utf8').trimEnd();
+  const text = readFileSync(path, 'utf8').trimEnd();
   writeFileSync(drawn, text);
   tmux('start-server', ';', 'set-option', '-g', 'history-limit', '0', ';', 'new-session', '-d', '-s', 'keep');
   try {
@@ -149,8 +161,16 @@ describe.skipIf(!supported)(`Claude first-run dialogs across pane sizes (${TMUX 
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), 'omc-sweep-'));
     process.env.HOME = root;
-    for (const [name, file] of Object.entries(FRAMES) as Array<[FrameName, string]>) {
-      const text = readFileSync(join(CORPUS, file), 'utf8');
+    const sources: Array<[FrameName, string]> = [
+      ...Object.entries(FRAMES).map(([name, file]) => [name as FrameName, join(CORPUS, file)] as [FrameName, string]),
+      ...Object.entries(DERIVED).map(([name, build]) => {
+        const path = join(root, `${name}.txt`);
+        writeFileSync(path, build());
+        return [name as FrameName, path] as [FrameName, string];
+      }),
+    ];
+    for (const [name, file] of sources) {
+      const text = readFileSync(file, 'utf8');
       const frames = TMUX
         ? new Map([...widthReflows(file, root), ...shortPanes(file, root)])
         : new Map(WIDTHS.map(width => [`${width}x50` as Size, cutAt(text, width)]));
@@ -333,7 +353,7 @@ describe.skipIf(!supported)(`Claude first-run dialogs across pane sizes (${TMUX 
     'delivers to idle panes and to a reply quoting the dialogs as dev does (%s sweep)',
     async (_sweep, sizes) => {
       const misses: string[] = [];
-      for (const name of ['idle', 'quoting', 'afterRenderer'] as const) {
+      for (const name of ['idle', 'quoting', 'afterRenderer', 'hudDarkMode', 'quoteAboveGreaterThan', 'quoteAboveChevron'] as const) {
         for (const size of sizes) {
           const frame = frameAt(name, size);
           const outcome = await deliver({ capture: () => frame, send: () => undefined });
