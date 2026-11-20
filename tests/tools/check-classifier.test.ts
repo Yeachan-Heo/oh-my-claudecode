@@ -704,6 +704,150 @@ it('a write command counts only as the command word of a command, not among the 
   assert.equal(edits('echo x | tee "my docs/a.md"'), false);
 });
 
+it('cp, mv, install, truncate and dd of= write their destination, only as the command word', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  // The destination decides: code is a change; documentation, lockfiles, temp directories and /dev/null are not.
+  for (const program of ['cp', 'mv', 'cp -r', 'cp -p', 'mv -f', 'install', 'install -m 644', 'install -D', 'install -o root -g root']) {
+    assert.equal(edits(`${program} a.ts src/b.ts`), true, `${program} to code`);
+    assert.equal(edits(`${program} a.ts docs/b.ts`), false, `${program} to docs`);
+    assert.equal(edits(`${program} a.ts README.md`), false, `${program} to a Markdown file`);
+    assert.equal(edits(`${program} a.ts package-lock.json`), false, `${program} to a lockfile`);
+    assert.equal(edits(`${program} a.ts ${TEMP_DIRS[0]}/b.ts`), false, `${program} to a temp directory`);
+    assert.equal(edits(`${program} a.ts "$TMPDIR/b.ts"`), false, `${program} to $TMPDIR`);
+    assert.equal(edits(`${program} a.ts /dev/null`), false, `${program} to the null device`);
+  }
+  assert.equal(edits('truncate -s 0 src/a.ts'), true);
+  assert.equal(edits('truncate -s0 src/a.ts'), true);
+  assert.equal(edits('truncate --size=0 src/a.ts'), true);
+  assert.equal(edits('truncate -c -s 0 README.md src/a.ts'), true, 'one code file among ignored ones');
+  assert.equal(edits('truncate -s 0 docs/a.ts'), false);
+  assert.equal(edits('truncate -s 0 README.md package-lock.json'), false);
+  assert.equal(edits(`truncate -s 0 ${TEMP_DIRS[0]}/a.ts`), false);
+  assert.equal(edits('truncate -r src/ref.ts README.md'), false, 'the reference file is read, not written');
+  assert.equal(edits('truncate --reference=src/ref.ts README.md'), false);
+  assert.equal(edits('truncate -r README.md src/a.ts'), true);
+  assert.equal(edits('dd if=a of=src/b.ts'), true);
+  assert.equal(edits('dd of=src/b.ts bs=1M count=1'), true);
+  assert.equal(edits('dd if=src/a.ts of=README.md'), false, 'the input file is only read');
+  assert.equal(edits('dd if=src/a.ts of=/dev/null'), false);
+  assert.equal(edits(`dd if=a of=${TEMP_DIRS[0]}/b.ts`), false);
+  assert.equal(edits('dd if=a of="src/my dir/b.ts"'), true);
+  assert.equal(edits('dd if=a of='), false, 'an empty target is no file');
+  // The target directory option, in every spelling, and a destination that is a directory.
+  assert.equal(edits('cp -t src/ a.ts'), true);
+  assert.equal(edits('cp -t src a.ts b.ts'), true);
+  assert.equal(edits('cp -tsrc/ a.ts'), true);
+  assert.equal(edits('cp -rt src/ lib'), true, 'an option cluster that ends in -t');
+  assert.equal(edits('cp --target-directory=src/ a.ts'), true);
+  assert.equal(edits('cp --target-directory src/ a.ts'), true);
+  assert.equal(edits('cp --target src/ a.ts'), true, 'an abbreviated long option');
+  assert.equal(edits('cp a.ts -t src/'), true, 'options may follow operands');
+  assert.equal(edits('mv -t src/ a.ts'), true);
+  assert.equal(edits('install -t src/ a.ts'), true);
+  assert.equal(edits('cp -t docs/ a.ts'), false);
+  assert.equal(edits('cp -t docs a.ts'), false, 'a directory with no trailing slash');
+  assert.equal(edits(`cp -t ${TEMP_DIRS[0]} a.ts`), false);
+  assert.equal(edits('cp -t "$TMPDIR" a.ts'), false);
+  assert.equal(edits('cp -t src/ README.md'), false, 'the file written is src/README.md');
+  assert.equal(edits('cp README.md src/'), false);
+  assert.equal(edits('cp a.ts b.ts c.ts docs'), false, 'several sources make the destination a directory');
+  assert.equal(edits('cp a.ts b.ts c.ts src'), true);
+  assert.equal(edits('cp a.ts docs/'), false);
+  assert.equal(edits('cp a.ts src/'), true);
+  assert.equal(edits('cp -T a.ts docs'), true, '-T makes the destination a file named docs');
+  assert.equal(edits('cp -S .bak a.ts docs/b.md'), false, 'the value of -S is not a path');
+  assert.equal(edits('cp --suffix .bak a.ts src/b.ts'), true);
+  assert.equal(edits('install -m 644 -t src a.ts'), true, 'the value of -m is not a path');
+  assert.equal(edits('install -m 644 a.ts docs/b.ts'), false);
+  assert.equal(edits('install --strip a.ts src/b.ts'), true, '--strip is a flag, not an abbreviation of an option with a value');
+  assert.equal(edits('install -s a.ts src/b.ts'), true);
+  assert.equal(edits('install --strip-program=strip a.ts docs/b.ts'), false);
+  assert.equal(edits('install --strip-program strip a.ts src/b.ts'), true);
+  assert.equal(edits('cp -- a.ts src/b.ts'), true);
+  assert.equal(edits('mv a.ts "src/my dir/b.ts"'), true);
+  assert.equal(edits("cp a.ts 'docs/my dir/b.ts'"), false);
+  // Options that write nothing, and commands with no destination.
+  for (const command of [
+    'cp --help', 'cp --version', 'mv --help', 'install --help', 'truncate --help', 'truncate', 'truncate -c', 'cp', 'mv', 'mv -n', 'cp -n a.ts', 'mv -n a.ts',
+    'cp -r', 'install -d src/lib', 'install -d -m 755 src/a/b', 'install --directory src/lib', 'install', 'dd', 'dd if=src/a.ts', 'cp -t',
+  ]) {
+    assert.equal(edits(command), false, command);
+  }
+  assert.equal(edits('cp -t src/ -r'), true, 'a directory with no source still names the target');
+  // Files from input: a directory or a size with no file operand names the target through xargs.
+  assert.equal(edits('ls | xargs cp -t src/'), true);
+  assert.equal(edits('ls | xargs cp -t docs/'), false);
+  assert.equal(edits('ls | xargs truncate -s 0'), true);
+  assert.equal(edits('truncate -s 0'), true, 'files from input, like an in-place sed with no file operand: counted as code on purpose');
+  assert.equal(edits('echo x | xargs -I{} cp {} src/'), true);
+  assert.equal(edits("find . -name '*.ts' -exec cp {} src/ \\;"), true);
+  assert.equal(edits("find . -name '*.ts' -exec cp -t docs/ {} +"), false);
+  // mv also removes its source, which is no write here (like rm).
+  assert.equal(edits(`mv src/a.ts ${TEMP_DIRS[0]}/`), false);
+  assert.equal(edits('mv src/a.ts docs/'), false);
+  // Wrappers, reserved words, a nested shell, an absolute path, an escaped name.
+  for (const command of [
+    'sudo cp a.ts src/b.ts', 'sudo -u root mv a.ts src/b.ts', 'doas install a.ts src/b.ts', 'env FOO=1 cp a.ts src/b.ts', 'env -u FOO truncate -s 0 src/a.ts',
+    'nohup cp a.ts src/b.ts', 'command mv a.ts src/b.ts', 'time cp a.ts src/b.ts', 'timeout 5 dd if=a of=src/b.ts', 'FOO=1 cp a.ts src/b.ts',
+    'sudo env FOO=1 nohup cp a.ts src/b.ts', 'ls && cp a.ts src/b.ts', 'ls; mv a.ts src/b.ts', 'ls | install a.ts src/b.ts', '(cd x; truncate -s 0 src/a.ts)',
+    'echo $(cp a.ts src/b.ts)', 'if true; then cp a.ts src/b.ts; fi', 'for f in a; do cp $f src/b.ts; done', '! cp a.ts src/b.ts', '{ dd of=src/a.ts; }',
+    "sh -c 'cp a.ts src/b.ts'", 'bash -lc "mv a.ts src/b.ts"', "sudo sh -c 'truncate -s 0 src/a.ts'", "su -c 'dd if=a of=src/b.ts'",
+    'sudo bash -c "sh -c \'cp a.ts src/b.ts\'"', '/bin/cp a.ts src/b.ts', '/usr/bin/dd if=a of=src/b.ts', '\\cp a.ts src/b.ts', 'cp a.ts src/b.ts && npm test',
+  ]) {
+    assert.equal(edits(command), true, command);
+  }
+  for (const command of [
+    "sh -c 'cp a.ts README.md'", 'sudo cp a.ts docs/b.ts', 'sudo -u root install a.ts /tmp/b.ts', 'timeout 5 dd if=a of=README.md', 'env FOO=1 truncate -s 0 README.md',
+    "su -c 'mv a.ts docs/b.ts'", 'cp a.ts README.md && echo done',
+  ]) {
+    assert.equal(edits(command), false, command);
+  }
+  // The name of a writing command among the arguments of another command writes nothing.
+  for (const command of [
+    'rg cp src/a.ts', 'echo mv a b', 'echo mv src/a.ts src/b.ts', 'grep install src/a.ts', 'rg truncate src/a.ts', 'echo dd of=src/a.ts', 'echo truncate -s0 src/a.ts',
+    'echo install x src/a.ts', 'cat cp src/a.ts', 'ls mv src/a.ts', 'git log --grep cp src/a.ts', 'npm test cp a.ts src/b.ts', 'which cp src/a.ts',
+    'man mv src/a.ts', 'echo "cp a.ts src/b.ts"', "echo 'dd of=src/a.ts'", 'sudo echo cp a.ts src/b.ts', 'xargs echo mv a.ts src/b.ts', 'echo x | rg install src/a.ts',
+    'ls # cp a.ts src/b.ts', 'ls # x; dd of=src/a.ts', 'ls; rg dd of=src/a.ts', 'echo cp; echo a.ts src/b.ts', "bash script.sh -c 'cp a.ts src/b.ts'", "ssh host 'cp a.ts src/b.ts'",
+  ]) {
+    assert.equal(edits(command), false, command);
+  }
+  // Other commands that copy or move are outside the write table, like rm.
+  for (const command of ['ln -s a.ts src/b.ts', 'rsync a.ts src/b.ts', 'git checkout -- src/a.ts', 'git mv a.ts src/b.ts', 'rm src/a.ts']) {
+    assert.equal(edits(command), false, command);
+  }
+  // A redirect or another write on the same line still counts as before.
+  assert.equal(edits('cp a.ts README.md; echo x > src/a.ts'), true);
+  assert.equal(edits('cp a.ts src/b.ts > /tmp/out'), true);
+});
+
+it('copy, truncate and dd arguments are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const got = classifyInChild<boolean>([
+    long('cp -t '),
+    long('cp -t a '),
+    long('cp --target '),
+    long('cp -rt '),
+    long('install -m '),
+    long('install -m 644 -o x -g y '),
+    long('truncate -s '),
+    long('truncate -r '),
+    long('dd of='),
+    long('dd of=a '),
+    `cp ${long('a ')}docs/`,
+    `cp ${long('-t ')}docs/ a.ts`,
+    `install ${long('-m 644 ')}docs/a.ts`,
+    `truncate -s 0 ${long('docs/a.md ')}`,
+    `dd ${long('if=a ')}of=README.md`,
+    `echo x ${long('# cp a ')}\necho y > README.md`,
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.equal(got.length, 16);
+  assert.equal(got[10], false, 'a long list of sources copied into documentation');
+  assert.equal(got[12], false, 'a long run of install options ending at an ignored target');
+  assert.equal(got[13], false, 'a long list of ignored files');
+  assert.equal(got[14], false, 'a long run of dd inputs ending at an ignored target');
+  assert.equal(got[15], false, 'a long comment holds no command');
+});
+
 it('nested shell strings are read in linear time', () => {
   const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
   const got = classifyInChild<boolean>([

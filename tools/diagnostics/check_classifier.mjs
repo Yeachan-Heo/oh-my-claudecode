@@ -795,12 +795,116 @@ function teeTargets(args) {
 }
 
 /**
- * Files a shell command writes by redirection, `tee`, a heredoc with a target, or an in-place
- * `sed`/`perl` (its file operands). A redirection is read by one scan: a quoted string, an escaped character or
- * a comment outside a target holds text, not a redirection (`echo "a > b"`); a target is read as the shell reads
- * it (quotes removed, `\ ` a space), so `> "README.md"` names the file, not the quotes. `tee`, `sed` and
- * `perl` count only as the command word of a command (see commandPrograms), so `rg tee src/a.ts` writes
- * nothing. The string of a nested shell (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep.
+ * Options of the commands that write the file named by an argument. `short` lists the letters whose value is the
+ * rest of the cluster or the next word (`-t src/`, `-tsrc/`, `-rt src/`), `long` the long options that take a
+ * value (`--target-directory=src/` or `--target-directory src/`).
+ */
+const WRITE_COMMAND_OPTIONS = {
+  cp: { short: 'tS', long: ['--target-directory', '--suffix'] },
+  install: { short: 'tSmog', long: ['--target-directory', '--suffix', '--mode', '--owner', '--group'] },
+  truncate: { short: 'sr', long: ['--size', '--reference'] },
+};
+const OPTION_NAMES = { t: '--target-directory', S: '--suffix', m: '--mode', o: '--owner', g: '--group', s: '--size', r: '--reference' };
+
+/**
+ * Split the arguments of a command into operands and options (name to value; a flag has the value ''). A short
+ * option is named `-x`, except a value option, which gets the long name of OPTION_NAMES, and a long option may
+ * be abbreviated to a unique prefix of a value option (`--target src/`). Options may follow operands; `--` ends
+ * them. Every word is read once.
+ */
+function splitOptions(args, spec) {
+  const operands = [];
+  const options = new Map();
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--') {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith('--')) {
+      const equals = arg.indexOf('=');
+      const given = equals === -1 ? arg : arg.slice(0, equals);
+      const name = spec.long.find((full) => full === given || (given.length > 2 && full.startsWith(given))) ?? given;
+      if (equals !== -1) options.set(name, arg.slice(equals + 1));
+      else if (spec.long.includes(name)) {
+        options.set(name, args[i + 1] ?? '');
+        i += 1;
+      } else options.set(name, '');
+    } else if (arg.startsWith('-') && arg.length > 1) {
+      for (let at = 1; at < arg.length; at += 1) {
+        const letter = arg[at];
+        if (!spec.short.includes(letter)) {
+          options.set(`-${letter}`, '');
+          continue;
+        }
+        const rest = arg.slice(at + 1);
+        options.set(OPTION_NAMES[letter], rest !== '' ? rest : (args[i + 1] ?? ''));
+        if (rest === '') i += 1;
+        break;
+      }
+    } else {
+      operands.push(arg);
+    }
+  }
+  return { operands, options };
+}
+
+/**
+ * The paths `cp`, `mv` and `install` write: the target directory of `-t` / `--target-directory`, else the last
+ * operand when a source precedes it. A destination known to be a directory (`-t`, a trailing `/`, several
+ * sources, unless `-T`) is joined with the name of each source, so `cp README.md src/` writes `src/README.md`
+ * and `cp -t docs a.ts` writes `docs/a.ts`; with no source (`... | xargs cp -t src/`) the directory itself is the
+ * target. `--help`, `--version` and `install -d` (it makes directories) write no file. `mv` also removes its
+ * source, which counts as no write, like `rm`.
+ */
+function copyTargets(program, args) {
+  const { operands, options } = splitOptions(args, WRITE_COMMAND_OPTIONS[program === 'install' ? 'install' : 'cp']);
+  if (options.has('--help') || options.has('--version')) return [];
+  if (program === 'install' && (options.has('-d') || options.has('--directory'))) return [];
+  let destination;
+  let sources;
+  let directory;
+  if (options.has('--target-directory')) {
+    destination = options.get('--target-directory');
+    sources = operands;
+    directory = true;
+  } else if (operands.length >= 2) {
+    destination = operands.at(-1);
+    sources = operands.slice(0, -1);
+    directory = !options.has('-T') && !options.has('--no-target-directory') && (destination.endsWith('/') || sources.length > 1);
+  } else {
+    return [];
+  }
+  if (destination === '') return [];
+  if (!directory) return [destination];
+  const base = destination.replace(/\/+$/, '');
+  const names = sources.map((source) => baseName(source.replace(/\/+$/, ''))).filter((name) => name !== '');
+  return names.length > 0 ? names.map((name) => `${base}/${name}`) : [`${base}/`];
+}
+
+/**
+ * The files `truncate` writes: its operands (the values of `-s` and `-r` are options). With no operand, a size or
+ * reference still means files from input (`... | xargs truncate -s 0`); `--help` and a bare `truncate` write nothing.
+ */
+function truncateTargets(args) {
+  const { operands, options } = splitOptions(args, WRITE_COMMAND_OPTIONS.truncate);
+  if (options.has('--help') || options.has('--version')) return [];
+  const files = operands.filter((operand) => operand !== '');
+  if (files.length > 0) return files;
+  return options.has('--size') || options.has('--reference') ? [UNKNOWN_TARGET] : [];
+}
+
+/** The files `dd` writes: the value of its `of=` operands. */
+const ddTargets = (args) => args.filter((arg) => arg.startsWith('of=') && arg.length > 3).map((arg) => arg.slice(3));
+
+/**
+ * Files a shell command writes by redirection, `tee`, a heredoc with a target, an in-place `sed`/`perl` (its file
+ * operands), or the destination of `cp`, `mv`, `install`, `truncate` and `dd of=`. A redirection is read by one
+ * scan: a quoted string, an escaped character or a comment outside a target holds text, not a redirection
+ * (`echo "a > b"`); a target is read as the shell reads it (quotes removed, `\ ` a space), so `> "README.md"`
+ * names the file, not the quotes. The named commands count only as the command word of a command (see
+ * commandPrograms), so `rg tee src/a.ts` and `echo cp a src/b.ts` write nothing. The string of a nested shell
+ * (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep.
  */
 function shellWriteTargets(command, depth = 0) {
   const QUOTED = String.raw`"[^"]*"|'[^']*'`;
@@ -821,6 +925,9 @@ function shellWriteTargets(command, depth = 0) {
     const program = baseName(words[at]);
     if (program === 'tee') targets.push(...teeTargets(words.slice(at + 1, end)));
     else if (program === 'sed' || program === 'perl') targets.push(...inPlaceTargets(program, words.slice(at + 1, end)));
+    else if (program === 'cp' || program === 'mv' || program === 'install') targets.push(...copyTargets(program, words.slice(at + 1, end)));
+    else if (program === 'truncate') targets.push(...truncateTargets(words.slice(at + 1, end)));
+    else if (program === 'dd') targets.push(...ddTargets(words.slice(at + 1, end)));
   }
   if (depth < NESTED_MAX_DEPTH) {
     for (const nested of nestedCommandStrings(words, programs)) {
@@ -834,8 +941,9 @@ function shellWriteTargets(command, depth = 0) {
  * Whether a tool call changes code. Write/Edit/MultiEdit/NotebookEdit change code unless the
  * file is ignored (docs, logs, lockfiles); NotebookEdit names its target in `notebook_path`, the others
  * in `file_path`. Bash changes code when its command writes files by
- * redirection, `tee`, heredoc with a target, or in-place `sed`/`perl`, unless every target is
- * ignored or a temp target (TEMP_DIRS, /dev/null, $TMPDIR) holds no code either.
+ * redirection, `tee`, heredoc with a target, in-place `sed`/`perl`, or `cp`/`mv`/`install`/`truncate`/`dd of=`
+ * naming a destination, unless every target is ignored or a temp target (TEMP_DIRS, /dev/null, $TMPDIR)
+ * holds no code either.
  * The project folder is not checked: the contract passes no working directory.
  * A command substitution inside double quotes (`echo "$(tee src/a.ts)"`) is quoted text and is not read;
  * an unquoted `$(...)` and backticks are.
