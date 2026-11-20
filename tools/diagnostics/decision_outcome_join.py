@@ -851,12 +851,18 @@ def main():
         'prices': {key: list(rates) for key, rates in prices.items()},
     }
     if a.tsv:
-        write_tsv(a.tsv, agents)
+        try:
+            write_tsv(a.tsv, agents)
+        except OSError as e:
+            usage_error(f'cannot write --tsv {a.tsv}: {e.strerror}')
         print()
         print(f'TSV: {a.tsv} ({len(agents)} agents)')
     if a.json:
-        with open(a.json, 'w', encoding='utf8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=1)
+        try:
+            with open(a.json, 'w', encoding='utf8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=1)
+        except OSError as e:
+            usage_error(f'cannot write --json {a.json}: {e.strerror}')
         print()
         print(f'JSON: {a.json}')
     return 0

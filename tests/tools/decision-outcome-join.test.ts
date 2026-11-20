@@ -363,6 +363,13 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(out.agents.length).toBe(0);
   });
 
+  it.each(['--tsv', '--json'])('an output path %s that is a directory stops the run with exit 2 and a message that names it, without a traceback', (option) => {
+    const result = run([option, journal]);
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain(`cannot write ${option} ${journal}`);
+    expect(result.stderr).not.toMatch(/Traceback/);
+  });
+
   it('without --prices the price table is empty: one note on stderr, exit 0, every cost unavailable (null), never zero', () => {
     const noPrices = join(base, 'result-no-prices-option.json');
     const missing = spawnSync('python3', ['-I', SCRIPT, '--journal', journal, '--transcripts', transcripts, '--json', noPrices], { encoding: 'utf8' });

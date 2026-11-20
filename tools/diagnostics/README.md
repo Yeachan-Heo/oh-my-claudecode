@@ -240,7 +240,7 @@ python3 -I tools/diagnostics/decision_outcome_join.py --journal J --transcripts 
 | `--json <file>` | the whole result as JSON (see the note on output files below) |
 | `--wilson-vectors` | print the Wilson test vectors (shared with `wilson_threshold.mjs`) and exit |
 
-Exit codes: `0` valid run (also with no data), `2` argument or input error.
+Exit codes: `0` valid run (also with no data), `2` argument or input error, including an output file (`--tsv`, `--json`) that cannot be written (a directory, no permission).
 
 Output files: `--tsv` and `--json` open the given path for writing, so an existing file is overwritten and a symbolic link is followed. Point them at a new path.
 
