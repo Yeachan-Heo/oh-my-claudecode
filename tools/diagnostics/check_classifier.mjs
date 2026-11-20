@@ -754,6 +754,14 @@ function shellWords(text) {
 const UNKNOWN_TARGET = '(files from input)';
 
 /**
+ * Adds every item to the list one by one. `list.push(...items)` takes each item as an argument and overflows the call
+ * stack on an array of about 150000 items, which a command with that many words gives.
+ */
+function pushAll(list, items) {
+  for (const item of items) list.push(item);
+}
+
+/**
  * The files an in-place `sed` or `perl` edits, from the words after the program name: the operands that
  * remain once options and the script are skipped. The script is the first operand unless `-e`/`-E` (perl),
  * `-e`/`-f` or `--expression`/`--file` (sed) gave it. Options may come after operands; `--` ends them.
@@ -770,7 +778,7 @@ function inPlaceTargets(program, args) {
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--') {
-      operands.push(...args.slice(i + 1));
+      pushAll(operands, args.slice(i + 1));
       break;
     }
     if (arg.startsWith('--')) {
@@ -1020,7 +1028,7 @@ function splitOptions(args, spec) {
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--') {
-      operands.push(...args.slice(i + 1));
+      pushAll(operands, args.slice(i + 1));
       break;
     }
     if (arg.startsWith('--')) {
@@ -1127,11 +1135,11 @@ function shellWriteTargets(command, depth = 0) {
   const programs = commandPrograms(words);
   for (const { at, end } of programs) {
     const program = baseName(words[at]);
-    if (program === 'tee') targets.push(...teeTargets(words.slice(at + 1, end)));
-    else if (program === 'sed' || program === 'perl') targets.push(...inPlaceTargets(program, words.slice(at + 1, end)));
-    else if (program === 'cp' || program === 'mv' || program === 'install') targets.push(...copyTargets(program, words.slice(at + 1, end)));
-    else if (program === 'truncate') targets.push(...truncateTargets(words.slice(at + 1, end)));
-    else if (program === 'dd') targets.push(...ddTargets(words.slice(at + 1, end)));
+    if (program === 'tee') pushAll(targets, teeTargets(words.slice(at + 1, end)));
+    else if (program === 'sed' || program === 'perl') pushAll(targets, inPlaceTargets(program, words.slice(at + 1, end)));
+    else if (program === 'cp' || program === 'mv' || program === 'install') pushAll(targets, copyTargets(program, words.slice(at + 1, end)));
+    else if (program === 'truncate') pushAll(targets, truncateTargets(words.slice(at + 1, end)));
+    else if (program === 'dd') pushAll(targets, ddTargets(words.slice(at + 1, end)));
   }
   if (depth < NESTED_MAX_DEPTH) {
     for (const nested of [...nestedCommandStrings(words, programs), ...bodies]) {

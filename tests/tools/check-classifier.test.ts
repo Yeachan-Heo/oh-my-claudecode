@@ -1115,6 +1115,20 @@ it('leading redirections, assignments and wrappers are read in linear time', () 
   assert.equal(classes[3].isCheck, true);
 });
 
+it('a command with 200000 operands is read: the operands are not spread into a call', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  const many = (word: string) => `${word} `.repeat(200_000);
+  const started = Date.now();
+  for (const prefix of ['tee ', 'tee -- ', 'sed -i s/a/b/ ', 'sed -i s/a/b/ -- ', 'cp ', 'cp -- ', 'mv -- ', 'install -- ', 'truncate -s 0 ', 'truncate -s 0 -- ']) {
+    assert.equal(edits(prefix + many('a.ts')), true, `${prefix}...: code files are written`);
+    assert.equal(edits(prefix + many('a.md')), false, `${prefix}...: documentation is not code`);
+  }
+  assert.equal(edits(`tee ${many('a.md')}src/a.ts`), true, 'the last of many operands is still a target');
+  assert.equal(edits(`sed -i s/a/b/ -- ${many('a.md')}src/a.ts`), true);
+  assert.equal(classifyCommand(`npm test ${many('a')}`).isCheck, true, 'many arguments of a check');
+  assert.ok(Date.now() - started < 60_000, 'read in a reasonable time');
+}, 120_000);
+
 it('many different here-document tags with no terminator line are read in linear time', () => {
   const lines = (count: number, line: (index: number) => string) => Array.from({ length: count }, (_, index) => line(index)).join('');
   // About 600000 characters: each tag is looked up once and never found. A search of the rest of the text
