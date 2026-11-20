@@ -1449,6 +1449,7 @@ LIMITS_V2 = [
     "A candidate is a call that matches a prohibition after a boundary, not proof of a breach; the user's review decides.",
     "A Bash command is judged by its first word (after environment variables and launch wrappers); a compound command such as `ls && rm x` is treated as read-only, so it is not counted (undercount).",
     "Under rule v2 `git branch` is read-only, so `git branch -D` gives no candidate (undercount).",
+    "A launch wrapper with an option outside its table (`sudo -n`, `nice -5`, `--`) stays the first word: `sudo -n ls` is then state-changing (counted as run or other, an overcount) and `sudo -n git commit` is no commit (undercount).",
     "A write redirection to a file (`>`, `>>`, not to /dev/null, not inside quotes or comments) makes any command state-changing; this extends the awk rule of the contract.",
     "The revocation check of rule v2 looks only in the same message; a bare permission word can match a question and revoke a prohibition that was not lifted.",
     "Prohibitions of classes edit, delete, run, install and deploy with a target match calls as in rule v1; without a target they match by the general patterns of rule v2.",

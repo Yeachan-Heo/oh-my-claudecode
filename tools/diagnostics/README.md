@@ -297,7 +297,7 @@ node tools/diagnostics/wilson_threshold.mjs --input labels.tsv --target 0.10 --d
 | `--holdout <0-0.5>` | fit/holdout split of the sessions (needs a `session` column) |
 | `--json` | JSON output instead of the text report |
 
-Exit codes: `0` valid run (also `no threshold`), `2` argument or input error.
+Exit codes: `0` valid run (also `no threshold`), `2` argument or input error, including an `--input` file that is missing, is a directory, cannot be read or is not valid UTF-8 (standard input, `--input -`, is decoded leniently).
 
 ## Input format
 
@@ -340,7 +340,7 @@ node tools/diagnostics/jev_outcome_labels.mjs --journal <journal dir> --transcri
 | `--tsv <file>` | the labelled rows as TSV, the input of `wilson_threshold.mjs` (columns `result`, `confidence`, `mode`, `point`, `spec_version`, `jev_model`, `session`, `ts`) |
 | `--json` | JSON output |
 
-Exit codes: `0` valid run, `2` argument or input error.
+Exit codes: `0` valid run, `2` argument or input error, including a `--journal` directory or a journal file in it that cannot be read.
 
 ## Label rules
 
@@ -432,7 +432,7 @@ python3 -I tools/diagnostics/empty_results.py --transcripts <dir> --intent inten
 | `--tsv <file>`, `--json <file>` | optional outputs (one TSV row per empty or stopped call or task; the full JSON result) |
 | `--wilson-vectors` | print the Wilson test vectors as JSON and exit |
 
-At least one of `--transcripts` and `--teams` is required. Exit codes: `0` normal run (also with no data), `2` argument or input error.
+At least one of `--transcripts` and `--teams` is required. Exit codes: `0` normal run (also with no data), `2` argument or input error, including a `--transcripts` or `--teams` directory that cannot be read and an `--intent` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 
 ## What is counted
 
@@ -460,7 +460,7 @@ behaviour, has no switch, is not run by any hook, and is not shipped in the npm 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The transcripts and the journal are only read. The only file written is the `--out` file, if given
   (a new file with mode `0600`; an existing file is an error).
-- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts.
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. The same holds for a `--transcript` or `--compact` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 - The journal is read from `OMC_JEV_LOG_DIR`, else from `.omc/state/jev` under the current directory (run the tool from
   the project root), unless `--compact` is given. With `OMC_STATE_DIR` set, the Jev log directory has a project identifier
   in its path, so pass the journal with `--compact` (or set `OMC_JEV_LOG_DIR`). The projects directory defaults to
@@ -500,7 +500,7 @@ change OMC behaviour, has no switch, and is not shipped in the npm package.
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The files written are the `--out` file and, with `--export-labeling`, the export file (new files with mode `0600`). The result and the `--out` file carry no ask or state content; the opt-in export file holds human message text by design, and also the transcript path (`file`) and the `session_id` of each unit.
 - This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
-- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts.
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. The same holds for a `--transcript`, `--compact` or `--labels` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 
 ```
 python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 7] [--ask-loss-threshold 0.05] [--json]
@@ -571,7 +571,7 @@ python3 -I tools/diagnostics/compaction_harm_monitor.py [--projects <dir>] [--tr
 ```
 
 `--transcript <file>` (repeatable) replaces the search under `--projects`. A `--transcript` path that cannot be read
-(missing, a directory, no permission) stops the run with exit 2 and a message that names it, before any report is
+(missing, a directory, no permission, not valid UTF-8) stops the run with exit 2 and a message that names it, before any report is
 printed, so a mistyped path never gives an empty report; the same holds for a `--projects` directory that is missing
 or cannot be read when the transcripts are searched (no `--transcript`); so do a directory below it and a transcript found
 by the search that cannot be read (the message names the path, and no count covers a part of the transcripts).
@@ -632,7 +632,7 @@ python3 -I tools/diagnostics/user_prohibitions_after_compaction.py [--projects <
 ```
 
 Without `--out` the JSON report goes to standard output and the summary line to standard error. Exit codes: 0,
-2 (a usage error, an unreadable input, which includes a directory below `--projects` or a transcript in it that cannot be read (the message names the path; it is never left out of the counts), a bad `--patterns` file or an output file that already exists).
+2 (a usage error, an unreadable input, which includes a directory below `--projects` or a transcript in it that cannot be read (the message names the path; it is never left out of the counts) and a `--compact-log` or `--patterns` file that is missing, is a directory, cannot be read or is not valid UTF-8, a bad `--patterns` file or an output file that already exists).
 
 ## What is counted
 
@@ -675,7 +675,7 @@ measurement. In short:
   `grep deploy README.md`).
 - Rule 2 cuts more fragment kinds (counted in `removed_fragments`), flags a prohibition revoked in its own
   message, matches general prohibitions by the kind of call (a `Bash` command is read-only or state-changing by
-  its first word, taken after leading assignments and redirections (`< in cat` is read-only), and a `>`, `>>`, `>|` or
+  its first word, taken after leading assignments, redirections and launch wrappers (`< in cat` is read-only; a wrapper with an option outside its table, `sudo -n ls`, stays the first word and the call is state-changing), and a `>`, `>>`, `>|` or
   `>&file` redirection to a file outside quotes and comments makes it state-changing:
   `echo '>'`, `grep ">" README.md`, `ls >&2` and `ls # > x` are still read-only), and counts pairs (prohibition, call); `--locators` then has one row
   per prohibition with a candidate and a `history_group` hash that copies of the same message share. Rule 3 (the
@@ -720,7 +720,7 @@ no switch, and is not shipped in the npm package.
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The only file written is the `--out` file, if given.
 - This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
-- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts.
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. The same holds for a `--transcript`, `--compact` or `--prices` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 - Prices come only from the file given with `--prices`; without it every USD figure is reported as
   unavailable and the cache measurements still run. The file is JSON, with prices in USD per million
   tokens:
@@ -827,7 +827,7 @@ node tools/diagnostics/hook_latency_p95.mjs --dir <Jev log dir> --shell-checks-d
 | `--now <ISO time>` | end of the window (`HOOK_LATENCY_NOW`, default the system clock); for tests |
 | `--help`, `-h` | print the options and exit with code 0 |
 
-Exit codes: `0` success, also when there are no samples; `2` bad argument, a log directory that was given and is missing or is not a directory, an unreadable log file or an unreadable `--hooks-json` file.
+Exit codes: `0` success, also when there are no samples; `2` bad argument, a log directory that was given and is missing or is not a directory, an unreadable log file or an unreadable `--hooks-json` file (a directory, no permission or not valid UTF-8; the message names the file).
 The window, the directories and files read, and the row counts go to stderr.
 
 ## Default directories
