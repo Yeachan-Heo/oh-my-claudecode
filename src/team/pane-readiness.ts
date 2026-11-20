@@ -167,78 +167,49 @@ function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): b
   );
 }
 
-// True when the heading starts the line at index, over as many lines as it
-// wraps to. Whitespace is ignored: Claude Code wraps a heading at a space to
-// fit a narrow pane, and a frame drawn wider than the pane wraps mid-word.
-function headingStartsAt(lines: readonly string[], index: number, heading: string): boolean {
-  const squeeze = (text: string) => text.replace(/\s+/g, '');
-  const wanted = squeeze(heading);
-  let text = '';
-  for (let line = index; line < lines.length && text.length < wanted.length; line++) text += squeeze(lines[line]!);
-  return text.startsWith(wanted);
-}
-
 // The dialogs Claude Code shows after the trust dialog on the first launch
 // with a fresh config directory (recorded on 2.1.328). Only the Claude startup
 // wait reads them; every other pane reader sees what it saw before them.
 export type ClaudeStartupDialogKind = 'claude_bypass_permissions' | 'claude_fullscreen_renderer';
-
-// Claude Code's two-choice dialogs: the two choices on adjacent lines with the
-// first focused, below a heading. The bypass warning has no heading entry: its
-// choice pair is unique to it, and its heading wraps over many lines in a
-// narrow pane.
 export type ClaudeDialogKind = 'claude_directory' | ClaudeStartupDialogKind;
 
-const CLAUDE_DIALOGS: Readonly<
-  Record<ClaudeDialogKind, { headingStartsAt?: (lines: readonly string[], index: number) => boolean; first: RegExp; second: RegExp }>
+// Each is read from the capture with all whitespace removed, so how the pane
+// wraps it (Claude Code at a space, tmux mid-word, a choice split over two
+// lines) cannot hide it. The bypass warning is its choice pair alone.
+const CLAUDE_STARTUP_DIALOGS: Readonly<
+  Record<ClaudeStartupDialogKind, { heading?: string; first: string; second: string }>
 > = {
-  claude_directory: {
-    headingStartsAt: claudeTrustQuestionStartsAt,
-    first: /^\s*(?:❯\s*)?No,\s*exit\b/i,
-    second: /^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i,
-  },
-  claude_bypass_permissions: {
-    first: /^\s*(?:❯\s*)?No,\s*exit$/i,
-    second: /^\s*(?:❯\s*)?Yes,\s*I accept$/i,
-  },
-  claude_fullscreen_renderer: {
-    headingStartsAt: (lines, index) => headingStartsAt(lines, index, 'Try the new fullscreen renderer?'),
-    first: /^\s*(?:❯\s*)?1\.\s*Yes,\s*try it$/i,
-    second: /^\s*(?:❯\s*)?2\.\s*Not now$/i,
-  },
+  claude_bypass_permissions: { first: 'No,exit', second: 'Yes,Iaccept' },
+  claude_fullscreen_renderer: { heading: 'Trythenewfullscreenrenderer?', first: '1.Yes,tryit', second: '2.Notnow' },
 };
 
-// Only the choice pair after the latest heading (or the latest pair, without
-// one) is the live dialog: an answered dialog can remain in the scrollback
-// above it. Null while that pair is not drawn yet; 'stale' when an input prompt
-// is drawn below it, as below a reply that quotes the dialog, so keys would
-// reach that prompt instead.
-function claudeDialogFocusIn(
-  lines: readonly string[],
-  kind: ClaudeDialogKind,
-): 'first' | 'second' | 'stale' | null {
-  const dialog = CLAUDE_DIALOGS[kind];
-  const isPairAt = (index: number) => dialog.first.test(lines[index]!) && dialog.second.test(lines[index + 1] ?? '');
-  let first: number;
-  if (dialog.headingStartsAt) {
-    const heading = lines.findLastIndex((_, index) => dialog.headingStartsAt!(lines, index));
-    if (heading < 0) return null;
-    first = lines.findIndex((line, index) => index > heading && dialog.first.test(line));
-  } else {
-    first = lines.findLastIndex((_, index) => isPairAt(index));
-  }
-  const second = first >= 0 ? lines[first + 1] ?? '' : '';
-  if (!dialog.second.test(second)) return null;
-  if (lines.slice(first + 2).some((line) => PANE_PATTERNS.claude.idlePromptLine.test(line))) return 'stale';
-  return /^\s*❯/.test(second) ? 'second' : 'first';
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Reads the latest choice pair: an answered dialog can remain in the
+// scrollback above it. 'stale' when Claude's ❯ input prompt follows the pair,
+// as below a reply that quotes the dialog, so keys would reach that prompt
+// instead. Only ❯ counts: reading a live warning as stale would let the
+// trigger and Enter reach it. 'unfocused' while neither choice carries the ❯.
+function claudeStartupDialogFocusIn(
+  captured: string,
+  kind: ClaudeStartupDialogKind,
+): 'first' | 'second' | 'unfocused' | 'stale' | null {
+  const dialog = CLAUDE_STARTUP_DIALOGS[kind];
+  const stream = captured.replace(/\s+/g, '');
+  const pair = new RegExp(`(❯?)${escapeRegExp(dialog.first)}(❯?)${escapeRegExp(dialog.second)}`, 'g');
+  const match = [...stream.matchAll(pair)].at(-1);
+  if (!match) return null;
+  if (dialog.heading && !stream.slice(0, match.index).includes(dialog.heading)) return null;
+  if (stream.slice(match.index + match[0].length).includes('❯')) return 'stale';
+  if (match[1]) return 'first';
+  return match[2] ? 'second' : 'unfocused';
 }
 
 // Read only by the Claude startup wait, before it reads the trust dialogs.
 export function detectClaudeStartupDialog(captured: string): ClaudeStartupDialogKind | null {
-  const lines = paneLines(captured);
   for (const kind of ['claude_bypass_permissions', 'claude_fullscreen_renderer'] as const) {
-    const focus = claudeDialogFocusIn(lines, kind);
-    if (focus === 'first' || focus === 'second') return kind;
+    const focus = claudeStartupDialogFocusIn(captured, kind);
+    if (focus !== null && focus !== 'stale') return kind;
   }
   return null;
 }
@@ -358,12 +329,26 @@ export function detectPaneTrustPromptKind(
   return detectTrustPrompt(paneLines(captured), patternsFor(provider).trustKinds);
 }
 
-// Which choice of a Claude Code dialog is focused (marked with ❯).
+// Which choice of a Claude Code dialog is focused (marked with ❯). Claude Code
+// draws "Yes" right below "No, exit" in its trust dialog; only the pair after
+// the latest question is the live dialog. Null while that pair is not drawn
+// yet; 'stale' when an input prompt is drawn below it.
 export function claudeDialogFocus(
   captured: string,
   kind: ClaudeDialogKind,
 ): 'first' | 'second' | 'stale' | null {
-  return claudeDialogFocusIn(paneLines(captured), kind);
+  if (kind !== 'claude_directory') {
+    const focus = claudeStartupDialogFocusIn(captured, kind);
+    return focus === 'unfocused' ? null : focus;
+  }
+  const lines = paneLines(captured);
+  const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
+  if (question < 0) return null;
+  const no = lines.findIndex((line, index) => index > question && /^\s*(?:❯\s*)?No,\s*exit\b/i.test(line));
+  const yes = no >= 0 ? lines[no + 1] ?? '' : '';
+  if (!/^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(yes)) return null;
+  if (lines.slice(no + 2).some((line) => patternsFor('claude').idlePromptLine.test(line))) return 'stale';
+  return /^\s*❯/.test(yes) ? 'second' : 'first';
 }
 
 export function paneHasTrustPrompt(
