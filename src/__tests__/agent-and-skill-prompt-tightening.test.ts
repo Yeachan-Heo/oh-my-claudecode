@@ -63,9 +63,9 @@ describe('git-master agent prompt', () => {
     expect(text).toContain('stop and report');
   });
 
-  test('counts rebase as history rewriting, with the autosquash exception on an own branch only', () => {
+  test('counts rebase as history rewriting, with the autosquash exception on an own unpushed branch only', () => {
     expect(text).toContain('including rebase');
-    expect(/exception[^.]*--autosquash[^.]*own branch/.test(text)).toBe(true);
+    expect(/exception[^.]*--autosquash[^.]*own unpushed branch/.test(text)).toBe(true);
   });
 
   // The branch categories are the one place that says which operation and exception a branch allows.
