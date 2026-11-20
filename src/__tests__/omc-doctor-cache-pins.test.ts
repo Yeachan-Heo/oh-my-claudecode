@@ -351,13 +351,13 @@ for (const name of ['statSync', 'readdirSync']) {
     }
   });
 
-  test('pinned version is compared by equality (5.8.0 is not protected by a 5.8.1 pin)', () => {
+  test('pinned version is compared by equality (5.8.1 is not protected by a 5.8.10 pin, though its text is a prefix of it)', () => {
     for (const command of commands) {
-      const { dir, cache } = makeConfigDir(['5.8.0', '5.8.1'], '5.8.1');
+      const { dir, cache } = makeConfigDir(['5.8.1', '5.8.10'], '5.8.10');
       try {
         const result = runCommand(command, dir);
         expect(result.status).toBe(0);
-        expect(digitVersions(cache)).toBe('5.8.1');
+        expect(digitVersions(cache)).toBe('5.8.10');
         expect(movedAside(dir)).toBe(1);
         expect(result.stdout).toMatch(/Moved 1 unprotected version/);
       } finally {
