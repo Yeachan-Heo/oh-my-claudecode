@@ -9,21 +9,44 @@ import { fileURLToPath } from 'node:url';
 // path, with no traceback and nothing on stdout. Four ways to fail are tried for every option that names an input file:
 // the file does not exist, it is a directory, it cannot be read (permission), and it is not valid UTF-8. The tests may run
 // as root, for which chmod does not refuse access, so the refusal is made inside the process under test: a small harness
-// replaces the file open of Python (builtins.open, io.open), and a preload module replaces fs.readFileSync of Node, so
-// that one path raises EACCES. A new tool or option is one more row in ENTRIES.
+// replaces the file open of Python (builtins.open, io.open) or the directory listing (os.scandir, os.listdir), and a preload module
+// replaces fs.readFileSync or fs.readdirSync of Node, so that one path raises EACCES. A new tool or option is one more row in ENTRIES.
 const TOOLS = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'tools', 'diagnostics');
 const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
 
 const PYTHON_HARNESS = [
   'import builtins, io, os, runpy, sys',
-  'target, script = sys.argv[1], sys.argv[2]',
-  'sys.argv = [script] + sys.argv[3:]',
-  'real_open = builtins.open',
-  'def opener(file, *args, **kwargs):',
-  '    if isinstance(file, (str, os.PathLike)) and os.fspath(file) == target:',
-  '        raise PermissionError(13, "Permission denied", target)',
-  '    return real_open(file, *args, **kwargs)',
-  'builtins.open = io.open = opener  # Path.open goes through io.open',
+  'mode, target, script = sys.argv[1], sys.argv[2], sys.argv[3]',
+  'sys.argv = [script] + sys.argv[4:]',
+  'def deny(path):',
+  '    raise PermissionError(13, "Permission denied", path)',
+  'if mode == "dir":',
+  '    # A directory without permissions: it cannot be listed, and nothing below it can be reached (stat fails too).',
+  '    real_scandir, real_listdir, real_stat = os.scandir, os.listdir, os.stat',
+  '    def named(path):',
+  '        return os.fspath(path) if isinstance(path, (str, os.PathLike)) else ""',
+  '    def below(path):',
+  '        return named(path).startswith(target + os.sep)',
+  '    def scandir(path="."):',
+  '        if named(path) == target or below(path):',
+  '            deny(named(path))',
+  '        return real_scandir(path)',
+  '    def listdir(path="."):',
+  '        if named(path) == target or below(path):',
+  '            deny(named(path))',
+  '        return real_listdir(path)',
+  '    def stat(path, *args, **kwargs):',
+  '        if below(path):',
+  '            deny(named(path))',
+  '        return real_stat(path, *args, **kwargs)',
+  '    os.scandir, os.listdir, os.stat = scandir, listdir, stat',
+  'elif mode == "file":',
+  '    real_open = builtins.open',
+  '    def opener(file, *args, **kwargs):',
+  '        if isinstance(file, (str, os.PathLike)) and os.fspath(file) == target:',
+  '            deny(target)',
+  '        return real_open(file, *args, **kwargs)',
+  '    builtins.open = io.open = opener  # Path.open goes through io.open',
   'try:',
   '    runpy.run_path(script, run_name="__main__")',
   'except SystemExit as stop:',
@@ -32,12 +55,16 @@ const PYTHON_HARNESS = [
 
 const NODE_PRELOAD = [
   "const fs = require('node:fs');",
+  'const mode = process.env.DENY_MODE;',
   'const target = process.env.DENY_PATH;',
-  'const real = fs.readFileSync;',
-  'fs.readFileSync = function (path, ...rest) {',
-  "  if (String(path) === target) throw Object.assign(new Error(`EACCES: permission denied, open '${target}'`), { code: 'EACCES', syscall: 'open', path: target });",
-  '  return real.call(this, path, ...rest);',
-  '};',
+  "const deny = (syscall) => Object.assign(new Error(`EACCES: permission denied, ${syscall} '${target}'`), { code: 'EACCES', syscall, path: target });",
+  "if (mode === 'dir') {",
+  '  const real = fs.readdirSync;',
+  '  fs.readdirSync = function (path, ...rest) { if (String(path) === target) throw deny("scandir"); return real.call(this, path, ...rest); };',
+  "} else if (mode === 'file') {",
+  '  const real = fs.readFileSync;',
+  '  fs.readFileSync = function (path, ...rest) { if (String(path) === target) throw deny("open"); return real.call(this, path, ...rest); };',
+  '}',
   "require('node:module').syncBuiltinESMExports();",
 ].join('\n');
 
@@ -125,12 +152,14 @@ beforeAll(() => {
 });
 afterAll(() => rmSync(base, { recursive: true, force: true }));
 
-function run(entry: Entry, args: string[], deny: string | null) {
+type Deny = { mode: 'file' | 'dir'; path: string } | null;
+
+function run(entry: Pick<Entry, 'tool' | 'runner'>, args: string[], deny: Deny) {
   const script = join(TOOLS, entry.tool);
   const r = entry.runner === 'python'
-    ? spawnSync('python3', ['-I', '-B', harness, deny ?? '', script, ...args], { encoding: 'utf8', timeout: 120000, cwd: base })
+    ? spawnSync('python3', ['-I', '-B', harness, deny?.mode ?? 'none', deny?.path ?? '', script, ...args], { encoding: 'utf8', timeout: 120000, cwd: base })
     : spawnSync(process.execPath, [...(deny === null ? [] : ['--require', preload]), script, ...args], {
-      encoding: 'utf8', timeout: 120000, cwd: base, env: { ...process.env, ...(deny === null ? {} : { DENY_PATH: deny }) },
+      encoding: 'utf8', timeout: 120000, cwd: base, env: { ...process.env, ...(deny === null ? {} : { DENY_MODE: deny.mode, DENY_PATH: deny.path }) },
     });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
@@ -174,7 +203,7 @@ describe.each(ENTRIES)('$tool $option names an input file', (entry) => {
 
   it.skipIf(skip)('a file that cannot be read stops the run', () => {
     const file = fixture('denied', entry.valid);
-    expectStopped(run(entry, entry.args(file, base), file), file);
+    expectStopped(run(entry, entry.args(file, base), { mode: 'file', path: file }), file);
   });
 
   it.skipIf(skip)('a file that is not valid UTF-8 stops the run', () => {
@@ -189,7 +218,7 @@ describe('denial_log_summary.mjs: a journal found in a directory that cannot be 
     mkdirSync(dir, { recursive: true });
     const file = join(dir, 'denials.jsonl');
     writeFileSync(file, DENIAL_ROW('ok'));
-    expectStopped(run(entryOf('denial_log_summary.mjs'), ['--dir', dir], file), file);
+    expectStopped(run(entryOf('denial_log_summary.mjs'), ['--dir', dir], { mode: 'file', path: file }), file);
   });
 
   it('names a journal that is a directory', () => {
@@ -207,4 +236,67 @@ describe('hook_latency_p95.mjs: a log file in --dir that cannot be read stops th
     mkdirSync(file, { recursive: true });
     expectStopped(run(entryOf('hook_latency_p95.mjs'), ['--dir', dir, '--shell-checks-dir', dir], null), file);
   });
+});
+
+// The options that name an input directory. A run is stopped by a directory that does not exist, is a file, or cannot be
+// listed, and by any file inside it that the run reads and that cannot be read: nothing is left out of the counts.
+interface DirEntry {
+  tool: string;
+  runner: 'node' | 'python';
+  option: string;
+  /** The arguments of a valid run whose input directory named by this option is `dir`. */
+  args: (dir: string) => string[];
+  /** The files of a valid directory, by name; the run reads each of them. */
+  files: Record<string, string>;
+}
+
+const APPLIED_ROW = `${JSON.stringify({ ts: '2026-11-14T10:00:00.500Z', point: 'learner-extraction', session_id: 's1', applied: {} })}\n`;
+const DIR_ENTRIES: DirEntry[] = [
+  {
+    tool: 'decision_outcome_join.py', runner: 'python', option: '--journal', args: (dir) => ['--journal', dir, '--transcripts', sharedProjects],
+    files: { 'applied.jsonl': APPLIED_ROW, 'applied-20261114-080000.jsonl': APPLIED_ROW, 'shadow.jsonl': '' },
+  },
+  {
+    tool: 'jev_outcome_labels.mjs', runner: 'node', option: '--journal', args: (dir) => ['--journal', dir, '--transcripts', sharedProjects, '--json'],
+    files: { 'applied.jsonl': APPLIED_ROW, 'applied-20261114-080000.jsonl': APPLIED_ROW, 'agent-type.jsonl': '' },
+  },
+  { tool: 'empty_results.py', runner: 'python', option: '--teams', args: (dir) => ['--teams', dir], files: {} },
+];
+
+describe.each(DIR_ENTRIES)('$tool $option names an input directory', (entry) => {
+  const skip = entry.runner === 'python' && !hasPython3;
+  const directory = (label: string) => {
+    counter += 1;
+    const dir = join(base, `dir-${counter}-${label}`);
+    mkdirSync(dir, { recursive: true });
+    for (const [name, content] of Object.entries(entry.files)) writeFileSync(join(dir, name), content);
+    return dir;
+  };
+
+  it.skipIf(skip)('control: a valid directory is read', () => {
+    const r = run(entry, entry.args(directory('valid')), null);
+    expect(r.status, r.stderr).toBe(0);
+  });
+
+  it.skipIf(skip)('a directory that does not exist stops the run', () => {
+    const dir = join(base, `no-such-directory-${counter += 1}`);
+    expectStopped(run(entry, entry.args(dir), null), dir);
+  });
+
+  it.skipIf(skip)('a file in place of the directory stops the run', () => {
+    const file = fixture('not-a-directory', '');
+    expectStopped(run(entry, entry.args(file), null), file);
+  });
+
+  it.skipIf(skip)('a directory that cannot be listed stops the run', () => {
+    const dir = directory('denied');
+    expectStopped(run(entry, entry.args(dir), { mode: 'dir', path: dir }), dir);
+  });
+
+  for (const name of Object.keys(entry.files)) {
+    it.skipIf(skip)(`${name} in the directory cannot be read: the run stops`, () => {
+      const dir = directory(`denied-${name}`);
+      expectStopped(run(entry, entry.args(dir), { mode: 'file', path: join(dir, name) }), join(dir, name));
+    });
+  }
 });

@@ -231,8 +231,8 @@ def read_journal(directory, prefix, period):
     rotated_pattern = re.compile(rf'^{re.escape(prefix)}-\d{{8}}-\d{{6}}(?:-\d+)?\.jsonl$')
     try:
         rotated = sorted(f for f in os.listdir(directory) if rotated_pattern.match(f))
-    except OSError:
-        return [], 0
+    except OSError as e:  # a journal directory that cannot be listed would leave its rotated files out of the counts
+        usage_error(f'cannot read {e.filename or directory}: {e.strerror}')
     paths = [os.path.join(directory, f) for f in rotated] + [os.path.join(directory, prefix + '.jsonl')]
     rows = []
     bad_ts = 0
@@ -257,8 +257,8 @@ def read_journal(directory, prefix, period):
                     if not in_period(ts, period):
                         continue
                     rows.append(r)
-        except OSError:
-            continue
+        except OSError as e:  # an existing journal file that cannot be read is never left out of the counts
+            usage_error(f'cannot read {path}: {e.strerror}')
     return rows, bad_ts
 
 

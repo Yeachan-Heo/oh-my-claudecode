@@ -122,7 +122,7 @@ function journalFiles(dir, name) {
   if (!existsSync(base)) return [];
   const rotated = [];
   let entries = [];
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { entries = []; }
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch (e) { throw new Error(`cannot read ${dir}: ${e && e.code ? e.code : e}`); } // the rotated files must not drop out of the counts
   for (const e of entries) {
     if (!e.isFile()) continue;
     const m = ROTATED_NAME_RE.exec(e.name);
@@ -137,7 +137,7 @@ function journalFiles(dir, name) {
 /** Rows of one JSONL file: good rows to the list, bad ones to the counter. */
 function readJsonlFile(path, rows, unreadable) {
   let text;
-  try { text = readFileSync(path, 'utf8'); } catch { return; }
+  try { text = readFileSync(path, 'utf8'); } catch (e) { throw new Error(`cannot read ${path}: ${e && e.code ? e.code : e}`); } // an existing journal file is never left out of the counts
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     try {

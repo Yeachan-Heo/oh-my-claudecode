@@ -793,7 +793,13 @@ def main():
     except OSError as error:
         print(f'error: cannot read {error.filename or args.transcripts}: {error.strerror}', file=sys.stderr)
         return 2
-    ca = part_team(args.teams, rng, args.min_support) if args.teams else None
+    try:
+        if args.teams:
+            check_tree(args.teams)  # glob skips a tasks directory that cannot be read without a word
+        ca = part_team(args.teams, rng, args.min_support) if args.teams else None
+    except OSError as error:
+        print(f'error: cannot read {error.filename or args.teams}: {error.strerror}', file=sys.stderr)
+        return 2
 
     def sum_entry(part):
         if part is None:
