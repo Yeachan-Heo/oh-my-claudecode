@@ -58,8 +58,8 @@ e. Candidate. A tool call in the same session and in the period, whose time is s
      restart|stop, docker restart|stop|rm, or kill (amended after review, for every rule version: the value of
      such an option used to be read as the subcommand, so "git -C commit status" counted as a commit);
    - edit, delete (targets required): an Edit, Write, MultiEdit or NotebookEdit call whose file_path or
-     notebook_path equals a target or ends with "/" + target; or a Bash command with rm, mv or sed -i that
-     contains a target;
+     notebook_path equals a target or ends with "/" + target; or a Bash command with rm, mv, or sed or perl with
+     an in-place option (-i, --in-place) that contains a target;
    - run, install, deploy (targets required): a Bash command that contains a target.
    A Bash command is read as the shell reads it: a word is a command only at the start of the text or after ;, &, |,
    (, ), a backtick or a newline, after launch wrappers (sudo, doas, env, command, nohup, exec, time, nice, timeout
@@ -911,11 +911,94 @@ def command_matches(klass, command):
     return git_subcommand_follows(command, klass)
 
 
+# The options of `sed` and `perl` that matter for an in-place edit, as one text that stands in this script and in the check
+# classifier (a test compares the two copies). One line per kind of option of a program. `flag` takes no value; `value` takes the
+# rest of the word or, when the word ends there, the next word (`-e SCRIPT`, `-eSCRIPT`; a long one is `--name=value` or
+# `--name value`); `optional` takes the rest of the word and never the next one (`-i.bak`, `--in-place=.bak`, `-F:`); `octal` takes
+# the octal digits that follow (`-l012`, `-0777`); `stop` means that the program prints text and exits without running (`--help`,
+# `-v`). Three more lines mark what an option means: `script` gives the script, `inplace` edits the files in place, `quiet` is
+# `-n`. The options are those of `sed --help` (GNU sed 4.9) and of perlrun (perl 5.40). Short options may be glued in one word
+# (`-nEi`; the first one that takes the rest ends the word, so `-ie` is `-i` with the suffix `e`), a long option of sed may be
+# abbreviated to a name that is unique (`--in-pl`), perl has no long options, and `--` ends the options. sed takes options between
+# the operands as well, perl stops at its first operand when no `-e` gave the script. An option that is not in the table is
+# skipped as a flag.
+EDIT_TABLE_TEXT = """sed flag -E -b -n -r -s -u -z --binary --debug --follow-symlinks --null-data --posix --quiet --regexp-extended --sandbox --separate --silent --unbuffered --zero-terminated
+sed value -e -f -l --expression --file --line-length
+sed optional -i --in-place
+sed script -e -f --expression --file
+sed inplace -i --in-place
+sed quiet -n --quiet --silent
+sed stop --help --version
+perl flag -a -c -f -g -n -p -s -S -t -T -u -U -w -W -X
+perl value -e -E -I -m -M
+perl optional -C -d -D -F -i -x
+perl octal -0 -l
+perl script -e -E
+perl inplace -i
+perl stop -V -h -v"""
+EDIT_TABLE = {}
+for _line in EDIT_TABLE_TEXT.split("\n"):
+    _name, _kind, *_options = _line.split(" ")
+    _spec = EDIT_TABLE.setdefault(_name, {"long": []})
+    _spec[_kind] = set(_options)
+    _spec["long"].extend(option for option in _options if option.startswith("--") and option not in _spec["long"])
+
+
+def edit_options(program, args):
+    """(in place, quiet) for the words after `sed` or `perl`: whether they edit files in place (EDIT_TABLE_TEXT) and whether
+    sed is told to print nothing by itself (`-n`, `--quiet`, `--silent`). A program that prints text and exits edits nothing."""
+    spec = EDIT_TABLE[program]
+    in_place = quiet = scripted = False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            break
+        if arg.startswith("--"):
+            if program == "sed":
+                given, equals, _ = arg.partition("=")
+                named = [given] if given in spec["long"] else [full for full in spec["long"] if full.startswith(given)]
+                if len(named) == 1:
+                    if named[0] in spec.get("stop", ()):
+                        return False, False
+                    in_place = in_place or named[0] in spec.get("inplace", ())
+                    quiet = quiet or named[0] in spec.get("quiet", ())
+                    scripted = scripted or named[0] in spec.get("script", ())
+                    if not equals and named[0] in spec.get("value", ()):
+                        index += 1  # the value is the next word
+        elif arg.startswith("-") and len(arg) > 1:
+            at = 1
+            while at < len(arg):
+                option = "-" + arg[at]
+                rest = arg[at + 1:]
+                if option in spec.get("stop", ()):
+                    return False, False
+                in_place = in_place or option in spec.get("inplace", ())
+                quiet = quiet or option in spec.get("quiet", ())
+                scripted = scripted or option in spec.get("script", ())
+                if option in spec.get("value", ()):
+                    if rest == "":
+                        index += 1  # the value is the next word
+                    break
+                if option in spec.get("optional", ()):
+                    if rest == "" and program == "sed" and option in spec["inplace"] and tuple(args[index + 1:index + 2]) == ("",):
+                        index += 1  # an empty word right after a bare -i is its suffix (BSD form)
+                    break
+                if option in spec.get("octal", ()):
+                    at += len(re.match(r"[0-7]*", rest).group())
+                at += 1
+        elif program == "perl" and not scripted:
+            break  # the first operand is the script file, and perl reads no option behind it
+        index += 1
+    return in_place, quiet
+
+
 def has_delete_or_move(command):
-    """Whether a Bash command runs rm or mv with an argument, or sed -i (rule e, classes edit and delete)."""
+    """Whether a Bash command runs rm or mv with an argument, or sed or perl with an in-place option (rule e, classes edit
+    and delete)."""
     for item in shell_commands(command):
         program = os.path.basename(item[0])
-        if len(item) > 1 and (program in ("rm", "mv") or (program == "sed" and SED_I_RE.match(item[1]))):
+        if len(item) > 1 and (program in ("rm", "mv") or (program in ("sed", "perl") and edit_options(program, item[1:])[0])):
             return True
     return False
 
@@ -930,14 +1013,12 @@ READ_ONLY_COMMANDS = frozenset((
 READ_ONLY_GIT_SUBCOMMANDS = frozenset(("status", "log", "diff", "show", "branch", "rev-parse", "merge-base"))
 FIND_ACTION_OPTIONS = frozenset(("-delete", "-exec", "-execdir", "-ok", "-okdir"))
 ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
-SED_IN_PLACE_RE = re.compile(r"-[A-Za-z]*i")  # -i, -ni, -i.bak
 # A write redirection to a file: ">", ">>", ">|" or ">&file" (not ">&2" or ">&-", which name a descriptor), not aimed at /dev/null.
 REDIRECT_WRITE_RE = re.compile(r"(?<!>)(?:>{1,2}(?![>&])|>&(?![0-9-]))\s*(?!/dev/null(?:\s|$))\S")
 # Quoted strings, escaped characters and comments (a "#" that starts a word, to the end of the line) are text, not
 # shell syntax: each one becomes a single "_" before the redirection is looked for, so a quoted file name after
 # ">" still counts as a target.
 QUOTED_OR_ESCAPED_RE = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(?:^|(?<=\s))#[^\n]*""", re.DOTALL)
-SED_I_RE = re.compile(r"-i(?!\w)")  # sed -i, sed -i.bak
 # Bash commands that match the general classes (rule c, v2): each pattern is matched against the text of one command
 # (command_text), so a command word in the arguments of another command (`echo "npm install x"`, `grep rm f`) is no command.
 DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "shred"))
@@ -1418,8 +1499,8 @@ def is_read_only_command(command):
     if first in READ_ONLY_COMMANDS or first == "awk":
         return True
     if first == "sed":
-        return "-n" in words and not any(SED_IN_PLACE_RE.match(word) or word.startswith("--in-place")
-                                         for word in words)
+        in_place, quiet = edit_options("sed", plain[index + 1:])
+        return quiet and not in_place
     if first == "find":
         return not any(word in FIND_ACTION_OPTIONS for word in words)
     if first == "git":

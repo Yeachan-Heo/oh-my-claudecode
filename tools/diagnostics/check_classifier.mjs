@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.20.6';
+export const RULES_VERSION = '2026.11.20.7';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
@@ -1004,19 +1004,52 @@ function pushAll(list, items) {
 }
 
 /**
- * The files an in-place `sed` or `perl` edits, from the words after the program name: the operands that
- * remain once options and the script are skipped. The script is the first operand unless `-e`/`-E` (perl),
- * `-e`/`-f` or `--expression`/`--file` (sed) gave it. Options may come after operands; `--` ends them.
- * An in-place flag is `-i` anywhere in a short cluster (`-i`, `-ni`, `-pi.bak`, `-0777pi`), the rest of
- * the cluster being its suffix, or `--in-place[=SUFFIX]`. An empty word right after a bare sed `-i` is
- * its suffix (BSD form). An in-place edit with no file operand (`... | xargs sed -i 's/a/b/'`) gets
- * UNKNOWN_TARGET. Other commands give no targets.
+ * The options of `sed` and `perl` that matter for an in-place edit, as one text that stands in this script and in the user
+ * prohibitions tool (a test compares the two copies). One line per kind of option of a program. `flag` takes no value; `value`
+ * takes the rest of the word or, when the word ends there, the next word (`-e SCRIPT`, `-eSCRIPT`; a long one is `--name=value`
+ * or `--name value`); `optional` takes the rest of the word and never the next one (`-i.bak`, `--in-place=.bak`, `-F:`); `octal`
+ * takes the octal digits that follow (`-l012`, `-0777`); `stop` means that the program prints text and exits without running
+ * (`--help`, `-v`). Three more lines mark what an option means: `script` gives the script, `inplace` edits the
+ * files in place, `quiet` is `-n`. The options are those of `sed --help` (GNU sed 4.9) and of perlrun (perl 5.40). Short options
+ * may be glued in one word (`-nEi`; the first one that takes the rest ends the word, so `-ie` is `-i` with the suffix `e`), a
+ * long option of sed may be abbreviated to a name that is unique (`--in-pl`), perl has no long options, and `--` ends the options.
+ * sed takes options between the operands as well, perl stops at its first operand when no `-e` gave the script. An option that is
+ * not in the table is skipped as a flag.
  */
-function inPlaceTargets(program, args) {
-  const perl = program === 'perl';
-  let inPlace = false;
-  let hasScript = false;
+const EDIT_TABLE_TEXT = `sed flag -E -b -n -r -s -u -z --binary --debug --follow-symlinks --null-data --posix --quiet --regexp-extended --sandbox --separate --silent --unbuffered --zero-terminated
+sed value -e -f -l --expression --file --line-length
+sed optional -i --in-place
+sed script -e -f --expression --file
+sed inplace -i --in-place
+sed quiet -n --quiet --silent
+sed stop --help --version
+perl flag -a -c -f -g -n -p -s -S -t -T -u -U -w -W -X
+perl value -e -E -I -m -M
+perl optional -C -d -D -F -i -x
+perl octal -0 -l
+perl script -e -E
+perl inplace -i
+perl stop -V -h -v`;
+const EDIT_TABLE = new Map();
+for (const line of EDIT_TABLE_TEXT.split('\n')) {
+  const [name, kind, ...options] = line.split(' ');
+  const spec = EDIT_TABLE.get(name) ?? { long: [] };
+  spec[kind] = new Set(options);
+  for (const option of options) if (option.startsWith('--') && !spec.long.includes(option)) spec.long.push(option);
+  EDIT_TABLE.set(name, spec);
+}
+
+/**
+ * Reads the words after `sed` or `perl` (EDIT_TABLE_TEXT): whether they edit files in place, whether an option gave the script,
+ * and the words that are no option (the script, when no option gave it, and the files). A program that prints text and exits
+ * edits nothing, so its operands are not returned. An empty word right after a bare sed `-i` is its suffix (BSD form).
+ */
+function editOptions(program, args) {
+  const spec = EDIT_TABLE.get(program);
+  const has = (kind, option) => spec[kind]?.has(option) === true;
   const operands = [];
+  let inPlace = false;
+  let scripted = false;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--') {
@@ -1024,36 +1057,54 @@ function inPlaceTargets(program, args) {
       break;
     }
     if (arg.startsWith('--')) {
-      const name = arg.split('=')[0];
-      if (!perl && name === '--in-place') inPlace = true;
-      else if (!perl && (name === '--expression' || name === '--file')) hasScript = true;
-      if (!perl && ['--expression', '--file', '--line-length'].includes(arg)) i += 1; // the value is the next word
+      if (program !== 'sed') continue; // perl has no long options
+      const at = arg.indexOf('=');
+      const given = at === -1 ? arg : arg.slice(0, at);
+      const named = spec.long.includes(given) ? [given] : spec.long.filter((full) => full.startsWith(given));
+      if (named.length !== 1) continue;
+      if (has('stop', named[0])) return { inPlace: false, scripted: false, operands: [] };
+      if (has('inplace', named[0])) inPlace = true;
+      if (has('script', named[0])) scripted = true;
+      if (at === -1 && has('value', named[0])) i += 1; // the value is the next word
     } else if (arg.startsWith('-') && arg.length > 1) {
       for (let at = 1; at < arg.length; at += 1) {
-        const flag = arg[at];
-        const last = at === arg.length - 1;
-        if (flag === 'i') {
-          inPlace = true;
-          if (!perl && last && args[i + 1] === '') i += 1;
+        const option = `-${arg[at]}`;
+        const rest = arg.slice(at + 1);
+        if (has('stop', option)) return { inPlace: false, scripted: false, operands: [] };
+        if (has('inplace', option)) inPlace = true;
+        if (has('script', option)) scripted = true;
+        if (has('value', option)) {
+          if (rest === '') i += 1; // the value is the next word
           break;
         }
-        if (perl ? flag === 'e' || flag === 'E' : flag === 'e' || flag === 'f') {
-          hasScript = true;
-          if (last) i += 1;
+        if (has('optional', option)) {
+          if (rest === '' && program === 'sed' && has('inplace', option) && args[i + 1] === '') i += 1;
           break;
         }
-        if (perl ? 'MmIFCdDx'.includes(flag) : flag === 'l') {
-          if (last && !perl) i += 1;
-          break;
-        }
+        if (has('octal', option)) at += /^[0-7]*/.exec(rest)[0].length;
       }
+    } else if (program === 'perl' && !scripted) {
+      pushAll(operands, args.slice(i)); // the first operand is the script file, and perl reads no option behind it
+      break;
     } else {
       operands.push(arg);
     }
   }
+  return { inPlace, scripted, operands };
+}
+
+/**
+ * The files an in-place `sed` or `perl` edits, from the words after the program name: the operands that remain once the options
+ * and the script are skipped (editOptions). An in-place edit with no file operand edits what it gets from `xargs` (`... | xargs
+ * sed -i 's/a/b/'`), which gets UNKNOWN_TARGET; with no `xargs` in front it edits nothing (sed stops with an error). Other
+ * commands give no targets.
+ */
+function inPlaceTargets(program, args, fed) {
+  const { inPlace, scripted, operands } = editOptions(program, args);
   if (!inPlace) return [];
-  const files = (hasScript ? operands : operands.slice(1)).filter((operand) => operand !== '');
-  return files.length > 0 ? files : [UNKNOWN_TARGET];
+  const files = (scripted ? operands : operands.slice(1)).filter((operand) => operand !== '');
+  if (files.length > 0) return files;
+  return fed ? [UNKNOWN_TARGET] : [];
 }
 
 /**
@@ -1246,7 +1297,8 @@ function commandPrograms(words) {
     if (typeof words[at] !== 'string') return;
     let end = at;
     while (typeof words[end] === 'string' && !(stop && stop.has(words[end]))) end += 1;
-    found.push({ at, end });
+    // `xargs` in front of the program hands it the files to work on (`xargs sed -i 's/a/b/'`)
+    found.push({ at, end, fed: words.slice(start, at).some((word) => typeof word === 'string' && baseName(word) === 'xargs') });
     if (stop === undefined && baseName(words[at]) === 'find') {
       for (let k = at + 1; k < end; k += 1) if (FIND_EXEC.has(words[k])) add(k + 1, FIND_EXEC_END);
     }
@@ -1441,10 +1493,10 @@ function shellWriteTargets(command, depth = 0, substitutions = 0) {
   }
   const words = shellWords(text);
   const programs = commandPrograms(words);
-  for (const { at, end } of programs) {
+  for (const { at, end, fed } of programs) {
     const program = baseName(words[at]);
     if (program === 'tee') pushAll(targets, teeTargets(words.slice(at + 1, end)));
-    else if (program === 'sed' || program === 'perl') pushAll(targets, inPlaceTargets(program, words.slice(at + 1, end)));
+    else if (program === 'sed' || program === 'perl') pushAll(targets, inPlaceTargets(program, words.slice(at + 1, end), fed));
     else if (program === 'cp' || program === 'mv' || program === 'install') pushAll(targets, copyTargets(program, words.slice(at + 1, end)));
     else if (program === 'truncate') pushAll(targets, truncateTargets(words.slice(at + 1, end)));
     else if (program === 'dd') pushAll(targets, ddTargets(words.slice(at + 1, end)));

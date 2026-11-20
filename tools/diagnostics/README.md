@@ -1026,6 +1026,33 @@ come before the rest of the command, so `env -S pytest` runs `pytest`. The attac
 hold the string in the same word, so the words behind them are arguments of that command, but the tools read the first of them
 as the command.
 
+# In-place edits (`sed`, `perl`)
+
+Two readings look for an in-place edit: the write reading of the check classifier (`isMutation`: the files behind the options are
+the targets, and an edit of a documentation file, a lockfile or a temp path is no code change) and the user prohibitions tool (a
+targeted `edit` or `delete` prohibition is matched by `sed` and `perl` with an in-place option, as by `rm` and `mv`; a `sed` with
+`-n` and no in-place option is read-only). Both read the options with one table of the options of `sed` (GNU sed 4.9, `sed --help`)
+and of `perl` (perlrun, perl 5.40), the same text in both scripts (`EDIT_TABLE_TEXT`; a test compares the copies). Each line
+names the options of one kind: `flag`, `value` (`-e SCRIPT`, `-eSCRIPT`, `--expression=SCRIPT`, `--expression SCRIPT`, `-l 5`),
+`optional` (the rest of the word, never the next one: `-i.bak`, `-ibak`, `--in-place=.bak`, `-F:`), `octal` (`-0777`, `-l012`) and
+`stop` (the program prints text and exits: `--help`, `--version`, `-v`), plus the marks `script`, `inplace` and `quiet`.
+
+An in-place option is looked for in every option of the command, not only in the first one: `sed -E -i`, `sed -nEi`, `sed -e
+'s/a/b/' -i f`, `sed -s -z -f script.sed -i f`, `sed -l 5 -i f`, `sed -i -- 's/a/b/' f` and `perl -I lib -pi -e 's/a/b/' f` are
+edits. Short options glued in one word end at the first one that takes the rest of the word, so `-ie` is `-i` with the suffix `e`,
+and `-pie` is `-p` and `-i` with the suffix `e`; sed takes options between the operands too (`sed 's/a/b/' f -i`), and perl stops
+at its first operand when no `-e` gave the script. A long option of sed may be shortened to a name that is unique (`--in-pl`,
+`--in`, `--i`, `--expr`). The files of the edit are the operands that remain once the script is taken (the first operand, unless an
+option gave it).
+
+Where the words cannot show what the program does: an edit with no file operand edits nothing (sed stops with an error, perl reads
+standard input), so the write reading takes it for an edit only behind `xargs` (`xargs sed -i 's/a/b/' < list`), which hands it the
+files, while the user prohibitions tool takes the in-place option alone for an edit (the prohibition must name a target that stands in
+the command text anyway). `perl -pie 's/a/b/' f` has the suffix `e` and takes `s/a/b/` as the name of a script file, which does not
+exist, so perl dies and writes nothing; both readings take it for an edit of `f`. A `w` command or a `-i` inside a sed script is not
+read. `tests/tools/shell-syntax-matrix.test.ts` holds the rows (`EDIT_ROWS`), each run once by the real programs; a new form is one
+more row there, and one more option is one more word in the table.
+
 # Shell syntax the tools do not read
 
 The tools that read a Bash command (the check classifier, the user prohibitions tool, advisor event coverage and the
