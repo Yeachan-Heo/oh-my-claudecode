@@ -214,7 +214,9 @@ it('options that run a subset of the tests, or none, narrow a test run of every 
     'xcodebuild test -only-testing:App/Suite', 'xcodebuild test -skip-testing:App/Slow', 'swift test --filter A', 'swift test --skip A',
     // package managers and make run a script: the long options of every runner, the short names no package manager uses
     'npm test -- -m smoke', 'npm test -- --lf', 'npm run test -- --grep a', 'pnpm test --shard 1/2', 'pnpm --filter @x/y test', 'yarn test --onlyChanged',
-    'make test -k a',
+    'make test -k a', 'cargo nextest run -E "test(foo)"', 'cargo nextest run --filter-expr "test(foo)"', 'cargo nextest run --partition count:1/2',
+    'cargo nextest run --run-ignored ignored-only', 'npm test -- --dir x', 'pnpm --dir pkg test --dir x', 'npm test -- -t name', 'rspec -t focus', 'jest -t name',
+    'dotnet test -t', 'nox -t tag', 'npm test -- --passWithNoTests', 'pnpm test --passWithNoTests',
   ];
   for (const cmd of narrowing) {
     const got = classifyCommand(cmd);
@@ -233,6 +235,15 @@ it('options that run a subset of the tests, or none, narrow a test run of every 
     'cargo test --target-dir out', 'cargo test --color always', 'dotnet test', 'dotnet test --no-build', 'rspec', 'mix test', 'phpunit', 'deno test',
     'ctest', 'ctest -j 4', 'make test', 'make check', 'npm test', 'npm test --silent', 'npm run test -- --reporter dot', 'pnpm -r test', 'yarn test --ci',
     'npm install --ignore-scripts && npm test',
+    // `--run` ends the watch mode of vitest behind a script; `--watch=false` and `--bail` select nothing either
+    'npm test -- --run', 'npm test --run', 'pnpm test --run', 'yarn test --run', 'npm run test -- --run', 'bun run test -- --run', 'npm run test -- --watch=false',
+    'npm test -- --bail', 'pnpm --dir pkg test', 'pnpm --dir=pkg test', 'pnpm -C pkg test', 'npm --prefix pkg test', 'vitest --run',
+    // cargo nextest: options that take a value are no test name filters
+    'cargo nextest run --retries 2', 'cargo nextest run --failure-output final', 'cargo nextest run --success-output never', 'cargo nextest run --status-level all',
+    'cargo nextest run --final-status-level slow', 'cargo nextest run --max-fail 3', 'cargo nextest run --test-threads 4', 'cargo nextest run --cargo-profile ci',
+    'cargo nextest run --build-jobs 4', 'cargo nextest run --profile ci',
+    // `-t` is the timeout of mocha and `--tap` of ava, not a test name
+    'mocha -t 5000', 'mocha --timeout 5000', 'ava -t', 'tox', 'nox',
   ];
   for (const cmd of full) {
     const got = classifyCommand(cmd);
@@ -1243,6 +1254,28 @@ function classifyInChild<T = { isCheck: boolean; kind: string | null }>(
   assert.ok(parsed.elapsed < 2000, `classification took ${parsed.elapsed} ms`);
   return parsed.out;
 }
+
+it('a long run of digits is read in linear time by every reading', () => {
+  // A digit run is tried as a redirection descriptor only at the start of a word, so it costs one pass, not one per position.
+  const digits = '1'.repeat(100000);
+  const got = classifyInChild([`npm test ${digits}`, `npm test ${digits} > out.txt`, `pytest -q ${digits}`, `echo ${digits}>f`]);
+  assert.equal(got[0].isCheck, true);
+  assert.equal(got[1].isCheck, true);
+  assert.equal(got[2].isCheck, true);
+  assert.equal(got[3].isCheck, false);
+  const result = classifyInChild<{ verdict: string }>(
+    [`npm test ${digits}`], 'classifyCheckResult', `classifyCheckResult({ command, output: 'ok', isError: false, exitCode: 0 })`,
+  );
+  assert.equal(typeof result[0].verdict, 'string');
+  assert.equal(classifyInChild<boolean>([`tee ${digits} > ${digits}`], 'isMutation', `isMutation('Bash', { command })`).length, 1);
+});
+
+it('a redirection with a digit descriptor is no argument, glued to the word or not', () => {
+  assert.equal(classifyCommand('npm test 2>&1').narrowed, false);
+  assert.equal(classifyCommand('npm test 1>out.txt').narrowed, false);
+  assert.equal(classifyCommand('npm test>out.txt').narrowed, false);
+  assert.equal(classifyCommand('npm test 12>>out.txt').narrowed, false);
+});
 
 it('a long run of package manager flags classifies in linear time and keeps its result', () => {
   const flags = (token: string) => `${token} `.repeat(40);

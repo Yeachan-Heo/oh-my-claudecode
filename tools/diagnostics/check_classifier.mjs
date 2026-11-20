@@ -140,9 +140,11 @@ const NEGATED = /^\s*!/;
 
 /**
  * One redirection: an optional descriptor (`2`, `{fd}`), the operator and its target word, which may hold an
- * escaped space. A redirection is no argument and no command word: its target names a file, never a program.
+ * escaped space. A redirection is no argument and no command word: its target names a file, never a program. A digit descriptor
+ * counts only at the start of a word (`echo a1>f` writes to `f` with the word `a1`), so a long run of digits is tried once, not at
+ * every position.
  */
-const REDIRECTION = String.raw`(?:\d+|\{[A-Za-z_]\w*\})?(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)(?!\()\s*(?:\\[\s\S]|[^\s\\])+`;
+const REDIRECTION = String.raw`(?:(?<!\S)\d+|\{[A-Za-z_]\w*\})?(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)(?!\()\s*(?:\\[\s\S]|[^\s\\])+`;
 const ASSIGNMENT = String.raw`[A-Za-z_][A-Za-z0-9_]*\+?=(?:\\[\s\S]|[^\s\\])*`; // `A+=x` appends; the value may hold an escaped space
 const LEADING_REDIRECTIONS = new RegExp(String.raw`^(?:(?:${ASSIGNMENT}|${REDIRECTION})\s+)+`);
 const ALL_REDIRECTIONS = new RegExp(REDIRECTION, 'g');
@@ -407,7 +409,7 @@ const SUBSET_OPTIONS = {
   // cargo: a test name filter is a positional word, read by cargoNarrows.
   cargo: [],
   dotnet: ['--filter', '--list-tests', '-t'],
-  rspec: ['-e', '--example', '-E', '--example-matches', '--tag', '--only-failures', '--next-failure', '--pattern', '--exclude_pattern'],
+  rspec: ['-t', '-e', '--example', '-E', '--example-matches', '--tag', '--only-failures', '--next-failure', '--pattern', '--exclude_pattern'],
   mix: ['--only', '--failed', '--stale', '--partitions', '--dry-run'],
   phpunit: [
     '--filter', '--group', '--exclude-group', '--testsuite', '--exclude-testsuite', '--covers', '--uses', '--list-tests',
@@ -424,14 +426,16 @@ const SUBSET_OPTIONS = {
   nox: ['-s', '-e', '--session', '-k', '--keywords', '-t', '--tags', '-l', '--list'],
 };
 /** Selectors every runner is read for: the short names that name a subset in most runners. */
-const COMMON_SUBSET = ['-t', '--testNamePattern', '-k', '--skip', '-run'];
+const COMMON_SUBSET = ['--testNamePattern', '-k', '--skip', '-run'];
 /**
- * A package manager or make runs a script of unknown content, so it is read for the long options of every
- * runner and for the short ones that no package manager uses itself.
+ * A package manager or make runs a script of unknown content, so the options behind its script word are read for the long options
+ * of every runner and for the short ones that no package manager uses itself, except `--run`: for vitest it only ends the watch
+ * mode (`npm test -- --run`), and go reads it only at `go test`. `-t` names a test in jest and vitest, the common runners behind a
+ * script.
  */
 const SCRIPT_SUBSET = new Set([
-  ...COMMON_SUBSET, '-m', '-g',
-  ...Object.values(SUBSET_OPTIONS).flat().filter((name) => name.startsWith('--')),
+  ...COMMON_SUBSET, '-t', '-m', '-g',
+  ...Object.values(SUBSET_OPTIONS).flat().filter((name) => name.startsWith('--') && name !== '--run'),
 ]);
 const SUBSET_SETS = new Map(Object.entries(SUBSET_OPTIONS).map(([runner, names]) => [runner, new Set([...COMMON_SUBSET, ...names])]));
 /** pytest and unittest read `-kEXPR`, `-mMARK` and a cluster that ends in the option (`-xk EXPR`). */
@@ -440,12 +444,17 @@ const PYTEST_SHORT_VALUE = /^-(?:[km].+|[A-Za-z]+[km])$/;
 /** cargo test options that narrow the run, and the options that take the next word as their value. */
 const CARGO_SUBSET = new Set([
   '--lib', '--bins', '--bin', '--tests', '--test', '--examples', '--example', '--benches', '--bench', '--doc', '-p', '--package',
-  '--skip', '--ignored', '--list', '--no-run',
+  '--skip', '--ignored', '--list', '--no-run', '--partition', '-E', '--filter-expr', '--run-ignored',
 ]);
 const CARGO_VALUE_OPTIONS = new Set([
   '-p', '--package', '--exclude', '-F', '--features', '--target', '--profile', '--target-dir', '--manifest-path', '--color',
   '--message-format', '-j', '--jobs', '--config', '-Z', '--bin', '--test', '--example', '--bench', '--test-threads', '--format',
   '--logfile', '--skip', '--shuffle-seed',
+  // cargo nextest run: options that take a value and select no tests (`--retries 2`), and the ones that select (`-E`, `--partition`)
+  '--retries', '--flaky-result', '--max-fail', '--failure-output', '--success-output', '--status-level', '--final-status-level',
+  '--cargo-profile', '--build-jobs', '--config-file', '--tool-config-file', '-P', '--archive-file', '--extract-to',
+  '--cargo-message-format', '--message-format-version', '--user-config-file', '--stress-count', '--stress-duration',
+  '--show-progress', '--partition', '-E', '--filter-expr', '--run-ignored',
 ]);
 
 /**
@@ -467,6 +476,16 @@ function cargoNarrows(tokens) {
   return false;
 }
 
+/**
+ * The tokens that are read for subset options. `--dir` before the script word is the directory option of the package manager
+ * (`pnpm --dir pkg test`), which selects no test; behind the script word it is the option of the runner (`vitest --dir x`).
+ */
+function optionTokens(tokens, runner) {
+  if (!SCRIPT_RUNNERS.has(runner)) return tokens;
+  const at = tokens.findIndex((token, index) => index > 0 && !token.startsWith('-') && /^(?:test|check)\b/.test(token));
+  return at === -1 ? tokens : tokens.filter((token, index) => index > at || !/^--dir(?:=|$)/.test(token));
+}
+
 /** Whether a token of a test command is an option that runs a subset of the tests (or none) for this runner. */
 function selectsSubset(token, runner) {
   if (!token.startsWith('-')) return false;
@@ -483,7 +502,7 @@ function pieceNarrows(piece, kind, runner) {
   const tokens = piece.replace(ALL_REDIRECTIONS, ' ').split(/\s+/).filter(Boolean);
   if (tokens.some((t) => WEAKEN.test(t))) return true;
   if (kind !== 'test') return false;
-  if (tokens.some((t) => selectsSubset(t, runner))) return true;
+  if (optionTokens(tokens, runner).some((t) => selectsSubset(t, runner))) return true;
   if (runner === 'cargo' && cargoNarrows(tokens)) return true;
   // `./...` (go packages) and trailing-slash directories do not narrow; a file path does.
   return tokens.some((t) => !t.startsWith('-') && !t.endsWith('/') && t !== './...' && FILE_TOKEN.test(t));
