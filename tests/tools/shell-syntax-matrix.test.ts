@@ -41,16 +41,16 @@ const PREFIXES: Array<[string, Reads]> = [
   ['>a\\ b.log ', ALL], ['<<< x ', ALL], ['2>/dev/null ', ALL], ['>&2 ', ALL], ['3< in.txt ', ALL], ['> out.log > out2.log ', ALL], ['2>&1 > out.log ', ALL],
   // assignments and redirections together, in both orders
   ['A=1 > out.log ', ALL], ['> out.log A=1 ', ALL], ['A="b c" 2>&1 ', ALL], ['> out.log 2>&1 A=$(d) ', ALL], ['A=1 B="c d" < in.txt 2> err.log ', ALL],
-  // launch wrappers: every wrapper of the table is read by the check reading; the metrics reading does not read sudo and nohup
+  // launch wrappers: every wrapper of the table is read by every reading
   ['env ', ALL], ['env A=1 ', ALL], ['time ', ALL], ['timeout 5 ', ALL],
   ['command ', ALL], ['exec ', ALL], ['nice -n 5 ', ALL],
-  ['sudo ', except('metrics')], ['nohup ', except('metrics')], ['sudo -u root ', except('metrics')],
+  ['sudo ', ALL], ['nohup ', ALL], ['sudo -u root ', ALL],
   // wrappers with assignments and redirections, and wrappers with each other
   ['A=1 env ', ALL], ['A="b c" time ', ALL], ['env > out.log ', ALL], ['> out.log env ', ALL],
-  ['time > out.log ', ALL], ['env A=1 time ', ALL], ['A=1 sudo ', except('metrics')],
-  ['sudo A=1 ', except('metrics')], ['> out.log sudo ', except('metrics')], ['sudo > out.log ', except('metrics')],
-  ['sudo env A=1 nohup ', except('metrics')], ['time sudo ', except('metrics')], ['env sudo ', except('metrics')],
-  ['command nohup ', except('metrics')],
+  ['time > out.log ', ALL], ['env A=1 time ', ALL], ['A=1 sudo ', ALL],
+  ['sudo A=1 ', ALL], ['> out.log sudo ', ALL], ['sudo > out.log ', ALL],
+  ['sudo env A=1 nohup ', ALL], ['time sudo ', ALL], ['env sudo ', ALL],
+  ['command nohup ', ALL],
 ];
 
 // The command words each reading looks for, as the text that follows the prefix.

@@ -63,7 +63,8 @@ e. Candidate. A tool call in the same session and in the period, whose time is s
    - run, install, deploy (targets required): a Bash command that contains a target.
    A Bash command is read as the shell reads it: a word is a command only at the start of the text or after ;, &, |,
    (, ), a backtick or a newline, after launch wrappers (sudo, doas, env, command, nohup, exec, time, nice, timeout
-   and xargs with their options, and VAR=x assignments) or reserved words (if, then, do, !, {), after find -exec, and
+   and xargs with their options, and VAR=x assignments; an option of sudo, nohup, command, exec, nice, time, timeout or env
+   that is not in the table of LAUNCH_TABLE, or `--`, leaves the wrapper as the command word) or reserved words (if, then, do, !, {), after find -exec, and
    in the string of sh -c, su -c or ssh host '...' (two levels deep, 100000 characters at most). A command name in
    the arguments of another command, in a quoted string, in a # comment or in a here-document body is text:
    "echo 'git commit'", "rg 'git commit' README.md" and "grep rm f" run no git and no rm. A redirection (>f, >>f, >|f,

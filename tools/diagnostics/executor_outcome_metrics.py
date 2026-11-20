@@ -59,8 +59,35 @@ DANGLING_END = re.compile(r"(?:,|&&|\|\||=>|[+\-*/%=]|[(\[{]|:|\b(?:const|let|va
 ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 REDIRECTION_OPERATOR = re.compile(r"^(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)$")
 FILE_DESCRIPTOR = re.compile(r"^(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})$")
-SECONDS_ARG = re.compile(r"^\d+(?:\.\d+)?[a-zA-Z]?$")
-NICE_ARG = re.compile(r"^-?\d+$")
+# Launch wrappers that are taken off in front of the command word, with the options each one is known by. The same table is in
+# check_classifier.mjs and in the other Python tools of this directory that look for a command word (each tool is a standalone
+# script):
+#
+#   sudo     -E | --preserve-env[=LIST]    -u USER | --user USER | --user=USER
+#   nohup    (no options)
+#   command  -p
+#   exec     -a NAME
+#   nice     -n N | -nN | --adjustment N | --adjustment=N
+#   time     -p
+#   timeout  -s SIGNAL | --signal SIGNAL | --signal=SIGNAL    -k DURATION | --kill-after DURATION | --kill-after=DURATION
+#            then DURATION (a number with an optional s, m, h or d)
+#   env      -i | --ignore-environment    -u NAME | --unset NAME | --unset=NAME    (NAME=VALUE words follow)
+#
+# The options are those of `--help` of sudo 1.9.16 and GNU coreutils 9.7 (nice, timeout, env) and of `help` of bash 5.2
+# (command, exec, time). An option that is not in the table (`sudo -n`, `timeout --foreground`, `nice -5`, `env -S`), the
+# end-of-options word `--`, a wrapper with no command and a `timeout` with no duration end the reading: the wrapper stays the
+# program, so the command behind it is not read and nothing is guessed.
+DURATION_ARG = re.compile(r"(?:\d+\.?\d*|\.\d+)[smhd]?\Z")
+LAUNCH_WRAPPERS = {
+    "sudo": {"flags": {"-E"}, "values": {"-u", "--user"}, "optional_value": {"--preserve-env"}, "duration": False},
+    "nohup": {"flags": set(), "values": set(), "optional_value": set(), "duration": False},
+    "command": {"flags": {"-p"}, "values": set(), "optional_value": set(), "duration": False},
+    "exec": {"flags": set(), "values": {"-a"}, "optional_value": set(), "duration": False},
+    "nice": {"flags": set(), "values": {"-n", "--adjustment"}, "optional_value": set(), "duration": False},
+    "time": {"flags": {"-p"}, "values": set(), "optional_value": set(), "duration": False},
+    "timeout": {"flags": set(), "values": {"-s", "--signal", "-k", "--kill-after"}, "optional_value": set(), "duration": True},
+    "env": {"flags": {"-i", "--ignore-environment"}, "values": {"-u", "--unset"}, "optional_value": set(), "duration": False},
+}
 SEGMENT_OPERATORS = ("&&", "||", ";", "|", "&")
 AGENT_FILE = re.compile(r"^agent-(.+)\.jsonl$")
 SUBAGENT_DIR = "subagents"
@@ -624,9 +651,44 @@ def command_segments(command):
     return segments
 
 
+def glued_option(word, spec):
+    """Whether word is an option of the wrapper with its value glued on: `-nN`, `-uUSER`, `--user=USER`, `--preserve-env=LIST`."""
+    if word.startswith("--"):
+        name, equals, _value = word.partition("=")
+        return equals == "=" and (name in spec["values"] or name in spec["optional_value"])
+    return len(word) > 2 and word.startswith("-") and word[:2] in spec["values"]
+
+
+def after_launch_wrapper(words, at):
+    """The index of the word behind the launch wrapper at words[at] and its options (see LAUNCH_WRAPPERS), or None when the
+    wrapper cannot be read to its command (an option outside the table, no command, no duration)."""
+    spec = LAUNCH_WRAPPERS[os.path.basename(words[at])]
+    index = at + 1
+    durations = 1 if spec["duration"] else 0
+    while True:
+        if index >= len(words):
+            return None
+        word = words[index]
+        if word in spec["flags"] or word in spec["optional_value"] or glued_option(word, spec):
+            index += 1
+        elif word in spec["values"]:
+            if index + 1 >= len(words):
+                return None
+            index += 2
+        elif word.startswith("-"):
+            return None
+        elif durations > 0:
+            if DURATION_ARG.match(word) is None:
+                return None
+            durations -= 1
+            index += 1
+        else:
+            return index
+
+
 def program_of_segment(words):
-    """(program, arguments) after removing prefixes: environment assignments, redirections (`> out`, `2>&1`, `< in`),
-    env with options, timeout with options and seconds, nice with a value, time, command, exec."""
+    """(program, arguments) after removing prefixes: environment assignments, redirections (`> out`, `2>&1`, `< in`) and the
+    launch wrappers of LAUNCH_WRAPPERS with their options. A wrapper that cannot be read stays the program."""
     i = 0
     count = len(words)
     while i < count:
@@ -637,28 +699,11 @@ def program_of_segment(words):
             i += 2
         elif FILE_DESCRIPTOR.match(word) and i + 1 < count and REDIRECTION_OPERATOR.match(words[i + 1]):
             i += 3
-        elif word == "env":
-            i += 1
-            while i < count:
-                token = words[i]
-                if token in ("-u", "--unset"):
-                    i += 2
-                elif token.startswith("-") or ENV_ASSIGNMENT.match(token):
-                    i += 1
-                else:
-                    break
-        elif word in ("time", "command", "exec"):
-            i += 1
-        elif word == "timeout":
-            i += 1
-            while i < count and (words[i].startswith("-") or SECONDS_ARG.match(words[i])):
-                i += 1
-        elif word == "nice":
-            i += 1
-            if i < count and words[i] == "-n":
-                i += 2
-            elif i < count and NICE_ARG.match(words[i]):
-                i += 1
+        elif os.path.basename(word) in LAUNCH_WRAPPERS:
+            behind = after_launch_wrapper(words, i)
+            if behind is None:
+                break
+            i = behind
         else:
             break
     if i < count:

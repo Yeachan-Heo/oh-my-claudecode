@@ -520,7 +520,7 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       values.forEach((value, index) => assert.deepEqual(kinds[index], ['S', 'S', 'k'], `${value}: pytest, npm test and ask-advisor are read`));
       // The target of a redirection and the words after it belong to the command before it; a substitution opens no command.
       const quiet = ['echo hi > pytest', 'echo hi 2>&1 pytest', 'cat < pytest', 'echo $(date) pytest', 'echo `date` npm test', 'echo hi > ask-advisor',
-        'echo $(pytest)', 'sudo pytest'];
+        'echo $(pytest)', 'sudo -n pytest', 'sudo -- pytest', 'timeout --foreground 5 pytest', 'nice -5 pytest', 'timeout pytest', 'sudo'];
       const none = pyEval(
         `[m.classify_call("Bash", c, {"is_error": False}, None, __import__("re").compile("ask-advisor")) for c in ${JSON.stringify(quiet)}]`,
       ) as Array<string | null>;
@@ -529,6 +529,11 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       const loud = ['echo hi > f; pytest', 'echo $(date) && npm test', 'echo hi > f | pytest'];
       const got = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(loud)}]`) as string[];
       assert.deepEqual(got, ['S', 'S', 'S']);
+      // The launch wrappers of the table and their options are taken off, sudo and nohup too.
+      const wrapped = ['sudo pytest', 'sudo -u root -E pytest', 'nohup npm test', 'command -p pytest', 'exec -a x pytest', 'nice -n 5 pytest', 'time -p pytest',
+        'timeout -s KILL -k 5s 60 pytest', 'env -i -u A B=1 pytest', 'sudo nohup timeout 5m pytest'];
+      const read = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(wrapped)}]`) as string[];
+      assert.deepEqual(read, wrapped.map(() => 'S'));
       // A long run of prefixes is read in one pass.
       const long = pyEval('[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ["A=\\"b c\\" " * 20000 + "pytest", "> o " * 20000 + "pytest", "$(a) " * 20000 + "pytest"]]');
       assert.deepEqual(long, ['S', 'S', null]);
