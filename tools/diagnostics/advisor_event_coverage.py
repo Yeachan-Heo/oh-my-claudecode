@@ -19,9 +19,13 @@ b. Session class. The model of a session is its most frequent message.model in a
    any model, is class claude. Results are kept apart for the three classes and for the total ("total").
    A session is counted when at least one of its rows lies in the window (all sessions when there is no window).
 c. Consultation. A block tool_use or server_tool_use named "advisor" is a consultation, kind "advisor". A tool_use
-   "Bash" whose command, after leading NAME=value environment assignments, has as its first word one of the
-   --consult-command values (repeatable; none by default) is a consultation, kind "bash-<command>"; the match is
-   on the whole first word, not on a prefix. A command with no word after the assignments is not a consultation.
+   "Bash" whose command, after leading NAME=value environment assignments and redirections, has as its first word one
+   of the --consult-command values (repeatable; none by default) is a consultation, kind "bash-<command>"; the match is
+   on the whole first word, not on a prefix. A value of an assignment is one shell word: it may be quoted
+   (MODE="deep analysis"), hold an escaped space (MODE=deep\\ analysis), be empty (MODE=) or be a command substitution
+   (MODE=$(date), MODE=`date`); a redirection (> out, 2>&1, < in, &> out, with or without a file descriptor) and its
+   target are skipped the same way. A command with no word after them is not a consultation. Launch wrappers (sudo,
+   env, command, nohup, time, timeout) are not read: `sudo ask-advisor` is not a consultation.
    A block counts once (first occurrence of its id). Separately, the declaration lines: lines of assistant text
    that start with the --declaration-prefix (default "ADVISOR:", after leading whitespace) are counted beside the
    consultations; they are not consultations.
@@ -110,7 +114,9 @@ PLAN_DIR_MARKER = "/plans/"
 # File name prefixes of plan and brief files, matched case-insensitively (data).
 PLAN_FILE_PREFIXES = ("plan", "brief")
 TODO_TOOL = "TodoWrite"
-ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=\S*\s+")
+ASSIGNMENT_START_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+EMPTY_SUBSTITUTION_RE = re.compile(r"\$\([ \t]*\)|`[ \t]*`")  # expands to nothing
+REDIRECTION_START_RE = re.compile(r"(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)(?!\()")
 PLAN = "plan"
 FAILURES = "failures"
 END = "end"
@@ -231,13 +237,106 @@ def scan_header(path, window, counters):
     return {"class": session_class(models), "rows": rows, "timed": timed, "in_window": in_window}
 
 
-def strip_env_assignments(command):
-    text = command.lstrip()
-    match = ENV_ASSIGNMENT.match(text)
-    while match:
-        text = text[match.end():]
-        match = ENV_ASSIGNMENT.match(text)
-    return text
+def closing_backtick(text, index):
+    """Index of the first unescaped backtick at or after index, or len(text) when there is none."""
+    length = len(text)
+    while index < length:
+        if text[index] == "\\":
+            index += 2
+        elif text[index] == "`":
+            return index
+        else:
+            index += 1
+    return length
+
+
+def matching_parenthesis(text, index):
+    """Index of the ")" that closes a "$(" whose body starts at text[index], or len(text) when none does. Quotes,
+    escapes and backticks inside hold no parenthesis."""
+    length = len(text)
+    depth = 1
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 1
+        elif char == "'":
+            close = text.find("'", index + 1)
+            if close == -1:
+                return length
+            index = close
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+        elif char == "`":
+            index = closing_backtick(text, index + 1)
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return length
+
+
+def skip_word(text, index):
+    """The index where the shell word that starts at text[index] ends: a quoted string, an escaped character (an escaped
+    space too) and a command substitution belong to the word; an unquoted blank, newline, ";", "&", "|", "(", ")", "<"
+    or ">" ends it."""
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 2
+        elif char == "'":
+            close = text.find("'", index + 1)
+            index = length if close == -1 else close + 1
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+            index += 1
+        elif char == "$" and text[index + 1:index + 2] == "(":
+            index = matching_parenthesis(text, index + 2) + 1
+        elif char == "`":
+            index = closing_backtick(text, index + 1) + 1
+        elif char in " \t\r\n;&|()<>":
+            break
+        else:
+            index += 1
+    return min(index, length)
+
+
+def skip_prefix(text):
+    """The text of a Bash command without the assignments (`FOO=1`) and the redirections (`> out`, `2>&1`, `< in`) that
+    stand before its command word, in any order. The value of an assignment and the target of a redirection are one
+    shell word, so they may hold quotes, escaped spaces and command substitutions; an empty substitution (`$()`) expands
+    to nothing and is skipped. The same function is in
+    user_prohibitions_after_compaction.py: each tool is a standalone script."""
+    length = len(text)
+    index = 0
+    while True:
+        while index < length and text[index] in " \t\r":
+            index += 1
+        match = EMPTY_SUBSTITUTION_RE.match(text, index)
+        if match is not None:
+            index = match.end()
+            continue
+        match = ASSIGNMENT_START_RE.match(text, index)
+        if match is not None:
+            index = skip_word(text, match.end())
+            continue
+        match = REDIRECTION_START_RE.match(text, index)
+        if match is None:
+            return text[index:]
+        start = match.end()
+        while start < length and text[start] in " \t\r":
+            start += 1
+        end = skip_word(text, start)
+        if end == start:
+            return text[index:]
+        index = end
 
 
 class Config:
@@ -257,7 +356,7 @@ def consult_kind(name, tool_input, config):
         command = tool_input.get("command")
         if isinstance(command, str):
             # The first word must equal a consult command, not just start with it.
-            words = strip_env_assignments(command).split()
+            words = skip_prefix(command).split()
             if words and words[0] in config.consult_commands:
                 return "bash-" + words[0]
     return None

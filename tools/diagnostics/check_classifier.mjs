@@ -24,17 +24,88 @@ const SUMMARY_TAIL = 6000;
 // eslint-disable-next-line no-control-regex
 const stripEsc = (output) => output.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
 
+/** Index of the `)` that closes a `$(` whose body starts at `at`, or the length of the text when none does. */
+function matchingParenthesis(text, at) {
+  let depth = 1;
+  for (let i = at; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '\\') i += 1;
+    else if (ch === "'") {
+      const close = text.indexOf("'", i + 1);
+      if (close === -1) return text.length;
+      i = close;
+    } else if (ch === '"') {
+      i += 1;
+      while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+    } else if (ch === '`') i = closingBacktick(text, i + 1);
+    else if (ch === '(') depth += 1;
+    else if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return text.length;
+}
+
+/** Index of the first unescaped backtick at or after `at`, or the length of the text when there is none. */
+function closingBacktick(text, at) {
+  for (let i = at; i < text.length; i += 1) {
+    if (text[i] === '\\') i += 1;
+    else if (text[i] === '`') return i;
+  }
+  return text.length;
+}
+
 /**
- * Drop `#` comments and neutralize quoted strings, so a commit message cannot name a check
- * (`true # npm test` and `git commit -m "npm test"` name nothing) while a quoted operand is still an
+ * Replace every command substitution outside quotes (`$(...)`, a backtick pair) by `placeholder`, so the
+ * substitution is one part of the word it stands in (`A=$(git rev-parse HEAD) npm test` has the assignment
+ * value `A=_`) and its end opens no command position (`echo $(date) git commit` runs only echo). The bodies are
+ * returned apart, for the callers that read them as commands of their own. A substitution with an empty body
+ * (`$()`, two backticks) expands to nothing, so it leaves no word. A substitution that has no end runs to the
+ * end of the text. One pass: a body is skipped once, then read again only at the next nesting level.
+ */
+function splitSubstitutions(text, placeholder) {
+  const bodies = [];
+  let out = '';
+  let from = 0;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') i += 2;
+    else if (ch === "'") {
+      const close = text.indexOf("'", i + 1);
+      i = close === -1 ? text.length : close + 1;
+    } else if (ch === '"') {
+      i += 1;
+      while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+      i += 1;
+    } else if (ch === '`' || (ch === '$' && text[i + 1] === '(')) {
+      const open = ch === '`' ? 1 : 2;
+      const end = ch === '`' ? closingBacktick(text, i + 1) : matchingParenthesis(text, i + 2);
+      const body = text.slice(i + open, end);
+      out += text.slice(from, i) + (body.trim() === '' ? '' : placeholder); // an empty substitution expands to nothing
+      bodies.push(body);
+      i = end + 1;
+      from = i;
+    } else i += 1;
+  }
+  return { text: out + text.slice(from), bodies };
+}
+
+/**
+ * Drop `#` comments and neutralize quoted strings and command substitutions, so a commit message cannot name
+ * a check (`true # npm test` and `git commit -m "npm test"` name nothing) while a quoted operand is still an
  * argument (`pytest "tests/a.py"` narrows the run). A quoted string keeps its text, but whitespace and
  * shell operators inside it become `_`: it stays one word and cannot split the command, start a comment
- * or join the words around it into a runner name. A `#` after an escaped space stays part of a word.
+ * or join the words around it into a runner name. A `#` after an escaped space stays part of a word. A
+ * command substitution outside quotes (`$(...)`, backticks) becomes `_` as a whole, so `A=$(x y) npm test`
+ * keeps `npm test` as its command and the check inside a substitution (`echo $(npm test)`) names none.
  */
 function executedText(command) {
-  return command
+  const plain = command
     .replace(/"[^"]*"|'[^']*'/g, (quoted) => quoted.slice(1, -1).replace(/[\s;&|#!<>()]/g, '_'))
     .replace(/(^|(?<!\\)\s)#[^\n]*/g, '$1');
+  return splitSubstitutions(plain, '_').text;
 }
 
 /** Backslash-newline joins one logical command, so it joins before the shell is split. */
@@ -72,7 +143,7 @@ const NEGATED = /^\s*!/;
  * escaped space. A redirection is no argument and no command word: its target names a file, never a program.
  */
 const REDIRECTION = String.raw`(?:\d+|\{[A-Za-z_]\w*\})?(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)(?!\()\s*(?:\\[\s\S]|[^\s\\])+`;
-const ASSIGNMENT = String.raw`[A-Za-z_][A-Za-z0-9_]*=\S*`;
+const ASSIGNMENT = String.raw`[A-Za-z_][A-Za-z0-9_]*\+?=(?:\\[\s\S]|[^\s\\])*`; // `A+=x` appends; the value may hold an escaped space
 const LEADING_REDIRECTIONS = new RegExp(String.raw`^(?:(?:${ASSIGNMENT}|${REDIRECTION})\s+)+`);
 const ALL_REDIRECTIONS = new RegExp(REDIRECTION, 'g');
 
@@ -828,7 +899,7 @@ function programAt(words, start) {
   for (;;) {
     const word = words[at];
     if (typeof word !== 'string') return at;
-    if (/^[A-Za-z_]\w*=/.test(word)) {
+    if (/^[A-Za-z_]\w*\+?=/.test(word)) {
       at += 1;
       continue;
     }
@@ -1040,7 +1111,7 @@ const ddTargets = (args) => args.filter((arg) => arg.startsWith('of=') && arg.le
 function shellWriteTargets(command, depth = 0) {
   const QUOTED = String.raw`"(?:[^"\\]|\\[\s\S])*"|'[^']*'`; // a double-quoted string may hold \"
   const WORD = String.raw`(?:${QUOTED}|\\[^\n]|[^\s;&|)<>"'\\])+`;
-  const text = withoutHeredocBodies(command);
+  const { text, bodies } = splitSubstitutions(withoutHeredocBodies(command), '_');
   const targets = [];
   const unquote = (raw) => shellWords(raw).find((word) => word !== null && word !== '');
   const scan = new RegExp(
@@ -1063,7 +1134,7 @@ function shellWriteTargets(command, depth = 0) {
     else if (program === 'dd') targets.push(...ddTargets(words.slice(at + 1, end)));
   }
   if (depth < NESTED_MAX_DEPTH) {
-    for (const nested of nestedCommandStrings(words, programs)) {
+    for (const nested of [...nestedCommandStrings(words, programs), ...bodies]) {
       if (nested.length <= NESTED_MAX_LENGTH) targets.push(...shellWriteTargets(nested, depth + 1));
     }
   }

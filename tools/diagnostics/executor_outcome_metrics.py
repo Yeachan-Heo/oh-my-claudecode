@@ -55,7 +55,9 @@ ERROR_FIELD_STATUS = {}  # error field value -> HTTP status; empty by default, e
 MODEL_SUFFIX = re.compile(r"\[[^\]]*\]$")  # context-window suffix such as "[1m]"
 # a final answer whose trimmed end is a dangling operator or opener, or a declaration or return keyword
 DANGLING_END = re.compile(r"(?:,|&&|\|\||=>|[+\-*/%=]|[(\[{]|:|\b(?:const|let|var|function|return))$")
-ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
+REDIRECTION_OPERATOR = re.compile(r"^(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)$")
+FILE_DESCRIPTOR = re.compile(r"^(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})$")
 SECONDS_ARG = re.compile(r"^\d+(?:\.\d+)?[a-zA-Z]?$")
 NICE_ARG = re.compile(r"^-?\d+$")
 SEGMENT_OPERATORS = ("&&", "||", ";", "|", "&")
@@ -500,11 +502,88 @@ def drop_heredocs(command):
     return "\n".join(kept)
 
 
+def closing_backtick(text, index):
+    """Index of the first unescaped backtick at or after index, or len(text) when there is none."""
+    length = len(text)
+    while index < length:
+        if text[index] == "\\":
+            index += 2
+        elif text[index] == "`":
+            return index
+        else:
+            index += 1
+    return length
+
+
+def matching_parenthesis(text, index):
+    """Index of the ")" that closes a "$(" whose body starts at text[index], or len(text) when none does. Quotes,
+    escapes and backticks inside hold no parenthesis."""
+    length = len(text)
+    depth = 1
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 1
+        elif char == "'":
+            close = text.find("'", index + 1)
+            if close == -1:
+                return length
+            index = close
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+        elif char == "`":
+            index = closing_backtick(text, index + 1)
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return length
+
+
+def mask_substitutions(text):
+    """Text with every command substitution outside quotes ("$(...)", a backtick pair) replaced by "_", so the
+    substitution is one part of the word it stands in (`A=$(date) pytest` has the assignment value `A=_`) and its
+    end opens no command position (`echo $(date) pytest` runs only echo). The body is not read as a command. A
+    substitution with an empty body expands to nothing and leaves no word. A substitution with no end runs to the
+    end of the text."""
+    out = []
+    length = len(text)
+    start = 0
+    index = 0
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 2
+        elif char == "'":
+            close = text.find("'", index + 1)
+            index = length if close == -1 else close + 1
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+            index += 1
+        elif char == "`" or (char == "$" and text[index + 1:index + 2] == "("):
+            end = closing_backtick(text, index + 1) if char == "`" else matching_parenthesis(text, index + 2)
+            body = text[index + (1 if char == "`" else 2):end]
+            out.append(text[start:index] + ("_" if body.strip() else ""))  # an empty substitution expands to nothing
+            index = end + 1
+            start = index
+        else:
+            index += 1
+    out.append(text[start:])
+    return "".join(out)
+
+
 def command_segments(command):
     """Segments of a Bash command as word lists, split at && || ; | & and new lines.
     Comments and heredoc bodies are removed first. shlex is used; on a shlex error a plain split is used."""
     text = "\n".join(strip_comments(line) for line in command.replace("\r", "\n").split("\n"))
-    text = drop_heredocs(text)
+    text = mask_substitutions(drop_heredocs(text))
     text = text.replace("\n", ";")
     try:
         lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
@@ -528,14 +607,18 @@ def command_segments(command):
 
 
 def program_of_segment(words):
-    """(program, arguments) after removing prefixes: environment assignments, env with options, timeout with
-    options and seconds, nice with a value, time, command, exec."""
+    """(program, arguments) after removing prefixes: environment assignments, redirections (`> out`, `2>&1`, `< in`),
+    env with options, timeout with options and seconds, nice with a value, time, command, exec."""
     i = 0
     count = len(words)
     while i < count:
         word = words[i]
         if ENV_ASSIGNMENT.match(word):
             i += 1
+        elif REDIRECTION_OPERATOR.match(word):  # the operator and its target are no command word
+            i += 2
+        elif FILE_DESCRIPTOR.match(word) and i + 1 < count and REDIRECTION_OPERATOR.match(words[i + 1]):
+            i += 3
         elif word == "env":
             i += 1
             while i < count:

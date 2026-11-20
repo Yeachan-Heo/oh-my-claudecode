@@ -339,6 +339,87 @@ for _word in ("!", "{", "if", "then", "elif", "else", "do", "while", "until"):
 HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?[ \t]*\\?(['\"]?)(\w+)\1")
 
 
+def closing_backtick(text, index):
+    """Index of the first unescaped backtick at or after index, or len(text) when there is none."""
+    length = len(text)
+    while index < length:
+        if text[index] == "\\":
+            index += 2
+        elif text[index] == "`":
+            return index
+        else:
+            index += 1
+    return length
+
+
+def matching_parenthesis(text, index):
+    """Index of the ")" that closes a "$(" whose body starts at text[index], or len(text) when none does. Quotes,
+    escapes and backticks inside hold no parenthesis."""
+    length = len(text)
+    depth = 1
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 1
+        elif char == "'":
+            close = text.find("'", index + 1)
+            if close == -1:
+                return length
+            index = close
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+        elif char == "`":
+            index = closing_backtick(text, index + 1)
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return length
+
+
+def split_substitutions(text, placeholder="_"):
+    """Replace every command substitution outside quotes ("$(...)", a backtick pair) by the placeholder, so the
+    substitution is one part of the word it stands in (`A=$(git rev-parse HEAD) git commit` has the assignment value
+    `A=_`) and its end opens no command position (`echo $(date) git commit` runs only echo). Returns the new text and
+    the bodies of the substitutions, for the caller that reads them as commands of their own. A substitution with an
+    empty body expands to nothing and leaves no word. A substitution with no end runs to the end of the text. One pass: a body is skipped once, then read again only at the next nesting level."""
+    bodies = []
+    out = []
+    length = len(text)
+    start = 0
+    index = 0
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 2
+        elif char == "'":
+            close = text.find("'", index + 1)
+            index = length if close == -1 else close + 1
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+            index += 1
+        elif char == "`" or (char == "$" and text[index + 1:index + 2] == "("):
+            opening = 1 if char == "`" else 2
+            end = closing_backtick(text, index + 1) if char == "`" else matching_parenthesis(text, index + 2)
+            body = text[index + opening:end]
+            out.append(text[start:index])
+            out.append(placeholder if body.strip() else "")  # an empty substitution expands to nothing
+            bodies.append(body)
+            index = end + 1
+            start = index
+        else:
+            index += 1
+    out.append(text[start:])
+    return "".join(out), bodies
+
+
 FILE_DESCRIPTOR_RE = re.compile(r"[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\}")
 
 
@@ -587,7 +668,8 @@ def nested_command_strings(words, at, end):
 
 def read_commands(text, depth):
     """The commands of a shell text, each as the tuple of its words (the program first), nested strings included."""
-    words = shell_words(without_heredoc_bodies(text))
+    text, bodies = split_substitutions(without_heredoc_bodies(text))
+    words = shell_words(text)
     found = []
     for at, end in command_programs(words):
         found.append(tuple(words[at:end]))
@@ -595,6 +677,10 @@ def read_commands(text, depth):
             for nested in nested_command_strings(words, at, end):
                 if len(nested) <= NESTED_MAX_LENGTH:
                     found.extend(read_commands(nested, depth + 1))
+    if depth < NESTED_MAX_DEPTH:
+        for body in bodies:
+            if len(body) <= NESTED_MAX_LENGTH:
+                found.extend(read_commands(body, depth + 1))
     return found
 
 
@@ -660,7 +746,7 @@ READ_ONLY_COMMANDS = frozenset((
 ))
 READ_ONLY_GIT_SUBCOMMANDS = frozenset(("status", "log", "diff", "show", "branch", "rev-parse", "merge-base"))
 FIND_ACTION_OPTIONS = frozenset(("-delete", "-exec", "-execdir", "-ok", "-okdir"))
-ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
 SED_IN_PLACE_RE = re.compile(r"-[A-Za-z]*i")  # -i, -ni, -i.bak
 # A write redirection to a file: ">", ">>", ">|" or ">&file" (not ">&2" or ">&-", which name a descriptor), not aimed at /dev/null.
 REDIRECT_WRITE_RE = re.compile(r"(?<!>)(?:>{1,2}(?![>&])|>&(?![0-9-]))\s*(?!/dev/null(?:\s|$))\S")
@@ -1026,12 +1112,14 @@ def match_candidates(session, boundaries, prohibitions):
 
 
 ASSIGNMENT_START_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
+EMPTY_SUBSTITUTION_RE = re.compile(r"\$\([ \t]*\)|`[ \t]*`")  # expands to nothing
 REDIRECTION_START_RE = re.compile(r"(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)(?!\()")
 
 
 def skip_word(text, index):
-    """The index where the shell word that starts at text[index] ends: a quoted string and an escaped character
-    (an escaped space too) belong to the word; an unquoted blank, newline, ";", "&", "|", "(", ")", "<" or ">" ends it."""
+    """The index where the shell word that starts at text[index] ends: a quoted string, an escaped character (an escaped
+    space too) and a command substitution belong to the word; an unquoted blank, newline, ";", "&", "|", "(", ")", "<"
+    or ">" ends it."""
     length = len(text)
     while index < length:
         char = text[index]
@@ -1045,6 +1133,10 @@ def skip_word(text, index):
             while index < length and text[index] != '"':
                 index += 2 if text[index] == "\\" else 1
             index += 1
+        elif char == "$" and text[index + 1:index + 2] == "(":
+            index = matching_parenthesis(text, index + 2) + 1
+        elif char == "`":
+            index = closing_backtick(text, index + 1) + 1
         elif char in " \t\r\n;&|()<>":
             break
         else:
@@ -1055,12 +1147,18 @@ def skip_word(text, index):
 def skip_prefix(text):
     """The text of a Bash command without the assignments (`FOO=1`) and the redirections (`> out`, `2>&1`, `< in`) that
     stand before its command word, in any order. The value of an assignment and the target of a redirection are one
-    shell word, so they may hold quotes and escaped spaces."""
+    shell word, so they may hold quotes, escaped spaces and command substitutions; an empty substitution (`$()`)
+    expands to nothing and is skipped. The same function is in advisor_event_coverage.py: each tool is a standalone
+    script."""
     length = len(text)
     index = 0
     while True:
         while index < length and text[index] in " \t\r":
             index += 1
+        match = EMPTY_SUBSTITUTION_RE.match(text, index)
+        if match is not None:
+            index = match.end()
+            continue
         match = ASSIGNMENT_START_RE.match(text, index)
         if match is not None:
             index = skip_word(text, match.end())

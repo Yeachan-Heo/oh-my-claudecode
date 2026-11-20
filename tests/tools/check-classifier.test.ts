@@ -1041,6 +1041,50 @@ it('a redirection is no command word and no argument: the command after leading 
   assert.equal(checkResult('2>&1 npm test', 'ok', 0).verdict, 'passed');
 });
 
+it('the value of a leading assignment is one shell word: quoted, with an escaped space, empty or a command substitution', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  const values = [
+    'MODE="deep analysis"', "MODE='deep analysis'", 'MODE=deep\\ analysis', 'MODE=', 'A=$(date)', 'A=$(git rev-parse HEAD)', 'A=$(a b c)',
+    'A=`date`', 'A=`a b`', 'A="$(a b)"', 'A=$(echo ")")', 'A=$(a $(b c))', 'A="x y"z', 'A=x"y z"', 'A=$(date)x', 'A+=y', 'A=b\\ c\\ d',
+  ];
+  for (const value of values) {
+    for (const prefix of ['', 'B=1 ', 'env C=2 ', '> out.log ', '2>&1 ']) {
+      const got = classifyCommand(`${prefix}${value} npm test`);
+      assert.equal(got.isCheck, true, `${prefix}${value} npm test: a check`);
+      assert.equal(got.runner, 'npm', `${prefix}${value} npm test: the runner`);
+      assert.equal(got.narrowed, false, `${prefix}${value} npm test: the value narrows nothing`);
+      assert.equal(edits(`${prefix}${value} tee src/a.ts`), true, `${prefix}${value} tee src/a.ts: tee is the command`);
+      assert.equal(edits(`${prefix}${value} cp a src/a.ts`), true, `${prefix}${value} cp: cp is the command`);
+      assert.equal(edits(`${prefix}${value} tee README.md`), false, `${prefix}${value} tee README.md: an ignored target`);
+    }
+  }
+  assert.equal(classifyCommand('MODE="deep analysis" pytest tests/a.py').narrowed, true, 'a file operand after the assignment narrows');
+  assert.equal(checkResult('MODE="a b" npm test', 'boom', 1).verdict, 'failed');
+  // A command substitution is one part of the word it stands in; its end opens no command word.
+  assert.equal(classifyCommand('echo $(date) npm test').isCheck, false, 'npm test is an argument of echo');
+  assert.equal(classifyCommand('echo `date` npm test').isCheck, false);
+  assert.equal(classifyCommand('echo $(npm test)').isCheck, false, 'the check inside a substitution is no check of the command');
+  assert.equal(classifyCommand('echo x $(date) && npm test').isCheck, true, 'a boundary after the substitution opens a command');
+  assert.equal(edits('echo $(date) tee src/a.ts'), false);
+  assert.equal(edits('echo `date` tee src/a.ts'), false);
+  assert.equal(edits('A=$(date) echo x > src/a.ts'), true);
+  // The body of a substitution is a command of its own.
+  assert.equal(edits('echo $(tee src/a.ts)'), true);
+  assert.equal(edits('echo `tee src/a.ts`'), true);
+  assert.equal(edits('A=$(tee src/a.ts) true'), true);
+  assert.equal(edits('A=$(cp a src/a.ts) true'), true);
+  assert.equal(edits('echo $(echo $(tee src/a.ts))'), true, 'nested substitutions');
+  assert.equal(edits('A=$(date) true'), false);
+  assert.equal(edits('$() tee src/a.ts'), true, 'an empty substitution expands to nothing: tee is the command');
+  assert.equal(edits('`` cp a src/a.ts'), true);
+  assert.equal(classifyCommand('$() npm test').isCheck, true);
+  assert.equal(edits('A=$(echo ")" > src/a.ts) true'), true, 'a quoted parenthesis does not end the substitution');
+  // An open substitution runs to the end of the text and reads no further word.
+  assert.equal(classifyCommand('echo $(npm test').isCheck, false);
+  assert.equal(edits('echo $(date'), false);
+  assert.equal(edits('echo `date'), false);
+});
+
 it('leading redirections, assignments and wrappers are read in linear time', () => {
   const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
   const got = classifyInChild<boolean>([

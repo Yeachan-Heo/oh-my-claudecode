@@ -743,6 +743,40 @@ describe('user prohibitions after compaction', () => {
     expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);
   });
 
+  it('the value of a leading assignment is one shell word: quoted, with an escaped space, empty or a command substitution', () => {
+    const values = [
+      'MODE="deep analysis"', "MODE='deep analysis'", 'MODE=deep\\ analysis', 'MODE=', 'A=$(date)', 'A=$(git rev-parse HEAD)', 'A=$(a b c)',
+      'A=`date`', 'A=`a b`', 'A="$(a b)"', 'A=$(echo ")")', 'A=$(a $(b c))', 'A="x y"z', 'A=x"y z"', 'A=$(date)x', 'A+=y', 'A=b\\ c\\ d',
+    ];
+    const forms: string[] = [];
+    for (const value of values) for (const prefix of ['', 'B=1 ', 'env C=2 ', '> out ', '2>&1 ', 'sudo ']) forms.push(`${prefix}${value} git commit -m x`);
+    const found = pyEval('[module.command_matches("commit", c) for c in argument]', forms);
+    forms.forEach((form, index) => expect(found[index], form).toBe(true));
+    const readOnly = pyEval('[module.is_read_only_command(c) for c in argument]', values.map((value) => `${value} git status`));
+    values.forEach((value, index) => expect(readOnly[index], `${value} git status`).toBe(true));
+    const changing = pyEval('[module.is_read_only_command(c) for c in argument]', values.map((value) => `${value} rm x`));
+    values.forEach((value, index) => expect(changing[index], `${value} rm x`).toBe(false));
+    // A command substitution is one part of the word it stands in; its end opens no command word.
+    const quiet = ['echo $(date) git commit', 'echo `date` git commit', 'echo x $(date) git commit', 'echo $(date)git commit',
+      'echo $(a (b) c) git commit', 'echo $(echo ")") git commit'];
+    const none = pyEval('[module.command_matches("commit", c) for c in argument]', quiet);
+    quiet.forEach((form, index) => expect(none[index], form).toBe(false));
+    // The body of a substitution is a command of its own, and a boundary after the substitution opens a command.
+    const loud = ['echo $(git commit)', 'echo `git commit`', 'A=$(git commit) true', 'echo $(echo $(git commit))', 'echo $(date) && git commit',
+      'echo $(date); git commit', 'echo "$(date)" && git commit', 'echo $(echo ")" ; git commit)',
+      // An empty substitution expands to nothing, so the next word is the command.
+      '$() git commit', '`` git commit', 'A=$() git commit'];
+    const got = pyEval('[module.command_matches("commit", c) for c in argument]', loud);
+    loud.forEach((form, index) => expect(got[index], form).toBe(true));
+    expect(pyEval('[module.is_read_only_command(c) for c in argument]', ['$() ls', '`` git status', '$() rm x'])).toEqual([true, true, false]);
+    // An open substitution runs to the end of the text and reads no further word.
+    const open = pyEval('[module.command_matches("commit", c) for c in argument]', ['echo $(date git commit', 'echo `date git commit']);
+    expect(open).toEqual([false, false]);
+    // The substitution reading is linear: a long run of substitutions is read in one pass.
+    const long = pyEval('module.command_matches("commit", argument)', 'echo ' + '$(a) '.repeat(20000) + 'git commit');
+    expect(long).toBe(false);
+  });
+
   it('git options: the value of -C, -c and the long options is not the subcommand, and the subcommand is a whole word', () => {
     const cases: Array<[string, string, boolean]> = [
       // An option value that reads like the subcommand, or a subcommand that only starts like it.

@@ -335,6 +335,36 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
     expect(group(report, 'plan', 'total').n).toBe(4);
   });
 
+  it('a consultation is the first word after leading assignments and redirections, whatever the value or the target holds', () => {
+    const values = [
+      'MODE="deep analysis"', "MODE='deep analysis'", 'MODE=deep\\ analysis', 'MODE=', 'A=$(date)', 'A=$(a b c)', 'A=`date`', 'A="$(a b)"',
+      'A=$(echo ")")', 'A=$(a $(b c))', 'A="x y"z', 'A=x"y z"', 'A+=y', 'A=b\\ c\\ d', 'B=1 MODE="a b"', '> out.log', '2>&1', '&> all.log', '< in.txt',
+      '>| out', '>>out', '2> err', '{fd}> out', '> "my out.log"', '> out.log MODE="a b"', 'MODE="a b" 2>&1', '>f\\ x',
+    ];
+    const hits = values.map((value) => `${value} ask-advisor --ask`);
+    const misses = [
+      'echo $(date) ask-advisor', 'echo `date` ask-advisor', 'echo hi > ask-advisor', 'echo hi 2>&1 ask-advisor', 'cat < ask-advisor', 'echo $(ask-advisor)',
+      'MODE="a b" echo ask-advisor', 'MODE="a b" ask-advisor-extra', '> ask-advisor', 'MODE="a b"', '2>&1', 'MODE="a b" > ',
+      // Launch wrappers are not read: the first word is the wrapper.
+      'sudo ask-advisor', 'env A=1 ask-advisor', 'command ask-advisor', 'nohup ask-advisor', 'time ask-advisor', 'timeout 5 ask-advisor',
+    ];
+    const calls = [...hits, ...misses].map((command, index) => assistant(index + 1, [bash(`b${index}`, command)]));
+    const report = runReport(makeTree('prefix-forms', { 'proj/s1.jsonl': calls }), ['--consult-command', 'ask-advisor']);
+    expect(report.consultations['bash-ask-advisor'].total).toBe(hits.length);
+    // An empty substitution expands to nothing, so the next word is the first word.
+    const empty = runReport(
+      makeTree('empty-substitution', { 'proj/s1.jsonl': [assistant(1, [bash('e1', '$() ask-advisor')]), assistant(2, [bash('e2', '`` ask-advisor')])] }),
+      ['--consult-command', 'ask-advisor'],
+    );
+    expect(empty.consultations['bash-ask-advisor'].total).toBe(2);
+    // A long run of prefixes is read in one pass.
+    const long = runReport(
+      makeTree('long-prefix', { 'proj/s1.jsonl': [assistant(1, [bash('l1', 'A="b c" '.repeat(20000) + 'ask-advisor')]), assistant(2, [bash('l2', '> o '.repeat(20000) + 'ask-advisor')])] }),
+      ['--consult-command', 'ask-advisor'],
+    );
+    expect(long.consultations['bash-ask-advisor'].total).toBe(2);
+  });
+
   it("the first plan has no consultation; the second plan's range starts after the first event", () => {
     const root = makeTree('two-plans', { 'proj/s1.jsonl': [
       assistant(1, [call('p1', 'ExitPlanMode')]),

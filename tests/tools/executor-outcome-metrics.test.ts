@@ -508,6 +508,32 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.equal(task.metrics.test_episodes_without_advisor, 0);
     });
 
+    it('the command word is read after leading assignments and redirections, whatever the value or the target holds', () => {
+      const values = [
+        'MODE="deep analysis"', "MODE='deep analysis'", 'MODE=deep\\ analysis', 'MODE=', 'A=$(date)', 'A=$(a b c)', 'A=`date`', 'A="$(a b)"',
+        'A=$(echo ")")', 'A=$(a $(b c))', 'A+=y', 'B=1 MODE="a b"', '> out.log', '2>&1', '&> all.log', '< in.txt', '>| out', '>>out', '2> err',
+        '{fd}> out', '> "my out.log"', '> out.log MODE="a b"', 'MODE="a b" 2>&1', 'env A=1', 'time > out', '$()',
+      ];
+      const kinds = pyEval(
+        `[[m.classify_call("Bash", v + " " + c, {"is_error": False}, None, __import__("re").compile("ask-advisor")) for c in ("pytest", "npm test", "ask-advisor")] for v in ${JSON.stringify(values)}]`,
+      ) as string[][];
+      values.forEach((value, index) => assert.deepEqual(kinds[index], ['S', 'S', 'k'], `${value}: pytest, npm test and ask-advisor are read`));
+      // The target of a redirection and the words after it belong to the command before it; a substitution opens no command.
+      const quiet = ['echo hi > pytest', 'echo hi 2>&1 pytest', 'cat < pytest', 'echo $(date) pytest', 'echo `date` npm test', 'echo hi > ask-advisor',
+        'echo $(pytest)', 'sudo pytest'];
+      const none = pyEval(
+        `[m.classify_call("Bash", c, {"is_error": False}, None, __import__("re").compile("ask-advisor")) for c in ${JSON.stringify(quiet)}]`,
+      ) as Array<string | null>;
+      quiet.forEach((command, index) => assert.equal(none[index], null, `${command}: no test run`));
+      // A boundary after a redirection or a substitution opens a command again.
+      const loud = ['echo hi > f; pytest', 'echo $(date) && npm test', 'echo hi > f | pytest'];
+      const got = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(loud)}]`) as string[];
+      assert.deepEqual(got, ['S', 'S', 'S']);
+      // A long run of prefixes is read in one pass.
+      const long = pyEval('[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ["A=\\"b c\\" " * 20000 + "pytest", "> o " * 20000 + "pytest", "$(a) " * 20000 + "pytest"]]');
+      assert.deepEqual(long, ['S', 'S', null]);
+    });
+
     it('--test-pattern replaces the built-in list of test runners', () => {
       const lines = [...failed(1, 'a', 'npm test'), ...failed(3, 'b', 'make check'), ...failed(5, 'c', 'make check')];
       const task = taskOf(lines, ['--test-pattern', 'make check']);
