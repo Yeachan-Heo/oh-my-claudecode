@@ -62,8 +62,16 @@ export async function readLatestProviderEvent(
   // the field is display-only, so Windows shows none.
   if (!attemptId || process.platform === 'win32') return { event: 'none' };
   // Read only a regular file reached without symlinks: a FIFO left at the path
-  // would otherwise block the whole monitor cycle.
-  const dirs = [join(teamStateRoot, 'workers'), join(teamStateRoot, 'workers', workerName)];
+  // would otherwise block the whole monitor cycle. The root is
+  // <storage anchor>/state/team/<team>; like assertTeamStatePathSafe(), every
+  // directory below the anchor must be real.
+  const dirs = [
+    dirname(dirname(teamStateRoot)),
+    dirname(teamStateRoot),
+    teamStateRoot,
+    join(teamStateRoot, 'workers'),
+    join(teamStateRoot, 'workers', workerName),
+  ];
   const path = providerEventsPath(teamStateRoot, workerName);
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {

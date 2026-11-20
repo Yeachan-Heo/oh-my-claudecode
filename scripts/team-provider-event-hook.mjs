@@ -1,8 +1,10 @@
 // Claude Code hook for team workers: `node team-provider-event-hook.mjs <Event>`.
 // Appends {"v":1,"event":...,"at":<ms>,"attempt":...} to
 // $OMC_TEAM_STATE_ROOT/workers/<worker>/provider-events.jsonl with one write.
-// It writes only to a regular file: never through a symlinked workers/ or
-// worker directory, a symlinked file, or a FIFO (which could block forever).
+// It writes only to a regular file: never through a symlinked directory below
+// the storage anchor (state/, state/team/, the team root, workers/, the worker
+// directory; the rule of assertTeamStatePathSafe() in src/team/state-paths.ts),
+// a symlinked file, or a FIFO (which could block forever).
 // Directories are checked again after the open, so one swapped for a symlink
 // in between makes the hook skip the write. A no-op on Windows, which ignores
 // O_NOFOLLOW.
@@ -12,7 +14,7 @@
 // builds the settings), so a new event needs no change here.
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import process from 'node:process';
 
 try {
@@ -25,8 +27,9 @@ try {
   if (process.platform !== 'win32' && /^[A-Za-z]+$/.test(event) && attempt && stateRoot && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(worker) && !worker.includes('..')) {
     // No mkdir: a missing worker directory means the team is gone, and the hook
     // must not recreate cleaned-up state.
-    const dirs = [join(stateRoot, 'workers'), join(stateRoot, 'workers', worker)];
-    const path = join(dirs[1], 'provider-events.jsonl');
+    // The root is <storage anchor>/state/team/<team>.
+    const dirs = [dirname(dirname(stateRoot)), dirname(stateRoot), stateRoot, join(stateRoot, 'workers'), join(stateRoot, 'workers', worker)];
+    const path = join(dirs[4], 'provider-events.jsonl');
     const before = await Promise.all(dirs.map(dir => lstat(dir)));
     const handle = before.every(stats => stats.isDirectory())
       ? await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK)
