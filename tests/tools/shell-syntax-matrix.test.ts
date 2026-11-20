@@ -41,17 +41,16 @@ const PREFIXES: Array<[string, Reads]> = [
   ['>a\\ b.log ', ALL], ['<<< x ', ALL], ['2>/dev/null ', ALL], ['>&2 ', ALL], ['3< in.txt ', ALL], ['> out.log > out2.log ', ALL], ['2>&1 > out.log ', ALL],
   // assignments and redirections together, in both orders
   ['A=1 > out.log ', ALL], ['> out.log A=1 ', ALL], ['A="b c" 2>&1 ', ALL], ['> out.log 2>&1 A=$(d) ', ALL], ['A=1 B="c d" < in.txt 2> err.log ', ALL],
-  // launch wrappers: env, time and timeout are read by the check reading; command, exec and nice are not; sudo and nohup are
-  // read by neither the check reading nor the metrics
+  // launch wrappers: every wrapper of the table is read by the check reading; the metrics reading does not read sudo and nohup
   ['env ', except(...NO_WRAPPER)], ['env A=1 ', except(...NO_WRAPPER)], ['time ', except(...NO_WRAPPER)], ['timeout 5 ', except(...NO_WRAPPER)],
-  ['command ', except('check', ...NO_WRAPPER)], ['exec ', except('check', ...NO_WRAPPER)], ['nice -n 5 ', except('check', ...NO_WRAPPER)],
-  ['sudo ', except('check', 'metrics', ...NO_WRAPPER)], ['nohup ', except('check', 'metrics', ...NO_WRAPPER)], ['sudo -u root ', except('check', 'metrics', ...NO_WRAPPER)],
+  ['command ', except(...NO_WRAPPER)], ['exec ', except(...NO_WRAPPER)], ['nice -n 5 ', except(...NO_WRAPPER)],
+  ['sudo ', except('metrics', ...NO_WRAPPER)], ['nohup ', except('metrics', ...NO_WRAPPER)], ['sudo -u root ', except('metrics', ...NO_WRAPPER)],
   // wrappers with assignments and redirections, and wrappers with each other
   ['A=1 env ', except(...NO_WRAPPER)], ['A="b c" time ', except(...NO_WRAPPER)], ['env > out.log ', except(...NO_WRAPPER)], ['> out.log env ', except(...NO_WRAPPER)],
-  ['time > out.log ', except(...NO_WRAPPER)], ['env A=1 time ', except(...NO_WRAPPER)], ['A=1 sudo ', except('check', 'metrics', ...NO_WRAPPER)],
-  ['sudo A=1 ', except('check', 'metrics', ...NO_WRAPPER)], ['> out.log sudo ', except('check', 'metrics', ...NO_WRAPPER)], ['sudo > out.log ', except('check', 'metrics', ...NO_WRAPPER)],
-  ['sudo env A=1 nohup ', except('check', 'metrics', ...NO_WRAPPER)], ['time sudo ', except('check', 'metrics', ...NO_WRAPPER)], ['env sudo ', except('check', 'metrics', ...NO_WRAPPER)],
-  ['command nohup ', except('check', 'metrics', ...NO_WRAPPER)],
+  ['time > out.log ', except(...NO_WRAPPER)], ['env A=1 time ', except(...NO_WRAPPER)], ['A=1 sudo ', except('metrics', ...NO_WRAPPER)],
+  ['sudo A=1 ', except('metrics', ...NO_WRAPPER)], ['> out.log sudo ', except('metrics', ...NO_WRAPPER)], ['sudo > out.log ', except('metrics', ...NO_WRAPPER)],
+  ['sudo env A=1 nohup ', except('metrics', ...NO_WRAPPER)], ['time sudo ', except('metrics', ...NO_WRAPPER)], ['env sudo ', except('metrics', ...NO_WRAPPER)],
+  ['command nohup ', except('metrics', ...NO_WRAPPER)],
 ];
 
 // The command words each reading looks for, as the text that follows the prefix.

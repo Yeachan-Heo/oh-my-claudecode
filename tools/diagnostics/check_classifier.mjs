@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.20.3';
+export const RULES_VERSION = '2026.11.20.4';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
@@ -147,12 +147,91 @@ const ASSIGNMENT = String.raw`[A-Za-z_][A-Za-z0-9_]*\+?=(?:\\[\s\S]|[^\s\\])*`; 
 const LEADING_REDIRECTIONS = new RegExp(String.raw`^(?:(?:${ASSIGNMENT}|${REDIRECTION})\s+)+`);
 const ALL_REDIRECTIONS = new RegExp(REDIRECTION, 'g');
 
+/**
+ * Launch wrappers that are taken off in front of the command word, and the options each one is known by. A wrapper does not
+ * change what the command behind it does, so `sudo git commit` and `timeout 60 npm test` read like the bare command. The same
+ * table is in the Python tools of this directory that look for a command word (each tool is a standalone script):
+ *
+ *   sudo     -E | --preserve-env[=LIST]    -u USER | --user USER | --user=USER
+ *   nohup    (no options)
+ *   command  -p
+ *   exec     -a NAME
+ *   nice     -n N | -nN | --adjustment N | --adjustment=N
+ *   time     -p
+ *   timeout  -s SIGNAL | --signal SIGNAL | --signal=SIGNAL    -k DURATION | --kill-after DURATION | --kill-after=DURATION
+ *            then DURATION (a number with an optional s, m, h or d)
+ *   env      -i | --ignore-environment    -u NAME | --unset NAME | --unset=NAME    (NAME=VALUE words follow, see below)
+ *
+ * The options are those of `--help` of sudo 1.9.16 and GNU coreutils 9.7 (nice, timeout, env) and of `help` of bash 5.2
+ * (command, exec, time). Assignments and redirections may stand in front of a wrapper and between two of them
+ * (LEADING_REDIRECTIONS), which is also where the `NAME=VALUE` words of `env` and `sudo` go. An option that is not in the
+ * table (`sudo -n`, `timeout --foreground`, `nice -5`, `env -S`), the end-of-options word `--`, a wrapper with no command and a
+ * `timeout` with no duration end the stripping: the command is left as it is, so it is no runner and nothing is guessed. At
+ * most eight wrappers in a row are taken off (stripWrappers), so a degenerate chain reads nothing.
+ */
+const DURATION = /^(?:\d+\.?\d*|\.\d+)[smhd]?$/;
+const launchWrapper = ({ flags = [], values = [], optionalValue = [], duration = false }) => ({ flags: new Set(flags), values: new Set(values), optionalValue: new Set(optionalValue), duration });
+const LAUNCH_TABLE = new Map([
+  ['sudo', launchWrapper({ flags: ['-E'], values: ['-u', '--user'], optionalValue: ['--preserve-env'] })],
+  ['nohup', launchWrapper({})],
+  ['command', launchWrapper({ flags: ['-p'] })],
+  ['exec', launchWrapper({ values: ['-a'] })],
+  ['nice', launchWrapper({ values: ['-n', '--adjustment'] })],
+  ['time', launchWrapper({ flags: ['-p'] })],
+  ['timeout', launchWrapper({ values: ['-s', '--signal', '-k', '--kill-after'], duration: true })],
+  ['env', launchWrapper({ flags: ['-i', '--ignore-environment'], values: ['-u', '--unset'] })],
+]);
+
+/** The next word of `text` and the text behind it (with the blanks after the word), or null when no word is left. */
+const nextWord = (text) => {
+  const found = /^(\S+)\s*/.exec(text);
+  return found === null ? null : { word: found[1], rest: text.slice(found[0].length) };
+};
+
+/** Whether `word` is an option of the wrapper with its value glued on: `-nN`, `-uUSER`, `--user=USER`, `--preserve-env=LIST`. */
+function gluedOption(word, spec) {
+  if (word.startsWith('--')) {
+    const at = word.indexOf('=');
+    if (at === -1) return false;
+    const name = word.slice(0, at);
+    return spec.values.has(name) || spec.optionalValue.has(name);
+  }
+  return word.length > 2 && word.startsWith('-') && spec.values.has(word.slice(0, 2));
+}
+
+/** Take one launch wrapper and its options off the front of `text`; the text is returned as it is when it starts with none. */
+function stripLaunchWrapper(text) {
+  const first = nextWord(text);
+  if (first === null) return text;
+  const spec = LAUNCH_TABLE.get(baseName(first.word));
+  if (spec === undefined) return text;
+  let rest = first.rest;
+  let durations = spec.duration ? 1 : 0;
+  for (;;) {
+    const next = nextWord(rest);
+    if (next === null) return text; // a wrapper with no command behind it
+    const { word } = next;
+    if (spec.flags.has(word) || spec.optionalValue.has(word) || gluedOption(word, spec)) {
+      rest = next.rest;
+    } else if (spec.values.has(word)) {
+      const value = nextWord(next.rest);
+      if (value === null) return text;
+      rest = value.rest;
+    } else if (word.startsWith('-')) {
+      return text; // an option outside the table, or `--`
+    } else if (durations > 0) {
+      if (!DURATION.test(word)) return text;
+      durations -= 1;
+      rest = next.rest;
+    } else {
+      return rest;
+    }
+  }
+}
+
 /** Launch wrappers stripped before runner matching. */
 const WRAPPERS = [
   LEADING_REDIRECTIONS, // env assignments and redirections before the command word (`CI=1 npm test`, `> out npm test`)
-  /^env\s+(?:-\S+\s+)*/,
-  /^timeout\s+(?:-\S+\s+)*\S+\s+/,
-  /^time\s+(?:-p\s+)?/,
   /^npx\s+/,
   /^bunx\s+/,
   /^pnpm\s+(?:exec|dlx)\s+/,
@@ -166,7 +245,7 @@ const WRAPPERS = [
 function stripWrappers(piece) {
   let current = piece;
   for (let i = 0; i < 8; i += 1) {
-    const next = WRAPPERS.reduce((acc, re) => acc.replace(re, ''), current);
+    const next = stripLaunchWrapper(WRAPPERS.reduce((acc, re) => acc.replace(re, ''), current));
     if (next === current) return next;
     current = next;
   }
@@ -875,7 +954,7 @@ const LAUNCH_WRAPPERS = new Map([
   ['env', launcher(['-u', '-C', '-S', '--unset', '--chdir'])],
   ['command', launcher()],
   ['nohup', launcher()],
-  ['exec', launcher()],
+  ['exec', launcher(['-a'])],
   ['time', launcher(['-f', '-o', '--format', '--output'])],
   ['nice', launcher(['-n', '--adjustment'])],
   ['timeout', launcher(['-s', '-k', '--signal', '--kill-after'], 1)],

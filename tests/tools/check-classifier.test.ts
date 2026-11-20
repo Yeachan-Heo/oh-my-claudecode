@@ -1263,3 +1263,50 @@ it('a long run of package manager flags classifies in linear time and keeps its 
   assert.equal(got[5].isCheck, false);
   assert.deepEqual([got[6].isCheck, got[6].kind], [true, 'test']);
 });
+
+it('launch wrappers are taken off with the options of the table, and the command behind them is read as it is', () => {
+  const bare = classifyCommand('npm test');
+  for (const prefix of [
+    'sudo ', 'sudo -E ', 'sudo --preserve-env ', 'sudo --preserve-env=PATH ', 'sudo -u root ', 'sudo --user root ', 'sudo --user=root ', 'sudo -uroot ',
+    'nohup ', 'command ', 'command -p ', 'exec ', 'exec -a name ', 'nice ', 'nice -n 5 ', 'nice -n5 ', 'nice --adjustment 5 ', 'nice --adjustment=5 ',
+    'time ', 'time -p ', 'timeout 5 ', 'timeout 1.5m ', 'timeout .5 ', 'timeout -s KILL 5 ', 'timeout --signal=KILL 5 ', 'timeout -k 2 5 ',
+    'timeout -s KILL -k 2s 5 ', 'timeout --kill-after 2 5 ', 'env ', 'env -i ', 'env --ignore-environment ', 'env -u NAME ', 'env --unset NAME ', 'env --unset=NAME ',
+    'env A=1 ', 'sudo env A=1 nohup ', 'sudo A=1 ', 'nice -n 5 timeout 5 sudo -u root env -i A=1 ', '/usr/bin/env ', '/usr/bin/sudo ', 'sudo > out.log ',
+  ]) {
+    assert.deepEqual(classifyCommand(`${prefix}npm test`), bare, `${prefix}npm test reads like npm test`);
+    assert.equal(classifyCommand(`${prefix}pytest tests/a.py`).narrowed, true, `${prefix}: the arguments of the command still narrow it`);
+  }
+});
+
+it('a wrapper option outside the table, `--`, a wrapper with no command and a timeout with no duration read nothing', () => {
+  for (const command of [
+    'sudo -n npm test', 'sudo -k npm test', 'sudo -- npm test', 'sudo -u', 'sudo -u root', 'sudo', 'nohup', 'nohup -- npm test', 'nohup -x npm test', 'command -v npm test',
+    'command -- npm test', 'exec -c npm test', 'exec -a', 'nice -5 npm test', 'nice -n', 'time -v npm test', 'time -f %e npm test', 'timeout npm test', 'timeout 5', 'timeout',
+    'timeout abc npm test', 'timeout --foreground 5 npm test', 'timeout -s', 'env -S x npm test', 'env -0 npm test', 'env -- npm test', 'env -u', 'sudo -n sudo npm test',
+    'sudo -E -n npm test', 'timeout 5 sudo -n npm test',
+  ]) {
+    assert.equal(classifyCommand(command).isCheck, false, `${command}: not read`);
+  }
+  // The stop is at the option: what stands before it is still stripped, and the command is never guessed.
+  assert.equal(classifyCommand('FOO=1 sudo -n npm test').isCheck, false);
+  assert.equal(classifyCommand('echo hi && sudo -n npm test').isCheck, false);
+  assert.equal(classifyCommand('sudo -n npm test; npm test').isCheck, true, 'the next command of the line is read on its own');
+});
+
+it('the wrapper table is read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  for (const piece of ['sudo -E ', 'env -i ', 'nice -n 5 ', 'timeout -s KILL 5 ', 'exec -a x ', 'sudo -u root ']) {
+    for (const command of [`${long(piece)}npm test`, `${long(piece)}-n npm test`, `${piece.repeat(40)}npm test`]) {
+      const started = Date.now();
+      classifyCommand(command);
+      assert.ok(Date.now() - started < 3000, `${piece.trim()}: ${command.length} characters`);
+    }
+  }
+  assert.equal(classifyCommand(`${'sudo -E '.repeat(40)}npm test`).isCheck, false, 'the nesting is capped, so a degenerate chain reads nothing');
+  assert.equal(classifyCommand(`${'sudo -E '.repeat(7)}npm test`).isCheck, true);
+});
+
+it('exec -a NAME writes through the program behind the name', () => {
+  assert.equal(isMutation('Bash', { command: 'exec -a name tee src/a.ts' }), true);
+  assert.equal(isMutation('Bash', { command: 'exec -a name tee README.md' }), false);
+});
