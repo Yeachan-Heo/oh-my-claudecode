@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.20.2';
+export const RULES_VERSION = '2026.11.20.3';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
@@ -166,22 +166,115 @@ function runnerMatch(piece) {
 }
 
 /**
- * Flags that weaken a check (`vitest --passWithNoTests` passes a suite with no tests at all);
- * and flags that select a subset (`vitest -t x`, `-k`, go's `-run`). Weakeners apply to every
- * kind; selectors and file arguments only to tests, where a subset run proves less.
+ * Flags that weaken a check (`vitest --passWithNoTests` passes a suite with no tests at all) apply to every
+ * kind. Options that select a subset of the tests, or none, apply to tests only, where a subset run proves
+ * less. The subset options are listed per runner (SUBSET_OPTIONS); a token names one when it equals the
+ * option or starts with `option=` or `option:` (`-run=X`, `-only-testing:Suite`).
  */
 const WEAKEN = /^(?:--passWithNoTests|--exclude|--testPathIgnorePatterns)(?:=|$)/;
-const SELECT = /^(?:-t|--testNamePattern|-k|--skip|-run)(?:=|$)/;
+
+/** go flags take one or two dashes and an optional `test.` prefix: `-run`, `--run`, `-test.run`. */
+const goOptions = (names) => names.flatMap((name) => [`-${name}`, `--${name}`, `-test.${name}`, `--test.${name}`]);
+
+const JEST_SUBSET = [
+  '-t', '--testNamePattern', '--test-name-pattern', '--testPathPattern', '--testPathPatterns', '--changed', '--onlyChanged', '-o',
+  '--changedSince', '--changedFilesWithAncestor', '--lastCommit', '--related', '--findRelatedTests', '--onlyFailures', '-f',
+  '--shard', '--project', '--projects', '--selectProjects', '--ignoreProjects', '--listTests', '--collectTests', '--dir',
+];
+const SUBSET_OPTIONS = {
+  pytest: [
+    '-m', '-k', '--lf', '--last-failed', '--sw', '--stepwise', '--sw-skip', '--stepwise-skip', '--deselect', '--ignore',
+    '--ignore-glob', '--collect-only', '--co',
+  ],
+  unittest: ['-k'],
+  vitest: JEST_SUBSET,
+  jest: JEST_SUBSET,
+  bun: JEST_SUBSET,
+  mocha: ['-g', '--grep', '-f', '--fgrep', '-i', '--invert', '--dry-run', '--ignore'],
+  ava: ['-m', '--match'],
+  'node-test': ['--test-name-pattern', '--test-skip-pattern', '--test-only', '--test-shard'],
+  go: goOptions(['run', 'skip', 'short', 'list']),
+  // cargo: a test name filter is a positional word, read by cargoNarrows.
+  cargo: [],
+  dotnet: ['--filter', '--list-tests', '-t'],
+  rspec: ['-e', '--example', '-E', '--example-matches', '--tag', '--only-failures', '--next-failure', '--pattern', '--exclude_pattern'],
+  mix: ['--only', '--failed', '--stale', '--partitions', '--dry-run'],
+  phpunit: [
+    '--filter', '--group', '--exclude-group', '--testsuite', '--exclude-testsuite', '--covers', '--uses', '--list-tests',
+    '--list-suites', '--list-groups',
+  ],
+  deno: ['--filter', '--ignore', '--no-run', '--shard'],
+  ctest: [
+    '-R', '--tests-regex', '-E', '--exclude-regex', '-L', '--label-regex', '-LE', '--label-exclude', '-I', '--tests-information',
+    '-N', '--show-only', '--rerun-failed', '--tests-from-file', '--exclude-from-file',
+  ],
+  xcodebuild: ['-only-testing', '-skip-testing', '-only-test-configuration', '-skip-test-configuration'],
+  swift: ['--filter', '--skip', '--list-tests', '-l'],
+  tox: ['-e', '-f', '-m', '-l'],
+  nox: ['-s', '-e', '--session', '-k', '--keywords', '-t', '--tags', '-l', '--list'],
+};
+/** Selectors every runner is read for: the short names that name a subset in most runners. */
+const COMMON_SUBSET = ['-t', '--testNamePattern', '-k', '--skip', '-run'];
+/**
+ * A package manager or make runs a script of unknown content, so it is read for the long options of every
+ * runner and for the short ones that no package manager uses itself.
+ */
+const SCRIPT_SUBSET = new Set([
+  ...COMMON_SUBSET, '-m', '-g',
+  ...Object.values(SUBSET_OPTIONS).flat().filter((name) => name.startsWith('--')),
+]);
+const SUBSET_SETS = new Map(Object.entries(SUBSET_OPTIONS).map(([runner, names]) => [runner, new Set([...COMMON_SUBSET, ...names])]));
+/** pytest and unittest read `-kEXPR`, `-mMARK` and a cluster that ends in the option (`-xk EXPR`). */
+const PYTEST_SHORT_VALUE = /^-(?:[km].+|[A-Za-z]+[km])$/;
+
+/** cargo test options that narrow the run, and the options that take the next word as their value. */
+const CARGO_SUBSET = new Set([
+  '--lib', '--bins', '--bin', '--tests', '--test', '--examples', '--example', '--benches', '--bench', '--doc', '-p', '--package',
+  '--skip', '--ignored', '--list', '--no-run',
+]);
+const CARGO_VALUE_OPTIONS = new Set([
+  '-p', '--package', '--exclude', '-F', '--features', '--target', '--profile', '--target-dir', '--manifest-path', '--color',
+  '--message-format', '-j', '--jobs', '--config', '-Z', '--bin', '--test', '--example', '--bench', '--test-threads', '--format',
+  '--logfile', '--skip', '--shuffle-seed',
+]);
+
+/**
+ * Whether a `cargo test` / `cargo nextest run` command runs a subset: a target or package option, a libtest option
+ * that selects, skips or lists tests, or a positional test name filter (`cargo test foo`). The words that are the
+ * value of an option (`-p foo`, `--test-threads 4`) are not filters.
+ */
+function cargoNarrows(tokens) {
+  let at = tokens.findIndex((token) => token === 'test' || token === 'nextest') + 1;
+  if (at === 0) return false;
+  if (tokens[at] === 'run') at += 1;
+  for (; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    if (token === '--') continue;
+    if (!token.startsWith('-')) return true;
+    if (CARGO_SUBSET.has(token.split('=')[0])) return true;
+    if (!token.includes('=') && CARGO_VALUE_OPTIONS.has(token)) at += 1;
+  }
+  return false;
+}
+
+/** Whether a token of a test command is an option that runs a subset of the tests (or none) for this runner. */
+function selectsSubset(token, runner) {
+  if (!token.startsWith('-')) return false;
+  const names = SCRIPT_RUNNERS.has(runner) ? SCRIPT_SUBSET : SUBSET_SETS.get(runner) ?? new Set(COMMON_SUBSET);
+  if (names.has(token.replace(/[=:][\s\S]*$/, ''))) return true;
+  return (runner === 'pytest' || runner === 'unittest') && PYTEST_SHORT_VALUE.test(token);
+}
 
 /** A non-flag token naming a file shape (`src/a.test.ts`, `tests/a.py::test_x`) narrows a test run. */
 const FILE_TOKEN = /^\S+\.\w{1,8}(?:::\S*)?$/;
 
-/** Whether one stripped piece narrows or weakens its check. */
-function pieceNarrows(piece, kind) {
+/** Whether one stripped piece of a `runner` narrows or weakens its check. */
+function pieceNarrows(piece, kind, runner) {
   const tokens = piece.split(/\s+/).filter(Boolean);
   if (tokens.some((t) => WEAKEN.test(t))) return true;
   if (kind !== 'test') return false;
-  if (tokens.some((t) => SELECT.test(t))) return true;
+  if (tokens.some((t) => selectsSubset(t, runner))) return true;
+  if (runner === 'cargo' && cargoNarrows(tokens)) return true;
   // `./...` (go packages) and trailing-slash directories do not narrow; a file path does.
   return tokens.some((t) => !t.startsWith('-') && !t.endsWith('/') && t !== './...' && FILE_TOKEN.test(t));
 }
@@ -265,7 +358,7 @@ export function classifyCommand(command) {
     return { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail, reason: 'no check runner in command' };
   }
   const strippedCheck = stripWrappers(pieces[check.index].text);
-  const narrowed = pieceNarrows(strippedCheck, check.kind);
+  const narrowed = pieceNarrows(strippedCheck, check.kind, check.runner);
   const reason = hidden
     ? `check exit code hidden (${hidden})`
     : 'check command recognized';

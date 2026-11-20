@@ -186,6 +186,65 @@ it('narrowing and weakening produce narrowed=true', () => {
   }
 });
 
+it('options that run a subset of the tests, or none, narrow a test run of every known runner', () => {
+  const narrowing = [
+    // pytest (options of `pytest --help`): mark and keyword expressions, last failed, stepwise, deselect, ignore, collect only.
+    'pytest -m smoke', 'pytest -msmoke', 'pytest -k "a or b"', 'pytest -kauth', 'pytest -xk auth', 'pytest --lf', 'pytest --last-failed',
+    'pytest --sw', 'pytest --stepwise', 'pytest --sw-skip', 'pytest --deselect tests/a', 'pytest --ignore=tests/slow', 'pytest --ignore-glob "*_slow"',
+    'pytest --collect-only', 'pytest --co', 'python -m pytest -m "not slow"', 'tox -e py311', 'nox -s tests', 'nox -k unit',
+    // vitest, jest, bun
+    'vitest run -t login', 'vitest run --testNamePattern=login', 'vitest --changed', 'vitest run --changed HEAD~1', 'vitest run --shard 1/3',
+    'vitest run --project unit', 'vitest run --dir src', 'jest --onlyChanged', 'jest -o', 'jest --changedSince main', 'jest --lastCommit',
+    'jest --findRelatedTests src/a', 'jest --testPathPattern foo', 'jest --testPathPatterns foo', 'jest --onlyFailures', 'jest --shard=2/4',
+    'jest --selectProjects a', 'jest --listTests', 'bun test --test-name-pattern x', 'bun test -t x',
+    // mocha, ava, node:test, unittest
+    'mocha --grep auth', 'mocha -g auth', 'mocha --fgrep auth', 'mocha --grep auth --invert', 'mocha --dry-run', 'mocha --ignore "test/slow/**"',
+    'ava --match "a*"', 'ava -m x', 'node --test --test-name-pattern=a', 'node --test --test-only', 'node --test --test-shard=1/2',
+    'node --test --test-skip-pattern=a', 'python -m unittest -k auth',
+    // go: one or two dashes, with or without the test. prefix
+    'go test -run TestA ./...', 'go test --run TestA ./...', 'go test -skip TestA ./...', 'go test -short ./...', 'go test -list . ./...', 'go test -test.run=TestA',
+    // cargo: target and package options, libtest options after `--`, a positional filter
+    'cargo test foo', 'cargo test --lib', 'cargo test --bins', 'cargo test --doc', 'cargo test --test api', 'cargo test -p core', 'cargo test --package core',
+    'cargo test -- --skip slow', 'cargo test -- --ignored', 'cargo test -- --list', 'cargo test --no-run', 'cargo test -- foo', 'cargo test -p core foo',
+    'cargo test --release foo', 'cargo nextest run foo', 'cargo test -j 4 foo', 'cargo test --workspace --exclude web',
+    // other runners
+    'dotnet test --filter Category=Unit', 'dotnet test --list-tests', 'rspec -e login', 'rspec --tag fast', 'rspec --only-failures', 'mix test --only wip',
+    'mix test --failed', 'mix test --stale', 'phpunit --filter testA', 'phpunit --group fast', 'phpunit --testsuite unit', 'deno test --filter a', 'deno test --no-run',
+    'ctest -R unit', 'ctest --tests-regex unit', 'ctest -E slow', 'ctest -L fast', 'ctest --rerun-failed', 'ctest -N', 'ctest -I 1,3',
+    'xcodebuild test -only-testing:App/Suite', 'xcodebuild test -skip-testing:App/Slow', 'swift test --filter A', 'swift test --skip A',
+    // package managers and make run a script: the long options of every runner, the short names no package manager uses
+    'npm test -- -m smoke', 'npm test -- --lf', 'npm run test -- --grep a', 'pnpm test --shard 1/2', 'pnpm --filter @x/y test', 'yarn test --onlyChanged',
+    'make test -k a',
+  ];
+  for (const cmd of narrowing) {
+    const got = classifyCommand(cmd);
+    assert.equal(got.isCheck, true, `${cmd}: a check`);
+    assert.equal(got.narrowed, true, `${cmd}: narrowed`);
+    assert.equal(checkResult(cmd, 'ok', 0).verdict, 'undetermined', `${cmd}: a zero exit status is no full check`);
+    assert.equal(checkResult(cmd, 'boom', 1).verdict, 'failed', `${cmd}: a visible failure still fails`);
+  }
+  // Options that only reorder, stop early, print or tune a run select nothing; a value is not a filter.
+  const full = [
+    'pytest --ff', 'pytest --failed-first', 'pytest --nf', 'pytest -x', 'pytest --maxfail=2', 'pytest -vv -ra', 'pytest -p no:cacheprovider', 'pytest --durations=5',
+    'vitest run', 'vitest run --reporter verbose', 'vitest run --coverage', 'jest --ci --coverage', 'jest --bail', 'mocha --bail', 'mocha --reporter dot',
+    'node --test', 'node --test --test-timeout=100', 'python -m unittest -v', 'go test ./...', 'go test -timeout 30s ./...', 'go test -mod=vendor -count=1 ./...',
+    'go test -v -race ./...', 'cargo test', 'cargo test --workspace', 'cargo test --all-features', 'cargo test --release', 'cargo test -- --nocapture',
+    'cargo test -- --test-threads 4', 'cargo test --test-threads=4', 'cargo test -j 4 --features x', 'cargo test --target x86_64-unknown-linux-gnu',
+    'cargo test --target-dir out', 'cargo test --color always', 'dotnet test', 'dotnet test --no-build', 'rspec', 'mix test', 'phpunit', 'deno test',
+    'ctest', 'ctest -j 4', 'make test', 'make check', 'npm test', 'npm test --silent', 'npm run test -- --reporter dot', 'pnpm -r test', 'yarn test --ci',
+    'npm install --ignore-scripts && npm test',
+  ];
+  for (const cmd of full) {
+    const got = classifyCommand(cmd);
+    assert.equal(got.isCheck, true, `${cmd}: a check`);
+    assert.equal(got.narrowed, false, `${cmd}: not narrowed`);
+  }
+  // Subset options are read for tests only: a build or a lint is not a subset of anything.
+  for (const cmd of ['cargo build --lib', 'cargo build -p core', 'cargo clippy -p core', 'go build -run x ./...', 'ruff check -k a', 'eslint -t x src']) {
+    assert.equal(classifyCommand(cmd).narrowed, false, `${cmd}: not a test`);
+  }
+});
+
 it('quoted file operands narrow a test run, and quoted text still names no check', () => {
   const cases: Array<[string, boolean]> = [
     ['pytest "tests/test_auth.py"', true], ["pytest 'tests/test_auth.py'", true],
