@@ -712,7 +712,10 @@ The report (template `compaction-report/1`, metric `user-prohibitions`) holds on
 files and sessions, the boundaries (`host`, `jev`), the user messages (in the period, before a boundary, with a
 prohibition), the prohibitions (total, with a target, general, by class, revoked in the same message), the
 candidates (total, by class, by tool, by boundary kind, sessions with a candidate, unique calls, prohibitions
-with a candidate, history groups), the data quality counters and the method limits.
+with a candidate, history groups), the data quality counters and the method limits. A call is one `tool_use`
+block, told apart by its id and, for a block without an id, by its place in its row, so the unique calls of a row
+with several blocks count each of them (they used to count the row once); the transcript line in `call_line` and
+`call_lines` is still the row.
 
 # Compaction cache cost
 

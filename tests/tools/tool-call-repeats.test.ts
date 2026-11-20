@@ -472,6 +472,16 @@ describe.skipIf(!hasPython3)('tool_call_repeats.py edge cases', () => {
     expect(findings).toEqual([]);
   });
 
+  it('calls in one row are told apart by id, and by their place in the row when a block has none', () => {
+    const agent = (id?: string) => ({ type: 'tool_use', ...(id === undefined ? {} : { id }), name: 'Agent', input: { subagent_type: 'worker', prompt: MARKER_PROMPT } });
+    const row = JSON.stringify({ type: 'assistant', timestamp: `${D}T10:00:00.000Z`, message: { id: 'msg-multi', content: [agent('x1'), agent(), agent(), agent('x2')] } }) + '\n';
+    const { out } = runSession([row]);
+    // Four identical Agent calls in one row: the first is the original, the other three are repeats of it.
+    expect(out.denominators.by_tool).toEqual({ Agent: 4 });
+    expect(out.b.pairs).toBe(6);
+    expect(out.b.duplicate_calls).toBe(3);
+  });
+
   it('keeps polling-only series and cycles out of the repeat-work sums, and still counts a mixed cycle', () => {
     const polling = builder();
     const rows: string[] = [];

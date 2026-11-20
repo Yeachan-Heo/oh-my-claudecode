@@ -308,6 +308,24 @@ describe('user prohibitions after compaction', () => {
     expect(locators[0].call_line).toBe(4);
   });
 
+  it('several tool_use blocks in one row are several calls: with ids, without ids, and identical in content', () => {
+    const edit = (id?: string): Row => ({ type: 'tool_use', ...(id === undefined ? {} : { id }), name: 'Edit', input: { file_path: '/srv/m.py' } });
+    const row = (minute: number, blocks: Row[]): Row => ({ type: 'assistant', message: { role: 'assistant', content: blocks }, timestamp: ts(minute) });
+    const rows = [user(1, "Don't touch /srv/m.py"), host(2),
+      row(3, [edit('a1'), edit('a2')]), row(4, [edit(), edit()]), row(5, [edit('a1')]), row(6, [edit('a3'), edit(), edit('a3')])];
+    // The distinct calls from the construction: the ids a1, a2 and a3 once each (a replay of an id is dropped) and three blocks without an id.
+    const distinct = new Set(['a1', 'a2', 'a3']).size + 3;
+    for (const rule of [1, 2, 3]) {
+      const { report, locators } = run(`blocks-${rule}`, { 'p/m1.jsonl': rows }, { rule });
+      expect([report.candidates.total, report.candidates.unique_calls], `rule ${rule}`).toEqual([distinct, distinct]);
+      if (rule === 1) expect(locators.map((item) => item.call_line)).toEqual([3, 3, 4, 4, 6, 6]);
+      else expect([locators[0].candidate_count, locators[0].call_lines]).toEqual([distinct, [3, 3, 4, 4, 6]]);
+    }
+    // One call per row keeps the old values.
+    const single = run('blocks-single', { 'p/m2.jsonl': [user(1, "Don't touch /srv/m.py"), host(2), row(3, [edit('s1')]), row(4, [edit()])] });
+    expect([single.report.candidates.total, single.report.candidates.unique_calls]).toEqual([2, 2]);
+  });
+
   it('NotebookEdit and rm candidates; the marker stays out of every output', () => {
     const rows = [user(1, `Do not delete /srv/${MARKER}.txt, it is ${MARKER}`), host(2),
       call(3, 'Bash', { command: `rm /srv/${MARKER}.txt` }, 'c1'),

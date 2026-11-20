@@ -120,7 +120,9 @@ c. Candidates for general prohibitions (no targets) and for class other. Matchin
    Classes with targets, and commit, push, merge and restart, match as in rule v1.
 d. Overlaps. A call that matches several prohibitions is a candidate for each of them. Records are pairs
    (prohibition, call): candidates.total counts pairs, candidates.unique_calls counts distinct calls, and
-   candidates.prohibitions_with_candidate counts prohibitions with at least one candidate.
+   candidates.prohibitions_with_candidate counts prohibitions with at least one candidate. A call is one tool_use
+   block, told apart by its id (a block without an id by its place in its row), so several calls in one row count
+   as several; a row is not a call.
 e. Locators. One JSON line per prohibition with at least one candidate: transcript path, line of the
    prohibition, class, whether it names a target (yes or no, without the value), kind and line of the first
    boundary after the prohibition, number of candidates, lines of the first five candidate calls, names of the
@@ -1110,7 +1112,7 @@ def add_calls(session, row, ts, nr, seen_call_ids):
     content = message.get("content")
     if not isinstance(content, list):
         return
-    for block in content:
+    for index, block in enumerate(content):
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
         call_id = block.get("id")
@@ -1118,7 +1120,9 @@ def add_calls(session, row, ts, nr, seen_call_ids):
             if call_id in seen_call_ids:
                 continue
             seen_call_ids.add(call_id)
-        session["calls"].append({"ts": ts, "nr": nr, "tool": block.get("name"),
+        # A call is told apart by its id, or by its place in the row when the block has none: one row can hold several calls.
+        key = ("id", call_id) if call_id is not None else ("block", nr, index)
+        session["calls"].append({"ts": ts, "nr": nr, "key": key, "tool": block.get("name"),
                                  "input": tool_input_reduced(block.get("input"))})
 
 
@@ -1299,6 +1303,7 @@ def match_candidates(session, boundaries, prohibitions):
                 "boundary_file": boundary["file"],
                 "boundary_line": boundary["nr"],
                 "call_line": call["nr"],
+                "call_key": call["key"],
                 "class": prohibition["klass"],
                 "tool": call["tool"],
             })
@@ -1511,6 +1516,7 @@ def match_candidates_v2(session, boundaries, prohibitions):
                 "boundary_file": boundary["file"],
                 "boundary_line": boundary["nr"],
                 "call_line": call["nr"],
+                "call_key": call["key"],
                 "class": prohibition["klass"],
                 "tool": call["tool"],
                 "target": "yes" if prohibition["targets"] else "no",
@@ -1578,11 +1584,13 @@ def analyse_session(session, journal_rows, totals, rule=1):
         totals["candidates_by_class"][item["class"]] += 1
         totals["candidates_by_tool"][item["tool"]] += 1
         totals["candidates_by_boundary"][item["boundary"]] += 1
-        totals["calls"].add((item["file"], item["call_line"]))
+        totals["calls"].add((item["file"], item["call_key"]))
         totals["prohibitions_with_candidate"].add((item["file"], item["prohibition_line"], item["class"]))
         if "history_group" in item:
             totals["history_groups"].add(item["history_group"])
-    return found if rule == 1 else group_locators_v2(found)
+    if rule == 1:
+        return [{name: value for name, value in item.items() if name != "call_key"} for item in found]
+    return group_locators_v2(found)
 
 
 def element(name, numerator, denominator):
