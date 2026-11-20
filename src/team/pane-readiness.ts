@@ -170,48 +170,61 @@ function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): b
 // The dialogs Claude Code shows after the trust dialog on the first launch
 // with a fresh config directory (recorded on 2.1.328). Only the Claude startup
 // wait reads them; every other pane reader sees what it saw before them.
-export type ClaudeStartupDialogKind = 'claude_bypass_permissions' | 'claude_fullscreen_renderer';
-export type ClaudeDialogKind = 'claude_directory' | ClaudeStartupDialogKind;
+// 'claude_startup_dialog_unidentified' is a dialog whose choices are off screen.
+export type ClaudeStartupDialogKind =
+  | 'claude_bypass_permissions'
+  | 'claude_fullscreen_renderer'
+  | 'claude_startup_dialog_unidentified';
+export type ClaudeDialogKind = 'claude_directory' | 'claude_bypass_permissions' | 'claude_fullscreen_renderer';
 
-// Each is read from the capture with all whitespace removed, so how the pane
-// wraps it (Claude Code at a space, tmux mid-word, a choice split over two
-// lines) cannot hide it. The bypass warning is its choice pair alone.
-const CLAUDE_STARTUP_DIALOGS: Readonly<
-  Record<ClaudeStartupDialogKind, { heading?: string; first: string; second: string }>
-> = {
-  claude_bypass_permissions: { first: 'No,exit', second: 'Yes,Iaccept' },
-  claude_fullscreen_renderer: { heading: 'Trythenewfullscreenrenderer?', first: '1.Yes,tryit', second: '2.Notnow' },
-};
+// Every dialog is read from the capture with all whitespace removed, so how
+// the pane wraps it (Claude Code at a space, tmux mid-word, a choice split over
+// two lines) cannot hide it. A short pane with no scrollback can also lose the
+// dialog's top, so any part of one counts: a dialog seen in part gets no
+// trigger and no Enter.
+const CLAUDE_STARTUP_CHOICES = {
+  claude_bypass_permissions: ['No,exit', 'Yes,Iaccept'],
+  claude_fullscreen_renderer: ['1.Yes,tryit', '2.Notnow'],
+} as const;
+const CLAUDE_TRUST_CHOICES = ['Yes,Itrustthisfolder', 'Yes,proceed'];
+// The footer below the trust dialog and both first-run dialogs.
+const CLAUDE_DIALOG_FOOTER = 'Entertoconfirm·Esctocancel';
+const CLAUDE_CHOICES: readonly string[] = [
+  ...Object.values(CLAUDE_STARTUP_CHOICES).flat(),
+  ...CLAUDE_TRUST_CHOICES,
+];
 
-const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-// Reads the latest choice pair: an answered dialog can remain in the
-// scrollback above it. 'stale' when Claude's ❯ input prompt follows the pair,
-// as below a reply that quotes the dialog, so keys would reach that prompt
-// instead. Only ❯ counts: reading a live warning as stale would let the
-// trigger and Enter reach it. 'unfocused' while neither choice carries the ❯.
-function claudeStartupDialogFocusIn(
-  captured: string,
-  kind: ClaudeStartupDialogKind,
-): 'first' | 'second' | 'unfocused' | 'stale' | null {
-  const dialog = CLAUDE_STARTUP_DIALOGS[kind];
+// The squeezed capture after the last live input prompt: a ❯ that does not
+// mark a dialog choice. A dialog quoted above that prompt is not on screen.
+function claudeDialogTail(captured: string): string {
   const stream = captured.replace(/\s+/g, '');
-  const pair = new RegExp(`(❯?)${escapeRegExp(dialog.first)}(❯?)${escapeRegExp(dialog.second)}`, 'g');
-  const match = [...stream.matchAll(pair)].at(-1);
-  if (!match) return null;
-  if (dialog.heading && !stream.slice(0, match.index).includes(dialog.heading)) return null;
-  if (stream.slice(match.index + match[0].length).includes('❯')) return 'stale';
-  if (match[1]) return 'first';
-  return match[2] ? 'second' : 'unfocused';
+  let start = 0;
+  for (const marker of stream.matchAll(/❯/gu)) {
+    const after = marker.index + marker[0].length;
+    if (!CLAUDE_CHOICES.some((choice) => stream.startsWith(choice, after))) start = after;
+  }
+  return stream.slice(start);
+}
+
+function claudeStartupDialogIn(tail: string, captured: string): ClaudeStartupDialogKind | null {
+  const footer = tail.includes(CLAUDE_DIALOG_FOOTER);
+  const shows = (choices: readonly string[]) => choices.some((choice) => tail.includes(choice));
+  if (tail.includes('Yes,Iaccept')) return 'claude_bypass_permissions';
+  // The trust dialog (#5108) is left to the trust detector while it reads it.
+  if (shows(CLAUDE_TRUST_CHOICES)) {
+    return detectTrustPrompt(paneLines(captured), ['claude_directory'])
+      ? null
+      : 'claude_startup_dialog_unidentified';
+  }
+  if (!footer) return null;
+  if (tail.includes('No,exit')) return 'claude_bypass_permissions';
+  if (shows(CLAUDE_STARTUP_CHOICES.claude_fullscreen_renderer)) return 'claude_fullscreen_renderer';
+  return 'claude_startup_dialog_unidentified';
 }
 
 // Read only by the Claude startup wait, before it reads the trust dialogs.
 export function detectClaudeStartupDialog(captured: string): ClaudeStartupDialogKind | null {
-  for (const kind of ['claude_bypass_permissions', 'claude_fullscreen_renderer'] as const) {
-    const focus = claudeStartupDialogFocusIn(captured, kind);
-    if (focus !== null && focus !== 'stale') return kind;
-  }
-  return null;
+  return claudeStartupDialogIn(claudeDialogTail(captured), captured);
 }
 
 function detectTrustPrompt(
@@ -338,8 +351,14 @@ export function claudeDialogFocus(
   kind: ClaudeDialogKind,
 ): 'first' | 'second' | 'stale' | null {
   if (kind !== 'claude_directory') {
-    const focus = claudeStartupDialogFocusIn(captured, kind);
-    return focus === 'unfocused' ? null : focus;
+    const [first, second] = CLAUDE_STARTUP_CHOICES[kind];
+    const tail = claudeDialogTail(captured);
+    if (claudeStartupDialogIn(tail, captured) !== kind) {
+      const stream = captured.replace(/\s+/g, '');
+      return stream.includes(first) || stream.includes(second) ? 'stale' : null;
+    }
+    if (tail.includes(`❯${first}`)) return 'first';
+    return tail.includes(`❯${second}`) ? 'second' : null;
   }
   const lines = paneLines(captured);
   const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));

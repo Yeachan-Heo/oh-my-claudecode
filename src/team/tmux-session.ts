@@ -4667,6 +4667,12 @@ export async function waitForStartupPaneReady(
       // focuses "No, exit", so any key could also end the session. Send none.
       if (selector === "claude_bypass_permissions")
         return { ok: false, reason: "claude_bypass_permissions_consent_required" };
+      // A first-run dialog with its choices off screen: wait for them, and
+      // type nothing into it meanwhile.
+      if (selector === "claude_startup_dialog_unidentified") {
+        await sleep(pollIntervalMs);
+        continue;
+      }
       const claudeDialog =
         selector === "claude_directory" ||
         selector === "claude_fullscreen_renderer";
@@ -4740,7 +4746,7 @@ async function startupPaneSubmitBlockReason(
   attemptAlreadyFenced: boolean,
 ): Promise<
   | Extract<StartupPaneReadyResult, { ok: false }>["reason"]
-  | "claude_fullscreen_renderer_offered"
+  | "claude_startup_dialog_pending"
   | undefined
 > {
   if (!(await startupContextIsActive(context, attemptAlreadyFenced)))
@@ -4765,7 +4771,7 @@ async function startupPaneSubmitBlockReason(
       : null;
   if (startupDialog === "claude_bypass_permissions")
     return "claude_bypass_permissions_consent_required";
-  if (startupDialog) return "claude_fullscreen_renderer_offered";
+  if (startupDialog) return "claude_startup_dialog_pending";
   const selector = detectPaneTrustPromptKind(
     observation.captured,
     context.provider,
@@ -4795,9 +4801,9 @@ export async function deliverStartupInbox(
       context,
       options.attemptAlreadyFenced ?? false,
     );
-    // The offer can draw after the wait saw the input prompt. Nothing is typed
-    // yet, so it is answered like any startup dialog, once.
-    if (preInputBlockReason === "claude_fullscreen_renderer_offered") {
+    // A first-run dialog can draw after the wait saw the input prompt. Nothing
+    // is typed yet, so the wait handles it like any startup dialog, once.
+    if (preInputBlockReason === "claude_startup_dialog_pending") {
       const answered = await waitForStartupPaneReady(context, {
         timeoutMs: resolveStartupReadyTimeoutMs(process.env),
         attemptAlreadyFenced: options.attemptAlreadyFenced,
@@ -4808,7 +4814,7 @@ export async function deliverStartupInbox(
         options.attemptAlreadyFenced ?? false,
       );
     }
-    if (preInputBlockReason === "claude_fullscreen_renderer_offered")
+    if (preInputBlockReason === "claude_startup_dialog_pending")
       return { ok: false, reason: "selector_persistent" };
     if (preInputBlockReason) return { ok: false, reason: preInputBlockReason };
     await sendLiteralPaneText(
@@ -4822,8 +4828,8 @@ export async function deliverStartupInbox(
         context,
         options.attemptAlreadyFenced ?? false,
       );
-      // The trigger is typed: Enter would now answer the offer, not submit it.
-      if (submitBlockReason === "claude_fullscreen_renderer_offered")
+      // The trigger is typed: Enter would now answer the dialog, not submit it.
+      if (submitBlockReason === "claude_startup_dialog_pending")
         return { ok: false, reason: "selector_persistent" };
       if (submitBlockReason) return { ok: false, reason: submitBlockReason };
       await sendTeamPaneKey(
