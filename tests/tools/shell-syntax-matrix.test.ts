@@ -71,6 +71,15 @@ const ARGUMENT_OF: string[] = [
   '> out.log echo hi > README.md ', 'echo $(date) ', 'echo `date` ', 'echo $(a b) ', 'echo "x" ', 'echo x $(date) ', 'A=$(date) echo hi > README.md ',
   'sudo echo hi > README.md ', 'env A=1 echo hi > README.md ', 'time echo hi > README.md ',
 ];
+// Negative rows for the launch wrappers: an option that is not in the table of options, the end-of-options word `--`, a timeout with
+// no duration and a bad one end the reading, so the wrapper stays the program and no reading sees the command behind it.
+const UNREAD_WRAPPER: string[] = [
+  'sudo -n ', 'sudo -- ', 'sudo -g adm ', 'sudo -u root -n ', 'timeout --foreground 5 ', 'timeout -v 5 ', 'timeout ', 'timeout 5x ', 'timeout -s ',
+  'nice -5 ', 'nice -- ', 'env -S ', 'env -- ', 'env -C /tmp ', 'time -f %e ', 'command -v ', 'command -- ', 'exec -c ', 'nohup -- ', 'nohup -n ',
+  'A=1 sudo -n ', 'sudo -n A=1 ', '> out.log sudo -n ', 'sudo -E -n ', 'time sudo -n ', 'env A=1 sudo -n ', 'sudo timeout ', 'nice -n 5 timeout --foreground 5 ',
+];
+// A wrapper with no command behind it is no command at all.
+const BARE_WRAPPER: string[] = ['sudo', 'nohup', 'time', 'command', 'exec', 'nice', 'env', 'env A=1', 'timeout', 'timeout 5', 'sudo -u root', 'sudo -E', 'nice -n 5', 'exec -a x', 'sudo env A=1 nohup'];
 // The command word itself is the target of the redirection: `echo hi > git commit` runs echo and writes a file named git.
 // For the write reading that file is a write of its own (no extension, so code), which is why these rows skip it.
 const TARGET_IS_THE_WORD: string[] = [
@@ -106,6 +115,10 @@ function casesFor(column: Column): Case[] {
   for (const prefix of negatives) {
     for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want: false, row: prefix });
   }
+  for (const prefix of UNREAD_WRAPPER) {
+    for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want: false, row: prefix });
+  }
+  for (const command of BARE_WRAPPER) cases.push({ command, word: '', want: false, row: command });
   for (const [prefix, reads] of AFTER_BOUNDARY) {
     for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want: reads[column], row: prefix });
   }
