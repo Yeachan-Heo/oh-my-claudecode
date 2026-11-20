@@ -6,6 +6,7 @@ import type { CliAgentType } from '../model-contract.js';
 import {
   claudeDialogFocus,
   classifyPane,
+  detectClaudeStartupDialog,
   detectPaneTrustPromptKind,
   observePane,
   PANE_PATTERNS,
@@ -61,10 +62,11 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/2.1.325/idle.txt': 'idlePrompt',
   'claude/2.1.325/trust-just-answered.txt': '',
   'claude/2.1.325/trust.txt': 'trust:claude_directory idlePrompt',
-  'claude/2.1.328/bypass-permissions-yes-focused.txt': 'trust:claude_bypass_permissions idlePrompt',
-  'claude/2.1.328/bypass-permissions.txt': 'trust:claude_bypass_permissions idlePrompt',
-  'claude/2.1.328/fullscreen-renderer-not-now-focused.txt': 'trust:claude_fullscreen_renderer idlePrompt',
-  'claude/2.1.328/fullscreen-renderer.txt': 'trust:claude_fullscreen_renderer idlePrompt',
+  // Claude Code's first-run dialogs are read only by the startup wait (detectClaudeStartupDialog).
+  'claude/2.1.328/bypass-permissions-yes-focused.txt': 'idlePrompt',
+  'claude/2.1.328/bypass-permissions.txt': 'idlePrompt',
+  'claude/2.1.328/fullscreen-renderer-not-now-focused.txt': 'idlePrompt',
+  'claude/2.1.328/fullscreen-renderer.txt': 'idlePrompt',
   'claude/2.1.328/idle-after-fullscreen-renderer.txt': 'idlePrompt',
   'claude/2.1.328/trust-yes-focused.txt': 'trust:claude_directory idlePrompt',
   'claude/synthetic/loading-in-scrollback.txt': 'bootstrapping idlePrompt',
@@ -271,52 +273,53 @@ describe('claudeDialogFocus', () => {
 
 describe('Claude Code first-run dialogs', () => {
   const read = (file: string) => readFileSync(join(CORPUS_ROOT, file), 'utf8');
-
-  it.each([
+  // tmux hard-wraps a frame drawn wider than the pane.
+  const hardWrap = (text: string, cols: number) =>
+    text.split('\n').flatMap(line => line.match(new RegExp(`.{1,${cols}}`, 'gu')) ?? ['']).join('\n');
+  const DIALOGS = [
     ['claude/2.1.328/bypass-permissions.txt', 'claude_bypass_permissions', 'first'],
     ['claude/2.1.328/bypass-permissions-yes-focused.txt', 'claude_bypass_permissions', 'second'],
     ['claude/2.1.328/fullscreen-renderer.txt', 'claude_fullscreen_renderer', 'first'],
     ['claude/2.1.328/fullscreen-renderer-not-now-focused.txt', 'claude_fullscreen_renderer', 'second'],
-  ] as const)('%s is %s with the %s choice focused', (file, kind, focus) => {
-    expect(detectPaneTrustPromptKind(read(file), 'claude')).toBe(kind);
-    expect(detectPaneTrustPromptKind(read(file))).toBe(kind);
+  ] as const;
+
+  it.each(DIALOGS)('%s is %s with the %s choice focused', (file, kind, focus) => {
+    expect(detectClaudeStartupDialog(read(file))).toBe(kind);
     expect(claudeDialogFocus(read(file), kind)).toBe(focus);
+  });
+
+  it.each(DIALOGS.flatMap(([file, kind]) => [18, 39].map(cols => [file, cols, kind] as const)))(
+    '%s wrapped to %i columns is still %s', (file, cols, kind) => {
+      expect(detectClaudeStartupDialog(hardWrap(read(file), cols))).toBe(kind);
+    },
+  );
+
+  it('reads the bypass warning by its choices alone, with no heading on screen', () => {
+    expect(detectClaudeStartupDialog('  ❯ No, exit\n    Yes, I accept\n  Enter to confirm · Esc to cancel\n')).toBe('claude_bypass_permissions');
+    expect(detectClaudeStartupDialog('    No, exit\n  ❯ Yes, I accept\n')).toBe('claude_bypass_permissions');
   });
 
   it('reads neither dialog once a reply quoting them has the input prompt drawn below', () => {
     const quoted = read('claude/synthetic/output-quoting-first-run-dialogs.txt');
-    expect(detectPaneTrustPromptKind(quoted, 'claude')).toBeNull();
+    expect(detectClaudeStartupDialog(quoted)).toBeNull();
     expect(claudeDialogFocus(quoted, 'claude_bypass_permissions')).toBe('stale');
     expect(claudeDialogFocus(quoted, 'claude_fullscreen_renderer')).toBe('stale');
   });
 
-  it('reads the pane after Not now, and the trust dialogs, as before', () => {
-    expect(detectPaneTrustPromptKind(read('claude/2.1.328/idle-after-fullscreen-renderer.txt'), 'claude')).toBeNull();
-    expect(detectPaneTrustPromptKind(read('claude/2.1.325/trust.txt'), 'claude')).toBe('claude_directory');
-    expect(claudeDialogFocus(read('claude/2.1.325/trust.txt'), 'claude_bypass_permissions')).toBeNull();
+  it('does not read the trust dialog or the pane after Not now as a first-run dialog', () => {
+    for (const file of ['claude/2.1.325/trust.txt', 'claude/2.1.328/trust-yes-focused.txt', 'claude/2.1.328/idle-after-fullscreen-renderer.txt']) {
+      expect(detectClaudeStartupDialog(read(file)), file).toBeNull();
+    }
   });
 
-  it('reads the bypass warning wrapped to a 35-column pane', () => {
-    const wrapped = [
-      'WARNING: Claude Code running in',
-      'Bypass Permissions mode',
-      'By proceeding, you accept all',
-      'responsibility for actions taken.',
-      '❯ No, exit',
-      '  Yes, I accept',
-      'Enter to confirm · Esc to cancel',
-    ].join('\n');
-    expect(detectPaneTrustPromptKind(wrapped, 'claude')).toBe('claude_bypass_permissions');
-  });
-
-  it('reads both dialogs drawn wider than a 39-column pane, which wraps them mid-word', () => {
-    const hardWrap = (text: string) => text.split('\n').flatMap(line => line.match(/.{1,39}/gu) ?? ['']).join('\n');
-    expect(detectPaneTrustPromptKind(hardWrap(read('claude/2.1.328/bypass-permissions.txt')), 'claude')).toBe('claude_bypass_permissions');
-    expect(detectPaneTrustPromptKind(hardWrap(read('claude/2.1.328/fullscreen-renderer.txt')), 'claude')).toBe('claude_fullscreen_renderer');
-  });
-
-  it('is not read for another provider', () => {
-    expect(detectPaneTrustPromptKind(read('claude/2.1.328/bypass-permissions.txt'), 'codex')).toBeNull();
-    expect(detectPaneTrustPromptKind(read('claude/2.1.328/fullscreen-renderer.txt'), 'codex')).toBeNull();
+  it('leaves the trust detector, observePane and classifyPane as they were, for every provider', () => {
+    const cursorQuote = `${read('claude/synthetic/output-quoting-first-run-dialogs.txt').split('────')[0]}\n→ ready\n`;
+    for (const captured of [...DIALOGS.map(([file]) => read(file)), cursorQuote]) {
+      for (const provider of [undefined, 'claude', 'codex', 'cursor'] as const) {
+        expect(detectPaneTrustPromptKind(captured, provider)).toBeNull();
+        expect(observePane(captured, provider).trust).toBeNull();
+      }
+      expect(classifyPane(observePane(captured)).kind).toBe('idle');
+    }
   });
 });

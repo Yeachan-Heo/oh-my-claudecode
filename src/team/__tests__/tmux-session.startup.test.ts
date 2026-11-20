@@ -1058,6 +1058,75 @@ describe('worker pane startup safety', () => {
     expect(tmuxState.args.filter(args => args[0] === 'capture-pane')).toHaveLength(1);
   });
 
+  strictTmuxIt.each(['bypass-permissions.txt', 'bypass-permissions-yes-focused.txt'].flatMap(file => [18, 39].map(cols => [file, cols] as const)))(
+    'fails at once on %s wrapped to %i columns and sends it no key',
+    async (file, cols) => {
+      const context = await acceptedContext('claude');
+      const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+      const recorded = readFileSync(join(corpus, 'claude/2.1.328', file), 'utf8');
+      tmuxState.captures = [recorded.split('\n').flatMap(line => line.match(new RegExp(`.{1,${cols}}`, 'gu')) ?? ['']).join('\n')];
+
+      await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+        ok: false,
+        reason: 'claude_bypass_permissions_consent_required',
+      });
+      expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    },
+  );
+
+  strictTmuxIt('fails with the consent reason when the Bypass Permissions warning first shows at the check before the trigger is typed', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    tmuxState.captures = [
+      readFileSync(join(corpus, 'claude/2.1.325/idle.txt'), 'utf8'),
+      readFileSync(join(corpus, 'claude/2.1.328/bypass-permissions.txt'), 'utf8'),
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'claude_bypass_permissions_consent_required',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  strictTmuxIt('answers a fullscreen renderer offer that first shows at the check before the trigger is typed, then delivers', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const read = (file: string) => readFileSync(join(corpus, file), 'utf8');
+    const frames = {
+      idle: read('claude/2.1.325/idle.txt'),
+      offered: read('claude/2.1.328/fullscreen-renderer.txt'),
+      notNow: read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      accepted: 'fullscreen renderer on\n',
+      dismissed: read('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    };
+    // Idle at the readiness wait, then the offer from the next capture on.
+    let shown: keyof typeof frames = 'idle';
+    let captures = 0;
+    let applied = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      if (++captures === 2) shown = 'offered';
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys')
+        .map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && shown === 'offered') shown = 'notNow';
+        if (key === 'Enter' && (shown === 'offered' || shown === 'notNow')) shown = shown === 'notNow' ? 'dismissed' : 'accepted';
+      }
+      return frames[shown];
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    expect(keysSeenOn.slice(0, 3)).toEqual([['offered', 'Down'], ['notNow', 'Enter'], ['dismissed', 'Read inbox.md, execute now.']]);
+    expect(shown).toBe('dismissed');
+  });
+
   strictTmuxIt('answers Claude Code’s fullscreen renderer offer with Not now, resending a dropped Down', async () => {
     const context = await acceptedContext('claude');
     const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
@@ -1099,8 +1168,6 @@ describe('worker pane startup safety', () => {
     ['Claude quick safety check', 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n'],
     ['directory trust', 'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n'],
     ['Codex hooks review', 'Hooks need review\n› 3. Continue without trusting\nPress enter to confirm or esc to go back\n'],
-    ['Claude Bypass Permissions warning', 'WARNING: Claude Code running in Bypass Permissions mode\n❯ No, exit\n  Yes, I accept\nEnter to confirm · Esc to cancel\n'],
-    ['Claude fullscreen renderer offer', 'Try the new fullscreen renderer?\n❯ 1. Yes, try it\n  2. Not now\nEnter to confirm · Esc to cancel\n'],
   ] as const)('guarded direct send refuses to type into a %s prompt', async (_label, capture) => {
     const context = await acceptedContext('claude');
     const identity = context.ownership.tmuxServerIdentity;
