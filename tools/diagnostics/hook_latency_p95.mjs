@@ -107,6 +107,15 @@ function logFiles(dir, name, cutoffMs) {
 }
 
 async function readSamples(path, sources, cutoffMs, endMs, out, stats, groups) {
+  try {
+    await readSampleLines(path, sources, cutoffMs, endMs, out, stats, groups);
+  } catch (e) { // a log file that cannot be read stops the run; the system message may not name the path
+    if (e && e.code && !String(e.message).includes(path)) throw new Error(`cannot read ${path}: ${e.code}`);
+    throw e;
+  }
+}
+
+async function readSampleLines(path, sources, cutoffMs, endMs, out, stats, groups) {
   const rl = createInterface({ input: createReadStream(path, { encoding: 'utf8' }), crlfDelay: Infinity });
   for await (const line of rl) {
     if (!line) continue;
@@ -139,7 +148,12 @@ async function readSamples(path, sources, cutoffMs, endMs, out, stats, groups) {
 // args is the text after the script path of the command, quotes dropped and spaces collapsed (empty when there is none).
 export function listHookEntries(file) {
   const found = [];
-  const hooks = JSON.parse(readFileSync(file, 'utf8')).hooks ?? {};
+  let hooks;
+  try {
+    hooks = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(file))).hooks ?? {};
+  } catch (e) { // the file is named on the command line: it must be readable, valid UTF-8 and JSON, and the message names it
+    throw new Error(`cannot read ${file}: ${e && e.code === 'ERR_ENCODING_INVALID_ENCODED_DATA' ? 'not valid UTF-8' : e && e.code ? e.code : e.message}`);
+  }
   for (const [event, entries] of Object.entries(hooks)) {
     for (const entry of entries) {
       for (const h of entry.hooks ?? []) {

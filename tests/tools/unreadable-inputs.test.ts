@@ -60,6 +60,10 @@ const DENIAL_ROW = (note: string) => `{"kind":"state","id":"0123456789abcdef","n
 const ENTRIES: Entry[] = [
   { tool: 'denial_log_summary.mjs', runner: 'node', option: '--file', args: (file) => ['--file', file], valid: DENIAL_ROW('ok'), invalid: withBadByte('{"kind":"state","note":"a', 'b"}\n') },
   { tool: 'denial_log_summary.mjs', runner: 'node', option: 'a plain argument', args: (file) => [file], valid: DENIAL_ROW('ok'), invalid: withBadByte('{"kind":"state","note":"a', 'b"}\n') },
+  {
+    tool: 'hook_latency_p95.mjs', runner: 'node', option: '--hooks-json', args: (file, base) => ['--dir', base, '--shell-checks-dir', base, '--hooks-json', file],
+    valid: '{"hooks":{}}\n', invalid: withBadByte('{"hooks":{},"note":"a', 'b"}\n'),
+  },
 ];
 
 let base = '';
@@ -147,5 +151,14 @@ describe('denial_log_summary.mjs: a journal found in a directory that cannot be 
     const file = join(dir, 'denials.jsonl');
     mkdirSync(file, { recursive: true });
     expectStopped(run(ENTRIES[0], ['--dir', dir], null), file);
+  });
+});
+
+describe('hook_latency_p95.mjs: a log file in --dir that cannot be read stops the run', () => {
+  it('names a log that is a directory', () => {
+    const dir = join(base, 'hook-logs');
+    const file = join(dir, 'hook-timing.jsonl');
+    mkdirSync(file, { recursive: true });
+    expectStopped(run(ENTRIES[2], ['--dir', dir, '--shell-checks-dir', dir], null), file);
   });
 });
