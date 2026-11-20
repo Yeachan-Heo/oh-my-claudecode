@@ -126,6 +126,8 @@ jobs:
           src/__tests__/omc-doctor-cache-identity.test.ts
           src/__tests__/omc-doctor-version-check.test.ts
           src/__tests__/omc-doctor-version-check-scopes.test.ts
+          src/__tests__/omc-doctor-cache-dotdot-links.test.ts
+          src/__tests__/omc-doctor-version-prefix.test.ts
           src/__tests__/omc-doctor-cache-links-occupancy.test.ts
           src/__tests__/omc-doctor-explicit-root.test.ts
           src/__tests__/omc-doctor-case-sensitive-volume.test.ts
