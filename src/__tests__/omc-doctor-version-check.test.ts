@@ -672,6 +672,18 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') + path.sep })).Installed).toBe('5.8.0');
     });
 
+    // Entries that carry only a version name the cache directory of that version, so they follow the active root as well.
+    test('entries with a version and no installPath follow the active root by the cache directory of their version', () => {
+      const pins = (dir: string) => ({ 'oh-my-claudecode@omc': [{ scope: 'project', version: '5.8.0' }, { scope: 'user', version: '5.9.0' }] });
+      const versionOnly = (env: ((dir: string) => Record<string, string>) | undefined) => run(env, pins);
+      for (const variable of ['OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT']) {
+        expect({ variable, got: versionOnly((dir) => ({ [variable]: base(dir, '5.8.0') })).Installed }).toEqual({ variable, got: '5.8.0' });
+        expect({ variable, got: versionOnly((dir) => ({ [variable]: base(dir, '5.9.0') })).Installed }).toEqual({ variable, got: '5.9.0' });
+      }
+      expect(versionOnly(undefined).Installed).toBe('5.9.0');
+      expect(versionOnly((dir) => ({ CLAUDE_PLUGIN_ROOT: dir })).Installed).toBe('5.9.0');
+    });
+
     test('a root that is a link to the install, or lies inside it, or is set in both variables in two spellings, is the active entry', () => {
       expect(run((dir) => {
         symlinkSync(base(dir, '5.8.0'), path.join(dir, 'lnk'), 'junction');
@@ -718,7 +730,10 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       const noNewest = (env: (dir: string) => Record<string, string>, plugins: (dir: string) => Record<string, unknown> = entries) =>
         step1({ plugins, cache: { omc: ['5.8.0'] }, clone: { omc: '5.9.0' }, env }).Installed;
       expect(noNewest((dir) => ({ CLAUDE_PLUGIN_ROOT: path.join(dir, 'gone') }))).toBe('5.9.0');
-      expect(noNewest((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }), (dir) => ({ 'oh-my-claudecode@omc': [{ version: '5.8.0' }, { version: '5.9.0', installPath: base(dir, '5.9.0') }] }))).toBe('5.9.0');
+      const mixed = (dir: string) => ({ 'oh-my-claudecode@omc': [{ version: '5.8.0' }, { version: '5.9.0', installPath: base(dir, '5.9.0') }] });
+      // An entry with only a version names the cache directory of that version, so the root on that directory is its entry.
+      expect(noNewest((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }), mixed)).toBe('5.8.0');
+      expect(noNewest((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.7.0') }), mixed)).toBe('5.9.0');
     });
   });
 
