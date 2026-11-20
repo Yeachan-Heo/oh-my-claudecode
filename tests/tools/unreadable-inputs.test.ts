@@ -120,6 +120,7 @@ const ENTRIES: Entry[] = [
   { tool: 'compaction_cache_cost.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file, '--compact', sharedJournal, ...CACHE_COST], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
   { tool: 'compaction_cache_cost.py', runner: 'python', option: '--prices', args: (file) => ['--transcript', sharedTranscript, '--compact', sharedJournal, '--prices', file, ...CACHE_COST], valid: PRICES, invalid: BAD_PRICES },
   { tool: 'executor_outcome_metrics.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
+  { tool: 'empty_results.py', runner: 'python', option: '--intent', args: (file) => ['--transcripts', sharedProjects, '--intent', file], valid: 'id\tintent\nx\tother\n', invalid: withBadByte('id\tintent\nx\tot', 'her\n') },
   { tool: 'wilson_threshold.mjs', runner: 'node', option: '--input', args: (file) => ['--input', file, '--target', '0.1'], valid: 'result\tnote\n1\tok\n0\tok\n', invalid: withBadByte('result\tnote\n1\tok\n0\tx', 'y\n') },
   { tool: 'decision_outcome_join.py', runner: 'python', option: '--prices', args: (file) => ['--journal', sharedJournalDir, '--transcripts', sharedProjects, '--prices', file], valid: '{"sonnet":[1,1,1,1,1]}', invalid: withBadByte('{"sonnet":[1,1,1,1,1],"note":"a', 'b"}') },
   { tool: '../maintenance/worktree_report.mjs', runner: 'node', option: '--repos-file', args: (file) => ['--repos-file', file], valid: '# no repositories\n', invalid: withBadByte('# a', 'b\n') },

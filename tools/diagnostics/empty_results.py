@@ -518,10 +518,12 @@ def read_intent(path):
     are counted in the main run, because the stopped set is not known here yet. A missing
     file or missing id/intent columns: exit 2 (usage)."""
     try:
-        with open(path, encoding='utf8', errors='replace') as f:
+        with open(path, encoding='utf8') as f:
             rows = f.read().splitlines()
     except OSError as e:
         usage_error(f'--intent unreadable: {e}')
+    except UnicodeDecodeError:
+        usage_error(f'--intent unreadable: {path} is not valid UTF-8')
     if not rows:
         usage_error('--intent: empty file')
     header = rows[0].split('\t')
