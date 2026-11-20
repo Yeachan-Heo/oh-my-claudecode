@@ -3214,6 +3214,18 @@ async function finalizeRecoveryPastDeadline(
         (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
       ).catch(() => true);
       if (persistedLaunch) return null;
+      // A split whose pane could not be proven leaves only this evidence, and
+      // shutdown cannot find that pane, so the recovery must stay active.
+      const rollbackEvidence = await readdir(
+        absPath(
+          input.cwd,
+          TeamPaths.recoveryPaneRollbackFailures(input.teamName, recoveryId),
+        ),
+      ).then(
+        (entries) => entries.length > 0,
+        (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
+      );
+      if (rollbackEvidence) return null;
       const progress = readRecoveryOutcome(input.cwd, input.requestId);
       if (
         progress?.kind === "final" ||
