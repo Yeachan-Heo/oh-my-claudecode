@@ -373,6 +373,20 @@ const SUMMARIES: Array<[string, string, string, 'failed' | 'passed' | 'undetermi
   ['npm test | tail -40', '===== 2 passed in 0.1s =====\n===== 1 failed, 1 passed in 0.1s =====', 'pytest: a failing run behind a passed one', 'failed'],
   ['npm test | tail -40', '===== 2 passed in 0.1s =====\n===== 3 passed in 0.1s =====', 'pytest: two passed runs', 'passed'],
   ['npm test | tail -40', '===== 2 passed in 0.1s =====\nTests  1 failed | 1 passed (2)', 'a failing vitest behind a passed pytest', 'failed'],
+  // pytest: a summary that is no pass holds back a pass that stands in front of it or behind it
+  ['pytest | tail -3', '===== 2 passed in 0.1s =====\n===== 5 passed, 2 odd_thing in 0.2s =====', 'pytest: a count of an unknown word behind a pass', 'undetermined'],
+  ['pytest | tail -3', '===== 5 passed, 2 odd_thing in 0.2s =====\n===== 2 passed in 0.1s =====', 'pytest: a count of an unknown word in front of a pass', 'undetermined'],
+  ['pytest | tail -3', '===== 2 passed in 0.1s =====\n===== 2 skipped in 0.1s =====', 'pytest: nothing passed in the second run', 'undetermined'],
+  // a failure of a runner that the kind of an npm script does not read (a lint or type error in a test script) holds the pass back
+  ['npm test | tail -40', '✖ 1 problem (1 error, 0 warnings)\nTest Files  1 passed (1)\n     Tests  2 passed (2)', 'an eslint error in front of a passed vitest', 'undetermined'],
+  ['npm test | tail -40', 'Test Files  1 passed (1)\n     Tests  2 passed (2)\n✖ 1 problem (1 error, 0 warnings)', 'an eslint error behind a passed vitest', 'undetermined'],
+  ['npm test | tail -40', "src/a.ts(1,7): error TS2322: Type 'string' is not assignable to type 'number'.\nℹ tests 1\nℹ pass 1\nℹ fail 0", 'a tsc error in front of a passed node:test', 'undetermined'],
+  ['npm test | tail -40', '✖ 2 problems (0 errors, 2 warnings)\nTest Files  1 passed (1)\n     Tests  2 passed (2)', 'eslint warnings next to a passed vitest', 'passed'],
+  // every runner piece of a command is read, not the last one only
+  ['eslint src ; vitest run | tail -9', '✖ 1 problem (1 error, 0 warnings)\nTest Files  1 passed (1)\n     Tests  2 passed (2)', 'eslint error, then a passed vitest', 'failed'],
+  ['vitest run ; eslint src | tail -9', 'Test Files  1 passed (1)\n     Tests  2 passed (2)\n✖ 1 problem (1 error, 0 warnings)', 'a passed vitest, then an eslint error', 'failed'],
+  ['eslint src ; vitest run | tail -9', '✖ 2 problems (0 errors, 2 warnings)\nTest Files  1 failed (1)\n     Tests  1 failed (1)', 'eslint warnings, then a failed vitest', 'failed'],
+  ['eslint src ; vitest run | tail -9', '✖ 2 problems (0 errors, 2 warnings)\nTest Files  1 passed (1)\n     Tests  2 passed (2)', 'eslint warnings, then a passed vitest', 'passed'],
   // ruff: the format check behind the lint check
   ['ruff check . ; ruff format --check . | tail -3', 'All checks passed!\nWould reformat: a.py\n1 file would be reformatted', 'a file the format check would change', 'failed'],
   ['ruff format --check . | tail -3', 'Would reformat: a.py\nWould reformat: b.py\n2 files would be reformatted', 'files the format check would change', 'failed'],
@@ -380,6 +394,15 @@ const SUMMARIES: Array<[string, string, string, 'failed' | 'passed' | 'undetermi
   // eslint: warnings that fail the run
   ['eslint src | tail -3', '✖ 2 problems (0 errors, 2 warnings)\nESLint found too many warnings (maximum: 0).', 'too many warnings', 'failed'],
 ];
+
+it('a failure of a runner outside the kind of an npm script holds back a pass but not a failing exit status', () => {
+  const output = '✖ 1 problem (1 error, 0 warnings)\nTest Files  1 passed (1)\n     Tests  2 passed (2)';
+  assert.equal(checkResult('npm test', output, 0).verdict, 'undetermined', 'exit 0 after a lint error in a test script');
+  assert.equal(checkResult('npm test', output, 1).verdict, 'failed', 'a failing exit status stays a failure');
+  assert.equal(checkResult('npm test', 'Test Files  1 passed (1)\n     Tests  2 passed (2)', 0).verdict, 'passed', 'no foreign failure');
+  // the generic line of ruff is data too often to hold a pass back
+  assert.equal(checkResult('npm test', 'Found 3 errors.\nTests  3 passed (3)', 0).verdict, 'passed');
+});
 
 it('runner summaries: a failed or error count anywhere in the summary decides before a passed count', () => {
   const wrong = SUMMARIES.flatMap(([command, output, label, want]) => {

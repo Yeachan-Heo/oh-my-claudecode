@@ -581,7 +581,7 @@ export function classifyCommand(command) {
   return readCommand(command).result;
 }
 
-/** The classification of a command with what classifyCheckResult reads next to it: the shell pieces and the index of the check in them. */
+/** The classification of a command with what classifyCheckResult reads next to it: the shell pieces, the index of the check in them and every runner piece. */
 function readCommand(command) {
   if (typeof command !== 'string' || command === '') {
     return { pieces: [], checkIndex: -1, result: { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail: false, reason: 'empty or non-string command' } };
@@ -593,6 +593,7 @@ function readCommand(command) {
   const pieces = shellPieces(bare);
   let check = null;
   let hidden;
+  const checks = [];
   for (let i = 0; i < pieces.length; i += 1) {
     const stripped = stripWrappers(pieces[i].text);
     if (stripped === null) continue;
@@ -600,11 +601,12 @@ function readCommand(command) {
     const m = runnerMatch(stripped);
     if (!m) continue;
     check = { ...m, index: i };
+    checks.push({ runner: m.runner, kind: m.kind });
     hidden = exitHiddenCause(pieces, i, pipefail);
     // later runner pieces overwrite: the command's status belongs to the last segment
   }
   if (!check) {
-    return { pieces, checkIndex: -1, result: { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail, reason: 'no check runner in command' } };
+    return { pieces, checks, checkIndex: -1, result: { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail, reason: 'no check runner in command' } };
   }
   const strippedCheck = stripWrappers(pieces[check.index].text);
   const narrowed = pieceNarrows(strippedCheck, check.kind, check.runner);
@@ -615,7 +617,7 @@ function readCommand(command) {
     : 'check command recognized';
   const chained = sharesExitStatus(pieces, check.index, pipefail);
   const piped = pieces[check.index].sep === '|' && !pipefail;
-  return { pieces, checkIndex: check.index, result: { isCheck: true, kind: check.kind, runner: check.runner, narrowed, exitHidden: hidden !== undefined, chained, piped, pipefail, reason } };
+  return { pieces, checks, checkIndex: check.index, result: { isCheck: true, kind: check.kind, runner: check.runner, narrowed, exitHidden: hidden !== undefined, chained, piped, pipefail, reason } };
 }
 
 /**
@@ -648,12 +650,14 @@ const SUMMARY_RULES = [
     rule: 'pytest-summary-line',
     apply: (tail) => {
       let passed = false;
+      let unclear = false;
       for (const line of tail.matchAll(/^=+ ([^=\n]*?) in [\d.]+s(?: \(\d+:\d{2}:\d{2}\))? =*$/gm)) {
         const counts = line[1];
         if (/(?:^|, )[1-9]\d* (?:[\w-]+ )*(?:failed|errors?)(?=,|$)/.test(counts)) return 'failed';
         if (/^\d+ [a-z-]+(?: [a-z-]+)*(?:, \d+ [a-z-]+(?: [a-z-]+)*)*$/.test(counts) && /(?:^|, )[1-9]\d* passed(?=,|$)/.test(counts)) passed = true;
+        else unclear = true; // a summary that is no pass (nothing passed, a count of a word it does not know) holds the pass back
       }
-      return passed ? 'passed' : null;
+      return passed && !unclear ? 'passed' : null;
     },
   },
   // vitest: a test file that failed to load (`Test Files N failed`) fails the run even when the `Tests` line reads as passed, and
@@ -860,7 +864,16 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
   if (!cc.isCheck) {
     return { verdict: 'undetermined', reason: 'not a check command', rule: null };
   }
-  const readers = readersFor(cc);
+  // Every runner piece of the command is read (`eslint . ; vitest run`), not the last one only.
+  const readers = new Set(read.checks.flatMap((check) => [...readersFor(check)]));
+  // A script of unknown content (`npm test`) may print the failure of a runner that its kind does not read (`eslint . && vitest run`).
+  // Such a line is no failure of the check, since a passing run can print it as data, but it holds a pass back: the verdict is then
+  // undetermined. The generic line of ruff (`Found 3 errors.`) is not looked for: it is too often data.
+  const heldBack = read.checks.some((check) => SCRIPT_RUNNERS.has(check.runner))
+    && SUMMARY_RULES.some((entry) => entry.runner !== 'ruff' && !readers.has(entry.runner) && entry.apply(tail) === 'failed');
+  const pass = (reason, rule) => (heldBack
+    ? { verdict: 'undetermined', reason: 'runner summary of another runner reports a failure', rule: 'foreign-summary-failure' }
+    : { verdict: 'passed', reason, rule });
   // A failure summary wins over everything, including a zero exit status and a zero-test report: a run
   // with a failure line ran something (a test may print `No tests found` as data, or an npm script may
   // chain a child that ran no tests with one that failed).
@@ -893,7 +906,7 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
     if (printed !== undefined) {
       // The element of PIPESTATUS is the status of the check itself: only the commands before its pipeline can have failed in its place.
       const chained = printed.viaPipestatus ? sharesExitStatusBefore(read.pieces, read.checkIndex) : cc.chained;
-      if (printed.code === 0) return { verdict: 'passed', reason: 'printed exit code 0', rule: 'printed-exit-code' };
+      if (printed.code === 0) return pass('printed exit code 0', 'printed-exit-code');
       return chained
         ? { verdict: 'undetermined', reason: `printed exit code ${printed.code} of an && chain: another command may have failed`, rule: 'chained-exit' }
         : { verdict: 'failed', reason: `printed exit code ${printed.code}`, rule: 'printed-exit-code' };
@@ -901,13 +914,13 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
     for (const entry of SUMMARY_RULES.filter((rule) => readers.has(rule.runner))) {
       const verdict = entry.apply(tail);
       if (verdict === 'passed') {
-        return { verdict: 'passed', reason: `runner summary pass (${entry.rule})`, rule: entry.rule };
+        return pass(`runner summary pass (${entry.rule})`, entry.rule);
       }
     }
     return { verdict: 'undetermined', reason: 'check exit code hidden without pipefail and no runner summary', rule: null };
   }
   // Visible exit status, not failing (the failing case returned above): passed.
-  return { verdict: 'passed', reason: 'zero or absent exit status with no error flag', rule: 'exit-code-zero' };
+  return pass('zero or absent exit status with no error flag', 'exit-code-zero');
 }
 
 /** Files whose edits never need a passing check: docs, images, lockfiles, logs, installed packages. */
