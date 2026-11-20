@@ -239,7 +239,13 @@ const main = async () => {
   }
   if (dir) {
     let names = [];
-    try { names = readdirSync(dir).filter((n) => n === 'denials.jsonl' || /^denials-\d{8}-\d{6}(-\d+)?\.jsonl$/.test(n)).sort(); } catch { /* no directory */ }
+    try { names = readdirSync(dir).filter((n) => n === 'denials.jsonl' || /^denials-\d{8}-\d{6}(-\d+)?\.jsonl$/.test(n)).sort(); } catch (e) {
+      // The default directory may not exist yet; a directory named with --dir that cannot be read is an error, whatever else is given.
+      if (opts.dir !== null) {
+        console.error(`denial_log_summary: cannot read ${dir}: ${e && e.code ? e.code : e}`);
+        process.exit(2);
+      }
+    }
     for (const n of names) files.push(join(dir, n));
   }
   if (!files.length) {

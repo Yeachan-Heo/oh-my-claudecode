@@ -210,6 +210,46 @@ describe.skipIf(!hasPython3)('a dangling link to a transcript stops every tool t
   }
 });
 
+// A task file of a team and the meta file of a subagent are read through a search, like the transcripts: one that cannot be read
+// stops the run with exit 2 and a message that names it, and only a file whose content is no JSON is counted as bad or left out.
+describe.skipIf(!hasPython3)('a task file or a meta file that cannot be read stops the tool', () => {
+  let teams = '';
+  let task = '';
+  beforeAll(() => {
+    teams = join(base, 'teams');
+    mkdirSync(join(teams, 't1', 'tasks'), { recursive: true });
+    task = join(teams, 't1', 'tasks', 'task-1.json');
+    writeFileSync(task, `${JSON.stringify({ id: '1', status: 'completed', subject: 'x', owner: 'w' })}\n`);
+  });
+
+  const cases: Array<{ name: string; script: string; args: () => string[]; target: () => string }> = [
+    { name: 'empty_results.py --teams: a task file', script: 'empty_results.py', args: () => ['--teams', teams], target: () => task },
+    { name: 'decision_outcome_join.py: an agent meta file', script: 'decision_outcome_join.py', args: () => ['--journal', routingJournal, '--transcripts', projects], target: () => join(subagentsDir, 'agent-a1.meta.json') },
+  ];
+  for (const entry of cases) {
+    it(`${entry.name}: control, the file is read`, () => {
+      const r = runPython(entry.script, entry.args(), 'none', '');
+      expect(r.status, r.stderr).toBe(0);
+    });
+
+    it(`${entry.name}: refused access exits 2 and names the file`, () => {
+      const r = runPython(entry.script, entry.args(), 'file', entry.target());
+      expect(r.status, r.stderr).toBe(2);
+      expect(r.stderr).toContain(entry.target());
+      expect(r.stderr).not.toMatch(/Traceback/);
+    });
+  }
+
+  it('empty_results.py --teams: a task file that is no JSON is still counted as bad_json', () => {
+    const broken = join(base, 'teams-broken');
+    mkdirSync(join(broken, 't1', 'tasks'), { recursive: true });
+    writeFileSync(join(broken, 't1', 'tasks', 'task-1.json'), '{nope');
+    const r = runPython('empty_results.py', ['--teams', broken], 'none', '');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('bad JSON: 1');
+  });
+});
+
 describe('a directory or a transcript that cannot be read stops the outcome labels tool', () => {
   const args = () => ['--journal', journal, '--transcripts', projects, '--json'];
 

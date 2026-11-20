@@ -305,7 +305,11 @@ describe('denial_log_summary.mjs command line', () => {
 
   it('accepts a positional path and --json output', () => {
     const file = writeJournal('cli/json/denials.jsonl', [decision({ key: '3333333333333333' })]);
-    const r = run([file, '--json']);
+    // A positional path does not switch the default directory off, so the run has a home and a working directory of its own:
+    // the journals that other tests write under the shared one are not read, whatever the order of the tests.
+    const own = join(dir, 'cli/json/home');
+    mkdirSync(own, { recursive: true });
+    const r = run([file, '--json'], { HOME: own }, own);
     expect(r.status).toBe(0);
     const parsed = JSON.parse(r.stdout);
     expect(parsed.rows).toBe(1);

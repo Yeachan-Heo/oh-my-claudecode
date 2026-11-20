@@ -711,6 +711,8 @@ def main():
             try:
                 with open(p, encoding='utf8') as f:
                     m = json.load(f)
+            except OSError as e:  # a meta file that cannot be read stops the run; only a file that is no JSON is left out
+                usage_error(f'cannot read {p}: {e.strerror}')
             except Exception:
                 continue
             tid = m.get('toolUseId')

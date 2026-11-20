@@ -251,6 +251,7 @@ interface DirEntry {
   files: Record<string, string>;
 }
 
+const joinFile = () => fixture('good-denials.jsonl', DENIAL_ROW('ok'));
 const APPLIED_ROW = `${JSON.stringify({ ts: '2026-11-14T10:00:00.500Z', point: 'learner-extraction', session_id: 's1', applied: {} })}\n`;
 const DIR_ENTRIES: DirEntry[] = [
   {
@@ -262,6 +263,15 @@ const DIR_ENTRIES: DirEntry[] = [
     files: { 'applied.jsonl': APPLIED_ROW, 'applied-20261114-080000.jsonl': APPLIED_ROW, 'agent-type.jsonl': '' },
   },
   { tool: 'empty_results.py', runner: 'python', option: '--teams', args: (dir) => ['--teams', dir], files: {} },
+  // `--dir` stops the run when it cannot be read, also when `--file` names a good journal beside it (the default directory may not exist).
+  {
+    tool: 'denial_log_summary.mjs', runner: 'node', option: '--dir', args: (dir) => ['--dir', dir, '--json'],
+    files: { 'denials.jsonl': DENIAL_ROW('ok'), 'denials-20261114-080000.jsonl': DENIAL_ROW('ok') },
+  },
+  {
+    tool: 'denial_log_summary.mjs', runner: 'node', option: '--file with --dir', args: (dir) => ['--file', joinFile(), '--dir', dir, '--json'],
+    files: { 'denials.jsonl': DENIAL_ROW('ok') },
+  },
 ];
 
 describe.each(DIR_ENTRIES)('$tool $option names an input directory', (entry) => {

@@ -251,7 +251,7 @@ Output files: `--tsv` and `--json` open the given path for writing, so an existi
 
 ## Input format
 
-- `applied.jsonl` rows with `point` `model-routing` and a `tool_use_id` are joined to `agent-*.meta.json` by `toolUseId`.
+- `applied.jsonl` rows with `point` `model-routing` and a `tool_use_id` are joined to `agent-*.meta.json` by `toolUseId`. A meta file that cannot be read stops the run with exit 2 and a message that names it; one that is no JSON is left out.
   The transcript is the `agent-*.jsonl` next to the meta file.
 - `shadow.jsonl` rows with the same `tool_use_id` give the Jev answers (probabilities and confidence of `model-tier` and `effort`).
 - Rotated files are read as `<name>-YYYYMMDD-HHMMSS.jsonl` or `<name>-YYYYMMDD-HHMMSS-<pid>.jsonl`.
@@ -435,7 +435,7 @@ python3 -I tools/diagnostics/empty_results.py --transcripts <dir> --intent inten
 | `--tsv <file>`, `--json <file>` | optional outputs (one TSV row per empty or stopped call or task; the full JSON result) |
 | `--wilson-vectors` | print the Wilson test vectors as JSON and exit |
 
-At least one of `--transcripts` and `--teams` is required. Exit codes: `0` normal run (also with no data), `2` argument or input error, including a `--transcripts` or `--teams` directory that cannot be read and an `--intent` file that is missing, is a directory, cannot be read or is not valid UTF-8.
+At least one of `--transcripts` and `--teams` is required. Exit codes: `0` normal run (also with no data), `2` argument or input error, including a `--transcripts` or `--teams` directory that cannot be read, a task file below `--teams` that cannot be read (one that is no JSON is counted as bad JSON) and an `--intent` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 
 ## What is counted
 
@@ -773,7 +773,7 @@ node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [
 | Option | Meaning |
 |---|---|
 | `--file <path>` | a journal file; repeatable. Plain arguments are taken as files too, and (unlike `--file`) do not turn off the default directory. A file given on the command line that does not exist, is a directory, cannot be read or is not valid UTF-8 stops the run with exit `2` and one line that names it |
-| `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`) |
+| `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`). A directory given with `--dir` that is missing, is not a directory or cannot be listed exits 2 and names it, also when `--file` or a plain argument names a good journal beside it; only the default directory (`OMC_JEV_LOG_DIR`, else `state/jev` under the state root) may be missing |
 | `--json` | JSON output |
 
 With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `state/jev` under the state root of the current directory (run the tool from the project root). The state root is resolved with `scripts/lib/state-root.mjs`, the resolver the hooks use, so it follows `OMC_STATE_DIR`; if it cannot be resolved the tool exits with `2` and asks for `--dir` (or `OMC_JEV_LOG_DIR`). This tool and `compaction_review.mjs` resolve the state root; the `compaction_*.py` tools do not. A journal found in the directory that cannot be read stops the run the same way (it is never left out of the counts; a file found in a directory is decoded leniently, because a rotated part may end in the middle of a character). Exit codes: `0` summary printed, `2` no journal file found or a journal file that cannot be read.

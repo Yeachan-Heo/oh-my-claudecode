@@ -673,6 +673,8 @@ def load_team_tasks(teams_path):
             try:
                 with open(p, encoding='utf8') as f:
                     data = json.load(f)
+            except OSError:
+                raise  # a task file that cannot be read stops the run (the caller names it, exit 2); only its content can be bad JSON
             except Exception:
                 counters['bad_json'] += 1
                 tasks.append((team, nr, None))
