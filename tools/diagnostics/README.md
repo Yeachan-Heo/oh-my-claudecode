@@ -1056,6 +1056,16 @@ command substitution. These constructs stay outside the scope of every tool, so 
 - A wrapper with a redirection between it and its duration (`timeout > out.log 5 git commit`): the readings that cut the
   redirection out of the words (the write reading and the user prohibitions tool) find the command, the check reading, advisor event
   coverage and the executor outcome metrics do not.
+- A status that a command keeps in a variable (`code=$?; echo $code`), prints from a function, a block, a subshell or a `trap`, sends
+  to a file (`echo $? > log`) or prints after `||` (`npm test || echo "EXIT=$?"`) is not read as the status of a check, and neither is a
+  second print of a status behind the first; see "Printed exit codes".
+- `set -e` and `exit $?`: the check reading does not take them as making the exit status visible, so a check with a command behind
+  it stays hidden; `eval` and `bash -c` strings hold no check for it either.
+- `PIPESTATUS` through a variable (`${PIPESTATUS[$i]}`), as a whole array (`${PIPESTATUS[@]}`) or after several pipelines on one line:
+  only a literal element of the pipeline that stands directly before the print is read.
+- A `>(` that stands alone is read as a redirection to a file named `(...`, so `echo >(cat)` counts as a write; a `>(` glued to a word
+  (`echo a>(cat)`) is no write, and `tee >(cat) src/a.ts` writes `src/a.ts` through its own operand. A quote inside a command
+  substitution inside double quotes (`echo "$(echo ">f")"`) ends the quoted string early, so the `>f` behind it is read as a redirection.
 
 `tests/tools/shell-syntax-matrix.test.ts` holds one table of the prefixes that a command can have (assignments,
 redirections, wrappers and their mixes) and says for each tool whether the command word is found behind it; a new variant of

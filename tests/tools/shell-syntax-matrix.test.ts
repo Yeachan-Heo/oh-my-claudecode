@@ -44,6 +44,8 @@ const PREFIXES: Array<[string, Reads]> = [
   ['> out.log ', ALL], ['>out.log ', ALL], ['>> out.log ', ALL], ['>>out.log ', ALL], ['2> err.log ', ALL], ['2>err.log ', ALL], ['2>&1 ', ALL], ['&> all.log ', ALL],
   ['&>all.log ', ALL], ['&>> all.log ', ALL], ['< in.txt ', ALL], ['<in.txt ', ALL], ['>| out.log ', ALL], ['>|out.log ', ALL], ['{fd}> out.log ', ALL], ['> "a b.log" ', ALL],
   ['>a\\ b.log ', ALL], ['<<< x ', ALL], ['2>/dev/null ', ALL], ['>&2 ', ALL], ['3< in.txt ', ALL], ['> out.log > out2.log ', ALL], ['2>&1 > out.log ', ALL],
+  // a redirection glued to an assignment: `A=1>out.log` is the assignment and a redirection, as the shell reads it
+  ['A=1>out.log ', ALL], ['A=1>>out.log ', ALL], ['A=1 B=2>out.log ', ALL], ['A=$(date)>out.log ', ALL], ['A=1 2>err.log B=2>out.log ', ALL], ['A="b c">out.log ', ALL],
   // assignments and redirections together, in both orders
   ['A=1 > out.log ', ALL], ['> out.log A=1 ', ALL], ['A="b c" 2>&1 ', ALL], ['> out.log 2>&1 A=$(d) ', ALL], ['A=1 B="c d" < in.txt 2> err.log ', ALL],
   // launch wrappers: every wrapper of the table is read by every reading
@@ -182,7 +184,7 @@ function wrapperTable() {
 }
 const TABLE = wrapperTable();
 // A redirection to a file other than /dev/null (not `>&2`, which names a descriptor).
-const WRITES_A_FILE = /(?:^|[\s\d}])(?:>>|>\||&>>?|>(?![&(]))\s*(?!\/dev\/null)\S/;
+const WRITES_A_FILE = /(?:>>|>\||&>>?|>(?![&(]))\s*(?!\/dev\/null)\S/;
 
 // A prefix that writes a file by redirection makes a command state-changing by itself; the readonly column does not use such rows.
 function casesFor(column: Column): Case[] {
