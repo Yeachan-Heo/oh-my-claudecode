@@ -616,12 +616,14 @@ function inPlaceTargets(program, args) {
  * shell. The rest of the line that holds the `<<TAG` operator stays (`cat <<EOF > src/a.ts`,
  * `cat <<EOF | tee f`): it still carries the redirections. Several operators on one line take their bodies
  * in order. An operator with no terminator line is left alone (`$((1 << 3))`), and `<<<` is a here-string.
- * One forward pass over the operators; a tag with no terminator line is searched for once.
+ * Linear in the length of the text: one pass finds the operators, one pass lists the lines that start with a
+ * word (a possible terminator) by that word, and every tag walks its own list forward only, because the
+ * position that the next body starts at never moves back.
  */
 function withoutHeredocBodies(text) {
   const operator = /(?<!<)<<(?!<)-?[ \t]*\\?(['"]?)(\w+)\1/g;
   const edits = []; // [start, end, replacement], sorted by start before they are applied
-  const missing = new Set(); // tags with no terminator line after the position being read
+  let terminators = null; // tag -> { lines: [{ index, end }], next } for the lines `[ \t]*TAG` after a newline
   let lineEnd = -1; // the newline that ends the line of the operators being read
   let resume = -1; // the newline before the next body of that line
   for (let m = operator.exec(text); m !== null; m = operator.exec(text)) {
@@ -631,17 +633,22 @@ function withoutHeredocBodies(text) {
       if (lineEnd === -1) break; // no line follows, so no body
       resume = lineEnd;
     }
-    const tag = m[2];
-    if (missing.has(tag)) continue;
-    const terminator = new RegExp(`\\n[ \\t]*${tag}\\b`, 'g');
-    terminator.lastIndex = resume;
-    const found = terminator.exec(text);
-    if (found === null) {
-      missing.add(tag);
-      continue;
+    if (terminators === null) {
+      terminators = new Map();
+      for (const line of text.matchAll(/\n[ \t]*(\w+)/g)) {
+        const entry = terminators.get(line[1]) ?? { lines: [], next: 0 };
+        entry.lines.push({ index: line.index, end: line.index + line[0].length });
+        terminators.set(line[1], entry);
+      }
     }
-    edits.push([m.index, m.index + m[0].length, `<< ${tag} `], [resume, found.index + found[0].length, '']);
-    resume = found.index + found[0].length;
+    const tag = m[2];
+    const entry = terminators.get(tag);
+    if (entry === undefined) continue;
+    while (entry.next < entry.lines.length && entry.lines[entry.next].index < resume) entry.next += 1;
+    const found = entry.lines[entry.next];
+    if (found === undefined) continue;
+    edits.push([m.index, m.index + m[0].length, `<< ${tag} `], [resume, found.end, '']);
+    resume = found.end;
   }
   let out = '';
   let from = 0;

@@ -901,6 +901,22 @@ it('command words, wrappers and comments are read in linear time', () => {
   assert.equal(got[15], false, 'a long run of tee options');
 });
 
+it('many different here-document tags with no terminator line are read in linear time', () => {
+  const lines = (count: number, line: (index: number) => string) => Array.from({ length: count }, (_, index) => line(index)).join('');
+  // About 600000 characters: each tag is looked up once and never found. A search of the rest of the text
+  // for every tag needs seconds here, the bound of classifyInChild is two.
+  const open = classifyInChild<boolean>([lines(50000, (index) => `cat <<t${index}\n`)], 'isMutation', "isMutation('Bash', { command })");
+  assert.deepEqual(open, [false]);
+  const got = classifyInChild<boolean>([
+    `${lines(4000, (index) => `cat <<t${index}\n`)}echo x > src/a.ts`, // no terminator: nothing is cut, the write counts
+    lines(4000, (index) => `cat <<t${index} > README.md\nt${index}\n`), // every tag has its own terminator line
+    `${lines(4000, (index) => `cat <<t${index} > README.md\nt${index}\n`)}echo x > src/a.ts`,
+    lines(4000, () => 'cat <<EOF\n'), // one tag again and again, never closed
+    `${lines(2000, (index) => `cat <<t${index}\n`)}${lines(2000, (index) => `t${index}\n`)}echo x > src/a.ts`, // terminators in a block at the end
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.deepEqual(got, [true, false, true, false, true]);
+});
+
 it('here-document and zero-test parsing is linear in the length of the input', () => {
   const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
   const tags = Array.from({ length: 4000 }, (_, index) => `<<t${index}\n`).join('');
