@@ -70,8 +70,9 @@ RULE (written before the measurement; do not change after seeing the results):
   message text by design.
 
 Exit codes: 0 a valid run; 1 --out or --export-labeling write refused (the file exists); 2 a usage error,
-a missing --compact file, a missing --labels file or a --transcript path that cannot be read (a transcript found
-by the search that cannot be read is skipped with a warning on standard error).
+a missing --compact file, a missing --labels file, a --transcript path that cannot be read, or a --projects
+directory that is missing or cannot be read when the transcripts are searched (a transcript found by the search
+that cannot be read is skipped with a warning on standard error).
 
 Blind labelling of binding and stale instructions (optional; without --export-labeling and --labels the
 output is the one described above):
@@ -1096,6 +1097,9 @@ def main(argv=None):
             else:
                 files.append((p, "main", None))
     else:
+        if not os.path.isdir(args.projects) or not os.access(args.projects, os.R_OK | os.X_OK):
+            print(f"error: --projects is not a readable directory: {args.projects}", file=sys.stderr)
+            return 2
         files = find_transcripts(args.projects)
     files.sort(key=lambda x: x[0])
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -459,7 +459,7 @@ describe('compaction_ask_probe', () => {
     }
   });
 
-  it('an explicit --transcript path that cannot be read exits 2 with a message that names it', () => {
+  it('an explicit --transcript path or a --projects directory that cannot be read exits 2 with a message that names it', () => {
     const env = makeEnv();
     try {
       writeFileSync(env.compactFile, '');
@@ -472,6 +472,14 @@ describe('compaction_ask_probe', () => {
         expect(p.stderr, label).toContain('--transcript');
         expect(p.stderr, label).toContain(bad);
         expect(p.stderr, label).not.toMatch(/skipping|Traceback/);
+      }
+      const mistyped = join(env.dir, 'projcts');
+      for (const bad of [mistyped, env.compactFile]) {
+        const p = spawnSync('python3', ['-I', SCRIPT, '--projects', bad, '--compact', env.compactFile, '--json'], { encoding: 'utf8' });
+        expect(p.status, p.stderr).toBe(2);
+        expect(p.stdout).toBe('');
+        expect(p.stderr).toContain('--projects');
+        expect(p.stderr).toContain(bad);
       }
     } finally {
       rmSync(env.dir, { recursive: true, force: true });

@@ -837,6 +837,8 @@ function shellWriteTargets(command, depth = 0) {
  * redirection, `tee`, heredoc with a target, or in-place `sed`/`perl`, unless every target is
  * ignored or a temp target (TEMP_DIRS, /dev/null, $TMPDIR) holds no code either.
  * The project folder is not checked: the contract passes no working directory.
+ * A command substitution inside double quotes (`echo "$(tee src/a.ts)"`) is quoted text and is not read;
+ * an unquoted `$(...)` and backticks are.
  */
 export function isMutation(toolName, toolInput) {
   if (typeof toolName !== 'string' || !toolName) return false;

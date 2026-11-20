@@ -386,7 +386,7 @@ describe('compaction harm monitor', () => {
     }
   });
 
-  it('an explicit --transcript path that cannot be read stops the run with exit 2; a searched file is not an explicit path', () => {
+  it('an explicit --transcript path or a --projects directory that cannot be read stops the run with exit 2; a searched file is not an explicit path', () => {
     const env = makeEnv();
     try {
       const good = addUnit(env, 'q1', { i: 0, tail: call('q1', 0, 'q1-a', 'text'), log: 'jev' });
@@ -409,6 +409,15 @@ describe('compaction harm monitor', () => {
       const searched = runMonitor(env, ['--json']);
       expect(searched.status, searched.stderr).toBe(0);
       expect(JSON.parse(searched.stdout).units).toBe(1);
+      const mistyped = join(env.dir, 'projcts');
+      for (const bad of [mistyped, good]) {
+        flushLog(env);
+        const stopped = spawnSync('python3', ['-I', MONITOR, '--projects', bad, '--compact', env.compactLog, '--to', UNTIL, '--days', '7'], { encoding: 'utf8' });
+        expect(stopped.status, stopped.stderr).toBe(2);
+        expect(stopped.stdout).toBe('');
+        expect(stopped.stderr).toContain('--projects');
+        expect(stopped.stderr).toContain(bad);
+      }
     } finally {
       cleanup(env);
     }

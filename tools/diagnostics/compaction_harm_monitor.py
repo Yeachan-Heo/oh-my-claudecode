@@ -53,7 +53,8 @@ RULE (written before any measurement; do not change after seeing a result):
   scripts get the same transcript paths.
 
 Exit codes: 0 ok; 2 usage error, missing or unusable input file (a --transcript path that cannot be read stops the
-run; a transcript found by the search that cannot be read is skipped with a warning on standard error).
+run, and so does a --projects directory that is missing or cannot be read when the transcripts are searched; a
+transcript found by the search that cannot be read is skipped with a warning on standard error).
 
 """
 
@@ -571,6 +572,9 @@ def main(argv=None):
             else:
                 files.append((path, "main", None))
     else:
+        if not os.path.isdir(args.projects) or not os.access(args.projects, os.R_OK | os.X_OK):
+            print(f"error: --projects is not a readable directory: {args.projects}", file=sys.stderr)
+            return 2
         files = find_transcripts(args.projects)
     files.sort(key=lambda item: item[0])
     occurrences = []

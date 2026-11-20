@@ -67,7 +67,8 @@ e. Candidate. A tool call in the same session and in the period, whose time is s
    in the string of sh -c, su -c or ssh host '...' (two levels deep, 100000 characters at most). A command name in
    the arguments of another command, in a quoted string, in a # comment or in a here-document body is text:
    "echo 'git commit'", "rg 'git commit' README.md" and "grep rm f" run no git and no rm. Not read: a here-document
-   that a shell takes as its input (bash <<EOF) and remote execution by docker exec or kubectl exec (amended, for
+   that a shell takes as its input (bash <<EOF), a command substitution inside double quotes (echo "$(git commit)"; an
+   unquoted $(...) and backticks are read) and remote execution by docker exec or kubectl exec (amended, for
    every rule version: any git, rm or systemctl word of the command used to count, quoted or not).
    Each call is counted once, for the earliest matching prohibition.
 
