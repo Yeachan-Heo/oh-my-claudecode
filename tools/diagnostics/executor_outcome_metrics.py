@@ -476,7 +476,7 @@ def strip_comments(line):
     return line
 
 
-HEREDOC = re.compile(r"<<-?\s*(?!<)(['\"]?)([A-Za-z0-9_][A-Za-z0-9_-]*)\1")
+HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z0-9_][A-Za-z0-9_-]*)\1")  # not a here-string (<<<)
 
 
 def drop_heredocs(command):

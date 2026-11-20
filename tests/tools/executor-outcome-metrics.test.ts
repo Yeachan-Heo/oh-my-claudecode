@@ -511,7 +511,7 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
     it('the command word is read after leading assignments and redirections, whatever the value or the target holds', () => {
       const values = [
         'MODE="deep analysis"', "MODE='deep analysis'", 'MODE=deep\\ analysis', 'MODE=', 'A=$(date)', 'A=$(a b c)', 'A=`date`', 'A="$(a b)"',
-        'A=$(echo ")")', 'A=$(a $(b c))', 'A+=y', 'B=1 MODE="a b"', '> out.log', '2>&1', '&> all.log', '< in.txt', '>| out', '>>out', '2> err',
+        'A=$(echo ")")', 'A=$(a $(b c))', 'A+=y', 'B=1 MODE="a b"', '> out.log', '2>&1', '&> all.log', '< in.txt', '<<< word', '>| out', '>>out', '2> err',
         '{fd}> out', '> "my out.log"', '> out.log MODE="a b"', 'MODE="a b" 2>&1', 'env A=1', 'time > out', '$()',
       ];
       const kinds = pyEval(
