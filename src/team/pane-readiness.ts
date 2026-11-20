@@ -191,13 +191,23 @@ const CLAUDE_STARTUP_CHOICES = {
 } as const;
 const CLAUDE_TRUST_CHOICES = ['Yes,Itrustthisfolder', 'Yes,proceed'];
 // Onboarding's theme picker and security notes, in parts that each survive a
-// pane too short for the whole screen.
-const CLAUDE_THEME_CHOICES = ['Auto(matchterminal)', 'Darkmode', 'Lightmode'];
+// pane too short for the whole screen. A theme name counts only as the picker
+// draws it, never as a bare "Dark mode" that a path could also hold.
+const CLAUDE_THEME_CHOICES = [
+  'Auto(matchterminal)',
+  'Darkmode',
+  'Lightmode',
+  'Darkmode(colorblind-friendly)',
+  'Lightmode(colorblind-friendly)',
+  'Darkmode(ANSIcolorsonly)',
+  'Lightmode(ANSIcolorsonly)',
+];
 const CLAUDE_ONBOARDING_TEXT = [
   "Let'sgetstarted.",
   'Choosethetextstyle',
   'Tochangethislater,run/theme',
-  ...CLAUDE_THEME_CHOICES,
+  ...CLAUDE_THEME_CHOICES.filter((choice) => choice.includes('(')),
+  'DarkmodeLightmode',
   'Syntaxtheme:',
   '(ctrl+ttodisable)',
   'Securitynotes:',
@@ -211,19 +221,36 @@ const CLAUDE_CHOICES: readonly string[] = [
   ...Object.values(CLAUDE_STARTUP_CHOICES).flat(),
   ...CLAUDE_TRUST_CHOICES,
   ...CLAUDE_THEME_CHOICES,
-  ...CLAUDE_THEME_CHOICES.map((choice) => `✔${choice}`),
 ];
 
-// The squeezed capture after the last live input prompt: a ❯ that does not
-// mark a dialog choice. A dialog quoted above that prompt is not on screen.
-function claudeDialogTail(captured: string): string {
-  const stream = captured.replace(/\s+/g, '');
-  let start = 0;
-  for (const marker of stream.matchAll(/❯/gu)) {
-    const after = marker.index + marker[0].length;
-    if (!CLAUDE_CHOICES.some((choice) => stream.startsWith(choice, after))) start = after;
-  }
-  return stream.slice(start);
+const squeeze = (text: string) => text.replace(/\s+/g, '');
+
+// A line the ready detector reads as an input prompt can instead be a dialog
+// choice focused with ❯ (a theme choice also with ✔), wrapped over the next
+// lines in a narrow pane. It is a choice only if the line holds nothing else.
+function lineMarksClaudeChoice(lines: readonly string[], index: number): boolean {
+  const rest = squeeze(lines[index]!.replace(PANE_PATTERNS.claude.idlePromptLine, '')).replace(/^✔/u, '');
+  if (!rest) return false;
+  const drawn = rest + squeeze(lines.slice(index + 1, index + 4).join(''));
+  return CLAUDE_CHOICES.some((choice) => choice.startsWith(rest) && drawn.startsWith(choice));
+}
+
+const CLAUDE_INPUT_BOX_RULE = /^[─━]{3,}$/u;
+
+// The squeezed capture below the last live input prompt, as the ready detector
+// reads prompts (❯, ›, >), not counting a focused dialog choice. A dialog quoted
+// above that prompt is not on screen. Null when that prompt sits in Claude's
+// input box: no first-run screen is drawn then, and what follows is the HUD.
+function claudeDialogTail(captured: string): string | null {
+  const lines = paneLines(captured);
+  const prompt = lines.findLastIndex(
+    (line, index) => PANE_PATTERNS.claude.idlePromptLine.test(line) && !lineMarksClaudeChoice(lines, index),
+  );
+  if (prompt < 0) return squeeze(lines.join(''));
+  // Claude draws a rule above the prompt and another below its input, which may wrap.
+  const inBox = CLAUDE_INPUT_BOX_RULE.test(lines[prompt - 1] ?? '')
+    && lines.slice(prompt + 1).some((line) => CLAUDE_INPUT_BOX_RULE.test(line));
+  return inBox ? null : squeeze(lines.slice(prompt + 1).join(''));
 }
 
 // The dialog whose choice (or onboarding text) is drawn last is the live one:
@@ -254,7 +281,8 @@ function claudeStartupDialogIn(tail: string, captured: string): ClaudeStartupDia
 
 // Read only by the Claude startup wait, before it reads the trust dialogs.
 export function detectClaudeStartupDialog(captured: string): ClaudeStartupDialogKind | null {
-  return claudeStartupDialogIn(claudeDialogTail(captured), captured);
+  const tail = claudeDialogTail(captured);
+  return tail === null ? null : claudeStartupDialogIn(tail, captured);
 }
 
 function detectTrustPrompt(
@@ -383,7 +411,7 @@ export function claudeDialogFocus(
   if (kind !== 'claude_directory') {
     const [first, second] = CLAUDE_STARTUP_CHOICES[kind];
     const tail = claudeDialogTail(captured);
-    if (claudeStartupDialogIn(tail, captured) !== kind) {
+    if (tail === null || claudeStartupDialogIn(tail, captured) !== kind) {
       const stream = captured.replace(/\s+/g, '');
       return stream.includes(first) || stream.includes(second) ? 'stale' : null;
     }
