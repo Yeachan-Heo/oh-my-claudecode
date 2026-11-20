@@ -276,7 +276,7 @@ function main() {
     repos.push(...opts.repos.map((p) => resolve(p)));
     if (opts.reposFile) {
       if (!existsSync(opts.reposFile)) throw new UsageError(`missing repository list file: ${opts.reposFile}`);
-      repos.push(...parseRepoList(readFileSync(opts.reposFile, 'utf8')));
+      for (const repo of parseRepoList(readFileSync(opts.reposFile, 'utf8'))) repos.push(repo); // a spread of a long list overflows the call stack
     }
     if (!repos.length) repos.push(process.cwd());
   } catch (e) {
