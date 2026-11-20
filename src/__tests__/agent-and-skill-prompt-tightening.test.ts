@@ -63,9 +63,51 @@ describe('git-master agent prompt', () => {
     expect(text).toContain('stop and report');
   });
 
-  test('counts rebase as history rewriting, with the autosquash exception on unpushed branches', () => {
+  test('counts rebase as history rewriting, with the autosquash exception on an own branch only', () => {
     expect(text).toContain('including rebase');
-    expect(/exception[^.]*--autosquash[^.]*unpushed/.test(text)).toBe(true);
+    expect(/exception[^.]*--autosquash[^.]*own branch/.test(text)).toBe(true);
+  });
+
+  // The branch categories are the one place that says which operation and exception a branch allows.
+  const constraints = text.slice(text.indexOf('<Constraints>'), text.indexOf('</Constraints>')).split('\n');
+  const category = (name: string) => constraints.find((l) => l.trim().startsWith(`- ${name}:`)) ?? '';
+  const heading = constraints.findIndex((l) => l.includes('Branch categories decide every history operation'));
+  const protectedLine = category('Protected');
+  const names = ['Protected', 'Current', 'Shared', 'Own'];
+
+  test('lists the branch categories in one place: protected, current, shared and own', () => {
+    expect(heading).toBeGreaterThanOrEqual(0);
+    expect(constraints.slice(heading + 1, heading + 1 + names.length).map((l) => l.trim().split(':')[0])).toEqual(names.map((n) => `- ${n}`));
+    expect(text).not.toContain('Never rebase main/master.');
+  });
+
+  test('the protected category names main, master and the release branches, and allows no rewrite and no exception', () => {
+    for (const branch of ['`main`', '`master`', '`release/<version>`', '`hotfix/<version>`']) expect(protectedLine).toContain(branch);
+    expect(protectedLine).toContain('whatever the request and the exception (the autosquash exception included)');
+    for (const verb of ['rebase', 'amend', 'reset the branch', 'filter', 'force-push', 'delete']) expect(protectedLine).toContain(verb);
+    expect(protectedLine).not.toMatch(/\b(unless|except when|only when|explicit(ly)?)\b/);
+    expect(text).not.toContain('the current release branch');
+  });
+
+  test('no exception or permission in the prompt reaches a protected branch', () => {
+    const protectedNames = ['main', 'master', 'release/', 'hotfix/'];
+    const GRANT = /\bexception\b|explicitly asks|\ballowed\b|--autosquash/;
+    const grants = text.split('\n').filter((l) => l !== protectedLine && GRANT.test(l));
+    expect(grants.length).toBeGreaterThan(0);
+    for (const line of grants) {
+      // A line that grants something names no protected branch, and is either a category line or points to the categories.
+      expect({ line, protectedNamed: protectedNames.filter((n) => line.includes(n)) }).toEqual({ line, protectedNamed: [] });
+      const bound = /^\s*- (Shared|Own|Current):/.test(line) || /branch categories|\bown branch\b|\bshared branches?\b/i.test(line);
+      expect({ line, bound }).toEqual({ line, bound: true });
+    }
+  });
+
+  test('the shared and own categories do not widen the protected one, and the other rules point to the categories', () => {
+    expect(category('Shared')).toContain('the autosquash exception does not apply');
+    expect(category('Own')).toContain('never pushed');
+    expect(text).toContain('only as the branch categories above allow');
+    expect(text).toContain('on an own branch only, squash them');
+    expect(text).toContain('never rewrite a protected branch (see the branch categories)');
   });
 });
 
@@ -103,10 +145,14 @@ describe('reviewer and architect agent prompts', () => {
     }
   });
 
-  test('code-reviewer has the root-cause guard that treats error-masking fallbacks as blockers', () => {
+  test('code-reviewer has the root-cause guard that rates error-masking fallbacks by their real impact', () => {
     const text = read('agents/code-reviewer.md');
     expect(text).toMatch(/root-cause guard/i);
-    expect(text).toMatch(/fallback\/workaround code that masks an error instead of fixing its cause as a blocker/i);
+    expect(text).toMatch(/fallback\/workaround code that masks an error instead of fixing its cause as a finding and rate it by its real impact/i);
+    // The severity follows the impact: CRITICAL only for security or data, as the Failure_Modes severity rule says.
+    expect(text).toContain('CRITICAL only when the masked failure endangers security or data; HIGH when it reaches users or core behavior; MEDIUM when it is confined to one feature; LOW when it touches only an optional side path such as telemetry');
+    expect(text).toContain('Reserve CRITICAL for security vulnerabilities and data loss risks.');
+    expect(text).not.toMatch(/as a blocker \(CRITICAL\)/);
   });
 
   test('code-reviewer keeps the fail-open exception and flags silent suppression', () => {
@@ -130,7 +176,58 @@ describe('reviewer and architect agent prompts', () => {
   });
 
   test('security-reviewer requires an exploitability argument for CRITICAL and HIGH findings', () => {
-    expect(read('agents/security-reviewer.md')).toMatch(/Do not escalate a speculative pattern without evidence that the attack path or the impact is reachable/);
+    const text = read('agents/security-reviewer.md');
+    expect(text).toMatch(/Do not escalate a speculative pattern without evidence that the attack path or the impact is reachable/);
+    // The rating an advisory gives a dependency CVE feeds the argument; it does not replace it.
+    expect(text).toContain('the CRITICAL or HIGH rating an advisory gives a dependency CVE is an input to that argument, not a substitute for it');
+  });
+});
+
+// A rule that fixes a weight ("CRITICAL", "HIGH", "MAJOR") must not contradict the scale of its own file. The rule blocks of
+// every prompt this change touches are read sentence by sentence: a sentence that names a weight is either part of the
+// verdict gate (it speaks of confidence, a verdict or approval) or it names the impact the weight depends on. Where the file
+// reserves CRITICAL for a domain ("Reserve CRITICAL for ..."), a sentence that names CRITICAL has to name that domain.
+describe('changed agent prompts fix no weight that contradicts the severity scale of the same file', () => {
+  const changed = ['architect', 'code-reviewer', 'debugger', 'git-master', 'security-reviewer'].map((name) => `agents/${name}.md`);
+  const ruleSentences = (text: string) =>
+    [...text.matchAll(/<(Constraints|Investigation_Protocol)>([\s\S]*?)<\/\1>/g)]
+      .flatMap((m) => m[2].split('\n'))
+      .flatMap((l) => l.split(/(?<=\.)\s+(?=[A-Z`])/))
+      .map((l) => l.trim())
+      .filter(Boolean);
+  const GATE = /confidence|verdict|approve|Open Questions|argument/i;
+  const GENERIC_IMPACT = /\b(security|data|exploit\w*|reachable|real impact)\b/i;
+
+  // The words of the domain a file reserves CRITICAL for, or null when the file has no such sentence.
+  const reservedDomain = (text: string) => {
+    const clause = /Reserve CRITICAL for ([^.]*)\./.exec(text)?.[1];
+    return clause ? new RegExp(`\\b(${[...new Set(clause.split(/\W+/).filter((w) => /^(security|data|safety|privacy)$/.test(w)))].join('|')})\\b`, 'i') : null;
+  };
+
+  const violations = (text: string) => {
+    const domain = reservedDomain(text);
+    return ruleSentences(text).filter((sentence) => {
+      if (!/\b(CRITICAL|HIGH|MAJOR)\b/.test(sentence) || GATE.test(sentence)) return false;
+      if (/\bCRITICAL\b/.test(sentence) && domain && !domain.test(sentence)) return true;
+      return !GENERIC_IMPACT.test(sentence);
+    });
+  };
+
+  test('every rule sentence of every changed prompt that names a weight is a gate or names its impact', () => {
+    for (const file of changed) expect({ file, violations: violations(read(file)) }).toEqual({ file, violations: [] });
+  });
+
+  test('the check sees the weights: code-reviewer reserves CRITICAL for security and data, and the rule sentences carry weights', () => {
+    const reviewer = read('agents/code-reviewer.md');
+    expect(reservedDomain(reviewer)?.test('security vulnerabilities')).toBe(true);
+    expect(ruleSentences(reviewer).filter((x) => /\bCRITICAL\b/.test(x)).length).toBeGreaterThanOrEqual(2);
+    expect(ruleSentences(read('agents/security-reviewer.md')).filter((x) => /\bCRITICAL\b/.test(x)).length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('the old rule that made every masking fallback CRITICAL is caught', () => {
+    const old = read('agents/code-reviewer.md').replace(/Treat fallback\/workaround code[\s\S]*?the verdict follows the rated severity\./, 'Treat fallback/workaround code that masks an error instead of fixing its cause as a blocker (CRITICAL): silently swallowed errors, blanket catches, and "skip this step" workarounds hide the defect.');
+    expect(old).toContain('as a blocker (CRITICAL)');
+    expect(violations(old).some((x) => x.includes('as a blocker (CRITICAL)'))).toBe(true);
   });
 });
 
