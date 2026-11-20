@@ -1,100 +1,296 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { commandWith, commands, flatCode, scriptOf, sharedSections, skillCommands, skillText } from './helpers/omc-doctor-cache-fixture.js';
+import { allCommands, bashBlocks, blockOf, codeOf, commands, locatorLine, runBlock, runCommand, SCRIPT, scriptSection, scriptText, skillText } from './helpers/omc-doctor-cache-fixture.js';
 import { versionCommand } from './helpers/omc-doctor-step1.js';
 
-// Every `node -e` command of the omc-doctor skill is a standalone script: separate processes cannot share code, so the
-// skill carries a copy of each helper where it is needed. A section that starts with `// == <name> (shared) ==` has the
-// same text in every command that carries it, and this test keeps the copies equal. The two cache commands differ only
-// in their `messages` section.
-const step4 = commandWith('Latest cached plugin version') ?? '';
-const step6 = commandWith("' version(s):'") ?? '';
-const probe = commandWith('claudeMdEnabled') ?? '';
-const npm = commandWith("'npm latest: '") ?? '';
-const [outdated, stale] = [commands[0] ?? '', commands[1] ?? ''];
-const step1 = versionCommand ?? '';
+// The checks of the omc-doctor skill that read the plugin installation are the commands of one script that ships with
+// the plugin (scripts/omc-doctor.mjs), and the skill calls them through one locator line. This file keeps that
+// structure: the skill holds no code of the checks, every call uses the same locator, and the script defines each helper
+// once. It also runs the locator through real bash: a missing file, an empty or wrong root, the second of two roots, a
+// path with a space or with backslashes.
+const posix = process.platform !== 'win32';
 
-const named: Array<[string, string]> = [['Step 1', step1], ['npm latest command', npm], ['Step 4', step4], ['Step 6', step6], ['outdated plugin command', outdated], ['stale cache command', stale]];
-
-// Which commands carry which shared section.
-const MEMBERS: Record<string, string[]> = {
-  'config dir': ['Step 1', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
-  'plugin ids': ['Step 1', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
-  'version grammar': ['Step 1', 'npm latest command', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
-  'version order': ['Step 1', 'Step 4'],
-  'read file': ['Step 1', 'Step 4', 'Step 6', 'outdated plugin command', 'stale cache command'],
-  'registry marketplaces': ['Step 4', 'Step 6'],
-  'registry entry shape': ['Step 1', 'outdated plugin command', 'stale cache command'],
-  'path resolver': ['Step 1', 'outdated plugin command', 'stale cache command'],
-  'repair constants': ['outdated plugin command', 'stale cache command'],
-  'repair registry': ['outdated plugin command', 'stale cache command'],
-  'occupancy records': ['outdated plugin command', 'stale cache command'],
-  'modification dates': ['outdated plugin command', 'stale cache command'],
-  protection: ['outdated plugin command', 'stale cache command'],
-  'repair run': ['outdated plugin command', 'stale cache command'],
-};
-
-describe('omc-doctor: the commands of the skill carry equal copies of their shared sections', () => {
-  test('the skill has the seven commands, each found once', () => {
-    expect(skillCommands).toHaveLength(7);
-    for (const [label, command] of [...named, ['opt-out probe', probe]]) expect({ label, found: command !== '' }).toEqual({ label, found: true });
-    expect(commands).toHaveLength(2);
-    expect(outdated).not.toBe(stale);
-  });
-
-  test('each shared section is in exactly the commands that need it', () => {
-    const where: Record<string, string[]> = {};
-    for (const [label, command] of named) for (const name of sharedSections(command).keys()) (where[name] ??= []).push(label);
-    expect(where).toEqual(MEMBERS);
-  });
-
-  test('every copy of a shared section is the same text', () => {
-    for (const [section, members] of Object.entries(MEMBERS)) {
-      const copies = members.map((label) => [label, sharedSections(named.find(([l]) => l === label)?.[1] ?? '').get(section) ?? '']);
-      expect(copies[0][1]).not.toBe('');
-      for (const [label, copy] of copies) expect({ section, label, same: copy === copies[0][1] }).toEqual({ section, label, same: true });
+describe('omc-doctor: the skill calls the script through one locator, and holds no code of the checks', () => {
+  test('the skill has no node -e command left: its checks are calls of the script', () => {
+    expect(skillText).not.toMatch(/node -e/);
+    // No inline code in a shell block either: a block is a comment, the locator line and calls, or plain shell checks.
+    for (const block of bashBlocks().filter((b) => b.includes('node "$S"'))) {
+      for (const line of block.split('\n')) {
+        expect({ line: line.slice(0, 60), ok: line.startsWith('#') || line === locatorLine || /^node "\$S" [a-z0-9-]+$/.test(line) }).toEqual({ line: line.slice(0, 60), ok: true });
+      }
     }
   });
 
-  test('the two cache commands differ only in their messages', () => {
-    const withoutMessages = (command: string) => scriptOf(command).split(/^(?=\/\/ == )/m).filter((section) => section.startsWith('// == ') && !section.startsWith('// == messages')).join('');
-    expect(scriptOf(stale).split(/^(?=\/\/ == )/m).filter((section) => section.startsWith('// == messages'))).toHaveLength(1);
-    expect(withoutMessages(stale)).toBe(withoutMessages(outdated));
-    expect(withoutMessages(stale).length).toBeGreaterThan(5000);
+  test('the locator line is one text, in every shell block that runs the script, before the first call', () => {
+    expect(locatorLine).not.toBe('');
+    const withLocator = bashBlocks().filter((block) => block.split('\n').some((line) => line.startsWith('S=; ')));
+    const callers = bashBlocks().filter((block) => block.includes('node "$S" '));
+    expect(withLocator).toEqual(callers);
+    // Six blocks run the seven commands (Step 1 and its npm line share one block).
+    expect(callers).toHaveLength(6);
+    for (const block of callers) {
+      const lines = block.split('\n');
+      expect(lines.filter((line) => line.startsWith('S=; '))).toEqual([locatorLine]);
+      expect(lines.indexOf(locatorLine)).toBeLessThan(lines.findIndex((line) => line.startsWith('node "$S" ')));
+    }
+    // CLAUDE_PLUGIN_ROOT first (the skill was loaded from that plugin, so its script matches the text), then OMC_PLUGIN_ROOT,
+    // then the global npm package, which npm is asked for only when neither variable has the file.
+    expect(locatorLine.indexOf('CLAUDE_PLUGIN_ROOT')).toBeLessThan(locatorLine.indexOf('OMC_PLUGIN_ROOT'));
+    expect(locatorLine.indexOf('OMC_PLUGIN_ROOT')).toBeLessThan(locatorLine.indexOf('npm root -g'));
+    expect(locatorLine.indexOf('done;')).toBeLessThan(locatorLine.indexOf('npm root -g'));
+    expect(locatorLine).toContain('/oh-my-claude-sisyphus');
+    // The first variable is the exact token the host substitutes in a skill and the compact shim of the installer names.
+    expect(locatorLine).toContain('"${CLAUDE_PLUGIN_ROOT}"');
+    expect(locatorLine).toContain('scripts/omc-doctor.mjs');
+    expect(locatorLine).toContain('omc-doctor: plugin files not found');
+    expect(locatorLine).toContain('exit 1');
   });
 
-  // The opt-out probe is one line, so its copy of the config dir section is that section as one line (see flatCode). A
-  // trailing comment would swallow the code after it in that form, so the section has whole-line comments only.
-  test('the one-line opt-out probe carries the config dir section', () => {
-    const section = sharedSections(step1).get('config dir') ?? '';
-    expect(section).not.toBe('');
-    expect(section.split('\n').filter((line) => !/^\s*\/\//.test(line) && line.includes('//'))).toEqual([]);
-    expect(scriptOf(probe)).toContain(flatCode(section));
-    expect(probe.includes('\n')).toBe(false);
+  test('each of the seven commands is called once, and the script knows every command the skill calls', () => {
+    const called = [...skillText.matchAll(/^node "\$S" ([a-z0-9-]+)$/gm)].map((match) => match[1]);
+    expect([...called].sort()).toEqual([...allCommands].sort());
+    const dispatch = scriptSection('dispatch');
+    for (const command of called) expect({ command, known: dispatch.includes(command.includes('-') ? `'${command}'` : command) }).toEqual({ command, known: true });
+  });
+
+  test('the shell blocks of the two cache commands and of the probe are the comment, the locator line and the call', () => {
+    for (const command of ['claude-md-optout', 'claude-md-version', 'cache-versions', ...commands]) {
+      const lines = blockOf(command).split('\n');
+      expect(lines).toHaveLength(3);
+      expect(lines[0].startsWith('# ')).toBe(true);
+      expect(lines[1]).toBe(locatorLine);
+      expect(lines[2]).toBe(`node "$S" ${command}`);
+    }
   });
 });
 
-// A command is pasted into a double-quoted shell string, so nothing in it may be changed by one: no quote, dollar sign or
-// backtick, no backslash in front of a character that a double-quoted string drops it for, and no backslash at the end of
-// a line (the shell would join the lines). The skill never spells `!==` either.
-describe('omc-doctor: no command contains anything a double-quoted shell string would change', () => {
-  test.each([...named, ['opt-out probe', probe]] as Array<[string, string]>)('%s', (_label, command) => {
-    expect(command.startsWith('node -e "')).toBe(true);
-    expect(command.endsWith('"')).toBe(true);
-    const script = scriptOf(command);
-    expect(script).not.toMatch(/["`$]|\\[\\"`$\n]/);
-    expect(script.split('\n').filter((line) => line.endsWith('\\'))).toEqual([]);
-    expect(script).not.toContain('!==');
+describe('omc-doctor: the script defines each helper once', () => {
+  test('every section heading of the script is unique', () => {
+    const headings = scriptText.split('\n').filter((line) => /^\/\/ == .+ ==$/.test(line));
+    expect(headings.length).toBeGreaterThan(15);
+    expect(new Set(headings).size).toBe(headings.length);
   });
 
+  test('the helpers the commands share exist once at the top level, and no command redefines one', () => {
+    const helpers = ['configDir', 'OMC_IDS', 'marketplaceOf', 'cacheDirOf', 'dropV', 'semver', 'isVersionDir', 'compareVersions', 'readFile', 'entryShapeBad', 'resolveFrom', 'linkChain', 'registryMarketplaces', 'newestChange', 'protectionOf', 'ownerGone', 'refuse', 'cacheRepair'];
+    for (const name of helpers) expect({ name, definitions: scriptText.split('\n').filter((line) => line.startsWith(`const ${name} = `)).length }).toEqual({ name, definitions: 1 });
+    // A helper nested in a command would be a second copy: indented definitions of these names do not exist.
+    for (const name of helpers) expect({ name, nested: new RegExp(`^\\s+(const|let|function) ${name}\\b`, 'm').test(scriptText) }).toEqual({ name, nested: false });
+  });
+
+  test('the two cache commands are one function and differ only in their messages', () => {
+    const messages = scriptSection('repair run');
+    const entries = [...messages.matchAll(/^ {2}(outdated|stale): \{$/gm)].map((match) => match[1]);
+    expect(entries).toEqual(['outdated', 'stale']);
+    const keysOf = (name: string) => [...messages.slice(messages.indexOf(`  ${name}: {`)).split('\n  },')[0].matchAll(/^ {4}(\w+): /gm)].map((match) => match[1]);
+    expect(keysOf('outdated')).toEqual(['movedEnd', 'allProtected', 'noPin', 'noCache', 'footer']);
+    expect(keysOf('stale')).toEqual(keysOf('outdated'));
+    expect(scriptText.split('const cacheRepair = ')).toHaveLength(2);
+    expect(scriptSection('dispatch')).toContain("'cache-outdated': () => cacheRepair('outdated')");
+    expect(scriptSection('dispatch')).toContain("'cache-stale': () => cacheRepair('stale')");
+  });
+
+  test('the script is plain Node: only built-in modules, no shell but the Windows npm call, no require', () => {
+    const imports = [...scriptText.matchAll(/^import .* from '([^']+)';$/gm)].map((match) => match[1]);
+    expect(imports.length).toBeGreaterThan(3);
+    for (const source of imports) expect(source.startsWith('node:')).toBe(true);
+    expect(codeOf()).not.toMatch(/\brequire\(/);
+    expect(codeOf().match(/shell: true/g)).toHaveLength(1);
+    expect(scriptSection('Step 1: npm latest')).toContain("process.platform == 'win32'");
+    expect(scriptSection('Step 1: npm latest')).toContain('shell: true');
+  });
+
+  // A command is pasted into the Bash tool as plain text: nothing in the skill may be the history expansion of a shell.
   test('the skill text never spells !==', () => {
     expect(skillText).not.toContain('!==');
   });
 });
 
-// Every omc-doctor test file that runs a command of the skill handles paths and file systems, so it belongs in the step of
-// ci.yml that runs the path-handling tests on Windows. The same remark came back for every new file of this skill.
+// The locator runs through real bash. A stub script in each root says which root it was found in and which command it
+// was called with, so the cases below are about the lookup and not about the checks (the real script runs in the cases
+// that follow).
+describe.skipIf(!posix)('omc-doctor: the locator line finds the script, or says the plugin files are missing', { timeout: 120_000 }, () => {
+  const stub = (parent: string, name: string, marker: string) => {
+    const root = path.join(parent, name);
+    mkdirSync(path.join(root, 'scripts'), { recursive: true });
+    writeFileSync(path.join(root, 'scripts', 'omc-doctor.mjs'), `console.log(${JSON.stringify(marker)} + ':' + process.argv.slice(2).join(' '));\n`);
+    return root;
+  };
+  const world = () => {
+    const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor-locator-'));
+    const config = path.join(base, 'config');
+    mkdirSync(path.join(config, 'plugins'), { recursive: true });
+    return { base, config };
+  };
+  const MISSING = 'omc-doctor: plugin files not found';
+  // `npm root -g` answers from npm_config_prefix, so each case gives npm a prefix of its own: the global package of the
+  // machine the tests run on never decides a case. The prefix holds the package under lib/node_modules when a case asks.
+  // The registry is a closed local port, so the npm latest line of Step 1 is (unavailable) at once and no case needs a network.
+  const locate = (command: string, config: string, env: Record<string, string>, base: string) =>
+    runBlock(command, config, { env: { npm_config_prefix: path.join(base, 'npm-prefix'), npm_config_registry: 'http://127.0.0.1:9/', npm_config_fetch_retries: '0', ...env }, cwd: base, timeout: 40_000 });
+
+  test('no file under either root, an unset or empty root, or two roots without the file: the message and exit code 1, for every block', () => {
+    const { base, config } = world();
+    try {
+      const bare = path.join(base, 'no-scripts');
+      mkdirSync(bare);
+      mkdirSync(path.join(base, 'other'));
+      const settings: Array<[string, Record<string, string>]> = [
+        ['both unset', { CLAUDE_PLUGIN_ROOT: '', OMC_PLUGIN_ROOT: '' }],
+        ['blank values', { CLAUDE_PLUGIN_ROOT: '   ', OMC_PLUGIN_ROOT: '\t' }],
+        ['two directories without the file', { CLAUDE_PLUGIN_ROOT: bare, OMC_PLUGIN_ROOT: path.join(base, 'other') }],
+        ['roots that do not exist', { CLAUDE_PLUGIN_ROOT: path.join(base, 'gone'), OMC_PLUGIN_ROOT: path.join(base, 'gone-too') }],
+        ['a root that is a file', { CLAUDE_PLUGIN_ROOT: path.join(base, 'config', 'plugins', '..', '..', 'config'), OMC_PLUGIN_ROOT: '' }],
+      ];
+      for (const [label, env] of settings) {
+        for (const command of allCommands) {
+          const result = locate(command, config, env, base);
+          expect({ label, command, status: result.status, first: result.stdout.split('\n')[0].slice(0, MISSING.length) }).toEqual({ label, command, status: 1, first: MISSING });
+          // The message names the way out, and nothing else is printed (the checks and the cache commands never started).
+          expect(result.stdout).toContain('Reinstall or update the plugin (omc update, or claude plugin update oh-my-claudecode)');
+          expect(result.stdout).toContain('in the global npm package');
+          expect(result.stdout.trim().split('\n')).toHaveLength(1);
+          expect(result.stderr).toBe('');
+        }
+      }
+      expect(readdirSync(config)).toEqual(['plugins']);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test('the first root that holds the file is used: CLAUDE_PLUGIN_ROOT, then OMC_PLUGIN_ROOT, whichever of them is wrong', () => {
+    const { base, config } = world();
+    try {
+      const first = stub(base, 'first', 'first');
+      const second = stub(base, 'second', 'second');
+      const bare = path.join(base, 'bare');
+      mkdirSync(bare);
+      const gone = path.join(base, 'gone');
+      const cases: Array<[string, Record<string, string>, string]> = [
+        ['both hold the file: CLAUDE_PLUGIN_ROOT wins', { CLAUDE_PLUGIN_ROOT: first, OMC_PLUGIN_ROOT: second }, 'first'],
+        ['only OMC_PLUGIN_ROOT holds it', { CLAUDE_PLUGIN_ROOT: bare, OMC_PLUGIN_ROOT: second }, 'second'],
+        ['CLAUDE_PLUGIN_ROOT is empty', { CLAUDE_PLUGIN_ROOT: '', OMC_PLUGIN_ROOT: second }, 'second'],
+        ['CLAUDE_PLUGIN_ROOT does not exist', { CLAUDE_PLUGIN_ROOT: gone, OMC_PLUGIN_ROOT: second }, 'second'],
+        ['OMC_PLUGIN_ROOT does not exist beside a live CLAUDE_PLUGIN_ROOT', { CLAUDE_PLUGIN_ROOT: first, OMC_PLUGIN_ROOT: gone }, 'first'],
+        ['only CLAUDE_PLUGIN_ROOT is set', { CLAUDE_PLUGIN_ROOT: first, OMC_PLUGIN_ROOT: '' }, 'first'],
+        ['surrounding spaces are ignored', { CLAUDE_PLUGIN_ROOT: `  ${first}  `, OMC_PLUGIN_ROOT: '' }, 'first'],
+      ];
+      for (const [label, env, marker] of cases) {
+        for (const command of ['claude-md-optout', 'cache-outdated']) {
+          const result = locate(command, config, env, base);
+          expect({ label, command, status: result.status, out: result.stdout.split('\n').filter((line) => line.includes(':')).pop() }).toEqual({ label, command, status: 0, out: `${marker}:${command}` });
+        }
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  // An install without a plugin root (the npm channel) keeps the script in the global npm package: the block reaches it
+  // there, and the real script answers Step 1 and the npm latest line from it.
+  test('with neither variable set the script of the global npm package is used, and Step 1 prints the npm channel', () => {
+    const { base, config } = world();
+    try {
+      const prefix = path.join(base, 'npm-prefix');
+      const pkg = path.join(prefix, 'lib', 'node_modules', 'oh-my-claude-sisyphus');
+      mkdirSync(path.join(pkg, 'scripts'), { recursive: true });
+      copyFileSync(SCRIPT, path.join(pkg, 'scripts', 'omc-doctor.mjs'));
+      mkdirSync(path.join(config, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.9.2'), { recursive: true });
+      for (const env of [{ CLAUDE_PLUGIN_ROOT: '', OMC_PLUGIN_ROOT: '' }, { CLAUDE_PLUGIN_ROOT: path.join(base, 'gone'), OMC_PLUGIN_ROOT: path.join(base, 'gone-too') }]) {
+        const out = locate('step1', config, env, base);
+        expect({ status: out.status, head: out.stdout.split('\n').slice(0, 3) }).toEqual({ status: 0, head: ['Channel: npm', 'Installed: 5.9.2', 'Updater: omc update'] });
+        expect(out.stdout).toContain('npm latest: (unavailable)');
+      }
+      // A variable that holds the file wins: npm is not asked, so a package without the file changes nothing.
+      const first = stub(base, 'first', 'first');
+      expect(locate('cache-versions', config, { CLAUDE_PLUGIN_ROOT: first, OMC_PLUGIN_ROOT: '' }, base).stdout.trim()).toBe('first:cache-versions');
+      // A global package without the script (an install too old to ship it) is the missing-files message again.
+      rmSync(path.join(pkg, 'scripts', 'omc-doctor.mjs'));
+      const missing = locate('step1', config, { CLAUDE_PLUGIN_ROOT: '', OMC_PLUGIN_ROOT: '' }, base);
+      expect({ status: missing.status, first: missing.stdout.split('\n')[0].slice(0, MISSING.length) }).toEqual({ status: 1, first: MISSING });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test('a root whose path has spaces, parentheses, a quote, a dollar sign or a drive letter is found and its script runs', () => {
+    const { base, config } = world();
+    try {
+      for (const name of ['with space', 'two  spaces and (parens)', 'C: Program Files (x86)', "it's quoted", 'dollar $HOME and `tick`']) {
+        const root = stub(base, name, 'found');
+        const result = locate('claude-md-version', config, { CLAUDE_PLUGIN_ROOT: root, OMC_PLUGIN_ROOT: '' }, base);
+        expect({ name, status: result.status, out: result.stdout.trim() }).toEqual({ name, status: 0, out: 'found:claude-md-version' });
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  // The roots decide the channel, and the script decides it from the variables, whichever copy of the file runs it.
+  test('the real script from the located root: two different roots are unknown, a checkout is plugin-dir, a stale OMC root beside a live one is no conflict', () => {
+    const { base, config } = world();
+    try {
+      const real = (name: string, version: string) => {
+        const root = path.join(base, name);
+        mkdirSync(path.join(root, 'scripts'), { recursive: true });
+        copyFileSync(SCRIPT, path.join(root, 'scripts', 'omc-doctor.mjs'));
+        writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version }));
+        return root;
+      };
+      const [one, two] = [real('one', '9.9.1'), real('two', '9.9.2')];
+      const run = (env: Record<string, string>) => locate('step1', config, env, base).stdout.split('\n');
+      expect(run({ CLAUDE_PLUGIN_ROOT: one, OMC_PLUGIN_ROOT: two })[0]).toBe('Channel: unknown (OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories; do not guess an updater)');
+      expect(run({ CLAUDE_PLUGIN_ROOT: one, OMC_PLUGIN_ROOT: path.join(base, 'gone') }).slice(0, 3)).toEqual([`Plugin root: ${one}`, 'Channel: plugin-dir', 'Installed: 9.9.1']);
+      expect(run({ CLAUDE_PLUGIN_ROOT: '', OMC_PLUGIN_ROOT: two }).slice(0, 3)).toEqual([`Plugin root: ${two}`, 'Channel: plugin-dir', 'Installed: 9.9.2']);
+      // The same directory under both names is one root.
+      expect(run({ CLAUDE_PLUGIN_ROOT: one, OMC_PLUGIN_ROOT: one })[1]).toBe('Channel: plugin-dir');
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// The script itself runs from any directory: nothing in it depends on the place it lies in or on the working directory.
+describe('omc-doctor: the script runs from a directory whose path has spaces', { timeout: 120_000 }, () => {
+  test('a copy in "a dir/scripts" answers Step 1 with a config directory that has a space as well, and an unknown command ends with 2', () => {
+    const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor script '));
+    try {
+      const copy = path.join(base, 'a dir', 'scripts', 'omc-doctor.mjs');
+      mkdirSync(path.dirname(copy), { recursive: true });
+      copyFileSync(SCRIPT, copy);
+      const config = path.join(base, 'config dir');
+      mkdirSync(path.join(config, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.9.0'), { recursive: true });
+      const env = { ...process.env, CLAUDE_CONFIG_DIR: config, HOME: config, USERPROFILE: config, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' };
+      const run = (...args: string[]) => spawnSync(process.execPath, [copy, ...args], { encoding: 'utf8', cwd: path.join(base, 'a dir'), env, timeout: 20_000 });
+      expect(run('step1')).toMatchObject({ status: 0, stdout: 'Channel: npm\nInstalled: 5.9.0\nUpdater: omc update\n' });
+      expect(runCommand(versionCommand, config).stdout).toBe('Channel: npm\nInstalled: 5.9.0\nUpdater: omc update\n');
+      for (const unknown of ['nope', 'constructor', '__proto__', '']) {
+        const result = run(unknown);
+        expect({ unknown, status: result.status, stdout: result.stdout }).toEqual({ unknown, status: 2, stdout: '' });
+        expect(result.stderr).toContain('omc-doctor.mjs: unknown command');
+      }
+      expect(run().status).toBe(2);
+      // The process reports win32 and the configured directory is a Windows home path with a space: the copy in the
+      // directory with a space still answers, from the directory that path names.
+      const windowsConfig = path.join(base, 'win config');
+      mkdirSync(path.join(windowsConfig, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.9.1'), { recursive: true });
+      const preload = path.join(base, 'platform.cjs');
+      writeFileSync(preload, "Object.defineProperty(process, 'platform', { value: 'win32' });\n");
+      const windows = spawnSync(process.execPath, ['--require', preload, copy, 'step1'], { encoding: 'utf8', cwd: path.join(base, 'a dir'), timeout: 20_000, env: { ...env, CLAUDE_CONFIG_DIR: '~\\win config', HOME: base, USERPROFILE: base } });
+      expect(windows).toMatchObject({ status: 0, stdout: 'Channel: npm\nInstalled: 5.9.1\nUpdater: omc update\n' });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// Every omc-doctor test file that runs a command of the script handles paths and file systems, so it belongs in the step
+// of ci.yml that runs the path-handling tests on Windows. The same remark came back for every new file of this skill.
 const ciFile = fileURLToPath(new URL('../../.github/workflows/ci.yml', import.meta.url));
 describe.skipIf(!existsSync(ciFile))('omc-doctor: the test files run in the Windows path-handling step of ci.yml', () => {
   test('every omc-doctor test file of src/__tests__ is listed in that step', () => {

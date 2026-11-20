@@ -3,13 +3,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, commandWith, runCommand } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, CLAUDE_MD_OPTOUT, CLAUDE_MD_VERSION, runCommand } from './helpers/omc-doctor-cache-fixture.js';
 
 // Step 4 reads CLAUDE.md, the companion file it names and the other CLAUDE-*.md files of the config directory, and the
 // opt-out probe reads .omc-config.json. Only a regular file is read, like the registry in Step 1: a FIFO (or any special
 // file) in the place of one is skipped as if it were missing, because opening a FIFO without a writer never returns.
-const step4 = commandWith('Latest cached plugin version') ?? '';
-const probe = commandWith('claudeMdEnabled') ?? '';
+const step4 = CLAUDE_MD_VERSION;
+const probe = CLAUDE_MD_OPTOUT;
 const posix = process.platform !== 'win32';
 
 const world = () => {

@@ -1,13 +1,12 @@
 import { describe, test, expect } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { ageVersions, commands, commandWith, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptOf, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
+import { ageVersions, CLAUDE_MD_VERSION, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { step1 } from './helpers/omc-doctor-step1.js';
 
 // The runtime reads a version with an optional leading `v` as the same version (`parseSemver` in scripts/session-start.mjs,
 // `parseVersion` in src/utils/semver-compare.ts), shows the bare form, and names the cache directory by the bare version.
-// The skill drops the `v` in one place (`dropV`, in the shared version grammar section) wherever it compares, validates or
+// The script drops the `v` in one place (`dropV`, in the version grammar section) wherever it compares, validates or
 // names a version.
 describe('omc-doctor: a leading v is ignored wherever a version is compared or named', { timeout: 120_000 }, () => {
   const cacheOf = (dir: string, version: string) => path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', version);
@@ -60,14 +59,12 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
   });
 
   describe('Step 4 compares the CLAUDE.md marker with the cached version without the prefix', () => {
-    const step4 = commandWith('Latest cached plugin version') ?? '';
-    // Step 4 is a shell command (a `node -e` in double quotes), so it runs through bash.
+    // Step 4 is a shell block of the skill (the locator line and the call), so it runs through bash.
     const verdict = (marker: string) => {
       const { dir } = makeCache(['5.9.0']);
       try {
         writeFileSync(path.join(dir, 'CLAUDE.md'), `<!-- OMC:VERSION:${marker} -->\n`);
-        const env = { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' };
-        const run = spawnSync('/bin/bash', ['-c', step4], { encoding: 'utf8', timeout: 20_000, env });
+        const run = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
         expect(run.error).toBeUndefined();
         return run.stdout.trim().split('\n').slice(-1)[0];
       } finally {
@@ -76,7 +73,6 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
     };
 
     test.skipIf(process.platform === 'win32')('v5.9.0 and 5.9.0 are aligned, another version is drift', () => {
-      expect(step4).not.toBe('');
       expect(verdict('v5.9.0')).toBe('VERSION MATCH: CLAUDE and plugin cache are aligned');
       expect(verdict('5.9.0')).toBe('VERSION MATCH: CLAUDE and plugin cache are aligned');
       expect(verdict('v5.8.0')).toBe('VERSION DRIFT: CLAUDE.md and plugin versions differ');
@@ -118,24 +114,27 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
     });
   });
 
-  describe('the commands carry one definition of the prefix and of the comparison', () => {
-    const step4 = commandWith('Latest cached plugin version') ?? '';
-    const step1Line = versionCommand ?? '';
-    const grammar = (command: string) => sharedSections(command).get('version grammar') ?? '';
+  describe('the script holds one definition of the prefix and of the comparison', () => {
+    const grammar = scriptSection('version grammar');
 
-    test('the prefix is dropped by the same function in Step 1, Step 4 and both cache commands', () => {
-      for (const command of [step1Line, step4, ...commands]) expect(grammar(command)).toContain("const dropV = (text) => text.replace(/^v(?=[0-9])/, '');");
+    test('the prefix is dropped by one function, which Step 1, Step 4 and both cache commands use', () => {
+      expect(grammar).toContain("const dropV = (text) => text.replace(/^v(?=[0-9])/, '');");
+      expect(scriptText.split('const dropV = ')).toHaveLength(2);
+      // Step 4 compares the marker and the cached version without the prefix; the registry commands drop it from a pin.
+      expect(scriptSection('Step 4')).toContain('dropV(claudeVersion) === dropV(pluginVersion)');
+      expect(scriptSection('protection')).toContain('dropV(version)');
     });
 
     test('Step 4 orders versions with the comparator of Step 1', () => {
-      const one = sharedSections(step1Line).get('version order') ?? '';
-      expect(one).toContain('dropV(name)');
-      expect(sharedSections(step4).get('version order')).toBe(one);
+      expect(scriptSection('version order')).toContain('dropV(name)');
+      expect(scriptText.split('const compareVersions = ')).toHaveLength(2);
+      expect(scriptSection('Step 4')).toContain('.sort(compareVersions)');
+      expect(scriptSection('Step 1: helpers')).toContain('.sort(compareVersions)');
     });
 
     test('the version of a marketplace clone is read with the same function', () => {
-      expect(scriptOf(step1Line)).toContain('semver(found.version)');
-      expect(grammar(step1Line)).toContain('return grammar.test(trimmed) ? dropV(trimmed) : \'\';');
+      expect(scriptSection('Step 1: the install channel')).toContain('semver(found.version)');
+      expect(grammar).toContain('return grammar.test(trimmed) ? dropV(trimmed) : \'\';');
     });
   });
 });

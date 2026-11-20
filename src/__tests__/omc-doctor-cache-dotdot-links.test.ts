@@ -3,34 +3,33 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ageVersions, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptOf, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
+import { ageVersions, backupDir, codeOf, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { step1 } from './helpers/omc-doctor-step1.js';
 // @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
 // A path that goes through a link and then `..` names the parent of the link's target: the file system reads the
-// components of a path in order. The commands resolve such a path the same way (one `chain` function, the same text in
-// Step 1 and in both cache commands) instead of folding `..` as text first. On win32, Windows folds `..` before it
+// components of a path in order. The commands resolve such a path the same way (one `linkChain` function in the script,
+// used by Step 1 and by both cache commands) instead of folding `..` as text first. On win32, Windows folds `..` before it
 // follows a junction, so the results below differ there and the cases that need a link followed by `..` run on POSIX only.
 const POSIX = process.platform !== 'win32';
 
 describe('omc-doctor: one path resolver in Step 1 and in both cache commands', () => {
-  const resolverOf = (command: string) => sharedSections(command).get('path resolver') ?? '';
-
-  test('the resolver is the same text in every command that reads a path from the registry, the records or the root variables', () => {
-    expect(commands).toHaveLength(2);
-    const texts = [versionCommand ?? '', ...commands].map(resolverOf);
-    expect(texts[0]).not.toBe('');
-    expect(texts[1]).toBe(texts[0]);
-    expect(texts[2]).toBe(texts[0]);
+  test('the resolver is defined once, and Step 1 and the cache commands read every path from the registry, the records and the root variables through it', () => {
+    const resolver = scriptSection('path resolver');
+    expect(resolver).toContain('const resolveFrom = ');
+    expect(resolver).toContain('const linkChain = ');
+    expect(scriptText.split('const linkChain = ')).toHaveLength(2);
+    expect(scriptText.split('const resolveFrom = ')).toHaveLength(2);
+    // Step 1 (realPath) and the protection of the cache commands (chainOf) both go through linkChain.
+    expect(scriptSection('Step 1: helpers')).toContain('linkChain(target)');
+    expect(scriptSection('protection')).toContain('linkChain(target)');
   });
 
   test('no command folds `..` as text before it follows a link or resolves a path with the JavaScript realpath', () => {
-    for (const command of [versionCommand ?? '', ...commands]) {
-      const code = scriptOf(command).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-      expect(code).not.toContain('realpathSync');
-      expect(code).not.toMatch(/path\.resolve\(start\)/);
-    }
+    const code = codeOf();
+    expect(code).not.toContain('realpathSync');
+    expect(code).not.toMatch(/path\.resolve\(start\)/);
   });
 });
 

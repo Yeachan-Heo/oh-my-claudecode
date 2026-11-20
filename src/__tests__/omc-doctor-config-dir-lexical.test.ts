@@ -3,20 +3,17 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, commands, commandWith, PLUGIN_ID, proseOf, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { versionCommand } from './helpers/omc-doctor-step1.js';
+import { addCache, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_VERSION, commands, locatorLine, PLUGIN_ID, runBlock, runCommand, skillText, STEP1, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 // @ts-expect-error Standalone runtime source is intentionally JavaScript-only.
 import { getClaudeConfigDir } from '../../scripts/lib/config-dir.mjs';
 
 // The runtime reads CLAUDE_CONFIG_DIR as text (getClaudeConfigDir normalizes it), so a `..` after a link folds the link
 // away: `<base>/link/../cfg` is `<base>/cfg`. The file system reads the same path as the parent of the link's target. The
-// commands and the shell blocks of the skill follow the runtime, so they all read the same directory.
+// script and the shell blocks of the skill follow the runtime, so they all read the same directory.
 const posix = process.platform !== 'win32';
-const step4 = commandWith('Latest cached plugin version') ?? '';
-const step6 = commandWith("' version(s):'") ?? '';
 
 // The first line of a shell block, and the blocks that use the directory.
-const blocks = [...skillText.matchAll(/```bash\n([\s\S]*?)\n```/g)].map((m) => m[1]).filter((b) => proseOf(b).includes('"$C"'));
+const blocks = bashBlocks().filter((b) => b.includes('"$C"'));
 const prelude = blocks[0].split('\n')[0];
 
 type Fixture = { base: string; textual: string; physical: string };
@@ -48,7 +45,7 @@ describe.skipIf(!posix)('omc-doctor: a .. after a link in CLAUDE_CONFIG_DIR is r
     ['a path under the home directory', `~/link/../cfg`],
   ];
 
-  test('the runtime, every node command and every shell block read the directory the text names', () => {
+  test('the runtime, every script command and every shell block read the directory the text names', () => {
     const f = fixture();
     try {
       for (const [label, configured] of forms(f)) {
@@ -63,12 +60,12 @@ describe.skipIf(!posix)('omc-doctor: a .. after a link in CLAUDE_CONFIG_DIR is r
         expect({ label, runtime }).toEqual({ label, runtime: f.textual });
 
         const env = { env: { CLAUDE_CONFIG_DIR: configured, HOME: f.base, USERPROFILE: f.base } };
-        const one = runCommand(versionCommand ?? '', f.textual, env);
+        const one = runCommand(STEP1, f.textual, env);
         expect({ label, step1: one.stdout }).toEqual({ label, step1: expect.stringContaining('Installed: 5.8.0') });
-        const four = shell(step4, configured, f.base);
+        const four = runBlock(CLAUDE_MD_VERSION, f.textual, env);
         expect({ label, step4: four.stdout }).toEqual({ label, step4: expect.stringContaining('CLAUDE.md OMC version: 5.8.0') });
         expect({ label, step4: four.stdout }).toEqual({ label, step4: expect.stringContaining('Latest cached plugin version: 5.8.0') });
-        expect({ label, step6: runCommand(step6, f.textual, env).stdout }).toEqual({ label, step6: expect.stringMatching(/^2 version\(s\): /) });
+        expect({ label, step6: runCommand(CACHE_VERSIONS, f.textual, env).stdout }).toEqual({ label, step6: expect.stringMatching(/^2 version\(s\): /) });
 
         // The shell blocks: the directory after the first line is the one the runtime names, and the blocks read it.
         expect({ label, dir: shell(`${prelude}\nprintf %s "$C"`, configured, f.base).stdout }).toEqual({ label, dir: f.textual });
@@ -117,7 +114,7 @@ describe.skipIf(!posix)('omc-doctor: a .. after a link in CLAUDE_CONFIG_DIR is r
 // `$C` is never outside the block that sets it, and the skill says to run a block whole.
 describe('omc-doctor: no shell line uses $C outside the block that sets it', () => {
   test('every line of the skill that uses $C sits in a shell block whose first line sets it', () => {
-    const lines = proseOf().split('\n');
+    const lines = skillText.split('\n');
     let fence: { open: boolean; first: string; kind: string } = { open: false, first: '', kind: '' };
     const orphans: string[] = [];
     let uses = 0;
@@ -127,7 +124,7 @@ describe('omc-doctor: no shell line uses $C outside the block that sets it', () 
         return;
       }
       // Only a line inside a fence can be run; the sentence that explains the rule mentions `$C` in prose.
-      if (!fence.open || !/\$\{?C\b/.test(line) || line.startsWith('node -e ')) return;
+      if (!fence.open || !/\$\{?C\b/.test(line)) return;
       uses++;
       const sets = fence.open && fence.kind === 'bash' && fence.first.startsWith('C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}";');
       if (!sets) orphans.push(`${i + 1}: ${line.slice(0, 80)}`);
@@ -140,6 +137,25 @@ describe('omc-doctor: no shell line uses $C outside the block that sets it', () 
     expect(blocks).toHaveLength(5);
     for (const block of blocks) expect(block.split('\n')[0]).toBe(prelude);
     expect(prelude).toContain('pwd -L');
-    expect(skillText).toContain('Run every shell block whole too, in one Bash call: the tool keeps no variable from one call to the next');
+    expect(skillText).toContain('Run every shell block whole, in one Bash call: the tool keeps no variable from one call to the next');
+  });
+
+  // The same holds for $S, the script path the locator line sets: every line that uses it follows that line in its block.
+  test('every line of the skill that uses $S sits in a shell block that sets it first, with the same locator line', () => {
+    expect(locatorLine).not.toBe('');
+    const users = bashBlocks().filter((block) => /\$\{?S\b/.test(block.replace(locatorLine, '')));
+    // Six blocks run the seven commands (Step 1 and the npm line share one).
+    expect(users).toHaveLength(6);
+    expect(skillText.match(/^node "\$S" /gm)).toHaveLength(7);
+    for (const block of users) {
+      const lines = block.split('\n');
+      const set = lines.indexOf(locatorLine);
+      expect(set).toBeGreaterThanOrEqual(0);
+      const firstUse = lines.findIndex((line) => line !== locatorLine && /\$\{?S\b/.test(line));
+      expect(firstUse).toBeGreaterThan(set);
+    }
+    // No fenced block outside the shell blocks, and no prose line, runs the script.
+    const outside = skillText.replace(/```bash\n[\s\S]*?\n```/g, '');
+    expect(outside).not.toMatch(/^node "\$S"/m);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { existsSync, lstatSync, lutimesSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { backupDir, commands, makeCache, movedAside, PLUGIN_ID, runCommand, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { backupDir, commands, makeCache, movedAside, PLUGIN_ID, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 // A version directory of the cache can be a link: SessionStart replaces a stale version with a redirect to the active one
 // (`5.7.0 -> 5.8.0`) so that a running session whose path points at the old name keeps working. The commands date such an
@@ -44,14 +44,13 @@ describe('omc-doctor: a version directory that is a link is dated by the link it
   };
   const clean = (dir: string) => rmSync(dir, { recursive: true, force: true });
 
-  test('both commands carry one dating function, which never follows a link', () => {
-    const dating = (command: string) => sharedSections(command).get('modification dates') ?? '';
+  test('both commands use one dating function, which never follows a link', () => {
     expect(commands).toHaveLength(2);
-    const [one, two] = commands.map(dating);
-    expect(one).not.toBe('');
-    expect(two).toBe(one);
-    expect(one).toContain('fs.lstatSync(entry)');
-    expect(one).not.toMatch(/(?<!l)statSync/);
+    const dating = scriptSection('modification dates');
+    expect(dating).toContain('const newestChange = ');
+    expect(scriptText.split('const newestChange = ')).toHaveLength(2);
+    expect(dating).toContain('fs.lstatSync(entry)');
+    expect(dating).not.toMatch(/(?<!l)statSync/);
   });
 
   test('a redirect created a moment ago to an older pinned version is not moved, and the same link dated before the threshold is', () => {

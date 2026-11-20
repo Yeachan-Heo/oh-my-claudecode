@@ -248,15 +248,18 @@ describe('ai-slop-cleaner skill', () => {
 
 describe('omc-doctor skill', () => {
   const text = read('skills/omc-doctor/SKILL.md');
+  const script = read('scripts/omc-doctor.mjs');
   const NO_PRUNE_RULE = 'Do not prune cache versions by age, lexical/version order, or presence of a newer version';
 
   test('no unconditional rmSync; every renameSync call sits behind an if', () => {
-    const lines = text.split('\n');
+    // The skill holds no code of the cache commands; they are the cacheRepair function of scripts/omc-doctor.mjs.
+    expect(text).not.toMatch(/rmSync\(|renameSync\(/);
+    const lines = script.split('\n');
     expect(lines.filter((l) => l.includes('rmSync('))).toEqual([]);
     const moves = lines.flatMap((l, i) => (l.includes('renameSync(') ? [i] : []));
-    expect(moves.length).toBeGreaterThan(0);
-    // The script is multi-line: the move follows guard clauses, and the closest `if` above it is the check of the
-    // protection read again just before the move.
+    expect(moves).toHaveLength(1);
+    // The move follows guard clauses, and the closest `if` above it is the check of the protection read again just
+    // before the move.
     for (const move of moves) {
       const guard = lines.slice(0, move).reverse().find((l) => /^\s*if \(/.test(l)) ?? '';
       expect({ line: move + 1, guard: guard.trim() }).toEqual({ line: move + 1, guard: expect.stringContaining('again.kept.includes(name)') });
@@ -275,12 +278,12 @@ describe('omc-doctor skill', () => {
   });
 
   test('both cache fix sections describe the freshness rule with the threshold of the SessionStart cleanup', () => {
-    for (const heading of ['Fix: Outdated Plugin', 'Fix: Stale Cache']) {
-      const fix = section(text, heading);
-      expect(fix).toContain('modified in the last 10 minutes');
-      expect(fix).toContain('`STALE_THRESHOLD_MS` in `src/utils/paths.ts`');
-      expect(fix).toContain('it is left in place and reported');
-    }
+    const fix = section(text, 'Fix: Outdated Plugin');
+    expect(fix).toContain('modified in the last 10 minutes');
+    expect(fix).toContain('`STALE_THRESHOLD_MS` in `src/utils/paths.ts`');
+    expect(fix).toContain('it is left in place and reported');
+    // The stale-cache section applies the same rule through its reference to the guard of the first section.
+    expect(section(text, 'Fix: Stale Cache')).toContain('the 10-minute freshness rule with its other limits');
   });
 
   test('cache fix sections state the no-prune rule and keep pinned versions', () => {
@@ -290,38 +293,41 @@ describe('omc-doctor skill', () => {
     expect(stale).toContain(NO_PRUNE_RULE);
     expect(outdated).toContain('Diagnostics do not authorize removal or setup changes');
     expect(stale).toContain('Diagnostics do not authorize removal or setup changes');
+    expect(stale).toContain('Everything the **Cache guard** of "Fix: Outdated Plugin" above says applies to the command below unchanged');
+    expect(stale).toContain('Move aside only unprotected versions, and report the protected versions kept.');
     expect(outdated).toContain('If every cached version is protected, move nothing and report the protection instead of running the command below.');
     expect(outdated).toContain('installed_plugins.json');
     expect(stale).toContain('installed_plugins.json');
   });
 
-  test('cache fix sections name every protection source and the fail-closed rule', () => {
-    for (const heading of ['Fix: Outdated Plugin', 'Fix: Stale Cache']) {
-      const fix = section(text, heading);
-      expect(fix).toContain('by `version` or by `installPath`');
-      expect(fix).toContain('.omc/cache-occupancy/');
-      expect(fix).toContain('Paths are compared after resolving symlinks one link at a time, and every link on the way is protected');
-      expect(fix).toContain('more than 40 links or a loop counts as unresolvable');
-      expect(fix).toContain('a record is ignored only when its owner is proven gone');
-      expect(fix).toContain('an old date alone never ignores a record, and this command never deletes one');
-      expect(fix).toContain('the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it');
-      expect(fix).toContain('`OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories');
-      expect(fix).toContain('the two variables are compared after resolving links and by filesystem identity');
-      expect(fix).toContain('letter case is never folded by the name of the platform');
-      expect(fix).toContain('(or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path');
-      expect(fix).toContain('the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system');
-      expect(fix).toContain('An exact spelling still protects the version it names and the free versions still move');
-      expect(fix).toContain('a path that does not exist is judged by its nearest existing parent');
-      expect(fix).toContain('a path that does not exist adds no protection of its own, only through its nearest existing parent as described above');
-      expect(fix).toContain('are read again just before each version is moved');
-      expect(fix).toContain('only the instant between that last read and the rename remains open');
-      expect(fix).toContain('cannot be read or resolved completely');
-      expect(fix).toContain('`oh-my-claudecode@oh-my-claudecode`, in any letter case');
-      expect(fix).toContain('the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level');
-      expect(fix).toContain('a key that contains `oh-my-claudecode` without being a supported ID');
-      expect(fix).toContain('an empty or non-array entry list under any key');
-      expect(fix).toContain('move nothing');
-    }
+  test('the cache guard names every protection source and the fail-closed rule once, and the stale-cache section applies it', () => {
+    // One place holds the rule: the stale-cache section points at it and lists what it covers.
+    const stale = section(text, 'Fix: Stale Cache');
+    for (const covered of ['the protection sources', 'the pins in `installed_plugins.json`', 'the `installPath` of other plugins', 'the plugin root variables', 'the occupancy records', 'every link on the way', 'the fail-closed refusals with exit code 1', 'the unreadable and missing cache directories']) expect(stale).toContain(covered);
+    const fix = section(text, 'Fix: Outdated Plugin');
+    expect(fix).toContain('by `version` or by `installPath`');
+    expect(fix).toContain('.omc/cache-occupancy/');
+    expect(fix).toContain('Paths are compared after resolving symlinks one link at a time, and every link on the way is protected');
+    expect(fix).toContain('more than 40 links or a loop counts as unresolvable');
+    expect(fix).toContain('a record is ignored only when its owner is proven gone');
+    expect(fix).toContain('an old date alone never ignores a record, and this command never deletes one');
+    expect(fix).toContain('the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it');
+    expect(fix).toContain('`OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories');
+    expect(fix).toContain('the two variables are compared after resolving links and by filesystem identity');
+    expect(fix).toContain('letter case is never folded by the name of the platform');
+    expect(fix).toContain('(or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path');
+    expect(fix).toContain('the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system');
+    expect(fix).toContain('An exact spelling still protects the version it names and the free versions still move');
+    expect(fix).toContain('a path that does not exist is judged by its nearest existing parent');
+    expect(fix).toContain('a path that does not exist adds no protection of its own, only through its nearest existing parent as described above');
+    expect(fix).toContain('are read again just before each version is moved');
+    expect(fix).toContain('only the instant between that last read and the rename remains open');
+    expect(fix).toContain('cannot be read or resolved completely');
+    expect(fix).toContain('`oh-my-claudecode@oh-my-claudecode`, in any letter case');
+    expect(fix).toContain('the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level');
+    expect(fix).toContain('a key that contains `oh-my-claudecode` without being a supported ID');
+    expect(fix).toContain('an empty or non-array entry list under any key');
+    expect(fix).toContain('move nothing');
   });
 
   test('cache fix sections put backups outside plugins/cache and explain why', () => {
@@ -331,6 +337,7 @@ describe('omc-doctor skill', () => {
       expect(fix).toContain('outside `plugins/cache/`');
       expect(fix).not.toContain('.bak-');
     }
+    expect(section(text, 'Fix: Outdated Plugin')).toContain("OMC's stale cache purge can remove any cache");
   });
 
   test('legacy section has no executable rm -rf and keeps the commented mv .bak variants', () => {

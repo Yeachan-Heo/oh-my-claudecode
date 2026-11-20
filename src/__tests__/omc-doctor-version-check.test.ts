@@ -3,39 +3,43 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commandWith, proseOf, read, runCommand, scriptOf, sharedSections, skillCommands, upperBelow, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { bashBlocks, CLAUDE_MD_VERSION, codeOf, read, runBlock, runCommand, scriptSection, scriptText, upperBelow, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
 
 const text = read('skills/omc-doctor/SKILL.md');
 
 describe('omc-doctor Step 1 derives the plugin ID, channel and latest version from the active install', () => {
   test('the command exists once and does not consult npm or a fixed plugin ID', () => {
-    expect(versionCommand).toBeDefined();
-    expect(skillCommands.filter((c) => c.includes("'Updater: "))).toHaveLength(1);
-    expect(versionCommand).not.toMatch(/npm view|registry\.npmjs|child_process/);
+    expect(scriptText.match(/^const step1 = /gm)).toHaveLength(1);
+    expect(text.match(/^node "\$S" step1$/gm)).toHaveLength(1);
+    // Step 1 reads files only: the npm query is a command of its own, in its own function.
+    const channel = [scriptSection('Step 1: helpers'), scriptSection('Step 1: the registry'), scriptSection('Step 1: the install channel')].join('\n');
+    expect(channel).not.toMatch(/npm view|registry\.npmjs|child_process|spawnSync/);
     // The npm line has its own label, so an offline run never prints a second `Latest:` next to a marketplace one.
-    const prose = proseOf(text);
-    const block = prose.slice(prose.indexOf('### Step 1'), prose.indexOf('**Diagnosis**'));
-    const npmCommand = commandWith("'npm latest: '") ?? '';
-    expect(scriptOf(npmCommand)).toContain("console.log('npm latest: ' + (latest || '(unavailable)'))");
-    expect(scriptOf(npmCommand)).not.toContain('Latest:');
-    expect(block.split('\n').filter((l) => !l.startsWith('node -e ') && l.includes('Latest:') && !l.startsWith('#'))).toEqual([]);
+    const block = bashBlocks().find((b) => b.includes('node "$S" step1')) ?? '';
+    const npmFunction = scriptSection('Step 1: npm latest');
+    expect(npmFunction).toContain("console.log('npm latest: ' + (latest || '(unavailable)'))");
+    expect(npmFunction).not.toContain('Latest:');
+    expect(block.split('\n').filter((l) => l.includes('Latest:') && !l.startsWith('#'))).toEqual([]);
   });
 
-  // The line is pasted into a double-quoted shell string, so nothing in it may be changed by one (a backslash
-  // before a letter stays as written), and bash must produce what node produces on the same configuration directory.
-  test('the command line contains nothing that a double-quoted shell string would change, and bash gives the output node gives', () => {
-    expect(versionCommand?.startsWith('node -e "') && versionCommand.endsWith('"')).toBe(true);
-    expect(scriptOf(versionCommand ?? '')).not.toMatch(/["`$]|\\[\\"`$\n]/);
+  // The block of the skill runs the script through bash: it must produce what node produces on the same configuration
+  // directory.
+  test('the shell block gives the output the script gives', () => {
     if (process.platform === 'win32') return;
     const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-version-'));
     try {
       mkdirSync(path.join(dir, 'plugins'), { recursive: true });
       writeRegistry(dir, { 'oh-my-claudecode@oh-my-claudecode': [{ version: '5.8.0' }] });
       const viaNode = runCommand(versionCommand ?? '', dir);
-      const viaBash = spawnSync('/bin/bash', ['-c', versionCommand ?? ''], { encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } });
+      // The block runs the Step 1 command and then the npm line (a Channel: npm install only, which this one is not),
+      // so its output is the Step 1 output followed by the npm line, here from an npm that fails.
+      const bin = path.join(dir, 'bin');
+      mkdirSync(bin);
+      writeFileSync(path.join(bin, 'npm'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      const viaBash = runBlock('step1', dir, { env: { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` } });
       expect(viaNode.stdout).toContain('Channel: marketplace oh-my-claudecode');
-      expect(viaBash.stdout).toBe(viaNode.stdout);
+      expect(viaBash.stdout).toBe(`${viaNode.stdout}npm latest: (unavailable)\n`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -199,21 +203,19 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     }
   }, 60_000);
 
-  // Step 4 names the highest cached plugin version as well, with the same comparator: both carry the shared version
-  // order section, and Step 4 sorts its cache listing with it. Step 4 is a shell command, so it runs through bash.
-  const claudeMdCommand = commandWith('Latest cached plugin version');
+  // Step 4 names the highest cached plugin version as well, with the same comparator: the script defines the version
+  // order once, and Step 4 sorts its cache listing with it. Step 4 is a shell block of the skill, so it runs through bash.
   test.skipIf(process.platform === 'win32')('Step 4 names the highest cached plugin version by semantic version, with the comparator of Step 1', () => {
-    expect(claudeMdCommand).toBeDefined();
-    const comparator = sharedSections(versionCommand ?? '').get('version order') ?? '';
+    const comparator = scriptSection('version order');
     expect(comparator).toContain('const compareVersions = ');
-    expect(sharedSections(claudeMdCommand ?? '').get('version order')).toBe(comparator);
-    expect(scriptOf(claudeMdCommand ?? '')).toContain('.filter(isVersionDir).sort(compareVersions);');
+    expect(scriptText.split('const compareVersions = ')).toHaveLength(2);
+    expect(scriptSection('Step 4')).toContain('.filter(isVersionDir).sort(compareVersions);');
     for (const prefix of prefixes) {
       const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-version-'));
       try {
         for (const version of prefix.versions) mkdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', version), { recursive: true });
         writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
-        const run = spawnSync('/bin/bash', ['-c', claudeMdCommand ?? ''], { encoding: 'utf8', timeout: 20_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir } });
+        const run = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
         expect(run.error).toBeUndefined();
         expect({ top: prefix.top, line: run.stdout.split('\n').find((l) => l.startsWith('Latest cached plugin version:')) }).toEqual({ top: prefix.top, line: `Latest cached plugin version: ${prefix.top}` });
       } finally {
@@ -225,9 +227,12 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
   test('no version in the skill is ordered as text', () => {
     expect(text).not.toContain('localeCompare');
     // Step 1 sorts versions in exactly two places, and both use the comparator.
-    const code = scriptOf(versionCommand ?? '').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    const code = codeOf([scriptSection('Step 1: helpers'), scriptSection('Step 1: the install channel')].join('\n'));
     expect(code.match(/\.sort\(/g)).toHaveLength(2);
     expect(code.match(/\.sort\(compareVersions\)/g)).toHaveLength(2);
+    // Across the script one more sort has no comparator: the CLAUDE-*.md file names of Step 4, which are not versions.
+    expect(codeOf().match(/\.sort\(\)/g)).toHaveLength(1);
+    expect(scriptSection('Step 4')).toContain('.sort()');
   });
 
   // The npm line is a command of its own: omc-doctor-npm-latest.test.ts runs it with a fake npm on success, on failure and on a hang.
@@ -666,14 +671,14 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       }
     });
 
-    // The command carries its own copy of the grammar, so it is run side by side with the runtime function on a grid.
+    // The script carries its own copy of the grammar, so it is run side by side with the runtime function on a grid.
     test('the grammar of the command accepts exactly the strings the runtime parseSemver accepts', () => {
       const runtime = read('scripts/session-start.mjs');
       const source = runtime.slice(runtime.indexOf('function parseSemver('), runtime.indexOf('function semverCompare('));
       expect(source).not.toBe('');
       const parseSemver = new Function(`${source}; return parseSemver;`)() as (v: unknown) => unknown;
-      // The grammar is a shared section of the command (the optional `v` is dropped by its `dropV`), so it is run as written.
-      const section = sharedSections(versionCommand ?? '').get('version grammar') ?? '';
+      // The grammar is a section of the script (the optional `v` is dropped by its `dropV`), so it is run as written.
+      const section = scriptSection('version grammar');
       expect(section).toContain('const semver = ');
       const sv = new Function(`${section}; return semver;`)() as (v: string) => string;
       const grid = ['5.9.0', '0.0.0', '1.2', '1', '1.2.3.4', '01.2.3', '1.02.3', '1.2.03', 'v1.2.3', 'V1.2.3', 'vv1.2.3', '999x.0.0', '1.2.3-', '1.2.3+', '1.2.3-a', '1.2.3-a.b', '1.2.3-a..b', '1.2.3-01', '1.2.3-a+b', '1.2.3+b.c', '1.2.3+b..c', '1.2.3+-', '1.2.3-+b', '1.2.3-a_b', ' 1.2.3 ', '1.2.3\n', '\n1.2.3', '1.2.3\n4', '1.2.3 4', '١.٢.٣', '1.2.3-é', '', ' ', '-1.2.3', '1.-2.3', '1.2.3-0.0', '10.20.30-rc.1+meta-1', '1.2.3-alpha.1.2.3.4.5.6.7.8.9'];

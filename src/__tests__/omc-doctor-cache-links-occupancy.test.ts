@@ -1,10 +1,10 @@
 import { describe, test, expect } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commands, ageVersions, scriptOf, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { blockOf, commands, ageVersions, runBlock, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 // @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
@@ -737,15 +737,19 @@ fs.mkdirSync = function (target, ...rest) {
     }
   });
 
-  // What the node subprocess runs must be what bash runs: nothing in the line may be changed by a double-quoted shell string (`\d` and `\x5c` pass through).
-  test('the command lines contain nothing that a double-quoted shell string would change', () => {
+  // The shell block of a cache command is its comment, the locator line and the call, so the command is the script
+  // run as written: no code of the command sits in the shell text.
+  test('the shell block of each cache command is the comment, the locator line and the call of the script', () => {
     for (const command of commands) {
-      expect(command.startsWith('node -e "') && command.endsWith('"')).toBe(true);
-      expect(scriptOf(command)).not.toMatch(/["`$]|\\(?!d|x5c)/);
+      const lines = blockOf(command).split('\n');
+      expect(lines).toHaveLength(3);
+      expect(lines[0].startsWith('# ')).toBe(true);
+      expect(lines[1].startsWith('S=; ')).toBe(true);
+      expect(lines[2]).toBe(`node "$S" ${command}`);
     }
   });
 
-  test.skipIf(process.platform === 'win32')('the line run by bash and the script run by node give the same output and the same tree', () => {
+  test.skipIf(process.platform === 'win32')('the shell block run by bash and the script run by node give the same output and the same tree', () => {
     const fixtures = () => {
       const made = makeChainCache(2, 'relative');
       writeRegistry(made.dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }, { scope: 'user', version: made.top }] });
@@ -756,8 +760,7 @@ fs.mkdirSync = function (target, ...rest) {
       const outcome = (viaBash: boolean) => {
         const { dir, cache } = fixtures();
         try {
-          const env = { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' };
-          const result = viaBash ? spawnSync('/bin/bash', ['-c', command], { encoding: 'utf8', env }) : runCommand(command, dir);
+          const result = viaBash ? runBlock(command, dir) : runCommand(command, dir);
           return { status: result.status, stdout: result.stdout.split(dir).join('<dir>'), versions: digitVersions(cache), moved: movedAside(dir) };
         } finally {
           rmSync(dir, { recursive: true, force: true });

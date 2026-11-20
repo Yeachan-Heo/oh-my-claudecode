@@ -1,14 +1,11 @@
 import { describe, test, expect } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, backupDir, commands, commandWith, makeCache, movedAside, PLUGIN_ID, runCommand, scriptOf, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
+import { addCache, backupDir, CACHE_VERSIONS, CLAUDE_MD_VERSION, codeOf, commands, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { step1 } from './helpers/omc-doctor-step1.js';
 
 // Step 4 prints the highest cached plugin version and compares it with the CLAUDE.md marker; Step 6 counts the cached versions.
-const step4 = commandWith('Latest cached plugin version') ?? '';
-const step6 = commandWith("' version(s):'") ?? '';
 const PLATFORMS = ['linux', 'darwin', 'win32'] as const;
 const OMC = 'oh-my-claudecode@omc';
 const OWN = 'oh-my-claudecode@oh-my-claudecode';
@@ -27,53 +24,53 @@ const fresh = () => {
   return dir;
 };
 
-// Step 4 is a shell command (a `node -e` in double quotes), so it runs through bash.
+// Step 4 is a shell block of the skill (the locator line and the call), so it runs through bash.
 function claudeMd(dir: string, marker: string, platform: string = process.platform): string[] {
   writeFileSync(path.join(dir, 'CLAUDE.md'), `<!-- OMC:VERSION:${marker} -->\n`);
-  const env = { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '', NODE_OPTIONS: `--require ${reportAs(dir, platform)}` };
-  const run = spawnSync('/bin/bash', ['-c', step4], { encoding: 'utf8', timeout: 20_000, env });
+  const run = runBlock(CLAUDE_MD_VERSION, dir, { env: { NODE_OPTIONS: `--require ${reportAs(dir, platform)}` }, timeout: 20_000 });
   expect(run.error).toBeUndefined();
   return run.stdout.trim().split('\n');
 }
 
 const count = (dir: string, plugins?: Record<string, unknown>, platform: string = process.platform) => {
   if (plugins) writeRegistry(dir, plugins);
-  const run = runCommand(step6, dir, { timeout: 20_000, preloads: [reportAs(dir, platform)] });
+  const run = runCommand(CACHE_VERSIONS, dir, { timeout: 20_000, preloads: [reportAs(dir, platform)] });
   expect(run.error).toBeUndefined();
   expect(run.status).toBe(0);
   return run.stdout.trim().split('\n').map((l) => l.replace(/(version\(s\): )(.*)/, (_m, head: string, list: string) => head + list.split(', ').sort().join(', ')));
 };
 
-// The commands cannot share code, so each carries its own copy of the version-name test and of the marketplace
-// derivation, in shared sections. The copies must stay equal (omc-doctor-shared-sections.test.ts); these tests keep what
-// the sections say.
-describe('omc-doctor: the cache commands carry one definition of a version name and of the marketplace list', () => {
-  const sources: Array<[string, string]> = [['Step 1', versionCommand ?? ''], ['Step 4', step4], ['Step 6', step6], ['outdated plugin command', commands[0] ?? ''], ['stale cache command', commands[1] ?? '']];
-
+// The commands share the code of the script: one version-name test and one marketplace derivation, each defined once.
+// These tests keep what the definitions say and that every command uses them.
+describe('omc-doctor: the script holds one definition of a version name and of the marketplace list', () => {
   test('every command exists', () => {
     expect(commands).toHaveLength(2);
-    for (const [label, line] of sources) expect({ label, found: line !== '' }).toEqual({ label, found: true });
+    const dispatch = scriptSection('dispatch');
+    for (const command of ['step1', 'npm-latest', 'claude-md-optout', 'claude-md-version', 'cache-versions', ...commands]) expect({ command, found: dispatch.includes(command) }).toEqual({ command, found: true });
   });
 
-  test('the version-name test is the same text everywhere and excludes a relink recovery directory', () => {
-    const definitions = sources.map(([label, command]) => [label, (sharedSections(command).get('version grammar') ?? '').split('\n').find((l) => l.startsWith('const isVersionDir')) ?? ''] as const);
-    for (const [label, definition] of definitions) expect({ label, definition }).toEqual({ label, definition: String.raw`const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);` });
+  test('the version-name test is defined once and excludes a relink recovery directory', () => {
+    const definitions = scriptText.split('\n').filter((line) => line.startsWith('const isVersionDir'));
+    expect(definitions).toEqual([String.raw`const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);`]);
+    // Step 1 (the cache of the npm channel), Step 4, Step 6 and the function both cache commands share list version
+    // directories through it, and nothing else lists them.
+    expect(scriptText.split('.filter(isVersionDir)').length - 1).toBe(4);
   });
 
   test('no command filters a cache listing by its own copy of the digit test', () => {
-    for (const [label, command] of sources) expect({ label, own: /filter\(\(?\w+\)? => \/\^(\\d|\[0-9\])/.test(scriptOf(command)) }).toEqual({ label, own: false });
+    expect(/filter\(\(?\w+\)? => \/\^(\\d|\[0-9\])/.test(codeOf())).toBe(false);
   });
 
   test('Steps 4 and 6 derive the marketplace list in the same way and keep the last occurrence of an ID', () => {
-    const [four, six] = [sharedSections(step4).get('registry marketplaces') ?? '', sharedSections(step6).get('registry marketplaces') ?? ''];
-    expect(four).not.toBe('');
-    expect(six).toBe(four);
-    expect(four).toContain('lastIndexOf');
+    expect(scriptText.split('const registryMarketplaces = ')).toHaveLength(2);
+    expect(scriptSection('marketplaces of the registry')).toContain('lastIndexOf');
+    expect(scriptSection('Step 4')).toContain('registryMarketplaces()');
+    expect(scriptSection('Step 6')).toContain('registryMarketplaces()');
   });
 
   test('Steps 4 and 6 name no fixed marketplace', () => {
-    expect(scriptOf(step4)).not.toMatch(/'cache',\s*'omc'/);
-    expect(scriptOf(step6)).not.toMatch(/'cache',\s*'omc'/);
+    expect(scriptSection('Step 4')).not.toMatch(/'cache',\s*'omc'/);
+    expect(scriptSection('Step 6')).not.toMatch(/'cache',\s*'omc'/);
   });
 });
 

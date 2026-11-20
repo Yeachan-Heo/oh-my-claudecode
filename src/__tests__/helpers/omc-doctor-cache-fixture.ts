@@ -4,85 +4,53 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 export const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 
-// Every `node -e "..."` command of the skill, as written: a one-line command (the opt-out probe) or the multi-line
-// form, `node -e "`, the script, then a line holding the closing quote.
-export function nodeCommandsOf(text: string): string[] {
-  const lines = text.split('\n');
-  const found: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].startsWith('node -e "')) continue;
-    if (lines[i] !== 'node -e "') {
-      found.push(lines[i]);
-      continue;
-    }
-    const start = i;
-    while (i < lines.length && lines[i] !== '"') i++;
-    found.push(lines.slice(start, i + 1).join('\n'));
-  }
-  return found;
-}
-
 export const skillText = read('skills/omc-doctor/SKILL.md');
-export const skillCommands = nodeCommandsOf(skillText);
 
-// The text of the skill with every `node -e` command folded into one placeholder line: the prose and the shell blocks,
-// for the tests that look at what is written around the commands. A line that starts with `node -e ` is a command.
-export const proseOf = (text: string = skillText): string => {
-  let out = text;
-  for (const command of nodeCommandsOf(text)) out = out.replace(command, 'node -e "<script>"');
-  return out;
-};
+// The commands of the doctor script that the skill runs, one per Bash call (scripts/omc-doctor.mjs).
+export const SCRIPT = path.join(ROOT, 'scripts', 'omc-doctor.mjs');
+export const scriptText = read('scripts/omc-doctor.mjs');
+export const STEP1 = 'step1';
+export const NPM_LATEST = 'npm-latest';
+export const CLAUDE_MD_OPTOUT = 'claude-md-optout';
+export const CLAUDE_MD_VERSION = 'claude-md-version';
+export const CACHE_VERSIONS = 'cache-versions';
+// The two cache commands: the outdated-plugin one and the stale-cache one.
+export const commands = ['cache-outdated', 'cache-stale'];
+// The seven commands, in the order the skill runs them.
+export const allCommands = [STEP1, NPM_LATEST, CLAUDE_MD_OPTOUT, CLAUDE_MD_VERSION, CACHE_VERSIONS, ...commands];
 
-// The command of a step, found by a phrase only that command prints.
-export function commandWith(phrase: string, text: string = skillText): string | undefined {
-  const hits = nodeCommandsOf(text).filter((c) => c.includes(phrase));
-  return hits.length === 1 ? hits[0] : undefined;
+// The code between the heading `// == <name> ==` of the script and the next heading, heading line included.
+export function scriptSection(name: string, text: string = scriptText): string {
+  const sections = text.split(/^(?=\/\/ == )/m);
+  const hits = sections.filter((section) => section.startsWith(`// == ${name} ==\n`));
+  if (hits.length !== 1) throw new Error(`expected exactly one section ${name} in the script, found ${hits.length}`);
+  return hits[0].trimEnd();
 }
 
-// The two `node -e` cache commands of the omc-doctor skill: the outdated-plugin one and the stale-cache one.
-export const commands = skillCommands.filter((c) => c.includes("'installed_plugins.json'") && c.includes("'oh-my-claudecode'") && c.includes("'backups'"));
+// The code of the script as text: whole-line comments dropped.
+export const codeOf = (text: string = scriptText): string => text.split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n');
 
-// The JavaScript of a `node -e "..."` command. It is run by Node directly, without a shell, so the
-// same case runs on every platform; one POSIX test below runs the unchanged command through bash.
-export const scriptOf = (command: string) =>
-  command.startsWith('node -e "\n') ? command.slice('node -e "\n'.length, -'\n"'.length) : command.slice('node -e "'.length, -1);
-
-// A script as one line: whole-line comments and indentation dropped, the lines joined by one space. The one-line opt-out
-// probe carries the shared config dir section in this form.
+// Code as one line: whole-line comments and indentation dropped, the lines joined by one space.
 export const flatCode = (code: string): string =>
   code.split('\n').filter((line) => !/^\s*\/\//.test(line)).map((line) => line.trim()).filter(Boolean).join(' ');
 
-// The sections of a script that are marked as shared: `// == <name> (shared) ==` up to the next `// == ... ==` line.
-// A shared section has the same text in every command that carries it; a test keeps the copies equal.
-export function sharedSections(command: string): Map<string, string> {
-  const sections = new Map<string, string>();
-  let name: string | null = null;
-  let acc: string[] = [];
-  const close = () => {
-    if (name !== null) sections.set(name, acc.join('\n').trimEnd());
-  };
-  for (const line of scriptOf(command).split('\n')) {
-    const header = /^\/\/ == (.+) ==$/.exec(line);
-    if (header) {
-      close();
-      name = header[1].endsWith(' (shared)') ? header[1].slice(0, -' (shared)'.length) : null;
-      acc = [];
-    }
-    if (name !== null) acc.push(line);
-  }
-  close();
-  return sections;
-}
+// The shell blocks of the skill (the fenced bash blocks), as written.
+export const bashBlocks = (text: string = skillText): string[] => [...text.matchAll(/```bash\n([\s\S]*?)\n```/g)].map((match) => match[1]);
 
-// Preload scripts (--require) change the process the command runs in, e.g. to report another platform.
-export function runCommand(command: string, configDir: string, options: { env?: Record<string, string>; preloads?: string[]; timeout?: number } = {}) {
-  return spawnSync(process.execPath, [...(options.preloads ?? []).flatMap((file) => ['--require', file]), '-e', scriptOf(command)], {
+// The locator line every block that runs the script starts with (the line that sets S).
+export const locatorLine = bashBlocks().flatMap((block) => block.split('\n')).find((line) => line.startsWith('S=; ')) ?? '';
+
+// Runs a command of the doctor script in a synthetic environment. Preload scripts (--require) change the process the
+// command runs in, e.g. to report another platform.
+export function runCommand(command: string, configDir: string, options: { env?: Record<string, string>; preloads?: string[]; timeout?: number; cwd?: string } = {}) {
+  return spawnSync(process.execPath, [...(options.preloads ?? []).flatMap((file) => ['--require', file]), SCRIPT, command], {
     encoding: 'utf8',
     timeout: options.timeout,
+    cwd: options.cwd,
     env: {
       ...process.env,
       CLAUDE_CONFIG_DIR: configDir,
@@ -90,6 +58,32 @@ export function runCommand(command: string, configDir: string, options: { env?: 
       USERPROFILE: configDir,
       OMC_PLUGIN_ROOT: '',
       CLAUDE_PLUGIN_ROOT: '',
+      ...options.env,
+    },
+  });
+}
+
+// The shell block of the skill that runs a command of the script, exactly as written.
+export const blockOf = (command: string): string => {
+  const hits = bashBlocks().filter((block) => block.split('\n').includes(`node "$S" ${command}`));
+  if (hits.length !== 1) throw new Error(`expected exactly one shell block that runs ${command}, found ${hits.length}`);
+  return hits[0];
+};
+
+// Runs that block through bash, whole and in one call, as the Bash tool does. The plugin root is this checkout unless
+// `env` says otherwise.
+export function runBlock(command: string, configDir: string, options: { env?: Record<string, string>; cwd?: string; timeout?: number } = {}) {
+  return spawnSync('bash', ['-c', blockOf(command)], {
+    encoding: 'utf8',
+    timeout: options.timeout,
+    cwd: options.cwd,
+    env: {
+      ...process.env,
+      CLAUDE_CONFIG_DIR: configDir,
+      HOME: configDir,
+      USERPROFILE: configDir,
+      OMC_PLUGIN_ROOT: '',
+      CLAUDE_PLUGIN_ROOT: ROOT,
       ...options.env,
     },
   });

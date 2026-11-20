@@ -96,7 +96,10 @@ describe('omc-doctor: the missing-install diagnosis is channel-aware', { timeout
 
   test('the diagnosis text reads the channel before every rule that reads Installed, Latest or Updater', () => {
     const first = bullets.findIndex((b) => b.includes('Read the `Channel:` line of each plugin before any rule below'));
-    expect(first).toBe(0);
+    // Only the rule for a script that did not run comes before it: it reads no line of the Step 1 output.
+    expect(bullets[0]).toContain('omc-doctor: plugin files not found');
+    for (const word of ['`Installed:`', '`Latest:`', '`Updater:`', '`Channel:']) expect(bullets[0]).not.toContain(word);
+    expect(first).toBe(1);
     for (const word of ['`Installed:`', '`Latest:`', '`Updater:`']) expect(bullets[first]).toContain(word);
     expect(bullets[first]).toContain('`Channel: plugin-dir` is a loaded checkout');
     // The rules read only the channels they name, and the two install channels are installs.

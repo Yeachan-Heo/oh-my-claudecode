@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
+import { codeOf, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptSection, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { step1 } from './helpers/omc-doctor-step1.js';
 
 // A `version` that a registry entry of OMC claims, and the version read from the `package.json` or `plugin.json` an entry
 // points to, is a semantic version in the grammar of the runtime's `parseSemver` (the `sv` of Step 1, with the optional
@@ -17,13 +17,16 @@ describe('omc-doctor: the version fields of the registry entries of OMC are vali
   const malformed = [5, '   ', '', null, ['5.9.0'], { v: '5.9.0' }, true];
 
   describe('one definition', () => {
-    const definition = (command: string) => (sharedSections(command).get('version grammar') ?? '').split('\n').filter((l) => l.startsWith('const grammar = ') || l.trimStart().startsWith('const grammar = ')).join('\n');
-    test('the grammar is the same text in Step 1 and in both cache commands', () => {
+    // The commands share the one script, so there is one grammar: the registry entries, the version order and the cache
+    // listings of Step 1 and of both cache commands go through the same `semver` function.
+    test('the grammar is one text in the script, and the entry check, the order and the cache listing use it', () => {
       expect(commands).toHaveLength(2);
-      const texts = [versionCommand ?? '', ...commands].map(definition);
-      expect(texts[0]).not.toBe('');
-      expect(texts[1]).toBe(texts[0]);
-      expect(texts[2]).toBe(texts[0]);
+      expect(codeOf().split('const grammar = ')).toHaveLength(2);
+      expect(scriptSection('version grammar')).toContain('const grammar = ');
+      expect(scriptSection('version grammar')).toContain('const isVersionDir = (name) => semver(name) == name');
+      // The entry checks of Step 1 and of the cache commands, and the cache listings of every command.
+      for (const section of ['Step 1: helpers', 'repair registry']) expect({ section, uses: scriptSection(section).includes('semver(') }).toEqual({ section, uses: true });
+      expect(codeOf().split('.filter(isVersionDir)').length - 1).toBe(4);
     });
   });
 

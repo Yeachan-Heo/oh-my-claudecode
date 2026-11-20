@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { read, commands, sharedSections, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, addCache, makeCache, volumeFoldsCase, writeCaseFoldPreload, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { blockOf, read, commands, scriptSection, scriptText, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, addCache, makeCache, volumeFoldsCase, writeCaseFoldPreload, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (pins, registry shapes, failed moves)', { timeout: 120_000 }, () => {
   function makeConfigDir(versions: string[], pinned: string | null, installed = true, pluginId = 'oh-my-claudecode@omc') {
@@ -26,7 +26,9 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
 
   test('both cache commands are present', () => {
     expect(commands).toHaveLength(2);
-    expect(commands.some((c) => c.includes('does not update the plugin'))).toBe(true);
+    // Each is a command of the script with its own shell block in the skill; the outdated-plugin one says that it only cleans up.
+    for (const command of commands) expect({ command, block: blockOf(command).endsWith(`node "$S" ${command}`) }).toEqual({ command, block: true });
+    expect(scriptSection('repair run')).toContain('This command only cleans up cached versions and does not update the plugin.');
   });
 
   // An update installs a new version directory before it records it in installed_plugins.json, and the
@@ -161,24 +163,22 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     const [, a, b, c] = /const STALE_THRESHOLD_MS = (\d+) \* (\d+) \* (\d+);/.exec(read('src/utils/paths.ts')) ?? [];
     const ms = Number(a) * Number(b) * Number(c);
     expect(ms).toBeGreaterThan(0);
-    for (const command of commands) expect(sharedSections(command).get('repair constants')).toContain(`const FRESH_MS = ${ms};`);
+    expect(scriptSection('repair constants')).toContain(`const FRESH_MS = ${ms};`);
     expect(ms / 60_000).toBe(10);
     expect(read('skills/omc-doctor/SKILL.md')).toContain('modified in the last 10 minutes');
   });
 
   test('the outdated-plugin command always says it only cleans up and does not update, the stale-cache command does not', () => {
-    const [outdated, stale] = [commands.find((c) => c.includes('does not update the plugin')), commands.find((c) => !c.includes('does not update the plugin'))];
-    expect(outdated).toBeDefined();
-    expect(stale).toBeDefined();
+    const [outdated, stale] = ['cache-outdated', 'cache-stale'];
     for (const [versions, pinned, installed] of [[['5.9.0'], '5.9.0', true], [['5.8.0', '5.9.0'], '5.9.0', true], [['5.8.0', '5.9.0'], null, false], [[], null, false]] as const) {
       const { dir } = makeConfigDir([...versions], pinned, installed);
       try {
-        const result = runCommand(outdated!, dir);
+        const result = runCommand(outdated, dir);
         expect(result.stdout).toContain('only cleans up cached versions and does not update the plugin');
         expect(result.stdout).toContain('run the Updater line that Step 1 printed');
         expect(result.stdout).not.toMatch(/marketplace update|omc update/);
         expect(result.stdout).not.toContain('to fetch latest version');
-        expect(runCommand(stale!, dir).stdout).not.toContain('does not update the plugin');
+        expect(runCommand(stale, dir).stdout).not.toContain('does not update the plugin');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -474,14 +474,13 @@ for (const name of ['statSync', 'readdirSync']) {
   });
 
   test('both commands compute the protected set with the same code, and it names the IDs the installer accepts', () => {
-    const segment = (c: string) => sharedSections(c).get('protection') ?? '';
-    expect(segment(commands[0]).length).toBeGreaterThan(500);
-    expect(segment(commands[1])).toBe(segment(commands[0]));
+    expect(scriptSection('protection').length).toBeGreaterThan(500);
+    expect(scriptText.split('const protectionOf = ')).toHaveLength(2);
     const installerIds = /PLUGIN_IDS\s*=\s*new Set\(\[([^\]]*)\]/.exec(read('src/installer/index.ts'));
     expect(installerIds).not.toBeNull();
     const accepted = [...installerIds![1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
     expect(accepted).toEqual([...OFFICIAL_IDS].sort());
-    for (const command of commands) for (const id of accepted) expect(command).toContain(`'${id}'`);
+    for (const id of accepted) expect(scriptSection('plugin ids')).toContain(`'${id}'`);
   });
 
   // For every supported ID, every letter case and both registry layouts: the key

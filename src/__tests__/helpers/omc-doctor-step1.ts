@@ -2,10 +2,10 @@ import { expect } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commandWith, runCommand, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './omc-doctor-cache-fixture.js';
+import { runCommand, STEP1, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './omc-doctor-cache-fixture.js';
 
-// The Step 1 command of the omc-doctor skill (the line that prints Plugin, Channel, Installed, Latest and Updater).
-export const versionCommand = commandWith("'Updater: ");
+// The Step 1 command of the omc-doctor script (the one that prints Plugin, Channel, Installed, Latest and Updater).
+export const versionCommand = STEP1;
 
 export type Profile = {
   plugins?: Record<string, unknown> | ((dir: string) => Record<string, unknown>);
@@ -41,7 +41,7 @@ export function step1(profile: Profile) {
     profile.setup?.(dir);
     // `casefold` gives the process a volume that ignores letter case while it reports linux (WSL2 on a Windows drive).
     const preloads = [...(profile.platform ? [preload] : []), ...(profile.casefold ? [writeCaseFoldPreload(dir)] : [])];
-    const result = runCommand(versionCommand ?? '', dir, { preloads, env: profile.env?.(dir), timeout: 20_000 });
+    const result = runCommand(versionCommand, dir, { preloads, env: profile.env?.(dir), timeout: 20_000 });
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
     return Object.fromEntries(result.stdout.trim().split('\n').map((l) => [l.slice(0, l.indexOf(': ')), l.slice(l.indexOf(': ') + 2)]));

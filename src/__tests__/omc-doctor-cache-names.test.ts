@@ -1,25 +1,21 @@
 import { describe, test, expect } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { backupDir, commandWith, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
+import { backupDir, CACHE_VERSIONS, CLAUDE_MD_VERSION, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { step1 } from './helpers/omc-doctor-step1.js';
 import { compareVersions } from '../utils/semver-compare.js';
 
 // A directory of the plugin cache is a version only when its name is a semantic version of the grammar the registry
 // versions already obey (an optional v is no part of a directory name). A name that is none, such as `1e3` or `4.15.7L`
 // (a digit first, junk after), is no version: the order ignores it (the runtime reads such a name as 0 or below), Step 6
 // does not count it, and the cache commands neither list nor move it. Before, such a name ranked above every real version.
-const step4 = commandWith('Latest cached plugin version') ?? '';
-const step6 = commandWith("' version(s):'") ?? '';
 const NOT_VERSIONS = ['1e3', '4.15.7L', '999x.0.0', '1.2', '1.2.3.4', '01.2.3', 'v5.7.0', '5.9.0 ', '5.9.0.bak', '5.9.0.omc-stale-4242'];
 
 describe('omc-doctor: a cache directory that is no semantic version takes no part', { timeout: 120_000 }, () => {
-  test('the version-name test is the grammar plus the relink exclusion, the same text in every command', () => {
-    for (const command of [versionCommand ?? '', step4, step6, ...commands]) {
-      const grammar = sharedSections(command).get('version grammar') ?? '';
-      expect(grammar).toContain('const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);');
-    }
+  test('the version-name test is the grammar plus the relink exclusion, defined once for every command', () => {
+    const definition = 'const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);';
+    expect(scriptSection('version grammar')).toContain(definition);
+    expect(scriptText.split('isVersionDir = ')).toHaveLength(2);
   });
 
   test('Step 1 on the npm channel: the highest real version is Installed, whatever the junk names are', () => {
@@ -43,10 +39,10 @@ describe('omc-doctor: a cache directory that is no semantic version takes no par
       try {
         mkdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', junk), { recursive: true });
         writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
-        const four = spawnSync('/bin/bash', ['-c', step4], { encoding: 'utf8', timeout: 20_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } });
+        const four = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
         expect({ junk, line: four.stdout.split('\n').find((l) => l.startsWith('Latest cached plugin version:')) }).toEqual({ junk, line: 'Latest cached plugin version: 5.9.0' });
         expect(four.stdout).toContain('VERSION MATCH');
-        const six = runCommand(step6, dir, { timeout: 20_000 });
+        const six = runCommand(CACHE_VERSIONS, dir, { timeout: 20_000 });
         expect({ junk, out: six.stdout.trim().replace(/: (.*)$/, (_m, list: string) => ': ' + list.split(', ').sort().join(', ')) }).toEqual({ junk, out: '2 version(s): 5.8.0, 5.9.0' });
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -74,9 +70,9 @@ describe('omc-doctor: a cache directory that is no semantic version takes no par
   });
 
   // The order of the names that are versions is the runtime order (compareVersions in src/utils/semver-compare.ts):
-  // the skill carries its own copy of the comparator, so the two are run side by side on a grid.
+  // the script carries its own copy of the comparator, so the two are run side by side on a grid.
   test('the order of real versions is the order of the runtime comparator', () => {
-    const comparator = new Function(`${sharedSections(versionCommand ?? '').get('version grammar')}\n${sharedSections(versionCommand ?? '').get('version order')}\nreturn compareVersions;`)() as (a: string, b: string) => number;
+    const comparator = new Function(`${scriptSection('version grammar')}\n${scriptSection('version order')}\nreturn compareVersions;`)() as (a: string, b: string) => number;
     const names = ['0.0.1', '1.0.0', '1.0.0-alpha', '1.0.0-alpha.1', '1.0.0-beta', '1.0.0-beta.2', '1.0.0-beta.11', '1.0.0-rc.1', '1.0.0+build', '1.2.3', '1.10.0', '2.0.0', '5.9.0', '5.9.0-beta.2', '5.9.10', '5.10.0', '10.0.0', '1.0.0-0', '1.0.0-1', '1.0.0-a-b'];
     for (const a of names) {
       for (const b of names) {

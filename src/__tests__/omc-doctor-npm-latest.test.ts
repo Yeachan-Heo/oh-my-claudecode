@@ -3,13 +3,12 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commandWith, proseOf, scriptOf, sharedSections } from './helpers/omc-doctor-cache-fixture.js';
-import { versionCommand } from './helpers/omc-doctor-step1.js';
+import { NPM_LATEST, SCRIPT, scriptSection, skillText } from './helpers/omc-doctor-cache-fixture.js';
 
 // The `npm latest:` line is only for the npm channel. It is a command of its own (Step 1 never consults npm): `npm view`
-// gets a time limit, and the answer has to be a semantic version of the grammar the commands share, so an error, a
+// gets a time limit, and the answer has to be a semantic version of the grammar the script defines once, so an error, a
 // timeout or junk on stdout is `npm latest: (unavailable)` and never a bare string a model could take for a version.
-const npmCommand = commandWith("'npm latest: '") ?? '';
+const npmFunction = scriptSection('Step 1: npm latest');
 const posix = process.platform !== 'win32';
 
 // Runs the command with a fake `npm` first on PATH. `preload` is a script run before the command (--require).
@@ -20,7 +19,7 @@ const run = (npm: string | null, preload?: string) => {
       writeFileSync(path.join(dir, 'npm'), `#!/bin/sh\n${npm}\n`);
       chmodSync(path.join(dir, 'npm'), 0o755);
     }
-    const args = ['-e', scriptOf(npmCommand)];
+    const args = [SCRIPT, NPM_LATEST];
     if (preload) {
       writeFileSync(path.join(dir, 'preload.cjs'), preload);
       args.unshift('--require', path.join(dir, 'preload.cjs'));
@@ -34,18 +33,18 @@ const run = (npm: string | null, preload?: string) => {
 };
 
 describe('omc-doctor npm latest command', { timeout: 120_000 }, () => {
-  test('it is one command of Step 1, carries the shared version grammar, and replaces the bare shell line', () => {
-    expect(npmCommand).not.toBe('');
-    expect(sharedSections(npmCommand).get('version grammar')).toBe(sharedSections(versionCommand ?? '').get('version grammar'));
-    expect(proseOf()).not.toMatch(/^latest=\$\(npm view/m);
-    expect(proseOf()).toContain('npm latest: for a Channel: npm install only');
+  test('it is one command of Step 1, answers with the version grammar of the script, and replaces the bare shell line', () => {
+    expect(npmFunction).toContain('const latest = run.status === 0 ? semver(run.stdout) : \'\';');
+    expect(skillText).not.toMatch(/^latest=\$\(npm view/m);
+    expect(skillText).toContain('npm latest: for a Channel: npm install only');
+    expect(skillText).toContain('node "$S" npm-latest');
     // Both outcomes are labelled by the command itself.
-    expect(scriptOf(npmCommand)).toContain("'npm latest: ' + (latest || '(unavailable)')");
+    expect(npmFunction).toContain("'npm latest: ' + (latest || '(unavailable)')");
   });
 
   test('npm view has a time limit of 20 seconds and a kill that cannot be ignored', () => {
-    expect(scriptOf(npmCommand)).toContain("timeout: 20000, killSignal: 'SIGKILL'");
-    expect(scriptOf(npmCommand)).toContain("'view', 'oh-my-claude-sisyphus', 'version'");
+    expect(npmFunction).toContain("timeout: 20000, killSignal: 'SIGKILL'");
+    expect(npmFunction).toContain("'view', 'oh-my-claude-sisyphus', 'version'");
   });
 
   test.skipIf(!posix)('a semantic version is printed bare, with the leading v dropped', () => {

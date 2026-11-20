@@ -1,23 +1,19 @@
 import { describe, test, expect } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { commands, commandWith, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptOf, sharedSections, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
+import { CLAUDE_MD_VERSION, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { step1 } from './helpers/omc-doctor-step1.js';
 
 // Semantic versions put no bound on a numeric part, so the skill orders the numeric parts of a version (the three parts of
 // the core and the numeric identifiers of a prerelease) as digit strings, the way `compareVersions` in
 // src/utils/semver-compare.ts does: without leading zeros, the longer string is the larger number, equal lengths compare
 // as text. A subtraction of the parts as numbers loses precision past 2^53 (`999999999999999999999` and
 // `1000000000000000000000` are one double, and 400 digits are `Infinity`), so the final text tie-break then put the older
-// version first. The comparator exists as one definition in Step 1 and in Step 4, and the registry commands never order versions.
-const skill = skillText;
-const step1Line = versionCommand ?? '';
-const step4Line = commandWith('Latest cached plugin version') ?? '';
-// The comparator of a command: its shared version grammar and version order sections, evaluated, giving `compareVersions`.
-const orderOf = (command: string) => sharedSections(command).get('version order') ?? '';
-const comparatorOf = (command: string) => vm.runInNewContext(`${sharedSections(command).get('version grammar')}\n${orderOf(command)}\n;compareVersions`, {}) as (a: string, b: string) => number;
+// version first. The comparator exists as one definition in the script, used by Step 1 and Step 4, and the registry commands never order versions.
+// The comparator of the script: its version grammar and version order sections, evaluated, giving `compareVersions`.
+const orderSection = scriptSection('version order');
+const comparator = vm.runInNewContext(`${scriptSection('version grammar')}\n${orderSection}\n;compareVersions`, {}) as (a: string, b: string) => number;
 
 const LOW = '999999999999999999999';
 const HIGH = '1000000000000000000000';
@@ -25,21 +21,22 @@ const posix = process.platform !== 'win32';
 
 describe('omc-doctor: numeric parts of a version are ordered as digit strings of any size', { timeout: 120_000 }, () => {
   describe('one definition', () => {
-    test('the digit-string comparison is the same text in Step 1 and Step 4, and no version part becomes a number', () => {
-      const texts = [step1Line, step4Line].map(orderOf);
-      expect(texts[0]).toContain('const compareVersions = ');
-      expect(texts[1]).toBe(texts[0]);
-      expect(texts[0]).not.toMatch(/Number|parseInt|parseFloat|BigInt|\+x|\+y|x - y/);
-      expect(scriptOf(step4Line)).toContain('.filter(isVersionDir).sort(compareVersions);');
-      // The only number conversions in the whole skill are the process id checks of the two registry commands.
-      const conversions = [...skill.matchAll(/\b(?:Number|parseInt|parseFloat|BigInt)\b[.(]?\w*/g)].map((m) => m[0]).filter((c) => c !== 'Number.isSafeInteger');
+    test('the digit-string comparison is defined once and used by Step 1 and Step 4, and no version part becomes a number', () => {
+      expect(orderSection).toContain('const compareVersions = ');
+      expect(scriptText.split('const compareVersions = ')).toHaveLength(2);
+      expect(orderSection).not.toMatch(/Number|parseInt|parseFloat|BigInt|\+x|\+y|x - y/);
+      // Step 1 (the highest of the cache and of the entries) and Step 4 (the newest cached version) both order with it.
+      expect(scriptText.split('.sort(compareVersions)').length - 1).toBeGreaterThanOrEqual(3);
+      expect(scriptText).toContain('.filter(isVersionDir).sort(compareVersions);');
+      // The only number conversions in the whole script are the process id checks of the two registry commands.
+      const conversions = [...scriptText.matchAll(/\b(?:Number|parseInt|parseFloat|BigInt)\b[.(]?\w*/g)].map((m) => m[0]).filter((c) => c !== 'Number.isSafeInteger');
       expect(conversions).toEqual([]);
     });
   });
 
-  describe('the comparator of both commands', () => {
-    // Both commands carry the same shared section; each one is evaluated as written.
-    const comparators = [step1Line, step4Line].map(comparatorOf);
+  describe('the comparator of the script', () => {
+    // The one definition, evaluated as written.
+    const comparators = [comparator];
     const parts = ['0', '1', '2', '9', '10', '99', '100', '9007199254740991', '9007199254740992', '9007199254740993', LOW, HIGH, '1000000000000000000001', '100000000000000000000000000000', `${'9'.repeat(400)}`, `1${'0'.repeat(400)}`, `1${'0'.repeat(399)}1`];
     const zeros = (digits: string) => (digits.length > 1 && digits[0] !== '0' ? [`0${digits}`, `${'0'.repeat(25)}${digits}`] : []);
     const sign = (n: number) => Math.sign(n);
@@ -131,8 +128,8 @@ describe('omc-doctor: numeric parts of a version are ordered as digit strings of
         const { dir } = makeCache([low, high]);
         try {
           writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
-          // A shell command (a `node -e` in double quotes), so it runs through bash.
-          const run = spawnSync('/bin/bash', ['-c', step4Line], { encoding: 'utf8', timeout: 20_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } });
+          // The shell block of the skill, so it runs through bash.
+          const run = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
           expect(run.error).toBeUndefined();
           expect({ low: low.slice(0, 40), line: run.stdout.split('\n').find((l) => l.startsWith('Latest cached plugin version:')) }).toEqual({ low: low.slice(0, 40), line: `Latest cached plugin version: ${high}` });
         } finally {
