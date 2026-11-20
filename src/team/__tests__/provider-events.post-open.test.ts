@@ -3,19 +3,35 @@
 // read from or written to. These tests swap them right after the real open.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const swap = vi.hoisted(() => ({ afterOpen: null as null | ((path: string) => void) }));
+const swap = vi.hoisted(() => ({
+  afterOpen: null as null | ((path: string) => void),
+  // Event files that opened, how many of them closed, and whether close should fail.
+  opened: [] as string[],
+  closed: 0,
+  failClose: false,
+}));
 
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const open: typeof actual.open = async (...args) => {
     const handle = await actual.open(...args);
     const path = String(args[0]);
-    if (swap.afterOpen && path.endsWith('provider-events.jsonl')) swap.afterOpen(path);
+    if (path.endsWith('provider-events.jsonl')) {
+      swap.opened.push(path);
+      const close = handle.close.bind(handle);
+      handle.close = async () => {
+        await close();
+        swap.closed += 1;
+        if (swap.failClose) throw new Error('close failed');
+      };
+      if (swap.afterOpen) swap.afterOpen(path);
+    }
     return handle;
   };
   return { ...actual, open, default: { ...actual, open } };
@@ -72,6 +88,9 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   });
   afterEach(() => {
     swap.afterOpen = null;
+    swap.opened = [];
+    swap.closed = 0;
+    swap.failClose = false;
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
   });
@@ -103,6 +122,42 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   it('reader still reads the file when nothing is swapped', async () => {
     writeFileSync(path, EVENT_LINE);
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'Stop', at: 7 });
+  });
+
+  it('reader opens nothing through a symlinked worker directory or leaf', async () => {
+    writeFileSync(join(outside, 'provider-events.jsonl'), EVENT_LINE);
+    symlinkSync(outside, join(root, 'workers', 'worker-2'));
+    symlinkSync(join(outside, 'provider-events.jsonl'), path);
+    expect(await readLatestProviderEvent(root, 'worker-2', 'a1')).toEqual({ event: 'none' });
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+    expect(swap.opened).toEqual([]);
+  });
+
+  it('reader returns none for a FIFO that holds a complete line', async () => {
+    execFileSync('mkfifo', [path]);
+    // A read-write descriptor keeps a writer on the FIFO without blocking; the
+    // line waits in the pipe, and closing the writer after the open gives EOF.
+    const writer = openSync(path, constants.O_RDWR);
+    writeSync(writer, EVENT_LINE);
+    swap.afterOpen = () => closeSync(writer);
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+    expect(swap.opened).toEqual([path]);
+  });
+
+  it('reader closes every file it opens, read or refused', async () => {
+    writeFileSync(path, EVENT_LINE);
+    await readLatestProviderEvent(root, 'worker-1', 'a1');
+    swap.afterOpen = opened => SWAPS.leaf(opened);
+    await readLatestProviderEvent(root, 'worker-1', 'a1');
+    expect(swap.opened).toHaveLength(2);
+    expect(swap.closed).toBe(2);
+  });
+
+  it('reader still returns the event when closing the file fails', async () => {
+    writeFileSync(path, EVENT_LINE);
+    swap.failClose = true;
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'Stop', at: 7 });
+    expect(swap.closed).toBe(1);
   });
 
   // The hook runs as its own process, so a preload wraps fs/promises.open there.
