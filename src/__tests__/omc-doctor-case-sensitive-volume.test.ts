@@ -381,17 +381,22 @@ fs.mkdirSync = function (target, ...rest) {
 };
 `;
     for (const command of commands) {
-      const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
-      try {
-        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }] });
-        const race = path.join(dir, 'race.cjs');
-        writeFileSync(race, racePreload);
-        const env = { RACE_BACKUP: backupDir(dir), RACE_ROOT: upperBelow(dir, path.join(cache, LIVE)) };
-        const result = runCommand(command, dir, { env, preloads: [...volume(dir), race] });
-        expect({ versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ versions: `5.1.0,5.8.0,${LIVE}`, moved: 0 });
-        expect(result.stdout).toMatch(/Skipped 2 version\(s\)/);
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
+      for (const platform of PLATFORMS) {
+        const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.1.0' }] });
+          const race = path.join(dir, 'race.cjs');
+          writeFileSync(race, racePreload);
+          const env = { RACE_BACKUP: backupDir(dir), RACE_ROOT: upperBelow(dir, path.join(cache, LIVE)) };
+          const result = runCommand(command, dir, { env, preloads: [reportAs(dir, platform), ...volume(dir), race] });
+          // Under win32 the record is read in lower case, so it is judged and the one free version moves.
+          const decided = platform === 'win32';
+          expect({ platform, versions: digitVersions(cache), moved: movedAside(dir) })
+            .toEqual({ platform, versions: decided ? `5.1.0,${LIVE}` : `5.1.0,5.8.0,${LIVE}`, moved: decided ? 1 : 0 });
+          if (!decided) expect(result.stdout).toMatch(/Skipped 2 version\(s\)/);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
       }
     }
   });
