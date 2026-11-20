@@ -294,6 +294,11 @@ describe('Claude Code first-run dialogs', () => {
     },
   );
 
+  it('reads the focus of the latest copy when the offer drawn before Down is still above it', () => {
+    const stacked = `${read('claude/2.1.328/fullscreen-renderer.txt')}\n${read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt')}`;
+    expect(claudeDialogFocus(stacked, 'claude_fullscreen_renderer')).toBe('second');
+  });
+
   it('reads the bypass warning by its choices alone, with no heading on screen', () => {
     expect(detectClaudeStartupDialog('  ❯ No, exit\n    Yes, I accept\n  Enter to confirm · Esc to cancel\n')).toBe('claude_bypass_permissions');
     expect(detectClaudeStartupDialog('    No, exit\n  ❯ Yes, I accept\n')).toBe('claude_bypass_permissions');

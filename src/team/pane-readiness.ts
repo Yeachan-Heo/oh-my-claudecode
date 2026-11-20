@@ -206,20 +206,28 @@ function claudeDialogTail(captured: string): string {
   return stream.slice(start);
 }
 
+// The dialog whose choice is drawn last is the live one: an answered dialog
+// can remain above it. "No, exit" alone is the bypass warning only with the
+// footer, as the trust dialog draws it too.
 function claudeStartupDialogIn(tail: string, captured: string): ClaudeStartupDialogKind | null {
   const footer = tail.includes(CLAUDE_DIALOG_FOOTER);
-  const shows = (choices: readonly string[]) => choices.some((choice) => tail.includes(choice));
-  if (tail.includes('Yes,Iaccept')) return 'claude_bypass_permissions';
+  const lastOf = (choices: readonly string[]) => Math.max(...choices.map((choice) => tail.lastIndexOf(choice)));
+  const accept = tail.lastIndexOf('Yes,Iaccept');
+  const trust = lastOf(CLAUDE_TRUST_CHOICES);
+  const renderer = lastOf(CLAUDE_STARTUP_CHOICES.claude_fullscreen_renderer);
+  const latest = Math.max(accept, trust, renderer);
+  if (latest < 0) {
+    if (!footer) return null;
+    return tail.includes('No,exit') ? 'claude_bypass_permissions' : 'claude_startup_dialog_unidentified';
+  }
+  if (latest === accept) return 'claude_bypass_permissions';
   // The trust dialog (#5108) is left to the trust detector while it reads it.
-  if (shows(CLAUDE_TRUST_CHOICES)) {
+  if (latest === trust) {
     return detectTrustPrompt(paneLines(captured), ['claude_directory'])
       ? null
       : 'claude_startup_dialog_unidentified';
   }
-  if (!footer) return null;
-  if (tail.includes('No,exit')) return 'claude_bypass_permissions';
-  if (shows(CLAUDE_STARTUP_CHOICES.claude_fullscreen_renderer)) return 'claude_fullscreen_renderer';
-  return 'claude_startup_dialog_unidentified';
+  return footer ? 'claude_fullscreen_renderer' : 'claude_startup_dialog_unidentified';
 }
 
 // Read only by the Claude startup wait, before it reads the trust dialogs.
@@ -357,8 +365,10 @@ export function claudeDialogFocus(
       const stream = captured.replace(/\s+/g, '');
       return stream.includes(first) || stream.includes(second) ? 'stale' : null;
     }
-    if (tail.includes(`❯${first}`)) return 'first';
-    return tail.includes(`❯${second}`) ? 'second' : null;
+    // The latest ❯: the same dialog drawn before Down can remain above it.
+    const [firstAt, secondAt] = [tail.lastIndexOf(`❯${first}`), tail.lastIndexOf(`❯${second}`)];
+    if (firstAt < 0 && secondAt < 0) return null;
+    return secondAt > firstAt ? 'second' : 'first';
   }
   const lines = paneLines(captured);
   const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
