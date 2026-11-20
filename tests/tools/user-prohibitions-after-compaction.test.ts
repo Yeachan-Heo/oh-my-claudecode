@@ -720,8 +720,11 @@ describe('user prohibitions after compaction', () => {
       'sudo': true, 'sudo -u root': true, 'nohup': true,
       // The words that start a command, xargs and doas are not wrappers of the table: the first word decides.
       'if grep -q x f; then rm -rf build; fi': false, '{ cat f; rm -rf build; }': false, '! grep -q x f || rm -rf build': false, 'xargs ls': false, 'doas ls': false,
-      // A compound command is judged by its first word (a documented limit).
-      'git status && rm x': true,
+      // A compound command is judged by its first word (a documented limit): what a chain holds behind a read-only first word is not read.
+      'git status && rm x': true, 'grep a f; rm -rf build': true, 'grep a f | xargs rm': true, 'grep a f\nrm -rf build': true,
+      // An assignment that stands before a `;` ends the line at once, so the line counts as a change of state; the same two commands on two
+      // lines, or an assignment before the command word, are judged by the command word (a documented limit).
+      'D=/x; grep a $D/f': false, 'D=/x && grep a $D/f': false, 'D=/x\ngrep a $D/f': true, 'D=/x grep a f': true,
     };
     const result = pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases));
     expect(result).toEqual(cases);

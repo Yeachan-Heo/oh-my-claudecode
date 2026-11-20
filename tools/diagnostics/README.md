@@ -682,7 +682,7 @@ measurement. In short:
   `grep deploy README.md`).
 - Rule 2 cuts more fragment kinds (counted in `removed_fragments`), flags a prohibition revoked in its own
   message, matches general prohibitions by the kind of call (a `Bash` command is read-only or state-changing by
-  its first word, taken after leading assignments, redirections and launch wrappers (`< in cat` and `sudo -n ls` are read-only, and a wrapper with no command behind it, `sudo -l`, changes nothing; reserved words (`if`, `then`, `do`, `{`, `!`), `xargs` and `doas` are not skipped, so `if grep -q x f; then rm -rf build; fi` is state-changing), and a `>`, `>>`, `>|` or
+  its first word, taken after leading assignments, redirections and launch wrappers (`< in cat` and `sudo -n ls` are read-only, and a wrapper with no command behind it, `sudo -l`, changes nothing; reserved words (`if`, `then`, `do`, `{`, `!`), `xargs` and `doas` are not skipped, so `if grep -q x f; then rm -rf build; fi` is state-changing; only that first word is judged, so what a chain (`;`, `&&`, `||`, a pipe or a new line) holds behind a read-only first word is not read, and `grep a f; rm -rf build` counts as read-only, while an assignment before a `;` makes the whole line state-changing, so `D=/x; grep a $D/f` counts as a change of state and the same two commands on two lines do not), and a `>`, `>>`, `>|` or
   `>&file` redirection to a file outside quotes and comments makes it state-changing:
   `echo '>'`, `grep ">" README.md`, `ls >&2` and `ls # > x` are still read-only), and counts pairs (prohibition, call); `--locators` then has one row
   per prohibition with a candidate and a `history_group` hash that copies of the same message share. Rule 3 (the
