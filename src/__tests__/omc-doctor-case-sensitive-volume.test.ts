@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, ageVersions, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, STEP1, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry, writeZeroInodePreload } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, ageVersions, backupDir, CLAUDE_MD_VERSION, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, STEP1, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry, writeZeroInodePreload } from './helpers/omc-doctor-cache-fixture.js';
 
 const step1Command = STEP1;
 const PLATFORMS = ['linux', 'darwin', 'win32'] as const;
@@ -562,6 +562,35 @@ fs.lstatSync = function (target, options) {
         return { env: { OMC_PLUGIN_ROOT: makeRoot(dir, 'checkout', '9.9.0') } };
       }, volume);
       expect({ platform, channel: elsewhere.Channel, installed: elsewhere.Installed }).toEqual({ platform, channel: 'plugin-dir', installed: '9.9.0' });
+    }
+  });
+
+  // Step 4 reads the cache of the marketplace whose entry holds the plugin root the session runs. Where that cannot be told
+  // (the root is another letter case of the entry's install and the volume gives no identity) it names no cache and skips
+  // the check, as Step 1 names no channel.
+  test('Step 4 chooses no cache where the plugin root cannot be matched to an entry, and chooses one for the exact spelling', () => {
+    for (const platform of PLATFORMS) {
+      if (hostCannot(platform)) continue;
+      for (const spelling of ['exact', 'other letter case'] as const) {
+        const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-case-'));
+        try {
+          mkdirSync(path.join(dir, 'plugins'), { recursive: true });
+          const install = installAt(dir);
+          writeRegistry(dir, pinned(install));
+          writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.8.0 -->\n');
+          const result = runCommand(CLAUDE_MD_VERSION, dir, { env: { CLAUDE_PLUGIN_ROOT: spelling === 'exact' ? install : upperBelow(dir, install) }, preloads: [reportAs(dir, platform), ...volume(dir)], timeout: 20_000 });
+          expect(result.error).toBeUndefined();
+          expect({ platform, spelling, lines: result.stdout.trim().split('\n').slice(2) }).toEqual({
+            platform,
+            spelling,
+            lines: spelling === 'exact'
+              ? ['Latest cached plugin version: 5.8.0', 'VERSION MATCH: CLAUDE and plugin cache are aligned']
+              : ['Latest cached plugin version: (unknown)', 'VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen'],
+          });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
     }
   });
 });

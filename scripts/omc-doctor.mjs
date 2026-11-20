@@ -9,6 +9,7 @@
 //   npm-latest         the latest version of the npm package (only for a Channel: npm install)
 //   claude-md-optout   whether CLAUDE.md management is switched off by claudeMdEnabled: false
 //   claude-md-version  the OMC version marker of CLAUDE.md (or its companion file) against the newest cached version
+//                      of the marketplace the session runs
 //   cache-versions     the version directories of the plugin cache, per marketplace
 //   cache-outdated     moves the unprotected cached versions to plugins/backups after an update (never deletes)
 //   cache-stale        the same cleanup for a stale cache with several versions
@@ -317,6 +318,15 @@ const entryInstallPaths = (market, entry) =>
   ]
     .filter((target) => typeof target == 'string' && target.trim())
     .map((target) => target.trim());
+// The plugin root variables that name an existing directory, OMC_PLUGIN_ROOT (--plugin-dir) first. CLAUDE_PLUGIN_ROOT is
+// only a locator in Step 1: Claude Code sets it for marketplace installs too, so it names a checkout only when the
+// registry holds no supported plugin ID. The installer's resolver also counts a lone CLAUDE_PLUGIN_ROOT as an explicit
+// root; the difference is deliberate, a marketplace install must not be reported as a checkout.
+const pluginRoots = () =>
+  [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT]
+    .map((root) => (root || '').trim())
+    .filter(Boolean)
+    .filter(isDirectory);
 // The entries of a plugin ID that the session runs: those whose install (entryInstallPaths) holds one of the existing
 // plugin roots. unknown is true when no entry certainly holds one and a comparison could not be made (askInside): which
 // install the session runs is then not known, and nothing is judged from the entries.
@@ -370,14 +380,7 @@ const STEP1_BLIND =
   'Channel: unknown (the file system gives no identity to a plugin root or an install path whose spelling differs from another only in letter case or Unicode form, so the two cannot be told apart; do not guess an updater)';
 const step1 = () => {
   const { unreadable, malformed, ambiguous, supported } = readChannelRegistry();
-  // The plugin root variables that name an existing directory. OMC_PLUGIN_ROOT (--plugin-dir) is the explicit one.
-  // CLAUDE_PLUGIN_ROOT is only a locator here: Claude Code sets it for marketplace installs too, so it names a checkout
-  // only when the registry holds no supported plugin ID. The installer's resolver also counts a lone CLAUDE_PLUGIN_ROOT
-  // as an explicit root; the difference is deliberate, a marketplace install must not be reported as a checkout.
-  const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT]
-    .map((root) => (root || '').trim())
-    .filter(Boolean)
-    .filter(isDirectory);
+  const roots = pluginRoots();
   const explicitRoot = (process.env.OMC_PLUGIN_ROOT || '').trim();
   // A loaded checkout: an existing OMC_PLUGIN_ROOT answers before the registry, whatever the registry holds, unless
   // it is the install a supported entry pins (its installPath, or the cache directory its version names), or the
@@ -507,7 +510,10 @@ const claudeMdOptOut = () => {
   console.log(off ? 'CLAUDE.md management disabled by claudeMdEnabled: false' : 'CLAUDE.md management enabled');
 };
 
-// The OMC version marker of CLAUDE.md (or its companion file) against the newest plugin cache version.
+// The OMC version marker of CLAUDE.md (or its companion file) against the newest plugin cache version of the marketplace
+// the session runs: the one whose registry entry holds the plugin root (activeEntries, as in Step 1; the runtime takes the
+// version from that root too, getPluginVersion in scripts/session-start.mjs). Where no entry holds one (no root, a checkout
+// outside the registry) the last supported ID of the registry whose cache holds a version names it; the registry has no other order.
 const claudeMdVersion = () => {
   const markets = registryMarketplaces();
   // Only regular files are read (readFile), so a FIFO or a directory in place of one is skipped like a missing file.
@@ -553,18 +559,24 @@ const claudeMdVersion = () => {
     claudeVersion = '(missing marker)';
     claudeSource = 'scanned deterministic CLAUDE sources';
   }
-  // The newest version in the cache of each marketplace the registry names; the last one that has a version wins.
+  const roots = pluginRoots();
+  const states = readChannelRegistry().supported.map(([id, entries]) => [marketplaceOf(id), activeEntries(id, entries, roots)]);
+  const running = [...new Set(states.filter(([, state]) => state.active.length).map(([market]) => market))];
   let pluginVersion = '(none)';
-  for (const market of markets) {
-    try {
-      const names = fs.readdirSync(cacheDirOf(market)).filter(isVersionDir).sort(compareVersions);
-      pluginVersion = names.length ? names[names.length - 1] : pluginVersion;
-    } catch {}
+  if (running.length) {
+    // With roots in two marketplaces the highest of their caches names it.
+    pluginVersion = running.map((market) => highestCached(cacheDirOf(market))).filter(Boolean).sort(compareVersions).pop() ?? '(none)';
+  } else if (states.some(([, state]) => state.unknown)) {
+    pluginVersion = '(unknown)';
+  } else {
+    for (const market of markets) pluginVersion = highestCached(cacheDirOf(market)) ?? pluginVersion;
   }
   console.log('CLAUDE.md OMC version:', claudeVersion);
   console.log('OMC version source:', claudeSource);
   console.log('Latest cached plugin version:', pluginVersion);
-  if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
+  if (pluginVersion === '(unknown)') {
+    console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
+  } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
     console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
   } else if (dropV(claudeVersion) === dropV(pluginVersion)) {
     console.log('VERSION MATCH: CLAUDE and plugin cache are aligned');
@@ -987,9 +999,10 @@ const cacheRepair = (kind) => {
     return false;
   };
   // Every cache directory that exists (or cannot be told from one) is handled in turn; with none the first
-  // marketplace is still tried, so that a missing cache is reported.
+  // marketplace is still tried, so that a missing cache is reported. The turns go by the name of the marketplace, not
+  // by the order of the registry: a refusal ends the command, so which caches were cleaned before it must not depend on it.
   const registry = readRegistry();
-  const markets = registry.ids.length ? [...new Set(registry.ids.map(marketplaceOf))] : ['omc'];
+  const markets = registry.ids.length ? [...new Set(registry.ids.map(marketplaceOf))].sort() : ['omc'];
   const caches = markets
     .map((market) => [market, cacheDirOf(market)])
     .filter(([, dir]) => {
