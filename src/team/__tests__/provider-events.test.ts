@@ -17,18 +17,27 @@ const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
 
 // The team root and its state/ and state/team/ parents lie below the storage
 // anchor, where assertTeamStatePathSafe() refuses a symlink. Builds
-// <root>/.omc/state/team/demo with `component` a symlink into `outside`, which
+// <base>/.omc/state/team/demo with `component` a symlink into `outside`, which
 // holds workers/worker-1/provider-events.jsonl; returns the team root.
 const TEAM_PATH = ['state', 'team', 'demo'] as const;
-function linkTeamPathComponent(root: string, outside: string, component: (typeof TEAM_PATH)[number], content: string): string {
+function linkTeamPathComponent(base: string, outside: string, component: (typeof TEAM_PATH)[number], content: string): string {
   const at = TEAM_PATH.indexOf(component);
-  const realParent = join(root, '.omc', ...TEAM_PATH.slice(0, at));
+  const realParent = join(base, '.omc', ...TEAM_PATH.slice(0, at));
   const workerDir = join(outside, ...TEAM_PATH.slice(at), 'workers', 'worker-1');
   mkdirSync(realParent, { recursive: true });
   mkdirSync(workerDir, { recursive: true });
   writeFileSync(join(workerDir, 'provider-events.jsonl'), content);
   symlinkSync(join(outside, component), join(realParent, component));
-  return join(root, '.omc', ...TEAM_PATH);
+  return join(base, '.omc', ...TEAM_PATH);
+}
+
+// Fixtures live at <temp>/.omc/state/team/demo like production, so the
+// ancestor check never meets a symlinked temp dir (TMPDIR=/tmp on macOS).
+function makeTeamRoot(prefix: string): { base: string; root: string } {
+  const base = mkdtempSync(join(tmpdir(), prefix));
+  const root = join(base, '.omc', ...TEAM_PATH);
+  mkdirSync(root, { recursive: true });
+  return { base, root };
 }
 
 describe('parseLatestProviderEvent', () => {
@@ -91,9 +100,10 @@ describe('parseLatestProviderEvent', () => {
 
 // File access refuses symlinks only off Windows; on Windows the reader always returns none.
 describe.skipIf(process.platform === 'win32')('readLatestProviderEvent', () => {
+  let base = '';
   let root = '';
-  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'provider-events-')); });
-  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+  beforeEach(() => { ({ base, root } = makeTeamRoot('provider-events-')); });
+  afterEach(() => { rmSync(base, { recursive: true, force: true }); });
 
   it('returns none when the file does not exist', async () => {
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
@@ -139,8 +149,19 @@ describe.skipIf(process.platform === 'win32')('readLatestProviderEvent', () => {
   it.each(TEAM_PATH)('returns none when the %s directory above the worker is a symlink', async component => {
     const outside = mkdtempSync(join(tmpdir(), 'provider-events-outside-'));
     try {
-      const teamRoot = linkTeamPathComponent(root, outside, component, line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
+      const teamRoot = linkTeamPathComponent(join(base, 'linked'), outside, component, line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
       expect(await readLatestProviderEvent(teamRoot, 'worker-1', 'a1')).toEqual({ event: 'none' });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // lstat("<root>/") follows a symlinked root; a stored root may end in a slash.
+  it('returns none when a team root given with a trailing slash is a symlink', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'provider-events-outside-'));
+    try {
+      const teamRoot = linkTeamPathComponent(join(base, 'linked'), outside, 'demo', line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
+      expect(await readLatestProviderEvent(`${teamRoot}/`, 'worker-1', 'a1')).toEqual({ event: 'none' });
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
@@ -209,9 +230,10 @@ describe('withProviderEventSettingsArgs', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('provider event hook', () => {
+  let base = '';
   let root = '';
-  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'provider-event-hook-')); });
-  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+  beforeEach(() => { ({ base, root } = makeTeamRoot('provider-event-hook-')); });
+  afterEach(() => { rmSync(base, { recursive: true, force: true }); });
 
   const hookCommand = async (event: string) => {
     const path = await writeProviderEventSettings(root);
@@ -291,12 +313,27 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
     const outside = mkdtempSync(join(tmpdir(), 'provider-event-hook-outside-'));
     try {
       const command = await hookCommand('Stop');
-      const teamRoot = linkTeamPathComponent(root, outside, component, '');
+      const teamRoot = linkTeamPathComponent(join(base, 'linked'), outside, component, '');
       const result = run(command, { OMC_TEAM_STATE_ROOT: teamRoot, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' });
       expect(result.status).toBe(0);
       expect(result.stdout).toBe('');
       expect(result.stderr).toBe('');
       expect(readFileSync(join(outside, ...TEAM_PATH.slice(TEAM_PATH.indexOf(component)), 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')).toBe('');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('does not write when a team root given with a trailing slash is a symlink', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'provider-event-hook-outside-'));
+    try {
+      const command = await hookCommand('Stop');
+      const teamRoot = linkTeamPathComponent(join(base, 'linked'), outside, 'demo', '');
+      const result = run(command, { OMC_TEAM_STATE_ROOT: `${teamRoot}/`, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('');
+      expect(readFileSync(join(outside, 'demo', 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')).toBe('');
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
