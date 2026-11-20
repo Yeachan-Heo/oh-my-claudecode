@@ -767,10 +767,13 @@ describe('user prohibitions after compaction', () => {
       // Text that only holds the character.
       "echo '>'": true, 'grep ">" README.md': true, 'echo ">>"': true, "echo '2> err'": true, 'echo "a \\" > b"': true,
       'echo a\\>b': true, 'echo "a > b" "c > d"': true, 'grep -n ">" a "b > c"': true, "echo '\"' '>'": true,
+      // A comment is text too, but a # inside a word or after $ starts none.
+      'ls # > x': true, 'echo hi\n# > x': true, 'echo "a" # > b': true,
       // Real redirections, quoted target included.
       'echo x > f': false, 'echo x >> f': false, 'cmd 2> err': false, 'cmd &> f': false, 'cmd &>> f': false, 'cmd >| f': false,
       'echo x > "f g"': false, "echo x >'f'": false, 'echo "a" > f': false, 'echo ">" > f': false, "echo '>' >> f": false,
-      'echo x > >(tee f)': false, 'echo x > /dev/nullx': false,
+      'echo x > >(tee f)': false, 'echo x > /dev/nullx': false, 'echo x > f # > g': false, 'echo a#b > f': false,
+      'echo $# > f': false, 'echo ${#x} > f': false,
       // Not a write to a file, as before.
       'echo hi 2>&1': true, 'echo hi 2>/dev/null': true, 'echo x > /dev/null': true, 'echo x >> /dev/null': true,
       'echo x >>/dev/null': true, 'echo a >&2': true, 'cat <(ls)': true,
@@ -819,7 +822,7 @@ describe('user prohibitions after compaction', () => {
       "redirects": [
         module.is_read_only_command(command)
         for command in ["echo " + "'" * 40000, "echo " + '"' * 40000, "echo " + "\\\\" * 40000, "echo " + '"a ' * 8000,
-                        "echo " + '\\\\"' * 20000, "echo '" + "a " * 20000, ">" * 40000, "> " * 20000, "echo " + "'>' " * 10000]
+                        "echo " + '\\\\"' * 20000, "echo '" + "a " * 20000, ">" * 40000, "> " * 20000, "echo " + "'>' " * 10000, "echo " + " #" * 20000]
       ],
       "delete": [
         module.call_matches_v2("delete", [], "Bash", {"command": command})
@@ -834,7 +837,7 @@ describe('user prohibitions after compaction', () => {
     // The quoted-value runs (9 to 11) hold paired quotes, so an earlier `git` reaches the final `commit`.
     // `git -C commit` has no subcommand: "commit" is the value of -C (the earlier pattern read it as the subcommand).
     expect(result.answers).toEqual([true, false, false, false, false, true, true, false, false, true, true, true, false, false, false]);
-    expect(result.redirects).toEqual([true, true, true, true, true, true, false, false, true]);
+    expect(result.redirects).toEqual([true, true, true, true, true, true, false, false, true, true]);
     expect(result.delete).toEqual([false, false, false, true, true, false]);
   });
 });

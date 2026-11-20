@@ -640,8 +640,8 @@ measurement. In short:
   it, so `git -c commit.gpgSign=false status` and `git -C commit status` have no `commit`.
 - Rule 2 cuts more fragment kinds (counted in `removed_fragments`), flags a prohibition revoked in its own
   message, matches general prohibitions by the kind of call (a `Bash` command is read-only or state-changing by
-  its first word, and a `>` or `>>` redirection to a file outside quotes makes it state-changing: `echo '>'` and
-  `grep ">" README.md` are still read-only), and counts pairs (prohibition, call); `--locators` then has one row
+  its first word, and a `>` or `>>` redirection to a file outside quotes and comments makes it state-changing:
+  `echo '>'`, `grep ">" README.md` and `ls # > x` are still read-only), and counts pairs (prohibition, call); `--locators` then has one row
   per prohibition with a candidate and a `history_group` hash that copies of the same message share. Rule 3 (the
   default) changes only the revocation check: explicit permission only, no revocation in a question, none after a
   negation.

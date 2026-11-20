@@ -55,7 +55,8 @@ e. Candidate. A tool call in the same session and in the period, whose time is s
    - commit, push, merge, restart (general or with targets): a Bash command running git commit, git push or
      git merge (git options may come before the subcommand; -C, -c and the long options with a value, such as
      --git-dir, take the next word as their value, and the subcommand must be a whole word), or systemctl
-     restart|stop, docker restart|stop|rm, or kill;
+     restart|stop, docker restart|stop|rm, or kill (amended after review, for every rule version: the value of
+     such an option used to be read as the subcommand, so "git -C commit status" counted as a commit);
    - edit, delete (targets required): an Edit, Write, MultiEdit or NotebookEdit call whose file_path or
      notebook_path equals a target or ends with "/" + target; or a Bash command with rm, mv or sed -i that
      contains a target;
@@ -94,7 +95,8 @@ c. Candidates for general prohibitions (no targets) and for class other. Matchin
    - deploy: Bash with deploy, systemctl (enable|start), docker (compose )?up or kubectl apply;
    - run and other: every call that changes state: an edit call, or a Bash call whose first command word
      (after environment assignments and sudo) is not in READ_ONLY_COMMANDS. A write redirection to a file makes
-     any Bash call state-changing; a > inside quotes or after a backslash is text. Class other is matched this way whether or not the prohibition names targets.
+     any Bash call state-changing; a > inside quotes, after a backslash or in a # comment is text (amended after
+     review, for every rule version: a quoted > used to count as a redirection, and >>/dev/null as a write). Class other is matched this way whether or not the prohibition names targets.
      READ_ONLY_COMMANDS holds ls, cat, head, tail, grep, rg, wc, stat, echo, pwd, which, date, file, printf, du,
      df, whoami and uname. Also read-only: sed -n without an in-place flag (-i), awk without a redirection, find
      without -delete, -exec, -execdir, -ok or -okdir, and git with the subcommand status, log, diff, show,
@@ -376,9 +378,10 @@ ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 SED_IN_PLACE_RE = re.compile(r"-[A-Za-z]*i")  # -i, -ni, -i.bak
 # A write redirection to a file: ">" or ">>" not followed by "&" and not aimed at /dev/null.
 REDIRECT_WRITE_RE = re.compile(r"(?<!>)>{1,2}(?![>&])\s*(?!/dev/null(?:\s|$))\S")
-# Quoted strings and escaped characters are text, not shell syntax: each one becomes a single "_" before the
-# redirection is looked for, so a quoted file name after ">" still counts as a target.
-QUOTED_OR_ESCAPED_RE = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|\\.""", re.DOTALL)
+# Quoted strings, escaped characters and comments (a "#" that starts a word, to the end of the line) are text, not
+# shell syntax: each one becomes a single "_" before the redirection is looked for, so a quoted file name after
+# ">" still counts as a target.
+QUOTED_OR_ESCAPED_RE = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(?:^|(?<=\s))#[^\n]*""", re.DOTALL)
 # Bash commands that match the general classes (rule c, v2).
 DELETE_GENERAL_RE = re.compile(r"\b(?:rm|rmdir|unlink|shred)\b|\bgit\s+rm\b")
 FIND_WORD_RE = re.compile(r"\bfind\b")
@@ -951,7 +954,7 @@ LIMITS_V2 = [
     "A candidate is a call that matches a prohibition after a boundary, not proof of a breach; the user's review decides.",
     "A Bash command is judged by its first word (after environment variables and sudo); a compound command such as `ls && rm x` is treated as read-only, so it is not counted (undercount).",
     "Under rule v2 `git branch` is read-only, so `git branch -D` gives no candidate (undercount).",
-    "A write redirection to a file (`>`, `>>`, not to /dev/null, not inside quotes) makes any command state-changing; this extends the awk rule of the contract.",
+    "A write redirection to a file (`>`, `>>`, not to /dev/null, not inside quotes or comments) makes any command state-changing; this extends the awk rule of the contract.",
     "The revocation check of rule v2 looks only in the same message; a bare permission word can match a question and revoke a prohibition that was not lifted.",
     "Prohibitions of classes edit, delete, run, install and deploy with a target match calls as in rule v1; without a target they match by the general patterns of rule v2.",
     "Copies of user messages rebuilt after a compaction in user rows are not removed; they count like ordinary messages.",
