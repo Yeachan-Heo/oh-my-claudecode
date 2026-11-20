@@ -692,8 +692,9 @@ describe('user prohibitions after compaction', () => {
       'git -C /srv/r status': true, 'git commit -m x': false, 'sed -n 1p f': true, 'sed -i s/a/b/ f': false,
       'find . -name x': true, 'find . -delete': false, "awk '{print}' f": true, "awk '{print}' f > g": false,
       'FOO=1 sudo ls': true, "python3 -c 'print(1)'": false, 'tee out.txt': false,
-      // Launch wrappers and their options are skipped, also an option with a value (`sudo -u root`) and one outside the table.
-      'sudo -u root cat f': true, 'sudo -E ls': true, 'sudo -n cat f': true, 'sudo -- cat f': true, 'nohup cat f': true, 'time -p ls': true, 'timeout 5 ls': true,
+      // Launch wrappers and their options of the table are skipped, also an option with a value (`sudo -u root`); an option outside
+      // the table and `--` leave the wrapper as the first word, which is no read-only command.
+      'sudo -u root cat f': true, 'sudo -E ls': true, 'sudo -n cat f': false, 'sudo -- cat f': false, 'nice -5 cat f': false, 'timeout --foreground 5 ls': false, 'nohup cat f': true, 'time -p ls': true, 'timeout 5 ls': true,
       'timeout -s KILL 5 ls': true, 'nice -n 5 cat f': true, 'env -i A=1 ls': true, 'env -u A cat f': true, 'command -p ls': true, 'exec -a x ls': true,
       'exec -a x tee f': false, 'sudo -u root rm x': false, 'sudo -u root git commit -m x': false, 'timeout 5 tee f': false, 'sudo': false, 'sudo -u root': false, 'nohup': false,
       // A compound command is judged by its first word (a documented limit).

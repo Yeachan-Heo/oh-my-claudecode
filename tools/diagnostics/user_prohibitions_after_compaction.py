@@ -323,15 +323,38 @@ SSH_VALUE_OPTIONS = frozenset(("-B", "-b", "-c", "-D", "-E", "-e", "-F", "-I", "
                                "-p", "-Q", "-R", "-S", "-W", "-w"))
 FIND_EXEC = frozenset(("-exec", "-execdir", "-ok", "-okdir"))
 FIND_EXEC_END = frozenset((";", "+")) | FIND_EXEC  # a terminator, or the next -exec (so each word is read once)
-# Launch wrappers and reserved words: name -> (options that take a value, positional words before the command).
+# Launch wrappers that are read by the rule of the table below, the same table as in advisor_event_coverage.py and
+# check_classifier.mjs (each tool is a standalone script):
+#
+#   sudo     -E | --preserve-env[=LIST]    -u USER | --user USER | --user=USER
+#   nohup    (no options)
+#   command  -p
+#   exec     -a NAME
+#   nice     -n N | -nN | --adjustment N | --adjustment=N
+#   time     -p
+#   timeout  -s SIGNAL | --signal SIGNAL | --signal=SIGNAL    -k DURATION | --kill-after DURATION | --kill-after=DURATION
+#            then DURATION (a number with an optional s, m, h or d)
+#   env      -i | --ignore-environment    -u NAME | --unset NAME | --unset=NAME    (NAME=VALUE words follow)
+#
+# The options are those of `--help` of sudo 1.9.16 and GNU coreutils 9.7 (nice, timeout, env) and of `help` of bash 5.2
+# (command, exec, time). An option that is not in the table (`sudo -n`, `timeout --foreground`, `nice -5`, `env -S`), the
+# end-of-options word `--`, a wrapper with no command and a `timeout` with no duration end the reading: the wrapper stays the
+# program word, so the command behind it is not read and nothing is guessed.
+DURATION_RE = re.compile(r"(?:\d+\.?\d*|\.\d+)[smhd]?\Z")
+LAUNCH_TABLE = {
+    "sudo": {"flags": {"-E"}, "values": {"-u", "--user"}, "optional_value": {"--preserve-env"}, "duration": False},
+    "nohup": {"flags": set(), "values": set(), "optional_value": set(), "duration": False},
+    "command": {"flags": {"-p"}, "values": set(), "optional_value": set(), "duration": False},
+    "exec": {"flags": set(), "values": {"-a"}, "optional_value": set(), "duration": False},
+    "nice": {"flags": set(), "values": {"-n", "--adjustment"}, "optional_value": set(), "duration": False},
+    "time": {"flags": {"-p"}, "values": set(), "optional_value": set(), "duration": False},
+    "timeout": {"flags": set(), "values": {"-s", "--signal", "-k", "--kill-after"}, "optional_value": set(), "duration": True},
+    "env": {"flags": {"-i", "--ignore-environment"}, "values": {"-u", "--unset"}, "optional_value": set(), "duration": False},
+}
+# Words that run the command after them and are not in the table: name -> (options that take a value, positional words
+# before the command). `doas`, `xargs` and the reserved words that start a command.
 LAUNCH_WRAPPERS = {
-    "sudo": (frozenset(("-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R")), 0),
     "doas": (frozenset(("-u", "-C")), 0),
-    "env": (frozenset(("-u", "-C", "-S", "--unset", "--chdir")), 0),
-    "command": (frozenset(), 0), "nohup": (frozenset(), 0), "exec": (frozenset(("-a",)), 0),
-    "time": (frozenset(("-f", "-o", "--format", "--output")), 0),
-    "nice": (frozenset(("-n", "--adjustment")), 0),
-    "timeout": (frozenset(("-s", "-k", "--signal", "--kill-after")), 1),
     "xargs": (frozenset(("-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s", "--arg-file", "--delimiter", "--eof",
                          "--max-args", "--max-lines", "--max-procs", "--max-chars")), 0),
 }
@@ -559,6 +582,41 @@ def without_heredoc_bodies(text):
     return "".join(out)
 
 
+def glued_option(word, spec):
+    """Whether word is an option of the wrapper with its value glued on: `-nN`, `-uUSER`, `--user=USER`, `--preserve-env=LIST`."""
+    if word.startswith("--"):
+        name, equals, _value = word.partition("=")
+        return equals == "=" and (name in spec["values"] or name in spec["optional_value"])
+    return len(word) > 2 and word.startswith("-") and word[:2] in spec["values"]
+
+
+def after_table_wrapper(words, at):
+    """The index of the word behind the launch wrapper of LAUNCH_TABLE at words[at] and its options, or None when the
+    wrapper cannot be read to its command (an option outside the table, no command, no duration)."""
+    spec = LAUNCH_TABLE[os.path.basename(words[at])]
+    index = at + 1
+    durations = 1 if spec["duration"] else 0
+    while True:
+        word = words[index] if index < len(words) else None
+        if word is None:
+            return None
+        if word in spec["flags"] or word in spec["optional_value"] or glued_option(word, spec):
+            index += 1
+        elif word in spec["values"]:
+            if index + 1 >= len(words) or words[index + 1] is None:
+                return None
+            index += 2
+        elif word.startswith("-"):
+            return None
+        elif durations > 0:
+            if DURATION_RE.match(word) is None:
+                return None
+            durations -= 1
+            index += 1
+        else:
+            return index
+
+
 def program_index(words, start):
     """The index of the program word of the command that starts at start: assignments (FOO=1), launch wrappers with
     their options and reserved words are skipped. A word that is not a string (a boundary or the end) ends it."""
@@ -569,6 +627,12 @@ def program_index(words, start):
         word = words[index]
         if ENV_ASSIGNMENT_RE.match(word):
             index += 1
+            continue
+        if os.path.basename(word) in LAUNCH_TABLE:
+            behind = after_table_wrapper(words, index)
+            if behind is None:
+                return index  # an option outside the table, `--`, no command or no duration: the wrapper stays the program
+            index = behind
             continue
         wrapper = LAUNCH_WRAPPERS.get(os.path.basename(word))
         if wrapper is None:
@@ -1185,9 +1249,8 @@ def is_read_only_command(command):
     if REDIRECT_WRITE_RE.search(QUOTED_OR_ESCAPED_RE.sub("_", command)):
         return False
     words = skip_prefix(command).split()
-    # Launch wrappers and their options (sudo -u root, nohup, nice -n 5, timeout 5, env -i ...) are skipped by the same rule that
-    # finds a command: it reads through an option that is not in its table, so a read-only command behind `sudo -n` still counts
-    # as read-only (the direction of this tool is to count less, see the notes of the report).
+    # Launch wrappers and their options are skipped by the rule that finds a command (program_index); a wrapper that cannot be
+    # read to its command (`sudo -n ls`) stays the first word, which is no read-only command.
     words = words[program_index(words, 0):]
     if not words:
         return False
