@@ -923,7 +923,7 @@ read for the last one, whose status is the command's, so the summary lines of an
 
 A check whose own exit status is hidden (a `;` with a command after it, a pipe, `||`) can still be judged by a status that the command prints
 (`npm test; echo "EXIT=$?"`). That status is used only when it belongs to the check: the check, or the pipeline it stands in, is
-followed directly by the print, as the next command after a `;`, a newline or `&&`, so that nothing between them sets `$?` (`true`, `:`,
+followed directly by the print, as the next command after a `;`, a newline (a blank line runs nothing) or `&&`, so that nothing between them sets `$?` (`true`, `:`,
 `cd`, `echo`, `test`, a block, a function, another command, a list with `||` or `&&` that has an alternative), the check runs whatever comes
 before it (a `||` before it can skip it: `true || npm test; echo $?` runs no check), the print is not redirected, and no second print of a status
 follows (it could repeat the text). The print is an `echo` (with `-n`, `-e`, `-E`) or a `printf` with the conversions `%s`, `%d`, `%i`,

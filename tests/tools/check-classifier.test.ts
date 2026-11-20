@@ -403,6 +403,7 @@ const PRINTED: Array<[string, string, number, 'passed' | 'failed' | 'undetermine
   ['npm test; /bin/echo "EXIT=${?}"', 'EXIT=2', 0, 'failed', 'a path to echo and ${?}'],
   ['npm test && echo "EXIT=$?"', 'EXIT=0', 0, 'passed', 'the print behind &&'],
   ['npm test; echo "EXIT=$?"', 'EXIT=0', 0, 'passed', 'the plain form'],
+  ['npm test\n\necho "EXIT=$?"', 'EXIT=1', 0, 'failed', 'a blank line runs nothing between them'],
   ['true; echo "EXIT=$?"; npm test', 'EXIT=0', 1, 'failed', 'a print before the check is no status of it (the exit status decides)'],
   ['npm test; true; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'true in between'],
   ['npm test; cd .; echo "EXIT=$?"', 'EXIT=0', 0, 'undetermined', 'cd in between'],

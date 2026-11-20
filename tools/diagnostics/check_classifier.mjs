@@ -805,12 +805,14 @@ function printedExitCode(pieces, index, pipefail, tail) {
   for (let at = first - 1; at >= 0 && ['&&', '||'].includes(pieces[at].sep); at -= 1) {
     if (pieces[at].sep === '||') return undefined;
   }
-  const printed = pieces[last + 1];
+  let next = last + 1;
+  while (pieces[next]?.text === '' && pieces[next].sep === '\n') next += 1; // a blank line runs nothing
+  const printed = pieces[next];
   if (printed === undefined || /[<>]/.test(printed.text)) return undefined;
   const literal = printedText(printed.text);
   if (literal === undefined || literal.length > 1000) return undefined; // a longer text is no print of a status, and its pattern would be huge
   const hasStatus = (text) => /^(?:\S*\/)?(?:echo|printf)\s/.test(text) && new RegExp(STATUS_VAR.source).test(text);
-  if (pieces.slice(last + 2).some((piece) => hasStatus(piece.text))) return undefined;
+  if (pieces.slice(next + 1).some((piece) => hasStatus(piece.text))) return undefined;
   let source = '';
   let from = 0;
   const own = []; // for each group of the pattern: how the variable belongs to the check, or null
