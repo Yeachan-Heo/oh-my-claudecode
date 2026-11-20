@@ -137,7 +137,7 @@ it('quoted file operands narrow a test run, and quoted text still names no check
     assert.equal(got.isCheck, true, `${cmd}: still a check`);
     assert.equal(got.narrowed, narrowed, `${cmd}: narrowed=${narrowed}`);
   }
-  // The text of a quoted string stays one word: it cannot name a runner, split the command or start a comment.
+  // A quoted string stays one word: it cannot join the words around it into a runner name, split the command or start a comment.
   for (const cmd of [
     '"npm test"', "'vitest run'", 'git commit -m "x; npm test"', 'git commit -m "x\nnpm test"', 'git commit -m "x && npm test"',
     'git commit -m "x | tail" && git push', 'bash -c "npm test"', 'echo "# npm test"',

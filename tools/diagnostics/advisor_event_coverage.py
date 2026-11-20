@@ -41,15 +41,16 @@ e. Coverage. The distance is a difference of positions, counted in calls. Lookin
    previous event of the same class (0 at the start of the session); the distance is position - c for the
    nearest such c. Events of one class at the same position (two text blocks with no call between them) keep
    their file order and their number: the earlier one is the previous event of the later one, so a consultation
-   is in range for the first of them only. Looking forward (failures): a consultation c is in range when
+   is in range for the first of them only (amended after review: such events used to merge into one, so one
+   consultation covered all of them). Looking forward (failures): a consultation c is in range when
    position < c < position of the next failures event (or the end of the session); the distance is c - position
    for the nearest such c. Every consultation of the session counts for coverage, whatever its time. An event
    is covered for window K when its distance is at most K; for K = None (no limit) when any consultation is in
-   range. WINDOWS = [1, 2, 3, 5, 10, 20, None]. Distribution over covered events: min, median, p75, p90, max; percentiles by nearest rank
-   (element number ceil(p * n / 100) of the sorted list). Per window: the count of covered events, the number
-   of events n, the share and the one-sided lower Wilson bound for z = 1.645. With n below MIN_SUPPORT (30) the
-   share and the bound read "too little data" and the counts stay. The windows are fixed and are not chosen from
-   the results.
+   range. WINDOWS = [1, 2, 3, 5, 10, 20, None]. Distribution over covered events: min, median, p75, p90, max;
+   percentiles by nearest rank (element number ceil(p * n / 100) of the sorted list). Per window: the count of
+   covered events, the number of events n, the share and the one-sided lower Wilson bound for z = 1.645. With n
+   below MIN_SUPPORT (30) the share and the bound read "too little data" and the counts stay. The windows are
+   fixed and are not chosen from the results.
 f. Output. --out (JSON, template "advisor-event-coverage/1") or stdout: the period, the number of main and
    subagent files, sessions by class, consultations by kind and class, declaration lines by class, events by event
    class and session class (n, period, distribution, coverage per window), and data_quality (valid rows, bad
