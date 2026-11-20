@@ -716,7 +716,7 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
     const { stdout, listed, target } = runSessions(root, 'odd');
     expect(statSync(target).size).toBeGreaterThan(0);
     expect(listed.map((item) => item.session)).toEqual(['s-odd']);
-    expect(/^[\x00-\x7f]*$/.test(readFileSync(target, 'utf8'))).toBe(true);
+    expect([...readFileSync(target, 'utf8')].every((char) => char.charCodeAt(0) <= 127)).toBe(true);
     expect(JSON.parse(stdout).consultations.advisor.total).toBe(1);
     const snippet = 'print(json.dumps(os.path.isfile(json.load(open(sys.argv[2]))[0]["transcript"])))';
     expect(inProcess(snippet, target)).toBe(true);
