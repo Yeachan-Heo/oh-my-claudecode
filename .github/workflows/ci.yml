@@ -132,6 +132,13 @@ jobs:
           src/__tests__/omc-doctor-registry-version-grammar.test.ts
           src/__tests__/omc-doctor-plugin-dir-diagnosis.test.ts
           src/__tests__/omc-doctor-config-dir-tilde.test.ts
+          src/__tests__/omc-doctor-cache-names.test.ts
+          src/__tests__/omc-doctor-cache-refusals.test.ts
+          src/__tests__/omc-doctor-config-dir-lexical.test.ts
+          src/__tests__/omc-doctor-large-version-parts.test.ts
+          src/__tests__/omc-doctor-npm-latest.test.ts
+          src/__tests__/omc-doctor-shared-sections.test.ts
+          src/__tests__/omc-doctor-step4-special-files.test.ts
           src/__tests__/omc-doctor-cache-links-occupancy.test.ts
           src/__tests__/omc-doctor-explicit-root.test.ts
           src/__tests__/omc-doctor-case-sensitive-volume.test.ts
