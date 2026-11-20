@@ -418,7 +418,8 @@ export function classifyCommand(command) {
   if (typeof command !== 'string' || command === '') {
     return { isCheck: false, kind: null, runner: null, narrowed: false, exitHidden: false, chained: false, piped: false, pipefail: false, reason: 'empty or non-string command' };
   }
-  const bare = executedText(joinContinuations(command));
+  // A here-document body is input, not shell (it is cut out before the lines are joined, as isMutation reads it).
+  const bare = executedText(joinContinuations(withoutHeredocBodies(command)));
   // Only a `set` statement changes the option; the last one wins.
   const pipefail = [...bare.matchAll(/(?:^|[;&\n])\s*set\s+([+-])\w*o\s+pipefail\b/g)].at(-1)?.[1] === '-';
   const pieces = shellPieces(bare);

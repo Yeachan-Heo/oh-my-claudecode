@@ -615,6 +615,25 @@ it('here-documents: the redirections on the operator line count, the body text d
   assert.equal(edits('cat <<EOF > README.md'), false);
 });
 
+it('here-documents: the body is input, so a runner name or a summary line in it is no check', () => {
+  const isCheck = (command: string) => classifyCommand(command).isCheck;
+  // The body of a printing command, of a shell reading its input and in a command substitution, with every delimiter form.
+  for (const operator of ['<<EOF', '<<-EOF', "<<'EOF'", '<<"EOF"', '<< EOF', '<<\\EOF']) {
+    assert.equal(isCheck(`cat ${operator}\nnpm test\nEOF`), false, `cat ${operator}`);
+    assert.equal(isCheck(`bash ${operator}\npytest -q\nEOF`), false, `bash ${operator}: the shell runs it, no tool reads it`);
+    assert.equal(isCheck(`A=1 cat ${operator} > notes.txt\nvitest run\nEOF`), false, `${operator} with a redirect`);
+  }
+  assert.equal(isCheck('echo "$(cat <<\'EOF\'\nnpm test\nEOF\n)"'), false, 'a body inside a command substitution');
+  assert.equal(isCheck("cat <<'EOF'\nline \\\nnpm test\nEOF"), false, 'a body line that ends in a backslash');
+  // The command on the operator line is still read, and so are the lines after the terminator.
+  assert.equal(classifyCommand('npm test <<EOF\nx\nEOF').isCheck, true);
+  assert.equal(isCheck('cat <<EOF\nx\nEOF\nnpm test'), true, 'the line after the terminator is a command');
+  assert.equal(isCheck('cat <<EOF > README.md\nnpm test'), true, 'no terminator line: nothing is cut');
+  // A printed summary in the body is no result: cat prints it, nothing ran. The result stays undetermined.
+  assert.equal(checkResult('cat <<EOF\nTests  3 passed (3)\nnpm test\nEOF', 'Tests  3 passed (3)\nnpm test\n', 0).verdict, 'undetermined');
+  assert.equal(checkResult('npm test <<EOF\nx\nEOF', ' Tests  3 passed (3)\n', 0).verdict, 'passed');
+});
+
 it('write targets are read as the shell reads them: quotes and escaped spaces do not hide an ignored file', () => {
   const edits = (command: string) => isMutation('Bash', { command });
   // An ignored target stays ignored in quotes (docs, lockfiles, temp directories).

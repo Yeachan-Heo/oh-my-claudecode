@@ -86,6 +86,16 @@ const AFTER_BOUNDARY: Array<[string, Reads]> = [
   ['A=$(date) true; ', except(...NO_WRAPPER)], ['echo hi 2>&1 && ', except(...NO_WRAPPER)],
 ];
 
+// Here-document rows: the body of a here-document is input, not shell, so the command word inside it is read by no reading.
+// The terminator line is part of the command, so these rows are templates, not prefixes. `bash <<EOF` really runs its body;
+// the rows pin it as outside the scope of every tool (the README lists it).
+const HEREDOC_BODY: Array<(word: string) => string> = [
+  (word) => `cat <<EOF\n${word}\nEOF`, (word) => `cat <<'EOF' > README.md\n${word}\nEOF`, (word) => `cat <<-EOF\n\t${word}\n\tEOF`,
+  (word) => `A=1 cat <<"EOF"\n${word}\nEOF`, (word) => `cat 2>&1 <<EOF\n${word}\nEOF`, (word) => `bash <<EOF\n${word}\nEOF`,
+  (word) => `sudo bash <<'EOF'\n${word}\nEOF`, (word) => `echo "$(cat <<'EOF'\n${word}\nEOF\n)"`, (word) => `cat <<EOF\nline \\\n${word}\nEOF`,
+  (word) => `cat <<'EOF'\nline \\\n${word}\nEOF`,
+];
+
 interface Case { command: string; word: string; want: boolean; row: string }
 
 function casesFor(column: Column): Case[] {
@@ -99,6 +109,9 @@ function casesFor(column: Column): Case[] {
   }
   for (const [prefix, reads] of AFTER_BOUNDARY) {
     for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want: reads[column], row: prefix });
+  }
+  for (const template of HEREDOC_BODY) {
+    for (const word of WORDS[column]) cases.push({ command: template(word), word, want: false, row: template('<word>') });
   }
   return cases;
 }
