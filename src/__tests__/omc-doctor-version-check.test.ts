@@ -175,7 +175,9 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
         expect({ top: prefix.top, installed: out.Installed }).toEqual({ top: prefix.top, installed: prefix.top });
       }
     }
-    for (const [low, high] of pairs) {
+    // A `version` of a registry entry is a semantic version of three parts (see omc-doctor-registry-version-grammar.test.ts), so
+    // the pairs with the two-part `5.9` are ordered only as cache directory names, below.
+    for (const [low, high] of pairs.filter((pair) => !pair.includes('5.9'))) {
       for (const versions of [[low, high], [high, low]]) {
         const out = step1({ plugins: { 'oh-my-claudecode@omc': versions.map((version) => ({ scope: 'user', version })) }, clone: { omc: '9.9.9' } });
         expect({ versions, installed: out.Installed }).toEqual({ versions, installed: high });

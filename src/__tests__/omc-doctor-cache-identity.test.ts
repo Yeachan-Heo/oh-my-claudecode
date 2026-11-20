@@ -137,6 +137,7 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
         const { dir, cache } = makeCache(['5.1.0', '5.8.0', '5.9.0']);
         try {
           link('5.9.0', path.join(cache, '5.9.1'));
+          ageVersions(cache); // a link is dated itself, so a link created just now would be left alone
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
           writeRecord(dir, upperBelow(dir, path.join(cache, '5.9.0')));
           const result = runCommand(command, dir, { preloads: [writeCaseFoldPreload(dir)] });

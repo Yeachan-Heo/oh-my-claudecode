@@ -91,6 +91,7 @@ describe('omc-doctor cache commands on a synthetic config directory (occupancy, 
       const { dir, cache } = makeCache(['5.9.0']);
       try {
         link('5.9.0', path.join(cache, '5.8.0'));
+        ageVersions(cache); // a link is dated itself, so a link created just now would be left alone
         writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
         const result = runCommand(command, dir);
         expect(result.status).toBe(0);
@@ -425,8 +426,8 @@ process.kill = function (pid, signal) {
         const { dir, cache } = makeCache(['5.1.0', '5.9.0']);
         try {
           mkdirSync(path.join(cache, '5.9.0', 'scripts'));
-          ageVersions(cache);
           link('5.9.0', path.join(cache, '5.8.0'));
+          ageVersions(cache);
           const env = referTo(kind, dir, cache, '5.9.0');
           const result = runCommand(command, dir, { env });
           expect({ kind, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) })
