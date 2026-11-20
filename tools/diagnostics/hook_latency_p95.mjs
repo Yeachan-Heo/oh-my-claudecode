@@ -171,7 +171,7 @@ function mapTimingGroups(groups, entries) {
     const base = pick ? pick.name : key;
     const name = SOURCES.some((s) => s.hook === base) ? `${base} (process)` : base;
     if (!named.has(name)) named.set(name, { name, base, matched: Boolean(pick), samples: [] });
-    named.get(name).samples.push(...samples);
+    for (const sample of samples) named.get(name).samples.push(sample); // a spread of a long array overflows the call stack
   }
   return [...named.values()].sort((x, y) => x.name.localeCompare(y.name));
 }

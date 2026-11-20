@@ -472,3 +472,18 @@ describe('hook-timing.jsonl', () => {
     expect(r.list.filter((c) => c[0] === 'Stop:ok-hook'), 'listed once').toHaveLength(1);
   });
 });
+
+describe('long inputs', () => {
+  it('300000 rows of one hook in hook-timing.jsonl are counted: the samples are not spread into a call', () => {
+    const count = 300_000;
+    const stamp = iso(1);
+    const rows = Array.from({ length: count }, (_, i) => `{"ts":"${stamp}","hook":"a.mjs","ms":${i % 1000}}`);
+    writeFileSync(join(dir, 'hook-timing.jsonl'), `${rows.join('\n')}\n`);
+    const started = Date.now();
+    const r = runDirs();
+    expect(r.code, r.stderr).toBe(0);
+    // n, p50, p95, max of the values 0..999 repeated 300 times
+    expect(r.rows['a.mjs'].slice(3, 7)).toEqual(['300000', '499', '949', '999']);
+    expect(Date.now() - started, 'read in a reasonable time').toBeLessThan(30_000);
+  }, 120_000);
+});
