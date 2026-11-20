@@ -249,6 +249,68 @@
     "note": "Launched without --dangerously-skip-permissions plus a --settings hook file, so the footer reads \"auto mode on\", not the worker's \"bypass permissions on\". Exact argv was not recorded."
   },
   {
+    "file": "claude/2.1.328/busy-long-turn.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "busy-long-turn",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/7a/frames.txt#182",
+    "note": "Frame at 1795071480.422, mid tool call in a 187.5s turn (three 60s bash ./work.sh runs). Hook events (epoch s): SessionStart 1795071385.497, UserPromptSubmit 1795071386.747, Stop 1795071574.234. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
+  },
+  {
+    "file": "claude/2.1.328/done.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "done",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/1/frames.txt#10",
+    "note": "Frame at 1795071140.197, idle after the turn. Hook events (epoch s): SessionStart 1795071113.897, UserPromptSubmit 1795071114.995, Stop 1795071116.206. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
+  },
+  {
+    "file": "claude/2.1.328/idle-after-esc-interrupt.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "idle-after-esc-interrupt",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/3/frames.txt#45",
+    "note": "Frame at 1795071425.542, after keys:Escape 1795071421.481 mid turn. Hook events (epoch s): SessionStart 1795071399.424, UserPromptSubmit 1795071400.682; Esc fires no Stop or StopFailure, so UserPromptSubmit stays latest. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
+  },
+  {
+    "file": "claude/2.1.328/idle-after-stopfailure.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "idle-after-stopfailure",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions",
+      "--model",
+      "claude-does-not-exist"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/4/frames.txt#8",
+    "note": "Frame at 1795071548.942, after an API error (unknown --model). Hook events (epoch s): SessionStart 1795071522.878, UserPromptSubmit 1795071524.085, StopFailure 1795071524.731; no Stop. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
+  },
+  {
     "file": "claude/2.1.328/trust-yes-focused.txt",
     "provider": "claude",
     "version": "2.1.328",
@@ -262,6 +324,21 @@
     "source": "recorded",
     "origin": ".omc/plans/readiness-proto/e0/1/frames.txt#2",
     "note": "The same dialog as trust.txt after one Down: only the ❯ moved."
+  },
+  {
+    "file": "claude/2.1.328/trust.txt",
+    "provider": "claude",
+    "version": "2.1.328",
+    "state": "trust",
+    "cols": 120,
+    "rows": 40,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "hooks": true,
+    "source": "recorded",
+    "origin": ".omc/plans/readiness-proto/e0/1/frames.txt#1",
+    "note": "Frame at 1795071112.315, before the trust answer (keys:Down 1795071112.848, keys:Enter 1795071113.390). Hook events (epoch s): SessionStart 1795071113.897; none while the dialog is drawn. Redacted after recording: the per-user temp dir is replaced with /private/tmp/omc-e0-XXXX and HUD usage figures with 0%."
   },
   {
     "file": "claude/synthetic/loading-in-scrollback.txt",

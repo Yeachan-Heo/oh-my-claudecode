@@ -1343,7 +1343,9 @@ describe('runtime v2 startup inbox dispatch', () => {
     const manifest = JSON.parse(await readFile(absPath(cwd, TeamPaths.manifest('dispatch-team')), 'utf-8'));
     expect(config.tmux_server_identity).toEqual(mocks.tmuxServerIdentity);
     expect(manifest.tmux_server_identity).toEqual(mocks.tmuxServerIdentity);
-    expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: [] });
+    const hookSettings = join(absPath(cwd, TeamPaths.root('dispatch-team')), 'provider-event-hooks.json');
+    expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: ['--settings', hookSettings] });
+    expect(Object.keys(JSON.parse(await readFile(hookSettings, 'utf-8')).hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure']);
     expect(manifest.workers[0].launch_descriptor).toEqual(config.workers[0].launch_descriptor);
     expect(config.service_descriptor).toMatchObject({ schema_version: 1, auto_merge_enabled: false, cadence_policy: 'disabled' });
   });
@@ -1628,6 +1630,23 @@ describe('runtime v2 startup inbox dispatch', () => {
     }
   });
 
+  it('writes no hook settings and adds no --settings for a codex worker', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-no-hook-settings-');
+    await useActualModelContractLaunchBuilder();
+    const { startTeamV2 } = await import('../runtime-v2.js');
+    await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['codex'],
+      tasks: [{ subject: 'No hooks', description: 'Codex takes no claude hook settings.' }],
+      cwd,
+    });
+    const launchConfig = mocks.spawnWorkerInPane.mock.calls[0]?.[2] as { launchArgs?: string[] } | undefined;
+    expect(launchConfig?.launchArgs).not.toContain('--settings');
+    await expect(lstat(join(absPath(cwd, TeamPaths.root('dispatch-team')), 'provider-event-hooks.json')))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('forwards Claude provider and tier environment variables at the launch boundary', async () => {
     cwd = await mkdtempFixture('omc-runtime-v2-claude-env-matrix-');
     await useActualModelContractLaunchBuilder();
@@ -1662,7 +1681,11 @@ describe('runtime v2 startup inbox dispatch', () => {
         launchArgs?: string[];
         envVars?: Record<string, string>;
       } | undefined;
-      expect(launchConfig?.launchArgs).toEqual(['--dangerously-skip-permissions']);
+      expect(launchConfig?.launchArgs).toEqual([
+        '--dangerously-skip-permissions',
+        '--settings',
+        join(absPath(cwd, TeamPaths.root('dispatch-team')), 'provider-event-hooks.json'),
+      ]);
       expect(launchConfig?.envVars).toMatchObject(values);
     } finally {
       for (const [key, value] of Object.entries(previous)) {

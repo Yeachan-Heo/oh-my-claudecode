@@ -10,6 +10,7 @@ type TraceCase = {
   keys: Array<{ fn: string; pane: string; guarded: boolean; keys: string[]; at_ms: number }>;
   result: unknown;
   wait_ms: number;
+  nudges?: Array<{ at_ms: number }>;
   unknown_commands: string[];
 };
 type Trace = { set: string; loaded_modules: string[]; cases: TraceCase[] };
@@ -148,5 +149,70 @@ describe('readiness-diff set trust', () => {
   it('fails when a mode has no case', () => {
     const only = (trace: Trace) => ({ ...trace, cases: trace.cases.slice(0, 1) });
     expect(runTrust(only(goodHead()), only(base()))).toContain('failure: no batched case');
+  });
+});
+
+describe('readiness-diff set r6', () => {
+  const IDLE = 'claude/2.1.325/idle.txt';
+  const r6Case = (waitMs: number, nudgeTimes: number[], keys = [['-l', 'Read inbox.md'], ['Enter']]): TraceCase => ({
+    case: `${IDLE} r6`,
+    env: { OMC_TEAM_READY_TIMEOUT_MS: null },
+    control: true,
+    keys: keys.map(send),
+    result: { ok: true, kind: 'attempted_unconfirmed' },
+    wait_ms: waitMs,
+    nudges: nudgeTimes.map(at_ms => ({ at_ms })),
+    unknown_commands: [],
+  });
+  const r6Trace = (traceCase: TraceCase, loaded = ['tmux-session', 'provider-events']): Trace =>
+    ({ set: 'r6', loaded_modules: loaded, cases: [traceCase] });
+  const runR6 = (head: Trace) =>
+    summarize({ set: 'r6', baseSha: 'base', headSha: 'head', base: r6Trace(r6Case(4_000, [2_000]), ['tmux-session']), head });
+
+  it('passes when head matches base exactly and loads provider-events', () => {
+    expect(runR6(r6Trace(r6Case(4_000, [2_000])))).toMatch(/RESULT PASS$/);
+  });
+
+  it('fails when head waits longer than base', () => {
+    const summary = runR6(r6Trace(r6Case(4_250, [2_000])));
+    expect(summary).toContain(`failure: ${IDLE} r6 wait_ms differs from base`);
+    expect(summary).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when head nudges later than base', () => {
+    const summary = runR6(r6Trace(r6Case(4_000, [2_250])));
+    expect(summary).toContain(`failure: ${IDLE} r6 nudge times differ from base`);
+    expect(summary).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when head sends an extra nudge', () => {
+    const summary = runR6(r6Trace(r6Case(4_000, [2_000, 3_000])));
+    expect(summary).toContain(`failure: ${IDLE} r6 nudge times differ from base`);
+    expect(summary).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when head drops the nudge', () => {
+    const summary = runR6(r6Trace(r6Case(4_000, [])));
+    expect(summary).toContain(`failure: ${IDLE} r6 nudge times differ from base`);
+    expect(summary).toContain('failure: nudge_missing=1');
+    expect(summary).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when head sends an extra key', () => {
+    const summary = runR6(r6Trace(r6Case(4_000, [2_000], [['-l', 'Read inbox.md'], ['Enter'], ['Enter']])));
+    expect(summary).toContain(`failure: ${IDLE} r6 key sequence differs from base`);
+    expect(summary).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when head differs from base only in the result', () => {
+    const summary = runR6(r6Trace({ ...r6Case(4_000, [2_000]), result: { ok: false, kind: 'attempted_unconfirmed' } }));
+    expect(summary).toContain(`failure: ${IDLE} r6 result differs from base`);
+    expect(summary).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when head does not load provider-events', () => {
+    const summary = runR6(r6Trace(r6Case(4_000, [2_000]), ['tmux-session']));
+    expect(summary).toContain('failure: head did not load provider-events');
+    expect(summary).toMatch(/RESULT FAIL$/);
   });
 });
