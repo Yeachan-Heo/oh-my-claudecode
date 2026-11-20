@@ -105,7 +105,9 @@ describe('omc-doctor npm latest command', { timeout: 120_000 }, () => {
       if (pid > 1) {
         try {
           process.kill(pid, 'SIGKILL');
-        } catch {}
+        } catch {
+          // The process is gone, which is what the case expects.
+        }
       }
       rmSync(dir, { recursive: true, force: true });
     }
