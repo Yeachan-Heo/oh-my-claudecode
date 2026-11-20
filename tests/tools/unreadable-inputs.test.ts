@@ -71,6 +71,7 @@ const BAD_JOURNAL = withBadByte('{"event":"compact","note":"a', 'b"}\n');
 let sharedTranscript = '';
 let sharedJournal = '';
 let sharedProjects = '';
+let sharedJournalDir = '';
 const PERIOD = ['--to', '2026-11-15T00:00:00Z', '--days', '7'];
 const CACHE_COST = ['--deployed-at', '2026-11-01T00:00:00Z', '--to', '2026-11-15T00:00:00Z', '--days', '30', '--json'];
 
@@ -92,6 +93,9 @@ const ENTRIES: Entry[] = [
   { tool: 'compaction_cache_cost.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file, '--compact', sharedJournal, ...CACHE_COST], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
   { tool: 'compaction_cache_cost.py', runner: 'python', option: '--prices', args: (file) => ['--transcript', sharedTranscript, '--compact', sharedJournal, '--prices', file, ...CACHE_COST], valid: PRICES, invalid: BAD_PRICES },
   { tool: 'executor_outcome_metrics.py', runner: 'python', option: '--transcript', args: (file) => ['--transcript', file], valid: TRANSCRIPT, invalid: BAD_TRANSCRIPT },
+  { tool: 'wilson_threshold.mjs', runner: 'node', option: '--input', args: (file) => ['--input', file, '--target', '0.1'], valid: 'result\tnote\n1\tok\n0\tok\n', invalid: withBadByte('result\tnote\n1\tok\n0\tx', 'y\n') },
+  { tool: 'decision_outcome_join.py', runner: 'python', option: '--prices', args: (file) => ['--journal', sharedJournalDir, '--transcripts', sharedProjects, '--prices', file], valid: '{"sonnet":[1,1,1,1,1]}', invalid: withBadByte('{"sonnet":[1,1,1,1,1],"note":"a', 'b"}') },
+  { tool: '../maintenance/worktree_report.mjs', runner: 'node', option: '--repos-file', args: (file) => ['--repos-file', file], valid: '# no repositories\n', invalid: withBadByte('# a', 'b\n') },
   {
     tool: 'hook_latency_p95.mjs', runner: 'node', option: '--hooks-json', args: (file, base) => ['--dir', base, '--shell-checks-dir', base, '--hooks-json', file],
     valid: '{"hooks":{}}\n', invalid: withBadByte('{"hooks":{},"note":"a', 'b"}\n'),
@@ -114,6 +118,8 @@ beforeAll(() => {
   mkdirSync(join(sharedProjects, 'proj'), { recursive: true });
   sharedTranscript = join(sharedProjects, 'proj', 's1.jsonl');
   writeFileSync(sharedTranscript, TRANSCRIPT);
+  sharedJournalDir = join(base, 'journal');
+  mkdirSync(sharedJournalDir);
   sharedJournal = join(base, 'compact.jsonl');
   writeFileSync(sharedJournal, JOURNAL);
 });

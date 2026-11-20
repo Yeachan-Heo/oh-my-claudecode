@@ -277,7 +277,9 @@ function main() {
     if (opts.reposFile) {
       if (!existsSync(opts.reposFile)) throw new UsageError(`missing repository list file: ${opts.reposFile}`);
       let listText;
-      try { listText = readFileSync(opts.reposFile, 'utf8'); } catch (e) { throw new UsageError(`cannot read repository list file: ${opts.reposFile} (${e.code ?? e.message})`); }
+      try { listText = new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(opts.reposFile)); } catch (e) {
+        throw new UsageError(`cannot read repository list file: ${opts.reposFile} (${e.code === 'ERR_ENCODING_INVALID_ENCODED_DATA' ? 'not valid UTF-8' : e.code ?? e.message})`);
+      }
       for (const repo of parseRepoList(listText)) repos.push(repo); // a spread of a long list overflows the call stack
     }
     if (!repos.length) repos.push(process.cwd());
