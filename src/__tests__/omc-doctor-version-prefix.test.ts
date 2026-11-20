@@ -2,12 +2,13 @@ import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { commands, digitVersions, makeCache, movedAside, PLUGIN_ID, read, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, commandWith, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptOf, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
 
 // The runtime reads a version with an optional leading `v` as the same version (`parseSemver` in scripts/session-start.mjs,
 // `parseVersion` in src/utils/semver-compare.ts), shows the bare form, and names the cache directory by the bare version.
-// The skill drops the `v` in one place (`nv`) wherever it compares, validates or names a version.
+// The skill drops the `v` in one place (`dropV`, in the shared version grammar section) wherever it compares, validates or
+// names a version.
 describe('omc-doctor: a leading v is ignored wherever a version is compared or named', { timeout: 120_000 }, () => {
   const cacheOf = (dir: string, version: string) => path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', version);
   const two = (first: string, second: string, extra: (dir: string) => Record<string, unknown> = () => ({})) => (dir: string) => ({
@@ -59,8 +60,8 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
   });
 
   describe('Step 4 compares the CLAUDE.md marker with the cached version without the prefix', () => {
-    const step4 = read('skills/omc-doctor/SKILL.md').split('\n').find((l) => l.startsWith('node -e ') && l.includes('Latest cached plugin version')) ?? '';
-    // Step 4 is written for a shell (its backslashes are doubled), so it runs through bash.
+    const step4 = commandWith('Latest cached plugin version') ?? '';
+    // Step 4 is a shell command (a `node -e` in double quotes), so it runs through bash.
     const verdict = (marker: string) => {
       const { dir } = makeCache(['5.9.0']);
       try {
@@ -116,23 +117,23 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
   });
 
   describe('the commands carry one definition of the prefix and of the comparison', () => {
-    const step4 = read('skills/omc-doctor/SKILL.md').split('\n').find((l) => l.startsWith('node -e ') && l.includes('Latest cached plugin version'))?.replaceAll('\\\\', '\\') ?? '';
+    const step4 = commandWith('Latest cached plugin version') ?? '';
     const step1Line = versionCommand ?? '';
-    const prefix = (line: string) => /nv=x=>x\.replace\(\/\^v\(\?=\[0-9\]\)\/,''\)/.exec(line)?.[0] ?? '';
+    const grammar = (command: string) => sharedSections(command).get('version grammar') ?? '';
 
     test('the prefix is dropped by the same function in Step 1, Step 4 and both cache commands', () => {
-      for (const line of [step1Line, step4, ...commands]) expect(prefix(line)).toBe("nv=x=>x.replace(/^v(?=[0-9])/,'')");
+      for (const command of [step1Line, step4, ...commands]) expect(grammar(command)).toContain("const dropV = (text) => text.replace(/^v(?=[0-9])/, '');");
     });
 
     test('Step 4 orders versions with the comparator of Step 1', () => {
-      const one = step1Line.slice(step1Line.indexOf('cv=') + 3, step1Line.indexOf(',rd=x=>'));
-      const four = step4.slice(step4.indexOf('.sort((a,c)=>') + '.sort('.length, step4.indexOf(');pluginV='));
-      expect(one).toContain('nv(x)');
-      expect(four).toBe(one);
+      const one = sharedSections(step1Line).get('version order') ?? '';
+      expect(one).toContain('dropV(name)');
+      expect(sharedSections(step4).get('version order')).toBe(one);
     });
 
     test('the version of a marketplace clone is read with the same function', () => {
-      expect(step1Line).toContain('?nv(t):');
+      expect(scriptOf(step1Line)).toContain('semver(found.version)');
+      expect(grammar(step1Line)).toContain('return grammar.test(trimmed) ? dropV(trimmed) : \'\';');
     });
   });
 });

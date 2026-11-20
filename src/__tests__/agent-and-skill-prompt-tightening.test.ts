@@ -253,9 +253,14 @@ describe('omc-doctor skill', () => {
   test('no unconditional rmSync; every renameSync call sits behind an if', () => {
     const lines = text.split('\n');
     expect(lines.filter((l) => l.includes('rmSync('))).toEqual([]);
-    const moves = lines.filter((l) => l.includes('renameSync('));
+    const moves = lines.flatMap((l, i) => (l.includes('renameSync(') ? [i] : []));
     expect(moves.length).toBeGreaterThan(0);
-    expect(moves.filter((l) => !/\bif\b/.test(l))).toEqual([]);
+    // The script is multi-line: the move follows guard clauses, and the closest `if` above it is the check of the
+    // protection read again just before the move.
+    for (const move of moves) {
+      const guard = lines.slice(0, move).reverse().find((l) => /^\s*if \(/.test(l)) ?? '';
+      expect({ line: move + 1, guard: guard.trim() }).toEqual({ line: move + 1, guard: expect.stringContaining('again.kept.includes(name)') });
+    }
   });
 
   test('an outdated plugin is routed to the updater, and the cache commands are described as cleanup only', () => {

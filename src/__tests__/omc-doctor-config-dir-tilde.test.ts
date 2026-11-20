@@ -3,21 +3,21 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, backupDir, commands, PLUGIN_ID, read, scriptOf, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, backupDir, commands, commandWith, flatCode, PLUGIN_ID, proseOf, scriptOf, skillCommands, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { versionCommand } from './helpers/omc-doctor-step1.js';
 
 // CLAUDE_CONFIG_DIR may hold a literal home path (`~`, `~/x`, `~\x`), for example from a settings env block; the
 // runtime expands it (scripts/lib/config-dir.mjs). Every command of the omc-doctor skill that computes the directory
 // must expand it the same way, so none of them probes a `~` directory under the working directory.
-const skill = read('skills/omc-doctor/SKILL.md');
-const lines = skill.split('\n');
-const nodeLines = lines.filter((l) => l.startsWith('node -e ') && l.includes('CLAUDE_CONFIG_DIR'));
-const step4Opt = nodeLines.find((l) => l.includes('claudeMdEnabled')) ?? '';
-const step4Version = nodeLines.find((l) => l.includes('Latest cached plugin version')) ?? '';
-const step6 = nodeLines.find((l) => l.includes("' version(s):'")) ?? '';
+const skill = skillText;
+const nodeCommands = skillCommands.filter((c) => c.includes('CLAUDE_CONFIG_DIR'));
+const step4Opt = commandWith('claudeMdEnabled') ?? '';
+const step4Version = commandWith('Latest cached plugin version') ?? '';
+const step6 = commandWith("' version(s):'") ?? '';
+// The shell blocks as written (they are run), selected by what they read outside their `node -e` commands.
 const blocks = [...skill.matchAll(/```bash\n([\s\S]*?)\n```/g)].map((m) => m[1])
-  .filter((b) => b.split('\n').some((l) => !l.startsWith('node -e ') && !l.startsWith('#') && l.includes('CLAUDE_CONFIG_DIR')));
-const EXPAND = String.raw`c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c`;
+  .filter((b) => proseOf(b).split('\n').some((l) => !l.startsWith('node -e ') && !l.startsWith('#') && l.includes('CLAUDE_CONFIG_DIR')));
+const EXPAND = String.raw`const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim(); const configDir = !configured ? path.join(home, '.claude') : configured === '~' ? home : /^~[/\x5c]/.test(configured) ? path.join(home, configured.slice(2)) : configured;`;
 const PRELUDE = String.raw`C="${'${CLAUDE_CONFIG_DIR:-$HOME/.claude}'}"; C=${'${C#"${C%%[![:space:]]*}"}'}; C=${'${C%"${C##*[![:space:]]}"}'}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${'${C#??}'};; esac`;
 const posix = process.platform !== 'win32';
 
@@ -68,19 +68,20 @@ const runShell = (w: World, script: string, configured: string) => {
 
 describe('omc-doctor: every command computes the config directory with one expression', { timeout: 120_000 }, () => {
   test('all node commands carry the same expansion text and no other read of the variable', () => {
-    expect(nodeLines).toHaveLength(6);
-    for (const line of nodeLines) {
-      expect(line.split(EXPAND)).toHaveLength(2);
-      expect(line.split('CLAUDE_CONFIG_DIR')).toHaveLength(2);
+    expect(nodeCommands).toHaveLength(6);
+    for (const command of nodeCommands) {
+      const code = flatCode(scriptOf(command));
+      expect(code.split(EXPAND)).toHaveLength(2);
+      expect(code.split('CLAUDE_CONFIG_DIR')).toHaveLength(2);
     }
-    for (const line of [versionCommand ?? '', step4Opt, step4Version, step6, ...commands]) expect(nodeLines).toContain(line);
+    for (const command of [versionCommand ?? '', step4Opt, step4Version, step6, ...commands]) expect(nodeCommands).toContain(command);
   });
 
   test('every shell block that reads the variable starts with the same expansion line and reads it nowhere else', () => {
     expect(blocks).toHaveLength(5);
     for (const block of blocks) {
       expect(block.split('\n')[0]).toBe(PRELUDE);
-      expect(block.split('\n').filter((l) => !l.startsWith('node -e ')).join('\n').split('CLAUDE_CONFIG_DIR')).toHaveLength(2);
+      expect(proseOf(block).split('\n').filter((l) => !l.startsWith('node -e ')).join('\n').split('CLAUDE_CONFIG_DIR')).toHaveLength(2);
     }
   });
 });

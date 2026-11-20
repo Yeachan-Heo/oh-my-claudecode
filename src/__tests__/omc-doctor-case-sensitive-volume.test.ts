@@ -3,9 +3,9 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, ageVersions, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, read, runCommand, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry, writeZeroInodePreload } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, ageVersions, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, commandWith, runCommand, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry, writeZeroInodePreload } from './helpers/omc-doctor-cache-fixture.js';
 
-const step1Command = read('skills/omc-doctor/SKILL.md').split('\n').find((l) => l.startsWith('node -e ') && l.includes("'Updater: ")) ?? '';
+const step1Command = commandWith("'Updater: ") ?? '';
 const PLATFORMS = ['linux', 'darwin', 'win32'] as const;
 
 // A preload makes the process report another platform; the volume under it stays the real one.

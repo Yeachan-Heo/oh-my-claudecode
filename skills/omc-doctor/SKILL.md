@@ -6,7 +6,7 @@ level: 3
 
 # Doctor Skill
 
-Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when that environment variable is set. Surrounding spaces are ignored and an empty value means `~/.claude`. A value that is `~`, or starts with `~/` or `~\`, means the home directory (OMC's runtime reads it that way; the shell does not expand a `~` stored in a variable), and a `~` anywhere else is literal. The `node -e` commands below expand it with one shared expression and each shell block starts with the same expansion line; expand a path you read or write yourself the same way.
+Note: All `~/.claude/...` paths in this guide respect `CLAUDE_CONFIG_DIR` when that environment variable is set. Surrounding spaces are ignored and an empty value means `~/.claude`. A value that is `~`, or starts with `~/` or `~\`, means the home directory (OMC's runtime reads it that way; the shell does not expand a `~` stored in a variable), and a `~` anywhere else is literal. The `node -e` commands below expand it with one shared expression and each shell block starts with the same expansion line; expand a path you read or write yourself the same way. Run every `node -e` command exactly as written, whole and in one Bash call: its lines belong together, and the sections headed `// == <name> (shared) ==` are copies of the same text in every command that needs them.
 
 ## Task: Run Installation Diagnostics
 
@@ -16,7 +16,343 @@ You are the OMC Doctor - diagnose and fix installation issues.
 
 ```bash
 # Get the plugin ID, install channel (marketplace, plugin-dir or npm), installed version, the channel's latest version and its updater (cross-platform)
-node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c,nv=x=>x.replace(/^v(?=[0-9])/,''),cv=(a,c)=>{const sp=x=>{const t=nv(x).split('+')[0],i=t.indexOf('-');return[(i<0?t:t.slice(0,i)).split('.'),i<0?null:t.slice(i+1).split('.')]},nm=y=>y!=''&&!y.replace(/[0-9]/g,''),cm=(u,v)=>{const m=nm(u),n=nm(v);if(m&&n){u=u.replace(/^0+(?=[0-9])/,'');v=v.replace(/^0+(?=[0-9])/,'');return u.length-v.length||(u<v?-1:u>v?1:0)}return m?-1:n?1:u<v?-1:u>v?1:0},[x,y]=sp(a),[z,w]=sp(c);for(let i=0;i<Math.max(x.length,z.length);i++){const r=cm(x[i]??'0',z[i]??'0');if(r)return r}if(!y||!w)return y?-1:w?1:a<c?-1:a>c?1:0;for(let i=0;i<Math.max(y.length,w.length);i++){if(y[i]===undefined)return-1;if(w[i]===undefined)return 1;const r=cm(y[i],w[i]);if(r)return r}return a<c?-1:a>c?1:0},rd=x=>{if(!f.statSync(x).isFile())throw 0;return f.readFileSync(x,'utf8')},V=x=>/^\d/.test(x)&&!/[.]omc-stale-\d+(?![^])/.test(x),top=b=>{try{const v=f.readdirSync(b).filter(V).sort(cv);return v.length?v[v.length-1]:null}catch{return null}},pv=s=>{for(const n of ['package.json','.claude-plugin/plugin.json'])try{const x=JSON.parse(rd([s,n].join(p.sep))).version;if(typeof x=='string'&&x.trim())return sv(x)||null}catch{}return''},iv=w=>{const s=typeof w.installPath=='string'?w.installPath.trim():'';if(!s)return'';const n=s.split(/[\x5c/]+/).filter(Boolean).pop()||'';return V(n)&&sv(n)||pv(s)},sv=x=>{const t=x.trim();return/^v?(0|[1-9]\d*)[.](0|[1-9]\d*)[.](0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/.test(t)?nv(t):''},cw=(()=>{let bad=false;const rs=(...a)=>{if(process.platform=='win32')return p.resolve(...a);const k=a.map(x=>p.isAbsolute(x)).lastIndexOf(true);return(k<0?[process.cwd(),...a]:a.slice(k)).join(p.sep)},chain=s=>{const t=[];let u=rs(s);for(let i=0;i<41;i++){const e=p.parse(u).root,a=u.slice(e.length).split(p.sep).filter(x=>x&&x!='.');let c=e,nx=null;for(let j=0;j<a.length&&!nx;j++){if(a[j]=='..'){c=p.dirname(c);continue}c=p.join(c,a[j]);let l;try{l=f.lstatSync(c)}catch(x){if(!(x&&['ENOENT','ENOTDIR'].includes(x.code)))bad=true;t.push(p.resolve(c,...a.slice(j+1)));return t}if(l.isSymbolicLink()){const r=a.slice(j+1),z=r.indexOf('..');t.push(p.join(c,...(z<0?r:r.slice(0,z))));try{nx=rs(p.dirname(c),f.readlinkSync(c),...r)}catch(x){bad=true;return t}}}if(!nx){t.push(c);return t}u=nx}bad=true;return t};return s=>{bad=false;const t=chain(s);return bad?null:t}})(),rp=x=>{const t=cw(x);return t?t[t.length-1]:p.resolve(x)},id=x=>{try{const t=f.statSync(x,{bigint:true});return t.ino?t.dev+':'+t.ino:''}catch{return''}},sd=(a,c)=>rp(a)==rp(c)||!!id(a)&&id(a)==id(c),dr=x=>{try{return f.statSync(x).isDirectory()}catch{return false}},ev=[process.env.OMC_PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT].map(x=>(x||'').trim()).filter(Boolean).filter(dr),eo=(process.env.OMC_PLUGIN_ROOT||'').trim(),ib=(x,y)=>{let q=rp(x);const t=id(y);for(let n;t;q=n){if(id(q)==t)return true;n=p.dirname(q);if(n==q)break}const a=rp(x),c=rp(y);return a==c||a.startsWith(c+p.sep)},ic=x=>ib(x,p.join(d,'plugins','cache')),vp=(m,s)=>[...new Set([s,nv(s)])].map(n=>p.join(d,'plugins','cache',m,'oh-my-claudecode')+p.sep+n),mk=k=>{const u=k.toLowerCase();return u.includes('@')?u.slice(u.indexOf('@')+1):'omc'},out=[];let bad=false,am=false,ms=false,ids=[],me=(w,t)=>{const z=[w?.version,w?.installPath];return z.every(y=>y==undefined)||z.some(y=>y!=undefined&&(typeof y!='string'||!y.trim()))||!!t&&(w.version!=undefined?!sv(w.version):iv(w)===null)};try{const j=JSON.parse(rd(p.join(d,'plugins','installed_plugins.json'))),g=j?j.plugins??j:0;if(!g||typeof g!='object'||Array.isArray(g))throw 0;for(const[k,es]of Object.entries(g)){const u=k.toLowerCase(),ok=['oh-my-claudecode@omc','oh-my-claudecode','oh-my-claudecode@oh-my-claudecode'].includes(u);if(ok){ids.push([k,es]);if(!Array.isArray(es)||!es.length||es.some(w=>me(w,1)))ms=true;continue}if(!Array.isArray(es)||!es.length||u.includes('oh-my-claudecode'))am=true;else if(es.some(w=>me(w)))am=true}}catch(e){bad=!(e&&e.code=='ENOENT')}const pd=!!eo&&dr(eo)&&!((bad||ids.length&&ms)&&ic(eo))&&!ids.some(([k,es])=>Array.isArray(es)&&es.some(w=>[w?.installPath,...(typeof w?.version=='string'&&w.version.trim()?vp(mk(k),w.version.trim()):[])].some(y=>typeof y=='string'&&!!y.trim()&&sd(y.trim(),eo))));if(ev.length>1&&!sd(ev[0],ev[1]))out.push('Channel: unknown (OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories; do not guess an updater)');else if(!pd&&(bad||ids.length&&ms))out.push('Channel: unknown (installed_plugins.json could not be read completely; do not guess an updater)');else if(pd||!ids.length&&ev.length)out.push('Plugin root: '+ev[0],'Channel: plugin-dir','Installed: '+(pv(ev[0])||'(none)'),'Latest: (unavailable) (a --plugin-dir checkout has no update channel)','Updater: none (update and rebuild that checkout, then run omc setup --plugin-dir-mode)');else if(!ids.length&&am)out.push('Channel: unknown (installed_plugins.json could not be read completely; do not guess an updater)');else if(!ids.length)out.push('Channel: npm','Installed: '+(top(p.join(d,'plugins','cache','omc','oh-my-claudecode'))||'(none)'),'Updater: omc update');else for(const[k,es]of ids){const m=mk(k),ac=es.filter(w=>[w.installPath,...(typeof w.version=='string'&&w.version.trim()?vp(m,w.version.trim()):[])].some(y=>typeof y=='string'&&!!y.trim()&&ev.some(r=>ib(r,y.trim())))),vs=(ac.length?ac:es).map(w=>typeof w.version=='string'&&w.version.trim()?nv(w.version.trim()):iv(w)).filter(Boolean).sort(cv);let lat=null;try{const mj=JSON.parse(rd(p.join(d,'plugins','marketplaces',m,'.claude-plugin','marketplace.json'))),e=Array.isArray(mj.plugins)?mj.plugins.find(x=>x&&x.name=='oh-my-claudecode'):null;lat=e&&typeof e.version=='string'?sv(e.version)||null:null}catch{}out.push('Plugin: '+k,'Channel: marketplace '+m,'Installed: '+((vs.length?vs[vs.length-1]:ac.length?'':top(p.join(d,'plugins','cache',m,'oh-my-claudecode')))||'(none)'),'Latest: '+(lat||'(unavailable)')+' (marketplace clone)','Updater: claude plugin marketplace update '+m+' && claude plugin update '+k);}console.log(out.join('\n'));"
+node -e "
+// omc-doctor Step 1: which install this is (marketplace, plugin-dir, npm or unknown), its installed version, the
+// latest version of its own channel and the command that updates it. Prints one block of lines per plugin.
+// == config dir (shared) ==
+// CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
+// ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
+// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+const path = require('path');
+const fs = require('fs');
+const home = require('os').homedir();
+const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim();
+const configDir = !configured
+  ? path.join(home, '.claude')
+  : configured === '~'
+    ? home
+    : /^~[/\x5c]/.test(configured)
+      ? path.join(home, configured.slice(2))
+      : configured;
+// == plugin ids (shared) ==
+// The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
+const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
+// The marketplace of a plugin ID: the part after the @ in lower case, omc for the bare ID.
+const marketplaceOf = (id) => {
+  const lower = id.toLowerCase();
+  return lower.includes('@') ? lower.slice(lower.indexOf('@') + 1) : 'omc';
+};
+// The plugin cache directory of a marketplace.
+const cacheDirOf = (market) => path.join(configDir, 'plugins', 'cache', market, 'oh-my-claudecode');
+// == version grammar (shared) ==
+// A leading v is dropped here and nowhere else.
+const dropV = (text) => text.replace(/^v(?=[0-9])/, '');
+// The grammar of parseSemver in scripts/session-start.mjs: an optional v, three numeric parts without leading
+// zeros, an optional prerelease and optional build metadata. Returns the bare version, or '' for anything else.
+const semver = (text) => {
+  const trimmed = text.trim();
+  const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
+  return grammar.test(trimmed) ? dropV(trimmed) : '';
+};
+// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
+// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
+const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// == version order (shared) ==
+// Semantic version precedence as a comparison function. Numeric parts compare as digit strings (leading zeros
+// dropped, the longer one is larger, equal lengths compare as text), never as numbers: a number past 2^53 is not
+// exact. A prerelease is older than its release and build metadata does not count. Two names that are equal in
+// this order are told apart by their text, so the result does not depend on the order of a directory listing.
+const compareVersions = (a, b) => {
+  const split = (name) => {
+    const bare = dropV(name).split('+')[0];
+    const dash = bare.indexOf('-');
+    return [(dash < 0 ? bare : bare.slice(0, dash)).split('.'), dash < 0 ? null : bare.slice(dash + 1).split('.')];
+  };
+  const isDigits = (part) => part != '' && !part.replace(/[0-9]/g, '');
+  const comparePart = (x, y) => {
+    if (isDigits(x) && isDigits(y)) {
+      x = x.replace(/^0+(?=[0-9])/, '');
+      y = y.replace(/^0+(?=[0-9])/, '');
+      return x.length - y.length || (x < y ? -1 : x > y ? 1 : 0);
+    }
+    return isDigits(x) ? -1 : isDigits(y) ? 1 : x < y ? -1 : x > y ? 1 : 0;
+  };
+  const [coreA, preA] = split(a);
+  const [coreB, preB] = split(b);
+  for (let i = 0; i < Math.max(coreA.length, coreB.length); i++) {
+    const result = comparePart(coreA[i] ?? '0', coreB[i] ?? '0');
+    if (result) return result;
+  }
+  if (!preA || !preB) return preA ? -1 : preB ? 1 : a < b ? -1 : a > b ? 1 : 0;
+  for (let i = 0; i < Math.max(preA.length, preB.length); i++) {
+    if (preA[i] === undefined) return -1;
+    if (preB[i] === undefined) return 1;
+    const result = comparePart(preA[i], preB[i]);
+    if (result) return result;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+// == read file (shared) ==
+// Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
+const readFile = (file) => {
+  if (!fs.statSync(file).isFile()) throw 0;
+  return fs.readFileSync(file, 'utf8');
+};
+// == registry entry shape (shared) ==
+// An entry of installed_plugins.json is malformed unless it has a non-blank string version or installPath
+// (a null field counts as missing, a non-string or blank one is malformed).
+const entryShapeBad = (entry) => {
+  const fields = [entry?.version, entry?.installPath];
+  return (
+    fields.every((field) => field == undefined) ||
+    fields.some((field) => field != undefined && (typeof field != 'string' || !field.trim()))
+  );
+};
+// == path resolver (shared) ==
+// resolveFrom(...parts): the parts joined as the file system would resolve them, relative ones against the
+// working directory. On win32 Windows folds .. as text, so path.resolve is used.
+const resolveFrom = (...parts) => {
+  if (process.platform == 'win32') return path.resolve(...parts);
+  const lastAbsolute = parts.map((part) => path.isAbsolute(part)).lastIndexOf(true);
+  return (lastAbsolute < 0 ? [process.cwd(), ...parts] : parts.slice(lastAbsolute)).join(path.sep);
+};
+// linkChain(start) reads a path one component at a time, as the file system does, and returns every path it goes
+// through: each link on the way and the end of the chain. A .. after a link names the parent of the link target,
+// a .. inside a link target is read the same way. unreadable is true when a component cannot be examined or when
+// more than 40 links are followed (a loop). A component that does not exist ends the chain without being unreadable.
+const linkChain = (start) => {
+  const paths = [];
+  let unreadable = false;
+  let current = resolveFrom(start);
+  for (let hop = 0; hop < 41; hop++) {
+    const root = path.parse(current).root;
+    const parts = current.slice(root.length).split(path.sep).filter((part) => part && part != '.');
+    let at = root;
+    let next = null;
+    for (let i = 0; i < parts.length && !next; i++) {
+      if (parts[i] == '..') {
+        at = path.dirname(at);
+        continue;
+      }
+      at = path.join(at, parts[i]);
+      let info;
+      try {
+        info = fs.lstatSync(at);
+      } catch (error) {
+        if (!(error && ['ENOENT', 'ENOTDIR'].includes(error.code))) unreadable = true;
+        paths.push(path.resolve(at, ...parts.slice(i + 1)));
+        return { paths, unreadable };
+      }
+      if (info.isSymbolicLink()) {
+        const rest = parts.slice(i + 1);
+        const dots = rest.indexOf('..');
+        paths.push(path.join(at, ...(dots < 0 ? rest : rest.slice(0, dots))));
+        try {
+          next = resolveFrom(path.dirname(at), fs.readlinkSync(at), ...rest);
+        } catch (error) {
+          unreadable = true;
+          return { paths, unreadable };
+        }
+      }
+    }
+    if (!next) {
+      paths.push(at);
+      return { paths, unreadable };
+    }
+    current = next;
+  }
+  return { paths, unreadable: true };
+};
+
+// == readers ==
+// The highest version directory name in a cache directory, or null.
+const highestCached = (dir) => {
+  try {
+    const names = fs.readdirSync(dir).filter(isVersionDir).sort(compareVersions);
+    return names.length ? names[names.length - 1] : null;
+  } catch {
+    return null;
+  }
+};
+// The version in package.json or .claude-plugin/plugin.json under a directory: the first file that has a non-blank
+// string version decides. Returns its bare semver, null when it is not one, or '' when no file names a version.
+const manifestVersion = (dir) => {
+  for (const name of ['package.json', '.claude-plugin/plugin.json']) {
+    try {
+      const version = JSON.parse(readFile([dir, name].join(path.sep))).version;
+      if (typeof version == 'string' && version.trim()) return semver(version) || null;
+    } catch {}
+  }
+  return '';
+};
+// The version a registry entry names through its installPath: the last component when it is a version directory
+// name, else the manifest under it. '' without an installPath, null when the version found is not a semver.
+const installPathVersion = (entry) => {
+  const installPath = typeof entry.installPath == 'string' ? entry.installPath.trim() : '';
+  if (!installPath) return '';
+  const last = installPath.split(/[\x5c/]+/).filter(Boolean).pop() || '';
+  return (isVersionDir(last) && semver(last)) || manifestVersion(installPath);
+};
+// A malformed entry. strict is for an entry of a supported plugin ID: its version has to be a semver, and an entry
+// that has only an installPath must not name a version that is not one.
+const entryBad = (entry, strict) =>
+  entryShapeBad(entry) ||
+  (!!strict && (entry.version != undefined ? !semver(entry.version) : installPathVersion(entry) === null));
+
+// == directories and identity ==
+// The device and inode of a path, or '' when it has none (it does not exist, or the file system reports inode 0).
+const identity = (target) => {
+  try {
+    const stat = fs.statSync(target, { bigint: true });
+    return stat.ino ? stat.dev + ':' + stat.ino : '';
+  } catch {
+    return '';
+  }
+};
+const isDirectory = (target) => {
+  try {
+    return fs.statSync(target).isDirectory();
+  } catch {
+    return false;
+  }
+};
+// The end of the link chain of a path, or its plain resolution when the chain cannot be read.
+const realPath = (target) => {
+  const chain = linkChain(target);
+  return chain.unreadable ? path.resolve(target) : chain.paths[chain.paths.length - 1];
+};
+// Whether two paths name one directory: the same real path, or the same identity (a link, another spelling).
+const sameDirectory = (a, b) => realPath(a) == realPath(b) || (!!identity(a) && identity(a) == identity(b));
+// Whether target is dir or lies inside it: by identity when dir has one (an ancestor of target has it too),
+// otherwise by the real paths.
+const isInside = (target, dir) => {
+  const id = identity(dir);
+  let up = realPath(target);
+  for (let parent; id; up = parent) {
+    if (identity(up) == id) return true;
+    parent = path.dirname(up);
+    if (parent == up) break;
+  }
+  const a = realPath(target);
+  const b = realPath(dir);
+  return a == b || a.startsWith(b + path.sep);
+};
+const inCache = (target) => isInside(target, path.join(configDir, 'plugins', 'cache'));
+// The cache directory a registry version names, as written and without a leading v.
+const versionDirPaths = (market, version) =>
+  [...new Set([version, dropV(version)])].map((name) => cacheDirOf(market) + path.sep + name);
+// The paths a registry entry names as its install: its installPath and the cache directory its version names.
+const entryInstallPaths = (market, entry) =>
+  [
+    entry?.installPath,
+    ...(typeof entry?.version == 'string' && entry.version.trim() ? versionDirPaths(market, entry.version.trim()) : []),
+  ]
+    .filter((target) => typeof target == 'string' && target.trim())
+    .map((target) => target.trim());
+
+// == registry ==
+// supported: [key, entries] of the supported plugin IDs. unreadable: the file is not usable. malformed: a
+// supported ID has an unusable entry list. ambiguous: another key could be an OMC install (a look-alike key, an
+// empty or non-array list, a malformed entry), so npm cannot be assumed.
+let unreadable = false;
+let malformed = false;
+let ambiguous = false;
+const supported = [];
+try {
+  const json = JSON.parse(readFile(path.join(configDir, 'plugins', 'installed_plugins.json')));
+  const plugins = json ? json.plugins ?? json : 0;
+  if (!plugins || typeof plugins != 'object' || Array.isArray(plugins)) throw 0;
+  for (const [key, entries] of Object.entries(plugins)) {
+    const lower = key.toLowerCase();
+    if (OMC_IDS.includes(lower)) {
+      supported.push([key, entries]);
+      if (!Array.isArray(entries) || !entries.length || entries.some((entry) => entryBad(entry, true))) malformed = true;
+      continue;
+    }
+    if (!Array.isArray(entries) || !entries.length || lower.includes('oh-my-claudecode')) ambiguous = true;
+    else if (entries.some((entry) => entryBad(entry, false))) ambiguous = true;
+  }
+} catch (error) {
+  unreadable = !(error && error.code == 'ENOENT');
+}
+
+// == plugin roots ==
+// The plugin root variables that name an existing directory. OMC_PLUGIN_ROOT (--plugin-dir) is the explicit one.
+const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT]
+  .map((root) => (root || '').trim())
+  .filter(Boolean)
+  .filter(isDirectory);
+const explicitRoot = (process.env.OMC_PLUGIN_ROOT || '').trim();
+// A loaded checkout: an existing OMC_PLUGIN_ROOT answers before the registry, whatever the registry holds, unless
+// it is the install a supported entry pins (its installPath, or the cache directory its version names), or the
+// registry cannot be read completely and the root lies inside the plugin cache.
+const registryUnusable = unreadable || (supported.length > 0 && malformed);
+const isPlugindir =
+  !!explicitRoot &&
+  isDirectory(explicitRoot) &&
+  !(registryUnusable && inCache(explicitRoot)) &&
+  !supported.some(
+    ([key, entries]) =>
+      Array.isArray(entries) &&
+      entries.some((entry) => entryInstallPaths(marketplaceOf(key), entry).some((target) => sameDirectory(target, explicitRoot))),
+  );
+
+// == output ==
+const out = [];
+if (roots.length > 1 && !sameDirectory(roots[0], roots[1])) {
+  out.push('Channel: unknown (OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories; do not guess an updater)');
+} else if (!isPlugindir && registryUnusable) {
+  out.push('Channel: unknown (installed_plugins.json could not be read completely; do not guess an updater)');
+} else if (isPlugindir || (!supported.length && roots.length)) {
+  out.push(
+    'Plugin root: ' + roots[0],
+    'Channel: plugin-dir',
+    'Installed: ' + (manifestVersion(roots[0]) || '(none)'),
+    'Latest: (unavailable) (a --plugin-dir checkout has no update channel)',
+    'Updater: none (update and rebuild that checkout, then run omc setup --plugin-dir-mode)',
+  );
+} else if (!supported.length && ambiguous) {
+  out.push('Channel: unknown (installed_plugins.json could not be read completely; do not guess an updater)');
+} else if (!supported.length) {
+  out.push(
+    'Channel: npm',
+    'Installed: ' + (highestCached(cacheDirOf('omc')) || '(none)'),
+    'Updater: omc update',
+  );
+} else {
+  for (const [key, entries] of supported) {
+    const market = marketplaceOf(key);
+    // The entries the session runs: those whose install holds an existing plugin root. Without a match all count.
+    const active = entries.filter((entry) =>
+      entryInstallPaths(market, entry).some((target) => roots.some((root) => isInside(root, target))),
+    );
+    const versions = (active.length ? active : entries)
+      .map((entry) =>
+        typeof entry.version == 'string' && entry.version.trim() ? dropV(entry.version.trim()) : installPathVersion(entry),
+      )
+      .filter(Boolean)
+      .sort(compareVersions);
+    // The latest version is the one the marketplace clone advertises, when it is a semver.
+    let latest = null;
+    try {
+      const manifest = JSON.parse(
+        readFile(path.join(configDir, 'plugins', 'marketplaces', market, '.claude-plugin', 'marketplace.json')),
+      );
+      const found = Array.isArray(manifest.plugins) ? manifest.plugins.find((x) => x && x.name == 'oh-my-claudecode') : null;
+      latest = found && typeof found.version == 'string' ? semver(found.version) || null : null;
+    } catch {}
+    const installed = versions.length ? versions[versions.length - 1] : active.length ? '' : highestCached(cacheDirOf(market));
+    out.push(
+      'Plugin: ' + key,
+      'Channel: marketplace ' + market,
+      'Installed: ' + (installed || '(none)'),
+      'Latest: ' + (latest || '(unavailable)') + ' (marketplace clone)',
+      'Updater: claude plugin marketplace update ' + market + ' && claude plugin update ' + key,
+    );
+  }
+}
+for (const line of out) console.log(line);
+"
 # npm latest: for a Channel: npm install only; a marketplace channel's latest is its own Latest: line above, never this one
 latest=$(npm view oh-my-claude-sisyphus version 2>/dev/null) && [ -n "$latest" ] && echo "npm latest: $latest" || echo "npm latest: (unavailable)"
 ```
@@ -26,8 +362,8 @@ latest=$(npm view oh-my-claude-sisyphus version 2>/dev/null) && [ -n "$latest" ]
 - If no version installed (`Installed: (none)` under `Channel: npm` or `Channel: marketplace`, never under `Channel: plugin-dir`): CRITICAL - plugin not installed
 - If `Channel: unknown`: CRITICAL - the install channel cannot be established, so the install cannot be diagnosed. Step 1 reads `installed_plugins.json` by the rules of the cache commands below: it must be a regular file (a FIFO is never opened) holding valid JSON, and every entry list under a supported plugin ID must be a non-empty array of entries that each have a non-blank string `version` or `installPath`, and a `version` there must be a semantic version of the grammar of the `Latest:` line below (`999x.0.0`, `1.2` and `1.2.3.4` are not), as must be the version an entry that has only an `installPath` gets from it when that path names one (the version `package.json` or `.claude-plugin/plugin.json` holds there); a `version` of an entry under another plugin's key is not an OMC version and has to be a non-blank string only; otherwise the channel is unknown (an existing `OMC_PLUGIN_ROOT` that is not a registry install answers first, see the next item). It is unknown too when the registry has no supported plugin ID but holds an empty or non-array entry list under some key, a malformed entry in a list under some other key (the rule of the cache commands, stricter than the installer's resolver, which skips the entries of other plugins: `null`, not an object, a nested array, neither field, or a blank or non-string one; a `null` field counts as missing), or a look-alike key such as `oh-my-claudecode-fork` (the installer's resolver calls that ambiguous, so npm is not assumed from it), unless `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` names the active checkout (next item); and when the two variables name different existing directories (two spellings of one directory are one directory, compared by filesystem identity, and two directories whose names differ only in letter case are two directories on a volume that tells letter case apart; a variable that names no existing directory is ignored, see the next item), whatever the registry holds. Say so, name no updater and do not compare versions
 - If `Channel: plugin-dir`: the session loads the checkout named by `OMC_PLUGIN_ROOT` (or `CLAUDE_PLUGIN_ROOT`). A variable whose path is not an existing directory names no checkout (the runtime wrapper skips it and falls through to the managed cache; it skips an existing root without a built HUD too, which Step 1 does not test), so Step 1 ignores it everywhere: it makes no plugin-dir install, no conflict and no channel, and an npm or marketplace install is diagnosed as if the variable were unset. `OMC_PLUGIN_ROOT` is the explicit override, the highest-priority root of the runtime resolution (`omc --plugin-dir` sets it; the runtime skips a root that does not exist), so Step 1 takes an existing one before the registry's channel, whatever the registry holds (a stale supported entry or a registry that cannot be read included), unless it names the install a supported entry pins: its `installPath`, or the cache directory `plugins/cache/<marketplace>/oh-my-claudecode/<version>` that its `version` names, compared by filesystem identity (by exact text where the file system reports inode 0) so that a link counts, and a letter-case alias counts where the volume ignores letter case. Every path Step 1 compares or reads (the variables, an `installPath`, a pinned version's directory) is resolved in the order the file system reads its components, so `<dir>/shortcut/..` with `shortcut` pointing to `5.9.0/nested` names `5.9.0`, the parent of the link's target, and not `<dir>`, the folder that holds the link (on win32 `..` is folded as text first, as Windows does). That is the registry's own install and the registry decides its channel. Where a directory lies excuses nothing else: another cache version than the pinned one (cache `5.7.0` while the registry pins `5.8.0`), a directory in the cache of another plugin and a path below a version are explicit roots like any other, so Step 1 reports `Channel: plugin-dir` for them, and the cache commands still keep that directory protected. Only when the registry cannot be read completely, a root inside `plugins/cache/` cannot be told from the pinned install, and Step 1 then says `Channel: unknown`. `CLAUDE_PLUGIN_ROOT` is only a locator (Claude Code sets it for marketplace installs too), so it names the checkout only when the registry parses and holds no supported plugin ID (a malformed entry under another key does not make it unreadable here). `Installed:` is the version in that checkout's `package.json` or `.claude-plugin/plugin.json` (`(none)` means it has neither, or that the version it holds is not a semantic version of that grammar, or that reading it failed), there is no channel latest, so no outdated WARN, and the `npm latest:` line is ignored. `Installed: (none)` here is an unknown version of a checkout the session is running, not a missing install: it is never `CRITICAL - plugin not installed`, the Plugin Version check is OK with the detail `plugin-dir checkout, version unknown`, and the report names the checkout (`Plugin root:`) and does not call the plugin absent
-- LATEST comes from the install channel the registry records, never from a fixed source: for `Channel: marketplace` it is the `Latest:` line the command prints (the version in that marketplace clone, accepted only when it is a semantic version in the grammar of the runtime's `parseSemver` in `scripts/session-start.mjs`: optional leading `v`, three numeric parts without leading zeros, optional prerelease and build metadata; Step 1 drops the `v`, and anything else, such as `999x.0.0`, `1.2`, `1.2.3.4` or `01.2.3`, is `Latest: (unavailable)`, which no update is recommended from), and `npm view` (the `npm latest:` line) is consulted only for `Channel: npm`, so ignore that line for a marketplace install. Only a latest version is a target an update is recommended to, so only a latest version must be a semantic version of that grammar: an `npm latest:` value that is not one is a damaged answer and counts as `(unavailable)`. The versions that report what is installed (a registry `version`, a cache directory name, the `version` of a checkout's `package.json` or `.claude-plugin/plugin.json`) are shown as recorded and ordered by the rule below, and are never a target. A version a user's data claims, a registry `version` under a supported plugin ID or the `version` of a `package.json` or `plugin.json`, must be a semantic version of that same grammar (one definition, `sv`, in Step 1 and both cache commands) before it is ordered, because the order ranks a core that is not numeric above the numeric ones: an entry whose `version` is not one is a damaged registry (`Channel: unknown`, no update recommended, nothing moved by the cache commands), and a checkout whose `version` is not one has none (`Installed: (none)`). A cache directory name claims nothing: the cache commands, Step 1, Step 4 and Step 6 keep taking any name that starts with a digit as a version directory, which is what the runtime purge does, and for an entry that has only an `installPath` the last component of the path names the version only when it is one of that grammar (otherwise its `package.json` is read). A marketplace install is never compared with an npm-only release, because the marketplace update cannot install one. If Step 1 lists several plugin IDs, judge each against its own `Latest:` line
-- Order versions as semantic versions, never as text: numeric parts compare as numbers of any size (`5.10.0` is newer than `5.9.0`, and `5.1000000000000000000000.0` is newer than `5.999999999999999999999.0`: the commands compare digit strings, leading zeros dropped, the longer one is the larger number and equal lengths compare as text, because a number past 2^53 is not exact) and a prerelease is older than the stable release it precedes (`5.9.0-beta` is older than `5.9.0`, `5.9.0-beta.2` is older than `5.9.0-beta.10`). `Installed:` is the highest version in that order, among the registry entries of a plugin ID (among the cache versions of its marketplace when no entry of it names a version) or, for the npm channel, among the cache versions, and the `Latest cached plugin version` of Step 4 is chosen the same way. Steps 4 and 6 read the cache of the marketplace Step 1 names (`plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds: `omc` for the bare `oh-my-claudecode`, and when the registry holds none or cannot be read); with several IDs Step 4 takes the last one whose cache holds a version and Step 6 prints one line per marketplace, led by its name. A directory named `<version>.omc-stale-<pid>` (what an interrupted cache relink leaves) is no version in Step 1, Step 4, Step 6 or the cache commands: none of them lists, counts, names it as the newest, dates or moves it. When a plugin ID has entries for several scopes and `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` names an existing directory that is the `installPath` of some of them or lies inside it (compared by filesystem identity), `Installed:` comes from those entries alone, because the session runs that install and not a newer entry of another scope; if they name no version it is `(none)`, never the highest of the others or of the cache. Two names that are the same version in that order (`5.9` and `5.9.0`, or build metadata only) are told apart by their text, so the choice does not depend on the order of the directory listing. A leading `v` is dropped in one place (`nv`), everywhere a version is compared, validated or named: `v5.8.0` and `5.8.0` are one version, as in the runtime (`parseSemver` in `scripts/session-start.mjs` and `parseVersion` in `src/utils/semver-compare.ts` both accept the optional `v`), so with the registry entries `v5.8.0` and `5.9.0` in different scopes `Installed:` is `5.9.0`. Step 1 prints the bare form on the `Installed:` line as it does on the `Latest:` line, which is how the runtime shows a version (its update notice writes `v` in front of a bare one). A cache directory is a version directory only when its name starts with a digit (the runtime lists no other and names the directory by the bare version), so a version `v5.8.0` recorded in the registry names the directory `5.8.0`, and Step 4 compares the `OMC:VERSION` marker with the cached version without the `v` of either
+- LATEST comes from the install channel the registry records, never from a fixed source: for `Channel: marketplace` it is the `Latest:` line the command prints (the version in that marketplace clone, accepted only when it is a semantic version in the grammar of the runtime's `parseSemver` in `scripts/session-start.mjs`: optional leading `v`, three numeric parts without leading zeros, optional prerelease and build metadata; Step 1 drops the `v`, and anything else, such as `999x.0.0`, `1.2`, `1.2.3.4` or `01.2.3`, is `Latest: (unavailable)`, which no update is recommended from), and `npm view` (the `npm latest:` line) is consulted only for `Channel: npm`, so ignore that line for a marketplace install. Only a latest version is a target an update is recommended to, so only a latest version must be a semantic version of that grammar: an `npm latest:` value that is not one is a damaged answer and counts as `(unavailable)`. The versions that report what is installed (a registry `version`, a cache directory name, the `version` of a checkout's `package.json` or `.claude-plugin/plugin.json`) are shown as recorded and ordered by the rule below, and are never a target. A version a user's data claims, a registry `version` under a supported plugin ID or the `version` of a `package.json` or `plugin.json`, must be a semantic version of that same grammar (one definition, `semver`, in the shared version grammar section of Step 1, Step 4, Step 6 and both cache commands) before it is ordered, because the order ranks a core that is not numeric above the numeric ones: an entry whose `version` is not one is a damaged registry (`Channel: unknown`, no update recommended, nothing moved by the cache commands), and a checkout whose `version` is not one has none (`Installed: (none)`). A cache directory name claims nothing: the cache commands, Step 1, Step 4 and Step 6 keep taking any name that starts with a digit as a version directory, which is what the runtime purge does, and for an entry that has only an `installPath` the last component of the path names the version only when it is one of that grammar (otherwise its `package.json` is read). A marketplace install is never compared with an npm-only release, because the marketplace update cannot install one. If Step 1 lists several plugin IDs, judge each against its own `Latest:` line
+- Order versions as semantic versions, never as text: numeric parts compare as numbers of any size (`5.10.0` is newer than `5.9.0`, and `5.1000000000000000000000.0` is newer than `5.999999999999999999999.0`: the commands compare digit strings, leading zeros dropped, the longer one is the larger number and equal lengths compare as text, because a number past 2^53 is not exact) and a prerelease is older than the stable release it precedes (`5.9.0-beta` is older than `5.9.0`, `5.9.0-beta.2` is older than `5.9.0-beta.10`). `Installed:` is the highest version in that order, among the registry entries of a plugin ID (among the cache versions of its marketplace when no entry of it names a version) or, for the npm channel, among the cache versions, and the `Latest cached plugin version` of Step 4 is chosen the same way. Steps 4 and 6 read the cache of the marketplace Step 1 names (`plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds: `omc` for the bare `oh-my-claudecode`, and when the registry holds none or cannot be read); with several IDs Step 4 takes the last one whose cache holds a version and Step 6 prints one line per marketplace, led by its name. A directory named `<version>.omc-stale-<pid>` (what an interrupted cache relink leaves) is no version in Step 1, Step 4, Step 6 or the cache commands: none of them lists, counts, names it as the newest, dates or moves it. When a plugin ID has entries for several scopes and `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` names an existing directory that is the `installPath` of some of them or lies inside it (compared by filesystem identity), `Installed:` comes from those entries alone, because the session runs that install and not a newer entry of another scope; if they name no version it is `(none)`, never the highest of the others or of the cache. Two names that are the same version in that order (`5.9` and `5.9.0`, or build metadata only) are told apart by their text, so the choice does not depend on the order of the directory listing. A leading `v` is dropped in one place (`dropV`), everywhere a version is compared, validated or named: `v5.8.0` and `5.8.0` are one version, as in the runtime (`parseSemver` in `scripts/session-start.mjs` and `parseVersion` in `src/utils/semver-compare.ts` both accept the optional `v`), so with the registry entries `v5.8.0` and `5.9.0` in different scopes `Installed:` is `5.9.0`. Step 1 prints the bare form on the `Installed:` line as it does on the `Latest:` line, which is how the runtime shows a version (its update notice writes `v` in front of a bare one). A cache directory is a version directory only when its name starts with a digit (the runtime lists no other and names the directory by the bare version), so a version `v5.8.0` recorded in the registry names the directory `5.8.0`, and Step 4 compares the `OMC:VERSION` marker with the cached version without the `v` of either
 - If INSTALLED is older than LATEST on the channel's own latest (same order): WARN - outdated plugin (it is updated through the `Updater:` line Step 1 printed for that plugin ID, see "Fix: Outdated Plugin"; the cache commands only clean up and never update it). If INSTALLED equals the channel's latest, there is no WARN, and there is none when it is newer than that latest either. If `Latest: (unavailable)` on a marketplace channel or `npm latest: (unavailable)` on the npm channel: report that the latest version could not be checked, not a WARN
 - If multiple versions exist: WARN - stale cache
 
@@ -91,7 +427,7 @@ First check whether CLAUDE.md management is disabled. Read `${CLAUDE_CONFIG_DIR:
 
 ```bash
 # Check if the user opted out of global CLAUDE.md management (cross-platform; expands ~ in CLAUDE_CONFIG_DIR like getClaudeConfigDir)
-node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c;let off=false;try{off=JSON.parse(f.readFileSync(p.join(d,'.omc-config.json'),'utf8')).claudeMdEnabled===false}catch{};console.log(off?'CLAUDE.md management disabled by claudeMdEnabled: false':'CLAUDE.md management enabled')"
+node -e "const path = require('path'); const fs = require('fs'); const home = require('os').homedir(); const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim(); const configDir = !configured ? path.join(home, '.claude') : configured === '~' ? home : /^~[/\x5c]/.test(configured) ? path.join(home, configured.slice(2)) : configured; let off = false; try { off = JSON.parse(fs.readFileSync(path.join(configDir, '.omc-config.json'), 'utf8')).claudeMdEnabled === false; } catch {} console.log(off ? 'CLAUDE.md management disabled by claudeMdEnabled: false' : 'CLAUDE.md management enabled');"
 ```
 
 Continue with the CLAUDE.md checks below only when the probe printed exactly `CLAUDE.md management enabled`.
@@ -108,7 +444,169 @@ ls -la "$C"/CLAUDE.md 2>/dev/null
 grep -q "<!-- OMC:START -->" "$C/CLAUDE.md" 2>/dev/null && echo "Has OMC config" || echo "Missing OMC config in CLAUDE.md"
 
 # Check CLAUDE.md (or deterministic companion) version marker and compare with latest installed plugin cache version
-node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c;const base=p.join(d,'CLAUDE.md');let baseContent='';try{baseContent=f.readFileSync(base,'utf8')}catch{};let candidates=[base];let referenced='';const importMatch=baseContent.match(/CLAUDE-[^ )]*\\.md/);if(importMatch){referenced=p.join(d,importMatch[0]);candidates.push(referenced)}else{const defaultCompanion=p.join(d,'CLAUDE-omc.md');if(f.existsSync(defaultCompanion))candidates.push(defaultCompanion);try{const others=f.readdirSync(d).filter(n=>/^CLAUDE-.*\\.md$/i.test(n)).sort().map(n=>p.join(d,n));for(const o of others){if(candidates.includes(o)===false)candidates.push(o)}}catch{}};let claudeV='(missing)';let claudeSource='(none)';for(const file of candidates){try{const c=f.readFileSync(file,'utf8');const m=c.match(/<!--\\s*OMC:VERSION:([^\\s]+)\\s*-->/i);if(m){claudeV=m[1];claudeSource=file;break}}catch{}};if(claudeV==='(missing)'&&candidates.length>0){claudeV='(missing marker)';claudeSource='scanned deterministic CLAUDE sources';};let pluginV='(none)';const nv=x=>x.replace(/^v(?=[0-9])/,''),V=x=>/^\\d/.test(x)&&!/[.]omc-stale-\\d+(?![^])/.test(x),ns=(()=>{try{const r=p.join(d,'plugins','installed_plugins.json');if(!f.statSync(r).isFile())throw 0;const j=JSON.parse(f.readFileSync(r,'utf8')),g=j?j.plugins??j:0,u=Object.keys(g&&typeof g=='object'&&!Array.isArray(g)?g:{}).map(x=>x.toLowerCase()).filter(x=>['oh-my-claudecode@omc','oh-my-claudecode','oh-my-claudecode@oh-my-claudecode'].includes(x)).map(x=>x.includes('@')?x.slice(x.indexOf('@')+1):'omc');return u.length?u.filter((x,i)=>u.lastIndexOf(x)==i):['omc']}catch{return['omc']}})();for(const mk of ns){try{const b=p.join(d,'plugins','cache',mk,'oh-my-claudecode');const v=f.readdirSync(b).filter(V).sort((a,c)=>{const sp=x=>{const t=nv(x).split('+')[0],i=t.indexOf('-');return[(i<0?t:t.slice(0,i)).split('.'),i<0?null:t.slice(i+1).split('.')]},nm=y=>y!=''&&!y.replace(/[0-9]/g,''),cm=(u,v)=>{const m=nm(u),n=nm(v);if(m&&n){u=u.replace(/^0+(?=[0-9])/,'');v=v.replace(/^0+(?=[0-9])/,'');return u.length-v.length||(u<v?-1:u>v?1:0)}return m?-1:n?1:u<v?-1:u>v?1:0},[x,y]=sp(a),[z,w]=sp(c);for(let i=0;i<Math.max(x.length,z.length);i++){const r=cm(x[i]??'0',z[i]??'0');if(r)return r}if(!y||!w)return y?-1:w?1:a<c?-1:a>c?1:0;for(let i=0;i<Math.max(y.length,w.length);i++){if(y[i]===undefined)return-1;if(w[i]===undefined)return 1;const r=cm(y[i],w[i]);if(r)return r}return a<c?-1:a>c?1:0});pluginV=v.length?v[v.length-1]:pluginV;}catch{}};console.log('CLAUDE.md OMC version:',claudeV);console.log('OMC version source:',claudeSource);console.log('Latest cached plugin version:',pluginV);if(claudeV==='(missing)'||claudeV==='(missing marker)'||pluginV==='(none)'){console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache')}else if(nv(claudeV)===nv(pluginV)){console.log('VERSION MATCH: CLAUDE and plugin cache are aligned')}else{console.log('VERSION DRIFT: CLAUDE.md and plugin versions differ')}"
+node -e "
+// omc-doctor Step 4: the OMC version marker of CLAUDE.md (or its companion file) against the newest plugin cache version.
+// == config dir (shared) ==
+// CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
+// ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
+// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+const path = require('path');
+const fs = require('fs');
+const home = require('os').homedir();
+const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim();
+const configDir = !configured
+  ? path.join(home, '.claude')
+  : configured === '~'
+    ? home
+    : /^~[/\x5c]/.test(configured)
+      ? path.join(home, configured.slice(2))
+      : configured;
+// == plugin ids (shared) ==
+// The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
+const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
+// The marketplace of a plugin ID: the part after the @ in lower case, omc for the bare ID.
+const marketplaceOf = (id) => {
+  const lower = id.toLowerCase();
+  return lower.includes('@') ? lower.slice(lower.indexOf('@') + 1) : 'omc';
+};
+// The plugin cache directory of a marketplace.
+const cacheDirOf = (market) => path.join(configDir, 'plugins', 'cache', market, 'oh-my-claudecode');
+// == version grammar (shared) ==
+// A leading v is dropped here and nowhere else.
+const dropV = (text) => text.replace(/^v(?=[0-9])/, '');
+// The grammar of parseSemver in scripts/session-start.mjs: an optional v, three numeric parts without leading
+// zeros, an optional prerelease and optional build metadata. Returns the bare version, or '' for anything else.
+const semver = (text) => {
+  const trimmed = text.trim();
+  const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
+  return grammar.test(trimmed) ? dropV(trimmed) : '';
+};
+// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
+// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
+const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// == version order (shared) ==
+// Semantic version precedence as a comparison function. Numeric parts compare as digit strings (leading zeros
+// dropped, the longer one is larger, equal lengths compare as text), never as numbers: a number past 2^53 is not
+// exact. A prerelease is older than its release and build metadata does not count. Two names that are equal in
+// this order are told apart by their text, so the result does not depend on the order of a directory listing.
+const compareVersions = (a, b) => {
+  const split = (name) => {
+    const bare = dropV(name).split('+')[0];
+    const dash = bare.indexOf('-');
+    return [(dash < 0 ? bare : bare.slice(0, dash)).split('.'), dash < 0 ? null : bare.slice(dash + 1).split('.')];
+  };
+  const isDigits = (part) => part != '' && !part.replace(/[0-9]/g, '');
+  const comparePart = (x, y) => {
+    if (isDigits(x) && isDigits(y)) {
+      x = x.replace(/^0+(?=[0-9])/, '');
+      y = y.replace(/^0+(?=[0-9])/, '');
+      return x.length - y.length || (x < y ? -1 : x > y ? 1 : 0);
+    }
+    return isDigits(x) ? -1 : isDigits(y) ? 1 : x < y ? -1 : x > y ? 1 : 0;
+  };
+  const [coreA, preA] = split(a);
+  const [coreB, preB] = split(b);
+  for (let i = 0; i < Math.max(coreA.length, coreB.length); i++) {
+    const result = comparePart(coreA[i] ?? '0', coreB[i] ?? '0');
+    if (result) return result;
+  }
+  if (!preA || !preB) return preA ? -1 : preB ? 1 : a < b ? -1 : a > b ? 1 : 0;
+  for (let i = 0; i < Math.max(preA.length, preB.length); i++) {
+    if (preA[i] === undefined) return -1;
+    if (preB[i] === undefined) return 1;
+    const result = comparePart(preA[i], preB[i]);
+    if (result) return result;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+// == read file (shared) ==
+// Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
+const readFile = (file) => {
+  if (!fs.statSync(file).isFile()) throw 0;
+  return fs.readFileSync(file, 'utf8');
+};
+// == registry marketplaces (shared) ==
+// The marketplaces of the supported plugin IDs in installed_plugins.json, each once, in the order of their last
+// occurrence. It is omc when the registry holds none and when it cannot be read (missing, a FIFO, bad JSON).
+const registryMarketplaces = (() => {
+  try {
+    const json = JSON.parse(readFile(path.join(configDir, 'plugins', 'installed_plugins.json')));
+    const plugins = json ? json.plugins ?? json : 0;
+    const names = Object.keys(plugins && typeof plugins == 'object' && !Array.isArray(plugins) ? plugins : {})
+      .filter((key) => OMC_IDS.includes(key.toLowerCase()))
+      .map(marketplaceOf);
+    return names.length ? names.filter((name, i) => names.lastIndexOf(name) == i) : ['omc'];
+  } catch {
+    return ['omc'];
+  }
+})();
+
+// == CLAUDE.md sources ==
+// The candidate files, in order: CLAUDE.md, the CLAUDE-*.md file it references, otherwise CLAUDE-omc.md and then
+// every CLAUDE-*.md of the config directory in name order.
+const base = path.join(configDir, 'CLAUDE.md');
+let baseContent = '';
+try {
+  baseContent = fs.readFileSync(base, 'utf8');
+} catch {}
+const candidates = [base];
+const referenced = baseContent.match(/CLAUDE-[^ )]*[.]md/);
+if (referenced) {
+  candidates.push(path.join(configDir, referenced[0]));
+} else {
+  const defaultCompanion = path.join(configDir, 'CLAUDE-omc.md');
+  if (fs.existsSync(defaultCompanion)) candidates.push(defaultCompanion);
+  try {
+    const others = fs
+      .readdirSync(configDir)
+      .filter((name) => /^CLAUDE-.*[.]md(?![^])/i.test(name))
+      .sort()
+      .map((name) => path.join(configDir, name));
+    for (const other of others) {
+      if (candidates.includes(other) === false) candidates.push(other);
+    }
+  } catch {}
+}
+// The first candidate that carries the marker decides.
+let claudeVersion = '(missing)';
+let claudeSource = '(none)';
+for (const file of candidates) {
+  try {
+    const marker = fs.readFileSync(file, 'utf8').match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
+    if (marker) {
+      claudeVersion = marker[1];
+      claudeSource = file;
+      break;
+    }
+  } catch {}
+}
+if (claudeVersion === '(missing)' && candidates.length > 0) {
+  claudeVersion = '(missing marker)';
+  claudeSource = 'scanned deterministic CLAUDE sources';
+}
+
+// == plugin cache ==
+// The newest version in the cache of each marketplace the registry names; the last one that has a version wins.
+let pluginVersion = '(none)';
+for (const market of registryMarketplaces) {
+  try {
+    const names = fs.readdirSync(cacheDirOf(market)).filter(isVersionDir).sort(compareVersions);
+    pluginVersion = names.length ? names[names.length - 1] : pluginVersion;
+  } catch {}
+}
+
+// == output ==
+console.log('CLAUDE.md OMC version:', claudeVersion);
+console.log('OMC version source:', claudeSource);
+console.log('Latest cached plugin version:', pluginVersion);
+if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
+  console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
+} else if (dropV(claudeVersion) === dropV(pluginVersion)) {
+  console.log('VERSION MATCH: CLAUDE and plugin cache are aligned');
+} else {
+  console.log('VERSION DRIFT: CLAUDE.md and plugin versions differ');
+}
+"
 
 # Check companion files for file-split pattern (e.g. CLAUDE-omc.md)
 find "$C" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null
@@ -148,7 +646,80 @@ touch "$C/.omc-write-probe" 2>/dev/null && rm -f "$C/.omc-write-probe" && echo "
 
 ```bash
 # Count versions in cache (cross-platform)
-node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c,V=x=>/^\d/.test(x)&&!/[.]omc-stale-\d+(?![^])/.test(x),ns=(()=>{try{const r=p.join(d,'plugins','installed_plugins.json');if(!f.statSync(r).isFile())throw 0;const j=JSON.parse(f.readFileSync(r,'utf8')),g=j?j.plugins??j:0,u=Object.keys(g&&typeof g=='object'&&!Array.isArray(g)?g:{}).map(x=>x.toLowerCase()).filter(x=>['oh-my-claudecode@omc','oh-my-claudecode','oh-my-claudecode@oh-my-claudecode'].includes(x)).map(x=>x.includes('@')?x.slice(x.indexOf('@')+1):'omc');return u.length?u.filter((x,i)=>u.lastIndexOf(x)==i):['omc']}catch{return['omc']}})();for(const mk of ns){const t=ns.length>1?mk+': ':'';try{const v=f.readdirSync(p.join(d,'plugins','cache',mk,'oh-my-claudecode')).filter(V);console.log(t+v.length+' version(s):',v.join(', '))}catch{console.log(t+'0 versions')}}"
+node -e "
+// omc-doctor Step 6: the version directories of the plugin cache, per marketplace.
+// == config dir (shared) ==
+// CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
+// ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
+// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+const path = require('path');
+const fs = require('fs');
+const home = require('os').homedir();
+const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim();
+const configDir = !configured
+  ? path.join(home, '.claude')
+  : configured === '~'
+    ? home
+    : /^~[/\x5c]/.test(configured)
+      ? path.join(home, configured.slice(2))
+      : configured;
+// == plugin ids (shared) ==
+// The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
+const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
+// The marketplace of a plugin ID: the part after the @ in lower case, omc for the bare ID.
+const marketplaceOf = (id) => {
+  const lower = id.toLowerCase();
+  return lower.includes('@') ? lower.slice(lower.indexOf('@') + 1) : 'omc';
+};
+// The plugin cache directory of a marketplace.
+const cacheDirOf = (market) => path.join(configDir, 'plugins', 'cache', market, 'oh-my-claudecode');
+// == version grammar (shared) ==
+// A leading v is dropped here and nowhere else.
+const dropV = (text) => text.replace(/^v(?=[0-9])/, '');
+// The grammar of parseSemver in scripts/session-start.mjs: an optional v, three numeric parts without leading
+// zeros, an optional prerelease and optional build metadata. Returns the bare version, or '' for anything else.
+const semver = (text) => {
+  const trimmed = text.trim();
+  const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
+  return grammar.test(trimmed) ? dropV(trimmed) : '';
+};
+// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
+// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
+const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// == read file (shared) ==
+// Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
+const readFile = (file) => {
+  if (!fs.statSync(file).isFile()) throw 0;
+  return fs.readFileSync(file, 'utf8');
+};
+// == registry marketplaces (shared) ==
+// The marketplaces of the supported plugin IDs in installed_plugins.json, each once, in the order of their last
+// occurrence. It is omc when the registry holds none and when it cannot be read (missing, a FIFO, bad JSON).
+const registryMarketplaces = (() => {
+  try {
+    const json = JSON.parse(readFile(path.join(configDir, 'plugins', 'installed_plugins.json')));
+    const plugins = json ? json.plugins ?? json : 0;
+    const names = Object.keys(plugins && typeof plugins == 'object' && !Array.isArray(plugins) ? plugins : {})
+      .filter((key) => OMC_IDS.includes(key.toLowerCase()))
+      .map(marketplaceOf);
+    return names.length ? names.filter((name, i) => names.lastIndexOf(name) == i) : ['omc'];
+  } catch {
+    return ['omc'];
+  }
+})();
+
+// == output ==
+// With more than one marketplace every line is led by its name.
+for (const market of registryMarketplaces) {
+  const lead = registryMarketplaces.length > 1 ? market + ': ' : '';
+  try {
+    const names = fs.readdirSync(cacheDirOf(market)).filter(isVersionDir);
+    console.log(lead + names.length + ' version(s):', names.join(', '));
+  } catch {
+    console.log(lead + '0 versions');
+  }
+}
+"
 ```
 
 **Diagnosis**:
@@ -252,14 +823,936 @@ After handling every relevant user/project settings file, re-check `${CLAUDE_CON
 **Cache guard**: Diagnostics do not authorize removal or setup changes. Do not prune cache versions by age, lexical/version order, or presence of a newer version. A cache version is protected and must never be moved aside when it is pinned in `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` (by `version` or by `installPath`, under any supported OMC plugin ID: `oh-my-claudecode@omc`, `oh-my-claudecode` or `oh-my-claudecode@oh-my-claudecode`, in any letter case; the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level), when the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it, or when a running session occupies it (a record in `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc/cache-occupancy/` whose plugin root is that version or inside it; a record is ignored only when its owner is proven gone: the process id no longer exists, on Linux the process start time differs from the recorded one, or the record is dated more than 5 minutes in the future; an old date alone never ignores a record, and this command never deletes one). Paths are compared after resolving symlinks one link at a time, and every link on the way is protected, not only the final directory (a pin on `5.7.0` in `5.7.0 -> 5.8.0 -> 5.9.0` protects all three; more than 40 links or a loop counts as unresolvable; the components of a path are read in the order the file system reads them, so a `..` after a link (`<dir>/shortcut/..`, where `shortcut` points to `5.9.0/nested`) names the parent of the link's target, and a `..` in a link's own target is read the same way, never folded as text first, except on win32, where Windows folds `..` first; an occupancy record protects what it names read that way and also what the runtime reads from it, the same text folded; a pinned `version` written with a leading `v` also pins the directory of the bare version, `v5.8.0` pins `5.8.0`); a link that nothing refers to is not protected just because its target is. Paths that exist are also compared by filesystem identity (device and inode), so two spellings of one directory are that directory on a volume that ignores letter case even where the platform reports `linux` (WSL2 on a Windows drive), and two directories whose names differ only in letter case stay two directories on a volume that tells letter case apart even where the platform reports `darwin` or `win32` (a case-sensitive volume): letter case is never folded by the name of the platform; the one exception only adds protection: the SessionStart publisher stores the plugin root of an occupancy record in lower case on win32 and the runtime compares records in that form, so on win32 a record also protects the version it names or lies inside by a lower-case comparison. Where a file system reports inode 0 (or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path: a path is judged by its exact text only when that text lies inside a cache version (or above the cache directory, where it names no version), and on win32 an occupancy record is also judged by the lower-case form above; every other path that protects or may protect a version, whatever the source (the `installPath` of a pin or of another plugin, `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT`, an occupancy record, a link on the way, a pinned `version` that names no directory by its exact spelling but a directory by another letter case; a path that does not exist is judged by its nearest existing parent), could be another name of a cached version that cannot be ruled out, so the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system (two names of one directory that differ in letter case are then different, so the two variables naming one directory by two spellings count as a conflict and nothing moves). An exact spelling still protects the version it names and the free versions still move. If `installed_plugins.json`, an occupancy record or a path in them cannot be read or resolved completely (a path that does not exist adds no protection of its own, only through its nearest existing parent as described above; a key that contains `oh-my-claudecode` without being a supported ID, an empty or non-array entry list under any key, an entry under any key (also of an unrelated plugin) that is not an object or has neither a `version` nor an `installPath` or has one that is not a non-blank string (a `null` field counts as missing), and under a supported plugin ID a `version` that is not a semantic version (`999x.0.0`, `1.2`, `1.2.3.4`; the grammar of Step 1's `Latest:`, with the optional `v`; a `version` of another plugin has to be a non-blank string only), and `OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories (a variable that names no existing directory takes no part in that comparison, as in Step 1, but a path it names still protects the version it points into) all count as unreadable; the two variables are compared after resolving links and by filesystem identity, so two names of one directory are not a conflict), move nothing (the cause may be an entry of an unrelated plugin, which the message does not name). The registry pins, the occupancy records and the plugin root variables are read again just before each version is moved, and a version that has become protected, or whose protection can no longer be read completely, is skipped and reported; only the instant between that last read and the rename remains open, because a SessionStart that has not yet published its record cannot be seen and the command holds no lock shared with the publisher. A version directory is not moved either when it, or any entry anywhere below it, was modified in the last 10 minutes (the same threshold, `STALE_THRESHOLD_MS` in `src/utils/paths.ts`, that SessionStart's own cleanup uses to leave a directory alone while an update may still be installing it; every entry at any depth counts because an update that refreshes an existing version overwrites its files in place and need not change the date of the directory itself or of any level above the file; a link is dated itself and never followed, and so is the version directory when it is a link: a redirect that SessionStart created a moment ago, such as `5.7.0 -> 5.8.0`, is as new as the link whatever the dates in its target and is left in place, and an old one is moved as the link only, so its target, in or outside the cache, is not touched): it is left in place and reported, and the command can be run again later. A version with more than 20000 entries (a cached version holds about 9000), or one whose entries cannot all be read, cannot be judged: it is left in place and reported (`Could not judge`). The updater (`copyPluginSyncPayload` in `src/installer/index.ts`) copies into the version directory in place and leaves no marker or lock file that the command could test, so an update that starts writing after the date scan has read the files it rewrites, up to the rename (the rest of the scan and the re-read of the registry, the records and the root variables run in between), cannot be seen; closing that window needs a lock or marker shared with the updater, which is a change in `src/installer` and not in this skill. The registry is read before any cache directory is looked for: when it cannot be read completely the command says so and stops, whatever namespace the cache lies in. The cache directory is `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds (`omc` for the bare `oh-my-claudecode`, and when the registry holds none): every such directory that exists is handled in turn, a pinned version protects the version of that name in each of them, and a backup from a marketplace other than `omc` carries its name in front (`<marketplace>-<version>-<time>`), and when more than one such directory exists every report line starts with `<marketplace>:` and its counts are those of that directory. A directory named `<version>.omc-stale-<pid>` (a name ending in `.omc-stale-` and a pid, what an interrupted cache relink leaves beside a missing or unusable original path) is not a version: the command does not list, protect, date or move it, because the reconciliation of SessionStart's own purge (`purgeStalePluginCacheVersions` in `src/utils/paths.ts`) restores it as the only intact copy and moving it to `plugins/backups` would prevent that. A cache directory that exists but cannot be read (any error other than its absence, such as `EACCES` or `EIO`, or a file where the directory should be) is not an absent cache: the command prints `Nothing moved: could not read <directory> (<error code>)`, moves nothing and stops, and `No plugin cache found` or `No cache to clean` is printed only for a directory that does not exist (`ENOENT`). If every cached version is protected, move nothing and report the protection instead of running the command below. Backups go to `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/backups/oh-my-claudecode/`, outside `plugins/cache/`: OMC's stale cache purge can remove any cache directory that is not the active version, so a backup left inside the cache may not survive.
 ```bash
 # Move unprotected cache versions to plugins/backups (cross-platform); keep versions pinned in installed_plugins.json; never delete
-node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c,k=p.join(d,'plugins','backups','oh-my-claudecode'),r=p.join(d,'plugins','installed_plugins.json'),o=p.join(d,'.omc','cache-occupancy');let n=0,sk=0,fr=0,jn=0,m=false;const U='Nothing moved: installed_plugins.json, the cache occupancy records, the plugin root variables or a path in them could not be read completely; fix that first, then run this again',N='Nothing moved: identity unavailable (the file system reports no inode, or a stat failed, for a cache version or for a path that may protect one, and the spelling of that path does not place it inside a version, so it cannot be ruled out as another name of a cached version); keep the cache and every path that points into it spelled alike, or use a file system that reports inodes, then run this again',V=x=>/^\d/.test(x)&&!/[.]omc-stale-\d+(?![^])/.test(x),nv=x=>x.replace(/^v(?=[0-9])/,''),sv=x=>{const t=x.trim();return/^v?(0|[1-9]\d*)[.](0|[1-9]\d*)[.](0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/.test(t)?nv(t):''},R=()=>{let bad=false,pins=[],other=[],ids=[];try{if(!f.statSync(r).isFile())throw 0;const j=JSON.parse(f.readFileSync(r,'utf8')),g=j?j.plugins??j:0;if(!g||typeof g!='object'||Array.isArray(g))throw 0;for(const[id,es]of Object.entries(g)){const u=id.toLowerCase(),ok=['oh-my-claudecode@omc','oh-my-claudecode','oh-my-claudecode@oh-my-claudecode'].includes(u);if(!Array.isArray(es)||!es.length||(!ok&&u.includes('oh-my-claudecode')))throw 0;if(ok)ids.push(u);for(const w of es){const z=[w?.version,w?.installPath];if(z.every(y=>y==undefined)||z.some(y=>y!=undefined&&(typeof y!='string'||!y.trim()))||ok&&w.version!=undefined&&!sv(w.version))throw 0;if(!ok){if(typeof w.installPath=='string')other.push(w.installPath.trim())}else pins.push(w)}}}catch(e){pins=[];other=[];ids=[];bad=!(e&&e.code=='ENOENT')}return{bad,pins,other,ids}},rg=R(),ns=rg.ids.length?[...new Set(rg.ids.map(x=>x.includes('@')?x.slice(x.indexOf('@')+1):'omc'))]:['omc'];const bs=ns.map(x=>[x,p.join(d,'plugins','cache',x,'oh-my-claudecode')]).filter(x=>{try{f.statSync(x[1]);return true}catch(e){return!(e&&e.code=='ENOENT')}});if(!bs.length)bs.push([ns[0],p.join(d,'plugins','cache',ns[0],'oh-my-claudecode')]);if(rg.bad)console.log(U);else for(const[mk,b]of bs){const T=bs.length>1?mk+': ':'';n=0;sk=0;fr=0;jn=0;try{const v=f.readdirSync(b).filter(V);const W=y=>{let t=0,c=0;const q=[y];for(let i=0;i<q.length;i++){const z=q[i];const s=f.lstatSync(z);t=Math.max(t,s.mtimeMs);if(s.isDirectory())for(const e of f.readdirSync(z)){if(++c>20000)throw 0;q.push(p.join(z,e))}}return t};const S=()=>{let bad=false,pins=[],other=[],held=[],names=[];const q=x=>p.resolve(x),I=x=>{try{const t=f.lstatSync(x,{bigint:true});return t.ino?t.dev+':'+t.ino:''}catch(e){return''}},Z=x=>{try{return!f.lstatSync(x,{bigint:true}).ino}catch(e){return!(e&&['ENOENT','ENOTDIR'].includes(e.code))}};const under=(y,x)=>{y=q(y);x=q(x);return y===x||y.startsWith(x+p.sep)},mr=(y,x)=>{if(process.platform!='win32')return false;y=q(y).toLowerCase();x=q(x).toLowerCase();return y===x||y.startsWith(x+p.sep)};const rs=(...a)=>{if(process.platform=='win32')return p.resolve(...a);const k=a.map(x=>p.isAbsolute(x)).lastIndexOf(true);return(k<0?[process.cwd(),...a]:a.slice(k)).join(p.sep)},chain=s=>{const t=[];let u=rs(s);for(let i=0;i<41;i++){const e=p.parse(u).root,a=u.slice(e.length).split(p.sep).filter(x=>x&&x!='.');let c=e,nx=null;for(let j=0;j<a.length&&!nx;j++){if(a[j]=='..'){c=p.dirname(c);continue}c=p.join(c,a[j]);let l;try{l=f.lstatSync(c)}catch(x){if(!(x&&['ENOENT','ENOTDIR'].includes(x.code)))bad=true;t.push(p.resolve(c,...a.slice(j+1)));return t}if(l.isSymbolicLink()){const r=a.slice(j+1),z=r.indexOf('..');t.push(p.join(c,...(z<0?r:r.slice(0,z))));try{nx=rs(p.dirname(c),f.readlinkSync(c),...r)}catch(x){bad=true;return t}}}if(!nx){t.push(c);return t}u=nx}bad=true;return t};const rb=chain(b).pop();const ev=[process.env.OMC_PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT].map(x=>(x||'').trim()).filter(Boolean);if(ev.length>1&&ev.every(x=>{try{return f.statSync(x).isDirectory()}catch(e){return false}})){const E=chain(ev[0]).pop(),F=chain(ev[1]).pop();if(q(E)!=q(F)&&!(I(E)&&I(E)==I(F)))bad=true}{const x=R();pins=x.pins;other=x.other;bad=bad||x.bad}try{names=f.readdirSync(o)}catch(e){bad=bad||!(e&&e.code=='ENOENT')}const gone=w=>{if(Number.isSafeInteger(w.pid)&&w.pid>0){try{process.kill(w.pid,0)}catch(e){if(!(e&&e.code=='EPERM'))return true}if(process.platform==='linux'&&typeof w.processStartIdentity=='string'&&w.processStartIdentity){let s='',c;try{s=f.readFileSync('/proc/'+w.pid+'/stat','utf8')}catch(e){}c=s.lastIndexOf(')');const i=c<0?'':s.substring(c+2).split(' ')[19];if(i&&i!=w.processStartIdentity)return true}}return typeof w.updatedAt=='string'&&Date.parse(w.updatedAt)-Date.now()>300000};for(const x of names){if(x.length==69&&/^[a-f0-9]{64}[.]json/.test(x)){try{if(!f.lstatSync(p.join(o,x)).isFile())continue;const w=JSON.parse(f.readFileSync(p.join(o,x),'utf8'));if(gone(w))continue;if(typeof w.pluginRoot!='string'||!w.pluginRoot.trim())throw 0;held.push(w.pluginRoot,p.resolve(w.pluginRoot))}catch(e){if(!(e&&e.code=='ENOENT'))bad=true}}}const pp=[];for(const w of pins){const s=w.version?.trim();for(const n of s?[...new Set([s,nv(s)])]:[]){const e=v.find(x=>x===n),g=b+p.sep+n;if(e)pp.push(p.join(b,e));else if(I(g)||Z(g))pp.push(g)}if(w.installPath!=undefined)pp.push(w.installPath.trim())}const pc=pp.flatMap(chain),oc=[...other,...held,...ev].flatMap(chain);const by=(c,h=[])=>{const a=new Set;for(let y of c)for(;;){const i=I(y);if(i)a.add(i);const n=p.dirname(y);if(n==y)break;y=n}return v.filter(x=>c.some(y=>under(y,p.join(b,x))||under(y,p.join(rb,x)))||a.has(I(p.join(b,x)))||h.some(y=>mr(y,p.join(b,x))||mr(y,p.join(rb,x))))};const pin=by(pc),keep=by([...pc,...oc],held);const hq=held.map(q),zc=v.some(x=>Z(p.join(b,x))),dec=(y,h)=>v.some(x=>[b,rb].some(z=>{z=p.join(z,x);return under(y,z)||h&&mr(y,z)}))||under(b,y)||under(rb,y)||p.dirname(y)==y,ni=!bad&&[...pc,...oc].some(y=>{let h=hq.includes(y);for(;;){if(Z(y))return!dec(y,h);if(I(y))return zc&&!dec(y,h);const n=p.dirname(y);if(n==y)return false;y=n;h=false}});return{bad,ni,pin,keep}};const st=S();if(st.bad){console.log(U);break}else if(st.ni){console.log(T+N);break}else{const{pin,keep}=st;const free=v.filter(x=>!keep.includes(x));if(keep.length){console.log(T+'Kept protected cache versions (pinned in installed_plugins.json or in use by a running session):',keep.join(', '))}if(pin.length&&free.length){m=true;f.mkdirSync(k,{recursive:true});free.forEach(x=>{let w;try{w=W(p.join(b,x))}catch(e){jn++;return}if(Date.now()-w<600000){fr++;return}const t=S();if(t.bad||t.ni||!t.pin.length||t.keep.includes(x)){sk++;return}f.renameSync(p.join(b,x),p.join(k,(mk=='omc'?'':mk+'-')+x+'-'+Date.now()));n++});console.log(T+'Moved',n,'unprotected version(s) to',k+'.');if(sk)console.log(T+'Skipped',sk,'version(s) that became protected or unreadable just before the move');if(jn)console.log(T+'Could not judge',jn,'version(s) (more than 20000 entries, or an entry could not be read), so they were left in place');if(fr)console.log(T+'Left',fr,'version(s) modified in the last 10 minutes alone: an update may still be installing them; run this again later')}else{console.log(T+(pin.length?'Nothing to move: every cached version is pinned in installed_plugins.json or in use by a running session':'Nothing moved: no pinned cache version found, so nothing is moved'))}}}catch(e){const c=e&&e.code;console.log(T+(m?'Cache move failed ('+n+' moved before the error): '+e.message:c=='ENOENT'?'No plugin cache found'+(mk=='omc'?'':' in plugins/cache/'+mk):'Nothing moved: could not read '+b+' ('+(c||'unknown error')+')'));break}};console.log('This command only cleans up cached versions and does not update the plugin. To update, run the Updater line that Step 1 printed, then restart Claude Code.')"
+node -e "
+// omc-doctor cache repair for an outdated plugin: moves the cached versions that nothing protects to plugins/backups.
+// == config dir (shared) ==
+// CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
+// ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
+// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+const path = require('path');
+const fs = require('fs');
+const home = require('os').homedir();
+const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim();
+const configDir = !configured
+  ? path.join(home, '.claude')
+  : configured === '~'
+    ? home
+    : /^~[/\x5c]/.test(configured)
+      ? path.join(home, configured.slice(2))
+      : configured;
+// == plugin ids (shared) ==
+// The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
+const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
+// The marketplace of a plugin ID: the part after the @ in lower case, omc for the bare ID.
+const marketplaceOf = (id) => {
+  const lower = id.toLowerCase();
+  return lower.includes('@') ? lower.slice(lower.indexOf('@') + 1) : 'omc';
+};
+// The plugin cache directory of a marketplace.
+const cacheDirOf = (market) => path.join(configDir, 'plugins', 'cache', market, 'oh-my-claudecode');
+// == version grammar (shared) ==
+// A leading v is dropped here and nowhere else.
+const dropV = (text) => text.replace(/^v(?=[0-9])/, '');
+// The grammar of parseSemver in scripts/session-start.mjs: an optional v, three numeric parts without leading
+// zeros, an optional prerelease and optional build metadata. Returns the bare version, or '' for anything else.
+const semver = (text) => {
+  const trimmed = text.trim();
+  const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
+  return grammar.test(trimmed) ? dropV(trimmed) : '';
+};
+// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
+// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
+const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// == read file (shared) ==
+// Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
+const readFile = (file) => {
+  if (!fs.statSync(file).isFile()) throw 0;
+  return fs.readFileSync(file, 'utf8');
+};
+// == registry entry shape (shared) ==
+// An entry of installed_plugins.json is malformed unless it has a non-blank string version or installPath
+// (a null field counts as missing, a non-string or blank one is malformed).
+const entryShapeBad = (entry) => {
+  const fields = [entry?.version, entry?.installPath];
+  return (
+    fields.every((field) => field == undefined) ||
+    fields.some((field) => field != undefined && (typeof field != 'string' || !field.trim()))
+  );
+};
+// == path resolver (shared) ==
+// resolveFrom(...parts): the parts joined as the file system would resolve them, relative ones against the
+// working directory. On win32 Windows folds .. as text, so path.resolve is used.
+const resolveFrom = (...parts) => {
+  if (process.platform == 'win32') return path.resolve(...parts);
+  const lastAbsolute = parts.map((part) => path.isAbsolute(part)).lastIndexOf(true);
+  return (lastAbsolute < 0 ? [process.cwd(), ...parts] : parts.slice(lastAbsolute)).join(path.sep);
+};
+// linkChain(start) reads a path one component at a time, as the file system does, and returns every path it goes
+// through: each link on the way and the end of the chain. A .. after a link names the parent of the link target,
+// a .. inside a link target is read the same way. unreadable is true when a component cannot be examined or when
+// more than 40 links are followed (a loop). A component that does not exist ends the chain without being unreadable.
+const linkChain = (start) => {
+  const paths = [];
+  let unreadable = false;
+  let current = resolveFrom(start);
+  for (let hop = 0; hop < 41; hop++) {
+    const root = path.parse(current).root;
+    const parts = current.slice(root.length).split(path.sep).filter((part) => part && part != '.');
+    let at = root;
+    let next = null;
+    for (let i = 0; i < parts.length && !next; i++) {
+      if (parts[i] == '..') {
+        at = path.dirname(at);
+        continue;
+      }
+      at = path.join(at, parts[i]);
+      let info;
+      try {
+        info = fs.lstatSync(at);
+      } catch (error) {
+        if (!(error && ['ENOENT', 'ENOTDIR'].includes(error.code))) unreadable = true;
+        paths.push(path.resolve(at, ...parts.slice(i + 1)));
+        return { paths, unreadable };
+      }
+      if (info.isSymbolicLink()) {
+        const rest = parts.slice(i + 1);
+        const dots = rest.indexOf('..');
+        paths.push(path.join(at, ...(dots < 0 ? rest : rest.slice(0, dots))));
+        try {
+          next = resolveFrom(path.dirname(at), fs.readlinkSync(at), ...rest);
+        } catch (error) {
+          unreadable = true;
+          return { paths, unreadable };
+        }
+      }
+    }
+    if (!next) {
+      paths.push(at);
+      return { paths, unreadable };
+    }
+    current = next;
+  }
+  return { paths, unreadable: true };
+};
+
+// == messages (the only part that differs between the two cache commands) ==
+const messages = {
+  movedEnd: '.',
+  allProtected: 'Nothing to move: every cached version is pinned in installed_plugins.json or in use by a running session',
+  noPin: 'Nothing moved: no pinned cache version found, so nothing is moved',
+  noCache: 'No plugin cache found',
+  footer: 'This command only cleans up cached versions and does not update the plugin. To update, run the Updater line that Step 1 printed, then restart Claude Code.',
+};
+
+// == repair constants (shared) ==
+// Moves the cached plugin versions that nothing protects to plugins/backups, never deletes one. A version is
+// protected when installed_plugins.json pins it, when the installPath of another plugin or a plugin root variable
+// points into it, or when a running session holds it (an occupancy record). A source that cannot be read
+// completely, or a version whose identity cannot be established, makes the command move nothing.
+const backups = path.join(configDir, 'plugins', 'backups', 'oh-my-claudecode');
+const registryFile = path.join(configDir, 'plugins', 'installed_plugins.json');
+const occupancyDir = path.join(configDir, '.omc', 'cache-occupancy');
+const STOP_UNREADABLE =
+  'Nothing moved: installed_plugins.json, the cache occupancy records, the plugin root variables or a path in them could not be read completely; fix that first, then run this again';
+const STOP_NO_IDENTITY =
+  'Nothing moved: identity unavailable (the file system reports no inode, or a stat failed, for a cache version or for a path that may protect one, and the spelling of that path does not place it inside a version, so it cannot be ruled out as another name of a cached version); keep the cache and every path that points into it spelled alike, or use a file system that reports inodes, then run this again';
+// The same threshold as STALE_THRESHOLD_MS in src/utils/paths.ts, which SessionStart's own cleanup uses.
+const FRESH_MS = 600000;
+
+// == repair registry (shared) ==
+// pins: the entries of the supported plugin IDs. other: the installPath of every entry of another plugin. ids: the
+// supported IDs. unreadable: the file is not a regular file, is not JSON of the expected shape, or holds a
+// malformed entry anywhere. A missing file is no pins and not unreadable.
+const readRegistry = () => {
+  let unreadable = false;
+  let pins = [];
+  let other = [];
+  let ids = [];
+  try {
+    const json = JSON.parse(readFile(registryFile));
+    const plugins = json ? json.plugins ?? json : 0;
+    if (!plugins || typeof plugins != 'object' || Array.isArray(plugins)) throw 0;
+    for (const [key, entries] of Object.entries(plugins)) {
+      const id = key.toLowerCase();
+      const isSupported = OMC_IDS.includes(id);
+      if (!Array.isArray(entries) || !entries.length || (!isSupported && id.includes('oh-my-claudecode'))) throw 0;
+      if (isSupported) ids.push(id);
+      for (const entry of entries) {
+        if (entryShapeBad(entry) || (isSupported && entry.version != undefined && !semver(entry.version))) throw 0;
+        if (!isSupported) {
+          if (typeof entry.installPath == 'string') other.push(entry.installPath.trim());
+        } else pins.push(entry);
+      }
+    }
+  } catch (error) {
+    pins = [];
+    other = [];
+    ids = [];
+    unreadable = !(error && error.code == 'ENOENT');
+  }
+  return { unreadable, pins, other, ids };
+};
+
+// == occupancy records (shared) ==
+// A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time
+// differs from the recorded one, or the record is dated more than 5 minutes in the future.
+const ownerGone = (record) => {
+  if (Number.isSafeInteger(record.pid) && record.pid > 0) {
+    try {
+      process.kill(record.pid, 0);
+    } catch (error) {
+      if (!(error && error.code == 'EPERM')) return true;
+    }
+    if (process.platform === 'linux' && typeof record.processStartIdentity == 'string' && record.processStartIdentity) {
+      let stat = '';
+      try {
+        stat = fs.readFileSync('/proc/' + record.pid + '/stat', 'utf8');
+      } catch (error) {}
+      const close = stat.lastIndexOf(')');
+      const start = close < 0 ? '' : stat.substring(close + 2).split(' ')[19];
+      if (start && start != record.processStartIdentity) return true;
+    }
+  }
+  return typeof record.updatedAt == 'string' && Date.parse(record.updatedAt) - Date.now() > 300000;
+};
+
+// == modification dates (shared) ==
+// The newest modification time of an entry and of everything below it, at any depth. A link is dated itself and
+// never followed. Throws when more than 20000 entries are found or an entry cannot be read.
+const newestChange = (root) => {
+  let newest = 0;
+  let count = 0;
+  const queue = [root];
+  for (let i = 0; i < queue.length; i++) {
+    const entry = queue[i];
+    const stat = fs.lstatSync(entry);
+    newest = Math.max(newest, stat.mtimeMs);
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(entry)) {
+        if (++count > 20000) throw 0;
+        queue.push(path.join(entry, name));
+      }
+    }
+  }
+  return newest;
+};
+
+// == protection (shared) ==
+// protectionOf(dir, versions) reads every source of protection again and returns { unreadable, noIdentity, pinned,
+// kept }: unreadable and noIdentity stop the command, pinned are the versions the registry pins (or a path of a pin
+// reaches), kept are all protected versions. dir is the cache directory and versions the version directory names in it.
+const protectionOf = (dir, versions) => {
+  let unreadable = false;
+  const chainOf = (target) => {
+    const chain = linkChain(target);
+    if (chain.unreadable) unreadable = true;
+    return chain.paths;
+  };
+  // The identity of a path without following a link at its end, and whether a path has none (inode 0, or a stat
+  // that failed for another reason than the path not existing).
+  const identityOf = (target) => {
+    try {
+      const stat = fs.lstatSync(target, { bigint: true });
+      return stat.ino ? stat.dev + ':' + stat.ino : '';
+    } catch (error) {
+      return '';
+    }
+  };
+  const lacksIdentity = (target) => {
+    try {
+      return !fs.lstatSync(target, { bigint: true }).ino;
+    } catch (error) {
+      return !(error && ['ENOENT', 'ENOTDIR'].includes(error.code));
+    }
+  };
+  const isUnder = (target, parent) => {
+    target = path.resolve(target);
+    parent = path.resolve(parent);
+    return target === parent || target.startsWith(parent + path.sep);
+  };
+  // win32 only: the SessionStart publisher stores the plugin root of a record in lower case.
+  const isUnderLowercase = (target, parent) => {
+    if (process.platform != 'win32') return false;
+    target = path.resolve(target).toLowerCase();
+    parent = path.resolve(parent).toLowerCase();
+    return target === parent || target.startsWith(parent + path.sep);
+  };
+  const realDir = chainOf(dir).pop();
+  // The plugin root variables: two different existing directories cannot be told apart from a conflict.
+  const rootVars = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT]
+    .map((root) => (root || '').trim())
+    .filter(Boolean);
+  if (
+    rootVars.length > 1 &&
+    rootVars.every((root) => {
+      try {
+        return fs.statSync(root).isDirectory();
+      } catch (error) {
+        return false;
+      }
+    })
+  ) {
+    const first = chainOf(rootVars[0]).pop();
+    const second = chainOf(rootVars[1]).pop();
+    if (path.resolve(first) != path.resolve(second) && !(identityOf(first) && identityOf(first) == identityOf(second))) unreadable = true;
+  }
+  const registry = readRegistry();
+  unreadable = unreadable || registry.unreadable;
+  let names = [];
+  try {
+    names = fs.readdirSync(occupancyDir);
+  } catch (error) {
+    unreadable = unreadable || !(error && error.code == 'ENOENT');
+  }
+  // The plugin roots of the records of running sessions.
+  const held = [];
+  for (const name of names) {
+    if (name.length == 69 && /^[a-f0-9]{64}[.]json/.test(name)) {
+      try {
+        if (!fs.lstatSync(path.join(occupancyDir, name)).isFile()) continue;
+        const record = JSON.parse(fs.readFileSync(path.join(occupancyDir, name), 'utf8'));
+        if (ownerGone(record)) continue;
+        if (typeof record.pluginRoot != 'string' || !record.pluginRoot.trim()) throw 0;
+        held.push(record.pluginRoot, path.resolve(record.pluginRoot));
+      } catch (error) {
+        if (!(error && error.code == 'ENOENT')) unreadable = true;
+      }
+    }
+  }
+  // The paths that pin: the directory of every pinned version (as written and without a leading v) that exists or
+  // may exist, and every installPath of a pin.
+  const pinPaths = [];
+  for (const pin of registry.pins) {
+    const version = pin.version?.trim();
+    for (const name of version ? [...new Set([version, dropV(version)])] : []) {
+      const listed = versions.find((x) => x === name);
+      const written = dir + path.sep + name;
+      if (listed) pinPaths.push(path.join(dir, listed));
+      else if (identityOf(written) || lacksIdentity(written)) pinPaths.push(written);
+    }
+    if (pin.installPath != undefined) pinPaths.push(pin.installPath.trim());
+  }
+  const pinChains = pinPaths.flatMap(chainOf);
+  const otherChains = [...registry.other, ...held, ...rootVars].flatMap(chainOf);
+  // The versions a list of paths protects: a path that is, or lies inside, the version directory (as written or
+  // through the real cache path), or an ancestor of a path with the identity of the version directory. lowercase
+  // are the paths of records, which on win32 also protect by a lower-case comparison.
+  const versionsReachedBy = (chains, lowercase = []) => {
+    const ids = new Set();
+    for (let up of chains) {
+      for (;;) {
+        const id = identityOf(up);
+        if (id) ids.add(id);
+        const parent = path.dirname(up);
+        if (parent == up) break;
+        up = parent;
+      }
+    }
+    return versions.filter(
+      (name) =>
+        chains.some((target) => isUnder(target, path.join(dir, name)) || isUnder(target, path.join(realDir, name))) ||
+        ids.has(identityOf(path.join(dir, name))) ||
+        lowercase.some(
+          (target) => isUnderLowercase(target, path.join(dir, name)) || isUnderLowercase(target, path.join(realDir, name)),
+        ),
+    );
+  };
+  const pinned = versionsReachedBy(pinChains);
+  const kept = versionsReachedBy([...pinChains, ...otherChains], held);
+  // When the file system reports no identity for a version directory, a protecting path has to be placed by its
+  // exact text inside a version (or above the cache directory) or it may be another name of a cached version.
+  const resolvedHeld = held.map((target) => path.resolve(target));
+  const anyVersionLacksIdentity = versions.some((name) => lacksIdentity(path.join(dir, name)));
+  const placed = (target, isHeld) =>
+    versions.some((name) =>
+      [dir, realDir].some((parent) => {
+        const version = path.join(parent, name);
+        return isUnder(target, version) || (isHeld && isUnderLowercase(target, version));
+      }),
+    ) ||
+    isUnder(dir, target) ||
+    isUnder(realDir, target) ||
+    path.dirname(target) == target;
+  const noIdentity =
+    !unreadable &&
+    [...pinChains, ...otherChains].some((target) => {
+      let isHeld = resolvedHeld.includes(target);
+      for (;;) {
+        if (lacksIdentity(target)) return !placed(target, isHeld);
+        if (identityOf(target)) return anyVersionLacksIdentity && !placed(target, isHeld);
+        const parent = path.dirname(target);
+        if (parent == target) return false;
+        target = parent;
+        isHeld = false;
+      }
+    });
+  return { unreadable, noIdentity, pinned, kept };
+};
+
+// == repair run (shared) ==
+// One cache directory: print what is protected, move the free versions to the backup directory. Returns true when
+// the whole command has to stop.
+let moveStarted = false;
+const cleanCache = (market, dir, lead) => {
+  let moved = 0;
+  let skipped = 0;
+  let fresh = 0;
+  let unjudged = 0;
+  try {
+    const versions = fs.readdirSync(dir).filter(isVersionDir);
+    const state = protectionOf(dir, versions);
+    if (state.unreadable) {
+      console.log(STOP_UNREADABLE);
+      return true;
+    }
+    if (state.noIdentity) {
+      console.log(lead + STOP_NO_IDENTITY);
+      return true;
+    }
+    const free = versions.filter((name) => !state.kept.includes(name));
+    if (state.kept.length) {
+      console.log(lead + 'Kept protected cache versions (pinned in installed_plugins.json or in use by a running session):', state.kept.join(', '));
+    }
+    if (state.pinned.length && free.length) {
+      moveStarted = true;
+      fs.mkdirSync(backups, { recursive: true });
+      free.forEach((name) => {
+        let newest;
+        try {
+          newest = newestChange(path.join(dir, name));
+        } catch (error) {
+          unjudged++;
+          return;
+        }
+        if (Date.now() - newest < FRESH_MS) {
+          fresh++;
+          return;
+        }
+        // Everything is read again just before the move: a version that became protected is skipped.
+        const again = protectionOf(dir, versions);
+        if (again.unreadable || again.noIdentity || !again.pinned.length || again.kept.includes(name)) {
+          skipped++;
+          return;
+        }
+        fs.renameSync(path.join(dir, name), path.join(backups, (market == 'omc' ? '' : market + '-') + name + '-' + Date.now()));
+        moved++;
+      });
+      console.log(lead + 'Moved', moved, 'unprotected version(s) to', backups + messages.movedEnd);
+      if (skipped) console.log(lead + 'Skipped', skipped, 'version(s) that became protected or unreadable just before the move');
+      if (unjudged) {
+        console.log(lead + 'Could not judge', unjudged, 'version(s) (more than 20000 entries, or an entry could not be read), so they were left in place');
+      }
+      if (fresh) {
+        console.log(lead + 'Left', fresh, 'version(s) modified in the last 10 minutes alone: an update may still be installing them; run this again later');
+      }
+    } else {
+      console.log(lead + (state.pinned.length ? messages.allProtected : messages.noPin));
+    }
+  } catch (error) {
+    const code = error && error.code;
+    console.log(
+      lead +
+        (moveStarted
+          ? 'Cache move failed (' + moved + ' moved before the error): ' + error.message
+          : code == 'ENOENT'
+            ? messages.noCache + (market == 'omc' ? '' : ' in plugins/cache/' + market)
+            : 'Nothing moved: could not read ' + dir + ' (' + (code || 'unknown error') + ')'),
+    );
+    return true;
+  }
+  return false;
+};
+// Every cache directory that exists (or cannot be told from one) is handled in turn; with none the first
+// marketplace is still tried, so that a missing cache is reported.
+const registry = readRegistry();
+const markets = registry.ids.length ? [...new Set(registry.ids.map(marketplaceOf))] : ['omc'];
+const caches = markets
+  .map((market) => [market, cacheDirOf(market)])
+  .filter(([, dir]) => {
+    try {
+      fs.statSync(dir);
+      return true;
+    } catch (error) {
+      return !(error && error.code == 'ENOENT');
+    }
+  });
+if (!caches.length) caches.push([markets[0], cacheDirOf(markets[0])]);
+if (registry.unreadable) console.log(STOP_UNREADABLE);
+else {
+  for (const [market, dir] of caches) {
+    if (cleanCache(market, dir, caches.length > 1 ? market + ': ' : '')) break;
+  }
+}
+if (messages.footer) console.log(messages.footer);
+"
 ```
 
 ### Fix: Stale Cache (multiple versions)
 **Stale cache guard**: Diagnostics do not authorize removal or setup changes. Do not prune cache versions by age, lexical/version order, or presence of a newer version. A cache version is protected when it is pinned in `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` (by `version` or by `installPath`, under any supported OMC plugin ID: `oh-my-claudecode@omc`, `oh-my-claudecode` or `oh-my-claudecode@oh-my-claudecode`, in any letter case; the registry is read like the installer reads it, from its `plugins` object or, when there is none, from its top level), when the `installPath` of any other plugin or `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT` points into it, or when a running session occupies it (a record in `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc/cache-occupancy/` whose plugin root is that version or inside it; a record is ignored only when its owner is proven gone: the process id no longer exists, on Linux the process start time differs from the recorded one, or the record is dated more than 5 minutes in the future; an old date alone never ignores a record, and this command never deletes one); move aside only unprotected versions, and report the protected versions kept. Paths are compared after resolving symlinks one link at a time, and every link on the way is protected, not only the final directory (a pin on `5.7.0` in `5.7.0 -> 5.8.0 -> 5.9.0` protects all three; more than 40 links or a loop counts as unresolvable; the components of a path are read in the order the file system reads them, so a `..` after a link (`<dir>/shortcut/..`, where `shortcut` points to `5.9.0/nested`) names the parent of the link's target, and a `..` in a link's own target is read the same way, never folded as text first, except on win32, where Windows folds `..` first; an occupancy record protects what it names read that way and also what the runtime reads from it, the same text folded; a pinned `version` written with a leading `v` also pins the directory of the bare version, `v5.8.0` pins `5.8.0`); a link that nothing refers to is not protected just because its target is. Paths that exist are also compared by filesystem identity (device and inode), so two spellings of one directory are that directory on a volume that ignores letter case even where the platform reports `linux` (WSL2 on a Windows drive), and two directories whose names differ only in letter case stay two directories on a volume that tells letter case apart even where the platform reports `darwin` or `win32` (a case-sensitive volume): letter case is never folded by the name of the platform; the one exception only adds protection: the SessionStart publisher stores the plugin root of an occupancy record in lower case on win32 and the runtime compares records in that form, so on win32 a record also protects the version it names or lies inside by a lower-case comparison. Where a file system reports inode 0 (or a `stat` of the path fails) it gives no identity, on either side of a comparison, and nothing is then guessed from the spelling of a path: a path is judged by its exact text only when that text lies inside a cache version (or above the cache directory, where it names no version), and on win32 an occupancy record is also judged by the lower-case form above; every other path that protects or may protect a version, whatever the source (the `installPath` of a pin or of another plugin, `OMC_PLUGIN_ROOT` or `CLAUDE_PLUGIN_ROOT`, an occupancy record, a link on the way, a pinned `version` that names no directory by its exact spelling but a directory by another letter case; a path that does not exist is judged by its nearest existing parent), could be another name of a cached version that cannot be ruled out, so the command prints `Nothing moved: identity unavailable` and moves nothing, also when that path lies outside the cache on such a file system (two names of one directory that differ in letter case are then different, so the two variables naming one directory by two spellings count as a conflict and nothing moves). An exact spelling still protects the version it names and the free versions still move. If `installed_plugins.json`, an occupancy record or a path in them cannot be read or resolved completely (a path that does not exist adds no protection of its own, only through its nearest existing parent as described above; a key that contains `oh-my-claudecode` without being a supported ID, an empty or non-array entry list under any key, an entry under any key (also of an unrelated plugin) that is not an object or has neither a `version` nor an `installPath` or has one that is not a non-blank string (a `null` field counts as missing), and under a supported plugin ID a `version` that is not a semantic version (`999x.0.0`, `1.2`, `1.2.3.4`; the grammar of Step 1's `Latest:`, with the optional `v`; a `version` of another plugin has to be a non-blank string only), and `OMC_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` naming different directories (a variable that names no existing directory takes no part in that comparison, as in Step 1, but a path it names still protects the version it points into) all count as unreadable; the two variables are compared after resolving links and by filesystem identity, so two names of one directory are not a conflict), move nothing (the cause may be an entry of an unrelated plugin, which the message does not name). The registry pins, the occupancy records and the plugin root variables are read again just before each version is moved, and a version that has become protected, or whose protection can no longer be read completely, is skipped and reported; only the instant between that last read and the rename remains open, because a SessionStart that has not yet published its record cannot be seen and the command holds no lock shared with the publisher. A version directory is not moved either when it, or any entry anywhere below it, was modified in the last 10 minutes (the same threshold, `STALE_THRESHOLD_MS` in `src/utils/paths.ts`, that SessionStart's own cleanup uses to leave a directory alone while an update may still be installing it; every entry at any depth counts because an update that refreshes an existing version overwrites its files in place and need not change the date of the directory itself or of any level above the file; a link is dated itself and never followed, and so is the version directory when it is a link: a redirect that SessionStart created a moment ago, such as `5.7.0 -> 5.8.0`, is as new as the link whatever the dates in its target and is left in place, and an old one is moved as the link only, so its target, in or outside the cache, is not touched): it is left in place and reported, and the command can be run again later. A version with more than 20000 entries (a cached version holds about 9000), or one whose entries cannot all be read, cannot be judged: it is left in place and reported (`Could not judge`). The updater (`copyPluginSyncPayload` in `src/installer/index.ts`) copies into the version directory in place and leaves no marker or lock file that the command could test, so an update that starts writing after the date scan has read the files it rewrites, up to the rename (the rest of the scan and the re-read of the registry, the records and the root variables run in between), cannot be seen; closing that window needs a lock or marker shared with the updater, which is a change in `src/installer` and not in this skill. The registry is read before any cache directory is looked for: when it cannot be read completely the command says so and stops, whatever namespace the cache lies in. The cache directory is `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/<marketplace>/oh-my-claudecode`, where `<marketplace>` is the part after the `@` of each supported plugin ID the registry holds (`omc` for the bare `oh-my-claudecode`, and when the registry holds none): every such directory that exists is handled in turn, a pinned version protects the version of that name in each of them, and a backup from a marketplace other than `omc` carries its name in front (`<marketplace>-<version>-<time>`), and when more than one such directory exists every report line starts with `<marketplace>:` and its counts are those of that directory. A directory named `<version>.omc-stale-<pid>` (a name ending in `.omc-stale-` and a pid, what an interrupted cache relink leaves beside a missing or unusable original path) is not a version: the command does not list, protect, date or move it, because the reconciliation of SessionStart's own purge (`purgeStalePluginCacheVersions` in `src/utils/paths.ts`) restores it as the only intact copy and moving it to `plugins/backups` would prevent that. A cache directory that exists but cannot be read (any error other than its absence, such as `EACCES` or `EIO`, or a file where the directory should be) is not an absent cache: the command prints `Nothing moved: could not read <directory> (<error code>)`, moves nothing and stops, and `No plugin cache found` or `No cache to clean` is printed only for a directory that does not exist (`ENOENT`). Backups go to `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/backups/oh-my-claudecode/`, outside `plugins/cache/`: OMC's stale cache purge can remove any cache directory that is not the active version, so a backup left inside the cache may not survive.
 ```bash
 # Keep protected versions; never prune by age, lexical/version order, or presence of a newer version; move only unprotected versions to plugins/backups
-node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c,k=p.join(d,'plugins','backups','oh-my-claudecode'),r=p.join(d,'plugins','installed_plugins.json'),o=p.join(d,'.omc','cache-occupancy');let n=0,sk=0,fr=0,jn=0,m=false;const U='Nothing moved: installed_plugins.json, the cache occupancy records, the plugin root variables or a path in them could not be read completely; fix that first, then run this again',N='Nothing moved: identity unavailable (the file system reports no inode, or a stat failed, for a cache version or for a path that may protect one, and the spelling of that path does not place it inside a version, so it cannot be ruled out as another name of a cached version); keep the cache and every path that points into it spelled alike, or use a file system that reports inodes, then run this again',V=x=>/^\d/.test(x)&&!/[.]omc-stale-\d+(?![^])/.test(x),nv=x=>x.replace(/^v(?=[0-9])/,''),sv=x=>{const t=x.trim();return/^v?(0|[1-9]\d*)[.](0|[1-9]\d*)[.](0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/.test(t)?nv(t):''},R=()=>{let bad=false,pins=[],other=[],ids=[];try{if(!f.statSync(r).isFile())throw 0;const j=JSON.parse(f.readFileSync(r,'utf8')),g=j?j.plugins??j:0;if(!g||typeof g!='object'||Array.isArray(g))throw 0;for(const[id,es]of Object.entries(g)){const u=id.toLowerCase(),ok=['oh-my-claudecode@omc','oh-my-claudecode','oh-my-claudecode@oh-my-claudecode'].includes(u);if(!Array.isArray(es)||!es.length||(!ok&&u.includes('oh-my-claudecode')))throw 0;if(ok)ids.push(u);for(const w of es){const z=[w?.version,w?.installPath];if(z.every(y=>y==undefined)||z.some(y=>y!=undefined&&(typeof y!='string'||!y.trim()))||ok&&w.version!=undefined&&!sv(w.version))throw 0;if(!ok){if(typeof w.installPath=='string')other.push(w.installPath.trim())}else pins.push(w)}}}catch(e){pins=[];other=[];ids=[];bad=!(e&&e.code=='ENOENT')}return{bad,pins,other,ids}},rg=R(),ns=rg.ids.length?[...new Set(rg.ids.map(x=>x.includes('@')?x.slice(x.indexOf('@')+1):'omc'))]:['omc'];const bs=ns.map(x=>[x,p.join(d,'plugins','cache',x,'oh-my-claudecode')]).filter(x=>{try{f.statSync(x[1]);return true}catch(e){return!(e&&e.code=='ENOENT')}});if(!bs.length)bs.push([ns[0],p.join(d,'plugins','cache',ns[0],'oh-my-claudecode')]);if(rg.bad)console.log(U);else for(const[mk,b]of bs){const T=bs.length>1?mk+': ':'';n=0;sk=0;fr=0;jn=0;try{const v=f.readdirSync(b).filter(V);const W=y=>{let t=0,c=0;const q=[y];for(let i=0;i<q.length;i++){const z=q[i];const s=f.lstatSync(z);t=Math.max(t,s.mtimeMs);if(s.isDirectory())for(const e of f.readdirSync(z)){if(++c>20000)throw 0;q.push(p.join(z,e))}}return t};const S=()=>{let bad=false,pins=[],other=[],held=[],names=[];const q=x=>p.resolve(x),I=x=>{try{const t=f.lstatSync(x,{bigint:true});return t.ino?t.dev+':'+t.ino:''}catch(e){return''}},Z=x=>{try{return!f.lstatSync(x,{bigint:true}).ino}catch(e){return!(e&&['ENOENT','ENOTDIR'].includes(e.code))}};const under=(y,x)=>{y=q(y);x=q(x);return y===x||y.startsWith(x+p.sep)},mr=(y,x)=>{if(process.platform!='win32')return false;y=q(y).toLowerCase();x=q(x).toLowerCase();return y===x||y.startsWith(x+p.sep)};const rs=(...a)=>{if(process.platform=='win32')return p.resolve(...a);const k=a.map(x=>p.isAbsolute(x)).lastIndexOf(true);return(k<0?[process.cwd(),...a]:a.slice(k)).join(p.sep)},chain=s=>{const t=[];let u=rs(s);for(let i=0;i<41;i++){const e=p.parse(u).root,a=u.slice(e.length).split(p.sep).filter(x=>x&&x!='.');let c=e,nx=null;for(let j=0;j<a.length&&!nx;j++){if(a[j]=='..'){c=p.dirname(c);continue}c=p.join(c,a[j]);let l;try{l=f.lstatSync(c)}catch(x){if(!(x&&['ENOENT','ENOTDIR'].includes(x.code)))bad=true;t.push(p.resolve(c,...a.slice(j+1)));return t}if(l.isSymbolicLink()){const r=a.slice(j+1),z=r.indexOf('..');t.push(p.join(c,...(z<0?r:r.slice(0,z))));try{nx=rs(p.dirname(c),f.readlinkSync(c),...r)}catch(x){bad=true;return t}}}if(!nx){t.push(c);return t}u=nx}bad=true;return t};const rb=chain(b).pop();const ev=[process.env.OMC_PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT].map(x=>(x||'').trim()).filter(Boolean);if(ev.length>1&&ev.every(x=>{try{return f.statSync(x).isDirectory()}catch(e){return false}})){const E=chain(ev[0]).pop(),F=chain(ev[1]).pop();if(q(E)!=q(F)&&!(I(E)&&I(E)==I(F)))bad=true}{const x=R();pins=x.pins;other=x.other;bad=bad||x.bad}try{names=f.readdirSync(o)}catch(e){bad=bad||!(e&&e.code=='ENOENT')}const gone=w=>{if(Number.isSafeInteger(w.pid)&&w.pid>0){try{process.kill(w.pid,0)}catch(e){if(!(e&&e.code=='EPERM'))return true}if(process.platform==='linux'&&typeof w.processStartIdentity=='string'&&w.processStartIdentity){let s='',c;try{s=f.readFileSync('/proc/'+w.pid+'/stat','utf8')}catch(e){}c=s.lastIndexOf(')');const i=c<0?'':s.substring(c+2).split(' ')[19];if(i&&i!=w.processStartIdentity)return true}}return typeof w.updatedAt=='string'&&Date.parse(w.updatedAt)-Date.now()>300000};for(const x of names){if(x.length==69&&/^[a-f0-9]{64}[.]json/.test(x)){try{if(!f.lstatSync(p.join(o,x)).isFile())continue;const w=JSON.parse(f.readFileSync(p.join(o,x),'utf8'));if(gone(w))continue;if(typeof w.pluginRoot!='string'||!w.pluginRoot.trim())throw 0;held.push(w.pluginRoot,p.resolve(w.pluginRoot))}catch(e){if(!(e&&e.code=='ENOENT'))bad=true}}}const pp=[];for(const w of pins){const s=w.version?.trim();for(const n of s?[...new Set([s,nv(s)])]:[]){const e=v.find(x=>x===n),g=b+p.sep+n;if(e)pp.push(p.join(b,e));else if(I(g)||Z(g))pp.push(g)}if(w.installPath!=undefined)pp.push(w.installPath.trim())}const pc=pp.flatMap(chain),oc=[...other,...held,...ev].flatMap(chain);const by=(c,h=[])=>{const a=new Set;for(let y of c)for(;;){const i=I(y);if(i)a.add(i);const n=p.dirname(y);if(n==y)break;y=n}return v.filter(x=>c.some(y=>under(y,p.join(b,x))||under(y,p.join(rb,x)))||a.has(I(p.join(b,x)))||h.some(y=>mr(y,p.join(b,x))||mr(y,p.join(rb,x))))};const pin=by(pc),keep=by([...pc,...oc],held);const hq=held.map(q),zc=v.some(x=>Z(p.join(b,x))),dec=(y,h)=>v.some(x=>[b,rb].some(z=>{z=p.join(z,x);return under(y,z)||h&&mr(y,z)}))||under(b,y)||under(rb,y)||p.dirname(y)==y,ni=!bad&&[...pc,...oc].some(y=>{let h=hq.includes(y);for(;;){if(Z(y))return!dec(y,h);if(I(y))return zc&&!dec(y,h);const n=p.dirname(y);if(n==y)return false;y=n;h=false}});return{bad,ni,pin,keep}};const st=S();if(st.bad){console.log(U);break}else if(st.ni){console.log(T+N);break}else{const{pin,keep}=st;const free=v.filter(x=>!keep.includes(x));if(keep.length){console.log(T+'Kept protected cache versions (pinned in installed_plugins.json or in use by a running session):',keep.join(', '))}if(pin.length&&free.length){m=true;f.mkdirSync(k,{recursive:true});free.forEach(x=>{let w;try{w=W(p.join(b,x))}catch(e){jn++;return}if(Date.now()-w<600000){fr++;return}const t=S();if(t.bad||t.ni||!t.pin.length||t.keep.includes(x)){sk++;return}f.renameSync(p.join(b,x),p.join(k,(mk=='omc'?'':mk+'-')+x+'-'+Date.now()));n++});console.log(T+'Moved',n,'unprotected version(s) to',k+'');if(sk)console.log(T+'Skipped',sk,'version(s) that became protected or unreadable just before the move');if(jn)console.log(T+'Could not judge',jn,'version(s) (more than 20000 entries, or an entry could not be read), so they were left in place');if(fr)console.log(T+'Left',fr,'version(s) modified in the last 10 minutes alone: an update may still be installing them; run this again later')}else{console.log(T+(pin.length?'Nothing to move: keep every pinned version; do not prune cache versions by age, lexical/version order, or presence of a newer version':'Nothing moved: no pinned version found; manual review instead of pruning'))}}}catch(e){const c=e&&e.code;console.log(T+(m?'Cache move failed ('+n+' moved before the error): '+e.message:c=='ENOENT'?'No cache to clean'+(mk=='omc'?'':' in plugins/cache/'+mk):'Nothing moved: could not read '+b+' ('+(c||'unknown error')+')'));break}}"
+node -e "
+// omc-doctor cache repair for a stale cache: moves the cached versions that nothing protects to plugins/backups.
+// == config dir (shared) ==
+// CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
+// ignored, an empty value means the .claude directory of the home directory, a value that is ~ or starts with ~/ or
+// ~ and a backslash means the home directory, and any other value is used as given (a ~ anywhere else is literal).
+const path = require('path');
+const fs = require('fs');
+const home = require('os').homedir();
+const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim();
+const configDir = !configured
+  ? path.join(home, '.claude')
+  : configured === '~'
+    ? home
+    : /^~[/\x5c]/.test(configured)
+      ? path.join(home, configured.slice(2))
+      : configured;
+// == plugin ids (shared) ==
+// The plugin IDs the installer accepts (OMC_PLUGIN_IDS in src/installer/index.ts), compared in lower case.
+const OMC_IDS = ['oh-my-claudecode@omc', 'oh-my-claudecode', 'oh-my-claudecode@oh-my-claudecode'];
+// The marketplace of a plugin ID: the part after the @ in lower case, omc for the bare ID.
+const marketplaceOf = (id) => {
+  const lower = id.toLowerCase();
+  return lower.includes('@') ? lower.slice(lower.indexOf('@') + 1) : 'omc';
+};
+// The plugin cache directory of a marketplace.
+const cacheDirOf = (market) => path.join(configDir, 'plugins', 'cache', market, 'oh-my-claudecode');
+// == version grammar (shared) ==
+// A leading v is dropped here and nowhere else.
+const dropV = (text) => text.replace(/^v(?=[0-9])/, '');
+// The grammar of parseSemver in scripts/session-start.mjs: an optional v, three numeric parts without leading
+// zeros, an optional prerelease and optional build metadata. Returns the bare version, or '' for anything else.
+const semver = (text) => {
+  const trimmed = text.trim();
+  const grammar = /^v?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?:[+][0-9A-Za-z-]+(?:[.][0-9A-Za-z-]+)*)?(?![^])/;
+  return grammar.test(trimmed) ? dropV(trimmed) : '';
+};
+// A cache directory is a version directory when its name starts with a digit (the runtime lists no other) and is
+// not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>.
+const isVersionDir = (name) => /^[0-9]/.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// == read file (shared) ==
+// Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
+const readFile = (file) => {
+  if (!fs.statSync(file).isFile()) throw 0;
+  return fs.readFileSync(file, 'utf8');
+};
+// == registry entry shape (shared) ==
+// An entry of installed_plugins.json is malformed unless it has a non-blank string version or installPath
+// (a null field counts as missing, a non-string or blank one is malformed).
+const entryShapeBad = (entry) => {
+  const fields = [entry?.version, entry?.installPath];
+  return (
+    fields.every((field) => field == undefined) ||
+    fields.some((field) => field != undefined && (typeof field != 'string' || !field.trim()))
+  );
+};
+// == path resolver (shared) ==
+// resolveFrom(...parts): the parts joined as the file system would resolve them, relative ones against the
+// working directory. On win32 Windows folds .. as text, so path.resolve is used.
+const resolveFrom = (...parts) => {
+  if (process.platform == 'win32') return path.resolve(...parts);
+  const lastAbsolute = parts.map((part) => path.isAbsolute(part)).lastIndexOf(true);
+  return (lastAbsolute < 0 ? [process.cwd(), ...parts] : parts.slice(lastAbsolute)).join(path.sep);
+};
+// linkChain(start) reads a path one component at a time, as the file system does, and returns every path it goes
+// through: each link on the way and the end of the chain. A .. after a link names the parent of the link target,
+// a .. inside a link target is read the same way. unreadable is true when a component cannot be examined or when
+// more than 40 links are followed (a loop). A component that does not exist ends the chain without being unreadable.
+const linkChain = (start) => {
+  const paths = [];
+  let unreadable = false;
+  let current = resolveFrom(start);
+  for (let hop = 0; hop < 41; hop++) {
+    const root = path.parse(current).root;
+    const parts = current.slice(root.length).split(path.sep).filter((part) => part && part != '.');
+    let at = root;
+    let next = null;
+    for (let i = 0; i < parts.length && !next; i++) {
+      if (parts[i] == '..') {
+        at = path.dirname(at);
+        continue;
+      }
+      at = path.join(at, parts[i]);
+      let info;
+      try {
+        info = fs.lstatSync(at);
+      } catch (error) {
+        if (!(error && ['ENOENT', 'ENOTDIR'].includes(error.code))) unreadable = true;
+        paths.push(path.resolve(at, ...parts.slice(i + 1)));
+        return { paths, unreadable };
+      }
+      if (info.isSymbolicLink()) {
+        const rest = parts.slice(i + 1);
+        const dots = rest.indexOf('..');
+        paths.push(path.join(at, ...(dots < 0 ? rest : rest.slice(0, dots))));
+        try {
+          next = resolveFrom(path.dirname(at), fs.readlinkSync(at), ...rest);
+        } catch (error) {
+          unreadable = true;
+          return { paths, unreadable };
+        }
+      }
+    }
+    if (!next) {
+      paths.push(at);
+      return { paths, unreadable };
+    }
+    current = next;
+  }
+  return { paths, unreadable: true };
+};
+
+// == messages (the only part that differs between the two cache commands) ==
+const messages = {
+  movedEnd: '',
+  allProtected: 'Nothing to move: keep every pinned version; do not prune cache versions by age, lexical/version order, or presence of a newer version',
+  noPin: 'Nothing moved: no pinned version found; manual review instead of pruning',
+  noCache: 'No cache to clean',
+  footer: '',
+};
+
+// == repair constants (shared) ==
+// Moves the cached plugin versions that nothing protects to plugins/backups, never deletes one. A version is
+// protected when installed_plugins.json pins it, when the installPath of another plugin or a plugin root variable
+// points into it, or when a running session holds it (an occupancy record). A source that cannot be read
+// completely, or a version whose identity cannot be established, makes the command move nothing.
+const backups = path.join(configDir, 'plugins', 'backups', 'oh-my-claudecode');
+const registryFile = path.join(configDir, 'plugins', 'installed_plugins.json');
+const occupancyDir = path.join(configDir, '.omc', 'cache-occupancy');
+const STOP_UNREADABLE =
+  'Nothing moved: installed_plugins.json, the cache occupancy records, the plugin root variables or a path in them could not be read completely; fix that first, then run this again';
+const STOP_NO_IDENTITY =
+  'Nothing moved: identity unavailable (the file system reports no inode, or a stat failed, for a cache version or for a path that may protect one, and the spelling of that path does not place it inside a version, so it cannot be ruled out as another name of a cached version); keep the cache and every path that points into it spelled alike, or use a file system that reports inodes, then run this again';
+// The same threshold as STALE_THRESHOLD_MS in src/utils/paths.ts, which SessionStart's own cleanup uses.
+const FRESH_MS = 600000;
+
+// == repair registry (shared) ==
+// pins: the entries of the supported plugin IDs. other: the installPath of every entry of another plugin. ids: the
+// supported IDs. unreadable: the file is not a regular file, is not JSON of the expected shape, or holds a
+// malformed entry anywhere. A missing file is no pins and not unreadable.
+const readRegistry = () => {
+  let unreadable = false;
+  let pins = [];
+  let other = [];
+  let ids = [];
+  try {
+    const json = JSON.parse(readFile(registryFile));
+    const plugins = json ? json.plugins ?? json : 0;
+    if (!plugins || typeof plugins != 'object' || Array.isArray(plugins)) throw 0;
+    for (const [key, entries] of Object.entries(plugins)) {
+      const id = key.toLowerCase();
+      const isSupported = OMC_IDS.includes(id);
+      if (!Array.isArray(entries) || !entries.length || (!isSupported && id.includes('oh-my-claudecode'))) throw 0;
+      if (isSupported) ids.push(id);
+      for (const entry of entries) {
+        if (entryShapeBad(entry) || (isSupported && entry.version != undefined && !semver(entry.version))) throw 0;
+        if (!isSupported) {
+          if (typeof entry.installPath == 'string') other.push(entry.installPath.trim());
+        } else pins.push(entry);
+      }
+    }
+  } catch (error) {
+    pins = [];
+    other = [];
+    ids = [];
+    unreadable = !(error && error.code == 'ENOENT');
+  }
+  return { unreadable, pins, other, ids };
+};
+
+// == occupancy records (shared) ==
+// A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time
+// differs from the recorded one, or the record is dated more than 5 minutes in the future.
+const ownerGone = (record) => {
+  if (Number.isSafeInteger(record.pid) && record.pid > 0) {
+    try {
+      process.kill(record.pid, 0);
+    } catch (error) {
+      if (!(error && error.code == 'EPERM')) return true;
+    }
+    if (process.platform === 'linux' && typeof record.processStartIdentity == 'string' && record.processStartIdentity) {
+      let stat = '';
+      try {
+        stat = fs.readFileSync('/proc/' + record.pid + '/stat', 'utf8');
+      } catch (error) {}
+      const close = stat.lastIndexOf(')');
+      const start = close < 0 ? '' : stat.substring(close + 2).split(' ')[19];
+      if (start && start != record.processStartIdentity) return true;
+    }
+  }
+  return typeof record.updatedAt == 'string' && Date.parse(record.updatedAt) - Date.now() > 300000;
+};
+
+// == modification dates (shared) ==
+// The newest modification time of an entry and of everything below it, at any depth. A link is dated itself and
+// never followed. Throws when more than 20000 entries are found or an entry cannot be read.
+const newestChange = (root) => {
+  let newest = 0;
+  let count = 0;
+  const queue = [root];
+  for (let i = 0; i < queue.length; i++) {
+    const entry = queue[i];
+    const stat = fs.lstatSync(entry);
+    newest = Math.max(newest, stat.mtimeMs);
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(entry)) {
+        if (++count > 20000) throw 0;
+        queue.push(path.join(entry, name));
+      }
+    }
+  }
+  return newest;
+};
+
+// == protection (shared) ==
+// protectionOf(dir, versions) reads every source of protection again and returns { unreadable, noIdentity, pinned,
+// kept }: unreadable and noIdentity stop the command, pinned are the versions the registry pins (or a path of a pin
+// reaches), kept are all protected versions. dir is the cache directory and versions the version directory names in it.
+const protectionOf = (dir, versions) => {
+  let unreadable = false;
+  const chainOf = (target) => {
+    const chain = linkChain(target);
+    if (chain.unreadable) unreadable = true;
+    return chain.paths;
+  };
+  // The identity of a path without following a link at its end, and whether a path has none (inode 0, or a stat
+  // that failed for another reason than the path not existing).
+  const identityOf = (target) => {
+    try {
+      const stat = fs.lstatSync(target, { bigint: true });
+      return stat.ino ? stat.dev + ':' + stat.ino : '';
+    } catch (error) {
+      return '';
+    }
+  };
+  const lacksIdentity = (target) => {
+    try {
+      return !fs.lstatSync(target, { bigint: true }).ino;
+    } catch (error) {
+      return !(error && ['ENOENT', 'ENOTDIR'].includes(error.code));
+    }
+  };
+  const isUnder = (target, parent) => {
+    target = path.resolve(target);
+    parent = path.resolve(parent);
+    return target === parent || target.startsWith(parent + path.sep);
+  };
+  // win32 only: the SessionStart publisher stores the plugin root of a record in lower case.
+  const isUnderLowercase = (target, parent) => {
+    if (process.platform != 'win32') return false;
+    target = path.resolve(target).toLowerCase();
+    parent = path.resolve(parent).toLowerCase();
+    return target === parent || target.startsWith(parent + path.sep);
+  };
+  const realDir = chainOf(dir).pop();
+  // The plugin root variables: two different existing directories cannot be told apart from a conflict.
+  const rootVars = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT]
+    .map((root) => (root || '').trim())
+    .filter(Boolean);
+  if (
+    rootVars.length > 1 &&
+    rootVars.every((root) => {
+      try {
+        return fs.statSync(root).isDirectory();
+      } catch (error) {
+        return false;
+      }
+    })
+  ) {
+    const first = chainOf(rootVars[0]).pop();
+    const second = chainOf(rootVars[1]).pop();
+    if (path.resolve(first) != path.resolve(second) && !(identityOf(first) && identityOf(first) == identityOf(second))) unreadable = true;
+  }
+  const registry = readRegistry();
+  unreadable = unreadable || registry.unreadable;
+  let names = [];
+  try {
+    names = fs.readdirSync(occupancyDir);
+  } catch (error) {
+    unreadable = unreadable || !(error && error.code == 'ENOENT');
+  }
+  // The plugin roots of the records of running sessions.
+  const held = [];
+  for (const name of names) {
+    if (name.length == 69 && /^[a-f0-9]{64}[.]json/.test(name)) {
+      try {
+        if (!fs.lstatSync(path.join(occupancyDir, name)).isFile()) continue;
+        const record = JSON.parse(fs.readFileSync(path.join(occupancyDir, name), 'utf8'));
+        if (ownerGone(record)) continue;
+        if (typeof record.pluginRoot != 'string' || !record.pluginRoot.trim()) throw 0;
+        held.push(record.pluginRoot, path.resolve(record.pluginRoot));
+      } catch (error) {
+        if (!(error && error.code == 'ENOENT')) unreadable = true;
+      }
+    }
+  }
+  // The paths that pin: the directory of every pinned version (as written and without a leading v) that exists or
+  // may exist, and every installPath of a pin.
+  const pinPaths = [];
+  for (const pin of registry.pins) {
+    const version = pin.version?.trim();
+    for (const name of version ? [...new Set([version, dropV(version)])] : []) {
+      const listed = versions.find((x) => x === name);
+      const written = dir + path.sep + name;
+      if (listed) pinPaths.push(path.join(dir, listed));
+      else if (identityOf(written) || lacksIdentity(written)) pinPaths.push(written);
+    }
+    if (pin.installPath != undefined) pinPaths.push(pin.installPath.trim());
+  }
+  const pinChains = pinPaths.flatMap(chainOf);
+  const otherChains = [...registry.other, ...held, ...rootVars].flatMap(chainOf);
+  // The versions a list of paths protects: a path that is, or lies inside, the version directory (as written or
+  // through the real cache path), or an ancestor of a path with the identity of the version directory. lowercase
+  // are the paths of records, which on win32 also protect by a lower-case comparison.
+  const versionsReachedBy = (chains, lowercase = []) => {
+    const ids = new Set();
+    for (let up of chains) {
+      for (;;) {
+        const id = identityOf(up);
+        if (id) ids.add(id);
+        const parent = path.dirname(up);
+        if (parent == up) break;
+        up = parent;
+      }
+    }
+    return versions.filter(
+      (name) =>
+        chains.some((target) => isUnder(target, path.join(dir, name)) || isUnder(target, path.join(realDir, name))) ||
+        ids.has(identityOf(path.join(dir, name))) ||
+        lowercase.some(
+          (target) => isUnderLowercase(target, path.join(dir, name)) || isUnderLowercase(target, path.join(realDir, name)),
+        ),
+    );
+  };
+  const pinned = versionsReachedBy(pinChains);
+  const kept = versionsReachedBy([...pinChains, ...otherChains], held);
+  // When the file system reports no identity for a version directory, a protecting path has to be placed by its
+  // exact text inside a version (or above the cache directory) or it may be another name of a cached version.
+  const resolvedHeld = held.map((target) => path.resolve(target));
+  const anyVersionLacksIdentity = versions.some((name) => lacksIdentity(path.join(dir, name)));
+  const placed = (target, isHeld) =>
+    versions.some((name) =>
+      [dir, realDir].some((parent) => {
+        const version = path.join(parent, name);
+        return isUnder(target, version) || (isHeld && isUnderLowercase(target, version));
+      }),
+    ) ||
+    isUnder(dir, target) ||
+    isUnder(realDir, target) ||
+    path.dirname(target) == target;
+  const noIdentity =
+    !unreadable &&
+    [...pinChains, ...otherChains].some((target) => {
+      let isHeld = resolvedHeld.includes(target);
+      for (;;) {
+        if (lacksIdentity(target)) return !placed(target, isHeld);
+        if (identityOf(target)) return anyVersionLacksIdentity && !placed(target, isHeld);
+        const parent = path.dirname(target);
+        if (parent == target) return false;
+        target = parent;
+        isHeld = false;
+      }
+    });
+  return { unreadable, noIdentity, pinned, kept };
+};
+
+// == repair run (shared) ==
+// One cache directory: print what is protected, move the free versions to the backup directory. Returns true when
+// the whole command has to stop.
+let moveStarted = false;
+const cleanCache = (market, dir, lead) => {
+  let moved = 0;
+  let skipped = 0;
+  let fresh = 0;
+  let unjudged = 0;
+  try {
+    const versions = fs.readdirSync(dir).filter(isVersionDir);
+    const state = protectionOf(dir, versions);
+    if (state.unreadable) {
+      console.log(STOP_UNREADABLE);
+      return true;
+    }
+    if (state.noIdentity) {
+      console.log(lead + STOP_NO_IDENTITY);
+      return true;
+    }
+    const free = versions.filter((name) => !state.kept.includes(name));
+    if (state.kept.length) {
+      console.log(lead + 'Kept protected cache versions (pinned in installed_plugins.json or in use by a running session):', state.kept.join(', '));
+    }
+    if (state.pinned.length && free.length) {
+      moveStarted = true;
+      fs.mkdirSync(backups, { recursive: true });
+      free.forEach((name) => {
+        let newest;
+        try {
+          newest = newestChange(path.join(dir, name));
+        } catch (error) {
+          unjudged++;
+          return;
+        }
+        if (Date.now() - newest < FRESH_MS) {
+          fresh++;
+          return;
+        }
+        // Everything is read again just before the move: a version that became protected is skipped.
+        const again = protectionOf(dir, versions);
+        if (again.unreadable || again.noIdentity || !again.pinned.length || again.kept.includes(name)) {
+          skipped++;
+          return;
+        }
+        fs.renameSync(path.join(dir, name), path.join(backups, (market == 'omc' ? '' : market + '-') + name + '-' + Date.now()));
+        moved++;
+      });
+      console.log(lead + 'Moved', moved, 'unprotected version(s) to', backups + messages.movedEnd);
+      if (skipped) console.log(lead + 'Skipped', skipped, 'version(s) that became protected or unreadable just before the move');
+      if (unjudged) {
+        console.log(lead + 'Could not judge', unjudged, 'version(s) (more than 20000 entries, or an entry could not be read), so they were left in place');
+      }
+      if (fresh) {
+        console.log(lead + 'Left', fresh, 'version(s) modified in the last 10 minutes alone: an update may still be installing them; run this again later');
+      }
+    } else {
+      console.log(lead + (state.pinned.length ? messages.allProtected : messages.noPin));
+    }
+  } catch (error) {
+    const code = error && error.code;
+    console.log(
+      lead +
+        (moveStarted
+          ? 'Cache move failed (' + moved + ' moved before the error): ' + error.message
+          : code == 'ENOENT'
+            ? messages.noCache + (market == 'omc' ? '' : ' in plugins/cache/' + market)
+            : 'Nothing moved: could not read ' + dir + ' (' + (code || 'unknown error') + ')'),
+    );
+    return true;
+  }
+  return false;
+};
+// Every cache directory that exists (or cannot be told from one) is handled in turn; with none the first
+// marketplace is still tried, so that a missing cache is reported.
+const registry = readRegistry();
+const markets = registry.ids.length ? [...new Set(registry.ids.map(marketplaceOf))] : ['omc'];
+const caches = markets
+  .map((market) => [market, cacheDirOf(market)])
+  .filter(([, dir]) => {
+    try {
+      fs.statSync(dir);
+      return true;
+    } catch (error) {
+      return !(error && error.code == 'ENOENT');
+    }
+  });
+if (!caches.length) caches.push([markets[0], cacheDirOf(markets[0])]);
+if (registry.unreadable) console.log(STOP_UNREADABLE);
+else {
+  for (const [market, dir] of caches) {
+    if (cleanCache(market, dir, caches.length > 1 ? market + ': ' : '')) break;
+  }
+}
+if (messages.footer) console.log(messages.footer);
+"
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md

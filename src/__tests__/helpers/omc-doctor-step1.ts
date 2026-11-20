@@ -2,10 +2,10 @@ import { expect } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { read, runCommand, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './omc-doctor-cache-fixture.js';
+import { commandWith, runCommand, writeCaseFoldPreload, writeRegistry, writeRegistryFile } from './omc-doctor-cache-fixture.js';
 
 // The Step 1 command of the omc-doctor skill (the line that prints Plugin, Channel, Installed, Latest and Updater).
-export const versionCommand = read('skills/omc-doctor/SKILL.md').split('\n').find((l) => l.startsWith('node -e ') && l.includes("'Updater: "));
+export const versionCommand = commandWith("'Updater: ");
 
 export type Profile = {
   plugins?: Record<string, unknown> | ((dir: string) => Record<string, unknown>);

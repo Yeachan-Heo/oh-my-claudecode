@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ageVersions, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { ageVersions, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, scriptOf, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
 // @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
@@ -15,11 +15,7 @@ import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 const POSIX = process.platform !== 'win32';
 
 describe('omc-doctor: one path resolver in Step 1 and in both cache commands', () => {
-  const resolverOf = (line: string) => {
-    const from = line.indexOf('rs=(...a)=>');
-    const to = line.indexOf('u=nx}bad=true;return t}', from);
-    return from < 0 || to < 0 ? '' : line.slice(from, to + 'u=nx}bad=true;return t}'.length);
-  };
+  const resolverOf = (command: string) => sharedSections(command).get('path resolver') ?? '';
 
   test('the resolver is the same text in every command that reads a path from the registry, the records or the root variables', () => {
     expect(commands).toHaveLength(2);
@@ -30,9 +26,10 @@ describe('omc-doctor: one path resolver in Step 1 and in both cache commands', (
   });
 
   test('no command folds `..` as text before it follows a link or resolves a path with the JavaScript realpath', () => {
-    for (const line of [versionCommand ?? '', ...commands]) {
-      expect(line).not.toContain('realpathSync');
-      expect(line).not.toContain('p.resolve(s)');
+    for (const command of [versionCommand ?? '', ...commands]) {
+      const code = scriptOf(command).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+      expect(code).not.toContain('realpathSync');
+      expect(code).not.toMatch(/path\.resolve\(start\)/);
     }
   });
 });

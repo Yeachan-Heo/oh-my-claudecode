@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, sharedSections, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
 
 // A `version` that a registry entry of OMC claims, and the version read from the `package.json` or `plugin.json` an entry
@@ -17,7 +17,7 @@ describe('omc-doctor: the version fields of the registry entries of OMC are vali
   const malformed = [5, '   ', '', null, ['5.9.0'], { v: '5.9.0' }, true];
 
   describe('one definition', () => {
-    const definition = (line: string) => /sv=x=>\{const t=x\.trim\(\);return[^]*?\?nv\(t\):''\}/.exec(line)?.[0] ?? '';
+    const definition = (command: string) => (sharedSections(command).get('version grammar') ?? '').split('\n').filter((l) => l.startsWith('const grammar = ') || l.trimStart().startsWith('const grammar = ')).join('\n');
     test('the grammar is the same text in Step 1 and in both cache commands', () => {
       expect(commands).toHaveLength(2);
       const texts = [versionCommand ?? '', ...commands].map(definition);

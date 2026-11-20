@@ -6,16 +6,77 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-export const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf8');
+export const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 
-// The two `node -e` cache commands of the omc-doctor skill.
-export const commands = read('skills/omc-doctor/SKILL.md')
-  .split('\n')
-  .filter((l) => l.startsWith('node -e ') && l.includes("'installed_plugins.json'") && l.includes("'oh-my-claudecode'") && l.includes("'backups'"));
+// Every `node -e "..."` command of the skill, as written: a one-line command (the opt-out probe) or the multi-line
+// form, `node -e "`, the script, then a line holding the closing quote.
+export function nodeCommandsOf(text: string): string[] {
+  const lines = text.split('\n');
+  const found: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('node -e "')) continue;
+    if (lines[i] !== 'node -e "') {
+      found.push(lines[i]);
+      continue;
+    }
+    const start = i;
+    while (i < lines.length && lines[i] !== '"') i++;
+    found.push(lines.slice(start, i + 1).join('\n'));
+  }
+  return found;
+}
 
-// The JavaScript of a `node -e "..."` line. It is run by Node directly, without a shell, so the
-// same case runs on every platform; one POSIX test below runs the unchanged line through bash.
-export const scriptOf = (command: string) => command.slice('node -e "'.length, -1);
+export const skillText = read('skills/omc-doctor/SKILL.md');
+export const skillCommands = nodeCommandsOf(skillText);
+
+// The text of the skill with every `node -e` command folded into one placeholder line: the prose and the shell blocks,
+// for the tests that look at what is written around the commands. A line that starts with `node -e ` is a command.
+export const proseOf = (text: string = skillText): string => {
+  let out = text;
+  for (const command of nodeCommandsOf(text)) out = out.replace(command, 'node -e "<script>"');
+  return out;
+};
+
+// The command of a step, found by a phrase only that command prints.
+export function commandWith(phrase: string, text: string = skillText): string | undefined {
+  const hits = nodeCommandsOf(text).filter((c) => c.includes(phrase));
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
+// The two `node -e` cache commands of the omc-doctor skill: the outdated-plugin one and the stale-cache one.
+export const commands = skillCommands.filter((c) => c.includes("'installed_plugins.json'") && c.includes("'oh-my-claudecode'") && c.includes("'backups'"));
+
+// The JavaScript of a `node -e "..."` command. It is run by Node directly, without a shell, so the
+// same case runs on every platform; one POSIX test below runs the unchanged command through bash.
+export const scriptOf = (command: string) =>
+  command.startsWith('node -e "\n') ? command.slice('node -e "\n'.length, -'\n"'.length) : command.slice('node -e "'.length, -1);
+
+// A script as one line: whole-line comments and indentation dropped, the lines joined by one space. The one-line opt-out
+// probe carries the shared config dir section in this form.
+export const flatCode = (code: string): string =>
+  code.split('\n').filter((line) => !/^\s*\/\//.test(line)).map((line) => line.trim()).filter(Boolean).join(' ');
+
+// The sections of a script that are marked as shared: `// == <name> (shared) ==` up to the next `// == ... ==` line.
+// A shared section has the same text in every command that carries it; a test keeps the copies equal.
+export function sharedSections(command: string): Map<string, string> {
+  const sections = new Map<string, string>();
+  let name: string | null = null;
+  let acc: string[] = [];
+  const close = () => {
+    if (name !== null) sections.set(name, acc.join('\n').trimEnd());
+  };
+  for (const line of scriptOf(command).split('\n')) {
+    const header = /^\/\/ == (.+) ==$/.exec(line);
+    if (header) {
+      close();
+      name = header[1].endsWith(' (shared)') ? header[1].slice(0, -' (shared)'.length) : null;
+      acc = [];
+    }
+    if (name !== null) acc.push(line);
+  }
+  close();
+  return sections;
+}
 
 // Preload scripts (--require) change the process the command runs in, e.g. to report another platform.
 export function runCommand(command: string, configDir: string, options: { env?: Record<string, string>; preloads?: string[]; timeout?: number } = {}) {
