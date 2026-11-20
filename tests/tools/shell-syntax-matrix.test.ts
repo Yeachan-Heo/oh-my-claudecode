@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { classifyCommand, isMutation } from '../../tools/diagnostics/check_classifier.mjs';
@@ -15,16 +16,20 @@ import { classifyCommand, isMutation } from '../../tools/diagnostics/check_class
 //   commit   user_prohibitions_after_compaction: `git commit` is a commit
 //   consult  advisor_event_coverage: `ask-advisor` is a consultation (--consult-command)
 //   metrics  executor_outcome_metrics: `pytest` is a passed test run and `ask-advisor` a consultation (--advisor-pattern)
+//   readonly user_prohibitions_after_compaction: `rm -rf build` makes the call state-changing, so it is not read-only
 //
-// A launch wrapper is read by some tools and not by others; the cells below pin what each tool does today (the
-// README lists it), so a change of that reading shows up here as one row to flip.
+// A row of the generated kind (every option of every wrapper, the `stop` options, the unknown options, `--` and the read-only
+// column) fails on the previous reading of the wrappers; the hand-written rows before them hold for the older readings too and stay
+// as guards. Every launch wrapper of the table is read by every reading; the rows for each of its options are generated from the
+// table text in check_classifier.mjs. A wrapper that runs no command, and an option that is not in the table, are pinned
+// by the rows of their own (the README lists them), so a change of that reading shows up here as one row to flip.
 
 const TOOLS = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'tools', 'diagnostics');
 const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
 
-type Column = 'check' | 'write' | 'commit' | 'consult' | 'metrics';
+type Column = 'check' | 'write' | 'commit' | 'consult' | 'metrics' | 'readonly';
 type Reads = Record<Column, boolean>;
-const ALL: Reads = { check: true, write: true, commit: true, consult: true, metrics: true };
+const ALL: Reads = { check: true, write: true, commit: true, consult: true, metrics: true, readonly: true };
 const except = (...columns: Column[]): Reads => ({ ...ALL, ...Object.fromEntries(columns.map((column) => [column, false])) });
 // advisor_event_coverage reads the first command of the text only, so a command after `;`, `&&` or a newline is no consultation.
 const FIRST_COMMAND_ONLY = ['consult'] as const;
@@ -51,6 +56,9 @@ const PREFIXES: Array<[string, Reads]> = [
   ['sudo A=1 ', ALL], ['> out.log sudo ', ALL], ['sudo > out.log ', ALL],
   ['sudo env A=1 nohup ', ALL], ['time sudo ', ALL], ['env sudo ', ALL],
   ['command nohup ', ALL],
+  // `--` ends the options of a wrapper, and the command stands behind it
+  ['sudo -- ', ALL], ['env -- ', ALL], ['nice -- ', ALL], ['command -- ', ALL], ['nohup -- ', ALL], ['time -- ', ALL], ['exec -- ', ALL], ['timeout -- 5 ', ALL],
+  ['sudo -u root -- ', ALL], ['env -i -- ', ALL],
 ];
 
 // The command words each reading looks for, as the text that follows the prefix.
@@ -60,6 +68,7 @@ const WORDS: Record<Column, string[]> = {
   commit: ['git commit -m x'],
   consult: ['ask-advisor --ask'],
   metrics: ['pytest', 'ask-advisor --ask'],
+  readonly: ['rm -rf build'],
 };
 
 // Negative rows: the command word is only an argument or the target of a redirection, so no reading may see it.
@@ -71,13 +80,21 @@ const ARGUMENT_OF: string[] = [
   '> out.log echo hi > README.md ', 'echo $(date) ', 'echo `date` ', 'echo $(a b) ', 'echo "x" ', 'echo x $(date) ', 'A=$(date) echo hi > README.md ',
   'sudo echo hi > README.md ', 'env A=1 echo hi > README.md ', 'time echo hi > README.md ',
 ];
-// Negative rows for the launch wrappers: an option that is not in the table of options, the end-of-options word `--`, a timeout with
-// no duration and a bad one end the reading, so the wrapper stays the program and no reading sees the command behind it.
-const UNREAD_WRAPPER: string[] = [
-  'sudo -n ', 'sudo -- ', 'sudo -g adm ', 'sudo -u root -n ', 'timeout --foreground 5 ', 'timeout -v 5 ', 'timeout ', 'timeout 5x ', 'timeout -s ',
-  'nice -5 ', 'nice -- ', 'env -S ', 'env -- ', 'env -C /tmp ', 'time -f %e ', 'command -v ', 'command -- ', 'exec -c ', 'nohup -- ', 'nohup -n ',
-  'A=1 sudo -n ', 'sudo -n A=1 ', '> out.log sudo -n ', 'sudo -E -n ', 'time sudo -n ', 'env A=1 sudo -n ', 'sudo timeout ', 'nice -n 5 timeout --foreground 5 ',
+// Negative rows for the launch wrappers: no command runs behind the wrapper (a `stop` option that lists or describes, a bad duration, an
+// assignment behind a wrapper that takes none, a timeout with no duration), so no reading sees the command behind it. The rows for the
+// `stop` options and the assignments of every wrapper are generated from the table below.
+const NO_COMMAND_RUNS: string[] = [
+  'timeout ', 'timeout 5x ', 'timeout 5S ', 'timeout abc ', 'timeout --foreground ',
+  'A=1 sudo -l ', '> out.log sudo -l ', 'sudo -E -l ', 'time sudo -l ', 'env A=1 sudo -l ', 'sudo timeout ', 'nice -n 5 timeout 5x ', 'sudo -l -- ', 'sudo -nl ',
+  'nohup A=1 ', 'timeout 5 A=1 ', 'nice A=1 ', 'command A=1 ', 'exec A=1 ', 'sudo nohup A=1 ',
 ];
+// A value option with no value takes the command word as its value (`sudo -u rm`), and `--` after the duration is the command itself; the
+// word behind is then no command of the table, and the judgement of the first word (readonly) sees a word that is not read-only.
+const EATS_THE_COMMAND: string[] = ['timeout -s ', 'timeout 5 -- ', 'nice -n ', 'exec -a ', 'sudo -u ', 'env -u '];
+// An option that is not in the table: the readings that claim a check, a consultation or a test run read nothing; the readings that look for
+// a command that writes or commits, and the read-only judgement, skip the option as a flag and find the command behind it.
+const UNKNOWN_OPTION: string[] = ['sudo -z ', 'sudo --no-such-option ', 'nohup -x ', 'timeout --no-such 5 ', 'nice -z ', 'env -z ', 'exec -z ', 'time -z ', 'command -z ', 'sudo -E -z '];
+const SKIPS_UNKNOWN_OPTION: Column[] = ['write', 'commit', 'readonly'];
 // A wrapper with no command behind it is no command at all.
 const BARE_WRAPPER: string[] = ['sudo', 'nohup', 'time', 'command', 'exec', 'nice', 'env', 'env A=1', 'timeout', 'timeout 5', 'sudo -u root', 'sudo -E', 'nice -n 5', 'exec -a x', 'sudo env A=1 nohup'];
 // The command word itself is the target of the redirection: `echo hi > git commit` runs echo and writes a file named git.
@@ -106,22 +123,57 @@ const HEREDOC_BODY: Array<(word: string) => string> = [
 
 interface Case { command: string; word: string; want: boolean; row: string }
 
+// The table of launch wrappers is the text in check_classifier.mjs (the same text is in the Python tools, see launch-wrapper-table.test.ts).
+// A prefix is generated for every option of every wrapper, in each of its forms, and for each kind of option the row says what is read.
+function wrapperTable() {
+  const text = /const LAUNCH_TABLE_TEXT = `([^`]*)`;/.exec(readFileSync(join(TOOLS, 'check_classifier.mjs'), 'utf8'))?.[1] ?? '';
+  const table = new Map<string, Record<string, string[]>>();
+  for (const line of text.split('\n')) {
+    const [name, kind, ...options] = line.split(' ');
+    const entry = table.get(name) ?? {};
+    entry[kind] = [...(entry[kind] ?? []), ...options];
+    table.set(name, entry);
+  }
+  const reads: string[] = [];
+  const none: string[] = [];
+  for (const [name, entry] of table) {
+    const duration = entry.duration === undefined ? ' ' : ' 5 '; // timeout: the duration stands behind the options
+    const flags = entry.flag ?? [];
+    for (const flag of flags) reads.push(`${name} ${flag}${duration}`);
+    const short = flags.filter((flag) => /^-[A-Za-z]$/.test(flag));
+    if (short.length > 1) reads.push(`${name} ${short[0]}${short[1].slice(1)}${duration}`);
+    for (const value of entry.value ?? []) {
+      if (value.startsWith('--')) reads.push(`${name} ${value} x${duration}`, `${name} ${value}=x${duration}`);
+      else reads.push(`${name} ${value} x${duration}`, `${name} ${value}x${duration}`);
+    }
+    for (const option of entry.optional ?? []) reads.push(`${name} ${option}${duration}`, `${name} ${option}=x${duration}`);
+    if (entry.number !== undefined) reads.push(`${name} -5${duration}`, `${name} --5${duration}`);
+    if (entry.assign !== undefined) reads.push(`${name} A=1${duration}`, `${name} A=1 B="c d"${duration}`);
+    else none.push(`${name}${duration}A=1 `);
+    for (const stop of entry.stop ?? []) none.push(`${name} ${stop}${duration}`);
+  }
+  return { reads, none, wrappers: [...table.keys()] };
+}
+const TABLE = wrapperTable();
+// A redirection to a file other than /dev/null (not `>&2`, which names a descriptor).
+const WRITES_A_FILE = /(?:^|[\s\d}])(?:>>|>\||&>>?|>(?![&(]))\s*(?!\/dev\/null)\S/;
+
+// A prefix that writes a file by redirection makes a command state-changing by itself; the readonly column does not use such rows.
 function casesFor(column: Column): Case[] {
   const cases: Case[] = [];
-  for (const [prefix, reads] of PREFIXES) {
-    for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want: reads[column], row: prefix });
-  }
-  const negatives = column === 'write' ? ARGUMENT_OF : [...ARGUMENT_OF, ...TARGET_IS_THE_WORD];
-  for (const prefix of negatives) {
-    for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want: false, row: prefix });
-  }
-  for (const prefix of UNREAD_WRAPPER) {
-    for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want: false, row: prefix });
-  }
+  const add = (prefix: string, want: boolean) => {
+    for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want, row: prefix });
+  };
+  for (const [prefix, reads] of PREFIXES) add(prefix, reads[column]);
+  for (const prefix of TABLE.reads) add(prefix, true);
+  for (const prefix of [...NO_COMMAND_RUNS, ...TABLE.none]) if (column !== 'readonly' || !WRITES_A_FILE.test(prefix)) add(prefix, false);
+  if (column !== 'readonly') for (const prefix of EATS_THE_COMMAND) add(prefix, false);
+  for (const prefix of UNKNOWN_OPTION) add(prefix, SKIPS_UNKNOWN_OPTION.includes(column));
   for (const command of BARE_WRAPPER) cases.push({ command, word: '', want: false, row: command });
-  for (const [prefix, reads] of AFTER_BOUNDARY) {
-    for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want: reads[column], row: prefix });
-  }
+  if (column === 'readonly') return cases; // the rows below hold a redirection, a boundary or a here-document: state-changing or text for the judgement of its first word
+  const negatives = column === 'write' ? ARGUMENT_OF : [...ARGUMENT_OF, ...TARGET_IS_THE_WORD];
+  for (const prefix of negatives) add(prefix, false);
+  for (const [prefix, reads] of AFTER_BOUNDARY) add(prefix, reads[column]);
   for (const template of HEREDOC_BODY) {
     for (const word of WORDS[column]) cases.push({ command: template(word), word, want: false, row: template('<word>') });
   }
@@ -185,10 +237,24 @@ describe('shell syntax matrix: the prefix of a command, for every tool that read
     verify('metrics', cases, pyEval('executor_outcome_metrics.py', expression, argument));
   });
 
+  it.skipIf(!hasPython3)('readonly: a command that changes state is found behind assignments, redirections and every launch wrapper, and a wrapper that runs nothing changes none', () => {
+    const cases = casesFor('readonly');
+    // got = the call is state-changing (not read-only): the command word `rm` was reached
+    const got = pyEval('user_prohibitions_after_compaction.py', '[not module.is_read_only_command(c) for c in argument]', cases.map((c) => c.command));
+    verify('readonly', cases, got);
+    // Control: the same prefixes in front of a command that only reads leave the call read-only unless the prefix writes a file.
+    const controls: Case[] = PREFIXES.map(([prefix]) => ({ command: `${prefix}ls -la`, word: 'ls -la', want: WRITES_A_FILE.test(prefix), row: prefix }));
+    verify('readonly', controls, pyEval('user_prohibitions_after_compaction.py', '[not module.is_read_only_command(c) for c in argument]', controls.map((c) => c.command)));
+  });
+
   it('the table has the rows the readings are checked with', () => {
     // A guard against an emptied table: every kind of prefix is present and every column has command words.
     expect(PREFIXES.length).toBeGreaterThan(60);
     for (const column of Object.keys(WORDS) as Column[]) expect(casesFor(column).length).toBeGreaterThan(80);
+    // Every wrapper of the table has rows, and the table is not read as empty.
+    expect(TABLE.wrappers).toEqual(['sudo', 'nohup', 'command', 'exec', 'nice', 'time', 'timeout', 'env']);
+    expect(TABLE.reads.length).toBeGreaterThan(120);
+    expect(TABLE.none.length).toBeGreaterThan(30);
     expect(TARGET_IS_THE_WORD).toContain('echo hi > ');
     expect(PREFIXES.map(([prefix]) => prefix)).toEqual(expect.arrayContaining(['A="b c" ', '2>&1 ', 'sudo ', 'A=1 > out.log ']));
   });

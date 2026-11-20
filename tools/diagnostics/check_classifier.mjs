@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.20.4';
+export const RULES_VERSION = '2026.11.20.5';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
@@ -148,85 +148,136 @@ const LEADING_REDIRECTIONS = new RegExp(String.raw`^(?:(?:${ASSIGNMENT}|${REDIRE
 const ALL_REDIRECTIONS = new RegExp(REDIRECTION, 'g');
 
 /**
- * Launch wrappers that are taken off in front of the command word, and the options each one is known by. A wrapper does not
- * change what the command behind it does, so `sudo git commit` and `timeout 60 npm test` read like the bare command. The same
- * table is in the Python tools of this directory that look for a command word (each tool is a standalone script):
- *
- *   sudo     -E | --preserve-env[=LIST]    -u USER | --user USER | --user=USER
- *   nohup    (no options)
- *   command  -p
- *   exec     -a NAME
- *   nice     -n N | -nN | --adjustment N | --adjustment=N
- *   time     -p
- *   timeout  -s SIGNAL | --signal SIGNAL | --signal=SIGNAL    -k DURATION | --kill-after DURATION | --kill-after=DURATION
- *            then DURATION (a number with an optional s, m, h or d)
- *   env      -i | --ignore-environment    -u NAME | --unset NAME | --unset=NAME    (NAME=VALUE words follow, see below)
- *
- * The options are those of `--help` of sudo 1.9.16 and GNU coreutils 9.7 (nice, timeout, env) and of `help` of bash 5.2
- * (command, exec, time). Assignments and redirections may stand in front of a wrapper and between two of them
- * (LEADING_REDIRECTIONS), which is also where the `NAME=VALUE` words of `env` and `sudo` go. An option that is not in the
- * table (`sudo -n`, `timeout --foreground`, `nice -5`, `env -S`), the end-of-options word `--`, a wrapper with no command and a
- * `timeout` with no duration end the stripping: the command is left as it is, so it is no runner and nothing is guessed. At
- * most eight wrappers in a row are taken off (stripWrappers), so a degenerate chain reads nothing.
+ * Launch wrappers that are taken off in front of the command word. A wrapper does not change what the command behind it does,
+ * so `sudo git commit` and `timeout 60 npm test` read like the bare command. The table below is the same text in
+ * check_classifier.mjs and in the Python tools of this directory that look for a command word (each tool is a standalone
+ * script, and a test compares the copies). One line per kind of option of a wrapper: `flag` takes no value, `value` takes the
+ * next word or the rest of the word (`-uroot`, `--user=root`), `optional` takes a value only as `--name=value`, `number` is an
+ * option that is a number (`nice -5`), `stop` means that the wrapper then runs no command (`sudo -l`, `command -v`, `--help`),
+ * `assign` that `NAME=VALUE` words may follow the options (`env`, `sudo`, `time`: behind the others the shell would run
+ * `NAME=VALUE`), `duration` that a duration comes before the command (a number as strtod reads it, with an optional s, m, h or
+ * d). The options are those of `--help` of sudo 1.9.16, GNU coreutils 9.7 (timeout, nice, env, nohup), bash 5.2 (`help
+ * command`, `help exec`) and GNU time (the man page of time(1)). Short options may be glued (`-nu root`), a long option may be
+ * abbreviated to a name that is unique in the wrapper (`--adj=3`), and `--` ends the options. A wrapper with no command behind
+ * it, a `stop` option, a bad duration and an assignment behind a wrapper that takes none end the reading: no command runs, so
+ * none is read. At most eight wrappers in a row are taken off. An option that is not in the table ends the reading too: the
+ * wrapper stays the program word and nothing is guessed. The finder of commands that write files (programAt) skips such an
+ * option as a flag without a value instead, so that a write behind an option the table does not know is still found.
  */
-const DURATION = /^(?:\d+\.?\d*|\.\d+)[smhd]?$/;
-const launchWrapper = ({ flags = [], values = [], optionalValue = [], duration = false }) => ({ flags: new Set(flags), values: new Set(values), optionalValue: new Set(optionalValue), duration });
-const LAUNCH_TABLE = new Map([
-  ['sudo', launchWrapper({ flags: ['-E'], values: ['-u', '--user'], optionalValue: ['--preserve-env'] })],
-  ['nohup', launchWrapper({})],
-  ['command', launchWrapper({ flags: ['-p'] })],
-  ['exec', launchWrapper({ values: ['-a'] })],
-  ['nice', launchWrapper({ values: ['-n', '--adjustment'] })],
-  ['time', launchWrapper({ flags: ['-p'] })],
-  ['timeout', launchWrapper({ values: ['-s', '--signal', '-k', '--kill-after'], duration: true })],
-  ['env', launchWrapper({ flags: ['-i', '--ignore-environment'], values: ['-u', '--unset'] })],
-]);
+const LAUNCH_TABLE_TEXT = `sudo assign
+sudo flag -A -b -B -E -H -i -k -N -n -P -S -s --askpass --background --bell --login --no-update --non-interactive --preserve-groups --reset-timestamp --set-home --shell --stdin
+sudo value -C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user
+sudo optional --preserve-env
+sudo stop -e -K -l -V -v --edit --help --list --remove-timestamp --validate --version
+nohup stop --help --version
+command flag -p
+command stop -V -v
+exec flag -c -l
+exec value -a
+nice number
+nice value -n --adjustment
+nice stop --help --version
+time assign
+time flag -a -p -q -v --append --portability --quiet --verbose
+time value -f -o --format --output
+time stop -V --help --version
+timeout duration
+timeout flag -f -p -v --foreground --preserve-status --verbose
+timeout value -k -s --kill-after --signal
+timeout stop --help --version
+env assign
+env flag - -i -S -v --debug --ignore-environment --list-signal-handling --split-string
+env value -a -C -u --argv0 --chdir --unset
+env optional --block-signal --default-signal --ignore-signal
+env stop -0 --help --null --version`;
+const LAUNCH_TABLE = new Map();
+for (const line of LAUNCH_TABLE_TEXT.split('\n')) {
+  const [name, kind, ...options] = line.split(' ');
+  const spec = LAUNCH_TABLE.get(name) ?? { flag: new Set(), value: new Set(), optional: new Set(), stop: new Set(), long: [], assign: false, duration: false, number: false };
+  if (kind === 'assign' || kind === 'duration' || kind === 'number') spec[kind] = true;
+  else for (const option of options) {
+    spec[kind].add(option);
+    if (option.startsWith('--')) spec.long.push(option);
+  }
+  LAUNCH_TABLE.set(name, spec);
+}
+/** A duration as strtod reads it (a decimal or hex number, `inf`) with an optional unit; no nested repeats, so it matches in linear time. */
+const DURATION = /^\+?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?)[smhd]?$/;
+const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
+const MAX_WRAPPERS = 8;
 
-/** The next word of `text` and the text behind it (with the blanks after the word), or null when no word is left. */
-const nextWord = (text) => {
-  const found = /^(\S+)\s*/.exec(text);
-  return found === null ? null : { word: found[1], rest: text.slice(found[0].length) };
-};
-
-/** Whether `word` is an option of the wrapper with its value glued on: `-nN`, `-uUSER`, `--user=USER`, `--preserve-env=LIST`. */
-function gluedOption(word, spec) {
+/**
+ * How many words the option `word` of the wrapper takes: 1, or 2 when its value is the next word; 0 when the wrapper then runs no
+ * command; -1 when the option is not in the table.
+ */
+function optionWidth(word, spec) {
+  if (spec.number && /^--?[0-9]+$/.test(word)) return 1;
   if (word.startsWith('--')) {
     const at = word.indexOf('=');
-    if (at === -1) return false;
-    const name = word.slice(0, at);
-    return spec.values.has(name) || spec.optionalValue.has(name);
+    const given = at === -1 ? word : word.slice(0, at);
+    const named = spec.long.includes(given) ? [given] : spec.long.filter((full) => full.startsWith(given));
+    if (named.length !== 1) return -1;
+    if (spec.stop.has(named[0])) return 0;
+    return at === -1 && spec.value.has(named[0]) ? 2 : 1;
   }
-  return word.length > 2 && word.startsWith('-') && spec.values.has(word.slice(0, 2));
+  for (let at = 1; at < word.length; at += 1) {
+    const option = `-${word[at]}`;
+    if (spec.stop.has(option)) return 0;
+    if (spec.value.has(option)) return at + 1 < word.length ? 1 : 2;
+    if (!spec.flag.has(option)) return -1;
+  }
+  return 1;
 }
 
-/** Take one launch wrapper and its options off the front of `text`; the text is returned as it is when it starts with none. */
-function stripLaunchWrapper(text) {
-  const first = nextWord(text);
-  if (first === null) return text;
-  const spec = LAUNCH_TABLE.get(baseName(first.word));
-  if (spec === undefined) return text;
-  let rest = first.rest;
+/**
+ * The index of the command word behind the launch wrapper of LAUNCH_TABLE at word `at`, or -1 when no command runs behind it.
+ * `wordAt(i)` is the word at index i, or anything but a string when the command ends there. An option that is not in the table
+ * ends the reading, or is skipped as a flag without a value when `skipUnknown` is set.
+ */
+function launchCommandIndex(wordAt, at, skipUnknown) {
+  const spec = LAUNCH_TABLE.get(baseName(wordAt(at)));
   let durations = spec.duration ? 1 : 0;
-  for (;;) {
-    const next = nextWord(rest);
-    if (next === null) return text; // a wrapper with no command behind it
-    const { word } = next;
-    if (spec.flags.has(word) || spec.optionalValue.has(word) || gluedOption(word, spec)) {
-      rest = next.rest;
-    } else if (spec.values.has(word)) {
-      const value = nextWord(next.rest);
-      if (value === null) return text;
-      rest = value.rest;
-    } else if (word.startsWith('-')) {
-      return text; // an option outside the table, or `--`
+  let options = true;
+  for (let index = at + 1; ;) {
+    const word = wordAt(index);
+    if (typeof word !== 'string') return -1;
+    if (options && word === '--') {
+      options = false;
+      index += 1;
+    } else if (options && word.startsWith('-') && (word.length > 1 || spec.flag.has(word))) {
+      let width = optionWidth(word, spec);
+      if (width < 0 && skipUnknown) width = 1;
+      if (width <= 0 || (width === 2 && typeof wordAt(index + 1) !== 'string')) return -1;
+      index += width;
     } else if (durations > 0) {
-      if (!DURATION.test(word)) return text;
+      if (!DURATION.test(word)) return -1;
       durations -= 1;
-      rest = next.rest;
+      options = false;
+      index += 1;
+    } else if (ASSIGNMENT_WORD.test(word) && !spec.assign) {
+      return -1;
     } else {
-      return rest;
+      return index; // an assignment behind a wrapper that takes one is read by the caller, which skips assignments
     }
   }
+}
+
+/** Take one launch wrapper and its options off the front of `text`; the text is returned as it is when it starts with none, or none runs a command. */
+function stripLaunchWrapper(text) {
+  const found = [];
+  const blank = /\S+/g;
+  const wordAt = (index) => {
+    while (found.length <= index) {
+      const match = blank.exec(text);
+      if (match === null) return undefined;
+      found.push(match);
+    }
+    return found[index][0];
+  };
+  const first = wordAt(0);
+  if (first === undefined || !LAUNCH_TABLE.has(baseName(first))) return text;
+  const command = launchCommandIndex(wordAt, 0, false);
+  return command === -1 ? text : text.slice(found[command].index);
 }
 
 /** Launch wrappers stripped before runner matching. */
@@ -244,7 +295,7 @@ const WRAPPERS = [
 /** Strip launch wrappers iteratively; cap the loop so a degenerate input cannot spin. */
 function stripWrappers(piece) {
   let current = piece;
-  for (let i = 0; i < 8; i += 1) {
+  for (let i = 0; i < MAX_WRAPPERS; i += 1) {
     const next = stripLaunchWrapper(WRAPPERS.reduce((acc, re) => acc.replace(re, ''), current));
     if (next === current) return next;
     current = next;
@@ -945,8 +996,7 @@ function withoutHeredocBodies(text) {
 /**
  * Words that run the command after them and are not in the table of launch wrappers (LAUNCH_TABLE): `doas`, `xargs` and the
  * reserved words that start a command (`then`, `do`, `!`, `{` ...). Each has the options that take a value (`xargs -n 1`) and
- * the positional words it takes before the command. The wrappers of the table are read by the rule of stripLaunchWrapper, in
- * programAt, so an option outside the table ends them there too.
+ * the positional words it takes before the command. The wrappers of the table are read by launchCommandIndex, in programAt.
  */
 const launcher = (values = [], positional = 0) => ({ values: new Set(values), positional });
 const LAUNCH_WRAPPERS = new Map([
@@ -971,40 +1021,13 @@ const NESTED_MAX_DEPTH = 2;
 const baseName = (word) => word.slice(word.lastIndexOf('/') + 1);
 
 /**
- * The index of the word behind the launch wrapper of LAUNCH_TABLE at `words[at]` and its options, by the rule of
- * stripLaunchWrapper; -1 when the wrapper cannot be read to its command.
- */
-function afterTableWrapper(words, at) {
-  const spec = LAUNCH_TABLE.get(baseName(words[at]));
-  let index = at + 1;
-  let durations = spec.duration ? 1 : 0;
-  for (;;) {
-    const word = words[index];
-    if (typeof word !== 'string') return -1;
-    if (spec.flags.has(word) || spec.optionalValue.has(word) || gluedOption(word, spec)) {
-      index += 1;
-    } else if (spec.values.has(word)) {
-      if (typeof words[index + 1] !== 'string') return -1;
-      index += 2;
-    } else if (word.startsWith('-')) {
-      return -1;
-    } else if (durations > 0) {
-      if (!DURATION.test(word)) return -1;
-      durations -= 1;
-      index += 1;
-    } else {
-      return index;
-    }
-  }
-}
-
-/**
  * The index of the program word of a command that starts at `start`: assignments (`FOO=1`), launch wrappers
  * with their options (`sudo -u root`, `env -i`, `timeout 5`, `xargs -n 1`) and reserved words (`then`, `do`)
  * are skipped. A word that is not a string (a boundary or the end) ends the command.
  */
 function programAt(words, start) {
   let at = start;
+  let wrappers = 0;
   for (;;) {
     const word = words[at];
     if (typeof word !== 'string') return at;
@@ -1013,8 +1036,9 @@ function programAt(words, start) {
       continue;
     }
     if (LAUNCH_TABLE.has(baseName(word))) {
-      const behind = afterTableWrapper(words, at);
-      if (behind === -1) return at; // an option outside the table, `--`, no command or no duration: the wrapper stays the program
+      wrappers += 1;
+      const behind = wrappers > MAX_WRAPPERS ? -1 : launchCommandIndex((index) => words[index], at, true);
+      if (behind === -1) return at; // no command runs behind the wrapper, or the chain is too long: the wrapper stays the program
       at = behind;
       continue;
     }

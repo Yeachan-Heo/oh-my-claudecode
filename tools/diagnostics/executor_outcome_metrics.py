@@ -59,35 +59,58 @@ DANGLING_END = re.compile(r"(?:,|&&|\|\||=>|[+\-*/%=]|[(\[{]|:|\b(?:const|let|va
 ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 REDIRECTION_OPERATOR = re.compile(r"^(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)$")
 FILE_DESCRIPTOR = re.compile(r"^(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})$")
-# Launch wrappers that are taken off in front of the command word, with the options each one is known by. The same table is in
-# check_classifier.mjs and in the other Python tools of this directory that look for a command word (each tool is a standalone
-# script):
-#
-#   sudo     -E | --preserve-env[=LIST]    -u USER | --user USER | --user=USER
-#   nohup    (no options)
-#   command  -p
-#   exec     -a NAME
-#   nice     -n N | -nN | --adjustment N | --adjustment=N
-#   time     -p
-#   timeout  -s SIGNAL | --signal SIGNAL | --signal=SIGNAL    -k DURATION | --kill-after DURATION | --kill-after=DURATION
-#            then DURATION (a number with an optional s, m, h or d)
-#   env      -i | --ignore-environment    -u NAME | --unset NAME | --unset=NAME    (NAME=VALUE words follow)
-#
-# The options are those of `--help` of sudo 1.9.16 and GNU coreutils 9.7 (nice, timeout, env) and of `help` of bash 5.2
-# (command, exec, time). An option that is not in the table (`sudo -n`, `timeout --foreground`, `nice -5`, `env -S`), the
-# end-of-options word `--`, a wrapper with no command and a `timeout` with no duration end the reading: the wrapper stays the
-# program, so the command behind it is not read and nothing is guessed.
-DURATION_ARG = re.compile(r"(?:\d+\.?\d*|\.\d+)[smhd]?\Z")
-LAUNCH_WRAPPERS = {
-    "sudo": {"flags": {"-E"}, "values": {"-u", "--user"}, "optional_value": {"--preserve-env"}, "duration": False},
-    "nohup": {"flags": set(), "values": set(), "optional_value": set(), "duration": False},
-    "command": {"flags": {"-p"}, "values": set(), "optional_value": set(), "duration": False},
-    "exec": {"flags": set(), "values": {"-a"}, "optional_value": set(), "duration": False},
-    "nice": {"flags": set(), "values": {"-n", "--adjustment"}, "optional_value": set(), "duration": False},
-    "time": {"flags": {"-p"}, "values": set(), "optional_value": set(), "duration": False},
-    "timeout": {"flags": set(), "values": {"-s", "--signal", "-k", "--kill-after"}, "optional_value": set(), "duration": True},
-    "env": {"flags": {"-i", "--ignore-environment"}, "values": {"-u", "--unset"}, "optional_value": set(), "duration": False},
-}
+# Launch wrappers that are taken off in front of the command word. A wrapper does not change what the command behind it does, so
+# `sudo pytest` and `timeout 60 pytest` read like the bare command. The table below is the same text in check_classifier.mjs and
+# in the Python tools of this directory that look for a command word (each tool is a standalone script, and a test compares the
+# copies). One line per kind of option of a wrapper: `flag` takes no value, `value` takes the next word or the rest of the word
+# (`-uroot`, `--user=root`), `optional` takes a value only as `--name=value`, `number` is an option that is a number (`nice
+# -5`), `stop` means that the wrapper then runs no command (`sudo -l`, `command -v`, `--help`), `assign` that `NAME=VALUE` words
+# may follow the options (`env`, `sudo`, `time`: behind the others the shell would run `NAME=VALUE`), `duration` that a duration
+# comes before the command (a number as strtod reads it, with an optional s, m, h or d). The options are those of `--help` of
+# sudo 1.9.16, GNU coreutils 9.7 (timeout, nice, env, nohup), bash 5.2 (`help command`, `help exec`) and GNU time (the man page
+# of time(1)). Short options may be glued (`-nu root`), a long option may be abbreviated to a name that is unique in the wrapper
+# (`--adj=3`), and `--` ends the options. A wrapper with no command behind it, a `stop` option, a bad duration and an assignment
+# behind a wrapper that takes none end the reading: no command runs, so none is read. At most eight wrappers in a row are taken
+# off. An option that is not in the table ends the reading too: the wrapper stays the program word and nothing is guessed.
+LAUNCH_TABLE_TEXT = """sudo assign
+sudo flag -A -b -B -E -H -i -k -N -n -P -S -s --askpass --background --bell --login --no-update --non-interactive --preserve-groups --reset-timestamp --set-home --shell --stdin
+sudo value -C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user
+sudo optional --preserve-env
+sudo stop -e -K -l -V -v --edit --help --list --remove-timestamp --validate --version
+nohup stop --help --version
+command flag -p
+command stop -V -v
+exec flag -c -l
+exec value -a
+nice number
+nice value -n --adjustment
+nice stop --help --version
+time assign
+time flag -a -p -q -v --append --portability --quiet --verbose
+time value -f -o --format --output
+time stop -V --help --version
+timeout duration
+timeout flag -f -p -v --foreground --preserve-status --verbose
+timeout value -k -s --kill-after --signal
+timeout stop --help --version
+env assign
+env flag - -i -S -v --debug --ignore-environment --list-signal-handling --split-string
+env value -a -C -u --argv0 --chdir --unset
+env optional --block-signal --default-signal --ignore-signal
+env stop -0 --help --null --version"""
+LAUNCH_TABLE = {}
+for _line in LAUNCH_TABLE_TEXT.split("\n"):
+    _name, _kind, *_options = _line.split(" ")
+    _spec = LAUNCH_TABLE.setdefault(_name, {"flag": set(), "value": set(), "optional": set(), "stop": set(), "long": [], "assign": False, "duration": False, "number": False})
+    if _kind in ("assign", "duration", "number"):
+        _spec[_kind] = True
+    else:
+        _spec[_kind].update(_options)
+        _spec["long"].extend(option for option in _options if option.startswith("--"))
+# A duration as strtod reads it (a decimal or hex number, `inf`) with an optional unit; no nested repeats, so it matches in linear time.
+DURATION_RE = re.compile(r"\+?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?)[smhd]?\Z")
+NUMBER_OPTION_RE = re.compile(r"--?[0-9]+\Z")
+MAX_WRAPPERS = 8
 SEGMENT_OPERATORS = ("&&", "||", ";", "|", "&")
 AGENT_FILE = re.compile(r"^agent-(.+)\.jsonl$")
 SUBAGENT_DIR = "subagents"
@@ -651,46 +674,69 @@ def command_segments(command):
     return segments
 
 
-def glued_option(word, spec):
-    """Whether word is an option of the wrapper with its value glued on: `-nN`, `-uUSER`, `--user=USER`, `--preserve-env=LIST`."""
+def option_width(word, spec):
+    """How many words the option word of the wrapper takes: 1, or 2 when its value is the next word; 0 when the wrapper then runs
+    no command; -1 when the option is not in the table."""
+    if spec["number"] and NUMBER_OPTION_RE.match(word):
+        return 1
     if word.startswith("--"):
-        name, equals, _value = word.partition("=")
-        return equals == "=" and (name in spec["values"] or name in spec["optional_value"])
-    return len(word) > 2 and word.startswith("-") and word[:2] in spec["values"]
+        given, equals, _value = word.partition("=")
+        named = [given] if given in spec["long"] else [full for full in spec["long"] if full.startswith(given)]
+        if len(named) != 1:
+            return -1
+        if named[0] in spec["stop"]:
+            return 0
+        return 2 if not equals and named[0] in spec["value"] else 1
+    for at in range(1, len(word)):
+        option = "-" + word[at]
+        if option in spec["stop"]:
+            return 0
+        if option in spec["value"]:
+            return 1 if at + 1 < len(word) else 2
+        if option not in spec["flag"]:
+            return -1
+    return 1
 
 
-def after_launch_wrapper(words, at):
-    """The index of the word behind the launch wrapper at words[at] and its options (see LAUNCH_WRAPPERS), or None when the
-    wrapper cannot be read to its command (an option outside the table, no command, no duration)."""
-    spec = LAUNCH_WRAPPERS[os.path.basename(words[at])]
-    index = at + 1
+def launch_command_index(words, at):
+    """The index of the command word behind the launch wrapper of LAUNCH_TABLE at words[at] and its options, or None when no
+    command runs behind it. A word that is None (a boundary) ends the command. An option that is not in the table ends the reading."""
+    spec = LAUNCH_TABLE[os.path.basename(words[at])]
     durations = 1 if spec["duration"] else 0
-    while True:
-        if index >= len(words):
-            return None
+    options = True
+    count = len(words)
+    index = at + 1
+    while index < count and words[index] is not None:
         word = words[index]
-        if word in spec["flags"] or word in spec["optional_value"] or glued_option(word, spec):
+        if options and word == "--":
+            options = False
             index += 1
-        elif word in spec["values"]:
-            if index + 1 >= len(words):
+        elif options and word.startswith("-") and (len(word) > 1 or word in spec["flag"]):
+            width = option_width(word, spec)
+            if width < 0:
                 return None
-            index += 2
-        elif word.startswith("-"):
-            return None
+            if width == 0 or (width == 2 and (index + 1 >= count or words[index + 1] is None)):
+                return None
+            index += width
         elif durations > 0:
-            if DURATION_ARG.match(word) is None:
+            if DURATION_RE.match(word) is None:
                 return None
             durations -= 1
+            options = False
             index += 1
+        elif ENV_ASSIGNMENT.match(word) and not spec["assign"]:
+            return None
         else:
-            return index
+            return index  # an assignment behind a wrapper that takes one is read by the caller, which skips assignments
+    return None
 
 
 def program_of_segment(words):
     """(program, arguments) after removing prefixes: environment assignments, redirections (`> out`, `2>&1`, `< in`) and the
-    launch wrappers of LAUNCH_WRAPPERS with their options. A wrapper that cannot be read stays the program."""
+    launch wrappers of LAUNCH_TABLE with their options. A wrapper behind which no command runs stays the program."""
     i = 0
     count = len(words)
+    wrappers = 0
     while i < count:
         word = words[i]
         if ENV_ASSIGNMENT.match(word):
@@ -699,8 +745,9 @@ def program_of_segment(words):
             i += 2
         elif FILE_DESCRIPTOR.match(word) and i + 1 < count and REDIRECTION_OPERATOR.match(words[i + 1]):
             i += 3
-        elif os.path.basename(word) in LAUNCH_WRAPPERS:
-            behind = after_launch_wrapper(words, i)
+        elif os.path.basename(word) in LAUNCH_TABLE:
+            wrappers += 1
+            behind = None if wrappers > MAX_WRAPPERS else launch_command_index(words, i)
             if behind is None:
                 break
             i = behind

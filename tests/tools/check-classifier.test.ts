@@ -1278,19 +1278,41 @@ it('launch wrappers are taken off with the options of the table, and the command
   }
 });
 
-it('a wrapper option outside the table, `--`, a wrapper with no command and a timeout with no duration read nothing', () => {
+it('a wrapper with no command behind it, a stop option, a bad duration and an option outside the table read nothing', () => {
   for (const command of [
-    'sudo -n npm test', 'sudo -k npm test', 'sudo -- npm test', 'sudo -u', 'sudo -u root', 'sudo', 'nohup', 'nohup -- npm test', 'nohup -x npm test', 'command -v npm test',
-    'command -- npm test', 'exec -c npm test', 'exec -a', 'nice -5 npm test', 'nice -n', 'time -v npm test', 'time -f %e npm test', 'timeout npm test', 'timeout 5', 'timeout',
-    'timeout abc npm test', 'timeout --foreground 5 npm test', 'timeout -s', 'env -S x npm test', 'env -0 npm test', 'env -- npm test', 'env -u', 'sudo -n sudo npm test',
-    'sudo -E -n npm test', 'timeout 5 sudo -n npm test',
+    'sudo -l npm test', 'sudo -v npm test', 'sudo -e npm test', 'sudo -K npm test', 'sudo -V npm test', 'sudo --help npm test', 'sudo -u', 'sudo -u root', 'sudo', 'nohup',
+    'nohup --version npm test', 'command -v npm test', 'command -V npm test', 'exec -a', 'nice -n', 'timeout npm test', 'timeout 5', 'timeout', 'timeout abc npm test',
+    'timeout 5x npm test', 'timeout 5S npm test', 'timeout -s', 'timeout 5 -- npm test', 'env -0 npm test', 'env -u', 'sudo -n sudo -l npm test',
+    // an option that is not in the table: nothing is guessed
+    'nohup -x npm test', 'sudo -z npm test', 'sudo --no-such-option npm test', 'timeout --no-such 5 npm test', 'sudo -E -z npm test', 'timeout 5 sudo -z npm test',
+    // an assignment behind a wrapper that takes none is the command the shell runs
+    'nohup A=1 npm test', 'timeout 5 A=1 npm test', 'nice A=1 npm test', 'command A=1 npm test', 'exec A=1 npm test',
   ]) {
     assert.equal(classifyCommand(command).isCheck, false, `${command}: not read`);
   }
   // The stop is at the option: what stands before it is still stripped, and the command is never guessed.
-  assert.equal(classifyCommand('FOO=1 sudo -n npm test').isCheck, false);
-  assert.equal(classifyCommand('echo hi && sudo -n npm test').isCheck, false);
-  assert.equal(classifyCommand('sudo -n npm test; npm test').isCheck, true, 'the next command of the line is read on its own');
+  assert.equal(classifyCommand('FOO=1 sudo -l npm test').isCheck, false);
+  assert.equal(classifyCommand('echo hi && sudo -l npm test').isCheck, false);
+  assert.equal(classifyCommand('sudo -l npm test; npm test').isCheck, true, 'the next command of the line is read on its own');
+});
+
+it('the options of every wrapper that do not change which command runs are taken off, `--` ends them', () => {
+  const bare = classifyCommand('npm test');
+  for (const prefix of [
+    'sudo -n ', 'sudo -H ', 'sudo -S ', 'sudo -k ', 'sudo -b ', 'sudo -A ', 'sudo -B ', 'sudo -N ', 'sudo -P ', 'sudo -i ', 'sudo -s ', 'sudo -g adm ', 'sudo -p P ', 'sudo -C 3 ',
+    'sudo -D /tmp ', 'sudo -R /srv ', 'sudo -T 60 ', 'sudo -r role ', 'sudo -t type ', 'sudo -nu root ', 'sudo -Eu root ', 'sudo -iu root ', 'sudo -- ', 'sudo -n -- ',
+    'sudo --set-home ', 'sudo --non-interactive ', 'sudo --chdir=/tmp ', 'sudo --close-from 3 ', 'sudo --group=adm ', 'sudo --prompt=P ',
+    'timeout -f 5 ', 'timeout --foreground 5 ', 'timeout -p 5 ', 'timeout --preserve-status 5 ', 'timeout -v 5 ', 'timeout -fv -s 9 5 ', 'timeout --sig=KILL 5 ', 'timeout -- 5 ',
+    'timeout 1e1 ', 'timeout inf ', 'timeout 0x5 ', 'timeout +5 ', 'nice -5 ', 'nice -10 ', 'nice --5 ', 'nice -n -5 ', 'nice --adj=3 ', 'nice -- ',
+    'env - ', 'env -C /tmp ', 'env -C/tmp ', 'env --chdir=/tmp ', 'env -a x ', 'env -v ', 'env -S ', 'env --split-string ', 'env --block-signal ', 'env --block-signal=PIPE ',
+    'env --list-signal-handling ', 'env -iu X ', 'env -- ', 'env -- A=1 ', 'exec -c ', 'exec -l ', 'exec -cl ', 'exec -a x -c ', 'exec -- ', 'command -- ', 'nohup -- ',
+    'time -- ', 'time -f %e ', 'time -o out.txt ', 'time -a ', 'time -v ', '/usr/bin/time -p ', '/usr/bin/time --verbose ', '/usr/bin/time --format=%e ',
+  ]) {
+    assert.deepEqual(classifyCommand(`${prefix}npm test`), bare, `${prefix}npm test reads like npm test`);
+  }
+  // `--` ends the options of timeout, but the duration still comes after it, and no option comes after the duration.
+  assert.equal(classifyCommand('timeout -- 5 npm test').isCheck, true);
+  assert.equal(classifyCommand('timeout 5 -- npm test').isCheck, false);
 });
 
 it('the wrapper table is read in linear time', () => {

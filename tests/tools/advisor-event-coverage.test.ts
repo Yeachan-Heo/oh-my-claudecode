@@ -370,15 +370,23 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
       'timeout 5 ', 'timeout 1.5m ', 'timeout .5 ', 'timeout -s KILL 5 ', 'timeout --signal=KILL 5 ', 'timeout -k 2 5 ', 'timeout -s KILL -k 2s 5 ', 'timeout --kill-after 2 5 ',
       'env ', 'env -i ', 'env --ignore-environment ', 'env -u NAME ', 'env --unset NAME ', 'env --unset=NAME ', 'env A=1 ', 'sudo env A=1 nohup ', 'sudo A=1 ',
       'nice -n 5 timeout 5 sudo -u root env -i A=1 ', '/usr/bin/env ', '/usr/bin/sudo ', 'sudo > out.log ', 'A="b c" sudo ', '> out.log sudo ',
+      // Options of the table that do not change which command runs, `--`, glued flags, a number as an option, a long option abbreviated.
+      'sudo -n ', 'sudo -H ', 'sudo -S ', 'sudo -k ', 'sudo -i ', 'sudo -g adm ', 'sudo -nu root ', 'sudo -Eu root ', 'sudo -- ', 'sudo --set-home ', 'sudo --chdir=/tmp ',
+      'timeout --foreground 5 ', 'timeout -v 5 ', 'timeout -fv -s 9 5 ', 'timeout --sig=KILL 5 ', 'timeout -- 5 ', 'timeout 1e1 ', 'timeout inf ', 'timeout 0x5 ',
+      'nice -5 ', 'nice --5 ', 'nice -n -5 ', 'nice --adj=3 ', 'nice -- ', 'env - ', 'env -C /tmp ', 'env --chdir=/tmp ', 'env -a x ', 'env -S ', 'env -v ', 'env -- ',
+      'command -- ', 'exec -c ', 'exec -cl ', 'nohup -- ', 'time -- ', 'time -f %e ', '/usr/bin/time -v ',
     ].map((prefix) => `${prefix}ask-advisor --ask`);
     const misses = [
-      // An option outside the table, `--`, a wrapper with no command and a timeout with no duration read nothing.
-      'sudo -n ask-advisor', 'sudo -k ask-advisor', 'sudo -- ask-advisor', 'sudo -u', 'sudo -u root', 'sudo', 'nohup', 'nohup -- ask-advisor', 'command -v ask-advisor',
-      'command -- ask-advisor', 'exec -c ask-advisor', 'exec -a', 'nice -5 ask-advisor', 'nice -n', 'time -v ask-advisor', 'time -f %e ask-advisor', 'timeout ask-advisor',
-      'timeout 5', 'timeout', 'timeout abc ask-advisor', 'timeout --foreground 5 ask-advisor', 'timeout -s', 'env -S x ask-advisor', 'env -0 ask-advisor', 'env -- ask-advisor',
-      'env -u', 'sudo -E -n ask-advisor', 'timeout 5 sudo -n ask-advisor', 'sudo echo ask-advisor', 'sudo ask-advisor-extra',
-      // Only the first command of the text counts: the wrapper is no boundary.
-      'sudo -n true; ask-advisor', 'echo hi && sudo ask-advisor',
+      // No command runs behind the wrapper: a bare wrapper, an option that only lists or describes (`stop`), a bad duration, an
+      // assignment behind a wrapper that takes none, and an option that is not in the table (nothing is guessed).
+      'sudo -l ask-advisor', 'sudo -v ask-advisor', 'sudo -e ask-advisor', 'sudo -K ask-advisor', 'sudo --help ask-advisor', 'sudo -u', 'sudo -u root', 'sudo', 'nohup',
+      'nohup --version ask-advisor', 'command -v ask-advisor', 'command -V ask-advisor', 'exec -a', 'nice -n', 'timeout ask-advisor', 'timeout 5', 'timeout',
+      'timeout abc ask-advisor', 'timeout 5x ask-advisor', 'timeout 5S ask-advisor', 'timeout -s', 'timeout 5 -- ask-advisor', 'env -0 ask-advisor', 'env -u',
+      'nohup -x ask-advisor', 'sudo -z ask-advisor', 'sudo --no-such-option ask-advisor', 'timeout --no-such 5 ask-advisor', 'sudo -E -z ask-advisor',
+      'nohup A=1 ask-advisor', 'timeout 5 A=1 ask-advisor', 'nice A=1 ask-advisor', 'command A=1 ask-advisor', 'exec A=1 ask-advisor',
+      'sudo echo ask-advisor', 'sudo ask-advisor-extra',
+      // Only the first command of the text counts: the wrapper is no boundary, and a newline ends the command.
+      'sudo -n true; ask-advisor', 'echo hi && sudo ask-advisor', 'timeout 5\nask-advisor --ask', 'sudo\nask-advisor --ask',
     ];
     const calls = [...hits, ...misses].map((command, index) => assistant(index + 1, [bash(`w${index}`, command)]));
     const report = runReport(makeTree('wrappers', { 'proj/s1.jsonl': calls }), ['--consult-command', 'ask-advisor']);
@@ -394,7 +402,7 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
       ] }),
       ['--consult-command', 'ask-advisor'],
     );
-    expect(long.consultations['bash-ask-advisor'].total).toBe(1);
+    expect(long.consultations['bash-ask-advisor'].total).toBe(2); // many options of one wrapper, and seven wrappers
     expect(Date.now() - started).toBeLessThan(20000);
   });
 

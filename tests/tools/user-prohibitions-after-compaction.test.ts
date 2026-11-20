@@ -692,11 +692,15 @@ describe('user prohibitions after compaction', () => {
       'git -C /srv/r status': true, 'git commit -m x': false, 'sed -n 1p f': true, 'sed -i s/a/b/ f': false,
       'find . -name x': true, 'find . -delete': false, "awk '{print}' f": true, "awk '{print}' f > g": false,
       'FOO=1 sudo ls': true, "python3 -c 'print(1)'": false, 'tee out.txt': false,
-      // Launch wrappers and their options of the table are skipped, also an option with a value (`sudo -u root`); an option outside
-      // the table and `--` leave the wrapper as the first word, which is no read-only command.
-      'sudo -u root cat f': true, 'sudo -E ls': true, 'sudo -n cat f': false, 'sudo -- cat f': false, 'nice -5 cat f': false, 'timeout --foreground 5 ls': false, 'nohup cat f': true, 'time -p ls': true, 'timeout 5 ls': true,
+      // Launch wrappers and their options of the table are skipped, also an option with a value (`sudo -u root`), an option that is
+      // not in the table and `--`. A wrapper behind which no command runs (a bare one, `sudo -l`, `command -v`) changes nothing.
+      'sudo -u root cat f': true, 'sudo -E ls': true, 'sudo -n cat f': true, 'sudo -- cat f': true, 'nice -5 cat f': true, 'timeout --foreground 5 ls': true,
+      'sudo --no-such-option cat f': true, 'nohup cat f': true, 'time -p ls': true, 'timeout 5 ls': true, 'time ls': true, 'sudo -l ls': true, 'command -v git': true,
       'timeout -s KILL 5 ls': true, 'nice -n 5 cat f': true, 'env -i A=1 ls': true, 'env -u A cat f': true, 'command -p ls': true, 'exec -a x ls': true,
-      'exec -a x tee f': false, 'sudo -u root rm x': false, 'sudo -u root git commit -m x': false, 'timeout 5 tee f': false, 'sudo': false, 'sudo -u root': false, 'nohup': false,
+      'exec -a x tee f': false, 'sudo -u root rm x': false, 'sudo -u root git commit -m x': false, 'timeout 5 tee f': false, 'sudo -n rm x': false,
+      'sudo': true, 'sudo -u root': true, 'nohup': true,
+      // The words that start a command, xargs and doas are not wrappers of the table: the first word decides.
+      'if grep -q x f; then rm -rf build; fi': false, '{ cat f; rm -rf build; }': false, '! grep -q x f || rm -rf build': false, 'xargs ls': false, 'doas ls': false,
       // A compound command is judged by its first word (a documented limit).
       'git status && rm x': true,
     };
@@ -1041,13 +1045,13 @@ describe('user prohibitions after compaction', () => {
     }`;
     const result = pyEval(expression, null);
     expect(result.t1 - result.t0).toBeLessThan(4);
-    // Wrappers, assignments, reserved words, unquoted separators and a nested string reach the command; words among the
-    // arguments of echo, a third level of ssh, a glued run of backslashes and an open quote do not make one.
+    // Assignments, reserved words, unquoted separators and a nested string reach the command; a run of more than eight launch
+    // wrappers does not (the first, third, fifth and sixteenth commands); words among the arguments of echo, a third level of ssh, a glued run of backslashes and an open quote do not make one.
     expect(result.answers).toEqual([
-      true, true, true, true, true, true, true, true, true, true, true, false, true, true, true, true, true, false, true, false, false,
+      false, true, false, true, false, true, true, true, true, true, true, false, true, true, true, false, true, false, true, false, false,
       true, true, true, false,
     ]);
-    expect(result.general).toEqual([false, true, false, true, true, true, false]);
+    expect(result.general).toEqual([false, true, false, true, false, true, false]); // more than eight sudo words read no command
   });
 
   it('long runs of git options and of find words match in linear time and keep their result', () => {
