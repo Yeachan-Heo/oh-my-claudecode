@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -385,5 +385,182 @@ describe.skipIf(!existsSync(ciFile))('omc-doctor: the test files run in the Wind
     const files = readdirSync(fileURLToPath(new URL('.', import.meta.url))).filter((name) => /^omc-doctor-.*\.test\.ts$/.test(name));
     expect(files.length).toBeGreaterThan(20);
     expect(files.filter((name) => !step.includes(`src/__tests__/${name}`))).toEqual([]);
+  });
+});
+
+// A cleanup that the skill calls reversible must never erase an earlier recovery copy: every backup goes to a
+// destination that does not exist yet, and an existing one stops the move. A fixed `<name>.bak` is not exclusive: a
+// per-file `mv` into it replaces a same-name copy, and `mv` of a whole root into an existing `<name>.bak` directory
+// nests the root in it instead of making the sibling copy.
+describe('omc-doctor: a backup never replaces or nests into an earlier one', { timeout: 120_000 }, () => {
+  // The legacy-content block: its definitions (what the model runs) and its template calls (the commented lines the
+  // model uncomments after the guards and the user's consent).
+  const legacy = bashBlocks().filter((block) => block.includes('# Never rm -rf here'));
+  const lines = legacy[0]?.split('\n') ?? [];
+  const defs = lines.filter((line) => line && !line.startsWith('#')).join('\n');
+  const templates = lines.filter((line) => /^# (K|mv) /.test(line)).map((line) => line.slice(2));
+  const wholeRoots = templates.filter((line) => !/[.]md\b/.test(line)).join('\n');
+  const perFile = templates.filter((line) => /deepsearch[.]md/.test(line));
+
+  const fixture = () => ({ dir: mkdtempSync(path.join(tmpdir(), 'omc-doctor-backup-')) });
+  const bash = (dir: string, script: string, env: Record<string, string> = {}) =>
+    spawnSync('bash', ['-c', script], { encoding: 'utf8', timeout: 20_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir, ...env } });
+  const put = (file: string, text: string) => {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  };
+  const backupsOf = (dir: string, root: string) => readdirSync(dir).filter((name) => name.startsWith(root + '.bak')).sort();
+  // A date that does not change, so that two calls in one shell ask for the same destination.
+  const frozenDate = () => {
+    const bin = mkdtempSync(path.join(tmpdir(), 'omc-doctor-backup-bin-'));
+    writeFileSync(path.join(bin, 'date'), '#!/bin/sh\necho 20260101000000\n');
+    chmodSync(path.join(bin, 'date'), 0o755);
+    return { bin, PATH: bin + path.delimiter + (process.env.PATH ?? '') };
+  };
+
+  test('the block documents one move for whole roots and one for single files, both through the same definition', () => {
+    expect(legacy).toHaveLength(1);
+    expect(defs).toContain('K() {');
+    expect(templates.filter((line) => /^K (agents|commands|skills)$/.test(line))).toHaveLength(3);
+    expect(perFile).toEqual(['K commands deepsearch.md']);
+  });
+
+  describe.skipIf(process.platform === 'win32')('run twice in a configuration directory', () => {
+    test('whole roots: the second run makes another sibling and leaves the first copy as it was, nothing is nested', () => {
+      const { dir } = fixture();
+      try {
+        const roots = ['agents', 'commands', 'skills'];
+        for (const text of ['first', 'second']) {
+          for (const root of roots) put(path.join(dir, root, 'OMC.md'), text);
+          const run = bash(dir, defs + '\n' + wholeRoots);
+          expect({ text, status: run.status, stderr: run.stderr }).toEqual({ text, status: 0, stderr: '' });
+          for (const root of roots) expect(existsSync(path.join(dir, root))).toBe(false);
+        }
+        for (const root of roots) {
+          const copies = backupsOf(dir, root);
+          expect({ root, copies: copies.length }).toEqual({ root, copies: 2 });
+          // Each copy is the root as it was: its file and nothing else (no root nested in the other copy).
+          const held = copies.map((name) => ({ listing: readdirSync(path.join(dir, name)), text: readFileSync(path.join(dir, name, 'OMC.md'), 'utf8') }));
+          expect({ root, held: held.map((copy) => copy.text).sort() }).toEqual({ root, held: ['first', 'second'] });
+          for (const copy of held) expect(copy.listing).toEqual(['OMC.md']);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('single files: a same-name file of an earlier run stays in the earlier copy, the custom file stays in place', () => {
+      const { dir } = fixture();
+      try {
+        for (const text of ['first', 'second']) {
+          put(path.join(dir, 'commands', 'deepsearch.md'), text);
+          put(path.join(dir, 'commands', 'custom.md'), 'mine');
+          const run = bash(dir, defs + '\n' + perFile.join('\n'));
+          expect({ text, status: run.status, stderr: run.stderr }).toEqual({ text, status: 0, stderr: '' });
+          expect(readdirSync(path.join(dir, 'commands')).sort()).toEqual(['custom.md']);
+        }
+        const copies = backupsOf(dir, 'commands');
+        expect(copies).toHaveLength(2);
+        const held = copies.map((name) => ({ listing: readdirSync(path.join(dir, name)), text: readFileSync(path.join(dir, name, 'deepsearch.md'), 'utf8') }));
+        expect(held.map((copy) => copy.text).sort()).toEqual(['first', 'second']);
+        for (const copy of held) expect(copy.listing).toEqual(['deepsearch.md']);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe.skipIf(process.platform === 'win32')('a destination that exists stops the move', () => {
+    // The same instant and the same shell ask for the same name twice: the second call must refuse.
+    test('two moves in one shell at one instant: the second refuses and moves nothing', () => {
+      const { dir } = fixture();
+      const { bin, PATH } = frozenDate();
+      try {
+        put(path.join(dir, 'agents', 'OMC.md'), 'first');
+        put(path.join(dir, 'commands', 'deepsearch.md'), 'first');
+        const run = bash(
+          dir,
+          [
+            defs,
+            'K agents; echo "first-agents=$?"',
+            'mkdir -p "$C/agents" && echo second > "$C/agents/OMC.md"',
+            'K agents; echo "second-agents=$?"',
+            'K commands deepsearch.md; echo "first-file=$?"',
+            'echo second > "$C/commands/deepsearch.md"',
+            'K commands deepsearch.md; echo "second-file=$?"',
+          ].join('\n'),
+          { PATH },
+        );
+        expect(run.stdout.trim().split('\n')).toEqual(['first-agents=0', 'second-agents=1', 'first-file=0', 'second-file=1']);
+        expect(run.stderr.match(/Nothing moved: .* exists/g)).toHaveLength(2);
+        // The second root and file are where they were, the first copies are untouched.
+        expect(readFileSync(path.join(dir, 'agents', 'OMC.md'), 'utf8')).toBe('second\n');
+        expect(readFileSync(path.join(dir, 'commands', 'deepsearch.md'), 'utf8')).toBe('second\n');
+        for (const [root, file] of [['agents', 'OMC.md'], ['commands', 'deepsearch.md']]) {
+          const copies = backupsOf(dir, root);
+          expect(copies).toHaveLength(1);
+          expect(readdirSync(path.join(dir, copies[0]))).toEqual([file]);
+          expect(readFileSync(path.join(dir, copies[0], file), 'utf8')).toBe('first');
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(bin, { recursive: true, force: true });
+      }
+    });
+
+    test.each([
+      ['a directory with a copy of an earlier cleanup', 'dir'],
+      ['a link to nothing', 'dangling link'],
+      ['a file', 'file'],
+    ])('%s at the destination: nothing is moved into it and it is not touched', (_name, kind) => {
+      const { dir } = fixture();
+      const { bin, PATH } = frozenDate();
+      try {
+        put(path.join(dir, 'agents', 'OMC.md'), 'live');
+        put(path.join(dir, 'commands', 'deepsearch.md'), 'live');
+        // The destination K asks for: the frozen date and the pid of the shell that runs it.
+        const occupy = (root: string) => {
+          const target = `"$C/${root}.bak-20260101000000-$$"`;
+          return kind === 'dir' ? `mkdir ${target} && echo earlier > ${target}/OMC.md` : kind === 'file' ? `echo earlier > ${target}` : `ln -s /nonexistent/earlier ${target}`;
+        };
+        const run = bash(dir, [defs, occupy('agents'), 'K agents; echo "agents=$?"', occupy('commands'), 'K commands deepsearch.md; echo "file=$?"'].join('\n'), { PATH });
+        expect(run.stdout.trim().split('\n')).toEqual(['agents=1', 'file=1']);
+        // K says so itself (a link to nothing would make mv fail anyway, but with a message about mv).
+        expect(run.stderr.match(/Nothing moved: .* exists/g)).toHaveLength(2);
+        expect(readFileSync(path.join(dir, 'agents', 'OMC.md'), 'utf8')).toBe('live');
+        expect(readFileSync(path.join(dir, 'commands', 'deepsearch.md'), 'utf8')).toBe('live');
+        for (const root of ['agents', 'commands']) {
+          const copies = backupsOf(dir, root);
+          expect(copies).toHaveLength(1);
+          if (kind === 'dir') expect(readdirSync(path.join(dir, copies[0]))).toEqual(['OMC.md']);
+          if (kind === 'dir') expect(readFileSync(path.join(dir, copies[0], 'OMC.md'), 'utf8')).toBe('earlier\n');
+          if (kind === 'file') expect(readFileSync(path.join(dir, copies[0]), 'utf8')).toBe('earlier\n');
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(bin, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('the CLAUDE.md fix and the stated rule', () => {
+    const section = (heading: string) => {
+      const start = skillText.indexOf(`### ${heading}`);
+      return skillText.slice(start, skillText.indexOf('\n### ', start + 1) === -1 ? undefined : skillText.indexOf('\n### ', start + 1));
+    };
+
+    test('the CLAUDE.md fix copies an existing file to a new destination before it writes', () => {
+      const fix = section('Fix: Missing/Outdated CLAUDE.md');
+      expect(fix).toContain('When that file exists, first copy it (`cp -n -p`) to a new `CLAUDE.md.bak-<UTC time>-<pid>` beside it and write only after the copy succeeded');
+      expect(fix).toContain('if it fails, leave CLAUDE.md as it is and say so');
+    });
+
+    test('the legacy section names the rule once: a destination that does not exist yet, never a fixed .bak name', () => {
+      const text = section('Fix: Legacy Curl-Installed Content');
+      expect(text).toContain('a reversible move (`mv`) to a sibling backup that does not exist yet, `<name>.bak-<UTC time>-<pid>`, made by `K` below, which stops when that name exists');
+      expect(text).toContain('a fixed `.bak` name is replaced or nested into by a second run');
+      expect(text).toContain('(`K commands <file>...`)');
+      expect(text).not.toMatch(/into `commands[.]bak\/`/);
+    });
   });
 });

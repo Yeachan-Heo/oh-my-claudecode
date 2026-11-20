@@ -243,6 +243,15 @@ const identity = (target) => {
     return '';
   }
 };
+// Whether anything is at a path, a link included (a path that cannot be examined counts as taken).
+const taken = (target) => {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch (error) {
+    return error.code != 'ENOENT';
+  }
+};
 const isDirectory = (target) => {
   try {
     return fs.statSync(target).isDirectory();
@@ -890,13 +899,17 @@ const cacheRepair = (kind) => {
             fresh++;
             return;
           }
+          // A backup goes to a destination that does not exist yet: a rename would replace an empty directory or a file
+          // of that name, and the cleanup that keeps old versions aside must never erase an earlier copy.
+          const backup = path.join(backups, (market == 'omc' ? '' : market + '-') + name + '-' + Date.now());
+          if (taken(backup)) throw new Error('the backup destination ' + backup + ' exists already, so nothing was moved to it');
           // Everything is read again just before the move: a version that became protected is skipped.
           const again = protectionOf(dir, versions);
           if (again.unreadable || again.noIdentity || !again.pinned.length || again.kept.includes(name)) {
             skipped++;
             return;
           }
-          fs.renameSync(path.join(dir, name), path.join(backups, (market == 'omc' ? '' : market + '-') + name + '-' + Date.now()));
+          fs.renameSync(path.join(dir, name), backup);
           moved++;
         });
         console.log(lead + 'Moved', moved, 'unprotected version(s) to', backups + messages.movedEnd);

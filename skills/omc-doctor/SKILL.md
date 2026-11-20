@@ -274,7 +274,7 @@ node "$S" cache-stale
 ### Fix: Missing/Outdated CLAUDE.md
 Skip this fix unless Step 4 printed `CLAUDE.md management enabled`: skip it when Step 4 reported `CLAUDE.md management disabled by claudeMdEnabled: false` or could not check the opt-out.
 
-Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`:
+Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. When that file exists, first copy it (`cp -n -p`) to a new `CLAUDE.md.bak-<UTC time>-<pid>` beside it and write only after the copy succeeded; if it fails, leave CLAUDE.md as it is and say so:
 ```
 WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
 ```
@@ -283,15 +283,17 @@ WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/ma
 
 **Legacy content guard**: Diagnostics do not authorize deletion or setup changes. Before moving anything, record the exact target, its ownership evidence, and its contents (a file list of what is being moved and why).
 Do not move entire `agents/`, `commands/`, or `skills/` roots to resolve a mixed installation. Never touch `agents/` or `skills/` roots containing any file that is not a verified OMC payload (those roots hold user custom agents and skills); with any such file present, report the mixed installation instead of fixing it.
-The only allowed cleanup is a reversible move to a sibling `.bak` copy (`mv`); deletion (`rm -rf`, `rm`) is never allowed. Move a whole root with `mv` only when every file inside matches a name shipped in the active plugin's own `agents/`, `commands/`, or `skills/` directory. A `commands/` root that also holds a custom (non-OMC) file is not moved as a whole: move only individually verified OMC-owned files, one by one, into `commands.bak/` and leave every other file in place. An `agents/` or `skills/` root that holds a custom file is only reported, as stated above: nothing in it is moved.
+The only allowed cleanup is a reversible move (`mv`) to a sibling backup that does not exist yet, `<name>.bak-<UTC time>-<pid>`, made by `K` below, which stops when that name exists (a fixed `.bak` name is replaced or nested into by a second run); deletion (`rm -rf`, `rm`) is never allowed. Move a whole root only when every file inside matches a name shipped in the active plugin's own `agents/`, `commands/`, or `skills/` directory. A `commands/` root that also holds a custom (non-OMC) file is not moved as a whole: move only the individually verified OMC-owned files into one new backup directory (`K commands <file>...`) and leave every other file in place. An `agents/` or `skills/` root that holds a custom file is only reported, as stated above: nothing in it is moved.
 
 ```bash
 C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L
-# Backup first (optional - ask user)
-# mv "$C"/agents "$C"/agents.bak
-# mv "$C"/commands "$C"/commands.bak
-# mv "$C"/skills "$C"/skills.bak
-# Never rm -rf here: the only allowed form is the reversible mv above, after the guards above
+# Backup first (optional - ask user): K moves "$C/<name>", or only the files listed after it, to a new "$C/<name>.bak-<UTC time>-<pid>"
+K() { D="$C/$1.bak-$(date -u +%Y%m%d%H%M%S)-$$"; [ ! -e "$D" ] && [ ! -L "$D" ] || { echo "Nothing moved: $D exists" >&2; return 1; }; if [ $# -eq 1 ]; then mv -- "$C/$1" "$D"; else N=$1; shift; mkdir -- "$D" && ( cd -- "$C/$N" && mv -n -- "$@" "$D"/ ); fi; }
+# K agents
+# K commands
+# K skills
+# K commands deepsearch.md
+# Never rm -rf here: the only allowed form is the reversible move above, after the guards above
 ```
 
 **Note**: Only move (never delete) if these contain oh-my-claudecode-related files. If user has custom agents/commands/skills, warn them and ask before moving.

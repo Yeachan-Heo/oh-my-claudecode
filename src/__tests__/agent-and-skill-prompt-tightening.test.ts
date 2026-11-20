@@ -340,12 +340,15 @@ describe('omc-doctor skill', () => {
     expect(section(text, 'Fix: Outdated Plugin')).toContain("OMC's stale cache purge can remove any cache");
   });
 
-  test('legacy section has no executable rm -rf and keeps the commented mv .bak variants', () => {
+  // The commented calls name no fixed .bak destination: K makes a new one each time (omc-doctor-backup-destination.test.ts
+  // runs them twice and pins that no earlier copy is replaced or nested into).
+  test('legacy section has no executable rm -rf and keeps the commented K calls of the backup move', () => {
     const legacy = section(text, 'Fix: Legacy Curl-Installed Content');
     const executableRm = bashBlocks(legacy).filter((l) => l.includes('rm -rf') && !l.trim().startsWith('#'));
     expect(executableRm).toEqual([]);
-    const mvBak = bashBlocks(legacy).filter((l) => l.trim().startsWith('#') && l.includes('mv ') && l.includes('.bak'));
-    expect(mvBak).toHaveLength(3);
+    const calls = bashBlocks(legacy).filter((l) => /^# K /.test(l.trim()));
+    expect(calls).toEqual(['# K agents', '# K commands', '# K skills', '# K commands deepsearch.md']);
+    expect(bashBlocks(legacy).filter((l) => l.trim().startsWith('#') && l.includes('mv ') && l.includes('.bak'))).toEqual([]);
     expect(legacy).toContain('# Never rm -rf here');
   });
 
@@ -355,7 +358,7 @@ describe('omc-doctor skill', () => {
     expect(legacy).toContain('Do not move entire `agents/`, `commands/`, or `skills/` roots');
     expect(legacy).toMatch(/record the exact target, its ownership evidence, and its contents/);
     expect(legacy).toContain("a name shipped in the active plugin's own");
-    expect(legacy).toContain('The only allowed cleanup is a reversible move to a sibling `.bak` copy (`mv`); deletion (`rm -rf`, `rm`) is never allowed.');
+    expect(legacy).toContain('deletion (`rm -rf`, `rm`) is never allowed.');
     expect(legacy).toContain('Only move (never delete) if these contain oh-my-claudecode-related files');
     expect(legacy).toContain('warn them and ask before moving');
   });
@@ -364,7 +367,7 @@ describe('omc-doctor skill', () => {
     const legacy = section(text, 'Fix: Legacy Curl-Installed Content');
     expect(legacy).toContain('with any such file present, report the mixed installation instead of fixing it');
     expect(legacy).toContain('A `commands/` root that also holds a custom (non-OMC) file is not moved as a whole');
-    expect(legacy).toContain('into `commands.bak/`');
+    expect(legacy).toContain('into one new backup directory (`K commands <file>...`)');
     expect(legacy).toContain('An `agents/` or `skills/` root that holds a custom file is only reported, as stated above: nothing in it is moved.');
     // The per-file move is no longer stated for every root.
     expect(legacy).not.toMatch(/with any custom \(non-OMC\) file present, move only/);

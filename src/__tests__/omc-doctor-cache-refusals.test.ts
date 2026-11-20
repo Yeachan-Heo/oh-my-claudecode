@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, lutimesSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, skillText, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, skillText, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
 
 // The two cache commands refuse to move anything when they cannot tell what is protected, and report a move that failed.
 // A refusal or a failure ends with exit code 1 and says why; a finished move, an empty cache and a cache nothing pins
@@ -237,6 +237,33 @@ describe('omc-doctor cache commands: a modification date in the future', { timeo
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    }
+  });
+});
+
+// The cache commands name the backup of a version `<version>-<time>` (`<marketplace>-<version>-<time>` for another
+// marketplace). A rename would replace an empty directory of that name, so the command looks first and stops.
+describe('omc-doctor: the cache commands never move a version onto an existing backup name', { timeout: 120_000 }, () => {
+  test.each(commands)('%s: an existing destination stops the move, nothing is replaced, the exit code is 1', (command) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-backup-'));
+    try {
+      const cache = addCache(dir, ['5.7.0', '5.8.1']);
+      writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] });
+      // Time stands still for the command, so the destination of 5.7.0 is known: backups/5.7.0-<now>.
+      const now = Date.now();
+      const preload = path.join(dir, 'frozen.cjs');
+      writeFileSync(preload, `const t = ${now};\nDate.now = () => t;\n`);
+      const taken = path.join(backupDir(dir), `5.7.0-${now}`);
+      mkdirSync(taken, { recursive: true });
+      const result = runCommand(command, dir, { preloads: [preload], timeout: 20_000 });
+      expect({ status: result.status, versions: digitVersions(cache), taken: readdirSync(taken) }).toEqual({ status: 1, versions: '5.7.0,5.8.1', taken: [] });
+      expect(result.stdout + result.stderr).toContain(`the backup destination ${taken} exists already`);
+      // Without the occupied name the same command moves the version aside (the control).
+      rmSync(taken, { recursive: true, force: true });
+      const control = runCommand(command, dir, { preloads: [preload], timeout: 20_000 });
+      expect({ status: control.status, versions: digitVersions(cache), moved: readdirSync(backupDir(dir)) }).toEqual({ status: 0, versions: '5.8.1', moved: [`5.7.0-${now}`] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
