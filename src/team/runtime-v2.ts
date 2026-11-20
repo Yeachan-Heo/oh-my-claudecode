@@ -296,6 +296,7 @@ import {
 import {
   isWorkerLaunchAttemptCurrent,
   isWorkerLaunchAttemptAccepted,
+  isValidCurrentWorkerLaunchRecord,
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
@@ -3170,11 +3171,12 @@ async function finalizeRecoveryPastDeadline(
         "utf8",
       ).then(
         (text) => {
-          const { context } = JSON.parse(text) as {
-            context?: { kind?: unknown; recovery_id?: unknown } | null;
-          };
+          const record: unknown = JSON.parse(text);
+          // A record the launch loader rejects cannot rule out the pane.
+          if (!isValidCurrentWorkerLaunchRecord(record)) return true;
           return (
-            context?.kind === "recovery" && context.recovery_id === recoveryId
+            record.context?.kind === "recovery" &&
+            record.context.recovery_id === recoveryId
           );
         },
         (error: NodeJS.ErrnoException) => error.code !== "ENOENT",

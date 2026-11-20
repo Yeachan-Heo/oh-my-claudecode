@@ -69,6 +69,14 @@ function reserveRecoveryRequest(
 }
 
 const TEAM_INSTANCE_ID = '22222222-2222-4222-8222-222222222222';
+
+function currentLaunchRecord(teamName: string, recoveryId: string): Record<string, unknown> {
+  return { schema_version: 1, attempt_id: '33333333-3333-4333-8333-333333333333',
+    nonce: '44444444-4444-4444-8444-444444444444', instance_id: TEAM_INSTANCE_ID, team_name: teamName,
+    worker_name: 'worker-1', pane_id: '%5', provider: 'claude', created_at: new Date().toISOString(),
+    runtime_cli_path: '/runtime/cli.cjs',
+    context: { kind: 'recovery', recovery_id: recoveryId, replacement_generation: 2, pane_attempt_id: 'pane-attempt-r' } };
+}
 function fixtureTmuxServerIdentity(cwd: string): { socket_path: string; server_pid: number; process_started_at: string } {
   const processStartedAt = currentStrictProcessStartIdentity();
   if (!processStartedAt) throw new Error('fixture tmux process identity unavailable');
@@ -678,6 +686,12 @@ describe('recovery owner retry deadline', () => {
   const PAST_DEADLINE_MS = 301_000;
   const BEFORE_DEADLINE_MS = 240_000;
 
+  function writeCurrentLaunch(teamName: string, record: Record<string, unknown>): void {
+    const path = absPath(cwd, TeamPaths.workerLaunchCurrent(teamName, 'worker-1'));
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, JSON.stringify(record));
+  }
+
   function writeIntent(teamName: string, requestId: string, recoveryId: string, ageMs: number): void {
     const workspaceHash = createHash('sha256').update(cwd).digest('hex');
     const path = absPath(cwd, TeamPaths.recoveryIntent(teamName, recoveryId));
@@ -857,11 +871,7 @@ describe('recovery owner retry deadline', () => {
     await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
     // A predecessor owner persisted the replacement launch, then died before
     // committing the worker row. This process starts with no pending pane.
-    const currentPath = absPath(cwd, TeamPaths.workerLaunchCurrent(teamName, 'worker-1'));
-    mkdirSync(join(currentPath, '..'), { recursive: true });
-    writeFileSync(currentPath, JSON.stringify({ team_name: teamName, instance_id: TEAM_INSTANCE_ID, worker_name: 'worker-1',
-      pane_id: '%5', attempt_id: 'launch-attempt-r', provider: 'claude',
-      context: { kind: 'recovery', recovery_id: 'stuck-recovery', replacement_generation: 2, pane_attempt_id: 'pane-attempt-r' } }));
+    writeCurrentLaunch(teamName, currentLaunchRecord(teamName, 'stuck-recovery'));
 
     const result = await execute(teamName);
     expect(result).not.toMatchObject({ error: 'recovery_request_timeout' });
@@ -869,6 +879,34 @@ describe('recovery owner retry deadline', () => {
     await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
       config: { active_recovery: { recovery_id: 'stuck-recovery' } },
     });
+  });
+
+  it.each([
+    ['an empty record', {}],
+    ['a recovery context without identity', { context: { kind: 'recovery' } }],
+  ])('keeps retrying past the deadline when the persisted launch is %s', async (_label, record) => {
+    cwd = mkdtempFixture('runtime-owner-deadline-invalid-launch-');
+    const teamName = 'deadline-invalid-launch';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    // A record the launch loader rejects cannot rule out a predecessor pane.
+    writeCurrentLaunch(teamName, record);
+
+    const result = await execute(teamName);
+    expect(result).not.toMatchObject({ error: 'recovery_request_timeout' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toBeNull();
+    await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'stuck-recovery' } },
+    });
+  });
+
+  it('fails past the deadline when the persisted launch belongs to another recovery', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-other-launch-');
+    const teamName = 'deadline-other-launch';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    writeCurrentLaunch(teamName, currentLaunchRecord(teamName, 'older-recovery'));
+
+    await expect(execute(teamName)).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+    expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();
   });
 
   it('falls through to the executor past the deadline when the task records cannot be read', async () => {
