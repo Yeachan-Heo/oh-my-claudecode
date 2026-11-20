@@ -737,6 +737,48 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     });
   });
 
+  // A clone version is the target of an update, so it must be accepted exactly where the runtime accepts it
+  // (`parseSemver` in scripts/session-start.mjs, which treats any other value as unavailable marketplace metadata).
+  describe('the latest version of a marketplace clone is a semantic version of the runtime grammar', () => {
+    const pinned = { 'oh-my-claudecode@omc': [{ version: '5.8.0' }] };
+    const latest = (version: string) => step1({ plugins: pinned, clone: { omc: version } });
+
+    test('a malformed clone version is unavailable and no update is offered towards it', () => {
+      for (const version of ['999x.0.0', '1.2', '1', '1.2.3.4', '01.2.3', '1.02.3', '1.2.03', 'v', 'vv1.2.3', 'latest', '5.9.0 beta', '5.9.0-', '5.9.0+', '5.9.0-beta..1', '5.9.0-be ta', '5.9.0_1', '1.2.3-é', '', '   ']) {
+        const out = latest(version);
+        expect({ version, installed: out.Installed, latest: out.Latest }).toEqual({ version, installed: '5.8.0', latest: '(unavailable) (marketplace clone)' });
+        const shown = version.trim();
+        if (shown) expect({ version, out: JSON.stringify(out) }).toEqual({ version, out: expect.not.stringContaining(`"${shown}`) });
+      }
+    });
+
+    test('a valid clone version is the latest, with a leading v dropped and whitespace trimmed', () => {
+      const accepted: Array<[string, string]> = [['5.9.0', '5.9.0'], ['0.0.0', '0.0.0'], ['5.10.0', '5.10.0'], ['5.9.0-beta.2', '5.9.0-beta.2'], ['5.9.0+build.7', '5.9.0+build.7'], ['5.9.0-rc.1+build.7', '5.9.0-rc.1+build.7'], ['5.9.0-0', '5.9.0-0'], ['5.9.0-x-y.1', '5.9.0-x-y.1'], ['v5.9.0', '5.9.0'], [' 5.9.0 ', '5.9.0'], ['v5.9.0-beta.1', '5.9.0-beta.1']];
+      for (const [version, shown] of accepted) expect({ version, latest: latest(version).Latest }).toEqual({ version, latest: `${shown} (marketplace clone)` });
+    });
+
+    test('the value of a clone manifest that is not a string is unavailable', () => {
+      for (const version of [5, null, ['5.9.0'], { v: '5.9.0' }, true]) {
+        const out = step1({ plugins: pinned, setup: (dir) => writeFileSync(path.join(dir, 'plugins', 'marketplaces', 'omc', '.claude-plugin', 'marketplace.json'), JSON.stringify({ plugins: [{ name: 'oh-my-claudecode', version }] })), clone: { omc: '5.9.0' } });
+        expect({ version, latest: out.Latest }).toEqual({ version, latest: '(unavailable) (marketplace clone)' });
+      }
+    });
+
+    // The command carries its own copy of the grammar, so it is run side by side with the runtime function on a grid.
+    test('the grammar of the command accepts exactly the strings the runtime parseSemver accepts', () => {
+      const runtime = read('scripts/session-start.mjs');
+      const source = runtime.slice(runtime.indexOf('function parseSemver('), runtime.indexOf('function semverCompare('));
+      expect(source).not.toBe('');
+      const parseSemver = new Function(`${source}; return parseSemver;`)() as (v: unknown) => unknown;
+      const command = scriptOf(versionCommand ?? '');
+      const from = command.indexOf('sv=x=>');
+      expect(from).toBeGreaterThan(0);
+      const sv = new Function(`const ${command.slice(from, command.indexOf(',rp=x=>', from))}; return sv;`)() as (v: string) => string;
+      const grid = ['5.9.0', '0.0.0', '1.2', '1', '1.2.3.4', '01.2.3', '1.02.3', '1.2.03', 'v1.2.3', 'V1.2.3', 'vv1.2.3', '999x.0.0', '1.2.3-', '1.2.3+', '1.2.3-a', '1.2.3-a.b', '1.2.3-a..b', '1.2.3-01', '1.2.3-a+b', '1.2.3+b.c', '1.2.3+b..c', '1.2.3+-', '1.2.3-+b', '1.2.3-a_b', ' 1.2.3 ', '1.2.3\n', '\n1.2.3', '1.2.3\n4', '1.2.3 4', '١.٢.٣', '1.2.3-é', '', ' ', '-1.2.3', '1.-2.3', '1.2.3-0.0', '10.20.30-rc.1+meta-1', '1.2.3-alpha.1.2.3.4.5.6.7.8.9'];
+      for (const value of grid) expect({ value, accepted: sv(value) !== '' }).toEqual({ value, accepted: parseSemver(value) !== null });
+    });
+  });
+
   test('the skill routes the update and the diagnosis through the derived lines, with no fixed updater recipe left', () => {
     expect(text).not.toMatch(/marketplace update omc/);
     expect(text).not.toMatch(/claude plugin update oh-my-claudecode@omc/);
