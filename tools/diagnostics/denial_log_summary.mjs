@@ -235,7 +235,7 @@ const main = async () => {
     for (const n of names) files.push(join(dir, n));
   }
   if (!files.length) {
-    console.error('denial_log_summary: no denials.jsonl journal files found');
+    console.error(`denial_log_summary: no denials.jsonl journal files found${dir ? ` in ${dir}` : ''}`);
     process.exit(2);
   }
   const result = summarize(files);

@@ -1497,19 +1497,19 @@ def main(argv):
         return fail("--to must be ISO UTC, for example 2026-11-16T12:00:00Z")
     start = end - args.days * DAY_SECONDS
     if not os.path.isdir(args.projects):
-        return fail("--projects is not a directory")
+        return fail("--projects is not a directory: " + args.projects)
     if args.compact_log is not None and not os.path.isfile(args.compact_log):
-        return fail("--compact-log is not a file")
+        return fail("--compact-log is not a file: " + args.compact_log)
     if args.patterns is not None:
         try:
             set_patterns(load_patterns(args.patterns))
         except (OSError, ValueError) as error:
-            return fail("--patterns: " + (getattr(error, "strerror", None) or str(error)))
+            return fail("--patterns " + args.patterns + ": " + (getattr(error, "strerror", None) or str(error)))
     for target in (args.out, args.locators):
         if target is not None and os.path.lexists(target):
-            return fail("output file already exists")
+            return fail("output file already exists: " + target)
     if args.out is not None and args.locators is not None and os.path.realpath(args.out) == os.path.realpath(args.locators):
-        return fail("--locators must differ from --out")
+        return fail("--locators must differ from --out: " + args.out)
     stats = {key: 0 for key in ("transcript_rows", "transcript_bad_lines", "without_time",
                                 "journal_rows", "journal_bad_lines", "journal_without_time")}
     stats["removed_fragments"] = Counter()  # rule v2: removed text fragments by kind

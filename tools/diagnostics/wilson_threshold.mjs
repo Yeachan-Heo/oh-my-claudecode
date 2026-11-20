@@ -561,7 +561,7 @@ async function main() {
   }
   const data = parseTsv(text);
   if (data.columns.length === 0 || !data.columns.includes('result')) {
-    console.error('wilson_threshold: file without a header or without the required column result');
+    console.error(`wilson_threshold: file without a header or without the required column result: ${args.file}`);
     process.exitCode = 2;
     return;
   }

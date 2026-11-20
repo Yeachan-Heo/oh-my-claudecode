@@ -538,7 +538,7 @@ def main(argv=None):
         try:
             probe, probe_period = load_probe(args.probe)
         except (OSError, ValueError) as error:
-            print(f"error: --probe: {error}", file=sys.stderr)
+            print(f"error: --probe {args.probe}: {getattr(error, 'strerror', None) or error}", file=sys.stderr)
             return 2
     if args.to is None and args.days is None and probe_period is not None:
         since_epoch, until_epoch = probe_period
@@ -556,7 +556,7 @@ def main(argv=None):
             print("error: the period differs from the probe's period; rerun with the same --to and --days", file=sys.stderr)
             return 2
     if not os.path.isfile(args.compact):
-        print("error: compaction log not found", file=sys.stderr)
+        print(f"error: compaction log not found: {args.compact}", file=sys.stderr)
         return 2
     try:
         compact_rows, journal_input = load_compact(args.compact)

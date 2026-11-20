@@ -812,21 +812,21 @@ def main(argv):
     if any(command == "" or len(command.split()) != 1 for command in args.consult_command):
         return fail("--consult-command must be a single word")
     if not os.path.isdir(args.projects):
-        return fail("--projects is not a directory")
+        return fail("--projects is not a directory: %s" % args.projects)
     if not os.access(args.projects, os.R_OK | os.X_OK):
-        return fail("--projects cannot be read")
+        return fail("--projects cannot be read: %s" % args.projects)
     if args.out is not None and os.path.lexists(args.out):
-        return fail("--out already exists")
+        return fail("--out already exists: %s" % args.out)
     if args.sessions_out is not None:
         if os.path.lexists(args.sessions_out):
-            return fail("--sessions-out already exists")
+            return fail("--sessions-out already exists: %s" % args.sessions_out)
         if args.out is not None and os.path.realpath(args.out) == os.path.realpath(args.sessions_out):
-            return fail("--sessions-out must differ from --out")
+            return fail("--sessions-out must differ from --out: %s" % args.out)
     for option, path in (("--out", args.out), ("--sessions-out", args.sessions_out)):
         if path is not None:
             parent = os.path.dirname(os.path.abspath(path))
             if not os.path.isdir(parent) or not os.access(parent, os.W_OK | os.X_OK):
-                return fail("cannot write %s" % option)
+                return fail("cannot write %s: %s" % (option, path))
     try:
         report, sessions = build_report(args, Window(since, until))
     except OSError as error:
@@ -842,9 +842,9 @@ def main(argv):
         try:
             write_new_file(path, content)
         except FileExistsError:
-            message = "%s already exists" % option
+            message = "%s already exists: %s" % (option, path)
         except (OSError, UnicodeError):
-            message = "cannot write %s" % option
+            message = "cannot write %s: %s" % (option, path)
         else:
             created.append(path)
             continue

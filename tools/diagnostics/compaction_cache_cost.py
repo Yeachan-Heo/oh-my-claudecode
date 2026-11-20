@@ -862,7 +862,7 @@ def main(argv):
     try:
         prices = load_prices(a.prices)
     except (OSError, ValueError) as error:
-        print(f"error: cannot load --prices: {error}", file=sys.stderr)
+        print(f"error: cannot load --prices {a.prices}: {getattr(error, 'strerror', None) or error}", file=sys.stderr)
         return 2
 
     if a.transcript:
