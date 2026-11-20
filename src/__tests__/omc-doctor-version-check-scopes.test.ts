@@ -388,4 +388,79 @@ describe('omc-doctor Step 1 takes the installed version from the manifest of the
       expect(block['Registry mismatch']).toContain('records 5.9.0');
     });
   });
+
+  // With no usable manifest the registry used to answer with the version of the entry, and the version its installPath names
+  // was ignored: an entry that records 5.9.0 for a directory named 5.8.0 printed Installed 5.9.0 and Latest 5.9.0, with no
+  // line about the mismatch. The version of an entry and the version its installPath names (the last component when it is a
+  // version name, else the manifest under it) have to agree; where they do not and no manifest of the active root settles
+  // it, neither is the code, so the installed version is unknown. The same rule serves every entry the session may run.
+  describe('an entry whose version and installPath name different versions has no known installed version without a manifest', () => {
+    const KEYS = ['Plugin', 'Channel', 'Installed', 'Registry mismatch', 'Latest', 'Updater'];
+    const torn = (dir: string) => ({ version: '5.9.0', installPath: cache(dir, '5.8.0') });
+    const readme = (dir: string) => ({ [path.join(cache(dir, '5.8.0'), 'README.md')]: 'no manifest' });
+
+    test.each(['CLAUDE_PLUGIN_ROOT', 'OMC_PLUGIN_ROOT'])('%s: the example of the review, 5.9.0 recorded, the directory named 5.8.0, no manifest', (variable) => {
+      const block = run({ entry: torn, root: (dir) => cache(dir, '5.8.0'), files: readme, variable });
+      expect(Object.keys(block)).toEqual(KEYS);
+      expect(block).toMatchObject({ Plugin: 'oh-my-claudecode@omc', Channel: 'marketplace omc', Installed: '(unknown)', Latest: '5.9.0 (marketplace clone)', Updater: UPDATER });
+      expect(block['Registry mismatch']).toContain('names 5.8.0, 5.9.0 for one install');
+      expect(block['Registry mismatch']).toContain('no manifest settles which is installed');
+      expect(block['Registry mismatch']).toContain('Updater line');
+    });
+
+    test.each([
+      ['metadata that cannot be parsed', '{ not json'],
+      ['a manifest without a version', JSON.stringify({ name: 'oh-my-claudecode' })],
+      ['a blank version', manifest('  ')],
+      ['a version that is not a string', manifest(5)],
+      ['a version outside the grammar', manifest('999x.0.0')],
+    ])('a manifest of the active root that names no usable version settles nothing: %s', (_name, text) => {
+      const block = run({ entry: torn, root: (dir) => cache(dir, '5.8.0'), files: (dir) => ({ [path.join(cache(dir, '5.8.0'), 'package.json')]: text }) });
+      expect(Object.keys(block)).toEqual(KEYS);
+      expect(block.Installed).toBe('(unknown)');
+      expect('Note' in block).toBe(false);
+    });
+
+    test('with no root variable the entry contradicts itself all the same, in either direction', () => {
+      for (const [version, leaf] of [['5.9.0', '5.8.0'], ['5.8.0', '5.9.0']]) {
+        const block = step1({ plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ version, installPath: cache(dir, leaf) }] }), clone: { omc: '5.9.0' }, setup: (dir) => write(path.join(cache(dir, leaf), 'README.md'), 'x') });
+        expect({ version, leaf, keys: Object.keys(block), installed: block.Installed }).toEqual({ version, leaf, keys: KEYS, installed: '(unknown)' });
+        expect(block['Registry mismatch']).toContain('names 5.8.0, 5.9.0 for one install');
+      }
+    });
+
+    test('an installPath that names no version but holds a manifest of another one is the same contradiction', () => {
+      const block = step1({
+        plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ version: '5.9.0', installPath: path.join(dir, 'custom') }] }),
+        clone: { omc: '5.9.0' },
+        setup: (dir) => write(path.join(dir, 'custom', 'package.json'), manifest('5.8.0')),
+      });
+      expect({ keys: Object.keys(block), installed: block.Installed }).toEqual({ keys: KEYS, installed: '(unknown)' });
+    });
+
+    test('a usable manifest of the active root settles it: Installed is its version, the registry is named, nothing is unknown', () => {
+      const block = run({ entry: torn, root: (dir) => cache(dir, '5.8.0'), files: (dir) => ({ [path.join(cache(dir, '5.8.0'), 'package.json')]: manifest('5.8.0') }) });
+      expect(Object.keys(block)).toEqual(KEYS);
+      expect(block.Installed).toBe('5.8.0');
+      expect(block['Registry mismatch']).toContain('records 5.9.0');
+      expect(block['Registry mismatch']).toContain('holds 5.8.0');
+    });
+
+    test('the entry of another scope that contradicts itself makes an unknown answer only where it is among the entries judged', () => {
+      const entries = (dir: string) => ({ 'oh-my-claudecode@omc': [{ version: '5.8.0', installPath: cache(dir, '5.8.0') }, { version: '5.9.0', installPath: cache(dir, '5.7.0') }] });
+      const files = (dir: string) => ({ [path.join(cache(dir, '5.8.0'), 'README.md')]: 'x', [path.join(cache(dir, '5.7.0'), 'README.md')]: 'x' });
+      const none = step1({ plugins: entries, clone: { omc: '5.9.0' }, setup: (dir) => Object.entries(files(dir)).forEach(([file, text]) => write(file, text)) });
+      expect({ keys: Object.keys(none), installed: none.Installed }).toEqual({ keys: KEYS, installed: '(unknown)' });
+      expect(none['Registry mismatch']).toContain('names 5.7.0, 5.9.0 for one install');
+      const active = step1({ plugins: entries, clone: { omc: '5.9.0' }, env: (dir) => ({ CLAUDE_PLUGIN_ROOT: cache(dir, '5.8.0') }), setup: (dir) => Object.entries(files(dir)).forEach(([file, text]) => write(file, text)) });
+      expect({ keys: Object.keys(active), installed: active.Installed }).toEqual({ keys: ['Plugin', 'Channel', 'Installed', 'Latest', 'Updater'], installed: '5.8.0' });
+    });
+
+    test('an entry whose two versions agree is printed as before: the same text, a leading v, build metadata only', () => {
+      for (const [recorded, leaf, installed] of [['5.9.0', '5.9.0', '5.9.0'], ['v5.9.0', '5.9.0', '5.9.0'], ['5.9.0+a', '5.9.0', '5.9.0+a']]) {
+        const block = run({ entry: (dir) => ({ version: recorded, installPath: cache(dir, leaf) }), root: (dir) => cache(dir, leaf), files: (dir) => ({ [path.join(cache(dir, leaf), 'README.md')]: 'x' }) });
+        expect({ recorded, leaf, keys: Object.keys(block), installed: block.Installed }).toEqual({ recorded, leaf, keys: ['Plugin', 'Channel', 'Installed', 'Latest', 'Updater'], installed });
+      }
+    });
+  });
 });

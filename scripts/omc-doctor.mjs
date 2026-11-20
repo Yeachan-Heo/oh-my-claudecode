@@ -230,6 +230,12 @@ const installPathVersion = (entry) => {
   const last = installPath.split(/[\\/]+/).filter(Boolean).pop() || '';
   return (isVersionDir(last) && semver(last)) || manifestVersion(installPath);
 };
+// The versions an entry names: its own version and the version its installPath names (installPathVersion), the ones that
+// are semantic versions. The two of one entry have to agree; where they do not and no manifest settles it, Step 1 does
+// not choose one of them.
+const claimsOf = (entry) => [typeof entry.version == 'string' && entry.version.trim() ? dropV(entry.version.trim()) : '', installPathVersion(entry)].filter(Boolean);
+// Build metadata (after a +) does not make a version another one, so it is left out of the comparison.
+const sameVersion = (a, b) => compareVersions(a.replace(/[+].*$/, ''), b.replace(/[+].*$/, '')) == 0;
 // A malformed entry. strict is for an entry of a supported plugin ID: its version has to be a semver, and an entry
 // that has only an installPath must not name a version that is not one.
 const entryBad = (entry, strict) =>
@@ -430,21 +436,18 @@ const step1 = () => {
       const market = marketplaceOf(id);
       // The entries the session runs: those whose install holds an existing plugin root. Without a match all count.
       const { active } = activeEntries(id, entries, roots);
-      const recorded = (active.length ? active : entries)
-        .map((entry) =>
-          typeof entry.version == 'string' && entry.version.trim() ? dropV(entry.version.trim()) : installPathVersion(entry),
-        )
-        .filter(Boolean)
-        .sort(compareVersions);
+      const claims = (active.length ? active : entries).map(claimsOf);
+      const recorded = claims.map((names) => names[0]).filter(Boolean).sort(compareVersions);
       // The code the session loads is the one in that root, so its manifest decides the installed version when it
       // holds a semantic version; the registry only says which version was recorded, and a partial update or a damaged
       // registry can make the two differ. A root deeper below the install has no manifest of its own: the registry
       // stays the answer there, as it does for a manifest that holds no usable version (said in a Note line).
       const root = active.length ? roots[0] : '';
       const loaded = root ? manifestVersion(root) : '';
-      // Build metadata (after a +) does not make a version another one, so it is left out of the comparison.
-      const core = (version) => version.replace(/[+].*$/, '');
-      const differing = [...new Set(loaded ? recorded.filter((version) => compareVersions(core(version), core(loaded)) != 0) : [])];
+      const differing = [...new Set(loaded ? recorded.filter((version) => !sameVersion(version, loaded)) : [])];
+      // Without such a manifest an entry whose own version and the version its installPath names differ gives no answer:
+      // neither is the code, so the installed version is unknown instead of one of the two (a partial update, a damaged registry).
+      const torn = loaded ? [] : [...new Set(claims.filter((names) => names.some((name) => !sameVersion(name, names[0]))).flat())].sort(compareVersions);
       const versions = loaded ? [loaded] : recorded;
       // The latest version is the one the marketplace clone advertises, when it is a semver.
       let latest = null;
@@ -459,13 +462,18 @@ const step1 = () => {
       out.push(
         'Plugin: ' + id,
         'Channel: marketplace ' + market,
-        'Installed: ' + (installed || '(none)'),
+        'Installed: ' + (torn.length ? '(unknown)' : installed || '(none)'),
         ...(differing.length
           ? [
               'Registry mismatch: the registry records ' + differing.join(', ') + ' for the install the session runs (' + root + '), but the manifest there holds ' + loaded + ', so Installed is ' + loaded + ' (a partial update or a damaged registry: update or reinstall the plugin with the Updater line, then restart Claude Code)',
             ]
           : []),
-        ...(root && !loaded && hasManifest(root)
+        ...(torn.length
+          ? [
+              'Registry mismatch: the registry names ' + torn.join(', ') + ' for one install (the version of an entry and the version its installPath names differ) and no manifest settles which is installed, so Installed is unknown (a partial update or a damaged registry: update or reinstall the plugin with the Updater line, then restart Claude Code)',
+            ]
+          : []),
+        ...(root && !loaded && !torn.length && hasManifest(root)
           ? ['Note: the manifest in ' + root + ' holds no usable version, so Installed is the version the registry records']
           : []),
         'Latest: ' + (latest || '(unavailable)') + ' (marketplace clone)',
