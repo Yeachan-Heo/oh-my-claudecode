@@ -1029,10 +1029,13 @@ def find_transcripts(projects):
                 files.append((os.path.join(dir_path, name), "main", None))
         for sub_entry in sorted(os.listdir(dir_path)):
             sub = os.path.join(dir_path, sub_entry, "subagents")
-            if os.path.isdir(sub):
-                for name in sorted(os.listdir(sub)):
-                    if name.startswith("agent-") and name.endswith(".jsonl"):
-                        files.append((os.path.join(sub, name), "subagent", name[6:-6]))
+            try:
+                names = sorted(os.listdir(sub))
+            except (FileNotFoundError, NotADirectoryError):
+                continue  # no subagents here; a directory that cannot be read is an error, never a skip
+            for name in names:
+                if name.startswith("agent-") and name.endswith(".jsonl"):
+                    files.append((os.path.join(sub, name), "subagent", name[6:-6]))
     return files
 
 

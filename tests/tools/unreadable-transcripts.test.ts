@@ -20,16 +20,25 @@ const PYTHON_HARNESS = [
   'def deny(path):',
   '    raise PermissionError(13, "Permission denied", path)',
   'if mode == "dir":',
-  '    real_scandir, real_listdir = os.scandir, os.listdir',
+  '    # A directory without permissions: it cannot be listed, and nothing below it can be reached (stat fails too).',
+  '    real_scandir, real_listdir, real_stat = os.scandir, os.listdir, os.stat',
+  '    def named(path):',
+  '        return os.fspath(path) if isinstance(path, (str, os.PathLike)) else ""',
+  '    def below(path):',
+  '        return named(path).startswith(target + os.sep)',
   '    def scandir(path="."):',
-  '        if os.fspath(path) == target:',
-  '            deny(target)',
+  '        if named(path) == target or below(path):',
+  '            deny(named(path))',
   '        return real_scandir(path)',
   '    def listdir(path="."):',
-  '        if os.fspath(path) == target:',
-  '            deny(target)',
+  '        if named(path) == target or below(path):',
+  '            deny(named(path))',
   '        return real_listdir(path)',
-  '    os.scandir, os.listdir = scandir, listdir',
+  '    def stat(path, *args, **kwargs):',
+  '        if below(path):',
+  '            deny(named(path))',
+  '        return real_stat(path, *args, **kwargs)',
+  '    os.scandir, os.listdir, os.stat = scandir, listdir, stat',
   'elif mode == "file":',
   '    real_open = builtins.open',
   '    def opener(file, *args, **kwargs):',
@@ -73,13 +82,17 @@ let routingJournal = '';
 let agentTranscript = '';
 let mainTranscript = '';
 let subagentsDir = '';
+let projectDir = '';
+let sessionDir = '';
 let harness = '';
 let preload = '';
 
 beforeAll(() => {
   base = mkdtempSync(join(tmpdir(), 'unreadable-transcripts-'));
   projects = join(base, 'projects');
-  subagentsDir = join(projects, 'proj', 's1', 'subagents');
+  projectDir = join(projects, 'proj');
+  sessionDir = join(projectDir, 's1');
+  subagentsDir = join(sessionDir, 'subagents');
   mkdirSync(subagentsDir, { recursive: true });
   mainTranscript = join(projects, 'proj', 's1.jsonl');
   writeFileSync(mainTranscript, TRANSCRIPT);
@@ -119,6 +132,9 @@ function runNode(script: string, args: string[], mode: Mode, target: string) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
+// The directories below the searched one that may refuse access: a project, a session and the directory of its subagents.
+const DIRECTORIES: Array<[string, () => string]> = [['project directory', () => projectDir], ['session directory', () => sessionDir], ['subagents directory', () => subagentsDir]];
+
 // Every Python tool that searches the transcripts, with the arguments of a valid run over the small tree above.
 const PYTHON_TOOLS: Array<{ script: string; args: () => string[]; fileTarget: () => string }> = [
   { script: 'advisor_event_coverage.py', args: () => ['--projects', projects, '--label', 'x'], fileTarget: () => mainTranscript },
@@ -144,10 +160,10 @@ describe.skipIf(!hasPython3)('a directory or a transcript that cannot be read st
         expect(r.status, r.stderr).toBe(0);
       });
 
-      it('a directory below the searched directory that cannot be read exits 2 and names it', () => {
-        const r = runPython(tool.script, tool.args(), 'dir', subagentsDir);
+      it.each(DIRECTORIES)('the %s below the searched directory cannot be read: exit 2 and a message that names it', (_name, directory) => {
+        const r = runPython(tool.script, tool.args(), 'dir', directory());
         expect(r.status, r.stderr).toBe(2);
-        expect(r.stderr).toContain(subagentsDir);
+        expect(r.stderr).toContain(directory());
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(r.stdout, 'no result is printed').toBe('');
       });
@@ -171,10 +187,10 @@ describe('a directory or a transcript that cannot be read stops the outcome labe
     expect(r.status, r.stderr).toBe(0);
   });
 
-  it('a directory below the transcripts directory that cannot be read exits 2 and names it', () => {
-    const r = runNode('jev_outcome_labels.mjs', args(), 'dir', subagentsDir);
+  it.each(DIRECTORIES)('the %s below the transcripts directory cannot be read: exit 2 and a message that names it', (_name, directory) => {
+    const r = runNode('jev_outcome_labels.mjs', args(), 'dir', directory());
     expect(r.status, r.stderr).toBe(2);
-    expect(r.stderr).toContain(subagentsDir);
+    expect(r.stderr).toContain(directory());
     expect(r.stdout, 'no result is printed').toBe('');
   });
 

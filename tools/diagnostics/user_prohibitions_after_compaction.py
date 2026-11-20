@@ -1059,9 +1059,11 @@ def list_transcripts(projects):
                 main.append(entry_path)
             elif os.path.isdir(entry_path):
                 sub_dir = os.path.join(entry_path, "subagents")
-                if os.path.isdir(sub_dir):
-                    subagent += [os.path.join(sub_dir, name) for name in sorted(os.listdir(sub_dir))
-                                 if name.endswith(".jsonl")]
+                try:
+                    names = sorted(os.listdir(sub_dir))
+                except (FileNotFoundError, NotADirectoryError):
+                    continue  # no subagents here; a directory that cannot be read is an error, never a skip
+                subagent += [os.path.join(sub_dir, name) for name in names if name.endswith(".jsonl")]
     return main, subagent
 
 
