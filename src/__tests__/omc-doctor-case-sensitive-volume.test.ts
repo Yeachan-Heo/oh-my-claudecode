@@ -224,6 +224,8 @@ describe('omc-doctor on a volume that ignores letter case and reports inode 0 fa
   test('a path that names a cached version in another letter case stops the command, whatever protects it, except a record under win32', () => {
     for (const command of commands) {
       for (const platform of PLATFORMS) {
+        // Skipped on purpose on a host that really is Windows, not to hide a failure: the fixtures are real directories, and Node names a real directory on a Windows disk only by a drive letter or a share (C:\..., C:/..., \\server\...), so no POSIX-style path can name it. The commands read such a path as foreign when the process reports linux or darwin and refuse it on purpose, so these combinations mean nothing there. The same rules run on Linux and macOS, and the win32 combinations run on every host.
+        if (process.platform === 'win32' && platform !== 'win32') continue;
         for (const source of SOURCES) {
           const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
           try {
@@ -244,6 +246,8 @@ describe('omc-doctor on a volume that ignores letter case and reports inode 0 fa
   test('a path that names the cached version by its exact text still protects it, and the free versions still move', () => {
     for (const command of commands) {
       for (const platform of PLATFORMS) {
+        // Skipped on purpose on a host that really is Windows, not to hide a failure: the fixtures are real directories, and Node names a real directory on a Windows disk only by a drive letter or a share (C:\..., C:/..., \\server\...), so no POSIX-style path can name it. The commands read such a path as foreign when the process reports linux or darwin and refuse it on purpose, so these combinations mean nothing there. The same rules run on Linux and macOS, and the win32 combinations run on every host.
+        if (process.platform === 'win32' && platform !== 'win32') continue;
         for (const source of SOURCES) {
           const { dir, cache } = makeCache(['5.1.0', '5.8.0', LIVE]);
           try {

@@ -697,6 +697,8 @@ fs.mkdirSync = function (target, ...rest) {
     for (const command of commands) {
       for (const kind of ['installPath', 'installPath of another plugin', 'occupancy record'] as const) {
         for (const simulated of ['win32', 'darwin', false] as const) {
+          // Skipped on purpose on a host that really is Windows, not to hide a failure: the fixtures are real directories, and Node names a real directory on a Windows disk only by a drive letter or a share (C:\..., C:/..., \\server\...), so no POSIX-style path can name it. The commands read such a path as foreign when the process reports linux or darwin and refuse it on purpose, so these combinations mean nothing there. The same rules run on Linux and macOS, and the win32 combinations run on every host.
+          if (process.platform === 'win32' && simulated === 'darwin') continue;
           const { dir, cache } = makeCache(['5.1.0', '5.8.0', '5.9.0']);
           try {
             const upper = upperBelow(dir, path.join(cache, '5.9.0'));
