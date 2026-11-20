@@ -25,12 +25,15 @@ const SUMMARY_TAIL = 6000;
 const stripEsc = (output) => output.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
 
 /**
- * Drop quoted strings and `#` comments, so a commit message cannot name a check
- * (`true # npm test` names nothing). A `#` after an escaped space stays part of a word.
+ * Drop `#` comments and neutralize quoted strings, so a commit message cannot name a check
+ * (`true # npm test` and `git commit -m "npm test"` name nothing) while a quoted operand is still an
+ * argument (`pytest "tests/a.py"` narrows the run). A quoted string keeps its text, but whitespace and
+ * shell operators inside it become `_`: it stays one word and cannot split the command, start a comment
+ * or join the words around it into a runner name. A `#` after an escaped space stays part of a word.
  */
 function executedText(command) {
   return command
-    .replace(/"[^"]*"|'[^']*'/g, '')
+    .replace(/"[^"]*"|'[^']*'/g, (quoted) => quoted.slice(1, -1).replace(/[\s;&|#!<>()]/g, '_'))
     .replace(/(^|(?<!\\)\s)#[^\n]*/g, '$1');
 }
 
@@ -170,8 +173,8 @@ function runnerMatch(piece) {
 const WEAKEN = /^(?:--passWithNoTests|--exclude|--testPathIgnorePatterns)(?:=|$)/;
 const SELECT = /^(?:-t|--testNamePattern|-k|--skip|-run)(?:=|$)/;
 
-/** A non-flag token naming an existing file shape (`src/a.test.ts`) narrows a test run. */
-const FILE_TOKEN = /^\S+\.\w{1,8}$/;
+/** A non-flag token naming a file shape (`src/a.test.ts`, `tests/a.py::test_x`) narrows a test run. */
+const FILE_TOKEN = /^\S+\.\w{1,8}(?:::\S*)?$/;
 
 /** Whether one stripped piece narrows or weakens its check. */
 function pieceNarrows(piece, kind) {
@@ -308,18 +311,24 @@ const SUMMARY_RULES = [
 ];
 
 /**
- * A runner's own report that nothing ran: a run of zero tests proves nothing about the change.
- * `cargo test` prints `running 0 tests` for its doc-tests after real results, and `go test -run X`
- * prints `[no tests to run]` for skipped packages, so zero counts only without real results.
- * Each report belongs to one runner's output (the `reader` name) and is read only for that runner.
+ * A runner's own report that nothing ran: a run of zero tests proves nothing about the change. Each entry
+ * belongs to one runner's output (the `reader` name) and is read only for that runner. `zero` is the report;
+ * `ran` is a line of real results (a test counted as passed, failed or skipped) that voids it: a test may print
+ * `No tests found` as data, and `cargo test` prints `running 0 tests` for its doc-tests after real results, and
+ * `go test -run X` prints `[no tests to run]` for skipped packages, so zero counts only without real results.
+ * Every `ran` pattern is anchored at a line start and has no nested repeats, so it matches in linear time.
  */
 const ZERO_TEST_REPORTS = [
-  { reader: 'jest', re: /Tests:\s+0 total\b|No tests found/i },
-  { reader: 'vitest', re: /No tests found/i },
-  { reader: 'pytest', re: /no tests ran/i },
-  { reader: 'node-test', re: /ℹ tests 0\b/i },
-  { reader: 'go', re: /\[no tests to run\]/i },
-  { reader: 'cargo', re: /running 0 tests\b/i },
+  { reader: 'jest', zero: /Tests:\s+0 total\b|No tests found/i, ran: /^[ \t]*Tests:[ \t]+(?:0 \w+,[ \t]*)*[1-9]\d* \w+/m },
+  { reader: 'vitest', zero: /No tests found/i, ran: /^[ \t]*(?:\S+:[ \t]*)?Tests {2,}(?:0 \w+ \| )*[1-9]\d* \w+/m },
+  {
+    reader: 'pytest',
+    zero: /no tests ran/i,
+    ran: /^[= ]*(?=(?:\d+ \w+, )*[1-9]\d* (?:passed|failed|skipped|xfailed|xpassed|errors?)\b)(?:\d+ \w+, )*\d+ \w+ in \d[\d.]*s\b/m,
+  },
+  { reader: 'node-test', zero: /ℹ tests 0\b/i, ran: /ℹ tests [1-9]\d*\b/ },
+  { reader: 'go', zero: /\[no tests to run\]/i, ran: /^[ \t]*ok[ \t](?![^\n]*\[no tests to run\])/m },
+  { reader: 'cargo', zero: /running 0 tests\b/i, ran: /^[ \t]*running [1-9]\d* tests?\b/m },
 ];
 
 /**
@@ -347,11 +356,14 @@ function readersFor({ runner, kind }) {
 /**
  * True when the zero-test report sits in the tail and no real result appears anywhere in the output.
  * The report is matched in the tail only, so an early "No tests found" line in a long green log does not count.
+ * Escape sequences are dropped first, so a colored summary line counts as a result.
  */
 function ranNoTests(output, readers) {
-  const tail = output.slice(-SUMMARY_TAIL);
-  if (!ZERO_TEST_REPORTS.some(({ reader, re }) => readers.has(reader) && re.test(tail))) return false;
-  return !output.split('\n').some((line) => /^\s*running [1-9]\d* tests?\b/.test(line) || (/^\s*ok\s/.test(line) && !line.includes('[no tests to run]')));
+  const text = stripEsc(output);
+  const tail = text.slice(-SUMMARY_TAIL);
+  const active = ZERO_TEST_REPORTS.filter(({ reader }) => readers.has(reader));
+  if (!active.some(({ zero }) => zero.test(tail))) return false;
+  return !active.some(({ ran }) => ran.test(text));
 }
 
 /** The variable an echo/printf prints for a runner's own exit code. */
@@ -390,15 +402,19 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
     return { verdict: 'undetermined', reason: 'not a check command', rule: null };
   }
   const readers = readersFor(cc);
-  if (out !== '' && ranNoTests(out, readers)) {
-    return { verdict: 'undetermined', reason: 'runner summary reports zero tests', rule: 'zero-tests' };
-  }
-  // A failure summary wins over everything, including a zero exit status.
+  // A failure summary wins over everything, including a zero exit status and a zero-test report: a run
+  // with a failure line ran something (a test may print `No tests found` as data, or an npm script may
+  // chain a child that ran no tests with one that failed).
   for (const entry of SUMMARY_RULES.filter((rule) => readers.has(rule.runner))) {
     const verdict = entry.apply(tail);
     if (verdict === 'failed') {
       return { verdict: 'failed', reason: `runner summary failure (${entry.rule})`, rule: entry.rule };
     }
+  }
+  // A zero-test report without real results decides before the exit status: the runners print it and
+  // exit nonzero on their own (vitest and jest exit 1 when no test is found), so that status is no failure.
+  if (out !== '' && ranNoTests(out, readers)) {
+    return { verdict: 'undetermined', reason: 'runner summary reports zero tests', rule: 'zero-tests' };
   }
   // A visible failing exit status decides even for a narrowed check: a narrowed run that failed
   // is still a failed run, and only a passing one is weakened evidence.
@@ -553,21 +569,61 @@ function inPlaceTargets(program, args) {
 }
 
 /**
+ * Cut here-document bodies and their terminator lines out of shell text, so body text is never read as
+ * shell. The rest of the line that holds the `<<TAG` operator stays (`cat <<EOF > src/a.ts`,
+ * `cat <<EOF | tee f`): it still carries the redirections. Several operators on one line take their bodies
+ * in order. An operator with no terminator line is left alone (`$((1 << 3))`), and `<<<` is a here-string.
+ * One forward pass over the operators; a tag with no terminator line is searched for once.
+ */
+function withoutHeredocBodies(text) {
+  const operator = /(?<!<)<<(?!<)-?[ \t]*\\?(['"]?)(\w+)\1/g;
+  const edits = []; // [start, end, replacement], sorted by start before they are applied
+  const missing = new Set(); // tags with no terminator line after the position being read
+  let lineEnd = -1; // the newline that ends the line of the operators being read
+  let resume = -1; // the newline before the next body of that line
+  for (let m = operator.exec(text); m !== null; m = operator.exec(text)) {
+    if (m.index > lineEnd && m.index < resume) continue; // inside a body that is already cut
+    if (m.index > lineEnd) {
+      lineEnd = text.indexOf('\n', m.index + m[0].length);
+      if (lineEnd === -1) break; // no line follows, so no body
+      resume = lineEnd;
+    }
+    const tag = m[2];
+    if (missing.has(tag)) continue;
+    const terminator = new RegExp(`\\n[ \\t]*${tag}\\b`, 'g');
+    terminator.lastIndex = resume;
+    const found = terminator.exec(text);
+    if (found === null) {
+      missing.add(tag);
+      continue;
+    }
+    edits.push([m.index, m.index + m[0].length, `<< ${tag} `], [resume, found.index + found[0].length, '']);
+    resume = found.index + found[0].length;
+  }
+  let out = '';
+  let from = 0;
+  for (const [start, end, replacement] of edits.sort((a, b) => a[0] - b[0])) {
+    out += text.slice(from, start) + replacement;
+    from = end;
+  }
+  return out + text.slice(from);
+}
+
+/**
  * Files a shell command writes by redirection, `tee`, a heredoc with a target, or an in-place
  * `sed`/`perl` (its file operands). Quoted strings hold text, not redirections, except a file name
  * quoted right after `>` or `tee`.
  */
 function shellWriteTargets(command) {
   const QUOTED = String.raw`"[^"]*"|'[^']*'`;
-  const text = command
-    .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?\n\s*\2\b/g, (m, q, tag) => `<< ${tag}`); // heredoc body out
+  const text = withoutHeredocBodies(command);
   const shell = text.replace(new RegExp(`(>\\s*|\\btee\\s+(?:-[ai]+\\s+)*)?(${QUOTED})`, 'g'), (m, keep) => (keep ? m : ''));
   const targets = [];
   const redirect = new RegExp(String.raw`(?:^|[\s;&|(])\d?>{1,2}\s*(?:${QUOTED}|[^\s;&|)<>]+)`, 'g');
   const quotedRedirect = new RegExp(String.raw`(?:^|[\s;&|(])\d?>{1,2}\s*(${QUOTED})`, 'g');
   for (const m of shell.matchAll(redirect)) targets.push(m[0].replace(/^[\s;&|(]*\d?>{1,2}\s*/, ''));
   for (const m of shell.matchAll(quotedRedirect)) targets.push(m[1].replace(/^["']|["']$/g, ''));
-  for (const m of shell.matchAll(/\btee\s+([^;&|)<>]+)/g)) {
+  for (const m of shell.matchAll(/\btee[ \t]+([^;&|)<>\n]+)/g)) {
     for (const t of m[1].split(/\s+/)) if (t && !t.startsWith('-')) targets.push(t);
   }
   const words = shellWords(text);

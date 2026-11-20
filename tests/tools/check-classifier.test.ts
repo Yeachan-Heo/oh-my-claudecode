@@ -121,6 +121,41 @@ it('narrowing and weakening produce narrowed=true', () => {
   }
 });
 
+it('quoted file operands narrow a test run, and quoted text still names no check', () => {
+  const cases: Array<[string, boolean]> = [
+    ['pytest "tests/test_auth.py"', true], ["pytest 'tests/test_auth.py'", true],
+    ['pytest "tests/my dir/test_auth.py"', true], ['pytest -- "tests/test_auth.py"', true],
+    ['pytest --maxfail 1 "tests/test_auth.py"', true], ['pytest -p "no:cacheprovider" -x "tests/a.py"', true],
+    ['vitest run "src/a.test.ts"', true], ['npm test "src/a.test.ts"', true], ['pytest -k "auth and not slow"', true],
+    ['vitest "--passWithNoTests"', true], ['pytest "tests/test_auth.py::test_login"', true],
+    ['pytest tests/test_auth.py::TestLogin::test_ok', true], ['pytest "tests/a.py::test_x[1 2]"', true],
+    // A quoted operand that names no file does not narrow, quoted or not.
+    ['pytest "tests/"', false], ['pytest -q "$DIR"', false], ['pytest ""', false], ['pytest -q', false],
+  ];
+  for (const [cmd, narrowed] of cases) {
+    const got = classifyCommand(cmd);
+    assert.equal(got.isCheck, true, `${cmd}: still a check`);
+    assert.equal(got.narrowed, narrowed, `${cmd}: narrowed=${narrowed}`);
+  }
+  // The text of a quoted string stays one word: it cannot name a runner, split the command or start a comment.
+  for (const cmd of [
+    '"npm test"', "'vitest run'", 'git commit -m "x; npm test"', 'git commit -m "x\nnpm test"', 'git commit -m "x && npm test"',
+    'git commit -m "x | tail" && git push', 'bash -c "npm test"', 'echo "# npm test"',
+  ]) {
+    assert.equal(classifyCommand(cmd).isCheck, false, `${cmd}: names no check`);
+  }
+  assert.equal(classifyCommand('echo "set -o pipefail" && npm test | tail').pipefail, false, 'quoted text sets no option');
+  assert.equal(classifyCommand('pytest "#x" tests/a.py').narrowed, true, 'a quoted # starts no comment');
+  // A quoted word is still a word: a quoted value of a wrapper, a quoted assignment, a quoted command name.
+  for (const cmd of ['timeout "5" npm test', 'FOO="a b" npm test', 'env "A=b c" npm test', '"pytest" -q']) {
+    assert.equal(classifyCommand(cmd).isCheck, true, `${cmd}: a check`);
+  }
+  // The verdict follows: a one-file run with a zero exit is not full evidence; a failing one still fails.
+  assert.equal(checkResult('pytest "tests/test_auth.py"', '1 passed in 0.1s', 0).verdict, 'undetermined');
+  assert.equal(checkResult('pytest "tests/test_auth.py"', '1 failed in 0.1s', 1).verdict, 'failed');
+  assert.equal(checkResult('pytest tests/', '5 passed in 0.1s', 0).verdict, 'passed');
+});
+
 it('node:test summary: passed, failed, undetermined (hidden exit)', () => {
   assert.equal(checkResult('node --test | tail -20', 'ℹ tests 5\nℹ pass 5\nℹ fail 0').verdict, 'passed');
   assert.equal(checkResult('node --test | tail -20', 'ℹ tests 5\nℹ pass 3\nℹ fail 2', 1).verdict, 'failed');
@@ -247,6 +282,39 @@ it('zero-test runs stay undetermined; an early zero-test line in a long log does
   assert.equal(checkResult('cargo test', 'running 5 tests\nok\nrunning 0 tests', 0).verdict, 'passed');
 });
 
+it('failure evidence beats a zero-test report; real results void it', () => {
+  // A test that prints `No tests found` as data, or a script that chains a zero-test child with a failing one.
+  assert.equal(checkResult('vitest run', 'No tests found\nTests  2 failed | 1 passed (3)', 1).verdict, 'failed');
+  assert.equal(checkResult('vitest run', 'No tests found\nTests  2 failed | 1 passed (3)', 0).verdict, 'failed', 'a failure line beats a zero exit');
+  assert.equal(checkResult('vitest run | tail', 'No tests found\nTests  2 failed | 1 passed (3)').verdict, 'failed');
+  assert.equal(checkResult('npm test', 'No tests found\n===== 2 failed in 0.1s =====', 1).verdict, 'failed');
+  assert.equal(checkResult('npm test', 'No tests found\nTest Files  1 failed | 1 passed (2)', 1).verdict, 'failed');
+  assert.equal(checkResult('node --test', 'ℹ tests 0\nℹ tests 3\nℹ pass 1\nℹ fail 2', 1).verdict, 'failed');
+  // Real results void the zero-test report even when nothing failed, so the visible exit status decides.
+  assert.equal(checkResult('vitest run', 'No tests found\nTests  3 passed (3)', 0).verdict, 'passed');
+  assert.equal(checkResult('vitest run', 'No tests found\n Tests  1 failed | 2 skipped (3)', 1).verdict, 'failed');
+  assert.equal(checkResult('vitest run', 'No tests found\n\u001b[2m      Tests \u001b[22m \u001b[32m3 passed\u001b[39m (3)', 0).verdict, 'passed', 'colored summary');
+  assert.equal(checkResult('jest', 'No tests found\nTests:       1 failed, 2 passed, 3 total', 1).verdict, 'failed', 'jest has no summary rule: the exit decides');
+  assert.equal(checkResult('jest', 'No tests found\nTests:       3 passed, 3 total', 0).verdict, 'passed');
+  assert.equal(checkResult('npm test', 'No tests found\nTests:       1 failed, 2 passed, 3 total', 1).verdict, 'failed', 'jest child of a script');
+  assert.equal(checkResult('pytest', 'no tests ran\n===== 3 passed in 0.1s =====', 0).verdict, 'passed');
+  assert.equal(checkResult('pytest', 'no tests ran\n3 passed, 1 warning in 0.1s', 0).verdict, 'passed', 'quiet mode summary');
+  assert.equal(checkResult('pytest', 'no tests ran\n1 failed, 2 passed in 0.1s', 1).verdict, 'failed', 'quiet mode summary without rule marks');
+  assert.equal(checkResult('node --test', 'ℹ tests 0\nℹ tests 3\nℹ pass 3\nℹ fail 0', 0).verdict, 'passed');
+  assert.equal(checkResult('go test ./...', '[no tests to run]\nok  pkg 0.1s', 0).verdict, 'passed');
+  // The zero-test report alone still leaves the check undetermined, with a zero or a nonzero exit.
+  for (const cmd of ['vitest run', 'jest', 'npm test']) {
+    assert.equal(checkResult(cmd, 'No tests found', 0).verdict, 'undetermined', `${cmd}: exit 0`);
+    assert.equal(checkResult(cmd, 'No tests found', 1).verdict, 'undetermined', `${cmd}: exit 1`);
+  }
+  assert.equal(checkResult('jest', 'No tests found, exiting with code 1', 1).verdict, 'undetermined');
+  assert.equal(checkResult('jest', 'Tests:       0 total', 1).verdict, 'undetermined');
+  assert.equal(checkResult('pytest', 'no tests ran in 0.01s', 5).verdict, 'undetermined');
+  assert.equal(checkResult('pytest', 'no tests ran, 1 warning in 0.01s', 5).verdict, 'undetermined', 'a warning is no result');
+  assert.equal(checkResult('node --test', 'ℹ tests 0\nℹ pass 0\nℹ fail 0', 1).verdict, 'undetermined');
+  assert.equal(checkResult('cargo test', 'running 0 tests', 1).verdict, 'undetermined');
+});
+
 it('mutations: editing tools', () => {
   assert.equal(isMutation('Write', { file_path: 'src/a.ts' }), true);
   assert.equal(isMutation('Edit', { file_path: 'src/a.ts' }), true);
@@ -359,6 +427,85 @@ it('in-place edit parsing is linear in the length of the command', () => {
   ], 'isMutation', "isMutation('Bash', { command })");
   assert.equal(got.length, 10);
   assert.equal(got[9], false, 'a long list of ignored files stays ignored');
+});
+
+it('here-documents: the redirections on the operator line count, the body text does not', () => {
+  const edits = (command: string) => isMutation('Bash', { command });
+  // A redirect after the delimiter, in every delimiter form.
+  for (const operator of ['<<EOF', '<<-EOF', "<<'EOF'", '<<"EOF"', '<< EOF', '<<\\EOF', '<<EOF>src/a.ts']) {
+    const redirected = operator.endsWith('>src/a.ts') ? operator : `${operator} > src/a.ts`;
+    assert.equal(edits(`cat ${redirected}\nbody\nEOF`), true, `${operator} > src/a.ts`);
+    assert.equal(edits(`cat ${operator.replace('>src/a.ts', '')} > README.md\nbody > src/a.ts\nEOF`), false, `${operator} > README.md`);
+  }
+  assert.equal(edits('cat <<EOF > src/a.ts\nx\nEOF'), true);
+  assert.equal(edits('cat <<EOF >> src/a.ts\nx\nEOF'), true);
+  assert.equal(edits('cat <<EOF 2> /tmp/err > src/a.ts\nx\nEOF'), true);
+  assert.equal(edits('cat <<EOF > "src/a.ts"\nx\nEOF'), true);
+  assert.equal(edits('cat <<-EOF > src/a.ts\n\tx\n\tEOF'), true, 'tab-indented terminator');
+  assert.equal(edits('cat <<EOF | tee src/a.ts\nx\nEOF'), true);
+  assert.equal(edits('cat <<EOF | tee -a src/a.ts\nx\nEOF'), true);
+  assert.equal(edits('cat <<EOF | tee README.md\nx\nEOF'), false);
+  // The command after the terminator is its own line: a `tee` with no file does not read it as a file name.
+  assert.equal(edits('cat <<EOF | tee README.md\nx\nEOF\nnpm test'), false);
+  assert.equal(edits('cat <<EOF | tee src/a.ts\nx\nEOF\nnpm test'), true);
+  assert.equal(edits('echo hi | tee\nnpm test'), false);
+  // Redirect before the delimiter, and a redirect on a later line.
+  assert.equal(edits('cat > src/a.ts <<EOF\nx\nEOF'), true);
+  assert.equal(edits('cat > README.md <<EOF\nx > src/a.ts\nEOF'), false, 'the body is text');
+  assert.equal(edits('cat <<EOF > README.md\nx\nEOF\necho a > src/a.ts'), true);
+  assert.equal(edits('cat <<EOF > README.md\nx > src/a.ts\nEOF'), false, 'the body is text');
+  assert.equal(edits('cat <<EOF > README.md\n\n\nEOF'), false, 'blank lines in the body');
+  assert.equal(edits('cat <<EOF > README.md\nEOF\necho a > src/a.ts'), true, 'an empty body');
+  // Several here-documents: one per line, or several on one line taking their bodies in order.
+  assert.equal(edits('cat <<A > README.md\nx\nA\ncat <<B > src/b.ts\ny\nB'), true);
+  assert.equal(edits('cat <<A > README.md\nx > src/a.ts\nA\ncat <<B > docs/b.ts\ny > src/b.ts\nB'), false);
+  assert.equal(edits('cat <<A > README.md; cat <<B > src/b.ts\nx\nA\ny\nB'), true);
+  assert.equal(edits('cat <<A > src/a.ts; cat <<B > README.md\nx\nA\ny\nB'), true);
+  assert.equal(edits('cat <<A > README.md; cat <<B > docs/b.ts\nx > src/z.ts\nA\ny > src/z.ts\nB'), false, 'both bodies are text');
+  assert.equal(edits('cat <<A > README.md; cat <<B > docs/b.ts\nx\nA\ny\nB\necho z > src/z.ts'), true, 'a line after both');
+  // Not a here-document: a here-string, an arithmetic shift, an operator with no terminator line.
+  assert.equal(edits('cat <<< "x" > src/a.ts'), true);
+  assert.equal(edits('cat <<< "x" > README.md\necho a > src/a.ts'), true);
+  assert.equal(edits('x=$((1<<3))\necho hi > src/a.ts'), true);
+  assert.equal(edits('cat <<EOF > README.md\nx > src/a.ts'), true, 'no terminator: nothing is cut');
+  assert.equal(edits('cat <<EOF > README.md'), false);
+});
+
+it('here-document and zero-test parsing is linear in the length of the input', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const tags = Array.from({ length: 4000 }, (_, index) => `<<t${index}\n`).join('');
+  const got = classifyInChild<boolean>([
+    long('cat <<EOF '),
+    long('<<A\n'),
+    long('<<a\nx\na\n'),
+    tags,
+    long('<<< x '),
+    `cat <<EOF > README.md\n${'\n'.repeat(40000)}EOF`,
+    `cat <<-${' '.repeat(40000)}EOF\nx\nEOF`,
+    `tee${' '.repeat(40000)}`,
+    `cat <<A > README.md;${long(' cat <<B ')}\nx\nA\ny\nB`,
+  ], 'isMutation', "isMutation('Bash', { command })");
+  assert.equal(got.length, 9);
+  assert.equal(got[5], false, 'a long body of blank lines is cut');
+  assert.equal(got[8], false, 'many operators on one line');
+  // The adversarial text comes first so that the zero-test report still sits in the 6000-character tail.
+  const outputs = [
+    `Tests: ${'1'.repeat(40000)}\nNo tests found`,
+    `Tests: ${'0 a, '.repeat(8000)}\nNo tests found`,
+    `  Tests  ${'0 a | '.repeat(6000)}\nNo tests found`,
+    `=== ${'1 a, '.repeat(8000)}x\nno tests ran`,
+    `=== ${'0 a, '.repeat(8000)}0 passed\nno tests ran`,
+    `${'\n'.repeat(40000)}no tests ran`,
+    `${' '.repeat(40000)}Tests: 1 passed\nno tests ran`,
+    `=${'1'.repeat(40000)}\nno tests ran`,
+  ];
+  const verdicts = classifyInChild<{ verdict: string }>(
+    outputs, 'classifyCheckResult', "classifyCheckResult({ command: 'npm test', output: command, isError: false, exitCode: 0 })",
+  );
+  assert.equal(verdicts.length, 8);
+  assert.deepEqual(verdicts.map((item) => item.verdict), [
+    'undetermined', 'undetermined', 'undetermined', 'undetermined', 'undetermined', 'undetermined', 'passed', 'undetermined',
+  ]);
 });
 
 it('a runner that writes to the null device is a check, not a mutation; echo of a runner into code is a mutation', () => {
