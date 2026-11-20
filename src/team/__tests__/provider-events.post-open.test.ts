@@ -81,12 +81,16 @@ const SWAPS = {
 };
 
 describe.skipIf(process.platform === 'win32')('provider events after a swap between open and re-check', () => {
+  let base = '';
   let root = '';
   let outside = '';
   let workerDir = '';
   let path = '';
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'provider-events-swap-'));
+    // <temp>/.omc/state/team/demo like production, so the ancestor check never
+    // meets a symlinked temp dir (TMPDIR=/tmp on macOS).
+    base = mkdtempSync(join(tmpdir(), 'provider-events-swap-'));
+    root = join(base, '.omc', 'state', 'team', 'demo');
     outside = mkdtempSync(join(tmpdir(), 'provider-events-swap-outside-'));
     workerDir = join(root, 'workers', 'worker-1');
     path = join(workerDir, 'provider-events.jsonl');
@@ -98,8 +102,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     swap.opened = [];
     swap.closed = 0;
     swap.failClose = false;
-    rmSync(root, { recursive: true, force: true });
-    rmSync(`${root}.moved`, { recursive: true, force: true });
+    rmSync(base, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
   });
 
