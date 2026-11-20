@@ -11,7 +11,7 @@
  */
 import { constants, type Stats } from 'node:fs';
 import { lstat, open, rename, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Hook events the worker records. Adding an event here is the whole change. */
@@ -54,13 +54,16 @@ export function providerEventsPath(teamStateRoot: string, workerName: string): s
 const sameNode = (a: Stats, b: Stats): boolean => a.dev === b.dev && a.ino === b.ino;
 
 export async function readLatestProviderEvent(
-  teamStateRoot: string,
+  rawTeamStateRoot: string,
   workerName: string,
   attemptId: string | undefined,
 ): Promise<LatestProviderEvent> {
   // Windows ignores O_NOFOLLOW, so a symlinked leaf cannot be refused there;
   // the field is display-only, so Windows shows none.
   if (!attemptId || process.platform === 'win32') return { event: 'none' };
+  // Lexical only (not realpath, which would hide a symlink): lstat of a root
+  // ending in a slash would follow a symlinked root.
+  const teamStateRoot = resolve(rawTeamStateRoot);
   // Read only a regular file reached without symlinks: a FIFO left at the path
   // would otherwise block the whole monitor cycle. The root is
   // <storage anchor>/state/team/<team>; like assertTeamStatePathSafe(), every
