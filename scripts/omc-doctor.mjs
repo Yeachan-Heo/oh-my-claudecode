@@ -274,19 +274,22 @@ const entryInstallPaths = (market, entry) =>
     .map((target) => target.trim());
 
 // == Step 1: the registry ==
-// supported: [key, entries] of the supported plugin IDs. unreadable: the file is not usable. malformed: a
-// supported ID has an unusable entry list. ambiguous: another key could be an OMC install (a look-alike key, an
-// empty or non-array list, a malformed entry), so npm cannot be assumed.
+// supported: [id, entries] of the supported plugin IDs, the id in lower case. unreadable: the file is not usable.
+// malformed: a supported ID has an unusable entry list. ambiguous: another key could be an OMC install (a look-alike
+// key, an empty or non-array list, a malformed entry), so npm cannot be assumed.
+// Two spellings of one plugin ID are one plugin, as the runtime reads them (auto-update.ts and the installer compare
+// the IDs in lower case): their entries are merged into one block, so the highest version of all of them is
+// Installed, and the block names the ID in lower case, which is the ID its Updater line passes to the CLI.
 // Limits kept on purpose, because the installer reads the registry the same way (resolveInstalledOmcPluginRoots in
 // src/installer): an installPath is used as written (a relative one is not resolved against the configuration
-// directory), scope and projectPath are not read (every entry of a supported ID counts, so the highest version is
-// Installed, whichever project it was installed for), and two spellings of one plugin ID are two plugins that print
-// a block each. The Updater line carries no CLAUDE_CONFIG_DIR: run it in the environment that holds the profile.
+// directory), and scope and projectPath are not read (every entry of a supported ID counts, so the highest version
+// is Installed, whichever project it was installed for). The Updater line carries no CLAUDE_CONFIG_DIR: run it in
+// the environment that holds the profile.
 const readChannelRegistry = () => {
   let unreadable = false;
   let malformed = false;
   let ambiguous = false;
-  const supported = [];
+  const merged = new Map();
   try {
     const json = JSON.parse(readFile(path.join(configDir, 'plugins', 'installed_plugins.json')));
     const plugins = json ? json.plugins ?? json : 0;
@@ -294,7 +297,7 @@ const readChannelRegistry = () => {
     for (const [key, entries] of Object.entries(plugins)) {
       const lower = key.toLowerCase();
       if (OMC_IDS.includes(lower)) {
-        supported.push([key, entries]);
+        merged.set(lower, (merged.get(lower) ?? []).concat(Array.isArray(entries) ? entries : []));
         if (!Array.isArray(entries) || !entries.length || entries.some((entry) => entryBad(entry, true))) malformed = true;
         continue;
       }
@@ -304,7 +307,7 @@ const readChannelRegistry = () => {
   } catch (error) {
     unreadable = !(error && error.code == 'ENOENT');
   }
-  return { unreadable, malformed, ambiguous, supported };
+  return { unreadable, malformed, ambiguous, supported: [...merged] };
 };
 
 // == Step 1: the install channel ==
@@ -354,8 +357,8 @@ const step1 = () => {
       'Updater: omc update',
     );
   } else {
-    for (const [key, entries] of supported) {
-      const market = marketplaceOf(key);
+    for (const [id, entries] of supported) {
+      const market = marketplaceOf(id);
       // The entries the session runs: those whose install holds an existing plugin root. Without a match all count.
       const active = entries.filter((entry) =>
         entryInstallPaths(market, entry).some((target) => roots.some((root) => isInside(root, target))),
@@ -377,11 +380,11 @@ const step1 = () => {
       } catch {}
       const installed = versions.length ? versions[versions.length - 1] : active.length ? '' : highestCached(cacheDirOf(market));
       out.push(
-        'Plugin: ' + key,
+        'Plugin: ' + id,
         'Channel: marketplace ' + market,
         'Installed: ' + (installed || '(none)'),
         'Latest: ' + (latest || '(unavailable)') + ' (marketplace clone)',
-        'Updater: claude plugin marketplace update ' + market + ' && claude plugin update ' + key,
+        'Updater: claude plugin marketplace update ' + market + ' && claude plugin update ' + id,
       );
     }
   }
@@ -392,14 +395,22 @@ const step1 = () => {
 // npm view gets 20 seconds: it normally answers in a few, and a hanging network must not stall the diagnosis. Only a
 // semantic version of the grammar above is an answer; an error, a timeout or anything else on stdout is
 // (unavailable), never a bare string.
+// On POSIX npm runs in a process group of its own, and a timeout kills the whole group, so a process npm started
+// (a registry helper, a proxy) does not outlive the command. On Windows the timeout ends the shell that starts
+// npm.cmd and not the processes below it: there the limit protects the diagnosis, it does not clean up the tree.
 const npmLatest = () => {
   const view = ['view', 'oh-my-claude-sisyphus', 'version'];
-  const options = { encoding: 'utf8', timeout: 20000, killSignal: 'SIGKILL' };
+  const windows = process.platform == 'win32';
+  const options = { encoding: 'utf8', timeout: 20000, killSignal: 'SIGKILL', detached: !windows };
   // npm is a .cmd file on Windows, which only a shell can start.
-  const run =
-    process.platform == 'win32'
-      ? childProcess.spawnSync('npm ' + view.join(' '), { ...options, shell: true })
-      : childProcess.spawnSync('npm', view, options);
+  const run = windows
+    ? childProcess.spawnSync('npm ' + view.join(' '), { ...options, shell: true })
+    : childProcess.spawnSync('npm', view, options);
+  if (!windows && run.error && run.pid) {
+    try {
+      process.kill(-run.pid, 'SIGKILL');
+    } catch {}
+  }
   const latest = run.status === 0 ? semver(run.stdout) : '';
   console.log('npm latest: ' + (latest || '(unavailable)'));
 };
@@ -523,8 +534,12 @@ const refuse = (text) => {
 // supported IDs. unreadable: the file is not a regular file, is not JSON of the expected shape, or holds a
 // malformed entry anywhere; reason names the first such entry. A missing file is no pins and not unreadable.
 // A Windows path (a drive letter or a UNC path) in the installPath of an entry of OMC cannot be read on another
-// system, so it counts as unreadable instead of protecting nothing.
-const foreignPath = (target) => process.platform != 'win32' && /^(?:[A-Za-z]:[/\\]|\\\\)/.test(target);
+// system, so it counts as unreadable instead of protecting nothing. An installPath that is not absolute (and no
+// Windows path) names another directory for each directory the command runs in, so it counts as unreadable too: the
+// pin it carries could not be told from a version nothing protects.
+const windowsPath = (target) => /^(?:[A-Za-z]:[/\\]|\\\\)/.test(target);
+const foreignPath = (target) => process.platform != 'win32' && windowsPath(target);
+const relativePath = (target) => !path.isAbsolute(target) && !windowsPath(target);
 const readRegistry = () => {
   let unreadable = false;
   let reason = '';
@@ -558,6 +573,10 @@ const readRegistry = () => {
         }
         if (isSupported && typeof entry.installPath == 'string' && foreignPath(entry.installPath.trim())) {
           reason = 'an entry of ' + key + ' has the Windows path ' + JSON.stringify(entry.installPath) + ' as installPath, which this system cannot read';
+          throw 0;
+        }
+        if (typeof entry.installPath == 'string' && relativePath(entry.installPath.trim())) {
+          reason = 'an entry of ' + key + ' has the relative path ' + JSON.stringify(entry.installPath) + ' as installPath, which names another directory for each directory the command runs in';
           throw 0;
         }
         if (!isSupported) {

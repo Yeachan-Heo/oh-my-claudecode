@@ -98,8 +98,9 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
   });
 
   // Grid: spelling of the registry key x where the installed version comes from x platform. The marketplace
-  // name, the clone it is looked up in and the updater follow the normalized official ID, as the installer
-  // reads the registry; the plugin ID in the updater stays as recorded.
+  // name, the clone it is looked up in, the Plugin line and both halves of the updater follow the normalized
+  // (lower case) ID, as the installer and the updater of the runtime compare plugin IDs; the key in the registry
+  // keeps its spelling.
   test('the registry key in any letter case, with the version from version, installPath or the cache, on every platform', () => {
     const keys: Array<[string, string]> = [
       ['oh-my-claudecode@omc', 'omc'],
@@ -131,11 +132,11 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
           expect({ key, label, platform, out }).toEqual({
             key, label, platform,
             out: {
-              Plugin: key,
+              Plugin: key.toLowerCase(),
               Channel: 'marketplace ' + market,
               Installed: installed,
               Latest: '6.0.0 (marketplace clone)',
-              Updater: `claude plugin marketplace update ${market} && claude plugin update ${key}`,
+              Updater: `claude plugin marketplace update ${market} && claude plugin update ${key.toLowerCase()}`,
             },
           });
         }

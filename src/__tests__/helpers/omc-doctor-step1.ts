@@ -22,7 +22,18 @@ export type Profile = {
 // version directories under plugins/cache/<marketplace>/oh-my-claudecode, `clone` maps a marketplace name
 // to the plugin version its clone advertises, `env` sets variables (it may create the directories they name)
 // and `setup` runs last. The command always runs with a timeout: a read that blocks must show up as an error.
+// The answer is one block of `Key: value` lines. A registry with several plugin IDs prints one block each; step1()
+// refuses to fold them into one object (a repeated key would silently keep the last block only), so a test that
+// expects several blocks reads them with step1Blocks().
 export function step1(profile: Profile) {
+  const blocks = step1Blocks(profile);
+  if (blocks.length !== 1) throw new Error(`step1() expects one block, the command printed ${blocks.length}: use step1Blocks()`);
+  return blocks[0];
+}
+
+// The blocks of the answer, one object per plugin (a block starts at its `Plugin:` line; the answers without one,
+// unknown, plugin-dir and npm, are a single block).
+export function step1Blocks(profile: Profile) {
   const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-version-'));
   try {
     mkdirSync(path.join(dir, 'plugins'), { recursive: true });
@@ -44,7 +55,16 @@ export function step1(profile: Profile) {
     const result = runCommand(versionCommand, dir, { preloads, env: profile.env?.(dir), timeout: 20_000 });
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
-    return Object.fromEntries(result.stdout.trim().split('\n').map((l) => [l.slice(0, l.indexOf(': ')), l.slice(l.indexOf(': ') + 2)]));
+    const blocks: Array<Record<string, string>> = [];
+    for (const line of result.stdout.trim().split('\n')) {
+      const key = line.slice(0, line.indexOf(': '));
+      if (key === 'Plugin' || !blocks.length) blocks.push({});
+      const block = blocks[blocks.length - 1];
+      // A key twice in one block is a bug of the command, not something to fold.
+      if (key in block) throw new Error(`the key ${key} is printed twice in one block: ${result.stdout}`);
+      block[key] = line.slice(line.indexOf(': ') + 2);
+    }
+    return blocks;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

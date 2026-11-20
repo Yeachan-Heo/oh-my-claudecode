@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, lutimesSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lutimesSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
 
@@ -124,12 +125,68 @@ describe.skipIf(!posix)('omc-doctor cache commands: an installPath written as a 
         const colon = path.join(dir, 'a:', 'x');
         mkdirSync(colon, { recursive: true });
         writeRegistry(dir, {
-          [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }, { scope: 'project', installPath: colon }, { scope: 'project', installPath: 'C/relative/looking' }],
+          [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }, { scope: 'project', installPath: colon }, { scope: 'project', installPath: path.join(dir, 'C', 'relative', 'looking') }],
           'other-plugin@market': [{ scope: 'user', installPath: 'C:\\Users\\u\\other' }],
         });
         const { status, out } = run(command, dir);
         expect({ status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.8.1', moved: 2 });
         expect(out).toContain('Moved 2 unprotected version(s)');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+});
+
+// An installPath that is not absolute names another directory for each directory the command runs in (the installer adds
+// it as written, without resolving it): a pin written that way protected the cache of the profile only when the shell
+// of the model happened to stand in the configuration directory. It is an unreadable entry, so the answer does not depend
+// on where the command runs.
+describe('omc-doctor cache commands: an installPath that is not absolute', { timeout: 120_000 }, () => {
+  const relative = ['plugins/cache/omc/oh-my-claudecode/5.8.1', './plugins/cache/omc/oh-my-claudecode/5.8.1', '../elsewhere/5.8.1', 'current'];
+
+  test('the command moves nothing, says which entry and path made it so, and answers alike from every working directory', () => {
+    for (const command of commands) {
+      for (const installPath of relative) {
+        for (const owner of [PLUGIN_ID, 'other-plugin@market']) {
+          const { dir, cache } = makeCache(['5.7.0', '5.8.1', '5.9.0']);
+          const elsewhere = mkdtempSync(path.join(tmpdir(), 'omc-doctor-cwd-'));
+          try {
+            writeRegistry(
+              dir,
+              owner === PLUGIN_ID
+                ? { [PLUGIN_ID]: [{ scope: 'user', version: '5.7.0' }, { scope: 'user', installPath }] }
+                : { [PLUGIN_ID]: [{ scope: 'user', version: '5.7.0' }], [owner]: [{ scope: 'user', installPath }] },
+            );
+            const answers = [dir, elsewhere].map((cwd) => {
+              const result = runCommand(command, dir, { timeout: 20_000, cwd });
+              expect(result.error).toBeUndefined();
+              return { status: result.status, out: result.stdout };
+            });
+            expect({ installPath, owner, ...answers[0] }).toEqual({ installPath, owner, ...answers[1] });
+            expect({ installPath, owner, status: answers[0].status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ installPath, owner, status: 1, versions: '5.7.0,5.8.1,5.9.0', moved: 0 });
+            expect(answers[0].out).toContain(`an entry of ${owner} has the relative path ${JSON.stringify(installPath)} as installPath, which names another directory for each directory the command runs in`);
+            expect(answers[0].out).toContain('Nothing moved');
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+            rmSync(elsewhere, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+  });
+
+  test('an absolute installPath and an entry with only a version are no refusal', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.7.0', '5.8.1', '5.9.0']);
+      try {
+        writeRegistry(dir, {
+          [PLUGIN_ID]: [{ scope: 'user', version: '5.7.0' }, { scope: 'user', installPath: path.join(cache, '5.8.1') }],
+          'other-plugin@market': [{ scope: 'user', version: '1.0.0' }],
+        });
+        const { status, out } = run(command, dir);
+        expect({ status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.7.0,5.8.1', moved: 1 });
+        expect(out).toContain('Moved 1 unprotected version(s)');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

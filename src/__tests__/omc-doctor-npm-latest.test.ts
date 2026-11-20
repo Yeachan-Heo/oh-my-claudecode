@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NPM_LATEST, SCRIPT, scriptSection, skillText } from './helpers/omc-doctor-cache-fixture.js';
@@ -71,5 +71,43 @@ describe('omc-doctor npm latest command', { timeout: 120_000 }, () => {
     const result = run('exec sleep 30', preload);
     expect(result).toEqual({ error: undefined, status: 0, stdout: 'npm latest: (unavailable)\n' });
     expect(Date.now() - started).toBeLessThan(20_000);
+  });
+
+  // npm starts a process of its own (here a long sleep that holds the pipe of its output open) and hangs. The limit ends
+  // npm, and the group kill ends the sleep with it; before, the sleep outlived the command. On Windows the limit ends the
+  // shell only (see the comment of the command), so the case is POSIX only.
+  test.skipIf(!posix)('a hanging npm is killed together with the process it started', () => {
+    const preload = "const cp = require('child_process'); const spawnSync = cp.spawnSync; cp.spawnSync = (command, args, options) => spawnSync(command, args, { ...options, timeout: 1500 });\n";
+    const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-npm-tree-'));
+    let pid = 0;
+    try {
+      writeFileSync(path.join(dir, 'npm'), '#!/bin/sh\nsleep 120 &\necho $! > "$(dirname "$0")/pid"\nwait\n');
+      chmodSync(path.join(dir, 'npm'), 0o755);
+      writeFileSync(path.join(dir, 'preload.cjs'), preload);
+      const result = spawnSync(process.execPath, ['--require', path.join(dir, 'preload.cjs'), SCRIPT, NPM_LATEST], {
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: { ...process.env, PATH: dir + path.delimiter + '/usr/bin' + path.delimiter + '/bin' },
+      });
+      expect({ error: result.error, status: result.status, stdout: result.stdout }).toEqual({ error: undefined, status: 0, stdout: 'npm latest: (unavailable)\n' });
+      pid = Number(readFileSync(path.join(dir, 'pid'), 'utf8').trim());
+      expect(Number.isInteger(pid) && pid > 1).toBe(true);
+      // The process is gone when it does not exist or only waits for its parent to collect it (a zombie).
+      const state = () => {
+        const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' });
+        expect(ps.error).toBeUndefined();
+        return ps.stdout.trim();
+      };
+      for (let i = 0; i < 30 && state() !== '' && !state().startsWith('Z'); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+      expect(state() === '' || state().startsWith('Z')).toBe(true);
+    } finally {
+      // A process of this test that is still there (the case failed) is ended by its pid.
+      if (pid > 1) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {}
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
