@@ -56,6 +56,9 @@ function closingBacktick(text, at) {
   return text.length;
 }
 
+/** What bash passes on for a process substitution: the path of a descriptor. It names no file of a project (see TEMP_TARGET). */
+const PROCESS_FILE = '/dev/fd/63';
+
 /**
  * Replace every command substitution outside quotes (`$(...)`, a backtick pair) by `placeholder`, so the
  * substitution is one part of the word it stands in (`A=$(git rev-parse HEAD) npm test` has the assignment
@@ -63,8 +66,13 @@ function closingBacktick(text, at) {
  * returned apart, for the callers that read them as commands of their own. A substitution with an empty body
  * (`$()`, two backticks) expands to nothing, so it leaves no word. A substitution that has no end runs to the
  * end of the text. One pass: a body is skipped once, then read again only at the next nesting level.
+ *
+ * With `processes` set, a process substitution (`<(...)`, `>(...)`, outside quotes) is read the same way: the word it stands in is
+ * what bash passes on (a path of a descriptor), so `echo >(cat)` has one argument, `cmd > >(tee x)` redirects to no file of its own
+ * and `tee >(cat) src/a.ts` keeps `src/a.ts` as an argument of `tee`; the body is a command of its own. A `#` comment holds no
+ * substitution then (`echo x # >(tee f)`).
  */
-function splitSubstitutions(text, placeholder) {
+function splitSubstitutions(text, placeholder, processes = false) {
   const bodies = [];
   let out = '';
   let from = 0;
@@ -72,7 +80,16 @@ function splitSubstitutions(text, placeholder) {
   while (i < text.length) {
     const ch = text[i];
     if (ch === '\\') i += 2;
-    else if (ch === "'") {
+    else if (processes && ch === '#' && (i === 0 || /[\s;&|(]/.test(text[i - 1]))) {
+      const newline = text.indexOf('\n', i);
+      i = newline === -1 ? text.length : newline;
+    } else if (processes && (ch === '<' || ch === '>') && text[i + 1] === '(') {
+      const end = matchingParenthesis(text, i + 2);
+      out += text.slice(from, i) + PROCESS_FILE;
+      bodies.push(text.slice(i + 2, end));
+      i = end + 1;
+      from = i;
+    } else if (ch === "'") {
       const close = text.indexOf("'", i + 1);
       i = close === -1 ? text.length : close + 1;
     } else if (ch === '"') {
@@ -1058,10 +1075,13 @@ const IGNORE = /(^|\/)docs?\/|(^|\/)(node_modules|\.venv|__pycache__|coverage|\.
 /** Package-manager lockfiles keep their JSON/YAML extension, so they are named apart. */
 const LOCKFILE = /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml)$/;
 
-/** Writes to temp directories, the null device, or $TMPDIR hold no code. */
+/**
+ * Writes to temp directories, the device files (`/dev/null`, `/dev/stderr`, `/dev/fd/3`, `/dev/tcp/host/port`; bash opens a
+ * descriptor or a socket there and makes no file), or $TMPDIR hold no code.
+ */
 const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const TEMP_TARGET = new RegExp(
-  `^(?:${TEMP_DIRS.map(escapeRe).join('|')})(?:/|$)|^/dev/null$|^\\s*["']?\\$TMPDIR\\b`,
+  `^(?:${TEMP_DIRS.map(escapeRe).join('|')})(?:/|$)|^/dev/(?:null|zero|full|tty|stdin|stdout|stderr|fd/\\d+|(?:tcp|udp)/.*)$|^\\s*["']?\\$TMPDIR\\b`,
 );
 
 /**
@@ -1627,7 +1647,7 @@ const ddTargets = (args) => args.filter((arg) => arg.startsWith('of=') && arg.le
 function shellWriteTargets(command, depth = 0, substitutions = 0) {
   const QUOTED = String.raw`"(?:[^"\\]|\\[\s\S])*"|'[^']*'`; // a double-quoted string may hold \"
   const WORD = String.raw`(?:${QUOTED}|\\[^\n]|[^\s;&|)<>"'\\])+`;
-  const { text, bodies } = splitSubstitutions(withoutHeredocBodies(command), '_');
+  const { text, bodies } = splitSubstitutions(withoutHeredocBodies(command), '_', true);
   const targets = [];
   const unquote = (raw) => shellWords(raw).find((word) => word !== null && word !== '');
   // A redirection operator outside quotes needs nothing before it: `printf x>src/a.ts` writes the file, and the digits before it name a
@@ -1640,7 +1660,6 @@ function shellWriteTargets(command, depth = 0, substitutions = 0) {
   );
   for (const m of text.matchAll(scan)) {
     if (m[2] === undefined) continue;
-    if (text[m.index + m[1].length] === '(' && m.index > 0 && !/[\s;&|("']/.test(text[m.index - 1])) continue; // `echo a>(cat)`: a process substitution is no target
     if (m[1] === '>&' && /^(?:\d+-?|-)$/.test(m[2])) continue; // `>&2` and `>&-` name a descriptor, not a file
     targets.push(unquote(m[2]));
   }

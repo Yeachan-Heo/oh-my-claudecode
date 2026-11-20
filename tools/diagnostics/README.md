@@ -674,7 +674,7 @@ measurement. In short:
   runs `git`, and `echo hi > git commit` runs only `echo` (`commit` is one more argument), so it gives no candidate. A
   command substitution is one part of the word it stands in and its end opens no command (`echo $(date) git commit` runs
   only `echo`, `A=$(date) git commit` runs `git`); its body is read as a command of its own, eight levels deep (counted apart from the two levels of nested shell
-  strings above). A here-document operator inside quotes or a `#` comment (`echo "<<EOF"`) is text and opens no body. A
+  strings above). A process substitution (`<(...)`, `>(...)`) is read the same way: one word of the command it stands in, and a body that is a command of its own. A here-document operator inside quotes or a `#` comment (`echo "<<EOF"`) is text and opens no body. A
   here-document that a shell takes as its input (`bash <<EOF`), a command substitution inside double quotes (`echo "$(git commit)"`; an unquoted `$(...)` and
   backticks are read, and so is the usual `git commit -m "$(cat <<'EOF' ... EOF)"`, whose `git` stands outside the
   quotes) and `docker exec` or `kubectl exec` are not read. The general `deploy` class also counts the word
@@ -684,7 +684,7 @@ measurement. In short:
   message, matches general prohibitions by the kind of call (a `Bash` command is read-only or state-changing by
   its first word, taken after leading assignments, redirections and launch wrappers (`< in cat` and `sudo -n ls` are read-only, and a wrapper with no command behind it, `sudo -l`, changes nothing; reserved words (`if`, `then`, `do`, `{`, `!`), `xargs` and `doas` are not skipped, so `if grep -q x f; then rm -rf build; fi` is state-changing; only that first word is judged, so what a chain (`;`, `&&`, `||`, a pipe or a new line) holds behind a read-only first word is not read, and `grep a f; rm -rf build` counts as read-only, while an assignment before a `;` makes the whole line state-changing, so `D=/x; grep a $D/f` counts as a change of state and the same two commands on two lines do not), and a `>`, `>>`, `>|` or
   `>&file` redirection to a file outside quotes and comments makes it state-changing:
-  `echo '>'`, `grep ">" README.md`, `ls >&2` and `ls # > x` are still read-only), and counts pairs (prohibition, call); `--locators` then has one row
+  `echo '>'`, `grep ">" README.md`, `ls >&2`, `ls # > x` and `echo >(cat)` are still read-only; a process substitution passes a descriptor path, not a file, and its body is judged as a command, so `echo >(tee f)` is state-changing), and counts pairs (prohibition, call); `--locators` then has one row
   per prohibition with a candidate and a `history_group` hash that copies of the same message share. Rule 3 (the
   default) changes only the revocation check: explicit permission only, no revocation in a question, none after a
   negation.
@@ -1098,9 +1098,17 @@ command substitution. These constructs stay outside the scope of every tool, so 
   it stays hidden; `eval` and `bash -c` strings hold no check for it either.
 - `PIPESTATUS` through a variable (`${PIPESTATUS[$i]}`), as a whole array (`${PIPESTATUS[@]}`) or after several pipelines on one line:
   only a literal element of the pipeline that stands directly before the print is read.
-- A `>(` that stands alone is read as a redirection to a file named `(...`, so `echo >(cat)` counts as a write; a `>(` glued to a word
-  (`echo a>(cat)`) is no write, and `tee >(cat) src/a.ts` writes `src/a.ts` through its own operand. A quote inside a command
-  substitution inside double quotes (`echo "$(echo ">f")"`) ends the quoted string early, so the `>f` behind it is read as a redirection.
+- A process substitution (`>(...)`, `<(...)`, outside quotes and comments) is one word, the descriptor path bash passes on, in these
+  places: after a blank, a `=`, a `,` or a `(`, at the start, behind another redirection (`cmd > >(tee x)`, `cmd 2> >(grep e)`) or twice in
+  a row. It is no redirection to a file, so `echo >(cat)` writes nothing and `tee >(cat) src/a.ts` writes `src/a.ts` through its own
+  operand. Its body is a command of its own and is read as one (`echo >(tee src/a.ts)` and `cmd > >(tee log.txt)` write a file, as do the
+  commands in `$(...)` and backticks). A target that is a device (`/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/N`,
+  `/dev/tcp/host/port`) is no file either, and neither are the descriptor forms (`>&2`, `>&-`, `2>&1`), `[[ a > b ]]`, `(( a > b ))`,
+  `$(( a>b ))` and `${v:-a>b}`; `&>`, `>|`, `>>` and `<>` write. In the read-only judgement of the user prohibitions tool a
+  command whose first word only reads stays read-only behind a pipe into a writer (`echo hi | tee >(cat) src/a.ts`), as without the
+  process substitution.
+- A command substitution inside double quotes is not read as a command (`echo "$(echo x>f)"` writes `f` and counts as no write), and a
+  quote inside one (`echo "$(echo ">f")"`) ends the quoted string early, so the `>f` behind it is read as a redirection.
 
 `tests/tools/shell-syntax-matrix.test.ts` holds one table of the prefixes that a command can have (assignments,
 redirections, wrappers and their mixes) and says for each tool whether the command word is found behind it; a new variant of

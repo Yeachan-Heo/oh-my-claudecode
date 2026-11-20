@@ -435,12 +435,24 @@ def matching_parenthesis(text, index):
     return length
 
 
-def split_substitutions(text, placeholder="_"):
+# What bash passes on for a process substitution: the path of a descriptor. It names no file of a project (see is_device_path).
+PROCESS_FILE = "/dev/fd/63"
+
+
+class ProcessBody(str):
+    """The body of a process substitution, which the caller may judge apart from the bodies of command substitutions."""
+
+
+def split_substitutions(text, placeholder="_", processes=False):
     """Replace every command substitution outside quotes ("$(...)", a backtick pair) by the placeholder, so the
     substitution is one part of the word it stands in (`A=$(git rev-parse HEAD) git commit` has the assignment value
     `A=_`) and its end opens no command position (`echo $(date) git commit` runs only echo). Returns the new text and
     the bodies of the substitutions, for the caller that reads them as commands of their own. A substitution with an
-    empty body expands to nothing and leaves no word. A substitution with no end runs to the end of the text. One pass: a body is skipped once, then read again only at the next nesting level."""
+    empty body expands to nothing and leaves no word. A substitution with no end runs to the end of the text. One pass: a body is skipped once, then read again only at the next nesting level.
+    With `processes` set, a process substitution ("<(...)", ">(...)" outside quotes) is read the same way: the word it stands in
+    is what bash passes on (PROCESS_FILE), so `echo >(cat)` has one argument, `cmd > >(tee x)` redirects to no file of its own and
+    `tee >(cat) f` keeps `f` as an argument of `tee`; its body (a ProcessBody) is a command of its own. A "#" comment holds no
+    substitution then (`echo x # >(tee f)`)."""
     bodies = []
     out = []
     length = len(text)
@@ -450,6 +462,16 @@ def split_substitutions(text, placeholder="_"):
         char = text[index]
         if char == "\\":
             index += 2
+        elif processes and char == "#" and (index == 0 or text[index - 1].isspace() or text[index - 1] in ";&|("):
+            newline = text.find("\n", index)
+            index = length if newline == -1 else newline
+        elif processes and char in "<>" and text[index + 1:index + 2] == "(":
+            end = matching_parenthesis(text, index + 2)
+            out.append(text[start:index])
+            out.append(PROCESS_FILE)
+            bodies.append(ProcessBody(text[index + 2:end]))
+            index = end + 1
+            start = index
         elif char == "'":
             close = text.find("'", index + 1)
             index = length if close == -1 else close + 1
@@ -464,7 +486,8 @@ def split_substitutions(text, placeholder="_"):
             body = text[index + opening:end]
             out.append(text[start:index])
             out.append(placeholder if body.strip() else "")  # an empty substitution expands to nothing
-            bodies.append(body)
+            if not (char == "$" and body.startswith("(") and body.endswith(")")):  # `$((1>2))` is arithmetic, not a command
+                bodies.append(body)
             index = end + 1
             start = index
         else:
@@ -851,7 +874,7 @@ def nested_command_strings(words, at, end):
 def read_commands(text, depth, substitutions=0):
     """The commands of a shell text, each as the tuple of its words (the program first), nested strings and the bodies of
     command substitutions included."""
-    text, bodies = split_substitutions(without_heredoc_bodies(text))
+    text, bodies = split_substitutions(without_heredoc_bodies(text), "_", True)
     words = shell_words(text)
     found = []
     for at, end in command_programs(words):
@@ -1025,12 +1048,15 @@ READ_ONLY_COMMANDS = frozenset((
 READ_ONLY_GIT_SUBCOMMANDS = frozenset(("status", "log", "diff", "show", "branch", "rev-parse", "merge-base"))
 FIND_ACTION_OPTIONS = frozenset(("-delete", "-exec", "-execdir", "-ok", "-okdir"))
 ENV_ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
-# A write redirection to a file: ">", ">>", ">|" or ">&file" (not ">&2" or ">&-", which name a descriptor), not aimed at /dev/null.
-REDIRECT_WRITE_RE = re.compile(r"(?<!>)(?:>{1,2}(?![>&])|>&(?![0-9-]))\s*(?!/dev/null(?:\s|$))\S")
-# Quoted strings, escaped characters and comments (a "#" that starts a word, to the end of the line) are text, not
-# shell syntax: each one becomes a single "_" before the redirection is looked for, so a quoted file name after
-# ">" still counts as a target.
-QUOTED_OR_ESCAPED_RE = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(?:^|(?<=\s))#[^\n]*""", re.DOTALL)
+# One scan for a write redirection (">", ">>", ">|", ">&file", also the ">" of "&>file" and "<>file"). Text that holds a ">" and no redirection is
+# read first and skipped: a quoted string, an escaped character, a parameter expansion, an arithmetic command, a conditional and a "#" comment
+# (the expansion and the conditional are looked for within 300 characters, so that many unclosed ones are read in linear time). A target is
+# read as the shell reads it, so a quoted file name after ">" still counts as a target.
+WRITE_SCAN_RE = re.compile(
+    r"""'[^']*'|"(?:[^"\\]|\\.)*"|\\.|\$\{[^}]{0,300}\}|\(\((?:[^()]|\([^()]*\))*\)\)|\[\[[^\n]{0,300}?\]\]|(?:^|(?<=[\s;&|(]))#[^\n]*"""
+    r"""|(>>|>\||>&|>)\s*((?:"(?:[^"\\]|\\.)*"|'[^']*'|\\.|[^\s;&|)<>"'\\])+)""",
+    re.DOTALL,
+)
 # Bash commands that match the general classes (rule c, v2): each pattern is matched against the text of one command
 # (command_text), so a command word in the arguments of another command (`echo "npm install x"`, `grep rm f`) is no command.
 DELETE_PROGRAMS = frozenset(("rm", "rmdir", "unlink", "shred"))
@@ -1475,11 +1501,48 @@ def unquoted_word(word):
     return parts[0] if len(parts) == 1 and parts[0] is not None else word
 
 
+DEVICE_PATH_RE = re.compile(r"/dev/(?:null|zero|full|tty|stdin|stdout|stderr|fd/[0-9]+|(?:tcp|udp)/.*)")
+
+
+def is_device_path(path):
+    """Whether a path names a device file (`/dev/null`, `/dev/stderr`, `/dev/fd/3`, `/dev/tcp/host/port`): bash opens a
+    descriptor or a socket there and makes no file. `/dev/nullx` is a name like any other."""
+    return DEVICE_PATH_RE.fullmatch(path) is not None
+
+
+def writes_by_redirection(command, depth=0):
+    """Whether a Bash command writes a file by redirection (WRITE_SCAN_RE), in its own text or in the body of a command or
+    process substitution. A target that is a device file (`>/dev/null`, `>/dev/stderr`) and the descriptor forms (`>&2`, `>&-`,
+    `2>&1`) make no file. Here-document bodies are input, not shell."""
+    text, bodies = split_substitutions(without_heredoc_bodies(command), "_", True)
+    for match in WRITE_SCAN_RE.finditer(text):
+        operator, target = match.group(1), match.group(2)
+        if operator is None or (operator == ">&" and re.fullmatch(r"[0-9]+-?|-", target)):
+            continue
+        if not is_device_path(unquoted_word(target)):
+            return True
+    return depth < SUBSTITUTION_MAX_DEPTH and any(
+        len(body) <= NESTED_MAX_LENGTH and writes_by_redirection(body, depth + 1) for body in bodies)
+
+
+def process_bodies(command, depth=0):
+    """The bodies of the process substitutions (`>(...)`, `<(...)`) of a Bash command, the ones inside the bodies of its
+    command substitutions included."""
+    _text, bodies = split_substitutions(without_heredoc_bodies(command), "_", True)
+    found = [body for body in bodies if isinstance(body, ProcessBody)]
+    if depth < SUBSTITUTION_MAX_DEPTH:
+        for body in bodies:
+            if len(body) <= NESTED_MAX_LENGTH:
+                found.extend(process_bodies(body, depth + 1))
+    return found
+
+
 def is_read_only_command(command):
     """Rule c, v2: True when a Bash command only reads state. Judged by its first word, after the leading environment
     assignments and redirections and after launch wrappers; a write redirection to a file (outside quotes) makes any command
-    state-changing."""
-    if REDIRECT_WRITE_RE.search(QUOTED_OR_ESCAPED_RE.sub("_", command)):
+    state-changing, and so does a process substitution whose body is not read-only (`echo >(tee f)`; `echo >(cat)` only prints
+    a path)."""
+    if writes_by_redirection(command) or not all(is_read_only_command(str(body)) for body in process_bodies(command)):
         return False
     words = skip_prefix(command).split()
     # The wrappers are read on the words as the shell passes them on: `timeout "5" rm -rf build` runs `rm`, so the duration

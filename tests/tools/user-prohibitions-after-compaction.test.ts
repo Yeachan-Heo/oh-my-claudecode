@@ -774,6 +774,32 @@ describe('user prohibitions after compaction', () => {
     expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);
   });
 
+  it('a process substitution is one word that names no file, and its body is a command of its own', () => {
+    const cases: Record<string, boolean> = {
+      'echo >(cat)': true, 'echo <(cat)': true, 'cat <(ls)': true, 'echo x > >(cat)': true, 'echo x 2> >(grep e)': true, 'echo x &> >(cat)': true,
+      'echo >(cat) >(cat)': true, 'echo a>(cat)': true, 'echo x=>(cat)': true, 'echo a,>(cat)': true, 'echo "x" >(cat)': true,
+      'echo >(tee f)': false, 'echo x > >(tee f)': false, 'echo >(cat >f)': false, 'echo x 2> >(grep e >f)': false, 'echo <(rm f)': false,
+      'echo >(cat) >f': false, 'echo x # >(tee f)': true, 'echo ">(tee f)"': true, 'echo >/dev/stderr': true, 'echo >/dev/fd/1': true,
+      'echo >/dev/tcp/host/9': true, 'echo >/dev/nullx': false, 'echo $((1>2))': true, 'echo ${v:-a>b}': true, 'echo >(cat) 2>f': false,
+    };
+    expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);
+    const split = pyEval('[module.split_substitutions(c, "_", True) for c in argument]', ['echo >(cat) x', 'echo x # >(a)\necho <(b)', 'echo a>(c)b']);
+    expect(split).toEqual([['echo /dev/fd/63 x', ['cat']], ['echo x # >(a)\necho /dev/fd/63', ['b']], ['echo a/dev/fd/63b', ['c']]]);
+    expect(pyEval('module.split_substitutions(argument, "_")', 'echo >(cat) $(a)')).toEqual(['echo >(cat) _', ['a']]);
+  });
+
+  it('a call whose only redirection is to a process substitution or a device is no state-changing call', () => {
+    const sessions: Record<string, Row[]> = {
+      'p/ps.jsonl': [user(1, 'No-run'), host(2),
+        call(3, 'Bash', { command: 'echo >(cat)' }, 'a1'), call(4, 'Bash', { command: 'echo hi >/dev/stderr' }, 'a2'),
+        call(5, 'Bash', { command: 'cat <(ls)' }, 'a3'), call(6, 'Bash', { command: 'echo x > >(tee log.txt)' }, 'a4'),
+        call(7, 'Bash', { command: 'echo >(tee out.txt)' }, 'a5'), call(8, 'Bash', { command: 'echo x > f.txt' }, 'a6')],
+    };
+    const { report } = run('process-substitution-calls', sessions, { rule: 2, patterns: SYNTHETIC_PATTERNS });
+    expect(report.candidates.total).toBe(3);
+    expect(report.candidates.by_class).toEqual({ run: 3 });
+  });
+
   it('the value of a leading assignment is one shell word: quoted, with an escaped space, empty or a command substitution', () => {
     const values = [
       'MODE="deep analysis"', "MODE='deep analysis'", 'MODE=deep\\ analysis', 'MODE=', 'A=$(date)', 'A=$(git rev-parse HEAD)', 'A=$(a b c)',
