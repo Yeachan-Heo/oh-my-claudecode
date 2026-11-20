@@ -678,12 +678,13 @@ const SUMMARY_RULES = [
       return Number(m[1]) > 0 ? 'failed' : 'passed';
     },
   },
-  // ruff, mypy and biome all count the same way, so one rule reads all three.
+  // ruff, mypy and biome all count the same way, so one rule reads all three; a failure is looked for before a pass is accepted.
   {
     runner: 'ruff',
     rule: 'ruff-found-errors',
     apply: (tail) => {
-      if (/^Found [1-9]\d* errors?\b/m.test(tail)) return 'failed';
+      // `ruff format --check` prints the files it would change; its line can stand behind `All checks passed!` of `ruff check`.
+      if (/^(?:Found [1-9]\d* errors?\b|Would reformat: |[1-9]\d* files? would be reformatted)/m.test(tail)) return 'failed';
       return /^(?:All checks passed!|Success: no issues found)/m.test(tail) ? 'passed' : null;
     },
   },

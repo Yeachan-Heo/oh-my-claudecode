@@ -348,6 +348,10 @@ const SUMMARIES: Array<[string, string, string, 'failed' | 'passed' | 'undetermi
   // node:test: the cancelled count behind the fail count
   ['node --test | tail -12', 'ℹ tests 2\nℹ pass 1\nℹ fail 0\nℹ cancelled 1\nℹ skipped 0', 'a cancelled test', 'failed'],
   ['node --test | tail -12', 'ℹ tests 2\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0', 'none cancelled', 'passed'],
+  // ruff: the format check behind the lint check
+  ['ruff check . ; ruff format --check . | tail -3', 'All checks passed!\nWould reformat: a.py\n1 file would be reformatted', 'a file the format check would change', 'failed'],
+  ['ruff format --check . | tail -3', 'Would reformat: a.py\nWould reformat: b.py\n2 files would be reformatted', 'files the format check would change', 'failed'],
+  ['ruff check . ; ruff format --check . | tail -3', 'All checks passed!\n3 files already formatted', 'nothing to reformat', 'passed'],
   // eslint: warnings that fail the run
   ['eslint src | tail -3', '✖ 2 problems (0 errors, 2 warnings)\nESLint found too many warnings (maximum: 0).', 'too many warnings', 'failed'],
 ];
