@@ -76,6 +76,12 @@ describe('omc-doctor: numeric parts of a version are ordered as digit strings of
         expect(compare(`5.${HIGH}.0`, `5.0${HIGH}.0`)).not.toBe(0);
         expect(sign(compare(`5.${HIGH}.0`, `5.0${HIGH}.0`))).toBe(-sign(compare(`5.0${HIGH}.0`, `5.${HIGH}.0`)));
         expect(compare('5.9.0', '5.9.0')).toBe(0);
+        // Equal in the order but spelled differently (only the build metadata differs, with or without a prerelease): the
+        // text decides, the same in both orders, so a directory listing never does.
+        for (const [x, y] of [['5.9.0-1+a', '5.9.0-1+b'], ['5.9.0-beta.2+build.7', '5.9.0-beta.2+build.8'], ['5.9.0-1', '5.9.0-1+b'], ['5.9.0+a', '5.9.0+b'], ['5.9.0', '5.9.0+b']]) {
+          expect({ x, y, got: sign(compare(x, y)) }).toEqual({ x, y, got: -1 });
+          expect({ x, y, got: sign(compare(y, x)) }).toEqual({ x, y, got: 1 });
+        }
         const chain = ['5.8.9', '5.9.0-2', '5.9.0-10', '5.9.0-alpha', '5.9.0-alpha.1', '5.9.0-beta.2', '5.9.0-beta.10', '5.9.0', '5.9.1-alpha', '5.9.10', '5.10.0-beta', '5.10.0', 'v5.10.1', '6.0.0'];
         expect([...chain].reverse().sort(compare)).toEqual(chain);
       }

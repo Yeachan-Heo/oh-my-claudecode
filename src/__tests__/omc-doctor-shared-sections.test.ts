@@ -4,7 +4,8 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allCommands, bashBlocks, blockOf, codeOf, commands, locatorLine, runBlock, runCommand, SCRIPT, scriptSection, scriptText, skillText } from './helpers/omc-doctor-cache-fixture.js';
+import { allCommands, bashBlocks, blockOf, codeOf, commands, locatorLine, ROOT, runBlock, runCommand, SCRIPT, scriptSection, scriptText, skillText } from './helpers/omc-doctor-cache-fixture.js';
+import { copyPluginSyncPayload } from '../installer/index.js';
 import { versionCommand } from './helpers/omc-doctor-step1.js';
 
 // The checks of the omc-doctor skill that read the plugin installation are the commands of one script that ships with
@@ -288,6 +289,52 @@ describe.skipIf(!posix)('omc-doctor: the locator line finds the script, or says 
       expect(run({ CLAUDE_PLUGIN_ROOT: '', OMC_PLUGIN_ROOT: two }).slice(0, 3)).toEqual([`Plugin root: ${two}`, 'Channel: plugin-dir', 'Installed: 9.9.2']);
       // The same directory under both names is one root.
       expect(run({ CLAUDE_PLUGIN_ROOT: one, OMC_PLUGIN_ROOT: one })[1]).toBe('Channel: plugin-dir');
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// The skill cannot do without the script, so the script has to reach every install: it is tracked by git (the marketplace
+// and --plugin-dir installs read the checkout), it is covered by the `files` of package.json (the npm package, which the
+// locator reaches through the global package), and the plugin sync of the installer copies it into the plugin cache.
+// `npm run plugin:shipping:verify` does not prove any of this: its closure holds only the generated files and a few named
+// scripts, so it passes with or without the file.
+describe('omc-doctor: the script reaches every install', { timeout: 120_000 }, () => {
+  const script = 'scripts/omc-doctor.mjs';
+  const insideGit = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: ROOT, encoding: 'utf8' }).stdout?.trim() === 'true';
+
+  test.skipIf(!insideGit)('the script is tracked by git', () => {
+    const tracked = spawnSync('git', ['ls-files', '--error-unmatch', script], { cwd: ROOT, encoding: 'utf8' });
+    expect({ status: tracked.status, out: tracked.stdout.trim() }).toEqual({ status: 0, out: script });
+  });
+
+  test('the files of package.json cover the script and no pattern leaves it out', () => {
+    const { files } = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { files: string[] };
+    const covers = (pattern: string) => pattern === script || script.startsWith(`${pattern.replace(/\/$/, '')}/`);
+    expect(files.filter((pattern) => !pattern.startsWith('!') && covers(pattern))).toContain('scripts');
+    expect(files.filter((pattern) => pattern.startsWith('!') && covers(pattern.slice(1)))).toEqual([]);
+  });
+
+  test('the plugin sync copies the script into the plugin cache, byte for byte', () => {
+    const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor-sync-'));
+    try {
+      // The smallest source root the installer accepts as a plugin payload, plus the real script.
+      const source = path.join(base, 'source');
+      const target = path.join(base, 'cache', 'omc', 'oh-my-claudecode', '9.9.9');
+      for (const dir of ['.claude-plugin', 'commands', 'dist/hooks', 'bridge', 'hooks', 'skills/plan', 'scripts']) mkdirSync(path.join(source, dir), { recursive: true });
+      writeFileSync(path.join(source, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'oh-my-claudecode', commands: './commands/', skills: ['./skills/plan/'] }));
+      writeFileSync(path.join(source, 'commands', 'omc-setup.md'), 'Read skills/omc-setup/SKILL.md and pass $ARGUMENTS.\n');
+      writeFileSync(path.join(source, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
+      writeFileSync(path.join(source, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+      writeFileSync(path.join(source, 'bridge', 'claude-md-coordinator.cjs'), 'console.log("coordinator");\n');
+      writeFileSync(path.join(source, 'hooks', 'hooks.json'), '{}\n');
+      writeFileSync(path.join(source, 'skills', 'plan', 'SKILL.md'), 'name: plan\n');
+      writeFileSync(path.join(source, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '9.9.9' }));
+      copyFileSync(SCRIPT, path.join(source, script));
+      const result = copyPluginSyncPayload(source, [target]);
+      expect(result).toEqual({ synced: true, errors: [] });
+      expect(readFileSync(path.join(target, script))).toEqual(readFileSync(SCRIPT));
     } finally {
       rmSync(base, { recursive: true, force: true });
     }

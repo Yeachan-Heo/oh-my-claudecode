@@ -40,8 +40,11 @@ const shell = (script: string, configured: string, home: string) =>
   spawnSync('/bin/bash', ['-c', script], { encoding: 'utf8', timeout: 20_000, env: { ...process.env, CLAUDE_CONFIG_DIR: configured, HOME: home, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } });
 
 describe.skipIf(!posix)('omc-doctor: a .. after a link in CLAUDE_CONFIG_DIR is read as the runtime reads it', { timeout: 120_000 }, () => {
+  // The text is joined by hand: path.join would fold the .. before the script sees it, and the script would never be given
+  // a .. that comes after a link (a file system that resolves the link first reads `real/cfg`, not `cfg`).
+  const written = (f: Fixture) => `${f.base}/link/../cfg`;
   const forms = (f: Fixture): Array<[string, string]> => [
-    ['an absolute path', path.join(f.base, 'link', '..', 'cfg')],
+    ['an absolute path', written(f)],
     ['a path under the home directory', `~/link/../cfg`],
   ];
 
@@ -82,7 +85,7 @@ describe.skipIf(!posix)('omc-doctor: a .. after a link in CLAUDE_CONFIG_DIR is r
     const f = fixture();
     try {
       for (const command of commands) {
-        const result = runCommand(command, f.textual, { env: { CLAUDE_CONFIG_DIR: path.join(f.base, 'link', '..', 'cfg'), HOME: f.base, USERPROFILE: f.base } });
+        const result = runCommand(command, f.textual, { env: { CLAUDE_CONFIG_DIR: written(f), HOME: f.base, USERPROFILE: f.base } });
         expect(result.stdout).toContain('Moved 1 unprotected version(s)');
         expect(result.stdout).toContain(path.join(f.textual, 'plugins', 'backups'));
         rmSync(path.join(f.textual, 'plugins', 'backups'), { recursive: true, force: true });
