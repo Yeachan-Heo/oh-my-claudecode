@@ -134,6 +134,21 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
     });
   });
 
+  describe('calls of one row', () => {
+    it('identical blocks with different ids are calls of their own; a block without an id is no call', () => {
+      const block = (id?: string) => ({ type: 'tool_use', ...(id === undefined ? {} : { id }), name: 'Read', input: { file_path: '/same' } });
+      const task = taskOf([
+        row('assistant', 1, { id: 'msg-multi', model: MODEL, content: [block('a'), block('b'), block(), block('c')] }),
+        row('user', 2, { role: 'user', content: ['a', 'b', 'c'].map((id) => ({ type: 'tool_result', tool_use_id: id, content: 'Error', is_error: true })) }),
+      ]);
+      // three ids are three calls: three failures in one run, and three identical calls are one retry over calls 0 to 2
+      assert.equal(task.metrics.tool_failures, 3);
+      assert.equal(task.metrics.failure_runs, 1);
+      assert.equal(task.metrics.longest_failure_run, 3);
+      assert.deepEqual(task.loop_patterns.retry, [[0, 2]]);
+    });
+  });
+
   describe('detectors 2-4: loop patterns', () => {
     it('retry: two identical calls are below the threshold', () => {
       const task = taskOf([call(1, 'a', 'Grep', { pattern: 'x' }), call(2, 'b', 'Grep', { pattern: 'x' })]);

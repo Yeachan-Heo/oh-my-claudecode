@@ -624,6 +624,16 @@ describe.skipIf(!hasPython3)('decision_outcome_join edge cases', () => {
     }
   });
 
+  it('counts every tool_use block of a row as a call of its own, with or without an id', () => {
+    const block = (id?: string) => ({ type: 'tool_use', ...(id === undefined ? {} : { id }), name: 'Bash', input: { command: 'ls' } });
+    const first = assistant('m1', 'claude-haiku-5-5', { content: [block('toolu-a'), block('toolu-b'), block(), block()], usage: usage(1000, 0, 0, 0, 100) });
+    const replay = assistant('m2', 'claude-haiku-5-5', { content: [block('toolu-a')], usage: usage(1000, 0, 0, 0, 100) });
+    const result = oneAgent(first + replay, PRICES);
+    expect(result.status, result.stderr).toBe(0);
+    // four blocks in the first row (two ids, two without one); the replay of toolu-a adds nothing
+    expect(result.agent!.tool_calls).toBe(4);
+  });
+
   it('counts a replayed tool call once', () => {
     const call = { type: 'tool_use', id: 'toolu-1', name: 'Read', input: { file_path: '/tmp/a' } };
     const first = assistant('r1', 'claude-haiku-5-5', { content: [call], usage: usage(1000, 0, 0, 0, 100) });

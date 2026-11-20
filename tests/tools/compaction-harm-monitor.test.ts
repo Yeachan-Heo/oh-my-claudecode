@@ -213,6 +213,23 @@ describe('compaction harm monitor', () => {
     }
   });
 
+  it('tool_errors: the tool_use blocks of one row are calls of their own, identical ones included', () => {
+    const env = makeEnv();
+    try {
+      const block = (id?: string) => ({ type: 'tool_use', ...(id === undefined ? {} : { id }), name: 'Bash', input: { command: 'ls' } });
+      const ids = ['m-t0', 'm-t1', 'm-t2', 'm-t3'];
+      addUnit(env, 'm', { i: 0, tail: [
+        assistant('m', at(0, 10), 'm-call', [block(ids[0]), block(ids[1]), block(), block(ids[2]), block(ids[3])]),
+        { type: 'user', sessionId: 'm', timestamp: at(0, 11), message: { role: 'user', content: ids.map((id, n) => ({ type: 'tool_result', tool_use_id: id, content: 'out', ...(n < 3 ? { is_error: true } : {}) })) } },
+      ] });
+      const group = monitorJson(env).signals.tool_errors['host/main'];
+      // four results from one row: three errors in four is above half, so the unit is defined and flagged
+      expect([group.units, group.defined, group.flagged]).toEqual([1, 1, 1]);
+    } finally {
+      cleanup(env);
+    }
+  });
+
   it('fallback_run: run of consecutive fallbacks per thread, jev resets, neutral results ignored', () => {
     const env = makeEnv();
     try {

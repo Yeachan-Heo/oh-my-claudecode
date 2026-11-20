@@ -270,6 +270,18 @@ describe.skipIf(!hasPython3)('advisor_event_coverage.py', () => {
     expect(group(report, 'plan').distance_distribution.min).toBe(2);
   });
 
+  it('the blocks of one row are calls of their own: identical ones and ones without an id each move the position', () => {
+    const noId = (): Block => ({ type: 'tool_use', name: 'Bash', input: { command: 'ls' } });
+    const root = makeTree('row-blocks', { 'proj/s1.jsonl': [
+      assistant(1, [advisor('c1')]),
+      assistant(2, [bash('b1', 'ls'), bash('b2', 'ls'), noId(), bash('b3', 'ls')]),
+      assistant(3, [call('p1', 'ExitPlanMode')]),
+    ] });
+    const report = runReport(root);
+    // the consultation is call 1, the row holds calls 2 to 5, the plan is call 6: distance 5
+    expect(group(report, 'plan').distance_distribution.min).toBe(5);
+  });
+
   it('synthetic rows add no calls, no events and no text events', () => {
     const root = makeTree('synthetic', { 'proj/s1.jsonl': [
       assistant(1, [advisor('c1')]),
