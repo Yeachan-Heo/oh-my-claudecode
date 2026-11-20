@@ -492,7 +492,7 @@ describe('jev-compaction module: active compaction', () => {
       (n) => '/'.repeat(n),
       (n) => '\\'.repeat(n),
       (n) => `a${'/'.repeat(n)}!`,
-      (n) => `${'\\\\/'.repeat(n / 2)}x.md`,
+      (n) => `${'\\/'.repeat(n / 2)}x.md`,
     ]) {
       let t100k = Infinity;
       for (let k = 0; k < 3; k++) {
