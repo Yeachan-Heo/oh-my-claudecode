@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runCommand, STEP1, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
@@ -173,5 +173,219 @@ describe('omc-doctor Step 1 prints one block per plugin ID, with the ID the runt
     expect(step1({ raw: JSON.stringify({ version: 2, plugins: entries }), clone })).toMatchObject(expected);
     // Only the plugins object is read when there is one: a top-level key beside it is not a plugin.
     expect(step1({ raw: JSON.stringify({ 'oh-my-claudecode@omc': [{ version: '9.9.9' }], plugins: entries }), clone })).toMatchObject(expected);
+  });
+});
+
+// The registry says which version was recorded for an install; the manifest of the plugin root the session runs says
+// which code that is. A partial update or a damaged registry makes the two differ, and Step 1 must not report the
+// recorded version as installed then: that would hide an outdated plugin behind a registry that says "current".
+describe('omc-doctor Step 1 takes the installed version from the manifest of the active plugin root', () => {
+  const UPDATER = 'claude plugin marketplace update omc && claude plugin update oh-my-claudecode@omc';
+  const cache = (dir: string, v: string) => path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', v);
+  const write = (file: string, text: string) => {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  };
+  const manifest = (version: unknown) => JSON.stringify({ name: 'oh-my-claudecode', version });
+
+  // One marketplace entry with `entry` as its fields, the session running `root`, whose files `files` writes.
+  // The marketplace clone advertises 5.9.0.
+  const run = (options: {
+    entry: (dir: string) => Record<string, unknown>;
+    root: (dir: string) => string;
+    files: (dir: string) => Record<string, string>;
+    variable?: string;
+  }) =>
+    step1({
+      plugins: (dir) => ({ 'oh-my-claudecode@omc': [options.entry(dir)] }),
+      clone: { omc: '5.9.0' },
+      env: (dir) => ({ [options.variable ?? 'CLAUDE_PLUGIN_ROOT']: options.root(dir) }),
+      setup: (dir) => {
+        for (const [file, text] of Object.entries(options.files(dir))) write(file, text);
+      },
+    });
+
+  const registered = (dir: string) => ({ version: '5.9.0', installPath: cache(dir, '5.9.0') });
+  const at = (v: string, file = 'package.json') => (dir: string) => ({ [path.join(cache(dir, v), file)]: manifest('5.8.0') });
+
+  describe('a recorded version that the code of the active root does not hold', () => {
+    // The case a reviewer reproduced: the entry declares 5.9.0, the cache root it points at holds 5.8.0, and the
+    // marketplace advertises 5.9.0. Step 1 printed Installed 5.9.0 and Latest 5.9.0 and so hid the outdated plugin.
+    test.each(['CLAUDE_PLUGIN_ROOT', 'OMC_PLUGIN_ROOT'])('%s: Installed is the loaded 5.8.0, the registry is named, Latest stays 5.9.0', (variable) => {
+      const block = run({ entry: registered, root: (dir) => cache(dir, '5.9.0'), files: at('5.9.0'), variable });
+      expect(Object.keys(block)).toEqual(['Plugin', 'Channel', 'Installed', 'Registry mismatch', 'Latest', 'Updater']);
+      expect(block).toMatchObject({ Plugin: 'oh-my-claudecode@omc', Channel: 'marketplace omc', Installed: '5.8.0', Latest: '5.9.0 (marketplace clone)', Updater: UPDATER });
+      expect(block['Registry mismatch']).toContain('records 5.9.0');
+      expect(block['Registry mismatch']).toContain('holds 5.8.0');
+      expect(block['Registry mismatch']).toContain('Updater line');
+      // The installed version is older than the latest one: the outdated warning is not suppressed.
+      expect(block.Installed).not.toBe(block.Latest.split(' ')[0]);
+    });
+
+    test('an entry with only an installPath whose directory is named 5.9.0 is judged by the manifest as well', () => {
+      const block = run({ entry: (dir) => ({ installPath: cache(dir, '5.9.0') }), root: (dir) => cache(dir, '5.9.0'), files: at('5.9.0') });
+      expect(block.Installed).toBe('5.8.0');
+      expect(block['Registry mismatch']).toContain('records 5.9.0');
+    });
+
+    test('an entry that names the cache directory only by its version is matched to the root and judged by the manifest', () => {
+      const block = run({ entry: () => ({ version: '5.9.0' }), root: (dir) => cache(dir, '5.9.0'), files: at('5.9.0') });
+      expect(block.Installed).toBe('5.8.0');
+      expect(block['Registry mismatch']).toContain('records 5.9.0');
+    });
+
+    test('plugin.json decides when package.json is missing', () => {
+      const block = run({ entry: registered, root: (dir) => cache(dir, '5.9.0'), files: at('5.9.0', path.join('.claude-plugin', 'plugin.json')) });
+      expect(block.Installed).toBe('5.8.0');
+      expect(block['Registry mismatch']).toContain('records 5.9.0');
+    });
+
+    test('a newer manifest than the registry records is reported the same way', () => {
+      const block = run({ entry: (dir) => ({ version: '5.7.0', installPath: cache(dir, '5.7.0') }), root: (dir) => cache(dir, '5.7.0'), files: (dir) => ({ [path.join(cache(dir, '5.7.0'), 'package.json')]: manifest('5.9.1') }) });
+      expect(block.Installed).toBe('5.9.1');
+      expect(block['Registry mismatch']).toContain('records 5.7.0');
+    });
+
+    test('only the entries that disagree are named, and the other scope is not', () => {
+      const block = step1({
+        plugins: (dir) => ({
+          'oh-my-claudecode@omc': [
+            { scope: 'project', version: '5.9.0', installPath: cache(dir, '5.9.0') },
+            { scope: 'user', version: '5.8.0', installPath: cache(dir, '5.9.0') },
+            { scope: 'local', version: '5.9.5', installPath: cache(dir, '5.9.5') },
+          ],
+        }),
+        clone: { omc: '5.9.0' },
+        env: (dir) => ({ CLAUDE_PLUGIN_ROOT: cache(dir, '5.9.0') }),
+        setup: (dir) => write(path.join(cache(dir, '5.9.0'), 'package.json'), manifest('5.8.0')),
+      });
+      expect(block.Installed).toBe('5.8.0');
+      expect(block['Registry mismatch']).toContain('records 5.9.0 for the install');
+      expect(block['Registry mismatch']).not.toContain('5.9.5');
+    });
+
+    test('both plugin IDs of one install are judged: each block names the mismatch', () => {
+      const blocks = step1Blocks({
+        plugins: (dir) => ({
+          'oh-my-claudecode@omc': [{ version: '5.9.0', installPath: cache(dir, '5.9.0') }],
+          'oh-my-claudecode@oh-my-claudecode': [{ version: '5.9.0', installPath: cache(dir, '5.9.0') }],
+        }),
+        env: (dir) => ({ CLAUDE_PLUGIN_ROOT: cache(dir, '5.9.0') }),
+        setup: (dir) => write(path.join(cache(dir, '5.9.0'), 'package.json'), manifest('5.8.0')),
+      });
+      expect(blocks.map((block) => [block.Plugin, block.Installed])).toEqual([['oh-my-claudecode@omc', '5.8.0'], ['oh-my-claudecode@oh-my-claudecode', '5.8.0']]);
+      for (const block of blocks) expect(block['Registry mismatch']).toContain('records 5.9.0');
+    });
+
+    test('with entries for several scopes the root decides which one is judged', () => {
+      const entries = (dir: string) => [
+        { scope: 'user', version: '5.8.0', installPath: cache(dir, '5.8.0') },
+        { scope: 'project', version: '5.9.0', installPath: cache(dir, '5.9.0') },
+      ];
+      const files = (dir: string) => ({ [path.join(cache(dir, '5.8.0'), 'package.json')]: manifest('5.8.0'), [path.join(cache(dir, '5.9.0'), 'package.json')]: manifest('5.8.0') });
+      const judge = (v: string) =>
+        step1({ plugins: (dir) => ({ 'oh-my-claudecode@omc': entries(dir) }), clone: { omc: '5.9.0' }, env: (dir) => ({ CLAUDE_PLUGIN_ROOT: cache(dir, v) }), setup: (dir) => { for (const [file, text] of Object.entries(files(dir))) write(file, text); } });
+      // The root on the consistent 5.8.0 install: nothing to report, whatever the other scope records.
+      const consistent = judge('5.8.0');
+      expect(consistent.Installed).toBe('5.8.0');
+      expect('Registry mismatch' in consistent).toBe(false);
+      // The root on the partly updated one: the entry records 5.9.0, the code is 5.8.0.
+      const partial = judge('5.9.0');
+      expect(partial.Installed).toBe('5.8.0');
+      expect(partial['Registry mismatch']).toContain('records 5.9.0');
+    });
+  });
+
+  describe('a recorded version that the manifest confirms is printed as before', () => {
+    test.each([
+      ['the same version', '5.9.0', '5.9.0'],
+      ['a recorded v prefix', 'v5.9.0', '5.9.0'],
+      ['a prerelease on both', '5.9.0-beta.2', '5.9.0-beta.2'],
+      // Build metadata does not make another version: the manifest's text is shown, and nothing is reported.
+      ['build metadata only', '5.9.0+a', '5.9.0+b'],
+      ['build metadata on one side', '5.9.0', '5.9.0+build.7'],
+    ])('%s', (_name, recorded, held) => {
+      const block = run({
+        entry: (dir) => ({ version: recorded, installPath: cache(dir, '5.9.0') }),
+        root: (dir) => cache(dir, '5.9.0'),
+        files: (dir) => ({ [path.join(cache(dir, '5.9.0'), 'package.json')]: manifest(held) }),
+      });
+      expect(Object.keys(block)).toEqual(['Plugin', 'Channel', 'Installed', 'Latest', 'Updater']);
+      expect(block.Installed).toBe(held);
+    });
+  });
+
+  describe('a manifest that names no usable version leaves the answer to the registry, with one note', () => {
+    test.each([
+      ['metadata that cannot be parsed', '{ not json'],
+      ['a manifest without a version', JSON.stringify({ name: 'oh-my-claudecode' })],
+      ['a blank version', manifest('  ')],
+      ['a version that is not a string', manifest(5)],
+      ['a version outside the grammar', manifest('999x.0.0')],
+    ])('%s', (_name, text) => {
+      const block = run({ entry: registered, root: (dir) => cache(dir, '5.9.0'), files: (dir) => ({ [path.join(cache(dir, '5.9.0'), 'package.json')]: text }) });
+      expect(Object.keys(block)).toEqual(['Plugin', 'Channel', 'Installed', 'Note', 'Latest', 'Updater']);
+      expect(block.Installed).toBe('5.9.0');
+      expect(block.Note).toContain('holds no usable version');
+      expect('Registry mismatch' in block).toBe(false);
+    });
+
+    test('an unusable package.json does not hide the version of plugin.json', () => {
+      const block = run({
+        entry: registered,
+        root: (dir) => cache(dir, '5.9.0'),
+        files: (dir) => ({ [path.join(cache(dir, '5.9.0'), 'package.json')]: '{ not json', [path.join(cache(dir, '5.9.0'), '.claude-plugin', 'plugin.json')]: manifest('5.8.0') }),
+      });
+      expect(block.Installed).toBe('5.8.0');
+      expect(block['Registry mismatch']).toContain('records 5.9.0');
+    });
+
+    test('a root with no manifest at all has nothing to compare: the registry answers and nothing is added', () => {
+      const block = run({ entry: registered, root: (dir) => cache(dir, '5.9.0'), files: (dir) => ({ [path.join(cache(dir, '5.9.0'), 'README.md')]: 'no manifest' }) });
+      expect(Object.keys(block)).toEqual(['Plugin', 'Channel', 'Installed', 'Latest', 'Updater']);
+      expect(block.Installed).toBe('5.9.0');
+    });
+  });
+
+  describe('only the root the session runs is judged', () => {
+    test('a root that is no install of the registry leaves the registry as the answer, whatever another install holds', () => {
+      const block = run({
+        entry: registered,
+        root: (dir) => path.join(dir, 'elsewhere'),
+        files: (dir) => ({ [path.join(dir, 'elsewhere', 'package.json')]: manifest('1.0.0'), [path.join(cache(dir, '5.9.0'), 'package.json')]: manifest('5.8.0') }),
+      });
+      expect(Object.keys(block)).toEqual(['Plugin', 'Channel', 'Installed', 'Latest', 'Updater']);
+      expect(block.Installed).toBe('5.9.0');
+    });
+
+    test('no root variable: the registry answers, nothing is read from the install', () => {
+      const block = step1({
+        plugins: (dir) => ({ 'oh-my-claudecode@omc': [registered(dir)] }),
+        clone: { omc: '5.9.0' },
+        setup: (dir) => write(path.join(cache(dir, '5.9.0'), 'package.json'), manifest('5.8.0')),
+      });
+      expect(Object.keys(block)).toEqual(['Plugin', 'Channel', 'Installed', 'Latest', 'Updater']);
+      expect(block.Installed).toBe('5.9.0');
+    });
+
+    test('a root deeper below the install, without a manifest of its own, leaves the registry as the answer', () => {
+      const block = run({
+        entry: registered,
+        root: (dir) => path.join(cache(dir, '5.9.0'), 'nested'),
+        files: (dir) => ({ [path.join(cache(dir, '5.9.0'), 'nested', 'README.md')]: 'nested', [path.join(cache(dir, '5.9.0'), 'package.json')]: manifest('5.8.0') }),
+      });
+      expect(Object.keys(block)).toEqual(['Plugin', 'Channel', 'Installed', 'Latest', 'Updater']);
+      expect(block.Installed).toBe('5.9.0');
+    });
+
+    test('a root deeper below the install that has a manifest of its own is the code that runs, so its manifest decides', () => {
+      const block = run({
+        entry: registered,
+        root: (dir) => path.join(cache(dir, '5.9.0'), 'nested'),
+        files: (dir) => ({ [path.join(cache(dir, '5.9.0'), 'nested', 'package.json')]: manifest('5.8.0') }),
+      });
+      expect(block.Installed).toBe('5.8.0');
+      expect(block['Registry mismatch']).toContain('records 5.9.0');
+    });
   });
 });

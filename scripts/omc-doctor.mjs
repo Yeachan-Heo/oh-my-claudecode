@@ -199,10 +199,11 @@ const highestCached = (dir) => {
     return null;
   }
 };
+const MANIFEST_FILES = ['package.json', '.claude-plugin/plugin.json'];
 // The version in package.json or .claude-plugin/plugin.json under a directory: the first file that has a non-blank
 // string version decides. Returns its bare semver, null when it is not one, or '' when no file names a version.
 const manifestVersion = (dir) => {
-  for (const name of ['package.json', '.claude-plugin/plugin.json']) {
+  for (const name of MANIFEST_FILES) {
     try {
       const version = JSON.parse(readFile([dir, name].join(path.sep))).version;
       if (typeof version == 'string' && version.trim()) return semver(version) || null;
@@ -210,6 +211,16 @@ const manifestVersion = (dir) => {
   }
   return '';
 };
+// Whether a directory holds a manifest file (a regular file, as in readFile): one that names no usable version is
+// told apart from no manifest at all.
+const hasManifest = (dir) =>
+  MANIFEST_FILES.some((name) => {
+    try {
+      return fs.statSync([dir, name].join(path.sep)).isFile();
+    } catch {
+      return false;
+    }
+  });
 // The version a registry entry names through its installPath: the last component when it is a version directory
 // name, else the manifest under it. '' without an installPath, null when the version found is not a semver.
 const installPathVersion = (entry) => {
@@ -363,12 +374,22 @@ const step1 = () => {
       const active = entries.filter((entry) =>
         entryInstallPaths(market, entry).some((target) => roots.some((root) => isInside(root, target))),
       );
-      const versions = (active.length ? active : entries)
+      const recorded = (active.length ? active : entries)
         .map((entry) =>
           typeof entry.version == 'string' && entry.version.trim() ? dropV(entry.version.trim()) : installPathVersion(entry),
         )
         .filter(Boolean)
         .sort(compareVersions);
+      // The code the session loads is the one in that root, so its manifest decides the installed version when it
+      // holds a semantic version; the registry only says which version was recorded, and a partial update or a damaged
+      // registry can make the two differ. A root deeper below the install has no manifest of its own: the registry
+      // stays the answer there, as it does for a manifest that holds no usable version (said in a Note line).
+      const root = active.length ? roots[0] : '';
+      const loaded = root ? manifestVersion(root) : '';
+      // Build metadata (after a +) does not make a version another one, so it is left out of the comparison.
+      const core = (version) => version.replace(/[+].*$/, '');
+      const differing = [...new Set(loaded ? recorded.filter((version) => compareVersions(core(version), core(loaded)) != 0) : [])];
+      const versions = loaded ? [loaded] : recorded;
       // The latest version is the one the marketplace clone advertises, when it is a semver.
       let latest = null;
       try {
@@ -383,6 +404,14 @@ const step1 = () => {
         'Plugin: ' + id,
         'Channel: marketplace ' + market,
         'Installed: ' + (installed || '(none)'),
+        ...(differing.length
+          ? [
+              'Registry mismatch: the registry records ' + differing.join(', ') + ' for the install the session runs (' + root + '), but the manifest there holds ' + loaded + ', so Installed is ' + loaded + ' (a partial update or a damaged registry: update or reinstall the plugin with the Updater line, then restart Claude Code)',
+            ]
+          : []),
+        ...(root && !loaded && hasManifest(root)
+          ? ['Note: the manifest in ' + root + ' holds no usable version, so Installed is the version the registry records']
+          : []),
         'Latest: ' + (latest || '(unavailable)') + ' (marketplace clone)',
         'Updater: claude plugin marketplace update ' + market + ' && claude plugin update ' + id,
       );
