@@ -71,6 +71,14 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/2.1.328/trust-yes-focused.txt': 'trust:claude_directory idlePrompt',
   'claude/2.1.329/onboarding-security-notes.txt': '',
   'claude/2.1.329/onboarding-theme.txt': 'idlePrompt',
+  'claude/2.1.330/bypass-permissions-body-partial.txt': '',
+  'claude/2.1.330/bypass-permissions-no-choices.txt': '',
+  'claude/2.1.330/bypass-permissions.txt': 'idlePrompt',
+  'claude/2.1.330/trust-body-partial.txt': '',
+  'claude/2.1.330/trust-no-choice-partial.txt': 'idlePrompt',
+  'claude/2.1.330/trust-yes-choice-partial.txt': 'idlePrompt',
+  'claude/2.1.330/trust.txt': 'trust:claude_directory idlePrompt',
+  'claude/2.1.330/trust-yes-focused.txt': 'trust:claude_directory idlePrompt',
   'claude/synthetic/loading-in-scrollback.txt': 'bootstrapping idlePrompt',
   'claude/synthetic/output-quoting-first-run-dialogs.txt': 'idlePrompt',
   'claude/synthetic/prompt-glyph-in-output.txt': 'idlePrompt',
@@ -295,6 +303,22 @@ describe('Claude Code first-run dialogs', () => {
       expect(detectClaudeStartupDialog(hardWrap(read(file), cols))).toBe(kind);
     },
   );
+
+  // Each copy of a dialog starts at its heading. Its choices, footer and ❯ are
+  // read below the latest heading only, never from an older copy above it.
+  it('reads no renderer focus while the latest copy, below an old one focused on Not now, has drawn no ❯ of its own', () => {
+    const notNow = read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt');
+    const offer = read('claude/2.1.328/fullscreen-renderer.txt');
+    const upToYe = offer.slice(0, offer.indexOf('❯ 1. Yes') + '❯ 1. Ye'.length);
+    expect(claudeDialogFocus(`${notNow}\n${upToYe}\n`, 'claude_fullscreen_renderer')).not.toBe('second');
+    expect(claudeDialogFocus(`${notNow}\n${offer.replace('❯ 1. Yes, try it', '  1. Yes, try it')}`, 'claude_fullscreen_renderer')).toBeNull();
+  });
+
+  it('reads no bypass focus while the latest copy, below an old one focused on Yes, I accept, has drawn no ❯ of its own', () => {
+    const accepted = read('claude/2.1.328/bypass-permissions-yes-focused.txt');
+    const warning = read('claude/2.1.328/bypass-permissions.txt').replace('❯ No, exit', '  No, exit');
+    expect(claudeDialogFocus(`${accepted}\n${warning}`, 'claude_bypass_permissions')).toBeNull();
+  });
 
   it('reads the focus of the latest copy when the offer drawn before Down is still above it', () => {
     const stacked = `${read('claude/2.1.328/fullscreen-renderer.txt')}\n${read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt')}`;

@@ -1187,6 +1187,118 @@ describe('worker pane startup safety', () => {
     expect(tmuxState.args.filter(args => args[0] === 'capture-pane')).toHaveLength(2);
   });
 
+  // Claude Code 2.1.330 was measured drawing its trust dialog and the bypass
+  // warning over several captures, each partial frame on screen for about
+  // 4 ms. No key goes out on a partial frame; once the whole screen is drawn
+  // it is handled as before: the trust dialog gets Down then Enter, the
+  // bypass warning no key at all.
+  const v330 = (state: string) => readFrame(`claude/2.1.330/${state}.txt`);
+  strictTmuxIt.each([
+    ['trust-no-choice-partial', 'trust'],
+    ['trust-yes-choice-partial', 'trust'],
+    ['trust-body-partial', 'trust'],
+    ['bypass-permissions-no-choices', 'bypass-permissions'],
+    ['bypass-permissions-body-partial', 'bypass-permissions'],
+  ] as const)('sends no key on the recorded 2.1.330 frame %s, drawn before the whole %s screen', async (partial, whole) => {
+    const context = await acceptedContext('claude');
+    const frames = {
+      partial: v330(partial),
+      'trust': v330('trust'),
+      'trust-yes-focused': v330('trust-yes-focused'),
+      'bypass-permissions': v330('bypass-permissions'),
+      idle: readFrame('claude/2.1.325/idle.txt'),
+    };
+    let shown: keyof typeof frames = 'partial';
+    let applied = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && shown === 'trust') shown = 'trust-yes-focused';
+        if (key === 'Enter' && shown === 'trust-yes-focused') shown = 'idle';
+      }
+      const frame = frames[shown];
+      if (shown === 'partial') shown = whole;
+      return frame;
+    };
+
+    await deliverStartupInbox(context, 'Read inbox.md, execute now.');
+    expect(keysSeenOn.filter(([frame]) => frame === 'partial')).toEqual([]);
+  });
+
+  strictTmuxIt('answers the whole recorded 2.1.330 trust dialog with Down then Enter, then delivers', async () => {
+    const context = await acceptedContext('claude');
+    const frames = { trust: v330('trust'), yes: v330('trust-yes-focused'), idle: readFrame('claude/2.1.325/idle.txt') };
+    let shown: keyof typeof frames = 'trust';
+    let applied = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && shown === 'trust') shown = 'yes';
+        if (key === 'Enter' && shown === 'yes') shown = 'idle';
+      }
+      return frames[shown];
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.'))
+      .resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    expect(keysSeenOn.slice(0, 3)).toEqual([['trust', 'Down'], ['yes', 'Enter'], ['idle', 'Read inbox.md, execute now.']]);
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+      .toEqual(['Down', 'Enter', 'Read inbox.md, execute now.', 'Enter', 'Enter']);
+  });
+
+  strictTmuxIt('fails at once on the whole recorded 2.1.330 Bypass Permissions warning and sends it no key', async () => {
+    const context = await acceptedContext('claude');
+    tmuxState.captures = [v330('bypass-permissions')];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'claude_bypass_permissions_consent_required',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  strictTmuxIt('sends no key to a renderer offer redrawn below an old one focused on Not now until the new copy draws its ❯', async () => {
+    const context = await acceptedContext('claude');
+    const offer = readFrame('claude/2.1.328/fullscreen-renderer.txt');
+    const notNow = readFrame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt');
+    const frames = {
+      partial: `${notNow}\n${offer.slice(0, offer.indexOf('❯ 1. Yes') + '❯ 1. Ye'.length)}\n`,
+      unmarked: `${notNow}\n${offer.replace('❯ 1. Yes, try it', '  1. Yes, try it')}`,
+      offered: `${notNow}\n${offer}`,
+      notNow: `${notNow}\n${notNow}`,
+      accepted: readFrame('claude/2.1.325/idle.txt'),
+      dismissed: readFrame('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    };
+    // The new copy is drawn halfway, then whole without its ❯, then with it.
+    let shown: keyof typeof frames = 'partial';
+    let captures = 0;
+    let applied = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && shown === 'offered') shown = 'notNow';
+        if (key === 'Enter' && shown !== 'dismissed') shown = shown === 'notNow' ? 'dismissed' : 'accepted';
+      }
+      captures++;
+      if (captures === 2 && shown === 'partial') shown = 'unmarked';
+      if (captures === 4 && shown === 'unmarked') shown = 'offered';
+      return frames[shown];
+    };
+
+    await deliverStartupInbox(context, 'Read inbox.md, execute now.');
+    expect(keysSeenOn.slice(0, 2)).toEqual([['offered', 'Down'], ['notNow', 'Enter']]);
+    expect(shown).toBe('dismissed');
+  });
+
   strictTmuxIt('answers a fullscreen renderer offer that first shows at the check before the trigger is typed, then delivers', async () => {
     const context = await acceptedContext('claude');
     const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');

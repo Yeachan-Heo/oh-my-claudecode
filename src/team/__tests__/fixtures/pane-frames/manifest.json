@@ -367,6 +367,118 @@
     "note": "First launch with no hasCompletedOnboarding: the theme picker, drawn before the trust dialog. The worker bootstrap command above it was dropped."
   },
   {
+    "file": "claude/2.1.330/bypass-permissions-body-partial.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "bypass-permissions-body-partial",
+    "cols": 200,
+    "rows": 50,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/b3/frames.log#5",
+    "note": "The Bypass Permissions warning captured while Claude Code drew it: cut in its third body line."
+  },
+  {
+    "file": "claude/2.1.330/bypass-permissions-no-choices.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "bypass-permissions-no-choices",
+    "cols": 60,
+    "rows": 15,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/b2/frames.log#6",
+    "note": "The Bypass Permissions warning captured while Claude Code drew it: the whole body, no choices and no footer."
+  },
+  {
+    "file": "claude/2.1.330/bypass-permissions.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "bypass-permissions",
+    "cols": 200,
+    "rows": 50,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/b3/frames.log#6",
+    "note": "The whole Bypass Permissions warning on 2.1.330, after the trust dialog was answered: No, exit is focused."
+  },
+  {
+    "file": "claude/2.1.330/trust-body-partial.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "trust-body-partial",
+    "cols": 200,
+    "rows": 50,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/r3/frames.log#2",
+    "note": "The trust dialog captured while Claude Code drew it: cut in the question, before Security guide and the choices."
+  },
+  {
+    "file": "claude/2.1.330/trust-no-choice-partial.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "trust-no-choice-partial",
+    "cols": 80,
+    "rows": 24,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/r1/frames.log#2",
+    "note": "The trust dialog captured while Claude Code drew it: the first choice is cut at \"❯ No, exi\". Visible for about 4 ms."
+  },
+  {
+    "file": "claude/2.1.330/trust-yes-choice-partial.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "trust-yes-choice-partial",
+    "cols": 60,
+    "rows": 15,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/r2/frames.log#2",
+    "note": "The trust dialog captured while Claude Code drew it: the second choice is cut at \"Yes, I trust th\" and the footer is not drawn. The wrapped workspace path is redacted to one line."
+  },
+  {
+    "file": "claude/2.1.330/trust-yes-focused.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "trust-yes-focused",
+    "cols": 200,
+    "rows": 50,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/b3/frames.log#3",
+    "note": "The same dialog as trust.txt after one Down: only the ❯ moved."
+  },
+  {
+    "file": "claude/2.1.330/trust.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "trust",
+    "cols": 200,
+    "rows": 50,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/r3/frames.log#3",
+    "note": "The whole trust dialog on 2.1.330: it opens with Accessing workspace and focuses No, exit."
+  },
+  {
     "file": "claude/synthetic/loading-in-scrollback.txt",
     "provider": "claude",
     "version": "synthetic",
