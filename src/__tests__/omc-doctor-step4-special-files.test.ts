@@ -292,6 +292,25 @@ describe.skipIf(!posix)('omc-doctor Step 4 shell block tells a CLAUDE.md it cann
     expect(markerLine((d) => mkdirSync(path.join(d, 'CLAUDE.md')))).toBe('Could not read CLAUDE.md');
     expect(markerLine((d) => symlinkSync(GONE, path.join(d, 'CLAUDE.md')))).toBe('Could not read CLAUDE.md');
   });
+
+  // grep opens a FIFO and waits for a writer, so a FIFO (or a link to one) in the place of CLAUDE.md used to hold the block
+  // for good, at the marker line and again at the line that looks for the companion CLAUDE.md names. The block now reads a
+  // regular file only and says what it did not read. A hang is killed by `timeout` and ends with 124 (137 after the kill).
+  test('a FIFO, or a link to one, in the place of CLAUDE.md is named and does not hang the block', () => {
+    for (const make of [(d: string) => fifo(path.join(d, 'CLAUDE.md')), (d: string) => { fifo(path.join(d, 'pipe')); symlinkSync('pipe', path.join(d, 'CLAUDE.md')); }]) {
+      const dir = world();
+      try {
+        make(dir);
+        // `timeout` signals the whole process group, so a grep that waits on the FIFO does not outlive the test.
+        const result = spawnSync('timeout', ['-k', '2', '6', '/bin/bash', '-c', block], { encoding: 'utf8', timeout: 20_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir } });
+        expect(result.error).toBeUndefined();
+        expect([124, 137]).not.toContain(result.status);
+        expect(result.stdout.split('\n').filter((line) => /OMC config|Could not read/.test(line))).toEqual(['Could not read CLAUDE.md']);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
 });
 
 // One rule for the files that are scanned as companions (CLAUDE-omc.md and every other CLAUDE-*.md), in the script and in the

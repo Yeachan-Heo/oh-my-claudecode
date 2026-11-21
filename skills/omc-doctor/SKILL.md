@@ -118,8 +118,9 @@ C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${
 # Check if CLAUDE.md exists
 ls -la "$C"/CLAUDE.md 2>/dev/null
 
-# Check for OMC markers (<!-- OMC:START --> is the canonical marker)
-grep -q "<!-- OMC:START -->" "$C/CLAUDE.md" 2>/dev/null; case $? in 0) echo "Has OMC config";; 1) echo "Missing OMC config in CLAUDE.md";; *) [ -e "$C/CLAUDE.md" ] || [ -L "$C/CLAUDE.md" ] && echo "Could not read CLAUDE.md" || echo "Missing OMC config in CLAUDE.md";; esac
+# Check for OMC markers (<!-- OMC:START --> is the canonical marker); only a regular file is read, as grep on a FIFO never returns
+if [ -f "$C/CLAUDE.md" ]; then grep -q "<!-- OMC:START -->" "$C/CLAUDE.md" 2>/dev/null; case $? in 0) echo "Has OMC config";; 1) echo "Missing OMC config in CLAUDE.md";; *) echo "Could not read CLAUDE.md";; esac
+elif [ -e "$C/CLAUDE.md" ] || [ -L "$C/CLAUDE.md" ]; then echo "Could not read CLAUDE.md"; else echo "Missing OMC config in CLAUDE.md"; fi
 
 # Check companion files for file-split pattern (e.g. CLAUDE-omc.md)
 find -L "$C" -maxdepth 1 -type f -iname 'CLAUDE-*.md' -print 2>/dev/null
@@ -128,7 +129,7 @@ while IFS= read -r f; do
 done < <(find -L "$C" -maxdepth 1 -type f -iname 'CLAUDE-*.md' -print 2>/dev/null)
 
 # Check if CLAUDE.md references a companion file
-grep -o "CLAUDE-[^ )]*\.md" "$C/CLAUDE.md" 2>/dev/null
+[ -f "$C/CLAUDE.md" ] && grep -o "CLAUDE-[^ )]*\.md" "$C/CLAUDE.md" 2>/dev/null
 ```
 
 ```bash
