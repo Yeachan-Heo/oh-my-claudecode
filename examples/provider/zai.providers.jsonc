@@ -1,0 +1,49 @@
+// Preset for the Z.ai coding endpoint, for scripts/provider. Copy to
+// ~/.config/claude-omc/providers.jsonc (or point OMC_PROVIDER_PROFILES_FILE at it),
+// then replace the key source with your own. Only the values shown here are
+// preset values; every other field takes the neutral default (docs/PROVIDER-WORKERS.md).
+{
+  "defaultProfile": "zai",
+  "profiles": {
+    "zai": {
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      // One key source: file, env or command. The file must contain only the key.
+      "apiKey": { "file": "~/.config/claude-omc/keys/zai.key" },
+      "models": {
+        "opus": { "id": "glm-5.3[1m]" },
+        "sonnet": { "id": "glm-5.3[1m]" },
+        "haiku": { "id": "glm-5.3-flash[1m]" },
+        "default": "sonnet"
+      },
+      "modelIdPrefixes": ["glm-"],
+      "contextWindow": 1000000,
+      "requestTimeoutMs": 3000000,
+      "shellTimeoutMs": 660000,
+      "roles": ["executor"],
+      "limits": {
+        // Equal to the number of concurrent sessions in the provider plan.
+        "maxSessions": 4
+      },
+      "quota": {
+        "adapter": "monitor-limits",
+        "url": "https://api.z.ai/api/monitor/usage/quota/limit",
+        "authScheme": "bearer"
+      },
+      "errorCodes": {
+        "quota": [1308, 1310],
+        "throttle": [1305]
+      },
+      "proxy": {
+        // Pick a free loopback port, for example from 30000 to 40000.
+        "nonRetryableBodyPatterns": [
+          "\"code\"\\s*:\\s*1311",
+          "1311 -",
+          "1308",
+          "1310",
+          "quota",
+          "usage limit"
+        ]
+      }
+    }
+  }
+}

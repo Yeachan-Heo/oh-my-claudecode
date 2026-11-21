@@ -42,6 +42,21 @@ function hasExtendedContextSuffix(modelId) {
 function isSubagentSafeModelId(modelId) {
   return isProviderSpecificModelId(modelId) && !hasExtendedContextSuffix(modelId);
 }
+// Mirrors src/config/models.ts isAltProviderModelId.
+// Some providers publish models whose full id carries a context suffix (for example
+// `acme-large[1m]`): there the suffix is part of the model name, not a context-window flag as
+// with Anthropic. The gate must not reject such ids when the process talks to a non-Claude
+// provider (other than Bedrock and Vertex). Opt-in: only ids that start with a prefix listed in
+// OMC_PROVIDER_MODEL_PREFIXES (comma-separated, case-insensitive) qualify; without the variable
+// the gate behaves as before.
+function isAltProviderModelId(modelId) {
+  const prefixes = (process.env.OMC_PROVIDER_MODEL_PREFIXES || '')
+    .split(',').map((p) => p.trim()).filter(Boolean);
+  return prefixes.some((prefix) => new RegExp(
+    `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9][A-Za-z0-9._-]*(\\[\\d+[mk]\\])?$`, 'i',
+  ).test(modelId))
+    && isNonClaudeProviderEnv() && !isBedrockProviderEnv() && !isVertexProviderEnv();
+}
 function isBedrockProviderEnv() {
   if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
@@ -2985,7 +3000,7 @@ async function main() {
           // → CLAUDE_CODE_BEDROCK_*_MODEL → ANTHROPIC_DEFAULT_*_MODEL.
           if (isTierAlias(toolModel) && resolveTierAliasToSafeModel(toolModel)) {
             // fall through to continue — tier alias resolves to a safe provider-specific ID
-          } else if (!isSubagentSafeModelId(toolModel)) {
+          } else if (!isSubagentSafeModelId(toolModel) && !isAltProviderModelId(toolModel)) {
             const tierUpper = isTierAlias(toolModel) ? toolModel.toUpperCase() : '';
             const derivedTier = tierUpper || (normalizeToCcAlias(toolModel) || '').toUpperCase();
             const guidance = derivedTier
@@ -3002,7 +3017,7 @@ async function main() {
             return;
           }
           // else: valid provider-specific model ID — fall through to continue.
-        } else if (sessionHasLmSuffix) {
+        } else if (sessionHasLmSuffix && !isAltProviderModelId(sessionModel)) {
           // No model param, but the session model has a [1m] context-window suffix.
           // Sub-agents would inherit it and fail — the runtime strips [1m] to a bare
           // Anthropic model ID (e.g. claude-sonnet-5) which is invalid on Bedrock.
@@ -3037,7 +3052,7 @@ async function main() {
           const resolvedModel = defTierAlias ? resolveTierAliasToSafeModel(defTierAlias) : '';
           const hasSafeRouting = !!resolvedModel;
           if (agentDefModel && !isSubagentSafeModelId(agentDefModel) && !isTierAlias(agentDefModel)
-              && hasSafeRouting) {
+              && hasSafeRouting && !isAltProviderModelId(agentDefModel)) {
             const guidance = `Add model="${defTierAlias}" to this ${toolName} call — tier aliases resolve to configured provider models (${resolvedModel}).`;
             const agentType = (toolInput.subagent_type).replace(/^oh-my-claudecode:/, '');
             emitPreToolUseOutput({

@@ -36,6 +36,14 @@ const BLOCKED_HOST_PATTERNS = [
 // Blocked URL schemes
 const ALLOWED_SCHEMES = ['https:', 'http:'];
 
+// Paths that could access cloud metadata
+const DANGEROUS_PATHS = [
+  '/metadata',
+  '/meta-data',
+  '/latest/meta-data',
+  '/computeMetadata',
+];
+
 /**
  * Validate a URL to prevent SSRF attacks
  * @param urlString The URL to validate
@@ -100,14 +108,8 @@ export function validateUrlForSSRF(urlString: string): SSRFValidationResult {
   }
 
   // Block specific dangerous paths that could access cloud metadata
-  const dangerousPaths = [
-    '/metadata',
-    '/meta-data',
-    '/latest/meta-data',
-    '/computeMetadata',
-  ];
   const pathLower = parsed.pathname.toLowerCase();
-  for (const dangerous of dangerousPaths) {
+  for (const dangerous of DANGEROUS_PATHS) {
     if (pathLower.startsWith(dangerous)) {
       return {
         allowed: false,
@@ -119,11 +121,51 @@ export function validateUrlForSSRF(urlString: string): SSRFValidationResult {
   return { allowed: true };
 }
 
+export interface AnthropicBaseUrlOptions {
+  /**
+   * A single loopback port that may be used as ANTHROPIC_BASE_URL (for example a
+   * local forwarding proxy started by the user). Integer 1-65535.
+   */
+  allowLoopbackPort?: number;
+}
+
+/**
+ * True when the URL is exactly http://127.0.0.1:<port> or http://localhost:<port> with the
+ * given port, no credentials and no cloud metadata path. Nothing else qualifies.
+ */
+function isAllowedLoopbackProxyUrl(urlString: string, port: number | undefined): boolean {
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return false;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(urlString);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:') return false;
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost') return false;
+  if (parsed.port !== String(port)) return false;
+  if (parsed.username || parsed.password) return false;
+  const pathLower = parsed.pathname.toLowerCase();
+  return !DANGEROUS_PATHS.some((dangerous) => pathLower.startsWith(dangerous));
+}
+
 /**
  * Validate ANTHROPIC_BASE_URL for safe usage
- * This is a convenience function that also enforces HTTPS preference
+ * This is a convenience function that also enforces HTTPS preference.
+ *
+ * With `options.allowLoopbackPort` a plain-HTTP loopback address on exactly that port is
+ * accepted (and not warned about); every other input is validated as without the option.
  */
-export function validateAnthropicBaseUrl(urlString: string): SSRFValidationResult {
+export function validateAnthropicBaseUrl(
+  urlString: string,
+  options?: AnthropicBaseUrlOptions,
+): SSRFValidationResult {
+  if (isAllowedLoopbackProxyUrl(urlString, options?.allowLoopbackPort)) {
+    return { allowed: true };
+  }
   const result = validateUrlForSSRF(urlString);
   if (!result.allowed) {
     return result;
