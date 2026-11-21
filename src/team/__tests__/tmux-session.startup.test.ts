@@ -1208,23 +1208,30 @@ describe('worker pane startup safety', () => {
       'bypass-permissions': v330('bypass-permissions'),
       idle: readFrame('claude/2.1.325/idle.txt'),
     };
+    // `shown` is what the pane draws now; each key is charged to the frame the
+    // last capture returned, the one the code decided on.
     let shown: keyof typeof frames = 'partial';
+    let lastReturned: keyof typeof frames | null = null;
     let applied = 0;
-    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
-    tmuxState.captureAt = () => {
+    const keysSeenOn: Array<[keyof typeof frames | null, string]> = [];
+    const applyKeys = () => {
       const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
       applied = tmuxState.args.length;
       for (const key of keys) {
-        keysSeenOn.push([shown, key]);
+        keysSeenOn.push([lastReturned, key]);
         if (key === 'Down' && shown === 'trust') shown = 'trust-yes-focused';
         if (key === 'Enter' && shown === 'trust-yes-focused') shown = 'idle';
       }
-      const frame = frames[shown];
+    };
+    tmuxState.captureAt = () => {
+      applyKeys();
+      lastReturned = shown;
       if (shown === 'partial') shown = whole;
-      return frame;
+      return frames[lastReturned];
     };
 
     await deliverStartupInbox(context, 'Read inbox.md, execute now.');
+    applyKeys();
     expect(keysSeenOn.filter(([frame]) => frame === 'partial')).toEqual([]);
   });
 
