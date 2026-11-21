@@ -86,6 +86,13 @@ export interface TeamTaskDelegationComplianceEvidence {
   recorded_at: string;
 }
 
+/** Recorded when a terminal result or error starts with an `ESCALATE: <lane>` line. */
+export interface TeamTaskEscalation {
+  lane: string;
+  source: 'terminal_result';
+  recorded_at: string;
+}
+
 export interface TeamTaskDelegationPlan {
   mode: TeamTaskDelegationMode;
   max_parallel_subtasks?: number;
@@ -126,6 +133,7 @@ export interface TeamTask {
   completed_at?: string;
   delegation?: TeamTaskDelegationPlan;
   delegation_compliance?: TeamTaskDelegationComplianceEvidence;
+  escalation?: TeamTaskEscalation;
   recovery_reservation?: TeamTaskRecoveryReservation;
   recovery_adoption?: TaskRecoveryAdoption;
 }

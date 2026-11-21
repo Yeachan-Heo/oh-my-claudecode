@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { lspTools } from './lsp-tools.js';
 import { astTools } from './ast-tools.js';
 import { pythonReplTool } from './python-repl/index.js';
+import { taskListTool } from './task-list-tools.js';
 
 export { lspTools } from './lsp-tools.js';
 export { astTools } from './ast-tools.js';
@@ -30,7 +31,10 @@ export interface GenericToolDefinition {
 export const allCustomTools: GenericToolDefinition[] = [
   ...lspTools as unknown as GenericToolDefinition[],
   ...astTools as unknown as GenericToolDefinition[],
-  pythonReplTool as unknown as GenericToolDefinition
+  pythonReplTool as unknown as GenericToolDefinition,
+  // Opt-in, as in the MCP registries (src/mcp/tool-registry.ts, src/mcp/omc-tools-server.ts): the task-list tool is part of this
+  // aggregate only when OMC_TASK_LIST=1 is set when the module loads. Without it the array is what it was.
+  ...(process.env.OMC_TASK_LIST === '1' ? [taskListTool as unknown as GenericToolDefinition] : []),
 ];
 
 /**

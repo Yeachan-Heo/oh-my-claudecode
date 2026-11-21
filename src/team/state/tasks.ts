@@ -8,6 +8,7 @@ import type { TeamTaskStatus } from '../contracts.js';
 import type {
   TeamTask,
   TeamTaskDelegationComplianceEvidence,
+  TeamTaskEscalation,
   TeamTaskV2,
   TaskReadiness,
   ClaimTaskResult,
@@ -270,6 +271,22 @@ function requiresDelegationComplianceEvidence(task: TeamTaskV2): boolean {
   return !!plan && (plan.mode === 'auto' || plan.mode === 'required' || plan.required_parallel_probe === true);
 }
 
+/**
+ * An `ESCALATE: <lane>` marker counts only on the first non-empty line of the
+ * terminal text; a later marker line does not escalate the task.
+ */
+function extractEscalationLane(text: string | undefined): TeamTaskEscalation | null {
+  if (typeof text !== 'string') return null;
+  for (const line of text.split(/\r?\n/)) {
+    if (line.trim() === '') continue;
+    const match = /^\s*ESCALATE:\s*(.+)$/.exec(line);
+    return match && match[1].trim()
+      ? { lane: match[1].trim(), source: 'terminal_result', recorded_at: new Date().toISOString() }
+      : null;
+  }
+  return null;
+}
+
 interface TransitionDeps extends ClaimTaskDeps {
   canTransitionTaskStatus: (from: TeamTaskStatus, to: TeamTaskStatus) => boolean;
   appendTeamEvent: (
@@ -327,6 +344,11 @@ export async function transitionTaskStatus(
     if (to === 'completed' && requiresDelegationComplianceEvidence(v) && !delegationCompliance) {
       return { ok: false as const, error: 'missing_delegation_compliance_evidence' as const };
     }
+    const escalation = to === 'completed'
+      ? extractEscalationLane(terminalData?.result)
+      : to === 'failed'
+        ? extractEscalationLane(terminalData?.error)
+        : undefined;
 
     const updated: TeamTaskV2 = {
       ...v,
@@ -335,6 +357,7 @@ export async function transitionTaskStatus(
       result: to === 'completed' ? normalizedResult : undefined,
       error: to === 'failed' ? normalizedError : undefined,
       delegation_compliance: to === 'completed' ? delegationCompliance ?? v.delegation_compliance : v.delegation_compliance,
+      ...(escalation !== undefined ? { escalation: escalation ?? undefined } : {}),
       claim: undefined,
       version: v.version + 1,
       ...(terminalData && 'metadata' in terminalData && terminalData.metadata

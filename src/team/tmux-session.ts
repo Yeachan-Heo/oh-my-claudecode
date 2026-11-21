@@ -4146,16 +4146,35 @@ export async function spawnOwnedWorkerInPane(
     });
     return { ownership, attempt, provider: config.provider };
   } catch (error) {
+    // The pane's process tree is read right before the provider is terminated (the last argument), and signalled first in the cleanup: a
+    // descendant that left the provider's process group is no longer below the pane's root once the provider is gone, and the kill of the
+    // pane reads the tree after that (OMC_TEAM_KILL_PANE_TREE). Not read of the pane of the leader or a reserved one, which the kill of the
+    // pane refuses.
+    let fencedTree: PaneProcessTree | null = null;
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
       attempt,
       "launch_failed",
       async () => {
         try {
+          if (fencedTree) await terminatePaneProcessTree(fencedTree);
           await killOwnedWorkerPane(ownership);
           return (await getOwnedWorkerLiveness(ownership)) === "dead";
         } catch {
           return false;
         }
+      },
+      async () => {
+        if (
+          process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
+          ownership.tmuxServerIdentity &&
+          ownership.paneId.startsWith("%") &&
+          ownership.paneId !== ownership.leaderPaneId &&
+          !ownership.reservedPaneIds.includes(ownership.paneId)
+        )
+          fencedTree = await capturePaneProcessTree(
+            ownership.tmuxServerIdentity,
+            ownership.paneId,
+          );
       },
     ).catch(() => false);
     if (!cleaned)
@@ -4373,6 +4392,246 @@ export async function killTeamPane(paneId: string): Promise<void> {
   throw new Error("tmux_server_identity_required");
 }
 
+/** Test seams for the pane process tree functions; production callers pass none. */
+export interface PaneProcessTreeDependencies {
+  readProcessRecords?: () => Promise<Map<number, { ppid: number }>>;
+  processIdentity?: (pid: number) => string | null;
+  killProcess?: (pid: number, signal: NodeJS.Signals | 0) => void;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/** The descendants of a pane's root process with the start identity each had when the process table was read. */
+export interface PaneProcessTree {
+  panePid: number;
+  /** Breadth first from the pane's root process: the reverse order is deepest first. */
+  pids: number[];
+  startIdentities: Map<number, string | null>;
+}
+
+/**
+ * Opt-in (`OMC_TEAM_KILL_PANE_TREE=1`), first half: reads the descendants of the
+ * pane's root process, found by parent PID regardless of session or process
+ * group, and the process start identity of each (a descendant is kept only
+ * when a second read of the process table shows the parent it had in the
+ * first and that parent is the pane's root process or a descendant kept in the
+ * same way, so a PID reused in between is not recorded, nor is a process below
+ * one that was replaced, and only when the pane's root process is, after those
+ * reads, still the same live process it was at the start, with a readable start
+ * identity). It only reads and signals nothing, so a caller can take it before an
+ * action that detaches descendants from the pane (the termination of the
+ * worker's provider) and hand it to `terminatePaneProcessTree` later. Returns null, before any tmux or `ps`
+ * call, when the variable is not `1`; also null when nothing can be read or
+ * the pane has no descendants.
+ */
+export async function capturePaneProcessTree(
+  identity: TmuxServerIdentity,
+  paneId: string,
+  dependencies: PaneProcessTreeDependencies = {},
+): Promise<PaneProcessTree | null> {
+  if (process.env.OMC_TEAM_KILL_PANE_TREE !== "1") return null;
+  try {
+    // The pane's root process as tmux reports it now: its PID, or null when the pane is dead or cannot be read.
+    const readPaneRoot = async (): Promise<number | null> => {
+      const result = await runGuardedNativeTmuxCommand(
+        identity,
+        tmuxCommandString(
+          ["display-message", "-p", "-t", paneId, "#{pane_pid} #{pane_dead}"],
+          ["#{pane_pid} #{pane_dead}"],
+        ),
+      );
+      if (result.outcome !== "executed") return null;
+      for (const line of result.stdout.split(/\r?\n/)) {
+        const match = line.trim().match(/^([1-9]\d*) ([01])$/);
+        if (match) return match[2] === "0" ? Number(match[1]) : null;
+      }
+      return null;
+    };
+    const panePid = await readPaneRoot();
+    if (panePid === null || panePid <= 1 || panePid === process.pid) {
+      return null;
+    }
+    const readRecords = dependencies.readProcessRecords ?? readProcessRecords;
+    const readIdentity =
+      dependencies.processIdentity ?? currentStrictProcessStartIdentity;
+    const identityOf = (pid: number): string | null => {
+      try {
+        return readIdentity(pid);
+      } catch {
+        return null;
+      }
+    };
+    const rootIdentity = identityOf(panePid);
+    if (rootIdentity === null) return null;
+    const records = await readRecords();
+    const byParent = new Map<number, number[]>();
+    for (const [pid, record] of records) {
+      const children = byParent.get(record.ppid) ?? [];
+      children.push(pid);
+      byParent.set(record.ppid, children);
+    }
+    const pids: number[] = [];
+    const seen = new Set<number>([panePid]);
+    const queue = [...(byParent.get(panePid) ?? [])];
+    for (const pid of queue) seen.add(pid);
+    while (queue.length > 0) {
+      const pid = queue.shift()!;
+      pids.push(pid);
+      for (const child of byParent.get(pid) ?? []) {
+        if (!seen.has(child)) {
+          seen.add(child);
+          queue.push(child);
+        }
+      }
+    }
+    if (pids.length === 0) return null;
+    const startIdentities = new Map<number, string | null>();
+    for (const pid of pids) startIdentities.set(pid, identityOf(pid));
+    // The identities above were read after the process table. A PID that exited and was reused in between is recorded under the
+    // identity of its new process; a second read of the table shows it with another parent (or not at all), so only a PID that
+    // still has the parent it had in the first read is kept. That check alone is not enough for a process below one that was
+    // replaced: if an intermediate process and its child both exited, an unrelated process can take the parent's PID (another parent,
+    // so it is dropped) and start a child that takes the child's PID, which again has the parent number the old child had. So the
+    // second table is walked from the pane's root, in the breadth first order of the first read (a parent comes before its children):
+    // a PID is kept only when its parent is the root or a PID kept before it, and has the same parent in both reads. Every kept PID
+    // then has an unbroken chain of kept ancestors up to the root in the second table, the one read after the identities.
+    const again = await readRecords();
+    const keptSet = new Set<number>([panePid]);
+    const kept: number[] = [];
+    for (const pid of pids) {
+      const parent = records.get(pid)?.ppid;
+      if (parent !== undefined && again.get(pid)?.ppid === parent && keptSet.has(parent)) {
+        keptSet.add(pid);
+        kept.push(pid);
+      }
+    }
+    if (kept.length === 0) return null;
+    // Everything above rests on the root PID of the first read being the pane's root process the whole time. If the pane's process
+    // exited and its PID was reused after that read, the children of the new process would pass as the pane's descendants, with start
+    // identities that are valid for unrelated processes. So the root is revalidated after the last read: the pane must still report
+    // the same PID and not be dead (tmux reaps the root before it reports the pane dead, and a PID is not reused before the root is
+    // reaped, so the PID was the pane's root throughout), and the process on that PID must have the start identity read at the
+    // beginning (a pane respawned onto the same PID in between has another one). A root whose identity cannot be read, at the beginning
+    // or now, gives no tree: without it the incarnation cannot be checked and nothing is signalled.
+    if ((await readPaneRoot()) !== panePid) return null;
+    if (identityOf(panePid) !== rootIdentity) return null;
+    return { panePid, pids: kept, startIdentities };
+  } catch {
+    /* reading the tree must not block the pane kill */
+    return null;
+  }
+}
+
+/**
+ * Second half: terminates the descendants captured by `capturePaneProcessTree`.
+ * A PID is signalled only when its process start identity was readable when the
+ * tree was captured and is the same now, so a PID that was reused in between,
+ * or that exited, is never hit, and a PID whose identity cannot be read is
+ * skipped. The descendants that pass get SIGTERM, deepest first; the ones still
+ * alive with an unchanged identity after 2 seconds get SIGKILL. The pane's root
+ * process and this process are never signalled. A PID reused in the remaining
+ * windows is still possible: each identity check and the signal that follows
+ * are not atomic (no pidfd). Errors are swallowed so that the pane kill still
+ * runs.
+ */
+export async function terminatePaneProcessTree(
+  tree: PaneProcessTree | null,
+  dependencies: PaneProcessTreeDependencies = {},
+): Promise<void> {
+  if (!tree) return;
+  try {
+    const readIdentity =
+      dependencies.processIdentity ?? currentStrictProcessStartIdentity;
+    const killProcess =
+      dependencies.killProcess ?? ((pid, signal) => process.kill(pid, signal));
+    const sleep =
+      dependencies.sleep ??
+      ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    const ownPid = process.pid;
+    const sameIncarnation = (pid: number): boolean => {
+      const recorded = tree.startIdentities.get(pid);
+      if (!recorded) return false;
+      try {
+        return readIdentity(pid) === recorded;
+      } catch {
+        return false;
+      }
+    };
+    const signalled: number[] = [];
+    for (const pid of [...tree.pids].reverse()) {
+      if (
+        pid > 1 &&
+        pid !== ownPid &&
+        pid !== tree.panePid &&
+        sameIncarnation(pid)
+      ) {
+        try {
+          killProcess(pid, "SIGTERM");
+          signalled.push(pid);
+        } catch {
+          /* already exited */
+        }
+      }
+    }
+    if (signalled.length === 0) return;
+    await sleep(2000);
+    const isAlive = (pid: number): boolean => {
+      try {
+        killProcess(pid, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException)?.code === "EPERM";
+      }
+    };
+    for (const pid of signalled) {
+      if (isAlive(pid) && sameIncarnation(pid)) {
+        try {
+          killProcess(pid, "SIGKILL");
+        } catch {
+          /* already exited */
+        }
+      }
+    }
+  } catch {
+    /* terminating the tree must not block the pane kill */
+  }
+}
+
+/**
+ * Opt-in (`OMC_TEAM_KILL_PANE_TREE=1`): before a tmux pane is killed, terminate
+ * every descendant process of the pane's root process (see
+ * `capturePaneProcessTree` and `terminatePaneProcessTree`). Callers that end
+ * the pane's provider first take the capture before that step and terminate
+ * after it, because a descendant that left the provider's process group is no
+ * longer below the pane's root once the provider is gone.
+ */
+export async function killWorkerPaneProcessTree(
+  identity: TmuxServerIdentity,
+  paneId: string,
+  dependencies: PaneProcessTreeDependencies = {},
+): Promise<void> {
+  await terminatePaneProcessTree(
+    await capturePaneProcessTree(identity, paneId, dependencies),
+    dependencies,
+  );
+}
+
+function readProcessRecords(): Promise<Map<number, { ppid: number }>> {
+  return execFileAsync("ps", ["-eo", "pid=,ppid="], { timeout: 2e3 }).then(
+    (result) => {
+      const records = new Map<number, { ppid: number }>();
+      for (const line of result.stdout.split(/\r?\n/)) {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s*$/);
+        if (!match) continue;
+        const pid = Number(match[1]);
+        const ppid = Number(match[2]);
+        if (pid > 0) records.set(pid, { ppid });
+      }
+      return records;
+    },
+    () => new Map<number, { ppid: number }>(),
+  );
+}
+
 export async function killOwnedWorkerPane(
   ownership: WorkerPaneOwnership,
 ): Promise<void> {
@@ -4420,6 +4679,10 @@ export async function killOwnedWorkerPane(
     await cmuxCloseSurface(ownership.paneId);
     return;
   }
+  await killWorkerPaneProcessTree(
+    ownership.tmuxServerIdentity!,
+    ownership.paneId,
+  );
   const result = await runGuardedNativeTmuxCommand(
     ownership.tmuxServerIdentity!,
     tmuxCommandString(["kill-pane", "-t", ownership.paneId]),

@@ -1210,10 +1210,18 @@ export async function retireWorkerLaunchAttempt(
   }
 }
 
+/**
+ * `beforeProviderTermination` runs under the launch lock once the attempt is current and accepted and its retirement is recorded, right
+ * before the provider is terminated, and only on the path that reaches the termination: the boundary a caller reads the process tree of the
+ * worker's pane at, because a descendant that left the provider's process group is no longer below the pane's root once the provider is
+ * gone, and one the worker started while the caller waited for this lock is in no read taken before it. It is awaited, and an error it
+ * throws changes nothing: a failed read must not keep the provider alive or fail the retirement.
+ */
 export async function retireAndCleanupCurrentWorkerLaunchAttempt(
   attempt: WorkerLaunchAttempt,
   reason: string,
   cleanup: () => Promise<boolean>,
+  beforeProviderTermination?: () => Promise<void>,
 ): Promise<boolean> {
   const retiredPath = `${attempt.decisionPath}.retired`;
   const cleanupCompletePath = `${retiredPath}.cleanup-complete`;
@@ -1250,6 +1258,9 @@ export async function retireAndCleanupCurrentWorkerLaunchAttempt(
         await writeExclusiveAtomic(retiredPath, {
           ...identityOf(attempt), kind: 'worker_launch_retired', reason, written_at: new Date().toISOString(),
         });
+      }
+      if (beforeProviderTermination) {
+        try { await beforeProviderTermination(); } catch { /* a failed read does not hold up the termination */ }
       }
       if (!await terminateWorkerLaunchProvider(attempt)) return false;
       if (!await cleanup()) return false;

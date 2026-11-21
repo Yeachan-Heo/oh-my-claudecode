@@ -150,6 +150,8 @@ const mocks = vi.hoisted(() => {
     applyMainVerticalLayout: vi.fn(),
     killWorkerPanes: vi.fn(async () => undefined),
     killOwnedWorkerPane: vi.fn<(ownership: { paneId: string }) => Promise<void>>(async () => {}),
+    capturePaneProcessTree: vi.fn<(identity: unknown, paneId: string) => Promise<unknown>>(async () => null),
+    terminatePaneProcessTree: vi.fn<(tree: unknown) => Promise<void>>(async () => undefined),
     killTeamSession: vi.fn(async () => {}),
     resolveSplitPaneWorkerPaneIds: vi.fn(async (_session: string | undefined, paneIds: string[]) => paneIds),
     splitTeamWorkerPaneWithEvidence: vi.fn(),
@@ -363,6 +365,8 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     workerPaneBelongsToOwnedProviderTarget: mocks.workerPaneBelongsToOwnedProviderTarget,
     killWorkerPanes: mocks.killWorkerPanes,
     killOwnedWorkerPane: mocks.killOwnedWorkerPane,
+    capturePaneProcessTree: mocks.capturePaneProcessTree,
+    terminatePaneProcessTree: mocks.terminatePaneProcessTree,
     killTeamSession: mocks.killTeamSession,
     resolveSplitPaneWorkerPaneIds: mocks.resolveSplitPaneWorkerPaneIds,
     getWorkerLiveness: mocks.getWorkerLiveness,
@@ -764,6 +768,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       }),
       'recovery_replacement',
       expect.any(Function),
+      expect.any(Function), // the read of the pane tree before the provider is terminated
     );
   }
 
@@ -978,6 +983,10 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.killTeamSession.mockReset();
     mocks.resolveSplitPaneWorkerPaneIds.mockReset();
     mocks.killOwnedWorkerPane.mockClear();
+    mocks.capturePaneProcessTree.mockReset();
+    mocks.capturePaneProcessTree.mockResolvedValue(null);
+    mocks.terminatePaneProcessTree.mockReset();
+    mocks.terminatePaneProcessTree.mockResolvedValue(undefined);
     mocks.getWorkerLiveness.mockReset();
     mocks.workerPaneBelongsToProviderTarget.mockReset();
     mocks.killTeamSession.mockResolvedValue(undefined);
@@ -1269,6 +1278,7 @@ describe('runtime v2 startup inbox dispatch', () => {
   afterEach(async () => {
     vi.useRealTimers();
     delete process.env.OMC_TEAM_ENGAGED_PANE_RECHECK_MS;
+    delete process.env.OMC_TEAM_KILL_PANE_TREE;
     startupDeliveryGate = undefined;
     for (const launch of activeRealLaunches.splice(0)) {
       await launch.terminate(launch.attempt).catch(() => false);
@@ -2275,6 +2285,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       }),
       'startup_rollback',
       expect.any(Function),
+      expect.any(Function),
     );
     await expect(readFile(backupPath, 'utf-8')).resolves.toContain('root agents');
     await expect(readFile(join(worktreePath, 'dirty-startup.txt'), 'utf-8')).resolves.toBe('preserve me\n');
@@ -2971,6 +2982,284 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(requests[0]?.status).toBe('failed');
     expect(requests[0]?.last_reason).toBe('worker_notify_failed:startup_send_failed');
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+  });
+
+  // OMC_TEAM_KILL_PANE_TREE on the paths that roll a start or a recovery back. The real retireAndCleanupCurrentWorkerLaunchAttempt runs its
+  // last argument right before it terminates the provider, and from then on a descendant that left the provider's process group is no longer
+  // below the pane's root: the retirement below keeps that order, and a read of the tree after the termination finds nothing.
+  describe('opt-in pane tree kill while a start or a recovery is rolled back', () => {
+    const DETACHED = { panePid: 4001, pids: [4002], startIdentities: new Map([[4002, 'start-4002']]) };
+    let events: string[] = [];
+    const tree = (): string[] => events.filter(event => ['capture', 'provider terminated', 'terminate', 'terminate other', 'kill-pane'].includes(event));
+
+    function useFencedRetirement(options: { paneDeadAfterTermination?: boolean; kill?: (ownership: { paneId: string }) => Promise<void> } = {}): void {
+      events = [];
+      process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+      launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementation(async (
+        _attempt: unknown,
+        _reason: string,
+        cleanup: () => Promise<boolean>,
+        beforeProviderTermination?: () => Promise<void>,
+      ) => {
+        await beforeProviderTermination?.();
+        events.push('provider terminated');
+        return cleanup();
+      });
+      mocks.capturePaneProcessTree.mockImplementation(async () => {
+        events.push('capture');
+        return events.includes('provider terminated') ? null : DETACHED;
+      });
+      mocks.terminatePaneProcessTree.mockImplementation(async (captured: unknown) => {
+        events.push(captured === DETACHED ? 'terminate' : 'terminate other');
+      });
+      const kill = options.kill ?? (async () => undefined);
+      mocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: string }) => {
+        events.push('kill-pane');
+        await kill(ownership);
+      });
+      if (options.paneDeadAfterTermination) {
+        mocks.getWorkerLiveness.mockImplementation(async () => (events.includes('provider terminated') ? 'dead' : 'alive'));
+      }
+    }
+
+    it.each([
+      ['the pane is still alive when the provider is gone', false],
+      ['the pane is already dead when the provider is gone', true],
+    ])('a failed startup signals the tree read before the provider was terminated first, when %s', async (_what, paneDeadAfterTermination) => {
+      cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-notify-');
+      mocks.sendToWorker.mockResolvedValue(false);
+      useFencedRetirement({ paneDeadAfterTermination });
+      const { startTeamV2 } = await import('../runtime-v2.js');
+
+      await startTeamV2({
+        teamName: 'dispatch-team',
+        workerCount: 1,
+        agentTypes: ['claude'],
+        tasks: [{ subject: 'Dispatch test', description: 'Roll back a startup whose notification fails' }],
+        cwd,
+      });
+
+      expect(mocks.capturePaneProcessTree).toHaveBeenCalledWith(mocks.tmuxServerIdentity, '%2');
+      expect(tree()).toEqual(paneDeadAfterTermination
+        ? ['capture', 'provider terminated', 'terminate']
+        : ['capture', 'provider terminated', 'terminate', 'kill-pane']);
+    });
+
+    it('without the switch the rollback reads and signals no tree of its own', async () => {
+      cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-off-');
+      mocks.sendToWorker.mockResolvedValue(false);
+      useFencedRetirement();
+      delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      const { startTeamV2 } = await import('../runtime-v2.js');
+
+      await startTeamV2({
+        teamName: 'dispatch-team',
+        workerCount: 1,
+        agentTypes: ['claude'],
+        tasks: [{ subject: 'Dispatch test', description: 'Roll back a startup whose notification fails' }],
+        cwd,
+      });
+
+      expect(mocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(mocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+      expect(tree()).toEqual(['provider terminated', 'kill-pane']);
+    });
+
+    // The tree is read only of a pane the kill of the pane would not refuse at once. The proof of the pane of a start refuses the pane of the
+    // leader and a reserved one before the launch, so the launch turns the ownership that the rollback holds into one of them.
+    it.each([
+      ['the pane of the leader', (paneId: string) => ({ leaderPaneId: paneId })],
+      ['a reserved pane', (paneId: string) => ({ reservedPaneIds: [paneId] })],
+    ])('a failed startup reads and signals no tree of %s', async (_what, excluded) => {
+      cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-excluded-');
+      mocks.sendToWorker.mockResolvedValue(false);
+      useFencedRetirement();
+      const spawnDefault = mocks.spawnOwnedWorkerInPane.getMockImplementation()!;
+      mocks.spawnOwnedWorkerInPane.mockImplementation(async (...args: unknown[]) => {
+        const ownership = args[1] as { paneId: string };
+        Object.assign(ownership, excluded(ownership.paneId));
+        return spawnDefault(...args);
+      });
+      const { startTeamV2 } = await import('../runtime-v2.js');
+
+      await startTeamV2({
+        teamName: 'dispatch-team',
+        workerCount: 1,
+        agentTypes: ['claude'],
+        tasks: [{ subject: 'Dispatch test', description: 'Roll back a startup whose notification fails' }],
+        cwd,
+      });
+
+      expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(String),
+        expect.any(Function),
+        expect.any(Function),
+      );
+      expect(mocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(mocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+      expect(tree()).toEqual(['provider terminated', 'kill-pane']);
+    });
+
+    it.each([
+      ['the pane is still alive when the provider is gone', false],
+      ['the pane is already dead when the provider is gone', true],
+    ])('the rollback of a started team after a failure past the launch signals the tree read before the provider was terminated first, when %s', async (_what, paneDeadAfterTermination) => {
+      cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-started-');
+      execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'pipe' });
+      execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'pipe' });
+      await writeFile(join(cwd, 'README.md'), 'rollback tree test\n', 'utf-8');
+      execFileSync('git', ['add', 'README.md'], { cwd, stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', 'initial'], { cwd, stdio: 'pipe' });
+      execFileSync('git', ['checkout', '-b', 'feature-auto-merge'], { cwd, stdio: 'pipe' });
+      mergeMocks.registerWorker.mockRejectedValueOnce(new Error('registration exploded'));
+      useFencedRetirement({ paneDeadAfterTermination });
+      launchMocks.loadWorkerLaunchAttempt.mockImplementation(async (input: WorkerLaunchAttemptLookup) => (
+        { attempt_id: input.attemptId, pane_id: input.paneId } as unknown as DurableWorkerLaunchAttempt
+      ));
+      const { startTeamV2 } = await import('../runtime-v2.js');
+
+      await expect(startTeamV2({
+        teamName: 'dispatch-team',
+        workerCount: 1,
+        agentTypes: ['claude'],
+        tasks: [{ subject: 'Auto merge fail', description: 'Registration failure must abort startup' }],
+        cwd,
+        autoMerge: true,
+      })).rejects.toThrow();
+
+      expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
+        expect.anything(),
+        'startup_rollback',
+        expect.any(Function),
+        expect.any(Function),
+      );
+      expect(mocks.capturePaneProcessTree).toHaveBeenCalledWith(mocks.tmuxServerIdentity, '%2');
+      // The signal does not wait for a kill: a pane that is dead once the provider is gone is not killed, and still gets the signal.
+      if (paneDeadAfterTermination) {
+        expect(tree()).toEqual(['capture', 'provider terminated', 'terminate']);
+        expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+      } else {
+        expect(tree().slice(0, 3)).toEqual(['capture', 'provider terminated', 'terminate']);
+        expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+      }
+    });
+
+    // Runs the replacement of the dead worker of the owner recovery fixture to its end: the old pane (%91) is dead for the recovery, its provider
+    // is retired, and a new pane (%2) takes over. `customize` changes the mocks after the retirement is set up.
+    async function replaceDeadWorker(customize: () => void = () => undefined): Promise<void> {
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-replacement-');
+      mocks.autoStartupEvidence = false;
+      const fixture = await seedOwnerRecoveryFixture('codex', 'before-dispatch');
+      configureOwnerPaneLifecycle();
+      useFencedRetirement({ kill: mocks.killOwnedWorkerPane.getMockImplementation() });
+      customize();
+      const deliveryGate = deferred<void>();
+      const probeGate = deferred<void>();
+      const evidenceGate = deferred<void>();
+      startupDeliveryGate = deliveryGate;
+      configureOwnerEvidenceProbe('current', probeGate, evidenceGate);
+
+      const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+      const recoveryPromise = executeRecoverDeadWorkerV2Owner({
+        teamName: fixture.teamName,
+        cwd,
+        workerName: 'worker-1',
+        requestId: fixture.requestId,
+        instanceId: fixture.instanceId,
+      });
+      await Promise.race([
+        deliveryGate.promise,
+        recoveryPromise.then(result => { throw new Error(`Recovery ended before delivery: ${JSON.stringify(result)}`); }),
+      ]);
+      await flushRealIo();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushRealIo();
+      await awaitGateOrRecoveryFailure(probeGate.promise, recoveryPromise, 'before-dispatch probe');
+      await vi.advanceTimersByTimeAsync(1_500);
+      await awaitGateOrRecoveryFailure(evidenceGate.promise, recoveryPromise, 'before-dispatch evidence');
+      await flushRealIo();
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(recoveryPromise).resolves.toMatchObject({ outcome: 'recovered', oldPaneId: '%91', newPaneId: '%2' });
+    }
+
+    // The proof of the old pane (its adoption) and the liveness the retirement sees of it are recorded in `events` next to the rest.
+    function watchOldPane(options: { adopted?: boolean; liveAfterProviderTerminated?: boolean } = {}): void {
+      const adoptDefault = mocks.adoptWorkerPaneOwnership.getMockImplementation()!;
+      mocks.adoptWorkerPaneOwnership.mockImplementation(async (input: AdoptWorkerPaneOwnershipInput) => {
+        if (input.paneId !== '%91') return adoptDefault(input);
+        events.push('adopt');
+        return options.adopted === false ? { ok: false as const, reason: 'pane_foreign' as const } : adoptDefault(input);
+      });
+      if (options.liveAfterProviderTerminated) {
+        const livenessDefault = mocks.getOwnedWorkerLiveness.getMockImplementation()!;
+        mocks.getOwnedWorkerLiveness.mockImplementation(async (ownership: OwnedWorkerLivenessInput) => {
+          if (ownership.paneId !== '%91') return livenessDefault(ownership);
+          if (events.includes('kill-pane')) return 'dead' as const;
+          return events.includes('provider terminated') ? 'alive' as const : 'dead' as const;
+        });
+      }
+    }
+    const replacementEvents = (): string[] => events.filter(event => ['adopt', 'capture', 'provider terminated', 'terminate', 'kill-pane'].includes(event));
+
+    it('the replacement of a dead worker signals the tree of the replaced pane, read before its provider was terminated, first', async () => {
+      await replaceDeadWorker();
+
+      expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
+        expect.objectContaining({ pane_id: '%91' }),
+        'recovery_replacement',
+        expect.any(Function),
+        expect.any(Function),
+      );
+      expect(mocks.capturePaneProcessTree).toHaveBeenCalledWith(mocks.tmuxServerIdentity, '%91');
+      expect(tree()).toEqual(['capture', 'provider terminated', 'terminate']); // the pane was dead already: the signal does not wait for a kill
+    });
+
+    it('the replacement of a dead worker proves the pane before it reads its tree, and signals the tree before it kills a pane that is still alive', async () => {
+      await replaceDeadWorker(() => watchOldPane({ liveAfterProviderTerminated: true }));
+
+      expect(mocks.capturePaneProcessTree).toHaveBeenCalledWith(mocks.tmuxServerIdentity, '%91');
+      expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%91' }));
+      expect(replacementEvents()).toEqual(['adopt', 'capture', 'provider terminated', 'terminate', 'adopt', 'kill-pane']);
+    });
+
+    it('the replacement of a dead worker reads and signals no tree of a pane it cannot prove to be a pane of the team', async () => {
+      await replaceDeadWorker(() => watchOldPane({ adopted: false }));
+
+      expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
+        expect.objectContaining({ pane_id: '%91' }),
+        'recovery_replacement',
+        expect.any(Function),
+        expect.any(Function),
+      );
+      expect(mocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(mocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+      expect(replacementEvents()).toEqual(['adopt', 'provider terminated']); // only the proof of the hook: a dead pane needs no proof to be left alone
+    });
+
+    it('the replacement of a dead worker whose pane is alive and cannot be proved reads no tree, kills nothing and ends as it did without the switch', async () => {
+      cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-unproved-');
+      const fixture = await seedOwnerRecoveryFixture('codex', 'before-dispatch');
+      configureOwnerPaneLifecycle();
+      useFencedRetirement({ kill: mocks.killOwnedWorkerPane.getMockImplementation() });
+      watchOldPane({ adopted: false, liveAfterProviderTerminated: true });
+      const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+
+      await expect(executeRecoverDeadWorkerV2Owner({
+        teamName: fixture.teamName,
+        cwd,
+        workerName: 'worker-1',
+        requestId: fixture.requestId,
+        instanceId: fixture.instanceId,
+      })).resolves.toMatchObject({ outcome: 'failed', error: 'worker_cleanup_incomplete' });
+
+      expect(mocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(mocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+      expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+      expect(replacementEvents()).toEqual(['adopt', 'provider terminated', 'adopt']); // the proof of the hook, then the proof before the kill
+    });
   });
 
   it('tears down the owned worker launch and names the refusal when the dispatch store refuses startup writes', async () => {
@@ -4233,6 +4522,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
       'startup_dispatch_failed',
       expect.any(Function),
+      expect.any(Function),
     );
   });
 
@@ -4498,11 +4788,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
     expect(mocks.retryStartupInboxSubmit).toHaveBeenCalledTimes(1);
     expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
-    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).not.toHaveBeenCalledWith(
-      expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
-      'startup_dispatch_failed',
-      expect.any(Function),
-    );
+    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mock.calls.some(call => call[1] === 'startup_dispatch_failed')).toBe(false);
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests[0]).toMatchObject({ status: 'notified', last_reason: 'worker_startup_confirmed' });
   });
@@ -4534,6 +4820,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
       expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
       'startup_dispatch_failed',
+      expect.any(Function),
       expect.any(Function),
     );
   });

@@ -1,0 +1,78 @@
+/**
+ * Task List Tool
+ *
+ * MCP tool `task_list`: the task list of a subagent. Registered only when OMC_TASK_LIST=1, in the standalone registry
+ * (tool-registry.ts), in the in-process server (omc-tools-server.ts) and in the public aggregate `allCustomTools` (index.ts), which
+ * `omc capabilities` reads.
+ * The server does not know which agent calls it, so the tool checks the shape of the call and confirms it; the PostToolUse hook
+ * scripts/jev-task-list-state.mjs saves the list per agent_id.
+ */
+
+import { z } from 'zod';
+
+const TASK_LIST_STATUSES = ['pending', 'in_progress', 'completed'] as const;
+
+const taskListArray = (value: unknown): unknown[] | null => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const taskListPositive = (value: unknown): boolean => {
+  const n = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value;
+  return Number.isInteger(n) && Number(value) >= 1;
+};
+
+const taskListSchema = {
+  items: z.array(z.object({
+    content: z.string().describe('One checkable result'),
+    status: z.enum(TASK_LIST_STATUSES),
+    note: z.string().optional().describe('Task in progress: 1-2 sentences, what you are doing now and why'),
+  })).optional().describe('The whole list in order; replaces the previous one'),
+  advance: z.boolean().optional().describe('Complete the task in progress and start the next pending one'),
+  done: z.array(z.number().int()).optional().describe('1-based numbers of tasks to mark completed'),
+  start: z.number().int().optional().describe('1-based number of the task to mark in_progress'),
+};
+
+type TaskListItem = { content?: unknown; status?: unknown; note?: unknown };
+
+// An item as the schema declares it, checked here because the standalone server hands over the raw arguments: content a non-empty
+// string, status one of the three, note absent or a string. The PostToolUse hook (updateShape in scripts/lib/jev-task-list.mjs)
+// applies the same rule, so a call that is accepted here is saved as sent.
+const taskListItemOk = (x: TaskListItem | null | undefined): boolean =>
+  !!x &&
+  typeof x.content === 'string' &&
+  x.content.trim() !== '' &&
+  TASK_LIST_STATUSES.includes(x.status as typeof TASK_LIST_STATUSES[number]) &&
+  (x.note === undefined || typeof x.note === 'string');
+
+export const taskListTool = {
+  name: 'task_list',
+  description: 'Task list of a subagent. Send the whole list as items, or advance/done/start as in update_plan. One task = one checkable result; in_progress before the work, completed after it; the task in progress gets a note: what you are doing and why.',
+  schema: taskListSchema,
+  handler: async (args: unknown) => {
+    const input = (args ?? {}) as Record<string, unknown>;
+    const fail = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
+    const items = input.items === undefined ? undefined : taskListArray(input.items);
+    if (input.items !== undefined && (!items || items.length === 0 || items.length > 50 || !(items as TaskListItem[]).every(taskListItemOk))) {
+      return fail('items: 1-50 tasks, each with a non-empty content, a status pending, in_progress or completed, and a note that, when present, is a string.');
+    }
+    const done = input.done === undefined ? undefined : taskListArray(input.done);
+    if (input.done !== undefined && (!done || !done.every(taskListPositive))) return fail('done: a list of 1-based task numbers.');
+    if (input.start !== undefined && !taskListPositive(input.start)) return fail('start: a 1-based task number.');
+    if (input.advance !== undefined && typeof input.advance !== 'boolean') return fail('advance: true or false.');
+    if (!items && !done && input.start === undefined && input.advance !== true) return fail('Send items, or advance, done or start.');
+    const current = items ? (items as TaskListItem[]).filter((x) => x.status === 'in_progress').map((x) => String(x.content).trim()) : [];
+    const text = items
+      ? `List accepted: ${items.length} task(s), in progress: ${current.length ? current.join('; ') : 'none'}.`
+      : 'Change accepted.';
+    return { content: [{ type: 'text' as const, text: text.length > 400 ? `${text.slice(0, 399)}…` : text }] };
+  },
+};

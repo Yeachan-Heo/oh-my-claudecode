@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   formatClaudeGoalReconciliation,
@@ -369,6 +370,15 @@ function titleFromObjective(objective: string, fallback: string): string {
   return firstLine.length > 72 ? `${firstLine.slice(0, 69).trimEnd()}...` : firstLine;
 }
 
+// Ceiling on goals derived from a loose list in the brief. Unset, 0 or any non-positive
+// value means no ceiling. Explicit goal arguments are never limited.
+const ULTRAGOAL_MAX_CANDIDATES_ENV = 'OMC_ULTRAGOAL_MAX_CANDIDATES';
+
+function maxDerivedGoalCandidates(): number {
+  const parsed = Number.parseInt(process.env[ULTRAGOAL_MAX_CANDIDATES_ENV] ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
 export function deriveGoalCandidates(brief: string): Array<{ title: string; objective: string }> {
   const lines = brief.split(/\r?\n/);
   const bulletGoals = lines
@@ -388,6 +398,13 @@ export function deriveGoalCandidates(brief: string): Array<{ title: string; obje
       .filter((paragraph) => paragraph.length > 0 && !paragraph.startsWith('#'));
 
   const selected = objectives.length > 0 ? objectives : [brief.trim() || 'Complete the requested project objective.'];
+  const maxCandidates = maxDerivedGoalCandidates();
+  if (maxCandidates > 0 && selected.length > maxCandidates) {
+    throw new UltragoalError(
+      `The brief yields ${selected.length} goal candidates, above the ${maxCandidates} allowed by ${ULTRAGOAL_MAX_CANDIDATES_ENV}. `
+      + 'Pass each goal explicitly with the repeatable --goal <title::objective> option, or narrow the brief.',
+    );
+  }
   return selected.map((objective, index) => ({
     title: titleFromObjective(objective, `Goal ${index + 1}`),
     objective,
@@ -432,8 +449,24 @@ export async function readUltragoalPlan(cwd: string, planId?: string): Promise<U
 }
 
 async function writePlan(cwd: string, plan: UltragoalPlan): Promise<void> {
+  // The plan is written to a unique temporary file in the same directory and renamed into place,
+  // so an interrupted write never leaves a truncated goals.json; a failed write removes its temporary file.
+  // The permissions of an existing goals.json carry over to the new file, and the temporary file is created with them
+  // (the plan is never in a file readable by more users than the one it replaces); without one the default mode applies.
+  const goalsPath = ultragoalGoalsPath(cwd, plan.planId);
+  const tmpPath = `${goalsPath}.tmp.${process.pid}.${randomUUID()}`;
   await mkdir(ultragoalDir(cwd, plan.planId), { recursive: true });
-  await writeFile(ultragoalGoalsPath(cwd, plan.planId), `${JSON.stringify(plan, null, 2)}\n`);
+  const existing = await stat(goalsPath).catch(() => null);
+  const mode = existing ? existing.mode & 0o777 : undefined;
+  try {
+    await writeFile(tmpPath, `${JSON.stringify(plan, null, 2)}\n`, mode === undefined ? { flag: 'wx' } : { flag: 'wx', mode });
+    // The umask can narrow the creation mode of a wider file (0o664 under 0o022): restore the exact mode before the rename.
+    if (mode !== undefined) await chmod(tmpPath, mode);
+    await rename(tmpPath, goalsPath);
+  } catch (error) {
+    await rm(tmpPath, { force: true });
+    throw error;
+  }
 }
 
 export async function createUltragoalPlan(cwd: string, options: CreateUltragoalOptions): Promise<UltragoalPlan> {
