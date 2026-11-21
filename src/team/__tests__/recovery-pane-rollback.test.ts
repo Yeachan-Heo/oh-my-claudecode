@@ -92,7 +92,7 @@ paneMocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: str
   await paneMocks.killTeamPane(ownership.paneId);
 });
 
-import { reserveRecoveryRequest as persistRecoveryRequest } from '../recovery-request-store.js';
+import { canonicalRecoveryPayloadHash, readRecoveryOutcome, reserveRecoveryRequest as persistRecoveryRequest } from '../recovery-request-store.js';
 import { executeRecoverDeadWorkerV2Owner } from '../runtime-v2.js';
 import {
   activateTeamInstanceUnderLock,
@@ -1083,6 +1083,84 @@ describe('recovery pane rollback evidence', () => {
     const evidence = JSON.parse(readFileSync(join(evidenceRoot, evidenceFiles[0]!), 'utf8'));
     expect(evidence).toMatchObject({ reason: 'pane_membership_unverified', unaddressable: true,
       split: { provider: 'tmux', paneId: '%10' } });
+  });
+
+  async function seedLayoutCleanupFailure(teamName: string): Promise<void> {
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    await reservePersistedTeamInstance(teamName, cwd);
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName, worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, replacement_generation: 1, working_dir: cwd }],
+      agent_type: 'claude', created_at: new Date().toISOString(), tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active', state_revision: 1, leader_pane_id: '%leader',
+    }));
+    await activatePersistedTeamInstance(teamName, cwd);
+    await attachPersistedPriorLaunch(teamName, configPath);
+    paneMocks.setPaneLiveness('%1', 'dead');
+    // The split pane survives the kill, so layout cleanup cannot be verified.
+    paneMocks.setPaneLiveness('%2', 'alive');
+  }
+
+  function writeRecoveryIntent(teamName: string, requestId: string, recoveryId: string, ageMs: number): void {
+    const workspaceHash = createHash('sha256').update(cwd).digest('hex');
+    const path = absPath(cwd, TeamPaths.recoveryIntent(teamName, recoveryId));
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, JSON.stringify({ schema_version: 1, kind: 'recover-worker', request_id: requestId,
+      recovery_id: recoveryId, operation: 'recover-worker', workspace_hash: workspaceHash,
+      payload_hash: canonicalRecoveryPayloadHash({ operation: 'recover-worker', workspaceHash, teamName,
+        workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID }),
+      team_name: teamName, worker_name: 'worker-1', instance_id: TEAM_INSTANCE_ID,
+      created_at: new Date(Date.now() - ageMs).toISOString() }));
+  }
+
+  it('records rollback evidence when the required layout fails and the split pane cannot be killed', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-layout-cleanup-'));
+    const teamName = 'layout-cleanup-team';
+    const requestId = 'layout-cleanup-request';
+    const recoveryId = 'layout-cleanup-recovery';
+    await seedLayoutCleanupFailure(teamName);
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID }, recoveryId);
+    paneMocks.applyMainVerticalLayout.mockRejectedValueOnce(new Error('layout failed'));
+
+    await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId, instanceId: TEAM_INSTANCE_ID }))
+      .resolves.toMatchObject({ outcome: 'failed', error: 'worker_cleanup_incomplete', recoveryId });
+
+    expect(paneMocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+    expect(paneMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    const evidenceRoot = absPath(cwd, TeamPaths.recoveryPaneRollbackFailures(teamName, recoveryId));
+    const evidenceFiles = readdirSync(evidenceRoot);
+    expect(evidenceFiles).toHaveLength(1);
+    const evidence = JSON.parse(readFileSync(join(evidenceRoot, evidenceFiles[0]!), 'utf8'));
+    expect(evidence).toMatchObject({ schema_version: 1, team_name: teamName, worker_name: 'worker-1',
+      request_id: requestId, recovery_id: recoveryId, pane_id: '%2',
+      reason: 'worker_layout_cleanup_unverified:worker-1:%2', liveness: 'alive' });
+  });
+
+  it('keeps the recovery active past the deadline after layout cleanup left its split pane alive', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-layout-deadline-'));
+    const teamName = 'layout-deadline-team';
+    const requestId = 'layout-deadline-request';
+    const recoveryId = 'layout-deadline-recovery';
+    await seedLayoutCleanupFailure(teamName);
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID }, recoveryId);
+    writeRecoveryIntent(teamName, requestId, recoveryId, 0);
+    const execute = () => executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId, instanceId: TEAM_INSTANCE_ID });
+    paneMocks.applyMainVerticalLayout.mockRejectedValue(new Error('layout failed'));
+    try {
+      await expect(execute()).resolves.toMatchObject({ outcome: 'failed', error: 'worker_cleanup_incomplete', recoveryId });
+
+      // The retry after the owner deadline must not drop the live, untracked pane.
+      writeRecoveryIntent(teamName, requestId, recoveryId, 301_000);
+      await expect(execute()).resolves.not.toMatchObject({ error: 'recovery_request_timeout' });
+    } finally {
+      paneMocks.applyMainVerticalLayout.mockResolvedValue(undefined);
+    }
+    expect(readRecoveryOutcome(cwd, requestId)?.kind).not.toBe('final');
+    const config = JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8'));
+    expect(config.active_recovery).toMatchObject({ recovery_id: recoveryId });
   });
 
   it('rejects a persisted provider descriptor whose validated path has changed', async () => {
