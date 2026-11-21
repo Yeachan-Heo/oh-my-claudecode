@@ -3268,6 +3268,18 @@ async function finalizeRecoveryPastDeadline(
         (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
       );
       if (untrackedSplit) return null;
+      // An owner from a build without split records left only this evidence
+      // for a split pane it could not prove.
+      const rollbackEvidence = await readdir(
+        absPath(
+          input.cwd,
+          TeamPaths.recoveryPaneRollbackFailures(input.teamName, recoveryId),
+        ),
+      ).then(
+        (entries) => entries.length > 0,
+        (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
+      );
+      if (rollbackEvidence) return null;
       const progress = readRecoveryOutcome(input.cwd, input.requestId);
       if (
         progress?.kind === "final" ||
