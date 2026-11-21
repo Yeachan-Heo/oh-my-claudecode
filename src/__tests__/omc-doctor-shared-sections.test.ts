@@ -298,25 +298,26 @@ describe.skipIf(!posix)('omc-doctor: the locator line finds the script, or says 
 // The skill cannot do without the script, so the script has to reach every install: it is tracked by git (the marketplace
 // and --plugin-dir installs read the checkout), it is covered by the `files` of package.json (the npm package, which the
 // locator reaches through the global package), and the plugin sync of the installer copies it into the plugin cache.
+// The guide file beside it (the details the skill leaves out, printed by `guide`) travels the same way: a cache repair
+// stops where it is missing, so a payload without it would make the repair unusable.
 // `npm run plugin:shipping:verify` does not prove any of this: its closure holds only the generated files and a few named
 // scripts, so it passes with or without the file.
-describe('omc-doctor: the script reaches every install', { timeout: 120_000 }, () => {
-  const script = 'scripts/omc-doctor.mjs';
+describe.each(['scripts/omc-doctor.mjs', 'scripts/omc-doctor-guide.md'])('omc-doctor: %s reaches every install', { timeout: 120_000 }, (script) => {
   const insideGit = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: ROOT, encoding: 'utf8' }).stdout?.trim() === 'true';
 
-  test.skipIf(!insideGit)('the script is tracked by git', () => {
+  test.skipIf(!insideGit)('the file is tracked by git', () => {
     const tracked = spawnSync('git', ['ls-files', '--error-unmatch', script], { cwd: ROOT, encoding: 'utf8' });
     expect({ status: tracked.status, out: tracked.stdout.trim() }).toEqual({ status: 0, out: script });
   });
 
-  test('the files of package.json cover the script and no pattern leaves it out', () => {
+  test('the files of package.json cover the file and no pattern leaves it out', () => {
     const { files } = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { files: string[] };
     const covers = (pattern: string) => pattern === script || script.startsWith(`${pattern.replace(/\/$/, '')}/`);
     expect(files.filter((pattern) => !pattern.startsWith('!') && covers(pattern))).toContain('scripts');
     expect(files.filter((pattern) => pattern.startsWith('!') && covers(pattern.slice(1)))).toEqual([]);
   });
 
-  test('the plugin sync copies the script into the plugin cache, byte for byte', () => {
+  test('the plugin sync copies the file into the plugin cache, byte for byte, beside the skills it compacts to shims', () => {
     const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor-sync-'));
     try {
       // The smallest source root the installer accepts as a plugin payload, plus the real script.
@@ -331,10 +332,12 @@ describe('omc-doctor: the script reaches every install', { timeout: 120_000 }, (
       writeFileSync(path.join(source, 'hooks', 'hooks.json'), '{}\n');
       writeFileSync(path.join(source, 'skills', 'plan', 'SKILL.md'), 'name: plan\n');
       writeFileSync(path.join(source, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '9.9.9' }));
-      copyFileSync(SCRIPT, path.join(source, script));
+      copyFileSync(path.join(ROOT, script), path.join(source, script));
       const result = copyPluginSyncPayload(source, [target]);
       expect(result).toEqual({ synced: true, errors: [] });
-      expect(readFileSync(path.join(target, script))).toEqual(readFileSync(SCRIPT));
+      expect(readFileSync(path.join(target, script))).toEqual(readFileSync(path.join(ROOT, script)));
+      // The sync compacts the skills of the payload to shims (their bodies move to skill-bodies/); the scripts are not touched.
+      expect(readFileSync(path.join(target, 'skills', 'plan', 'SKILL.md'), 'utf8')).toContain('Read and follow the full skill body');
     } finally {
       rmSync(base, { recursive: true, force: true });
     }

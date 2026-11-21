@@ -2,7 +2,8 @@
 // The commands behind the checks of the omc-doctor skill (skills/omc-doctor/SKILL.md). The skill runs one command per
 // Bash call: node omc-doctor.mjs <command>. Every command prints the lines the skill's diagnosis reads and ends with
 // exit code 0, except the two cache commands, which end with 1 when they refuse to move anything or a move fails,
-// and an unknown command, which ends with 2.
+// and an unknown command, which ends with 2. The guide command ends with 1 when its file is missing and with 2 for an
+// unknown section.
 //
 //   step1              the install channel (marketplace, plugin-dir, npm or unknown), the installed version, the
 //                      channel's latest version and the command that updates it, one block of lines per plugin
@@ -13,6 +14,7 @@
 //   cache-versions     the version directories of the plugin cache, per marketplace
 //   cache-outdated     moves the unprotected cached versions to plugins/backups after an update (never deletes)
 //   cache-stale        the same cleanup for a stale cache with several versions
+//   guide <section>    prints one section of omc-doctor-guide.md, the details the skill leaves out
 //
 // Everything is plain Node (no shell), so it runs the same on Windows and POSIX. The sections below hold the code
 // the commands share: each of them exists once, here.
@@ -22,6 +24,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 // == config dir ==
 // CLAUDE_CONFIG_DIR expanded like getClaudeConfigDir() in scripts/lib/config-dir.mjs: surrounding spaces are
@@ -1100,6 +1103,35 @@ const cacheRepair = (kind) => {
   if (messages.footer) console.log(messages.footer);
 };
 
+// == guide ==
+// The details that the skill leaves out are in omc-doctor-guide.md beside this script, one section per `## name` heading.
+// `guide <name>` prints that section. A file that cannot be read ends with exit code 1 and a message, a name that is no
+// section with 2 (naming the sections), so that a shell block that must have the guide can stop on it.
+const guide = () => {
+  const file = path.join(path.dirname(fileURLToPath(import.meta.url)), 'omc-doctor-guide.md');
+  let text;
+  try {
+    text = readFile(file).replace(/\r\n/g, '\n');
+  } catch (error) {
+    console.error(
+      'omc-doctor: guide not found: ' + file + ' cannot be read (' + ((error && error.code) || 'not a regular file') +
+        '). Reinstall or update the plugin (omc update, or claude plugin update oh-my-claudecode), restart Claude Code and run the doctor again',
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const sections = text.split(/^(?=## )/m).filter((part) => part.startsWith('## '));
+  const nameOf = (part) => part.slice(3, part.indexOf('\n')).trim();
+  const name = process.argv[3];
+  const found = sections.find((part) => nameOf(part) === name);
+  if (!found) {
+    console.error('omc-doctor.mjs: unknown guide section ' + JSON.stringify(name) + '; use one of ' + sections.map(nameOf).join(', '));
+    process.exitCode = 2;
+    return;
+  }
+  console.log(found.trimEnd());
+};
+
 // == dispatch ==
 const COMMANDS = {
   step1,
@@ -1109,6 +1141,7 @@ const COMMANDS = {
   'cache-versions': cacheVersions,
   'cache-outdated': () => cacheRepair('outdated'),
   'cache-stale': () => cacheRepair('stale'),
+  guide,
 };
 const name = process.argv[2];
 if (Object.hasOwn(COMMANDS, name)) {
