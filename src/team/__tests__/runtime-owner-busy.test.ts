@@ -949,6 +949,46 @@ describe('recovery owner retry deadline', () => {
     expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();
   });
 
+  // An owner from a build without pane split records leaves only this
+  // evidence for a split it could not prove: no record, pending pane or row.
+  function writeRollbackFailure(teamName: string, recoveryId: string): void {
+    const path = absPath(cwd, TeamPaths.recoveryPaneRollbackFailure(teamName, recoveryId, 'attempt-x', Date.now()));
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, JSON.stringify({ schema_version: 1, recovery_id: recoveryId, pane_id: null,
+      pane_attempt_id: 'attempt-x', reason: 'pane_membership_unverified' }));
+  }
+
+  it.each([
+    ['present', (teamName: string) => writeRollbackFailure(teamName, 'stuck-recovery')],
+    ['unreadable', (teamName: string) => {
+      const dir = join(absPath(cwd, TeamPaths.recoveryPaneRollbackFailure(teamName, 'stuck-recovery', 'a', 0)), '..');
+      mkdirSync(join(dir, '..'), { recursive: true });
+      writeFileSync(dir, 'not a directory');
+    }],
+  ])('keeps retrying past the deadline when rollback-failure evidence for the recovery is %s', async (_label, seed) => {
+    cwd = mkdtempFixture('runtime-owner-deadline-rollback-evidence-');
+    const teamName = 'deadline-rollback-evidence';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    seed(teamName);
+
+    const result = await execute(teamName);
+    expect(result).not.toMatchObject({ error: 'recovery_request_timeout' });
+    expect(readRecoveryOutcome(cwd, 'stuck-request')).toBeNull();
+    await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
+      config: { active_recovery: { recovery_id: 'stuck-recovery' } },
+    });
+  });
+
+  it('fails past the deadline when the rollback-failure evidence belongs to another recovery', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-other-evidence-');
+    const teamName = 'deadline-other-evidence';
+    await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
+    writeRollbackFailure(teamName, 'older-recovery');
+
+    await expect(execute(teamName)).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+    expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();
+  });
+
   it('falls through to the executor past the deadline when the task records cannot be read', async () => {
     cwd = mkdtempFixture('runtime-owner-deadline-corrupt-task-');
     const teamName = 'deadline-corrupt-task';
