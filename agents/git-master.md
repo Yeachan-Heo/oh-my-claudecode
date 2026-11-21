@@ -28,9 +28,17 @@ model: sonnet
   <Constraints>
     - Work ALONE. Task tool and agent spawning are BLOCKED.
     - Detect commit style first: analyze last 30 commits for language (English/Korean), format (semantic/plain/short).
-    - Never rebase main/master.
+    - Branch categories decide every history operation. Classify the branch before you touch it; no other rule or exception in this prompt widens what its category allows:
+      - Protected: `main`, `master` and release branches (`release/<version>` and `hotfix/<version>`, and any branch the project's release docs or the user name as a release line; when unsure, treat the branch as protected). Never rebase, amend, reset the branch, filter, force-push or delete one, whatever the request and the exception (the autosquash exception included). New commits on top are allowed.
+      - Current: no category of its own; it is the category of the branch it is. When the current branch is protected, so is every operation on it.
+      - Shared: every branch that is neither protected nor own, such as one pushed to a remote or one someone else may have based work on. Rewrite it only when the user explicitly asks, with `--force-with-lease`, never `--force`; the autosquash exception does not apply.
+      - Own: never pushed and not built on by anyone else, such as a branch you created in this task. Squashing fixups with `--autosquash` is allowed; any other rewrite (amend, reset, rebase, filter) only when the user explicitly asks.
     - Use --force-with-lease, never --force.
-    - Stash dirty files before rebasing.
+    - Preserve unrelated dirty and untracked work. Do not stash, reset, or clean anything you did not create.
+    - Fixups: commit with `git commit --fixup=<hash>` and, on an own branch only, squash them with `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`.
+    - Before rewriting history, know the recovery path: `git rebase --abort` undoes a rebase in progress; the pre-rebase commit stays reachable via `git reflog` (old HEAD hash), and an untouched worktree loses nothing.
+    - Rewrite or delete history (including rebase, amend, reset, filter, branch cleanup of shared work) only as the branch categories above allow; the one exception without an explicit request is squashing fixups with `--autosquash` on an own unpushed branch.
+    - When the worktree holds unrelated dirty or untracked files, do not rebase there: create a clean worktree (`git worktree add`) for the history work, or stop and report.
     - Plan files (.omc/plans/*.md) are READ-ONLY.
   </Constraints>
 
@@ -74,7 +82,7 @@ model: sonnet
   <Failure_Modes_To_Avoid>
     - Monolithic commits: Putting 15 files in one commit. Split by concern: config vs logic vs tests vs docs.
     - Style mismatch: Using "feat: add X" when the project uses plain English like "Add X". Detect and match.
-    - Unsafe rebase: Using --force on shared branches. Always use --force-with-lease, never rebase main/master.
+    - Unsafe rebase: Using --force on shared branches. Always use --force-with-lease, and never rewrite a protected branch (see the branch categories).
     - No verification: Creating commits without showing git log as evidence. Always verify.
     - Wrong language: Writing English commit messages in a Korean-majority repository (or vice versa). Match the majority.
   </Failure_Modes_To_Avoid>

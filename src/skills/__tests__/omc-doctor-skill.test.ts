@@ -3,22 +3,26 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+import { blockOf, ROOT, scriptText, skillAndGuide } from '../../__tests__/helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor skill (issue #2254)', () => {
   it('documents CLAUDE.md OMC version drift check against cached plugin version', () => {
     const skillPath = join(process.cwd(), 'skills', 'omc-doctor', 'SKILL.md');
     const content = readFileSync(skillPath, 'utf8');
 
-    expect(content).toContain('CLAUDE.md OMC version:');
-    expect(content).toContain('OMC version source:');
-    expect(content).toContain('Latest cached plugin version:');
-    expect(content).toContain('VERSION DRIFT: CLAUDE.md and plugin versions differ');
-    expect(content).toContain('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
-    expect(content).toContain('VERSION MATCH: CLAUDE and plugin cache are aligned');
+    // The lines are printed by the claude-md-version command of scripts/omc-doctor.mjs; the skill names them in its rules.
+    expect(scriptText).toContain("console.log('CLAUDE.md OMC version:'");
+    expect(scriptText).toContain('OMC version source:');
+    expect(scriptText).toContain('Latest cached plugin version:');
+    expect(scriptText).toContain('VERSION DRIFT: CLAUDE.md and plugin versions differ');
+    expect(scriptText).toContain('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
+    expect(scriptText).toContain('VERSION MATCH: CLAUDE and plugin cache are aligned');
+    expect(scriptText).toContain('CLAUDE-*.md');
+    expect(scriptText).toContain('scanned deterministic CLAUDE sources');
     expect(content).toContain('CLAUDE-*.md');
     expect(content).toContain('deterministic companion');
-    expect(content).toContain('scanned deterministic CLAUDE sources');
-    expect(content).not.toContain('!==');
+    expect(content).toContain('Latest cached plugin version');
+    expect(skillAndGuide).not.toContain('!==');
     expect(content).toContain('If `CLAUDE.md OMC version` != `Latest cached plugin version`: WARN - version drift detected');
   });
 });
@@ -33,9 +37,9 @@ describe('omc-doctor skill Ralph runtime prerequisites (issue #3996)', () => {
     expect(content).toContain('node --version');
     expect(content).toContain('Ralph Runtime Prerequisites');
     // The Ruby check was a false positive (issue #3996): OMC has never used Ruby.
-    expect(content).not.toMatch(/\bruby\b/i);
-    expect(content).not.toContain('ruby-full');
-    expect(content).not.toContain('brew install ruby');
+    expect(skillAndGuide).not.toMatch(/\bruby\b/i);
+    expect(skillAndGuide).not.toContain('ruby-full');
+    expect(skillAndGuide).not.toContain('brew install ruby');
   });
 });
 
@@ -44,8 +48,11 @@ describe('omc-doctor skill package version diagnostic (issue #2981)', () => {
     const skillPath = join(process.cwd(), 'skills', 'omc-doctor', 'SKILL.md');
     const content = readFileSync(skillPath, 'utf8');
 
-    expect(content).toContain('npm view oh-my-claude-sisyphus version');
-    expect(content).not.toContain('npm view oh-my-claudecode version');
+    expect(scriptText).toContain("const view = ['view', 'oh-my-claude-sisyphus', 'version'];");
+    expect(scriptText).not.toContain("'view', 'oh-my-claudecode', 'version'");
+    expect(scriptText).not.toContain('npm view oh-my-claudecode version');
+    expect(skillAndGuide).not.toContain("'view', 'oh-my-claudecode', 'version'");
+    expect(skillAndGuide).not.toContain('npm view oh-my-claudecode version');
   });
 });
 
@@ -57,7 +64,8 @@ describe('omc-doctor skill claudeMdEnabled opt-out probe fails closed', () => {
     content.indexOf('### Step 5: Check Ralph Runtime Prerequisites'),
   );
   const fixSection = content.slice(content.indexOf('### Fix: Missing/Outdated CLAUDE.md'));
-  const probe = step4.split('\n').find((line) => line.startsWith('node -e ') && line.includes('claudeMdEnabled'));
+  // The probe is the shell block of the skill that runs the claude-md-optout command of the script: the locator line and the call.
+  const probe = blockOf('claude-md-optout');
 
   function runProbe(pathDirs: string[], configDir: string) {
     const env: NodeJS.ProcessEnv = {};
@@ -68,7 +76,9 @@ describe('omc-doctor skill claudeMdEnabled opt-out probe fails closed', () => {
     env.HOME = configDir;
     env.USERPROFILE = configDir;
     env.CLAUDE_CONFIG_DIR = configDir;
-    return spawnSync(probe as string, { shell: true, env, encoding: 'utf8' });
+    env.CLAUDE_PLUGIN_ROOT = ROOT;
+    env.OMC_PLUGIN_ROOT = '';
+    return spawnSync('/bin/bash', ['-c', probe], { env, encoding: 'utf8' });
   }
 
   it('continues with the CLAUDE.md checks only on the exact enabled line', () => {
@@ -86,7 +96,8 @@ describe('omc-doctor skill claudeMdEnabled opt-out probe fails closed', () => {
     expect(fixSection).toContain('could not check the opt-out');
   });
 
-  it('probe prints neither status line when node is not on PATH', () => {
+  // The probe is a bash block (the locator line is bash), so these two cases run where bash does, not on Windows runners.
+  it.skipIf(process.platform === 'win32')('probe prints neither status line when node is not on PATH', () => {
     expect(probe).toBeDefined();
     const emptyBin = mkdtempSync(join(tmpdir(), 'omc-doctor-probe-nopath-'));
     const configDir = mkdtempSync(join(tmpdir(), 'omc-doctor-probe-config-'));
@@ -94,13 +105,16 @@ describe('omc-doctor skill claudeMdEnabled opt-out probe fails closed', () => {
       const result = runProbe([emptyBin], configDir);
       expect(result.stdout).not.toContain('CLAUDE.md management enabled');
       expect(result.stdout).not.toContain('CLAUDE.md management disabled by claudeMdEnabled: false');
+      // The locator found the script (the plugin root is this checkout); it is the call of node that failed.
+      expect(result.stdout).not.toContain('plugin files not found');
+      expect(result.stderr).toContain('node');
     } finally {
       rmSync(emptyBin, { recursive: true, force: true });
       rmSync(configDir, { recursive: true, force: true });
     }
   });
 
-  it('probe prints a status line when node is on PATH', () => {
+  it.skipIf(process.platform === 'win32')('probe prints a status line when node is on PATH', () => {
     expect(probe).toBeDefined();
     const configDir = mkdtempSync(join(tmpdir(), 'omc-doctor-probe-config-'));
     try {

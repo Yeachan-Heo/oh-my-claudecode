@@ -141,6 +141,14 @@ Use these as review prompts, not absolute bans. Keep intentional brand, accessib
    - **Behavior lock / verification run**
    - **Remaining risks**
 
+## Fallback Findings
+
+During any pass, keep a separate inventory of code that masks an error instead of fixing it:
+
+- **Masking fallback slop**: catch-and-suppress handlers, blanket try/catch, silently swallowed errors, default returns that hide failures, and workarounds ("skip this step", "retry until it passes") standing in for the root-cause fix. Intentional fail-open is not slop only when it has all three: a comment stating the reason, a logged signal, and a bounded scope; flag silent suppression that lacks any one of them.
+- Prefer the root-cause fix over any workaround; when a fallback is genuinely required, it must say so in a comment and must not silence the failure signal.
+- List them under **Fallback Findings** in the evidence-dense report (step 6): file:line, why it masks the failure, and the root cause to fix instead.
+
 ## Usage
 
 - `/oh-my-claudecode:ai-slop-cleaner <target>`

@@ -121,6 +121,33 @@ jobs:
           src/__tests__/run-cjs-generic-timeout.test.ts
           src/__tests__/run-cjs-windows-stdio-contract.test.ts
           src/__tests__/release-boundary.test.ts
+          src/__tests__/omc-doctor-cache-pins.test.ts
+          src/__tests__/omc-doctor-cache-registry-shapes.test.ts
+          src/__tests__/omc-doctor-cache-identity.test.ts
+          src/__tests__/omc-doctor-version-check.test.ts
+          src/__tests__/omc-doctor-version-check-scopes.test.ts
+          src/__tests__/omc-doctor-cache-dotdot-links.test.ts
+          src/__tests__/omc-doctor-version-prefix.test.ts
+          src/__tests__/omc-doctor-cache-link-dating.test.ts
+          src/__tests__/omc-doctor-registry-version-grammar.test.ts
+          src/__tests__/omc-doctor-plugin-dir-diagnosis.test.ts
+          src/__tests__/omc-doctor-config-dir-tilde.test.ts
+          src/__tests__/omc-doctor-cache-names.test.ts
+          src/__tests__/omc-doctor-dangling-links.test.ts
+          src/__tests__/omc-doctor-guide.test.ts
+          src/__tests__/omc-doctor-skill-guide.test.ts
+          src/__tests__/omc-doctor-backup-destination.test.ts
+          src/__tests__/omc-doctor-cache-refusals.test.ts
+          src/__tests__/omc-doctor-config-dir-lexical.test.ts
+          src/__tests__/omc-doctor-large-version-parts.test.ts
+          src/__tests__/omc-doctor-npm-latest.test.ts
+          src/__tests__/omc-doctor-shared-sections.test.ts
+          src/__tests__/omc-doctor-step4-special-files.test.ts
+          src/__tests__/omc-doctor-cache-links-occupancy.test.ts
+          src/__tests__/omc-doctor-explicit-root.test.ts
+          src/__tests__/omc-doctor-case-sensitive-volume.test.ts
+          src/__tests__/omc-doctor-cache-registry-order.test.ts
+          src/__tests__/omc-doctor-cache-namespace.test.ts
           src/installer/__tests__/claude-md-transaction.test.ts
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts

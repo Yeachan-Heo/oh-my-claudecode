@@ -208,12 +208,16 @@ describe('HUD Windows Compatibility', () => {
 
       // Should NOT use ~ for plugin cache paths in bash commands
       expect(content).not.toMatch(/ls ~\/\.claude\/plugins\/cache/);
-      // Should use node -e for cross-platform compatibility
-      expect(content).toContain("node -e");
-      // Should use path.join for constructing paths
-      expect(content).toContain("p.join(d,'plugins','cache','omc','oh-my-claudecode')");
+      // The version checks are commands of one Node script (scripts/omc-doctor.mjs), called as `node "$S" <command>`, so
+      // they run the same on every platform; the skill holds no inline `node -e`.
+      expect(content).toContain('node "$S" step1');
+      expect(content).not.toContain('node -e');
+      // The script uses path.join for constructing paths
+      const scriptContent = readFileSync(join(packageRoot, 'scripts', 'omc-doctor.mjs'), 'utf-8');
+      expect(scriptContent).toContain("path.join(configDir, 'plugins', 'cache', market, 'oh-my-claudecode')");
       expect(content).not.toContain('ls ~/.claude/CLAUDE-*.md');
-      expect(content).toContain("find \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null");
+      // The shell blocks expand CLAUDE_CONFIG_DIR into $C first (a stored `~` is not expanded by the shell).
+      expect(content).toContain("find -L \"$C\" -maxdepth 1 -type f -iname 'CLAUDE-*.md' -print 2>/dev/null");
     });
 
     it('hud skill should use cross-platform Node.js commands for plugin detection', () => {
