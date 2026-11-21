@@ -93,7 +93,7 @@ paneMocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: str
 });
 
 import { canonicalRecoveryPayloadHash, readRecoveryOutcome, reserveRecoveryRequest as persistRecoveryRequest } from '../recovery-request-store.js';
-import { executeRecoverDeadWorkerV2Owner } from '../runtime-v2.js';
+import { clearRecoveryPaneSplit, executeRecoverDeadWorkerV2Owner, recordRecoveryPaneSplit } from '../runtime-v2.js';
 import {
   activateTeamInstanceUnderLock,
   createTeamInstanceBinding,
@@ -1376,5 +1376,33 @@ describe('recovery pane rollback evidence', () => {
     expect(evidenceFiles).toHaveLength(1);
     const evidence = JSON.parse(readFileSync(join(evidenceRoot, evidenceFiles[0]!), 'utf8'));
     expect(evidence).toMatchObject({ reason: 'pane_identity_leader_alias', pane_id: null, unaddressable: true });
+  });
+});
+
+describe('recovery pane split record ids', () => {
+  // A pane attempt id restored from a persisted launch record is only checked
+  // to be non-empty text, so it can climb out of the record directory.
+  const teamName = 'split-id-team';
+  const recoveryId = 'split-id-recovery';
+  const owner = () => ({ teamName, cwd, workerName: 'worker-1', requestId: 'split-id-request', instanceId: TEAM_INSTANCE_ID });
+  const escaped = () => absPath(cwd, `.omc/state/team/${teamName}/recovery/x.json`);
+
+  it.each(['../../x', '..', 'a/b', ''])('never deletes a file outside the record directory for pane attempt id %j', async (paneAttemptId) => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-split-id-clear-'));
+    mkdirSync(join(escaped(), '..'), { recursive: true });
+    writeFileSync(escaped(), 'sentinel');
+
+    await clearRecoveryPaneSplit(owner(), recoveryId, paneAttemptId);
+    expect(readFileSync(escaped(), 'utf8')).toBe('sentinel');
+  });
+
+  it.each([
+    ['pane attempt id', recoveryId, '../../x'],
+    ['recovery id', '../escaped', 'attempt-1'],
+  ])('refuses to record a split with an unsafe %s', async (_label, unsafeRecoveryId, paneAttemptId) => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-split-id-record-'));
+
+    await expect(recordRecoveryPaneSplit(owner(), unsafeRecoveryId, paneAttemptId)).rejects.toThrow();
+    expect(existsSync(absPath(cwd, `.omc/state/team/${teamName}/recovery`))).toBe(false);
   });
 });

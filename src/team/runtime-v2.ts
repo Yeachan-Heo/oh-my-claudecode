@@ -2484,7 +2484,7 @@ const pendingRecoveryPanes = new Map<string, PendingRecoveryPane>();
  * carried by the worker row. Until then the pane may be alive and tracked
  * nowhere else, so the owner deadline keeps the recovery active.
  */
-async function recordRecoveryPaneSplit(
+export async function recordRecoveryPaneSplit(
   input: RecoverDeadWorkerOwnerInput,
   recoveryId: string,
   paneAttemptId: string,
@@ -2506,7 +2506,7 @@ async function recordRecoveryPaneSplit(
 }
 
 // A record left behind only keeps the deadline from ending the recovery.
-async function clearRecoveryPaneSplit(
+export async function clearRecoveryPaneSplit(
   input: RecoverDeadWorkerOwnerInput,
   recoveryId: string,
   paneAttemptId: string,
