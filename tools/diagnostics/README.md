@@ -1113,7 +1113,10 @@ command substitution. These constructs stay outside the scope of every tool, so 
   substitutions down to nine levels and judges each body once, so a text of any depth ends in time linear in its length; a command that
   holds a process substitution below those levels is state-changing (`echo >(` nested nine times around `cat` is read-only, ten times
   is not). `isMutation` reads the bodies of both kinds of substitution nine levels deep as well, so `echo >(` nested nine times around
-  `tee src/a.ts` writes the file and ten times is read as no write.
+  `tee src/a.ts` writes the file, and it counts a command as a write when a body at the ninth level holds the text of a process
+  substitution, which it does not read (`echo >(` nested ten times around `cat` is a write there, as it is no read-only command for
+  the user prohibitions tool). Below the ninth level both tools take a command with a process substitution on the careful side; a chain
+  of command substitutions alone (`echo $(` nested ten times around `tee src/a.ts`) holds no process substitution and counts as no write.
 - A command substitution inside double quotes is not read as a command (`echo "$(echo x>f)"` writes `f` and counts as no write), and a
   quote inside one (`echo "$(echo ">f")"`) ends the quoted string early, so the `>f` behind it is read as a redirection.
 

@@ -882,16 +882,27 @@ it('a here-document operator inside quotes or a comment opens no body', () => {
   assert.equal(isMutation('Bash', { command: 'cat <<EOF\ntee src/a.ts\nEOF' }), false);
 });
 
-it('the body of a command or process substitution is read as a command of its own, nine levels deep', () => {
-  const nest = (levels: number, open = '$(') => Array.from({ length: levels }).reduce<string>((inner) => `echo ${open}${inner})`, 'tee src/a.ts');
-  for (const open of ['$(', '>(', '<(']) {
-    assert.equal(isMutation('Bash', { command: nest(3, open) }), true, `${open} 3`);
-    assert.equal(isMutation('Bash', { command: nest(9, open) }), true, `${open} 9`);
-    assert.equal(isMutation('Bash', { command: nest(10, open) }), false, `${open} 10`);
+it('the body of a command or process substitution is read as a command of its own, nine levels deep; a process substitution below that is a write', () => {
+  // `levels` substitutions around `inner`, the kinds of `opens` repeated from the outermost inwards: `echo $(echo >(inner))` is two.
+  const nest = (levels: number, opens: string[], inner: string) =>
+    Array.from({ length: levels }).reduceRight<string>((text, _, at) => `echo ${opens[at % opens.length]}${text})`, inner);
+  const write = 'tee src/a.ts';
+  const read = 'cat';
+  // Only command substitutions: the tenth level is not read and holds no process substitution, so nothing is counted there.
+  for (const levels of [3, 9]) assert.equal(isMutation('Bash', { command: nest(levels, ['$('], write) }), true, `$( ${levels}`);
+  for (const levels of [10, 12]) assert.equal(isMutation('Bash', { command: nest(levels, ['$('], write) }), false, `$( ${levels}`);
+  for (const levels of [3, 9, 10]) assert.equal(isMutation('Bash', { command: nest(levels, ['$('], read) }), false, `$( ${levels} cat`);
+  // A process substitution at the ninth level is read; one that the ninth level holds is below the limit and counts as a write.
+  for (const opens of [['>('], ['<('], ['$(', '>('], ['<(', '$(', '>(']]) {
+    const label = opens.join(' ');
+    assert.equal(isMutation('Bash', { command: nest(3, opens, read) }), false, `${label} 3 cat`);
+    assert.equal(isMutation('Bash', { command: nest(9, opens, read) }), false, `${label} 9 cat`);
+    for (const levels of [3, 9, 10, 11, 12]) assert.equal(isMutation('Bash', { command: nest(levels, opens, write) }), true, `${label} ${levels} tee`);
+    for (const levels of [10, 11, 12, 30]) assert.equal(isMutation('Bash', { command: nest(levels, opens, read) }), true, `${label} ${levels} cat`);
   }
-  // Both kinds count in one depth.
-  assert.equal(isMutation('Bash', { command: `echo $(${nest(8, '>(')})` }), true);
-  assert.equal(isMutation('Bash', { command: `echo $(${nest(9, '>(')})` }), false);
+  assert.equal(isMutation('Bash', { command: nest(8, ['$('], `echo >(${read})`) }), false);
+  assert.equal(isMutation('Bash', { command: nest(9, ['$('], `echo >(${read})`) }), true);
+  assert.equal(isMutation('Bash', { command: nest(8, ['$('], `echo >(${write})`) }), true);
   // The levels of nested shell strings are counted apart: a substitution inside `sh -c` and a `sh -c` inside a substitution are read.
   assert.equal(isMutation('Bash', { command: "sh -c 'echo $(tee src/a.ts)'" }), true);
   assert.equal(isMutation('Bash', { command: 'echo $(sh -c "tee src/a.ts")' }), true);

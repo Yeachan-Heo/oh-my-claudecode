@@ -1431,6 +1431,8 @@ const NESTED_MAX_LENGTH = 100000;
 const NESTED_MAX_DEPTH = 2;
 /** Substitutions inside substitutions (command and process) are read this deep, apart from the nested shell strings above. */
 const SUBSTITUTION_MAX_DEPTH = 9;
+/** A target that stands for a body that is not read (see shellWriteTargets): it names no file, and no pattern of the ignored targets matches it. */
+const UNREAD_BODY = '(unread body)';
 
 const baseName = (word) => word.slice(word.lastIndexOf('/') + 1);
 
@@ -1661,11 +1663,14 @@ const ddTargets = (args) => args.filter((arg) => arg.startsWith('of=') && arg.le
  * names the file, not the quotes. The named commands count only as the command word of a command (see
  * commandPrograms), so `rg tee src/a.ts` and `echo cp a src/b.ts` write nothing. The string of a nested shell
  * (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep; the body of a command substitution is read again
- * as a command of its own, nine levels deep, counted apart from the nested shell strings.
+ * as a command of its own, nine levels deep, counted apart from the nested shell strings. A body of the last level that
+ * holds the text of a process substitution (`<(`, `>(`) is not read below it, so it counts as a write (UNREAD_BODY), as the
+ * prohibitions tool does not judge such a command read-only; a body of the last level without that text is as it is.
  */
 function shellWriteTargets(command, depth = 0, substitutions = 0) {
   const QUOTED = String.raw`"(?:[^"\\]|\\[\s\S])*"|'[^']*'`; // a double-quoted string may hold \"
   const WORD = String.raw`(?:${QUOTED}|\\[^\n]|[^\s;&|)<>"'\\])+`;
+  if (substitutions === SUBSTITUTION_MAX_DEPTH && (command.includes('<(') || command.includes('>('))) return [UNREAD_BODY];
   const { text, bodies } = splitSubstitutions(withoutHeredocBodies(command), '_', true);
   const targets = [];
   const unquote = (raw) => shellWords(raw).find((word) => word !== null && word !== '');
