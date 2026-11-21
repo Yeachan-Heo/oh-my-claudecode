@@ -534,18 +534,23 @@ describe('denial counter: /goal guard in the hook', () => {
 });
 
 describe('denial counter: shell-checks refusal in the hook', () => {
+  // The two tests below are skipped where no bash exists for the syntax check; it.skipIf is the only skip in this file and carries this reason.
   const haveBash = findBashForSyntax() !== null;
+  // The syntax check runs bash -n under OMC_SHELL_SYNTAX_TIMEOUT_MS; the limit is generous so that a loaded machine does not turn the refusal into an allow.
   const hookEnv = { OMC_SHELL_CHECKS: '1', OMC_SHELL_SYNTAX_TIMEOUT_MS: '3000' };
 
   it.skipIf(!haveBash)('counter on: three refusals of one session count #1, #2, #3 and escalate at the third with a journal row of the shell-checks guard', () => {
     const env = { ...hookEnv, OMC_JEV_DENIAL_COUNTER: '1' };
     const root = tempDir();
     const runs = [1, 2, 3].map((i) => runBashDeny(env, 'bash-seq', { root, tool_use_id: `tool-${i}` }));
-    for (const [i, run] of runs.entries()) expect(run.permissionDecision, `call ${i + 1}: ${run.reason.slice(0, 200)}`).toBe('deny');
+    for (const [i, run] of runs.entries()) expect(run.permissionDecision, `call ${i + 1}: exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
     const base = runs[0].reason.slice(0, runs[0].reason.indexOf('\n\n'));
+    expect(base).toMatch(/^\[SHELL CHECK\] bash -n rejects the command/);
     const hash = keyHash(denialKey('shell-checks', base));
     expect(runs[0].reason).toContain(`[denial ${hash} #1]`);
-    expect(runs[1].reason).toMatch(/\[denial [0-9a-f]{16} #2\]/);
+    expect(runs[0].reason).not.toContain('[DENIAL COUNTER]');
+    expect(runs[1].reason).toContain(`[denial ${hash} #2]`);
+    expect(runs[1].reason).not.toContain('[DENIAL COUNTER]');
     expect(runs[2].reason).toContain(`[denial ${hash} #3]`);
     expect(runs[2].reason).toContain('[DENIAL COUNTER] The same denial of guard shell-checks has come 3 times');
     const rows = journal(runs[0].logDir);
@@ -555,13 +560,15 @@ describe('denial counter: shell-checks refusal in the hook', () => {
   }, 60_000);
 
   it.skipIf(!haveBash)('counter off: the refusal keeps its text (no marker) and writes no counter files', () => {
-    const run = runBashDeny(hookEnv, 'bash-off');
-    expect(run.permissionDecision).toBe('deny');
-    expect(run.reason.startsWith('[SHELL CHECK] ')).toBe(true);
-    expect(run.reason).not.toContain('[denial ');
-    expect(listRecursive(run.home).some((name) => name.includes('denials-'))).toBe(false);
-    expect(listRecursive(run.logDir).some((name) => name.includes('denials'))).toBe(false);
-  }, 30_000);
+    for (const value of [undefined, '0', 'true']) {
+      const run = runBashDeny({ ...hookEnv, OMC_JEV_DENIAL_COUNTER: value }, `bash-off-${value ?? 'unset'}`);
+      expect(run.permissionDecision, `exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
+      expect(run.reason.startsWith('[SHELL CHECK] ')).toBe(true);
+      expect(run.reason).not.toContain('[denial ');
+      expect(listRecursive(run.home).some((name) => name.includes('denials-'))).toBe(false);
+      expect(listRecursive(run.logDir).some((name) => name.includes('denials'))).toBe(false);
+    }
+  }, 60_000);
 });
 
 // --- hook helpers -------------------------------------------------------------------------------
@@ -575,8 +582,12 @@ function listRecursive(dir) {
 }
 
 function runHook(home, cwd, env, input) {
-  const hookEnv = {
-    ...process.env,
+  // The hook must not see the OMC_*/TYPESAFE_* configuration of the shell that runs the tests: every such variable and DISABLE_OMC is dropped before the overrides of the call are applied.
+  const hookEnv = { ...process.env };
+  for (const name of Object.keys(hookEnv)) {
+    if (name.startsWith('OMC_') || name.startsWith('TYPESAFE_') || name === 'DISABLE_OMC') delete hookEnv[name];
+  }
+  Object.assign(hookEnv, {
     HOME: home,
     USERPROFILE: home,
     CLAUDE_CONFIG_DIR: join(home, '.claude'),
@@ -584,7 +595,7 @@ function runHook(home, cwd, env, input) {
     OMC_JEV_POOL: '1',
     OMC_JEV_POOL_MAX_AGENTS: '1',
     ...env,
-  };
+  });
   for (const name of ['OMC_JEV_DENIAL_COUNTER', 'OMC_JEV_DENIAL_TEXTS', 'OMC_JEV_DENIAL_RELEASE']) {
     if (env[name] === undefined) delete hookEnv[name];
   }
@@ -598,6 +609,7 @@ function runHook(home, cwd, env, input) {
   const out = JSON.parse(String(result.stdout || '{}'));
   return {
     status: result.status,
+    stdout: String(result.stdout ?? ''),
     permissionDecision: out.hookSpecificOutput?.permissionDecision,
     reason: out.hookSpecificOutput?.permissionDecisionReason ?? '',
   };
@@ -630,7 +642,7 @@ function runPoolDeny(extraEnv, sid, extraInput = {}) {
 // An echo with a double quote that is never closed and is over 200 characters, so the syntax check runs on every platform where bash exists (the Windows syntax check covers only longer commands); own copy of the integration test's shape.
 const BASH_UNCLOSED = 'echo "this Bash command is longer than two hundred characters on purpose, so the syntax check of the shell checks runs on every platform where bash exists; the double quote after echo is never closed and the command ends inside the still-open string';
 
-/** One Bash call with BASH_UNCLOSED that the opt-in shell checks refuse, with a fresh session and its own transcript; extraInput.root reuses one directory tree (a shared session, as in runGoalDeny), the remaining extraInput fields go into the hook payload. */
+/** One Bash call with BASH_UNCLOSED that the opt-in shell checks refuse, with a fresh session and its own transcript; extraInput.root reuses one directory tree (a shared session, as in runGoalDeny), the remaining extraInput fields go into the hook payload. Two calls that share one root must pass different tool_use_id values, because the transcript file and the message id are derived from it and an identical id counts once. */
 function runBashDeny(extraEnv, sid, extraInput = {}) {
   const { root: sharedRoot, ...input } = extraInput;
   const root = sharedRoot ?? tempDir();
