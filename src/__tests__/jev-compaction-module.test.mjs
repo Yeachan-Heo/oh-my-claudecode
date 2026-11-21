@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { boundExcerpts, classifyFailure, wellFormedBody, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass, tailRedacted } from '../../hooks/jev-compaction.mjs';
+import { boundExcerpts, classifyFailure, readConfig, wellFormedBody, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass, tailRedacted, pasteMode, pasteTags, ownerMarkerPatterns, ownerMarked, replyRuns, replyTrace, directReplyRows } from '../../hooks/jev-compaction.mjs';
 import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
@@ -2789,6 +2789,71 @@ describe('jev-compaction module: mirrors and mods API', () => {
   });
 });
 
+describe('jev-compaction module: settings fallback for the options of the stages', () => {
+  // Every gate readConfig looked at before the options of the token, agent, notification, paste and reply stages existed is already in the process
+  // environment, so no earlier read of the settings is due: a value that only the settings hold must still be read.
+  const GATES = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', OMC_JEV_BREAKER: '0', OMC_JEV_MAX_RPM: '0', HOME: '/home/u' };
+  // The options the module added: [variable, value in the settings, field of the configuration, what the field holds, what it holds without the value].
+  const OPTIONS = [
+    ['OMC_JEV_COMPACT_TOKEN_ACCOUNTING', '1', (c) => c.tokenAccounting, true, false],
+    ['OMC_JEV_COMPACT_MAX_WINDOW_TOKENS', '123456', (c) => c.maxWindowTokens, 123456, undefined],
+    ['OMC_JEV_COMPACT_TARGET_PERCENT', '50', (c) => c.targetPercent, 50, undefined],
+    ['OMC_JEV_COMPACT_RATES', '{"RATE_IN":7}', (c) => c.rates.RATE_IN, 7, 0.5513],
+    ['OMC_JEV_COMPACT_QUESTION_NAME', '1', (c) => c.questionNamed, true, false],
+    ['OMC_JEV_COMPACT_HOST_HANDOFF', '1', (c) => c.handoff, true, false],
+    ['OMC_JEV_COMPACT_OWN_THRESHOLD', '1', (c) => c.ownSkip, true, false],
+    ['OMC_JEV_COMPACT_AGENT_TRIM', '1', (c) => c.agentTrim, true, false],
+    ['OMC_JEV_COMPACT_AGENT_STATES', 'standing by', (c) => c.agentStates.test('standing by'), true, false],
+    ['OMC_JEV_COMPACT_NOTIFICATIONS', '1', (c) => c.notifications, true, false],
+    ['CLAUDE_CODE_AUTO_COMPACT_WINDOW', '150000', (c) => c.autoCompactWindow, '150000', undefined],
+    ['CLAUDE_CONFIG_DIR', '/cfg/claude', (c) => c.configDir, '/cfg/claude', undefined],
+    ['OMC_JEV_COMPACT_PASTES', 'active', (c) => c.pastes, 'active', 'off'],
+    ['OMC_JEV_COMPACT_PASTE_MIN_CHARS', '1234', (c) => c.pasteMinChars, 1234, 2000],
+    ['OMC_JEV_COMPACT_PASTE_MAX_CHARS', '99999', (c) => c.pasteMaxChars, 99999, 30000],
+    ['OMC_JEV_COMPACT_PASTE_YES', '0.5', (c) => c.pasteYes, 0.5, 0.8],
+    ['OMC_JEV_COMPACT_OWNER_MARKERS', 'my marker', (c) => c.ownerMarkers.length, 1, 0],
+    ['OMC_JEV_COMPACT_LONG_REPLIES', 'active', (c) => c.replies, 'active', 'off'],
+    ['OMC_JEV_COMPACT_HOOK_ROW_PREFIXES', 'Custom note:', (c) => c.hookRowPrefixes.includes('Custom note:'), true, false],
+  ];
+  // The keys readConfig read before those options (the other keys of its environment table).
+  const READ_BEFORE = ['OMC_JEV', 'TYPESAFE_API_KEY', 'OMC_JEV_ENDPOINT', 'OMC_JEV_LOG_DIR', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_EXCERPT_CHARS_COMPACTION', 'OMC_JEV_COMPACT_AT_PERCENT', 'OMC_JEV_COMPACT_TARGET', 'OMC_JEV_COMPACT_TOAST', 'OMC_JEV_COMPACT_PRIVATE_PATHS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_BREAKER_DIR', 'OS', 'USERPROFILE', 'HOME'];
+  const configFor = (env, settingsEnv) => { const fake = fakeDollar({ env, settingsEnv }); return readConfig(fake.$).then((cfg) => ({ cfg, calls: fake.calls })); };
+
+  it('lists every option readConfig reads beyond the ones it read before', () => {
+    const source = readFileSync(join(root, 'hooks', 'jev-compaction.mjs'), 'utf8');
+    const body = source.slice(source.indexOf('export async function readConfig'), source.indexOf('// --- shared breaker and request limit'));
+    const read = [...body.matchAll(/\$\.env\.get\('([A-Z_]+)'\)/g)].map((m) => m[1]);
+    expect(read.filter((name) => !READ_BEFORE.includes(name)).sort()).toEqual(OPTIONS.map((o) => o[0]).sort());
+  });
+
+  it.each(OPTIONS)('%s: read from the settings when the activation and the breaker values all stand in the process environment', async (name, value, field, expected, fallback) => {
+    const without = await configFor(GATES, {});
+    expect(field(without.cfg), 'the default').toEqual(fallback);
+    const withValue = await configFor(GATES, { [name]: value });
+    expect(field(withValue.cfg), 'from the settings').toEqual(expected);
+    // The process environment still wins over the settings.
+    const both = await configFor({ ...GATES, [name]: '(' }, { [name]: value });
+    expect(field(both.cfg), 'from the environment').not.toEqual(expected);
+  });
+
+  it('keeps the older options as they were: the extra read fills only the options of the stages', async () => {
+    const { cfg } = await configFor(GATES, { OMC_JEV_COMPACT_TOAST: '1', OMC_JEV_COMPACT_AT_PERCENT: '10', OMC_JEV_ENDPOINT: 'https://example.test/x', OMC_JEV_COMPACT_PRIVATE_PATHS: '/secret', OMC_JEV_COMPACT_AGENT_TRIM: '1' });
+    expect(cfg).toMatchObject({ toast: false, atPercent: undefined, endpoint: expect.not.stringContaining('example.test'), privatePaths: [], agentTrim: true });
+  });
+
+  it('reads the settings only while the point is on, and not at all when every option is in the process environment', async () => {
+    const off = await configFor({ ...GATES, OMC_JEV: 'off' }, { OMC_JEV_COMPACT_AGENT_TRIM: '1' });
+    expect(off.calls.settings).toBe(0);
+    expect(off.cfg.agentTrim).toBe(false);
+    const every = Object.fromEntries(OPTIONS.map((o) => [o[0], '0']));
+    const full = await configFor({ ...GATES, ...every }, { OMC_JEV_COMPACT_AGENT_TRIM: '1' });
+    expect(full.calls.settings).toBe(0);
+    expect(full.cfg.agentTrim).toBe(false);
+    const one = await configFor(GATES, {});
+    expect(one.calls.settings).toBe(1);
+  });
+});
+
 describe('jev-compaction module: what the host sends after the compaction', () => {
   // The host side, modelled from true message ids (measured on Claude Code 2.1.321), not from the
   // module's own check. Claude Code writes one transcript row per content block, so one API message
@@ -3087,6 +3152,17 @@ describe('jev-compaction module: what the host sends after the compaction', () =
     const sub = await compactHost([...opening, ...singles(20, 1), ...closing], { api: plain, event: { agentId: 'sub-1' } });
     expect(sub.records()[0]).toMatchObject({ result: 'jev', server_blocks: null, agent_id: 'sub-1' });
     expect(sub.asked).toEqual([{ as: 'api', agentId: 'sub-1' }]);
+  });
+
+  it('with pasted text moved (OMC_JEV_COMPACT_PASTES=active) the rebuilt user row joins the user rows around it: nothing missing, nothing repeated on resume', async () => {
+    const paste = `Please check the report below. <pasted_content id="1">${'alpha '.repeat(500)}</pasted_content>`;
+    const respond = (body) => (body.questions.pasted ? okResponse({ answers: { pasted: { type: 'noul', noul: 0.95 } } }) : okResponse(scoreByMarker(body)));
+    const run = await compactHost([...opening, U(paste), ...singles(20, 1), ...closing], { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active' }, respond });
+    expect(run.records()[0]).toMatchObject({ result: 'jev', pastes: { moved: 1, installed: true } });
+    expect(run.written.some((r) => r.role === 'user' && r.blocks.some((b) => b.type === 'text' && b.text.startsWith('Please check the report below. [pasted text moved at compaction')))).toBe(true);
+    expect(run.written.some((r) => r.blocks.some((b) => b.type === 'text' && b.text.includes('<pasted_content')))).toBe(false);
+    expect(run.request).toEqual(clean);
+    expect(run.resumed).toEqual(noReplay);
   });
 });
 
@@ -3485,6 +3561,896 @@ describe('jev-compaction module: refused batches, unrated results, well-formed b
       const run = await compactOnce(conversation(30));
       const broken = { ...run.$, fs: { ...run.$.fs, write: async () => { throw new Error('EACCES'); } } };
       await step(run.handlers, broken, usage);
+    });
+  });
+});
+
+describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
+  // A <pasted_content> tag says that the user pasted the text, not who wrote it. The rule under test: no sentence of the user leaves the
+  // conversation, so a tag moves to a file only when Jev, who read all of it, says that none of it is the user's own writing; text outside
+  // tags never moves; tags never join; the default is off.
+  // The tests below tune the stage to short tags and a lower bar (the example values of docs/HOOKS.md); the defaults (2000 characters, 0.8) are tested apart.
+  const PASTES = { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active', OMC_JEV_COMPACT_PASTE_MIN_CHARS: '400', OMC_JEV_COMPACT_PASTE_YES: '0.7' };
+  const DIR = `${STATE}/compaction-pastes/sess-1`;
+  const tag = (inner, id = 1) => `<pasted_content id="${id}">${inner}</pasted_content>`;
+  const filler = (word, n) => `${word} `.repeat(Math.ceil(n / (word.length + 1))).slice(0, n);
+  // A tag of exactly `n` characters.
+  const sized = (n, id = 1) => tag(filler('alpha', n - `<pasted_content id="${id}"></pasted_content>`.length), id);
+  const OUTSIDE = 'Please check the report below and tell me what you think of it.';
+  const MINE = 'MY-OWN-WORDS: I decided to keep option B, do not touch the cache.';
+
+  /** The first message, then the user messages `texts` one after the other, then 30 call/result pairs and a closing exchange. */
+  function withPastes(texts, options) {
+    const base = conversation(30, options);
+    const rows = texts.map((text, k) => Object.freeze({ role: 'user', text, toolUses: [], handle: `p${k}` }));
+    return [base[0], ...rows, ...base.slice(1)];
+  }
+
+  /** The API form of a conversation; a row in `images` also holds an image block. */
+  function apiOf(messages, images = []) {
+    return messages.map((m, i) => (m.role === 'assistant'
+      ? { role: 'assistant', content: [...(m.text ? [{ type: 'text', text: m.text }] : []), ...(m.toolUses || []).map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))] }
+      : { role: 'user', content: m.toolResults?.length ? m.toolResults.map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })) : [{ type: 'text', text: m.text }, ...(images.includes(i) ? [{ type: 'image', source: {} }] : [])] }));
+  }
+
+  /** Jev's answer to the pasted-text question: `noul` is a probability or a function of the tag text; scoring is the usual one. */
+  const jevSays = (noul) => (body) => (body.questions.pasted
+    ? okResponse({ answers: { pasted: { type: 'noul', noul: typeof noul === 'function' ? noul(body.state.fragment.text) : noul } } })
+    : okResponse(scoreByMarker(body)));
+  const isPasteRequest = (c) => Boolean(c.body.questions.pasted);
+
+  async function compactPastes(messages, { env = PASTES, jev = jevSays(0.95), api, images, event, ...options } = {}) {
+    const handlers = load();
+    const fake = fakeDollar({ env, respond: jev, messages, ...options });
+    const form = api ?? apiOf(messages, images);
+    fake.$.session.messages = async (opts) => (opts?.as === 'api' ? form : messages);
+    const next = summaryNext();
+    const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages, ...event }), next);
+    const requests = fake.calls.fetch.filter(isPasteRequest);
+    const written = [...fake.files.keys()].filter((path) => path.startsWith(`${STATE}/compaction-pastes/`));
+    return { out, next, handlers, requests, written, record: fake.records()[0], ...fake };
+  }
+
+  const userRow = (out, startsWith) => out.messages.find((m) => m.role === 'user' && m.text.startsWith(startsWith));
+  const withoutTimes = (record) => { const copy = { ...record }; for (const key of ['ts', 'duration_ms', 'jev_ms']) delete copy[key]; return copy; };
+
+  it('is off unless asked for: unset, off and any other value give the same conversation and record as without the module code', async () => {
+    const report = sized(3000);
+    const messages = withPastes([`${OUTSIDE} ${report}`]);
+    const runs = [];
+    for (const OMC_JEV_COMPACT_PASTES of [undefined, 'off', '', 'yes', '1', 'true']) {
+      runs.push(await compactPastes(messages, { env: { ...ACTIVE_ENV, ...(OMC_JEV_COMPACT_PASTES === undefined ? {} : { OMC_JEV_COMPACT_PASTES }) } }));
+    }
+    for (const run of runs) {
+      expect(run.requests).toHaveLength(0);
+      expect(run.written).toHaveLength(0);
+      expect(run.record).not.toHaveProperty('pastes');
+      expect(JSON.stringify(run.out.messages)).toBe(JSON.stringify(runs[0].out.messages));
+      expect(withoutTimes(run.record)).toEqual(withoutTimes(runs[0].record));
+      expect(run.calls.fetch).toHaveLength(runs[0].calls.fetch.length);
+    }
+    expect(userRow(runs[0].out, OUTSIDE).text).toBe(`${OUTSIDE} ${report}`);
+  });
+
+  it('reads the owner markers as comma separated expressions: a comma inside braces or brackets does not separate, a broken one is ignored, the flags are imu', () => {
+    expect(ownerMarkerPatterns(undefined)).toEqual([]);
+    expect(ownerMarkerPatterns(' , ,')).toEqual([]);
+    expect(ownerMarkerPatterns('^note: ,x{1,3}y,[a,b]z').map(String)).toEqual(['/^note:/imu', '/x{1,3}y/imu', '/[a,b]z/imu']);
+    expect(ownerMarkerPatterns('(,ok').map(String)).toEqual(['/ok/imu']);
+    expect(ownerMarked('A NOTE: this', ownerMarkerPatterns('^a note:'))).toBe(true);
+    expect(ownerMarked('anything', [])).toBe(false);
+  });
+
+  it('reads OMC_JEV_COMPACT_PASTES as off, shadow or active in any case; anything else is off', () => {
+    expect([undefined, '', 'off', 'yes', '1', 'true', 'activ'].map(pasteMode)).toEqual(Array(7).fill('off'));
+    expect(['active', 'Active', ' SHADOW ', 'shadow'].map(pasteMode)).toEqual(['active', 'active', 'shadow', 'shadow']);
+  });
+
+  it('moves a whole tag that Jev, having read all of it, clears: the file holds the tag, the trace the first 200 and last 300 characters, the words outside stay', async () => {
+    const inner = `${filler('alpha', 1500)}${filler('omega', 1500)}`;
+    const report = tag(inner);
+    const messages = withPastes([`${OUTSIDE} ${report} Thanks, that is all.`]);
+    const off = await compactPastes(messages, { env: ACTIVE_ENV });
+    const run = await compactPastes(messages);
+    // Jev got the whole tag, once, with the pasted-text question.
+    expect(run.requests).toHaveLength(1);
+    expect(run.requests[0].body.state).toEqual({ fragment: { text: report, chars: report.length } });
+    expect(run.requests[0].body.questions.pasted).toMatchObject({ type: 'noul' });
+    // The file holds the tag, byte for byte, under a name made from its content.
+    expect(run.written).toHaveLength(1);
+    const [path] = run.written;
+    expect(path).toMatch(new RegExp(`^${DIR}/[0-9a-f]{32}\\.txt$`));
+    expect(run.files.get(path)).toBe(report);
+    // The row is rebuilt without its handle: the words around the tag, and the trace instead of the tag.
+    const row = userRow(run.out, OUTSIDE);
+    expect(row.handle).toBeUndefined();
+    const trace = row.text.slice(OUTSIDE.length + 1, row.text.length - ' Thanks, that is all.'.length);
+    expect(row.text).toBe(`${OUTSIDE} ${trace} Thanks, that is all.`);
+    const match = /^\[pasted text moved at compaction: (\d+) chars, full text in (\S+); start: ("(?:[^"\\]|\\.)*"); end: ("(?:[^"\\]|\\.)*")\]$/.exec(trace);
+    expect(match).not.toBeNull();
+    expect(Number(match[1])).toBe(report.length);
+    expect(match[2]).toBe(path);
+    expect(JSON.parse(match[3])).toBe(inner.slice(0, 200));
+    expect(JSON.parse(match[4])).toBe(inner.slice(-300));
+    expect(trace.length).toBeLessThan(report.length);
+    // The record counts it; the results kept and removed are the same as with the switch off.
+    expect(run.record.pastes).toMatchObject({ mode: 'active', tags: 1, asked: 1, yes: 1, written: 1, moved: 1, moved_chars: report.length, trace_chars: trace.length, installed: true });
+    expect(run.record.pastes.answers).toEqual([{ name: createHash('sha256').update(report).digest('hex').slice(0, 32), chars: report.length, p: 0.95 }]);
+    expect(path.endsWith(`/${run.record.pastes.answers[0].name}.txt`)).toBe(true);
+    for (const key of ['asked', 'requests', 'kept_full', 'kept_short', 'traced', 'score_hist', 'candidates']) expect(run.record[key]).toEqual(off.record[key]);
+    expect(run.record.chars_after).toBe(off.record.chars_after - (report.length - trace.length));
+    expect(run.out.messages).toHaveLength(off.out.messages.length);
+  });
+
+  it.each([
+    ['below the bar', 0.69],
+    ['no', 0.1],
+    ['no answer', undefined],
+    ['out of range', 2],
+    ['not a number', 'yes'],
+  ])('Jev says %s: the tag stays, nothing is written', async (_label, noul) => {
+    const text = `${OUTSIDE} ${sized(3000)}`;
+    const run = await compactPastes(withPastes([text]), { jev: jevSays(noul) });
+    expect(run.requests).toHaveLength(1);
+    expect(userRow(run.out, OUTSIDE).text).toBe(text);
+    expect(run.written).toHaveLength(0);
+    expect(run.record.pastes).toMatchObject({ asked: 1, yes: 0, moved: 0, installed: false });
+  });
+
+  it('moves a tag at 0.7 and keeps it when the request fails or times out', async () => {
+    const text = `${OUTSIDE} ${sized(3000)}`;
+    expect(userRow((await compactPastes(withPastes([text]), { jev: jevSays(0.7) })).out, OUTSIDE).text).not.toBe(text);
+    // OMC_JEV_COMPACT_PASTE_YES moves the bar.
+    const strict = await compactPastes(withPastes([text]), { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_YES: '0.9' }, jev: jevSays(0.8) });
+    expect(userRow(strict.out, OUTSIDE).text).toBe(text);
+    expect(userRow((await compactPastes(withPastes([text]), { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_YES: '0.9' }, jev: jevSays(0.95) })).out, OUTSIDE).text).not.toBe(text);
+    expect(userRow((await compactPastes(withPastes([text]), { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_YES: 'high' }, jev: jevSays(0.8) })).out, OUTSIDE).text).not.toBe(text);
+    const failing = (body) => (body.questions.pasted ? { ok: false, status: 500, headers: {}, text: '' } : okResponse(scoreByMarker(body)));
+    const run = await compactPastes(withPastes([text]), { jev: failing });
+    expect(userRow(run.out, OUTSIDE).text).toBe(text);
+    expect(run.written).toHaveLength(0);
+    expect(run.record.pastes).toMatchObject({ asked: 1, unanswered: 1, moved: 0 });
+    // A failed request pauses the next ones like a failed scoring request.
+    const second = await run.handlers['session.compact'](fakeDollar({ env: PASTES, respond: jevSays(0.95), messages: [] }).$, Object.freeze({ trigger: 'auto', messages: withPastes([text]) }), summaryNext());
+    expect(second).toBe(SUMMARY);
+  });
+
+  it('a tag that ends with the user\'s own words stays when Jev sees them; when Jev errs the words in the last 300 characters still stand in the trace and every moved character was in the request', async () => {
+    const text = `${OUTSIDE} ${tag(`${filler('alpha', 3000)}\n\n${MINE}`)}`;
+    const careful = await compactPastes(withPastes([text]), { jev: jevSays((fragment) => (fragment.includes('MY-OWN-WORDS') ? 0.1 : 0.95)) });
+    expect(userRow(careful.out, OUTSIDE).text).toBe(text);
+    expect(careful.written).toHaveLength(0);
+    const wrong = await compactPastes(withPastes([text]));
+    const row = userRow(wrong.out, OUTSIDE);
+    expect(row.text).not.toBe(text);
+    expect(row.text).toContain(MINE);
+    expect(wrong.requests[0].body.state.fragment.text).toContain(MINE);
+    expect(wrong.files.get(wrong.written[0])).toContain(MINE);
+  });
+
+  it('never joins neighbouring tags: each is asked about and moved by itself, and a tag Jev refuses stays with the text between', async () => {
+    const command = tag(`${filler('beta', 2400)} ${MINE}`, 1);
+    const material = tag(filler('gamma', 3300), 2);
+    const text = `${OUTSIDE}\n${command}\n${material}`;
+    const run = await compactPastes(withPastes([text]), { jev: jevSays((fragment) => (fragment.includes('MY-OWN-WORDS') ? 0.05 : 0.95)) });
+    expect(run.requests.map((c) => c.body.state.fragment.text).sort()).toEqual([command, material].sort());
+    const row = userRow(run.out, OUTSIDE);
+    expect(row.text.startsWith(`${OUTSIDE}\n${command}\n[pasted text moved at compaction: ${material.length} chars`)).toBe(true);
+    expect(run.written).toHaveLength(1);
+    expect(run.files.get(run.written[0])).toBe(material);
+    // Both cleared: two traces, two files, the line break between them intact.
+    const both = await compactPastes(withPastes([text]));
+    const traces = [...userRow(both.out, OUTSIDE).text.matchAll(/\[pasted text moved at compaction: (\d+) chars/g)].map((m) => Number(m[1]));
+    expect(traces).toEqual([command.length, material.length]);
+    expect(both.written).toHaveLength(2);
+    expect(userRow(both.out, OUTSIDE).text).toMatch(/^Please check[^\n]*\n\[pasted text moved[^\n]*\]\n\[pasted text moved[^\n]*\]$/);
+  });
+
+  it('never touches text outside a tag: a quotation with the user\'s comment in the same paragraph, a list, a code block', async () => {
+    const quotation = `${filler('delta', 3000)} <- ${MINE}`;
+    const code = `\`\`\`\n${filler('epsilon', 2500)}\n\`\`\``;
+    const only = `${quotation}\n\n${code}`;
+    const run = await compactPastes(withPastes([only, `${OUTSIDE} ${sized(3000)}\n\n${quotation}\n\n${code}`]), { jev: jevSays(0.99) });
+    expect(userRow(run.out, filler('delta', 20)).text).toBe(only);
+    const row = userRow(run.out, OUTSIDE);
+    expect(row.text.endsWith(`\n\n${quotation}\n\n${code}`)).toBe(true);
+    expect(row.text).toContain('[pasted text moved at compaction');
+    expect(run.requests).toHaveLength(1);
+    for (const c of run.requests) expect(c.body.state.fragment.text).not.toContain('MY-OWN-WORDS');
+  });
+
+  it('keeps a message that is nothing but the paste (alone, with a keyword, with a few characters): it sends that text as the user\'s own instruction', async () => {
+    const report = sized(3000);
+    const near = (outside) => `${outside}\n${report}`;
+    const run = await compactPastes(withPastes([report, near('ultrathink'), near('x'.repeat(19)), `${report}\n${tag(filler('beta', 3000), 2)}`, near('x'.repeat(20))]));
+    expect(run.requests).toHaveLength(1);
+    expect(run.requests[0].body.state.fragment.text).toBe(report);
+    const kept = run.out.messages.filter((m) => m.role === 'user' && m.text.includes('<pasted_content'));
+    expect(kept.map((m) => m.text)).toEqual([report, near('ultrathink'), near('x'.repeat(19)), `${report}\n${tag(filler('beta', 3000), 2)}`]);
+    expect(run.record.pastes).toMatchObject({ tags: 6, kept_whole: 5, moved: 1 });
+  });
+
+  it('leaves the first and the newest user message, the last six messages, and rows with an image alone', async () => {
+    const report = sized(3000);
+    const text = (k) => `${OUTSIDE} ${k} ${report}`;
+    const base = conversation(30);
+    const first = Object.freeze({ ...base[0], text: text('first') });
+    const mid = [Object.freeze({ role: 'user', text: text('middle'), toolUses: [], handle: 'pm' }), Object.freeze({ role: 'user', text: text('image'), toolUses: [], handle: 'pi' })];
+    // The newest user message and the tail rows: a paste in the closing exchange.
+    const newest = Object.freeze({ ...base[base.length - 2], text: text('newest') });
+    const messages = [first, ...mid, ...base.slice(1, -2), newest, base[base.length - 1]];
+    const run = await compactPastes(messages, { images: [2] });
+    expect(run.requests).toHaveLength(1);
+    expect(userRow(run.out, `${OUTSIDE} first`).text).toBe(text('first'));
+    expect(userRow(run.out, `${OUTSIDE} newest`).text).toBe(text('newest'));
+    expect(userRow(run.out, `${OUTSIDE} image`).text).toBe(text('image'));
+    expect(userRow(run.out, `${OUTSIDE} middle`).text).toContain('[pasted text moved at compaction');
+    // The tail is the last six messages; a user message inside it stays even when it is not the newest.
+    const tail = conversation(30);
+    const inTail = [...tail.slice(0, -3), Object.freeze({ role: 'user', text: text('tail'), toolUses: [], handle: 'pt' }), ...tail.slice(-3)];
+    const second = await compactPastes([Object.freeze({ ...inTail[0] }), Object.freeze({ role: 'user', text: text('early'), toolUses: [], handle: 'pe' }), ...inTail.slice(1)]);
+    expect(userRow(second.out, `${OUTSIDE} tail`).text).toBe(text('tail'));
+    expect(userRow(second.out, `${OUTSIDE} early`).text).toContain('[pasted text moved at compaction');
+    expect(second.requests).toHaveLength(1);
+  });
+
+  it('moves nothing when an image message of the API form matches no row, or without the API form', async () => {
+    const report = sized(3000);
+    const messages = withPastes([`${OUTSIDE} ${report}`]);
+    const api = apiOf(messages);
+    api.splice(2, 0, { role: 'user', content: [{ type: 'text', text: 'A screenshot that no row shows.' }, { type: 'image', source: {} }] });
+    const unmatched = await compactPastes(messages, { api });
+    expect(unmatched.requests).toHaveLength(0);
+    expect(unmatched.record.pastes).toMatchObject({ reason: 'image_unmatched', moved: 0 });
+    const plain = await compactPastes(messages, { api: messages });
+    expect(plain.requests).toHaveLength(0);
+    expect(plain.record.pastes).toMatchObject({ reason: 'no_api_form' });
+    expect(userRow(plain.out, OUTSIDE).text).toBe(`${OUTSIDE} ${report}`);
+  });
+
+  it('a tag with a secret, a secret path or a private path goes neither to Jev nor to a file', async () => {
+    const key = 'sk-ant-api03-' + 'A1b2C3d4'.repeat(4);
+    const secrets = [`${filler('alpha', 3000)} ANTHROPIC key ${key}`, `${filler('alpha', 3000)} cat /home/u/.ssh/id_rsa`, `${filler('alpha', 3000)} password: hunter2`, `${filler('alpha', 3000)} see /srv/clients/acme/notes`];
+    const messages = withPastes([...secrets.map((s, k) => `${OUTSIDE} ${tag(s, k + 1)}`), `${OUTSIDE} PLAIN ${tag(filler('beta', 3000), 9)}`]);
+    const run = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PRIVATE_PATHS: '/srv/clients' } });
+    expect(run.requests).toHaveLength(1);
+    expect(run.requests[0].body.state.fragment.text).toContain('beta');
+    for (const c of run.calls.fetch) expect(JSON.stringify(c.body)).not.toMatch(/A1b2C3d4|\.ssh|hunter2|\/srv\/clients/);
+    for (const path of run.written) expect(run.files.get(path)).not.toMatch(/A1b2C3d4|\.ssh|hunter2|\/srv\/clients/);
+    expect(run.record.pastes).toMatchObject({ secret: 4, moved: 1 });
+    for (const s of secrets) expect(run.out.messages.some((m) => m.text.includes(s))).toBe(true);
+  });
+
+  it('a tag moves only between 400 and 30000 characters and when its trace is shorter; both limits are set by variables; Jev never gets a cut tag', async () => {
+    const messages = withPastes([`${OUTSIDE} ${sized(399)}`, `${OUTSIDE} ${sized(400)}`, `${OUTSIDE} ${sized(4001)}`, `${OUTSIDE} ${sized(30001)}`]);
+    const byDefault = await compactPastes(messages);
+    // The 400-character tag is no shorter than its own trace, so it is not asked about.
+    expect(byDefault.requests.map((c) => c.body.state.fragment.text.length)).toEqual([4001]);
+    expect(byDefault.record.pastes).toMatchObject({ small: 1, too_long: 1, too_short: 1, moved: 1 });
+    const narrow = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_MIN_CHARS: '5000' } });
+    expect(narrow.requests).toHaveLength(0);
+    expect(narrow.record.pastes).toMatchObject({ small: 3, too_long: 1, moved: 0 });
+    const capped = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_MAX_CHARS: '4000' } });
+    expect(capped.requests).toHaveLength(0);
+    expect(capped.record.pastes).toMatchObject({ small: 1, too_long: 2, too_short: 1, moved: 0 });
+    const raised = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_MAX_CHARS: '100000' } });
+    expect(raised.requests.map((c) => c.body.state.fragment.text.length).sort((a, b) => b - a)).toEqual([30001, 4001]);
+    for (const c of [...byDefault.requests, ...raised.requests]) expect(c.body.state.fragment.chars).toBe(c.body.state.fragment.text.length);
+  });
+
+  it('without the size and probability variables a tag moves from 2000 characters and at 0.8', async () => {
+    const defaults = { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active' };
+    const messages = withPastes([`${OUTSIDE} ${sized(1999)}`, `${OUTSIDE} ${sized(2001, 2)}`]);
+    const asked = await compactPastes(messages, { env: defaults, jev: jevSays(0.8) });
+    expect(asked.requests.map((c) => c.body.state.fragment.text.length)).toEqual([2001]);
+    expect(asked.record.pastes).toMatchObject({ small: 1, asked: 1, yes: 1, moved: 1 });
+    const below = await compactPastes(messages, { env: defaults, jev: jevSays(0.79) });
+    expect(below.record.pastes).toMatchObject({ asked: 1, yes: 0, no: 1, moved: 0 });
+    expect(below.written).toHaveLength(0);
+  });
+
+  it('a tag that carries the style named in OMC_JEV_COMPACT_OWNER_MARKERS stays without a question; with no patterns nothing is held back', async () => {
+    const styled = tag(`${filler('alpha', 1500)} <- my comment ${filler('omega', 1500)}`);
+    const plain = tag(`${filler('beta', 3000)}`, 2);
+    const messages = withPastes([`${OUTSIDE} ${styled}`, `${OUTSIDE} ${plain}`]);
+    const without = await compactPastes(messages);
+    expect(without.requests).toHaveLength(2);
+    expect(without.record.pastes).toMatchObject({ owner_marked: 0, moved: 2 });
+    for (const markers of [undefined, '', ' , ']) {
+      const run = await compactPastes(messages, { env: { ...PASTES, ...(markers === undefined ? {} : { OMC_JEV_COMPACT_OWNER_MARKERS: markers }) } });
+      expect(run.record.pastes).toMatchObject({ owner_marked: 0, moved: 2 });
+    }
+    const marked = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_OWNER_MARKERS: '[ ]<-+[ ],(' } });
+    expect(marked.requests).toHaveLength(1);
+    expect(marked.record.pastes).toMatchObject({ owner_marked: 1, moved: 1 });
+    expect(userRow(marked.out, OUTSIDE).text).toContain('<-');
+  });
+
+  it('asks about the largest four tags only; the rest stay', async () => {
+    const texts = [2500, 3500, 2600, 3900, 3100, 2200].map((n, k) => `${OUTSIDE} ${sized(n, k + 1)}`);
+    const run = await compactPastes(withPastes(texts));
+    expect(run.requests).toHaveLength(4);
+    expect(run.requests.map((c) => c.body.state.fragment.text.length).sort((a, b) => a - b)).toEqual([2600, 3100, 3500, 3900]);
+    expect(run.record.pastes).toMatchObject({ tags: 6, unasked: 2, asked: 4, moved: 4 });
+  });
+
+  it('shadow asks and counts but writes and changes nothing; active acts only while the point itself is active', async () => {
+    const text = `${OUTSIDE} ${sized(3000)}`;
+    const messages = withPastes([text]);
+    const off = await compactPastes(messages, { env: ACTIVE_ENV });
+    const shadow = await compactPastes(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'shadow' } });
+    expect(shadow.requests).toHaveLength(1);
+    expect(shadow.written).toHaveLength(0);
+    expect(JSON.stringify(shadow.out.messages)).toBe(JSON.stringify(off.out.messages));
+    expect(shadow.record.pastes).toMatchObject({ mode: 'shadow', yes: 1, moved: 1, written: 0 });
+    expect(shadow.record.pastes).not.toHaveProperty('installed');
+    const pointShadow = await compactPastes(messages, { env: { ...PASTES, OMC_JEV: 'compaction' } });
+    expect(pointShadow.out).toBe(SUMMARY);
+    expect(pointShadow.written).toHaveLength(0);
+    expect(pointShadow.record.pastes).toMatchObject({ mode: 'shadow' });
+  });
+
+  it('only in the main loop, and not without the API form, a session id or a state directory', async () => {
+    const messages = withPastes([`${OUTSIDE} ${sized(3000)}`]);
+    const sub = await compactPastes(messages, { event: { agentId: 'sub-1' } });
+    expect(sub.requests).toHaveLength(0);
+    expect(sub.record).not.toHaveProperty('pastes');
+    const noDir = await compactPastes(messages, { env: { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'k', OMC_JEV_COMPACT_PASTES: 'active' } });
+    expect(noDir.requests).toHaveLength(0);
+    const noSession = await compactWith(messages, (fake) => { fake.$.session.id = async () => undefined; });
+    expect(noSession.calls.fetch.filter(isPasteRequest)).toHaveLength(0);
+    expect(noSession.record.pastes).toMatchObject({ reason: 'no_session', moved: 0 });
+  });
+
+  /** Like compactPastes, but `patch(fake)` may change the host's file interface or clock first. */
+  async function compactWith(messages, patch) {
+    const handlers = load();
+    const fake = fakeDollar({ env: PASTES, respond: jevSays(0.95), messages });
+    fake.$.session.messages = async (opts) => (opts?.as === 'api' ? apiOf(messages) : messages);
+    patch?.(fake);
+    const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), summaryNext());
+    return { out, record: fake.records()[0], ...fake };
+  }
+  const inPastes = (path) => path.includes('/compaction-pastes/');
+
+  it('a file that cannot be written and read back whole in time leaves the tag: a write error, other content on read-back, a write that never ends', async () => {
+    const report = sized(3000);
+    const text = `${OUTSIDE} ${report}`;
+    const messages = withPastes([text]);
+    const stays = (run) => expect(userRow(run.out, OUTSIDE).text).toBe(text);
+    const refusing = await compactWith(messages, (fake) => {
+      const write = fake.$.fs.write;
+      fake.$.fs.write = (path, body) => (inPastes(path) ? Promise.reject(new Error('EACCES')) : write(path, body));
+    });
+    stays(refusing);
+    expect(refusing.record.pastes).toMatchObject({ yes: 1, write_failed: 1, written: 0, moved: 0, installed: false });
+    const garbling = await compactWith(messages, (fake) => {
+      const read = fake.$.fs.read;
+      fake.$.fs.read = async (path) => { const body = await read(path); return inPastes(path) ? `${body}!` : body; };
+    });
+    stays(garbling);
+    expect(garbling.record.pastes).toMatchObject({ write_failed: 1, moved: 0 });
+    // Two cleared tags and a write that never ends: the first stays after the cap, the second is not even tried. The clock is faked
+    // (timers of a second or more fire at once), so the test does not wait for the real host cap.
+    const two = withPastes([`${OUTSIDE} ${sized(3000, 1)}`, `${OUTSIDE} again ${sized(3100, 2)}`]);
+    let attempts = 0;
+    const stalled = await compactWith(two, (fake) => {
+      const write = fake.$.fs.write;
+      fake.$.fs.write = (path, body) => { if (!inPastes(path)) return write(path, body); attempts++; return new Promise(() => {}); };
+      fake.$.clock.after = (ms, fn) => { const t = setTimeout(fn, ms >= 1000 ? 50 : ms); return { cancel: () => clearTimeout(t) }; };
+    });
+    expect(attempts).toBe(1);
+    expect(stalled.record.pastes).toMatchObject({ yes: 2, timed_out: 2, written: 0, moved: 0 });
+    expect(stalled.record.result).toBe('jev');
+    expect(userRow(stalled.out, OUTSIDE).text).toBe(`${OUTSIDE} ${sized(3000, 1)}`);
+  });
+
+  it('names the file after the sha-256 of the tag: an identical file is reused without a write, a broken one is written again', async () => {
+    const report = sized(3000);
+    const messages = withPastes([`${OUTSIDE} ${report}`]);
+    const path = `${DIR}/${createHash('sha256').update(report).digest('hex').slice(0, 32)}.txt`;
+    const reused = await compactWith(messages, (fake) => fake.files.set(path, report));
+    expect(reused.record.pastes).toMatchObject({ reused: 1, written: 0, moved: 1, installed: true });
+    expect(reused.calls.write).toBe(1); // the record
+    const broken = await compactWith(messages, (fake) => fake.files.set(path, report.slice(0, 100)));
+    expect(broken.files.get(path)).toBe(report);
+    expect(broken.record.pastes).toMatchObject({ reused: 0, written: 1, moved: 1 });
+  });
+
+  it('writes no file when the compaction ends in the built-in summary, and the scoring request has the first claim on OMC_JEV_MAX_REQUESTS', async () => {
+    const messages = withPastes([`${OUTSIDE} ${sized(3000)}`]);
+    const scoringFails = (body) => (body.questions.pasted ? jevSays(0.95)(body) : { ok: false, status: 500, headers: {}, text: '' });
+    const failed = await compactPastes(messages, { jev: scoringFails });
+    expect(failed.out).toBe(SUMMARY);
+    expect(failed.written).toHaveLength(0);
+    expect(failed.record.pastes).toMatchObject({ yes: 1, moved: 0, installed: false });
+    const capped = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_MAX_REQUESTS: '1' } });
+    expect(capped.calls.fetch).toHaveLength(1);
+    expect(capped.requests).toHaveLength(0);
+    expect(capped.record).toMatchObject({ result: 'jev' });
+    expect(capped.record.pastes).toMatchObject({ held: 1, moved: 0 });
+  });
+
+  it('a trace holds no tag, even when the pasted text held tags of its own, so the next compaction leaves it alone', async () => {
+    const text = `${OUTSIDE} <pasted_content id="1"><pasted_content id="9">${filler('alpha', 2900)}</pasted_content></pasted_content>`;
+    const run = await compactPastes(withPastes([text]));
+    const row = userRow(run.out, OUTSIDE);
+    expect(row.text).toContain('[pasted text moved at compaction');
+    expect(row.text).toContain('\\u003cpasted_content id=\\"9\\">alpha');
+    expect(pasteTags(row.text)).toEqual([]);
+    expect(row.text).not.toContain('<pasted_content');
+  });
+
+  it('pasteTags finds closed tags only, ends each at the first closing tag, never nests or joins them, and is linear on hostile text', () => {
+    expect(pasteTags('no tags')).toEqual([]);
+    expect(pasteTags('<pasted_content id="1">open only')).toEqual([]);
+    expect(pasteTags('<pasted_content_x>no</pasted_content_x>')).toEqual([]);
+    const text = 'a<pasted_content>one</pasted_content>b<pasted_content id="2">two <pasted_content>x</pasted_content> tail</pasted_content>';
+    const tags = pasteTags(text);
+    expect(tags.map((t) => text.slice(t.start, t.end))).toEqual(['<pasted_content>one</pasted_content>', '<pasted_content id="2">two <pasted_content>x</pasted_content>']);
+    expect(tags.map((t) => text.slice(t.from, t.to))).toEqual(['one', 'two <pasted_content>x']);
+    // Hostile repeats: a quadratic scan would not return within the test's own timeout, so the results are asserted without a clock.
+    expect(pasteTags('<pasted_content'.repeat(30000))).toEqual([]);
+    expect(pasteTags('<pasted_content>'.repeat(30000))).toEqual([]);
+  });
+
+  // The API form of a conversation as the host holds it: consecutive user rows are one message (a row with results shows them, then its text), and
+  // `extra` (row index to texts) adds delivered blocks after that row's blocks, as the host does for a message the user typed during a tool turn.
+  const apiJoined = (messages, extra = {}) => {
+    const api = [];
+    messages.forEach((m, i) => {
+      const content = m.role === 'assistant'
+        ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...(m.toolUses || []).map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
+        : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : [])];
+      const last = api[api.length - 1];
+      if (m.role === 'user' && last?.role === 'user') last.content.push(...content); else api.push({ role: m.role, content });
+      if (extra[i]) api[api.length - 1].content.push(...extra[i].map((text) => ({ type: 'text', text })));
+    });
+    return api;
+  };
+  const delivered = (words) => `The user sent a new message while you were working:\n${words}\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
+
+  describe('rows that are not rebuilt by the paste stage: tool results and delivered messages (the replacement is a plain user row)', () => {
+    it('keeps a tag in a row that a message delivered during a tool turn is anchored to: the row stays with its handle, nothing is asked, written or counted as moved', async () => {
+      const messages = withPastes([`${OUTSIDE} ${sized(3000)}`]);
+      const words = 'DELIVERED-WORDS: stop after this step.';
+      const run = await compactPastes(messages, { api: apiJoined(messages, { 1: [delivered(words)] }) });
+      expect(run.record).toMatchObject({ result: 'jev', queued_user: 1, pastes: { tags: 1, queued_anchor: 1, result_rows: 0, moved: 0, asked: 0, installed: false } });
+      expect(run.requests).toHaveLength(0);
+      expect(run.written).toHaveLength(0);
+      // The row stands as the host gave it, with its handle, so the host brings the delivered message back after it.
+      expect(run.out.messages).toContain(messages[1]);
+      expect(pairingOk(messages, run.out.messages)).toBe(true);
+      // The same row without the delivered message does move, so the anchor is what holds it.
+      const free = await compactPastes(messages);
+      expect(free.record.pastes).toMatchObject({ queued_anchor: 0, moved: 1, installed: true });
+    });
+
+    it('keeps a tag in a mid-turn message that a tool result row carries: the results stay, the build holds, nothing is counted as moved', async () => {
+      const base = conversation(30);
+      const mid = delivered(`${OUTSIDE} ${sized(3000)}`);
+      const messages = base.map((m) => (resultOf([m], 't10') ? Object.freeze({ ...m, text: mid }) : m));
+      const run = await compactPastes(messages, { api: apiJoined(messages) });
+      expect(run.record).toMatchObject({ result: 'jev', pastes: { tags: 1, result_rows: 1, queued_anchor: 0, moved: 0, asked: 0, installed: false } });
+      expect(run.requests).toHaveLength(0);
+      expect(run.written).toHaveLength(0);
+      expect(JSON.stringify(run.out.messages)).toContain('<pasted_content');
+      expect(pairingOk(messages, run.out.messages)).toBe(true);
+      expect(run.out.messages.some((m) => (m.text || '').includes(OUTSIDE))).toBe(true);
+    });
+  });
+
+  describe('the check for a secret in the stages that move text whole is bounded (maskSecrets is quadratic on one long word)', () => {
+    // 'KEY' repeated is one word with thousands of KEY inside: 90 000 characters of it take seconds in maskSecrets and nothing in a bounded check. The
+    // tests assert on the counters of the stages, never on the time.
+    const withSecret = (n) => `${filler('alpha', n)} password=hunter22`;
+
+    it('a tag is checked up to the budget of one compaction (four times the default limit): the rest stays, counted as unchecked, and a tag with a secret is counted as secret', async () => {
+      // The results are large, so the results are what the compaction cuts and the stage still runs.
+      const messages = withPastes(Array.from({ length: 8 }, (_, k) => `${OUTSIDE} ${tag(withSecret(29000), k + 1)}`), { chars: 20000 });
+      const run = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_MIN_CHARS: '2000' } });
+      expect(run.record.pastes).toMatchObject({ tags: 8, secret: 4, unchecked: 4, moved: 0, asked: 0 });
+      expect(run.requests).toHaveLength(0);
+      expect(run.written).toHaveLength(0);
+    });
+
+    it('a tag within the budget and without a secret is still asked about and moved', async () => {
+      const messages = withPastes([`${OUTSIDE} ${sized(29000)}`]);
+      const run = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_PASTE_MIN_CHARS: '2000' } });
+      expect(run.record.pastes).toMatchObject({ tags: 1, unchecked: 0, asked: 1, moved: 1 });
+    });
+  });
+
+  describe('rows that a hook or the host puts in as a user message (the paste stage)', () => {
+    // A hook or host row is no message of the user: it neither becomes the newest message of the user (which stays whole) nor shifts that role off the
+    // paste's own row. The paste row stands last among the user's messages here, followed only by the row under test.
+    const rowOf = (text, extra = {}) => Object.freeze({ role: 'user', text, toolUses: [], ...extra });
+    function pasteThenRow(row) {
+      const base = conversation(30);
+      const paste = rowOf(`${OUTSIDE} ${sized(3000)}`, { handle: 'px' });
+      // 26 call/result pairs, the paste row, the row under test, four more pairs and a closing answer: the paste row lies before the last six messages.
+      return [base[0], ...base.slice(1, 53), paste, row, ...base.slice(53, 61), base[62]];
+    }
+    const moved = async (row, env = PASTES) => (await compactPastes(pasteThenRow(row), { env })).record.pastes.moved;
+
+    it('moves the tag when a message of the user follows it, so the setup is a case the stage acts on', async () => {
+      expect(await moved(rowOf('Next, please carry on with part five of the plan.'))).toBe(1);
+    });
+
+    it('does not count a row the host flags isMeta, or one that opens with the prefix of a hook or host row, as a message of the user', async () => {
+      for (const row of [
+        rowOf('Keep going with the plan, said the hook.', { isMeta: true }),
+        rowOf('Stop hook feedback: do not stop yet, the tests are red.'),
+        rowOf('\n  Stop hook feedback: leading space and a line break are ignored.'),
+        rowOf('<ci-monitor-event>the build finished</ci-monitor-event>'),
+        rowOf('<cross-session-message from="peer">hello</cross-session-message>'),
+      ]) {
+        const run = await compactPastes(pasteThenRow(row), { env: PASTES });
+        expect(run.record.pastes, row.text).toMatchObject({ moved: 0, tags: 0 });
+        expect(run.written, row.text).toHaveLength(0);
+      }
+    });
+
+    it('does not count a row that opens with any of the built-in host and hook row prefixes as a message of the user', async () => {
+      for (const text of [
+        'Stop hook feedback: do not stop yet.', 'Goal check-in: the goal still holds.', 'A session-scoped Stop hook is now active with a condition.',
+        '<ci-monitor-event>the build finished</ci-monitor-event>',
+        '<cross-session-message from="peer">hello</cross-session-message>', '[Image: source: /tmp/shot.png]', '[Image: original 2000x1500, displayed at 1568x1176.]',
+        '(Re-invocation of the skill, same arguments)', '[Usage limit reached, resets at noon]',
+      ]) {
+        const run = await compactPastes(pasteThenRow(rowOf(text)), { env: PASTES });
+        expect(run.record.pastes, text).toMatchObject({ moved: 0, tags: 0 });
+      }
+    });
+
+    it('takes more prefixes from OMC_JEV_COMPACT_HOOK_ROW_PREFIXES, comma separated and trimmed, and counts the row as a message of the user without it', async () => {
+      const row = rowOf('Custom hook note: the check passed.');
+      expect(await moved(row)).toBe(1);
+      expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Custom hook note:' })).toBe(0);
+      expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: ' Build bot says ,, Custom hook note: ,' })).toBe(0);
+      expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Build bot says' })).toBe(1);
+      expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: '' })).toBe(1);
+    });
+
+    it('counts rows that no host or built-in prefix covers as messages of the user until the variable lists their prefix', async () => {
+      for (const text of ['Quoted from GitHub: a comment on the pull request.', 'Background (from the session that started this one): notes.']) {
+        const row = rowOf(text);
+        expect(await moved(row), text).toBe(1);
+        expect(await moved(row, { ...PASTES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Quoted from GitHub, Background (from the session that started this one)' }), text).toBe(0);
+      }
+    });
+
+    it('reads the prefixes from the settings env too', async () => {
+      const run = await compactPastes(pasteThenRow(rowOf('Custom hook note: the check passed.')), { env: PASTES, settingsEnv: { OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Custom hook note:' } });
+      expect(run.record.pastes.moved).toBe(0);
+    });
+  });
+
+  describe('the prediction with a token target and pasted text (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
+    // The text a tag moves to a file comes off the predicted tokens before the plan: 0.455 per moved character less 0.58 per character of the trace.
+    const TARGET = { OMC_JEV_COMPACT_TARGET_PERCENT: '50' };
+    // A manual compaction takes the host's tokens as they are (an automatic one is raised to the threshold).
+    const MANUAL = { trigger: 'manual' };
+    const atTokens = (tokens) => () => ({ context: { tokens, window: 200000 } });
+    const messages = withPastes([`${OUTSIDE} ${sized(20000)}`]);
+    const off = { ...ACTIVE_ENV, ...TARGET };
+    const on = { ...PASTES, ...TARGET };
+
+    it('below the rule\'s target the scores decide, so the prediction is lower by the moved text and nothing else', async () => {
+      const without = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(60000) });
+      const withPaste = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(60000) });
+      expect(without.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+      expect(withPaste.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+      expect(withPaste.record.pastes).toMatchObject({ moved: 1, installed: true });
+      const expected = 0.455 * withPaste.record.pastes.moved_chars - 0.58 * withPaste.record.pastes.trace_chars;
+      expect(expected).toBeGreaterThan(8000);
+      expect(Math.abs(without.record.tokens_after_pred - withPaste.record.tokens_after_pred - expected)).toBeLessThanOrEqual(1);
+    });
+
+    it('above the target the cascade stops earlier: fewer results become traces and the prediction still reaches the target', async () => {
+      const without = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(105000) });
+      const withPaste = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(105000) });
+      expect(without.record).toMatchObject({ result: 'jev', cut: 'cascade' });
+      expect(withPaste.record).toMatchObject({ result: 'jev', cut: 'cascade' });
+      expect(withPaste.record.pastes.moved).toBe(1);
+      expect(withPaste.record.traced).toBeLessThan(without.record.traced);
+      expect(withPaste.record.tokens_after_pred).toBe(withPaste.record.cascade_predicted_tokens);
+      expect(withPaste.record.cascade_predicted_tokens).toBeLessThanOrEqual(withPaste.record.cascade_target_tokens);
+      expect(without.record.cascade_predicted_tokens).toBeLessThanOrEqual(without.record.cascade_target_tokens);
+    });
+
+    it('takes nothing off in shadow mode, with the switch off or unset, or when the tag stays: the same prediction as without the stage', async () => {
+      const base = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(105000) });
+      for (const OMC_JEV_COMPACT_PASTES of ['shadow', 'off', '', 'yes']) {
+        const run = await compactPastes(messages, { env: { ...PASTES, ...TARGET, OMC_JEV_COMPACT_PASTES }, event: MANUAL, usage: atTokens(105000) });
+        expect(run.record.tokens_after_pred, OMC_JEV_COMPACT_PASTES).toBe(base.record.tokens_after_pred);
+        expect(run.record.traced, OMC_JEV_COMPACT_PASTES).toBe(base.record.traced);
+        expect(run.written, OMC_JEV_COMPACT_PASTES).toHaveLength(0);
+      }
+      const refused = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(105000), jev: jevSays(0.1) });
+      expect(refused.record.pastes).toMatchObject({ yes: 0, moved: 0 });
+      expect(refused.record.tokens_after_pred).toBe(base.record.tokens_after_pred);
+    });
+  });
+
+  describe('long replies (OMC_JEV_COMPACT_LONG_REPLIES)', () => {
+    // Long runs of assistant text well before the newest user messages move to a file without a question to Jev; the replies that answer
+    // a user message directly, the newest turns and rows the host could not rebuild from text stay; the default is off.
+    const REPLIES = { ...ACTIVE_ENV, OMC_JEV_COMPACT_LONG_REPLIES: 'active' };
+    const long = (word, n = 1200) => `${word}-START ${filler(word, n)} ${word}-END`;
+    const A = (text, id) => ({ role: 'assistant', text, toolUses: id ? [{ tool_use_id: id, tool: 'Bash', input: { command: `cat ${id}.txt` } }] : [] });
+    const U = (text) => ({ role: 'user', text, toolUses: [] });
+    const Rr = (id) => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(2000)}`, isError: false }] });
+
+    /** `turns` user questions; in each the assistant opens, works with a long middle reply, and closes. */
+    function replyConversation(turns, { middle = (k) => long(`reply${k}`), chars } = {}) {
+      const rows = conversation(30, chars ? { chars } : {}).slice(0, -2).map((m) => ({ ...m }));
+      for (let k = 1; k <= turns; k++) rows.push(U(`Question ${k}: what about part ${k}?`), A(`Looking at part ${k}.`, `a${k}`), Rr(`a${k}`), A(middle(k), `b${k}`), Rr(`b${k}`), A(`Part ${k} is done.`));
+      return rows.map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
+    }
+    const replyOf = (out, startsWith) => out.messages.find((m) => m.role === 'assistant' && m.text.includes(startsWith));
+    const hash = (text) => createHash('sha256').update(text).digest('hex').slice(0, 32);
+
+    it('is off unless asked for: unset, off and any other value give the same conversation and record as without the module code', async () => {
+      const messages = replyConversation(8);
+      const runs = [];
+      for (const OMC_JEV_COMPACT_LONG_REPLIES of [undefined, 'off', '', 'yes', '1']) {
+        runs.push(await compactPastes(messages, { env: { ...ACTIVE_ENV, ...(OMC_JEV_COMPACT_LONG_REPLIES === undefined ? {} : { OMC_JEV_COMPACT_LONG_REPLIES }) } }));
+      }
+      for (const run of runs) {
+        expect(run.written).toHaveLength(0);
+        expect(run.record).not.toHaveProperty('replies');
+        expect(JSON.stringify(run.out.messages)).toBe(JSON.stringify(runs[0].out.messages));
+        expect(withoutTimes(run.record)).toEqual(withoutTimes(runs[0].record));
+      }
+      expect(replyOf(runs[0].out, 'reply1-START').text).toContain('reply1-END');
+    });
+
+    it('moves the long middle replies of the older turns: the file holds the run, the trace its first 120 and last 120 characters, short replies stay', async () => {
+      const messages = replyConversation(8);
+      const off = await compactPastes(messages, { env: ACTIVE_ENV });
+      const run = await compactPastes(messages, { env: REPLIES });
+      const first = long('reply1');
+      const trace = run.out.messages.map((m) => m.text).find((t) => t.startsWith('[reply moved at compaction: '));
+      expect(trace).toBe(replyTrace(first.length, first, `${DIR}/${hash(first)}.txt`));
+      expect(run.files.get(`${DIR}/${hash(first)}.txt`)).toBe(first);
+      expect(trace).toContain('reply1-START');
+      expect(trace).toContain('reply1-END');
+      expect(trace.length).toBeLessThan(first.length - 150);
+      expect(replyOf(run.out, 'Looking at part 1.')).toBeDefined();
+      expect(replyOf(run.out, 'Part 1 is done.')).toBeDefined();
+      // Turns 3 to 8 are the newest six turns, so their replies stay whole.
+      for (let k = 3; k <= 8; k++) expect(replyOf(run.out, long(`reply${k}`))).toBeDefined();
+      expect(run.record.replies).toMatchObject({ mode: 'active', moved: 2, moved_chars: 2 * first.length, written: 2, installed: true, too_short: 0, secret: 0 });
+      expect(run.record.chars_after).toBe(off.record.chars_after - 2 * (first.length - trace.length));
+      expect(run.out.messages).toHaveLength(off.out.messages.length);
+      for (const key of ['asked', 'requests', 'kept_full', 'kept_short', 'traced']) expect(run.record[key]).toEqual(off.record[key]);
+      expect(run.calls.fetch).toHaveLength(off.calls.fetch.length);
+    });
+
+    it('shadow counts what would move and writes nothing; a second compaction of the same conversation writes the same files', async () => {
+      const messages = replyConversation(8);
+      const off = await compactPastes(messages, { env: ACTIVE_ENV });
+      const shadow = await compactPastes(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_LONG_REPLIES: 'shadow' } });
+      expect(shadow.written).toHaveLength(0);
+      expect(shadow.record.replies).toMatchObject({ mode: 'shadow', moved: 2, written: 0 });
+      expect(shadow.record.replies).not.toHaveProperty('installed');
+      expect(JSON.stringify(shadow.out.messages)).toBe(JSON.stringify(off.out.messages));
+      const first = await compactPastes(messages, { env: REPLIES });
+      const again = await compactPastes(messages, { env: REPLIES });
+      expect(first.written).toHaveLength(2);
+      expect(again.written).toEqual(first.written);
+    });
+
+    it('keeps a long reply that answers a user message directly, even in an old turn', async () => {
+      const rows = replyConversation(8, { middle: (k) => (k <= 2 ? 'Short.' : long(`reply${k}`)) });
+      // Turn 2 becomes one long reply right after the question: it is then the first and last reply to it.
+      const q2 = rows.findIndex((m) => m.text.startsWith('Question 2:'));
+      const direct = [...rows.slice(0, q2 + 1), A(long('direct2')), ...rows.slice(q2 + 6)].map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
+      const run = await compactPastes(direct, { env: REPLIES });
+      expect(replyOf(run.out, long('direct2'))).toBeDefined();
+      expect(run.record.replies).toMatchObject({ moved: 0 });
+      expect(run.record.replies.direct_replies).toBeGreaterThan(0);
+    });
+
+    it('directReplyRows names the first and the last assistant row with text after each user message that holds words of its own', () => {
+      const rows = [U('first'), A('one', 'a'), Rr('a'), A('two', 'b'), Rr('b'), A('three'), U('second'), A('x'), U('[pasted text moved at compaction: 5 chars, full text in /p; start: "a"; end: "a"]'), A('y'), A('z')];
+      expect([...directReplyRows(rows, [0, 6, 8])].sort((a, b) => a - b)).toEqual([1, 5, 7]);
+      expect([...directReplyRows(rows, [0, 6])].sort((a, b) => a - b)).toEqual([1, 5, 7, 10]);
+    });
+
+    it('directReplyRows treats a bracketed instruction after a paste trace on the same line as words of the user, whatever brackets the excerpts hold', () => {
+      const trace = '[pasted text moved at compaction: 2038 chars, full text in /p; start: "[a] b]"; end: "c [d]"]';
+      const row = (text) => [U('first'), A('one'), U(text), A('answer'), A('last')];
+      expect([...directReplyRows(row(`${trace} [Keep the second instruction exactly as given.]`), [0, 2])].sort((a, b) => a - b)).toEqual([1, 3, 4]);
+      expect([...directReplyRows(row(`${trace}\n[Keep it.] ${trace}`), [0, 2])].sort((a, b) => a - b)).toEqual([1, 3, 4]);
+      expect([...directReplyRows(row(`${trace} ${trace}`), [0, 2])].sort((a, b) => a - b)).toEqual([1]);
+    });
+
+    it('splits runs at trace lines and counts a run from its first to its last non-empty line', () => {
+      const text = `${'a'.repeat(300)}\n\n${'b'.repeat(300)}\n[compacted] Bash(x) - removed\n${'c'.repeat(100)}\n[reply moved at compaction: 1 chars, full text in /p; start: "a"; end: "a"]\n${'d'.repeat(500)}\n`;
+      const runs = replyRuns(text);
+      expect(runs.map((r) => text.slice(r.start, r.end).length)).toEqual([602, 500]);
+      expect(replyRuns(text, 100).map((r) => text.slice(r.start, r.end).length)).toEqual([602, 100, 500]);
+    });
+
+    it('keeps a run that names a secret or that masking changes, and a reply that saves less than 150 characters', async () => {
+      const key = 'sk-ant-api03-' + 'A1b2C3d4'.repeat(4);
+      const secret = `${long('reply1')}\nANTHROPIC key ${key}`;
+      const brief = `${'w'.repeat(430)}`;
+      const messages = replyConversation(8, { middle: (k) => (k === 1 ? secret : k === 2 ? brief : long(`reply${k}`)) });
+      const run = await compactPastes(messages, { env: REPLIES });
+      expect(run.record.replies).toMatchObject({ secret: 1, too_short: 1, moved: 0 });
+      expect(run.written).toHaveLength(0);
+      expect(replyOf(run.out, 'reply1-START').text).toContain(key);
+      expect(replyOf(run.out, brief)).toBeDefined();
+    });
+
+    it('moves nothing from a row the host could not rebuild from text', async () => {
+      const messages = replyConversation(8);
+      const form = apiOf(messages);
+      const k1 = messages.findIndex((m) => m.text === long('reply1'));
+      form[k1].content.push({ type: 'server_tool_use', id: 'srv1', name: 'web_search', input: {} });
+      const blocked = await compactPastes(messages, { env: REPLIES, api: form });
+      expect(blocked.record.replies).toMatchObject({ skipped_blocks: 1, moved: 1 });
+    });
+
+    it('never touches the rows of a subagent and does not run with fewer than three user messages or six turns', async () => {
+      const messages = replyConversation(8);
+      const sub = await compactPastes(messages, { env: REPLIES, event: { agentId: 'sub-1' } });
+      expect(sub.record).not.toHaveProperty('replies');
+      const few = await compactPastes(replyConversation(2), { env: REPLIES });
+      expect(few.record.replies).toMatchObject({ limit_row: 0, moved: 0 });
+    });
+
+    it('checks a long run for a secret only up to a limit: a reply of 90 000 characters of one word stays and is counted as unchecked, one of 25 000 characters moves', async () => {
+      const messages = replyConversation(8, { chars: 20000, middle: (k) => (k === 1 ? 'KEY'.repeat(30000) : k === 2 ? long('reply2', 25000) : long(`reply${k}`)) });
+      const run = await compactPastes(messages, { env: REPLIES });
+      expect(run.record.replies).toMatchObject({ moved: 1, unchecked: 1, secret: 0, written: 1, installed: true });
+      expect(run.written).toHaveLength(1);
+      expect(replyOf(run.out, 'KEY'.repeat(30000))).toBeDefined();
+      expect(replyOf(run.out, long('reply2', 25000))).toBeUndefined();
+    });
+
+    it('the runs of one compaction share a budget of 120 000 characters: the first four of 29 000 characters are checked and move, the rest stay unchecked', async () => {
+      // Turns 7 to 12 are the newest six, so turns 1 to 6 are eligible.
+      const many = await compactPastes(replyConversation(12, { chars: 20000, middle: (k) => long(`reply${k}`, 29000) }), { env: REPLIES });
+      expect(many.record.replies).toMatchObject({ moved: 4, unchecked: 2, written: 4 });
+    });
+
+    it('a message the user typed during a tool turn (in the API form only) is a user message too: the reply that opens after it is a direct reply and stays', async () => {
+      const rowOf = (text, extra = {}) => ({ role: 'user', text, toolUses: [], ...extra });
+      const rows = conversation(30).slice(0, -2).map((m) => ({ ...m }));
+      rows.push(U('Question A: what about part A?'), A('Looking at part A.', 'a0'), Rr('a0'), A(long('middle'), 'b0'), Rr('b0'), rowOf('Please continue.', { isMeta: true }), A('Part A is done.'));
+      for (let k = 1; k <= 8; k++) rows.push(U(`Question ${k}: and part ${k}?`), A(`Looking at part ${k}.`, `c${k}`), Rr(`c${k}`), A(`Part ${k} is done.`));
+      const messages = rows.map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
+      const at = messages.findIndex((m) => resultOf([m], 'a0'));
+      const plain = await compactPastes(messages, { env: REPLIES, api: apiJoined(messages) });
+      expect(plain.record.replies).toMatchObject({ moved: 1 });
+      expect(replyOf(plain.out, long('middle'))).toBeUndefined();
+      const run = await compactPastes(messages, { env: REPLIES, api: apiJoined(messages, { [at]: [delivered('DELIVERED: look at part A again.')] }) });
+      expect(run.record).toMatchObject({ result: 'jev', queued_user: 1 });
+      expect(run.record.replies).toMatchObject({ moved: 0 });
+      expect(replyOf(run.out, long('middle'))).toBeDefined();
+    });
+
+    it('directReplyRows takes the replies after a delivered user message, whose row holds no words of its own', () => {
+      const m = [
+        { role: 'user', text: 'Question.', toolUses: [] },
+        { role: 'assistant', text: 'Reply one.', toolUses: [] },
+        { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'x', text: 'result' }] },
+        { role: 'assistant', text: 'Reply two.', toolUses: [] },
+        { role: 'assistant', text: 'Reply three.', toolUses: [] },
+        { role: 'assistant', text: 'Reply four.', toolUses: [] },
+      ];
+      expect([...directReplyRows(m, [0])].sort()).toEqual([1, 5]);
+      expect([...directReplyRows(m, [0], [2])].sort()).toEqual([1, 3, 5]);
+      expect([...directReplyRows(m, [], [2])].sort()).toEqual([3, 5]);
+    });
+
+    describe('rows that a hook or the host puts in as a user message (the reply stage)', () => {
+      // Question A is answered by an opening reply, a long middle reply and a closing reply, with the row under test between the middle and the closing
+      // reply. A hook or host row does not end the span of replies to the question, so the closing reply is the last one and the middle reply moves; a
+      // message of the user there does end it, and the middle reply is the last reply to the question and stays.
+      const rowOf = (text, extra = {}) => ({ role: 'user', text, toolUses: [], ...extra });
+      function between(row) {
+        const rows = conversation(30).slice(0, -2).map((m) => ({ ...m }));
+        rows.push(U('Question A: what about part A?'), A('Looking at part A.', 'a0'), Rr('a0'), A(long('middle'), 'b0'), Rr('b0'), row, A('Part A is done.'));
+        for (let k = 1; k <= 8; k++) rows.push(U(`Question ${k}: and part ${k}?`), A(`Looking at part ${k}.`, `c${k}`), Rr(`c${k}`), A(`Part ${k} is done.`));
+        return rows.map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
+      }
+      const movedMiddle = async (row, env = REPLIES) => {
+        const run = await compactPastes(between(row), { env });
+        return { moved: run.record.replies.moved, whole: Boolean(replyOf(run.out, long('middle'))) };
+      };
+
+      it('keeps the middle reply when a message of the user stands between it and the closing reply', async () => {
+        expect(await movedMiddle(rowOf('Part A looks fine, carry on with part B.'))).toEqual({ moved: 0, whole: true });
+      });
+
+      it('moves the middle reply when the row between is a hook or host row, that is isMeta or opens with a hook prefix', async () => {
+        for (const row of [
+          rowOf('Please continue.', { isMeta: true }),
+          rowOf('Stop hook feedback: do not stop yet.'),
+          rowOf('<ci-monitor-event>the build finished</ci-monitor-event>'),
+          rowOf('<cross-session-message from="peer">hello</cross-session-message>'),
+        ]) {
+          expect(await movedMiddle(row), row.text).toEqual({ moved: 1, whole: false });
+        }
+      });
+
+      it('moves the middle reply for every built-in host and hook row prefix', async () => {
+        for (const text of [
+          'Goal check-in: the goal still holds.', 'A session-scoped Stop hook is now active with a condition.',
+          '[Image: source: /tmp/shot.png]', '[Image: original 2000x1500, displayed at 1568x1176.]',
+          '(Re-invocation of the skill, same arguments)', '[Usage limit reached, resets at noon]',
+        ]) {
+          expect(await movedMiddle(rowOf(text)), text).toEqual({ moved: 1, whole: false });
+        }
+      });
+
+      it('takes more prefixes from OMC_JEV_COMPACT_HOOK_ROW_PREFIXES, and without it the row counts as a message of the user', async () => {
+        const row = rowOf('Custom hook note: the check passed.');
+        expect(await movedMiddle(row)).toEqual({ moved: 0, whole: true });
+        expect(await movedMiddle(row, { ...REPLIES, OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: 'Build bot says, Custom hook note:' })).toEqual({ moved: 1, whole: false });
+      });
+    });
+
+    describe('the prediction with a token target (OMC_JEV_COMPACT_TARGET_PERCENT)', () => {
+      // The text a long reply moves to a file comes off the predicted tokens before the plan: 0.455 per moved character less 0.58 per character of the trace.
+      const TARGET = { OMC_JEV_COMPACT_TARGET_PERCENT: '50' };
+      // A manual compaction takes the host's tokens as they are (an automatic one is raised to the threshold).
+      const MANUAL = { trigger: 'manual' };
+      const atTokens = (tokens) => () => ({ context: { tokens, window: 200000 } });
+      const messages = replyConversation(8, { middle: (k) => long(`reply${k}`, 6000) });
+      const off = { ...ACTIVE_ENV, ...TARGET };
+      const on = { ...REPLIES, ...TARGET };
+
+      it('below the rule\'s target the scores decide, so the prediction is lower by the moved text and nothing else', async () => {
+        const without = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(60000) });
+        const withReplies = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(60000) });
+        expect(without.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+        expect(withReplies.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+        expect(withReplies.record.replies).toMatchObject({ moved: 2, installed: true });
+        const expected = 0.455 * withReplies.record.replies.moved_chars - 0.58 * withReplies.record.replies.trace_chars;
+        expect(expected).toBeGreaterThan(4000);
+        expect(Math.abs(without.record.tokens_after_pred - withReplies.record.tokens_after_pred - expected)).toBeLessThanOrEqual(1);
+      });
+
+      it('above the target the cascade stops earlier: fewer results become traces and the prediction still reaches the target', async () => {
+        const without = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(110000) });
+        const withReplies = await compactPastes(messages, { env: on, event: MANUAL, usage: atTokens(110000) });
+        expect(without.record).toMatchObject({ result: 'jev', cut: 'cascade' });
+        expect(withReplies.record).toMatchObject({ result: 'jev', cut: 'cascade' });
+        expect(withReplies.record.replies.moved).toBe(2);
+        expect(withReplies.record.traced).toBeLessThan(without.record.traced);
+        expect(withReplies.record.tokens_after_pred).toBe(withReplies.record.cascade_predicted_tokens);
+        expect(withReplies.record.cascade_predicted_tokens).toBeLessThanOrEqual(withReplies.record.cascade_target_tokens);
+        expect(without.record.cascade_predicted_tokens).toBeLessThanOrEqual(without.record.cascade_target_tokens);
+      });
+
+      it('the host handoff sees the cut the stage makes: with no results traced the prediction stays at the tokens before and goes to the host\'s summary, with the replies moved the cut is above 30 % and Jev finishes', async () => {
+        const wholeEach = (body) => okResponse({ answers: Object.fromEntries(Object.keys(body.questions).map((q) => [q, { type: 'score', score: 3, confidence: 0.9 }])) });
+        const talk = replyConversation(20, { middle: (k) => long(`reply${k}`, 6000) });
+        const handoff = { ...ACTIVE_ENV, ...TARGET, OMC_JEV_COMPACT_HOST_HANDOFF: '1' };
+        // 84 000 tokens are below the rule's target of 85 000, so the scores alone decide, and every result is scored whole.
+        const without = await compactPastes(talk, { env: handoff, event: MANUAL, usage: atTokens(84000), jev: wholeEach });
+        const withReplies = await compactPastes(talk, { env: { ...handoff, OMC_JEV_COMPACT_LONG_REPLIES: 'active' }, event: MANUAL, usage: atTokens(84000), jev: wholeEach });
+        expect(without.record).toMatchObject({ result: 'fallback', reason: 'cut_below_host_min', cascade_pass: 'manual', tokens_after_pred: 84000 });
+        expect(withReplies.record.replies.moved).toBeGreaterThan(10);
+        expect(withReplies.record).toMatchObject({ result: 'jev', cascade_pass: 'manual' });
+        expect(withReplies.record.tokens_after_pred).toBeLessThan(0.7 * 84000);
+      });
+
+      it('takes nothing off in shadow mode, with the switch off or unset: the same prediction as without the stage', async () => {
+        const base = await compactPastes(messages, { env: off, event: MANUAL, usage: atTokens(110000) });
+        for (const OMC_JEV_COMPACT_LONG_REPLIES of ['shadow', 'off', '', 'yes']) {
+          const run = await compactPastes(messages, { env: { ...ACTIVE_ENV, ...TARGET, OMC_JEV_COMPACT_LONG_REPLIES }, event: MANUAL, usage: atTokens(110000) });
+          expect(run.record.tokens_after_pred, OMC_JEV_COMPACT_LONG_REPLIES).toBe(base.record.tokens_after_pred);
+          expect(run.record.traced, OMC_JEV_COMPACT_LONG_REPLIES).toBe(base.record.traced);
+          expect(run.written, OMC_JEV_COMPACT_LONG_REPLIES).toHaveLength(0);
+        }
+      });
     });
   });
 });
