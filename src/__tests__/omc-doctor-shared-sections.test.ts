@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allCommands, bashBlocks, blockOf, codeOf, commands, GUIDE_CALL, GUIDE_GUARD, locatorLine, ROOT, runBlock, runCommand, SCRIPT, scriptSection, scriptText, skillText } from './helpers/omc-doctor-cache-fixture.js';
+import { allCommands, bashBlocks, blockOf, codeOf, commands, GUIDE_CALL, GUIDE_GUARD, locatorLine, ROOT, runBlock, runCommand, SCRIPT, scriptSection, scriptText, skillAndGuide, skillText } from './helpers/omc-doctor-cache-fixture.js';
 import { copyPluginSyncPayload } from '../installer/index.js';
 import { versionCommand } from './helpers/omc-doctor-step1.js';
 
@@ -17,7 +17,7 @@ const posix = process.platform !== 'win32';
 
 describe('omc-doctor: the skill calls the script through one locator, and holds no code of the checks', () => {
   test('the skill has no node -e command left: its checks are calls of the script', () => {
-    expect(skillText).not.toMatch(/node -e/);
+    expect(skillAndGuide).not.toMatch(/node -e/);
     // No inline code in a shell block either: a block is a comment, the locator line and calls, or plain shell checks.
     for (const block of bashBlocks().filter((b) => b.includes('node "$S"'))) {
       for (const line of block.split('\n')) {
@@ -128,7 +128,7 @@ describe('omc-doctor: the script defines each helper once', () => {
 
   // A command is pasted into the Bash tool as plain text: nothing in the skill may be the history expansion of a shell.
   test('the skill text never spells !==', () => {
-    expect(skillText).not.toContain('!==');
+    expect(skillAndGuide).not.toContain('!==');
   });
 });
 

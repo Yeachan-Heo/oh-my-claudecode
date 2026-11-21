@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
-import { blockOf, ROOT, scriptText } from '../../__tests__/helpers/omc-doctor-cache-fixture.js';
+import { blockOf, ROOT, scriptText, skillAndGuide } from '../../__tests__/helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor skill (issue #2254)', () => {
   it('documents CLAUDE.md OMC version drift check against cached plugin version', () => {
@@ -22,7 +22,7 @@ describe('omc-doctor skill (issue #2254)', () => {
     expect(content).toContain('CLAUDE-*.md');
     expect(content).toContain('deterministic companion');
     expect(content).toContain('Latest cached plugin version');
-    expect(content).not.toContain('!==');
+    expect(skillAndGuide).not.toContain('!==');
     expect(content).toContain('If `CLAUDE.md OMC version` != `Latest cached plugin version`: WARN - version drift detected');
   });
 });
@@ -37,9 +37,9 @@ describe('omc-doctor skill Ralph runtime prerequisites (issue #3996)', () => {
     expect(content).toContain('node --version');
     expect(content).toContain('Ralph Runtime Prerequisites');
     // The Ruby check was a false positive (issue #3996): OMC has never used Ruby.
-    expect(content).not.toMatch(/\bruby\b/i);
-    expect(content).not.toContain('ruby-full');
-    expect(content).not.toContain('brew install ruby');
+    expect(skillAndGuide).not.toMatch(/\bruby\b/i);
+    expect(skillAndGuide).not.toContain('ruby-full');
+    expect(skillAndGuide).not.toContain('brew install ruby');
   });
 });
 
@@ -51,8 +51,8 @@ describe('omc-doctor skill package version diagnostic (issue #2981)', () => {
     expect(scriptText).toContain("const view = ['view', 'oh-my-claude-sisyphus', 'version'];");
     expect(scriptText).not.toContain("'view', 'oh-my-claudecode', 'version'");
     expect(scriptText).not.toContain('npm view oh-my-claudecode version');
-    expect(content).not.toContain("'view', 'oh-my-claudecode', 'version'");
-    expect(content).not.toContain('npm view oh-my-claudecode version');
+    expect(skillAndGuide).not.toContain("'view', 'oh-my-claudecode', 'version'");
+    expect(skillAndGuide).not.toContain('npm view oh-my-claudecode version');
   });
 });
 

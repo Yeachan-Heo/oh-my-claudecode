@@ -228,7 +228,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
   }, 60_000);
 
   test('no version in the skill is ordered as text', () => {
-    expect(text).not.toContain('localeCompare');
+    expect(text + guideText).not.toContain('localeCompare');
     // Step 1 sorts versions in exactly three places (the highest cached version, the versions the registry records, the
     // versions an entry names twice), and all use the comparator.
     const code = codeOf([scriptSection('Step 1: helpers'), scriptSection('Step 1: the install channel')].join('\n'));
@@ -692,9 +692,9 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
   });
 
   test('the skill routes the update and the diagnosis through the derived lines, with no fixed updater recipe left', () => {
-    expect(text).not.toMatch(/marketplace update omc/);
-    expect(text).not.toMatch(/claude plugin update oh-my-claudecode@omc/);
-    expect(text).not.toMatch(/\/omc-setup\b.*\bnpm install\b/);
+    expect(text + guideText).not.toMatch(/marketplace update omc/);
+    expect(text + guideText).not.toMatch(/claude plugin update oh-my-claudecode@omc/);
+    expect(text + guideText).not.toMatch(/\/omc-setup\b.*\bnpm install\b/);
     // The rules of Step 1 and the details they leave to the guide (the sections of Step 1 and the ordering of versions).
     const diagnosis = text.slice(text.indexOf('### Step 1'), text.indexOf('### Step 2')) + '\n' + guideText;
     expect(diagnosis).toContain('LATEST comes from the install channel the registry records');

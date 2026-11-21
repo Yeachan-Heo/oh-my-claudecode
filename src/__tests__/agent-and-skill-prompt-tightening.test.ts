@@ -263,7 +263,7 @@ describe('omc-doctor skill', () => {
 
   test('no unconditional rmSync; every renameSync call sits behind an if', () => {
     // The skill holds no code of the cache commands; they are the cacheRepair function of scripts/omc-doctor.mjs.
-    expect(text).not.toMatch(/rmSync\(|renameSync\(/);
+    expect(text + guide).not.toMatch(/rmSync\(|renameSync\(/);
     const lines = script.split('\n');
     expect(lines.filter((l) => l.includes('rmSync('))).toEqual([]);
     const moves = lines.flatMap((l, i) => (l.includes('renameSync(') ? [i] : []));
@@ -284,7 +284,7 @@ describe('omc-doctor skill', () => {
     expect(outdated).toContain('`omc update`');
     expect(outdated).toContain('Do not report the plugin as fixed until a later run of Step 1 shows INSTALLED equal to that channel\'s `Latest:`');
     expect(outdated.indexOf('**Update first**')).toBeLessThan(outdated.indexOf('**Cache guard**'));
-    expect(text).not.toContain('Restart Claude Code to fetch latest version');
+    expect(text + guide).not.toContain('Restart Claude Code to fetch latest version');
   });
 
   test('both cache fix sections describe the freshness rule with the threshold of the SessionStart cleanup', () => {
@@ -345,7 +345,7 @@ describe('omc-doctor skill', () => {
       const fix = section(text, heading);
       expect(fix).toContain('plugins/backups/oh-my-claudecode/');
       expect(fix).toContain('outside `plugins/cache/`');
-      expect(fix).not.toContain('.bak-');
+      expect(fix + guide).not.toContain('.bak-');
     }
     expect(section(text, 'Fix: Outdated Plugin')).toContain("OMC's stale cache purge can remove any cache");
   });

@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { NPM_LATEST, SCRIPT, scriptSection, skillText } from './helpers/omc-doctor-cache-fixture.js';
+import { NPM_LATEST, SCRIPT, scriptSection, skillAndGuide, skillText } from './helpers/omc-doctor-cache-fixture.js';
 
 // The `npm latest:` line is only for the npm channel. It is a command of its own (Step 1 never consults npm): `npm view`
 // gets a time limit, and the answer has to be a semantic version of the grammar the script defines once, so an error, a
@@ -35,7 +35,7 @@ const run = (npm: string | null, preload?: string) => {
 describe('omc-doctor npm latest command', { timeout: 120_000 }, () => {
   test('it is one command of Step 1, answers with the version grammar of the script, and replaces the bare shell line', () => {
     expect(npmFunction).toContain('const latest = run.status === 0 ? semver(run.stdout) : \'\';');
-    expect(skillText).not.toMatch(/^latest=\$\(npm view/m);
+    expect(skillAndGuide).not.toMatch(/^latest=\$\(npm view/m);
     expect(skillText).toContain('npm latest: for a Channel: npm install only');
     expect(skillText).toContain('node "$S" npm-latest');
     // Both outcomes are labelled by the command itself.
