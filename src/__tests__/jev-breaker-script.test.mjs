@@ -1133,6 +1133,41 @@ describe('outage notice in a hook script', () => {
     expect(rows.map((row) => row.mode)).toEqual(['degraded']); // the request went out (unreachable stub endpoint)
   }, 60_000);
 
+  it('a breaker of scope low is honored in the hook: a low point is held back with the notice, an active medium point still asks Jev', async () => {
+    const stub = await startStub(() => ({ status: 200 }));
+    const env = jevEnv({ OMC_JEV: 'intent:active,slop-warning:active', OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '5000' });
+    const settings = settingsFor(env);
+    mkdirSync(settings.dir, { recursive: true });
+    const now = Date.now();
+    const state = { until: now + 300_000, reason: 'no-response', since: now, scope: 'low' };
+    writeFileSync(join(settings.dir, 'breaker.json'), JSON.stringify(state));
+    const shadowUrl = pathToFileURL(join(root, 'scripts', 'lib', 'jev-shadow.mjs')).href;
+    // One hook: the judgment of one point, then the hook's own JSON output (which carries the outage notice when it was armed).
+    const run = async (point, sessionId) => {
+      writeFileSync(join(caseDir, 'point-hook.mjs'), [
+        'import { recordJevShadow, setJevSessionId } from ' + JSON.stringify(shadowUrl) + ';',
+        'setJevSessionId(' + JSON.stringify(sessionId) + ');',
+        'const result = recordJevShadow({ point: ' + JSON.stringify(point) + ", state: { prompt: 'x' }, questions: { slop_advisory: { type: 'noul', criteria: { yes: 'a', no: 'b' } } }, heuristic: false });",
+        "console.log(JSON.stringify({ continue: true, waited: result?.mode ?? null }));",
+      ].join('\n'));
+      return new Promise((resolve, reject) => {
+        const child = spawn(NODE, [join(caseDir, 'point-hook.mjs')], { cwd: caseDir, env: { ...cleanParentEnv(), ...env }, windowsHide: true });
+        let out = '';
+        child.stdout.on('data', (chunk) => { out += chunk; });
+        child.stderr.resume();
+        child.on('error', reject);
+        child.on('close', () => resolve(JSON.parse(out)));
+      });
+    };
+    // Medium point: the scope-low breaker does not cover it, the active hook waits for Jev's answer and shows no notice.
+    expect(await run('intent', 'session-a')).toEqual({ continue: true, waited: 'active' });
+    expect(stub.count()).toBe(1);
+    // Low point: covered, so the hook does not wait (shadow), the resolver holds the request back, and the notice shows.
+    expect(await run('slop-warning', 'session-a')).toEqual({ continue: true, waited: null, systemMessage: outageMessage(state) });
+    expect((await waitForRows(env, 2)).some((row) => row.point === 'slop-warning' && row.mode === 'circuit-open')).toBe(true);
+    expect(stub.count()).toBe(1);
+  }, 60_000);
+
   it('active mode: the request that opens the breaker shows the notice in the same hook output', async () => {
     const stub = await startStub(() => ({ status: 503, headers: { 'Retry-After': '30' } }));
     const env = jevEnv({ OMC_JEV: 'slop-warning:active', OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '5000' });

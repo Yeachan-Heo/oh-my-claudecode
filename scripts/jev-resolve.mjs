@@ -40,7 +40,7 @@
  * deliberate mirrors; parity with the TS parse is locked by the test suite.
  */
 
-import { existsSync, lstatSync, readFileSync, renameSync, rmdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmdirSync, statSync, unlinkSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -143,6 +143,39 @@ export function rotateJevLog(path, maxBytes, now = new Date()) {
 }
 
 /**
+ * The files of one Jev log, newest first: the live file <name>.jsonl and its
+ * rotated archives <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (see rotateJevLog),
+ * ordered by their stamp, newest archive first. Only files that exist. With
+ * sinceMs, an archive whose rotation time is older than that is left out (every
+ * row of an archive is older than its rotation time). The stamp holds whole
+ * seconds, cut down from the rotation time, while sinceMs and the row times of
+ * the log are milliseconds: an archive is left out only when even the end of its
+ * stamp second is before sinceMs, so a row written in the same second as the
+ * rotation is not lost. A reader that looks for the last row of a kind goes
+ * through the list in order; rotation never deletes, so the archives are the
+ * history of the log.
+ */
+export function jevLogFiles(dir, name, sinceMs = 0) {
+  const files = [];
+  const live = join(dir, `${name}.jsonl`);
+  if (existsSync(live)) files.push(live);
+  let names = [];
+  try { names = readdirSync(dir); } catch { return files; }
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`^${escaped}-(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})-\\d+\\.jsonl$`);
+  const archives = [];
+  for (const entry of names) {
+    const m = pattern.exec(entry);
+    if (!m) continue;
+    const stamp = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+    if (!(stamp + 1000 > sinceMs)) continue; // the rotation fell in [stamp, stamp + 1000 ms)
+    archives.push({ stamp, path: join(dir, entry) });
+  }
+  archives.sort((a, b) => b.stamp - a.stamp || (a.path < b.path ? 1 : -1));
+  return [...files, ...archives.map((archive) => archive.path)];
+}
+
+/**
  * Resolve the script-side Jev timeout using the same strict contract for the
  * HTTP resolver and its synchronous active-mode parent process.
  */
@@ -179,10 +212,12 @@ export function serializeQuestions(questions) {
 
 /**
  * Points that `all` and `all:active` never enable: they send more than the
- * bounded excerpts of the other points, so each needs its own opt-in. Mirror
- * of NAMED_ONLY_POINTS in src/hooks/jev/config.ts.
+ * bounded excerpts of the other points (`compaction`), or are asked outside the
+ * hooks' own judgment path (`delegation` of a coordinator session,
+ * `session-routing` of scripts/jev-session.mjs), so each needs its own opt-in.
+ * Mirror of NAMED_ONLY_POINTS in src/hooks/jev/config.ts.
  */
-export const NAMED_ONLY_POINTS = new Set(["compaction"]);
+export const NAMED_ONLY_POINTS = new Set(["compaction", "delegation", "session-routing"]);
 
 /**
  * Mirror of parseJevConfig + pointState in src/hooks/jev/config.ts. Returns
@@ -732,7 +767,7 @@ export async function resolveRequest(
   const durationMs = Date.now() - startedAt;
   // Tell the breaker before the log write, so concurrent callers see it at once.
   const failureClass = guard && failure ? guard.breaker.classifyFailure(failure) : undefined;
-  const opened = guard && failure ? guard.breaker.recordFailure(guard.settings, failureClass) : undefined;
+  const opened = guard && failure ? guard.breaker.recordFailure(guard.settings, failureClass, Date.now(), request.point) : undefined;
   await writeShadowLog(
     {
       ts: new Date().toISOString(),

@@ -38,7 +38,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { setPriority } from 'node:os';
+import { homedir, setPriority } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -48,11 +48,18 @@ import { getClaudeConfigDir } from './config-dir.mjs';
 
 export const DEFAULT_MIN_TIMEOUT_S = 60;
 export const DELIVERY_ALERT_PERCENT = 95;
+// Breaker alarm (OMC_JEV_GUARD_TIMEOUTS_ALARM=1): more openings of the breaker caused by missing responses per 24 hours than
+// this alarm, and so does more minutes than this of holding back (the union of the openings' time).
+export const TIMEOUTS_ALERT_OPENINGS = 20;
+export const TIMEOUTS_ALERT_MINUTES = 60;
 const DAY_MS = 24 * 3600 * 1000;
 const STALE_RESULT_MS = 2 * DAY_MS; // a daily result older than this is not shown
 const SESSION_RECORD_MAX_AGE_MS = 14 * DAY_MS;
 const LOCK_STALE_MS = 30 * 60 * 1000;
 const SETTLE_MS = 120 * 1000; // a decision younger than this may not have an agent yet
+const OPENINGS_KEEP_MS = 7 * DAY_MS;
+const MAX_OPENING_MS = 30 * 60_000; // the longest breaker (1800 s): an opening that began earlier cannot reach into the window
+const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const SESSION_ID = /^[A-Za-z0-9._-]{1,200}$/;
 const SELF = fileURLToPath(import.meta.url);
 const PLUGIN_ROOT = join(dirname(SELF), '..', '..');
@@ -62,6 +69,16 @@ export function isGuardEnabled(env = process.env, permissionMode) {
   return ['1', 'true'].includes(String(env.OMC_JEV_GUARD ?? '').trim().toLowerCase())
     && parseJevEnv('model-routing', env, permissionMode) === 'active';
 }
+
+// Sub-switches of the delivery check, each opt-in on top of OMC_JEV_GUARD=1 and each changing the daily result only when set:
+//   OMC_JEV_GUARD_EFFORT=1          compare the effort as well as the model; calls of a named agent (a team member, which
+//                                   the effort may not reach) are counted apart and leave the share
+//   OMC_JEV_GUARD_USE_MARKER=1      leave out the decisions of calls with a `use` marker (applied.jsonl, source "marker")
+//   OMC_JEV_GUARD_TIMEOUTS_ALARM=1  count the breaker's openings caused by missing responses and alarm when there are many
+const switchOn = (env, name) => String(env?.[name] ?? '').trim() === '1';
+export const isEffortCheckEnabled = (env = process.env) => switchOn(env, 'OMC_JEV_GUARD_EFFORT');
+export const isUseMarkerCheckEnabled = (env = process.env) => switchOn(env, 'OMC_JEV_GUARD_USE_MARKER');
+export const isTimeoutsAlarmEnabled = (env = process.env) => switchOn(env, 'OMC_JEV_GUARD_TIMEOUTS_ALARM');
 
 /** OMC_JEV_GUARD_MIN_TIMEOUT_S: a positive number of seconds, else the default. */
 export function minTimeoutSeconds(env = process.env) {
@@ -231,15 +248,32 @@ function changedSinceStartMessage(reasons) {
 export function deliveryMessage(result) {
   if (!result || typeof result !== 'object') return null;
   if (typeof result.error === 'string') return `Jev delivery guard: the daily check failed (${result.error}); it will try again in 24 hours.`;
+  return [deliveryPart(result), timeoutsMessage(result)].filter(Boolean).join('\n') || null;
+}
+
+// The alarm about the breaker opened by missing responses too often; null below the thresholds, or without the
+// fields (the daily result of a guard without OMC_JEV_GUARD_TIMEOUTS_ALARM).
+export function timeoutsMessage(result) {
+  const openings = Number(result?.breakerOpenings) || 0;
+  const minutes = Number(result?.breakerHeldMinutes) || 0;
+  if (!(openings > TIMEOUTS_ALERT_OPENINGS || minutes > TIMEOUTS_ALERT_MINUTES)) return null;
+  return `Jev delivery guard: in the last ${result.windowHours} h missing responses opened the Jev breaker ${openings} times (${minutes} min of held-back requests in all; the alarm is above ${TIMEOUTS_ALERT_OPENINGS} openings or above ${TIMEOUTS_ALERT_MINUTES} min per day). The Jev endpoint answers slowly; the hooks decide with their heuristics meanwhile.`;
+}
+
+function deliveryPart(result) {
   const interrupted = Number(result.interruptedAgentHooks) || 0;
   const percent = typeof result.deliveredPercent === 'number' ? result.deliveredPercent : null;
   // Use full-precision percent if available (production), otherwise fall back to rounded percent (tests/legacy)
   const thresholdPercent = typeof result.deliveredPercentFull === 'number' ? result.deliveredPercentFull : percent;
   if (!(interrupted > 0 || (thresholdPercent !== null && thresholdPercent < DELIVERY_ALERT_PERCENT))) return null;
+  // With the `use` marker left out of the count the share no longer holds it against the hook.
+  const markerLeftOut = typeof result.markerDecisions === 'number';
+  const alone = markerLeftOut ? 'forceInherit' : 'a `use` marker or forceInherit';
   const share = percent === null
     ? 'no active model-routing decision could be matched to an agent'
-    : `${result.delivered} of ${result.withAgent} Jev model decisions reached the agent (${percent} %; a call the hook leaves alone on purpose, such as a \`use\` marker or forceInherit, counts as not delivered)`;
-  return `Jev delivery guard: in the last ${result.windowHours} h ${share}; PreToolUse:Agent hooks interrupted: ${interrupted} (hooks of other commands: ${Number(result.interruptedOtherHooks) || 0}). An interrupted hook loses Jev's model and effort for that call: check the pre-tool-enforcer timeout in hooks/hooks.json and restart sessions started before it was raised.`;
+    : `${result.delivered} of ${result.withAgent} Jev ${typeof result.namedAgents === 'number' ? 'model and effort' : 'model'} decisions reached the agent (${percent} %; a call the hook leaves alone on purpose, such as ${alone}, counts as not delivered)`;
+  const named = Number(result.namedAgents) > 0 ? ` Named calls (the model only; the effort may not reach them): ${result.namedModelMatching} of ${result.namedAgents}.` : '';
+  return `Jev delivery guard: in the last ${result.windowHours} h ${share}; PreToolUse:Agent hooks interrupted: ${interrupted} (hooks of other commands: ${Number(result.interruptedOtherHooks) || 0}). An interrupted hook loses Jev's model and effort for that call: check the pre-tool-enforcer timeout in hooks/hooks.json and restart sessions started before it was raised.${named}`;
 }
 
 // Takes the slot of the daily check: a lock file created exclusively; a lock older than 30 minutes is a dead check.
@@ -406,7 +440,10 @@ async function* linesOf(path) {
 
 // Active model-routing decisions of the window that carry a tool_use_id field:
 // tool_use_id -> the model Jev chose. Rotated files (shadow-<stamp>-<pid>.jsonl) are read too.
-async function readDecisions(logDir, since, until) {
+// With `withEffort` (OMC_JEV_GUARD_EFFORT) the value is {model, effort}, the effort being the level of the
+// answer's effort score (rounded half to even, capped by OMC_JEV_MAX_EFFORT); a decision without a numeric
+// score is left out then.
+async function readDecisions(logDir, since, until, { withEffort = false, env = process.env } = {}) {
   const decisions = new Map();
   if (!logDir) return decisions;
   for (const path of listFiles(logDir, (name) => /^shadow(-\d{8}-\d{6}(-\d+)?)?\.jsonl$/.test(name), since)) {
@@ -417,10 +454,41 @@ async function readDecisions(logDir, since, until) {
       const at = Date.parse(row?.ts);
       const choice = row?.answers?.['model-tier']?.choice;
       if (row.point !== 'model-routing' || row.mode !== 'active' || typeof row.tool_use_id !== 'string' || typeof choice !== 'string') continue;
-      if (at > since && at <= until) decisions.set(row.tool_use_id, choice.toLowerCase());
+      if (!(at > since && at <= until)) continue;
+      if (!withEffort) { decisions.set(row.tool_use_id, choice.toLowerCase()); continue; }
+      const score = row?.answers?.effort?.score;
+      if (typeof score !== 'number') continue;
+      decisions.set(row.tool_use_id, { model: choice.toLowerCase(), effort: levelFromScore(score, env.OMC_JEV_MAX_EFFORT ?? 'max') });
     }
   }
   return decisions;
+}
+
+// The effort level of a score (0-4): rounded to the nearest level, a half to the even one, at most `cap`.
+export function levelFromScore(score, cap = 'max') {
+  const below = Math.floor(score);
+  const frac = score - below;
+  const index = frac < 0.5 ? below : frac > 0.5 ? below + 1 : (below % 2 === 0 ? below : below + 1);
+  const capped = LEVELS.indexOf(String(cap).trim().toLowerCase());
+  return LEVELS[Math.min(index, 4, capped === -1 ? 4 : capped)];
+}
+
+// Tool use ids of the window's model-routing decisions that carried a `use` marker (applied.jsonl rows whose
+// applied model or effort has source "marker"); those calls are not the hook's to deliver.
+async function readMarkerIds(logDir, since, until) {
+  const ids = new Set();
+  if (!logDir) return ids;
+  for (const path of listFiles(logDir, (name) => /^applied(-\d{8}-\d{6}(-\d+)?)?\.jsonl$/.test(name), since)) {
+    for await (const line of linesOf(path)) {
+      if (!line.includes('"model-routing"') || !line.includes('"marker"')) continue;
+      try {
+        const row = JSON.parse(line);
+        const at = Date.parse(row.ts);
+        if (row.point === 'model-routing' && row.tool_use_id && at > since && at <= until && (row.applied?.model?.source === 'marker' || row.applied?.effort?.source === 'marker')) ids.add(row.tool_use_id);
+      } catch { /* a cut or foreign line */ }
+    }
+  }
+  return ids;
 }
 
 // The variables Claude Code reads to resolve a tier alias to a model id; the first one that is set wins, as in
@@ -463,6 +531,16 @@ function readAgentModels(projectsDir, since) {
   return models;
 }
 
+// Model, effort and name of the agents that ran in the window: tool use id -> {model, effort, name}.
+function readAgentMetas(projectsDir, since) {
+  const metas = new Map();
+  for (const path of listFiles(projectsDir, (name) => /^agent-.+\.meta\.json$/.test(name), since)) {
+    const meta = readJson(path);
+    if (typeof meta?.toolUseId === 'string') metas.set(meta.toolUseId, { model: String(meta.model ?? '').toLowerCase(), effort: String(meta.effort ?? '').toLowerCase(), name: meta.name });
+  }
+  return metas;
+}
+
 // PreToolUse hooks Claude Code interrupted (hook attachments with "timedOut":true in the session
 // transcripts, nested agents included), each hook call counted once.
 async function countInterruptions(projectsDir, since, until) {
@@ -490,27 +568,95 @@ async function countInterruptions(projectsDir, since, until) {
   return counts;
 }
 
+// Directory of the breaker's openings log (scripts/lib/jev-breaker.mjs keeps it next to its per-endpoint directories).
+const openingsDir = (env = process.env) => {
+  let base = env.OMC_JEV_BREAKER_DIR;
+  if (!base) {
+    try { base = join(homedir(), '.omc', 'state', 'jev', 'breaker'); } catch { base = '.omc/state/jev/breaker'; }
+  }
+  return join(base, 'openings');
+};
+
+// Openings of the breaker in the window (one file <epoch ms>-<id>.json per opening: {ts, reason, scope, seconds,
+// until, since}). `timeouts` = openings with reason no-response (any scope) that began in the window, `timeoutsAll` =
+// of those the ones that held back every point, `other` = openings for any other reason, `minutes` = the union of
+// [ts, until] of the no-response openings clipped to the window (an opening that began up to 30 minutes before the
+// window and reaches into it counts for its part in the window). With `prune`, files older than 7 days than `wall`
+// are removed (the compaction module writes there too and does not clean up).
+export function countOpenings(dir, since, until, { prune = false, wall = Date.now() } = {}) {
+  const out = { timeouts: 0, timeoutsAll: 0, other: 0, minutes: 0 };
+  const spans = [];
+  let names = [];
+  try { names = readdirSync(dir); } catch { return out; }
+  for (const name of names) {
+    const at = Number(name.split('-')[0]);
+    if (!Number.isFinite(at)) continue;
+    if (prune && wall - at > OPENINGS_KEEP_MS) { try { unlinkSync(join(dir, name)); } catch { /* gone */ } continue; }
+    if (!(at > since - MAX_OPENING_MS && at <= until)) continue;
+    const row = readJson(join(dir, name));
+    if (!row || typeof row !== 'object') continue;
+    if (row.scope !== undefined && row.scope !== 'low' && row.scope !== 'all') continue; // a breaker of one point held back no other point
+    const begins = at > since;
+    if (row.reason !== 'no-response') { if (begins) out.other++; continue; }
+    if (begins) { out.timeouts++; if (row.scope !== 'low') out.timeoutsAll++; }
+    const end = Number.isFinite(row.until) ? Math.min(row.until, until) : at;
+    const from = Math.max(at, since);
+    if (end > from) spans.push([from, end]);
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let reach = -Infinity;
+  for (const [from, to] of spans) {
+    const start = Math.max(from, reach);
+    if (to > start) total += to - start;
+    reach = Math.max(reach, to);
+  }
+  out.minutes = Math.round(total / 6000) / 10;
+  return out;
+}
+
 /**
  * The daily figures for the window ending at `now`: interrupted PreToolUse hooks, and the share of
  * Jev's active model-routing decisions (shadow.jsonl lines with a tool_use_id) whose model is the one
  * in the agent's meta.json. Decisions with no agent found are left out of the share.
  */
-export async function computeDelivery({ logDir, configDir = getClaudeConfigDir(), now = Date.now(), windowMs = DAY_MS, env = process.env } = {}) {
+export async function computeDelivery({ logDir, configDir = getClaudeConfigDir(), now = Date.now(), windowMs = DAY_MS, env = process.env, pruneOpenings = false } = {}) {
   const since = now - windowMs;
   const projectsDir = join(configDir, 'projects');
   // With forceInherit the hook leaves the model of some calls alone: the share would say nothing then.
   // Decisions are read over the settled window (since - SETTLE_MS, now - SETTLE_MS]: a decision younger
   // than SETTLE_MS may not have an agent yet, and shifting the whole window instead of trimming its tail
   // makes back-to-back daily runs cover every decision exactly once.
+  const withEffort = isEffortCheckEnabled(env);
   const decisions = env.OMC_ROUTING_FORCE_INHERIT === 'true'
     ? new Map()
-    : await readDecisions(logDir, since - SETTLE_MS, now - SETTLE_MS);
-  const models = readAgentModels(projectsDir, since - SETTLE_MS - 3600 * 1000);
+    : await readDecisions(logDir, since - SETTLE_MS, now - SETTLE_MS, { withEffort, env });
   const result = { ts: now, windowHours: Math.round(windowMs / 360000) / 10, decisions: decisions.size, withAgent: 0, delivered: 0, deliveredPercent: null };
-  for (const [id, wanted] of decisions) {
-    if (!models.has(id)) continue;
-    result.withAgent++;
-    if (modelMatches(models.get(id), wanted, env)) result.delivered++;
+  if (withEffort || isUseMarkerCheckEnabled(env)) {
+    const markers = isUseMarkerCheckEnabled(env) ? await readMarkerIds(logDir, since - SETTLE_MS, now) : new Set();
+    const metas = readAgentMetas(projectsDir, since - SETTLE_MS - 3600 * 1000);
+    if (isUseMarkerCheckEnabled(env)) result.markerDecisions = 0;
+    if (withEffort) { result.namedAgents = 0; result.namedModelMatching = 0; }
+    for (const [id, wanted] of decisions) {
+      if (markers.has(id)) { result.markerDecisions++; continue; }
+      const meta = metas.get(id);
+      if (!meta) continue;
+      const wantedModel = withEffort ? wanted.model : wanted;
+      if (withEffort && typeof meta.name === 'string' && meta.name.trim() !== '') {
+        result.namedAgents++;
+        if (modelMatches(meta.model, wantedModel, env)) result.namedModelMatching++;
+        continue;
+      }
+      result.withAgent++;
+      if (modelMatches(meta.model, wantedModel, env) && (!withEffort || meta.effort === wanted.effort)) result.delivered++;
+    }
+  } else {
+    const models = readAgentModels(projectsDir, since - SETTLE_MS - 3600 * 1000);
+    for (const [id, wanted] of decisions) {
+      if (!models.has(id)) continue;
+      result.withAgent++;
+      if (modelMatches(models.get(id), wanted, env)) result.delivered++;
+    }
   }
   if (result.withAgent > 0) {
     const fullPercent = (1000 * result.delivered) / result.withAgent / 10;
@@ -520,6 +666,13 @@ export async function computeDelivery({ logDir, configDir = getClaudeConfigDir()
   const interrupted = await countInterruptions(projectsDir, since, now);
   result.interruptedAgentHooks = interrupted.agent;
   result.interruptedOtherHooks = interrupted.other;
+  if (isTimeoutsAlarmEnabled(env)) {
+    const opened = countOpenings(openingsDir(env), since, now, { prune: pruneOpenings });
+    result.breakerOpenings = opened.timeouts;
+    result.breakerOpeningsAll = opened.timeoutsAll;
+    result.breakerOpeningsOther = opened.other;
+    result.breakerHeldMinutes = opened.minutes;
+  }
   return result;
 }
 
@@ -550,6 +703,7 @@ async function runDailyCheck(argv) {
       configDir,
       now: Number.isFinite(now) ? now : Date.now(),
       windowMs: hours > 0 ? hours * 3600000 : DAY_MS,
+      pruneOpenings: argv.includes('--write') && !Number.isFinite(now),
     });
   } catch (error) {
     result = { ts: Date.now(), error: String(error?.message ?? error).slice(0, 200) };
