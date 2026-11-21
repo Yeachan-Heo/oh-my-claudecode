@@ -111,6 +111,20 @@ const readFile = (file) => {
   return fs.readFileSync(file, 'utf8');
 };
 
+// == read JSON ==
+// Every JSON file the commands read goes through here: a regular file, as the runtime reads it (utf-8 text, then JSON.parse,
+// as in isClaudeMdEnabledInConfig and readJsonFile). A byte order mark is not stripped, because the runtime does not strip
+// it either: its parse fails on a file that starts with one, and it takes such a file for a missing config, so a file with one
+// cannot be told to hold the setting it carries. UTF-8 with a mark (Windows PowerShell 5.1 and many editors) arrives as U+FEFF,
+// UTF-16 with a mark (the default of > and Out-File there, FF FE or FE FF) as two U+FFFD. The error is a SyntaxError that says
+// so (bom), so a caller that prints the reason can tell it from text that is no JSON, and one that does not still sees a
+// SyntaxError.
+const readJson = (file) => {
+  const text = readFile(file);
+  if (text.startsWith('\uFEFF') || text.startsWith('\uFFFD\uFFFD')) throw Object.assign(new SyntaxError('byte order mark'), { bom: true });
+  return JSON.parse(text);
+};
+
 // == registry entry shape ==
 // An entry of installed_plugins.json is malformed unless it has a non-blank string version or installPath
 // (a null field counts as missing, a non-string or blank one is malformed).
@@ -215,7 +229,7 @@ const absent = (error, target) => !!error && error.code == 'ENOENT' && nothingAt
 // occurrence. It is omc when the registry holds none and when it cannot be read (missing, a FIFO, bad JSON).
 const registryMarketplaces = () => {
   try {
-    const json = JSON.parse(readFile(path.join(configDir, 'plugins', 'installed_plugins.json')));
+    const json = readJson(path.join(configDir, 'plugins', 'installed_plugins.json'));
     const plugins = json ? json.plugins ?? json : 0;
     const names = Object.keys(plugins && typeof plugins == 'object' && !Array.isArray(plugins) ? plugins : {})
       .filter((key) => OMC_IDS.includes(key.toLowerCase()))
@@ -243,7 +257,7 @@ const MANIFEST_FILES = ['package.json', '.claude-plugin/plugin.json'];
 const manifestVersion = (dir) => {
   for (const name of MANIFEST_FILES) {
     try {
-      const version = JSON.parse(readFile([dir, name].join(path.sep))).version;
+      const version = readJson([dir, name].join(path.sep)).version;
       if (typeof version == 'string' && version.trim()) return semver(version) || null;
     } catch {}
   }
@@ -401,7 +415,7 @@ const readChannelRegistry = () => {
   const merged = new Map();
   const file = path.join(configDir, 'plugins', 'installed_plugins.json');
   try {
-    const json = JSON.parse(readFile(file));
+    const json = readJson(file);
     const plugins = json ? json.plugins ?? json : 0;
     if (!plugins || typeof plugins != 'object' || Array.isArray(plugins)) throw 0;
     for (const [key, entries] of Object.entries(plugins)) {
@@ -495,9 +509,7 @@ const step1 = () => {
       // The latest version is the one the marketplace clone advertises, when it is a semver.
       let latest = null;
       try {
-        const manifest = JSON.parse(
-          readFile(path.join(configDir, 'plugins', 'marketplaces', market, '.claude-plugin', 'marketplace.json')),
-        );
+        const manifest = readJson(path.join(configDir, 'plugins', 'marketplaces', market, '.claude-plugin', 'marketplace.json'));
         const found = Array.isArray(manifest.plugins) ? manifest.plugins.find((x) => x && x.name == 'oh-my-claudecode') : null;
         latest = found && typeof found.version == 'string' ? semver(found.version) || null : null;
       } catch {}
@@ -567,17 +579,17 @@ const npmLatest = () => {
 // == Step 4 ==
 // Whether CLAUDE.md management is disabled: only an explicit claudeMdEnabled: false in .omc-config.json disables it.
 // A file that is there but cannot be read (a link to nothing, EACCES), is not a regular file (a directory, a FIFO) or is
-// not JSON (an empty file included) may hold the opt-out, so that is neither line.
+// not JSON (an empty file, and one that starts with a byte order mark, included) may hold the opt-out, so that is neither line.
 const claudeMdOptOut = () => {
   const file = path.join(configDir, '.omc-config.json');
   let off = false;
   let cannotRead = '';
   try {
-    off = JSON.parse(readFile(file))?.claudeMdEnabled === false;
+    off = readJson(file)?.claudeMdEnabled === false;
   } catch (error) {
     // readFile throws 0 for a file that is not a regular one.
     if (error === 0) cannotRead = 'not a regular file';
-    else if (error instanceof SyntaxError) cannotRead = 'not valid JSON';
+    else if (error instanceof SyntaxError) cannotRead = error.bom ? 'has a byte order mark' : 'not valid JSON';
     else if (error && error.code && !absent(error, file)) cannotRead = error.code;
   }
   console.log(
@@ -767,7 +779,7 @@ const readRegistry = () => {
   let other = [];
   let ids = [];
   try {
-    const json = JSON.parse(readFile(registryFile));
+    const json = readJson(registryFile);
     const plugins = json ? json.plugins ?? json : 0;
     if (!plugins || typeof plugins != 'object' || Array.isArray(plugins)) throw 0;
     for (const [key, entries] of Object.entries(plugins)) {
@@ -938,7 +950,7 @@ const protectionOf = (dir, versions) => {
       const file = path.join(occupancyDir, name);
       try {
         if (!fs.lstatSync(file).isFile()) continue;
-        const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const record = readJson(file);
         if (ownerGone(record)) continue;
         if (typeof record.pluginRoot != 'string' || !record.pluginRoot.trim()) throw 0;
         held.push(record.pluginRoot, path.resolve(record.pluginRoot));

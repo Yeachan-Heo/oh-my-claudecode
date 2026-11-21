@@ -268,6 +268,53 @@ describe('omc-doctor opt-out probe names a file it cannot use', { timeout: 120_0
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // The runtime reads the file as utf-8 text and parses it (isClaudeMdEnabledInConfig, readJsonFile): a byte order mark makes
+  // that fail and the file counts as no config there, so the probe cannot tell what a file with one says. It stays unknown, with
+  // the reason named, for UTF-8 with a mark (editors, Windows PowerShell 5.1 Set-Content) and for UTF-16 with a mark (the
+  // default of > and Out-File there); the same text without the mark is read, and text that is no JSON keeps its own reason.
+  test('a byte order mark, UTF-8 or UTF-16, is named and is not read as the setting', () => {
+    const dir = world();
+    try {
+      const file = path.join(dir, '.omc-config.json');
+      const text = '{"claudeMdEnabled": false}';
+      const utf16le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]);
+      const utf16be = Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()]);
+      const reasons: Array<[string, Buffer, string]> = [
+        ['UTF-8 with a mark', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]), 'has a byte order mark'],
+        ['UTF-16LE with a mark', utf16le, 'has a byte order mark'],
+        ['UTF-16BE with a mark', utf16be, 'has a byte order mark'],
+        ['UTF-8 without a mark', Buffer.from(text), ''],
+        ['text that is no JSON', Buffer.from('{not json'), 'not valid JSON'],
+        ['UTF-16LE without a mark', Buffer.from(text, 'utf16le'), 'not valid JSON'],
+      ];
+      for (const [label, bytes, reason] of reasons) {
+        writeFileSync(file, bytes);
+        const expected = reason ? `CLAUDE.md management unknown: could not read .omc-config.json (${reason})\n` : 'CLAUDE.md management disabled by claudeMdEnabled: false\n';
+        expect({ label, out: run(probe, dir) }).toEqual({ label, out: expected });
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The other JSON files go through the same reader, so a mark is no different there: a registry that starts with one cannot be
+  // used (as for the runtime), whatever the reader says about the reason.
+  test('a registry that starts with a byte order mark cannot be used, and the version check says so', () => {
+    const dir = world();
+    try {
+      writeFileSync(path.join(dir, 'CLAUDE.md'), MARKER);
+      const registry = path.join(dir, 'plugins', 'installed_plugins.json');
+      writeFileSync(registry, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify({ plugins: { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] } }))]));
+      const out = run(step4, dir);
+      expect(out).toContain('Latest cached plugin version: (unknown)');
+      expect(out).toContain('VERSION CHECK SKIPPED: installed_plugins.json cannot be used');
+      writeFileSync(registry, JSON.stringify({ plugins: { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] } }));
+      expect(run(step4, dir)).toContain('VERSION MATCH');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // The marker line of the shell block of Step 4: grep fails with 2 for a file it cannot read and with 1 for one without
@@ -418,7 +465,7 @@ describe('omc-doctor skill: the CLAUDE.md fix and the diagnosis name the lines o
     expect(skillText).toContain('and when it printed `Could not read CLAUDE.md` or the version `(unreadable)`: write nothing through a file that cannot be read.');
     expect(skillText).toContain('`Could not read CLAUDE.md`: WARN, it is there and unreadable');
     expect(skillText).toContain('`(unreadable)` as the CLAUDE.md version or a `Note:` about an unreadable plugin cache or an unusable `installed_plugins.json`: WARN');
-    expect(skillText).toContain('`not a regular file`, or `not valid JSON`');
+    expect(skillText).toContain('`not a regular file`, `has a byte order mark` (the runtime cannot read such a file either; it is to be saved without one) or `not valid JSON`');
     expect(skillText).toContain('`(none)`, `(unknown)` and `(unreadable)` are no versions');
   });
 });
