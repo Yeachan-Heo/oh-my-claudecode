@@ -2490,10 +2490,7 @@ export async function recordRecoveryPaneSplit(
   paneAttemptId: string,
 ): Promise<void> {
   await writeAtomic(
-    absPath(
-      input.cwd,
-      TeamPaths.recoveryPaneSplit(input.teamName, recoveryId, paneAttemptId),
-    ),
+    recoveryPaneSplitPath(input, recoveryId, paneAttemptId),
     JSON.stringify({
       schema_version: 1,
       request_id: input.requestId,
@@ -2505,19 +2502,37 @@ export async function recordRecoveryPaneSplit(
   );
 }
 
-// A record left behind only keeps the deadline from ending the recovery.
+// A record left behind only keeps the deadline from ending the recovery, so
+// an unsafe id or a failed removal leaves it in place.
 export async function clearRecoveryPaneSplit(
   input: RecoverDeadWorkerOwnerInput,
   recoveryId: string,
   paneAttemptId: string,
 ): Promise<void> {
-  await rm(
-    absPath(
-      input.cwd,
-      TeamPaths.recoveryPaneSplit(input.teamName, recoveryId, paneAttemptId),
-    ),
-    { force: true },
-  ).catch(() => undefined);
+  try {
+    await rm(recoveryPaneSplitPath(input, recoveryId, paneAttemptId), {
+      force: true,
+    });
+  } catch {
+    // Left in place.
+  }
+}
+
+// A pane attempt id restored from a launch record is only known to be text.
+function recoveryPaneSplitPath(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+  paneAttemptId: string,
+): string {
+  if (
+    !isSafeRecoveryRequestId(recoveryId) ||
+    !isSafeRecoveryRequestId(paneAttemptId)
+  )
+    throw new Error("invalid_recovery_pane_split_id");
+  return absPath(
+    input.cwd,
+    TeamPaths.recoveryPaneSplit(input.teamName, recoveryId, paneAttemptId),
+  );
 }
 
 async function recordRecoveryPaneRollbackFailure(
