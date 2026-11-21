@@ -800,6 +800,33 @@ describe('user prohibitions after compaction', () => {
     expect(report.candidates.by_class).toEqual({ run: 3 });
   });
 
+  it('process substitutions of any depth end; the bodies down to nine levels are read and a command that holds one deeper is no read-only command', () => {
+    // No time budget: a call that does not end is killed by the limit of pyEval, and a RecursionError fails the call.
+    const result = pyEval(`{
+      "chains": [
+        module.is_read_only_command("echo >(" * depth + body + ")" * depth)
+        for depth, body in [(1, "cat"), (8, "cat"), (9, "cat"), (10, "cat"), (11, "cat"), (9, "tee f"), (10, "tee f"), (600, "cat"), (3000, "tee f")]
+      ],
+      "open": [module.is_read_only_command(command) for command in ["echo " + ">(" * 1000, ">(" * 50000, "<(" * 30000 + "cat", ">(" * 50000 + ")" * 50000]],
+      "wide": [module.is_read_only_command(command) for command in ["echo " + ">(cat) " * 5000, "echo " + ">(cat) " * 5000 + ">(tee f)"]],
+      "mixed": [module.is_read_only_command(command) for command in ["cat <(echo >(tee f))", "cat <(echo >(cat))", "echo $(echo >(tee f))", "echo >(echo $(echo >(tee f)))",
+                                                                      "echo $(" * 9 + "echo >(tee f)" + ")" * 9, "echo $(" * 12 + "echo >(cat)" + ")" * 12]],
+      "long": [module.is_read_only_command("echo >(cat " + "x" * 100001 + " >(tee f))"), module.is_read_only_command("echo >(cat " + "x" * 100001 + ")")],
+    }`, null);
+    // Nine levels of bodies are read, so nine nested read-only bodies are read-only and ten are not; a write is a write at every depth.
+    expect(result.chains).toEqual([true, true, true, false, false, false, false, false, false]);
+    expect(result.open).toEqual([false, false, false, false]);
+    expect(result.wide).toEqual([true, false]);
+    expect(result.mixed).toEqual([false, true, false, false, false, false]);
+    expect(result.long).toEqual([false, true]);
+    // Each body is judged once, so the judgements of a command are the command and its bodies, not a number that doubles with every level.
+    const judged = pyEval(`(lambda mock: (
+      mock.patch.object(module, "is_read_only_command", wraps=module.is_read_only_command).start(),
+      [(module.is_read_only_command.reset_mock(), module.is_read_only_command(command), module.is_read_only_command.call_count)[2] for command in argument],
+    )[1])(__import__("unittest.mock").mock)`, ['echo >(echo >(echo >(cat)))', 'echo ' + 'echo >('.repeat(9) + 'cat' + ')'.repeat(9), 'echo ' + '>(cat) '.repeat(50)]);
+    expect(judged).toEqual([4, 10, 51]);
+  });
+
   it('the value of a leading assignment is one shell word: quoted, with an escaped space, empty or a command substitution', () => {
     const values = [
       'MODE="deep analysis"', "MODE='deep analysis'", 'MODE=deep\\ analysis', 'MODE=', 'A=$(date)', 'A=$(git rev-parse HEAD)', 'A=$(a b c)',

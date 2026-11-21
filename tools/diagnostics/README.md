@@ -1105,7 +1105,10 @@ command substitution. These constructs stay outside the scope of every tool, so 
   `/dev/tcp/host/port`) is no file either, and neither are the descriptor forms (`>&2`, `>&-`, `2>&1`), `[[ a > b ]]`, `(( a > b ))`,
   `$(( a>b ))` and `${v:-a>b}`; `&>`, `>|`, `>>` and `<>` write. In the read-only judgement of the user prohibitions tool a
   command whose first word only reads stays read-only behind a pipe into a writer (`echo hi | tee >(cat) src/a.ts`), as without the
-  process substitution.
+  process substitution. The user prohibitions tool reads the bodies of process substitutions nested in each other or in command
+  substitutions down to nine levels and judges each body once, so a text of any depth ends in time linear in its length; a command that
+  holds a process substitution below those levels, or in a body of more than 100000 characters, is state-changing (`echo >(` nested nine
+  times around `cat` is read-only, ten times is not).
 - A command substitution inside double quotes is not read as a command (`echo "$(echo x>f)"` writes `f` and counts as no write), and a
   quote inside one (`echo "$(echo ">f")"`) ends the quoted string early, so the `>f` behind it is read as a redirection.
 

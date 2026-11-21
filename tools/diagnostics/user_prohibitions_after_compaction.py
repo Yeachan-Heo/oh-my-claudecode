@@ -1527,23 +1527,34 @@ def writes_by_redirection(command, depth=0):
 
 def process_bodies(command, depth=0):
     """The bodies of the process substitutions (`>(...)`, `<(...)`) of a Bash command, the ones inside the bodies of its
-    command substitutions included."""
+    command substitutions and of its process substitutions included, down to SUBSTITUTION_MAX_DEPTH + 1 levels of bodies. None
+    when a body below them holds the text of a process substitution anywhere: that body is not read, so the command is not
+    judged."""
     _text, bodies = split_substitutions(without_heredoc_bodies(command), "_", True)
     found = [body for body in bodies if isinstance(body, ProcessBody)]
-    if depth < SUBSTITUTION_MAX_DEPTH:
-        for body in bodies:
-            if len(body) <= NESTED_MAX_LENGTH:
-                found.extend(process_bodies(body, depth + 1))
+    for body in bodies:
+        if depth < SUBSTITUTION_MAX_DEPTH:
+            deeper = process_bodies(body, depth + 1)
+            if deeper is None:
+                return None
+            found.extend(deeper)
+        elif "<(" in body or ">(" in body:
+            return None
     return found
 
 
-def is_read_only_command(command):
+def is_read_only_command(command, judge_process_bodies=True):
     """Rule c, v2: True when a Bash command only reads state. Judged by its first word, after the leading environment
     assignments and redirections and after launch wrappers; a write redirection to a file (outside quotes) makes any command
     state-changing, and so does a process substitution whose body is not read-only (`echo >(tee f)`; `echo >(cat)` only prints
-    a path)."""
-    if writes_by_redirection(command) or not all(is_read_only_command(str(body)) for body in process_bodies(command)):
+    a path) or that lies deeper than process_bodies reads. process_bodies lists the bodies nested in bodies as well, so each body
+    is judged once, without its own process bodies: the work is linear in the length of the command and a text of any depth ends."""
+    if writes_by_redirection(command):
         return False
+    if judge_process_bodies:
+        bodies = process_bodies(command)
+        if bodies is None or not all(is_read_only_command(str(body), False) for body in bodies):
+            return False
     words = skip_prefix(command).split()
     # The wrappers are read on the words as the shell passes them on: `timeout "5" rm -rf build` runs `rm`, so the duration
     # is read without its quotes. A word that holds a boundary or more than one shell word is kept as it stands.
