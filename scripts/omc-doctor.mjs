@@ -973,7 +973,7 @@ const protectionOf = (dir, versions) => {
 // backup directory is resolved first, the way the file system does (every link on the way; for what does not exist yet
 // its nearest existing parent and the rest of the name), and has to lie outside every tree below. backupPlace(registry)
 // answers { place, problem }: place is the real directory the moves go to, problem is empty when all is well and says
-// why nothing is moved otherwise. The trees: the plugin cache and the cache of every marketplace of the registry, the
+// why nothing is moved otherwise. The trees: the plugin cache (the cache of every marketplace lies inside it), the
 // marketplace clones, the occupancy records, the plugin root variables and every installPath of the registry, each as
 // written and as the file system reads it (a .. after a link). Both directions count (the destination inside a tree, a
 // tree inside the destination); a destination the configuration itself writes inside a tree (an active root that is the
@@ -988,7 +988,7 @@ const resolvable = (target) => {
     return !!error && ((error.code == 'ENOENT' && nothingAt(target)) || error.code == 'ENOTDIR');
   }
 };
-const backupPlace = (registry, markets) => {
+const backupPlace = (registry) => {
   const chain = linkChain(backups);
   const place = chain.paths[chain.paths.length - 1];
   const stop = (reason) => ({ place, problem: 'Nothing moved: ' + reason + '; fix that first, then run this again' });
@@ -1002,7 +1002,6 @@ const backupPlace = (registry, markets) => {
   const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT].map((root) => (root || '').trim()).filter(Boolean);
   const trees = [
     ['the plugin cache', path.join(configDir, 'plugins', 'cache')],
-    ...[...new Set([...markets, 'omc'])].map((market) => ['the cache of ' + market, cacheDirOf(market)]),
     ['the marketplace clones', path.join(configDir, 'plugins', 'marketplaces')],
     ['the occupancy records', occupancyDir],
     ...roots.flatMap(bothForms).map((root) => ['the plugin root', root]),
@@ -1073,7 +1072,7 @@ const cacheRepair = (kind) => {
       if (state.pinned.length && free.length) {
         // Where the moves go is settled before the first one: a link in the way of the backup directory may lead into a
         // cache version, where the only recovery copy would be removed or relinked by the next cleanup.
-        const target = backupPlace(registry, markets);
+        const target = backupPlace(registry);
         if (target.problem) {
           refuse(lead + target.problem);
           return true;
@@ -1103,7 +1102,7 @@ const cacheRepair = (kind) => {
           if (taken(backup)) throw new Error('the backup destination ' + backup + ' exists already, so nothing was moved to it');
           // Everything is read again just before the move: the backup directory (a change stops the command) and the
           // protection (a version that became protected is skipped).
-          const here = backupPlace(registry, markets);
+          const here = backupPlace(registry);
           if (here.problem || here.place != target.place) throw new Error('the backup directory changed or overlaps a cache tree now, so nothing more was moved: ' + (here.problem || here.place));
           const again = protectionOf(dir, versions);
           if (again.unreadable || again.noIdentity || !again.pinned.length || again.kept.includes(name)) {

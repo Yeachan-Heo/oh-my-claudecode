@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
@@ -14,6 +15,16 @@ import { backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, P
 const posix = process.platform !== 'win32';
 const PLATFORMS = ['linux', 'darwin'] as const;
 const GONE = 'no-such-target';
+// A volume that ignores letter case names one directory by two spellings, so the case test below cannot run on it.
+const foldsCase = (() => {
+  const probe = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+  try {
+    mkdirSync(path.join(probe, 'a'));
+    return existsSync(path.join(probe, 'A'));
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+})();
 
 const platformPreload = (dir: string, name: string) => {
   const file = path.join(dir, `platform-${name}.cjs`);
@@ -162,6 +173,37 @@ describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and 
         const result = runCommand(command, dir, { timeout: 20_000 });
         expect({ command, status: result.status, refused: /Nothing moved: the backup directory /.test(result.stdout), cause: cause.test(result.stdout) }).toEqual({ command, status: 1, refused: true, cause: true });
         expect(readdirSync(cache).sort()).toEqual(ALL);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // Where the file system reports no identity for the cache (inode 0, as some volumes that ignore letter case do), a
+  // destination that differs from the cache only by letter case may be the cache itself: it cannot be compared, so it is
+  // refused like an overlap. On this volume plugins/CACHE is another directory, which is what makes the case testable.
+  test.skipIf(foldsCase)('a destination that differs from the cache only by letter case, where the cache has no identity, is refused as not comparable', () => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        const stash = path.join(dir, 'plugins', 'CACHE', 'stash');
+        mkdirSync(stash, { recursive: true });
+        link(stash, path.join(dir, 'plugins', 'backups'));
+        const file = path.join(dir, 'zero-inode-cache.cjs');
+        writeFileSync(file, `const fs = require('fs');
+for (const name of ['statSync', 'lstatSync']) {
+  const real = fs[name];
+  fs[name] = function (target, options) {
+    const stat = real.call(fs, target, options);
+    if (options && options.bigint && /[\\\\/]plugins[\\\\/]cache(?![^\\\\/])/.test(String(target))) stat.ino = 0n;
+    return stat;
+  };
+}
+`);
+        const result = runCommand(command, dir, { preloads: [file], timeout: 20_000 });
+        expect({ command, status: result.status, refused: /Nothing moved: the file system gives no identity to the backup directory \S+ \(really \S+\) or to /.test(result.stdout) }).toEqual({ command, status: 1, refused: true });
+        expect(readdirSync(cache).sort()).toEqual(ALL);
+        expect(readdirSync(stash)).toEqual([]);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
