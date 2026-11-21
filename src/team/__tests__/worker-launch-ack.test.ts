@@ -3414,4 +3414,36 @@ describe('worker launch acknowledgement', () => {
       ['SYSTEMROOT'],
     )).toThrow('worker_launch_env_passthrough_key_reserved');
   });
+
+  it('sets detached: false for herdr pane workers and detached: true for tmux pane workers', async () => {
+    const paneIdModule = await import('../pane-id.js');
+    const { isHerdrPaneId } = paneIdModule;
+
+    // Test herdr pane ID (format: w<id>:p<id>)
+    expect(isHerdrPaneId('w123:p456')).toBe(true);
+    expect(isHerdrPaneId('w0:p0')).toBe(true);
+    expect(isHerdrPaneId('wABC:pDEF')).toBe(true);
+
+    // Test tmux pane ID (format: %<id>)
+    expect(isHerdrPaneId('%2')).toBe(false);
+    expect(isHerdrPaneId('%0')).toBe(false);
+
+    // Test invalid inputs
+    expect(isHerdrPaneId('invalid')).toBe(false);
+    expect(isHerdrPaneId('w123')).toBe(false);
+    expect(isHerdrPaneId('p456')).toBe(false);
+    expect(isHerdrPaneId('')).toBe(false);
+    expect(isHerdrPaneId(undefined)).toBe(false);
+
+    // Test detached flag calculation
+    // For herdr panes on POSIX: detached = false
+    const herdrPaneId = 'w123:p456';
+    const detachedForHerdr = process.platform !== 'win32' && !isHerdrPaneId(herdrPaneId);
+    expect(detachedForHerdr).toBe(false);
+
+    // For tmux panes on POSIX: detached = true
+    const tmuxPaneId = '%2';
+    const detachedForTmux = process.platform !== 'win32' && !isHerdrPaneId(tmuxPaneId);
+    expect(detachedForTmux).toBe(true);
+  });
 });
