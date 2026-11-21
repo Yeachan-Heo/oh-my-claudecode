@@ -1,0 +1,339 @@
+/**
+ * The TS resolver masks a point's state before it is bounded, sent or logged
+ * (scripts/lib/jev-state-mask.mjs), and sends nothing when it cannot.
+ */
+import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetJevResolverState, resolveJudgment } from '../resolver.js';
+import type { JevQuestions } from '../types.js';
+
+const ENV_KEYS = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_ENDPOINT', 'OMC_JEV_QUIET', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING'] as const;
+const QUESTIONS: JevQuestions = {
+  route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
+};
+const GHP = 'ghp_' + 'A'.repeat(36);
+
+let dir = '';
+const savedEnv: Record<string, string | undefined> = {};
+
+beforeEach(async () => {
+  resetJevResolverState();
+  dir = await mkdtemp(join(tmpdir(), 'jev-resolver-mask-'));
+  for (const key of ENV_KEYS) {
+    savedEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+  process.env.TYPESAFE_API_KEY = 'test-key';
+  process.env.OMC_JEV = 'model-routing:active';
+  process.env.OMC_JEV_LOG_DIR = join(dir, 'log');
+  process.env.OMC_JEV_ENDPOINT = 'http://127.0.0.1:9/v1/systemone';
+});
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  for (const key of ENV_KEYS) {
+    if (savedEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedEnv[key];
+  }
+  await rm(dir, { recursive: true, force: true });
+});
+
+function recordingFetch(bodies: string[]): typeof fetch {
+  return (async (_url: unknown, init: { body: string }) => {
+    bodies.push(String(init.body));
+    return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) } as unknown as Response;
+  }) as unknown as typeof fetch;
+}
+
+/** A state that cannot be masked and that the resolver itself handles without a stack overflow: 65 levels. */
+function deepState(levels: number): unknown {
+  let value: unknown = 'leaf';
+  for (let i = 0; i < levels; i++) value = { a: value };
+  return value;
+}
+
+function lastLogLine(): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8').trim().split('\n').pop() as string);
+}
+
+describe('resolveJudgment state mask', () => {
+  it('sends and logs a state without secrets and keeps token counters', async () => {
+    const bodies: string[] = [];
+    const state = { prompt: `use ${GHP}\ncat /home/u/.ssh/id_ed25519`, config: { password: 'hunter2zzQ', totalTokens: 1234 } };
+    const result = await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(result).toMatchObject({ mode: 'active', source: 'jev' });
+    expect(bodies).toHaveLength(1);
+    const line = readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    for (const text of [bodies[0], line]) {
+      expect(text).not.toContain(GHP);
+      expect(text).not.toContain('hunter2zzQ');
+      expect(text).not.toContain('id_ed25519');
+      expect(text).toContain('1234');
+    }
+  });
+
+  it('masks a token under a cwd key at any place of the state, and keeps a UUID under session_id at the top only', async () => {
+    const uuid = '8f14e45f-ceea-4672-8a3e-5e1b6f3d2a10';
+    const state = { session_id: uuid, cwd: '/tmp/' + GHP, tool_name: 'Edit', tool_input: { cwd: '/tmp/' + GHP, session_id: uuid, nested: [{ cwd: '/tmp/' + GHP }] } };
+    const expected = { session_id: uuid, cwd: '/tmp/ghp_***', tool_name: 'Edit', tool_input: { cwd: '/tmp/ghp_***', session_id: '***', nested: [{ cwd: '/tmp/ghp_***' }] } };
+    const bodies: string[] = [];
+    const result = await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(result).toMatchObject({ mode: 'active', source: 'jev' });
+    expect(bodies).toHaveLength(1);
+    const line = readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    expect(JSON.parse(bodies[0]).state).toEqual(expected);
+    expect(lastLogLine().state).toEqual(expected);
+    for (const text of [bodies[0], line]) expect(text).not.toContain(GHP);
+  });
+
+  it('sends nothing, answers with the twin and logs a marker when the state cannot be masked', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bodies: string[] = [];
+    const state = deepState(65);
+    const args = { point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) };
+    expect(await resolveJudgment(args)).toEqual({ answer: 'sonnet', source: 'twin', mode: 'degraded' });
+    expect(await resolveJudgment(args)).toEqual({ answer: 'sonnet', source: 'twin', mode: 'degraded' });
+    expect(bodies).toHaveLength(0);
+    expect(lastLogLine()).toMatchObject({ mode: 'degraded', state: '[state not sent: mask failed]', jev: null });
+        // one warning per process
+    const warnings = error.mock.calls.filter(([m]) => String(m).includes('mask failed'));
+    expect(warnings).toHaveLength(1);
+    expect(String(warnings[0][0])).toBe('[jev] model-routing: degraded - state not sent: mask failed (JevStateMaskError)');
+  });
+
+  it('stays silent with OMC_JEV_QUIET=1', async () => {
+    process.env.OMC_JEV_QUIET = '1';
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await resolveJudgment({ point: 'model-routing', state: deepState(65), questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch([]) });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('does not count a call that was not sent against OMC_JEV_MAX_REQUESTS and does not open the circuit', async () => {
+    process.env.OMC_JEV_MAX_REQUESTS = '1';
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bad = deepState(65);
+    const bodies: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      await resolveJudgment({ point: 'model-routing', state: bad, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    }
+    const result = await resolveJudgment({ point: 'model-routing', state: { prompt: 'ok' }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(result).toMatchObject({ mode: 'active', source: 'jev' });
+    expect(bodies).toHaveLength(1);
+  });
+
+  it('sends nothing when a string of the state is a secret path whole, with its own marker, no slot and no circuit', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.OMC_JEV_MAX_REQUESTS = '1';
+    const bodies: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const result = await resolveJudgment({ point: 'model-routing', state: { task: 'Do not touch the .env handling.' }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(result).toEqual({ answer: 'sonnet', source: 'twin', mode: 'degraded' });
+    }
+    expect(bodies).toHaveLength(0);
+    expect(lastLogLine()).toMatchObject({ mode: 'degraded', state: '[state not sent: secret path]', jev: null });
+    const ok = await resolveJudgment({ point: 'model-routing', state: { task: 'fix the build\ncat /srv/app/.env' }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(ok).toMatchObject({ mode: 'active', source: 'jev' });
+    expect(JSON.parse(bodies[0]).state.task).toBe('fix the build\n[line omitted: secret path]');
+  });
+
+  it('masks a secret that starts just before the edge of the window whole, in the body and in the log', async () => {
+    process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '100';
+    const bodies: string[] = [];
+    await resolveJudgment({ point: 'model-routing', state: { task: ' '.repeat(95) + GHP + ' tail' }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    for (const text of [bodies[0], readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8')]) expect(text).not.toMatch(/ghp_[A-Za-z0-9]/);
+    delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+  });
+
+  it('masks a private key block of RSA 4096 size that starts 100 characters before the edge of the window', async () => {
+    process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    const body = ('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC' + 'x'.repeat(14)).repeat(40);
+    const text = 'a'.repeat(100) + '\n-----BEGIN RSA PRIVATE KEY-----\n' + body + '\n-----END RSA PRIVATE KEY-----\nafter';
+    const bodies: string[] = [];
+    await resolveJudgment({ point: 'model-routing', state: { task: text }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    for (const sent of [bodies[0], readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8')]) expect(sent).not.toContain('MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSj');
+    delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+  });
+
+  it('masks URL credentials whose "@" is beyond the margin, in the body and in the log', async () => {
+    process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '100';
+    const task = 'deploy to https://user:' + 'abcdefghij'.repeat(30) + 'z'.repeat(400) + '@host/x';
+    const bodies: string[] = [];
+    await resolveJudgment({ point: 'model-routing', state: { task }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(bodies).toHaveLength(1);
+    for (const text of [bodies[0], readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8')]) {
+      expect(text).not.toContain('abcdefghij');
+      expect(text).toContain('https://user:***');
+    }
+    delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+  });
+
+  it('sends nothing when the sent part of a string is a secret path whole and plain text follows in the margin', async () => {
+    process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '100';
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const task = '/home/u/.ssh/id_ed25519\n' + ' \n'.repeat(100) + 'plain text that nobody sends';
+    const bodies: string[] = [];
+    const result = await resolveJudgment({ point: 'model-routing', state: { task }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+    expect(result).toEqual({ answer: 'sonnet', source: 'twin', mode: 'degraded' });
+    expect(bodies).toHaveLength(0);
+    expect(lastLogLine()).toMatchObject({ mode: 'degraded', state: '[state not sent: secret path]' });
+    delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+  });
+
+  describe('the tail of the cut and the keys', () => {
+    const logText = () => readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    beforeEach(() => {
+      process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    });
+    afterEach(() => {
+      delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+    });
+
+    it('masks a token that the cut crosses whose digit comes after the cut, in the body and in the log', async () => {
+      const task = ' '.repeat(190) + 'A'.repeat(600) + '1' + 'B'.repeat(100) + ' end';
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state: { task }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      for (const text of [bodies[0], logText()]) expect(text).not.toMatch(/AAA/);
+    });
+
+    it('omits the last line when its secret path is beyond the cut, also after a shortened token', async () => {
+      const task = 'Q9'.repeat(300) + '\necho hunter2 > ' + 'x '.repeat(400) + '~/.ssh/id_ed25519';
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state: { task }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      for (const text of [bodies[0], logText()]) expect(text).not.toContain('hunter2');
+    });
+
+    it('masks the value under a key with an acronym or a glued prefix', async () => {
+      const bodies: string[] = [];
+      const state = { DBPassword: 'hunter2zzQ', APIToken: 'plain-token-value', userpassword: 'second-secret', ok: 'fine' };
+      await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      for (const text of [bodies[0], logText()]) {
+        for (const secret of ['hunter2zzQ', 'plain-token-value', 'second-secret']) expect(text).not.toContain(secret);
+        expect(text).toContain('fine');
+      }
+    });
+  });
+
+  describe('plural keys, bearer with ~, arguments and pairs', () => {
+    const logText = () => readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    beforeEach(() => {
+      process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    });
+    afterEach(() => {
+      delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+    });
+    const send = async (state: unknown): Promise<string[]> => {
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      return [bodies[0], logText()];
+    };
+
+    it('masks a bearer value with ~ that the cut crosses, after a shortened token', async () => {
+      // the value starts 7 characters before the cut, and a bearer value needs 8: the rule can only see it if the run goes on past the ~
+    const task = 'Q9'.repeat(300) + ' ' + ' '.repeat(97) + 'Bearer ' + 'abcdef~' + 'ghijk'.repeat(60);
+      for (const text of await send({ task })) expect(text).not.toContain('abcdef~');
+    });
+
+    it('masks the value under accessTokens and the arguments after a secret flag, and the value of a pair', async () => {
+      const state = { accessTokens: ['tok_hunter2zz', 'tok-one-zzQ'], refreshTokens: 'hunter2zz', argv: ['run', '--password', 'arg-secret-zzQ'], env: [{ name: 'DB_PASSWORD', value: 'pair-secret-zzQ' }], ok: 'fine' };
+      for (const text of await send(state)) {
+        for (const secret of ['tok_hunter2zz', 'hunter2zz', 'tok-one-zzQ', 'arg-secret-zzQ', 'pair-secret-zzQ']) expect(text).not.toContain(secret);
+        expect(text).toContain('fine');
+      }
+    });
+  });
+
+  describe('the program of a command that has a long path', () => {
+    const logText = () => readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    beforeEach(() => {
+      process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    });
+    afterEach(() => {
+      delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+    });
+
+    it('masks the value of -p after a program whose path is longer than the window, in the body and in the log', async () => {
+      // the base name of the path is at its end, 806 characters from the start, beyond the window of 200 + 512
+      const argv = ['/' + 'd/'.repeat(400) + 'mysql', '-p', 'hunter2zzQ'];
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state: { argv }, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      for (const text of [bodies[0], logText()]) expect(text).not.toContain('hunter2zzQ');
+    });
+  });
+
+  describe('the options of a command line in every way they are written', () => {
+    const logText = () => readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8');
+    beforeEach(() => {
+      process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '200';
+    });
+    afterEach(() => {
+      delete process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING;
+    });
+
+    it.each([
+      ['a command with the user stuck to -u', { command: 'curl -uuser:hunter2zzQ https://h/' }],
+      ['an array with the user stuck to -u', { argv: ['curl', '-uuser:hunter2zzQ', 'https://h/'] }],
+      ['a command with -u in a cluster of flags', { command: 'curl -sSu user:hunter2zzQ https://h/' }],
+      ['an array with --proxy-user', { argv: ['curl', '--proxy-user', 'user:hunter2zzQ', 'https://h/'] }],
+      ['a command with a quoted value', { command: "mysql -p'a hunter2zzQ' db" }],
+      ['a command with an escaped quote inside a quoted --user', { command: 'curl --user "name:pre\\"suffix hunter2zzQ"' }],
+      ['a command with a separator after an escaped quote before -U', { command: 'curl -H "X-Note: foo\\";bar" -U u:hunter2zzQ https://host' }],
+      ['a command with a quoted Cookie value', { command: "curl -H 'Cookie: \"sid=hunter2zzQ\"' https://host" }],
+      ['a URL with an empty user name', { command: 'psql postgresql://:hunter2zzQ@db/app' }],
+      ['a URL with an @ in the password', { command: 'curl http://u:p@ss:hunter2zzQ@h/x' }],
+    ])('masks the credential of %s, in the body and in the log', async (_name, state) => {
+      const bodies: string[] = [];
+      await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
+      expect(bodies).toHaveLength(1);
+      for (const text of [bodies[0], logText()]) expect(text).not.toContain('hunter2zzQ');
+    });
+  });
+
+  describe('the time before the request', () => {
+    // The mask runs in the hook process before the request is made, so its cost must not grow with the size of the state.
+    const repeatTo = (unit: string, n: number): string => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+    const SIZE = 32 * 1024 * 1024;
+    const states: Record<string, () => unknown> = {
+      'a prompt of one line': () => ({ prompt: repeatTo('/srv/app/dir/', SIZE) }),
+      'a key': () => ({ [repeatTo('the quick brown fox ', SIZE)]: 'v' }),
+      'the name of a pair': () => ({ name: repeatTo('k', SIZE), value: 'v' }),
+      'the path of a program': () => ({ argv: [repeatTo('d/', SIZE) + 'mysql', '-p', 'hunter2zzQ', 'db'] }),
+      'a cluster of flags': () => ({ command: `-${repeatTo('sS', SIZE)}` }),
+      'options and quotes': () => ({ command: repeatTo('-u "', SIZE) }),
+      'a program and many commands': () => ({ command: `${repeatTo('mysql ;', SIZE)} -p x` }),
+      'headers': () => ({ command: repeatTo('Authorization: "', SIZE) }),
+      'escaped quotes': () => ({ command: `curl -u "${repeatTo('\\"', SIZE)}` }),
+      'nested substitutions': () => ({ command: `curl ${repeatTo('"$(', SIZE)}` }),
+      'cookie quotes': () => ({ command: repeatTo('Cookie: "', SIZE) }),
+      'headers and single quotes': () => ({ command: repeatTo("-H 'X-Api-Key: \"", SIZE) }),
+      'urls with an empty user': () => ({ command: repeatTo('//:', SIZE) }),
+      'a long password and no @': () => ({ command: `//u:${repeatTo('a', SIZE)}` }),
+    };
+
+    it.each(Object.keys(states))('sends %s of 32 MiB after milliseconds of masking', async (name) => {
+      const state = states[name]();
+      // the best of three calls: a pause of the machine in one of them is no cost of the mask
+      const times: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const started = performance.now();
+        let before = -1;
+        const fetchFn = (async () => {
+          before = performance.now() - started;
+          return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) } as unknown as Response;
+        }) as unknown as typeof fetch;
+        const result = await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn });
+        expect(result).toMatchObject({ mode: 'active', source: 'jev' });
+        expect(before).toBeGreaterThanOrEqual(0);
+        times.push(before);
+      }
+      expect(Math.min(...times)).toBeLessThan(250);
+    });
+  });
+});
