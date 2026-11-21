@@ -1033,7 +1033,46 @@ async function runWorker(targetPath, manifestHook, timeoutMs) {
   }
 }
 
+// Hook timing (opt-in): with OMC_HOOK_TIMING=1 (only the value 1) every hook run appends one row {ts, hook, ms} to hook-timing.jsonl
+// in the Jev log directory (OMC_JEV_LOG_DIR, default ~/.omc/state/jev). The write is synchronous in the 'exit' handler, so it covers
+// every way out that runs 'exit' handlers (worker, session end, generic child, timeout, process.exit, and on the generic path
+// SIGTERM, SIGINT and SIGHUP, which that path handles). A process the OS kills (SIGKILL), and a SIGTERM, SIGINT or SIGHUP that reaches
+// the worker or session-end path (no signal handler there), end without an 'exit' event and leave no row. ms is the uptime of the
+// whole run.cjs process, node start included; hook is the script name plus its arguments (run.cjs does not read the hook event).
+// A failed write is swallowed: nothing is printed and the exit code is never changed. Rotation follows OMC_JEV_LOG_MAX_MB like the
+// other Jev logs (a canonical positive integer of MiB, otherwise off): a larger file is renamed to
+// hook-timing-YYYYMMDD-HHmmss-<pid>.jsonl (UTC) before the append, and only the newest two renamed files are kept. Not called at all
+// when the switch is off.
+function startHookTiming(targetPath, args) {
+  process.once('exit', () => {
+    try {
+      const ms = Math.round(process.uptime() * 1000);
+      const hook = Array.from([basename(targetPath), ...args].join(' ').replace(/[\u0000-\u001f\u007f]/g, ' ')).slice(0, 200).join(''); // 200 code points, never a lone surrogate
+      const fs = require('fs');
+      const { homedir } = require('os');
+      const dir = process.env.OMC_JEV_LOG_DIR || join(homedir(), '.omc', 'state', 'jev');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = join(dir, 'hook-timing.jsonl');
+      const rawMb = process.env.OMC_JEV_LOG_MAX_MB;
+      const maxMb = typeof rawMb === 'string' && /^[1-9]\d*$/.test(rawMb) ? Number(rawMb) : 0;
+      if (Number.isSafeInteger(maxMb) && maxMb > 0 && maxMb <= Math.floor(Number.MAX_SAFE_INTEGER / 1048576)) {
+        try {
+          if (fs.statSync(file).size > maxMb * 1048576) {
+            const stamp = new Date().toISOString().replace(/\.\d+Z$/, '').replace(/[-:]/g, '').replace('T', '-');
+            const rotated = join(dir, `hook-timing-${stamp}-${process.pid}.jsonl`);
+            if (!existsSync(rotated)) fs.renameSync(file, rotated);
+            const old = fs.readdirSync(dir).filter((f) => /^hook-timing-\d{8}-\d{6}-\d+\.jsonl$/.test(f)).sort().slice(0, -2);
+            for (const f of old) fs.unlinkSync(join(dir, f));
+          }
+        } catch { /* no file yet, a lost rename race or a failed delete: append anyway */ }
+      }
+      fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), hook, ms }) + '\n', 'utf8');
+    } catch { /* fail-open: a timing row never changes the hook outcome */ }
+  });
+}
+
 if (require.main === module) {
+  const hookTiming = process.env.OMC_HOOK_TIMING === '1';
   ensureProcessDestGuards();
   const target = process.argv[2];
   if (target === '--generic-child-supervisor') {
@@ -1058,6 +1097,7 @@ if (require.main === module) {
             return;
           }
         }
+        if (hookTiming) startHookTiming(resolution.targetPath, extraArgs);
         const workerTimeoutMs = resolveTrustedWorkerTimeoutMs(resolution.targetPath, workerManifestHook);
         runWorker(resolution.targetPath, workerManifestHook, workerTimeoutMs).then(status => {
           process.exitCode = status;
@@ -1076,12 +1116,14 @@ if (require.main === module) {
             ? requestedTestTimeout
             : Math.max(MIN_SESSION_END_BUDGET_MS, Math.floor(manifestTimeoutMs * 0.5));
           const timeoutMs = Math.min(manifestTimeoutMs, budgetMs);
+          if (hookTiming) startHookTiming(resolution.targetPath, extraArgs);
           runWorker(resolution.targetPath, sessionEndManifestHook, timeoutMs).then(status => {
             process.exitCode = status;
           });
         } else {
           const manifestHook = resolveHookTimeoutMs(resolution.targetPath, extraArgs);
           const timeoutMs = resolveGenericTimeoutMs(manifestHook);
+          if (hookTiming) startHookTiming(resolution.targetPath, extraArgs);
           runGenericChild(resolution.targetPath, extraArgs, timeoutMs, manifestHook).then(status => {
             process.exitCode = status;
           });

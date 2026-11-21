@@ -238,6 +238,14 @@ def evidence_account(evidence, file_path):
     return evidence.setdefault(file_path, {'taskstops': [], 'notifications': []})
 
 
+def check_tree(dir_path):
+    """Raises OSError that names a directory below dir_path that cannot be read: glob would skip it without a word."""
+    def stop(error):
+        raise error
+    for _dirpath, _dirs, _files in os.walk(dir_path, onerror=stop):
+        pass
+
+
 def scan_sessions(dir_path, rng):
     """Scan of the transcripts directory: <dir>/<project>/<session>.jsonl and subagent
     transcripts <dir>/<project>/<session>/subagents/(<child>/)agent-*.jsonl. Returns
@@ -255,6 +263,7 @@ def scan_sessions(dir_path, rng):
     seen_tids = set()
     # Main sessions and subagent transcripts as sources of Agent/Task calls: a subagent
     # can issue its own Agent calls; the timestamp field, fallback ts.
+    check_tree(dir_path)
     files = [
         (sorted(glob.glob(os.path.join(dir_path, '*', '*.jsonl'))), 'sessions'),
         (sorted(glob.glob(os.path.join(dir_path, '*', '*', 'subagents', 'agent-*.jsonl'))), 'subagents'),
@@ -268,11 +277,7 @@ def scan_sessions(dir_path, rng):
                 counters['subagent_transcripts'] += 1
             rel = os.path.relpath(path, dir_path)
             account = evidence_account(evidence, rel)
-            try:
-                f = open(path, encoding='utf8', errors='replace')
-            except OSError:
-                continue
-            with f:
+            with open(path, encoding='utf8', errors='replace') as f:  # a transcript that cannot be read raises OSError
                 for line in f:
                     if not line.strip():
                         continue
@@ -513,10 +518,12 @@ def read_intent(path):
     are counted in the main run, because the stopped set is not known here yet. A missing
     file or missing id/intent columns: exit 2 (usage)."""
     try:
-        with open(path, encoding='utf8', errors='replace') as f:
+        with open(path, encoding='utf8') as f:
             rows = f.read().splitlines()
     except OSError as e:
         usage_error(f'--intent unreadable: {e}')
+    except UnicodeDecodeError:
+        usage_error(f'--intent unreadable: {path} is not valid UTF-8')
     if not rows:
         usage_error('--intent: empty file')
     header = rows[0].split('\t')
@@ -666,6 +673,8 @@ def load_team_tasks(teams_path):
             try:
                 with open(p, encoding='utf8') as f:
                     data = json.load(f)
+            except OSError:
+                raise  # a task file that cannot be read stops the run (the caller names it, exit 2); only its content can be bad JSON
             except Exception:
                 counters['bad_json'] += 1
                 tasks.append((team, nr, None))
@@ -783,8 +792,18 @@ def main():
         usage_error(f'--to is not an ISO date: {args.date_to}')
     rng = (o, d)
 
-    c0 = part_transcripts(args.transcripts, rng, args.min_support, intent_map) if args.transcripts else None
-    ca = part_team(args.teams, rng, args.min_support) if args.teams else None
+    try:
+        c0 = part_transcripts(args.transcripts, rng, args.min_support, intent_map) if args.transcripts else None
+    except OSError as error:
+        print(f'error: cannot read {error.filename or args.transcripts}: {error.strerror}', file=sys.stderr)
+        return 2
+    try:
+        if args.teams:
+            check_tree(args.teams)  # glob skips a tasks directory that cannot be read without a word
+        ca = part_team(args.teams, rng, args.min_support) if args.teams else None
+    except OSError as error:
+        print(f'error: cannot read {error.filename or args.teams}: {error.strerror}', file=sys.stderr)
+        return 2
 
     def sum_entry(part):
         if part is None:

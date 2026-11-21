@@ -323,6 +323,17 @@ describe('reportRepo on fixture repositories', () => {
       expect(parsed.repositories.map((x: { skipped?: string }) => x.skipped)).toEqual([undefined, 'not_a_repository', undefined]);
     });
 
+    it('reads a list file of 200000 repositories: the list is not spread into a call', () => {
+      const count = 200_000;
+      const list = join(dir, 'many-repos.txt');
+      writeFileSync(list, Array.from({ length: count }, (_, i) => join(dir, 'no-such-repo', `r${i}`)).join('\n') + '\n');
+      const started = Date.now();
+      const r = spawnSync(process.execPath, [SCRIPT, '--repos-file', list, '--json'], { encoding: 'utf8', cwd: dir, env: gitEnv, maxBuffer: 512 * 1024 * 1024 });
+      expect(r.status, r.stderr.slice(0, 300)).toBe(0);
+      expect(JSON.parse(r.stdout).summary).toMatchObject({ repositories: count, skipped: count });
+      expect(Date.now() - started, 'read in a reasonable time').toBeLessThan(60_000);
+    }, 120_000);
+
     it('reports a repository without the named main branch as skipped and still exits 0', () => {
       const r = run(['--repo', repo, '--main-branch', 'trunk']);
       expect(r.status).toBe(0);

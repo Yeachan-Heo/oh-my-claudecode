@@ -134,6 +134,21 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
     });
   });
 
+  describe('calls of one row', () => {
+    it('identical blocks with different ids are calls of their own; a block without an id is no call', () => {
+      const block = (id?: string) => ({ type: 'tool_use', ...(id === undefined ? {} : { id }), name: 'Read', input: { file_path: '/same' } });
+      const task = taskOf([
+        row('assistant', 1, { id: 'msg-multi', model: MODEL, content: [block('a'), block('b'), block(), block('c')] }),
+        row('user', 2, { role: 'user', content: ['a', 'b', 'c'].map((id) => ({ type: 'tool_result', tool_use_id: id, content: 'Error', is_error: true })) }),
+      ]);
+      // three ids are three calls: three failures in one run, and three identical calls are one retry over calls 0 to 2
+      assert.equal(task.metrics.tool_failures, 3);
+      assert.equal(task.metrics.failure_runs, 1);
+      assert.equal(task.metrics.longest_failure_run, 3);
+      assert.deepEqual(task.loop_patterns.retry, [[0, 2]]);
+    });
+  });
+
   describe('detectors 2-4: loop patterns', () => {
     it('retry: two identical calls are below the threshold', () => {
       const task = taskOf([call(1, 'a', 'Grep', { pattern: 'x' }), call(2, 'b', 'Grep', { pattern: 'x' })]);
@@ -508,6 +523,64 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.equal(task.metrics.test_episodes_without_advisor, 0);
     });
 
+    it('the command word is read after leading assignments and redirections, whatever the value or the target holds', () => {
+      const values = [
+        'MODE="deep analysis"', "MODE='deep analysis'", 'MODE=deep\\ analysis', 'MODE=', 'A=$(date)', 'A=$(a b c)', 'A=`date`', 'A="$(a b)"',
+        'A=$(echo ")")', 'A=$(a $(b c))', 'A+=y', 'B=1 MODE="a b"', '> out.log', '2>&1', '&> all.log', '< in.txt', '<<< word', '>| out', '>>out', '2> err',
+        '{fd}> out', '> "my out.log"', '> out.log MODE="a b"', 'MODE="a b" 2>&1', 'env A=1', 'time > out', '$()',
+      ];
+      const kinds = pyEval(
+        `[[m.classify_call("Bash", v + " " + c, {"is_error": False}, None, __import__("re").compile("ask-advisor")) for c in ("pytest", "npm test", "ask-advisor")] for v in ${JSON.stringify(values)}]`,
+      ) as string[][];
+      values.forEach((value, index) => assert.deepEqual(kinds[index], ['S', 'S', 'k'], `${value}: pytest, npm test and ask-advisor are read`));
+      // The target of a redirection and the words after it belong to the command before it; a substitution opens no command.
+      const quiet = ['echo hi > pytest', 'echo hi 2>&1 pytest', 'cat < pytest', 'echo $(date) pytest', 'echo `date` npm test', 'echo hi > ask-advisor',
+        'echo $(pytest)', 'timeout pytest', 'sudo', 'sudo -l pytest', 'command -v pytest', 'nohup A=1 pytest', 'nohup -x pytest', 'timeout 5x pytest', 'env -0 pytest',
+        'timeout 5 -- pytest'];
+      const none = pyEval(
+        `[m.classify_call("Bash", c, {"is_error": False}, None, __import__("re").compile("ask-advisor")) for c in ${JSON.stringify(quiet)}]`,
+      ) as Array<string | null>;
+      quiet.forEach((command, index) => assert.equal(none[index], null, `${command}: no test run`));
+      // A boundary after a redirection or a substitution opens a command again.
+      const loud = ['echo hi > f; pytest', 'echo $(date) && npm test', 'echo hi > f | pytest'];
+      const got = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(loud)}]`) as string[];
+      assert.deepEqual(got, ['S', 'S', 'S']);
+      // The launch wrappers of the table and their options are taken off, sudo and nohup too.
+      const wrapped = ['sudo pytest', 'sudo -u root -E pytest', 'nohup npm test', 'command -p pytest', 'exec -a x pytest', 'nice -n 5 pytest', 'time -p pytest',
+        'timeout -s KILL -k 5s 60 pytest', 'env -i -u A B=1 pytest', 'sudo nohup timeout 5m pytest', 'sudo -n pytest', 'sudo -- pytest', 'timeout --foreground 5 pytest',
+        'nice -5 pytest', 'env --chdir=sub pytest', 'env -S pytest', 'time -f %e pytest', 'exec -cl pytest', 'sudo -nu root pytest', 'timeout 1e1 pytest'];
+      const read = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(wrapped)}]`) as string[];
+      assert.deepEqual(read, wrapped.map(() => 'S'));
+      // An option outside the table is a flag for `env` and `timeout`, as before the table; behind any other wrapper it ends the reading.
+      const unknownRead = ['timeout --no-such 5 pytest', 'timeout -z 5 pytest', 'env -z pytest', 'env --no-such-option pytest'];
+      const unknownKinds = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(unknownRead)}]`) as string[];
+      assert.deepEqual(unknownKinds, unknownRead.map(() => 'S'));
+      const unknownPrograms = pyEval(`[[p[0] for p in m.split_command(c)] for c in ${JSON.stringify(['sudo -z pytest', 'nice -z pytest', 'time -z pytest', 'timeout -z 5 git push'])}]`);
+      assert.deepEqual(unknownPrograms, [['sudo'], ['nice'], ['time'], ['git']]);
+      // A long run of prefixes is read in one pass.
+      const long = pyEval('[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ["A=\\"b c\\" " * 20000 + "pytest", "> o " * 20000 + "pytest", "$(a) " * 20000 + "pytest"]]');
+      assert.deepEqual(long, ['S', 'S', null]);
+    });
+
+    it('a here-document body is cut, with a tab-indented terminator and with the operator in quotes or a comment left alone', () => {
+      const commands = [
+        'cat <<-EOF\n\tx\n\tEOF\npytest', 'cat <<EOF\nx\nEOF\npytest', 'cat <<-"EOF" > f\n\tpytest\n\tEOF\npytest', 'cat <<A <<-B\nx\nA\n\ty\n\tB\npytest',
+        'echo "<<EOF"\npytest\nEOF', "echo '<<EOF'\npytest\nEOF", 'echo hi # <<EOF\npytest\nEOF', 'git commit -m "$(cat <<\'EOF\'\npytest\nEOF\n)"',
+        'cat <<EOF\npytest\nEOF',
+      ];
+      const got = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(commands)}]`) as Array<string | null>;
+      assert.deepEqual(got, ['S', 'S', 'S', 'S', 'S', 'S', 'S', null, null]);
+    });
+
+    it('many here-document operators on one line and one very long word are read in a short time', () => {
+      const started = Date.now();
+      const got = pyEval(
+        `[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ["cat " + "<<A " * 25000 + "\\n" + "A\\n" * 25000 + "pytest", "pytest " + "1" * 1000000, "A=\\"b c\\" " * 20000 + "pytest"]]`,
+      ) as Array<string | null>;
+      assert.deepEqual(got, ['S', 'S', 'S']);
+      assert.ok(Date.now() - started < 5_000, `read in ${Date.now() - started} ms`);
+    });
+
     it('--test-pattern replaces the built-in list of test runners', () => {
       const lines = [...failed(1, 'a', 'npm test'), ...failed(3, 'b', 'make check'), ...failed(5, 'c', 'make check')];
       const task = taskOf(lines, ['--test-pattern', 'make check']);
@@ -592,13 +665,11 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.equal(task.metrics.test_runs_no_result, 0);
     });
 
-    it('an unreadable file gives an unmeasured task with a reason and exit code 0', () => {
+    it('a transcript that cannot be read stops the run with exit 2 and a message that names it', () => {
       const p = run(['--transcript', '/proc/self/mem', '--json']);
-      assert.equal(p.status, 0, p.stderr);
-      const task = JSON.parse(p.stdout).tasks[0];
-      assert.equal(task.transcript, 'unreadable');
-      assert.equal(task.metrics.assistant_steps, 'unmeasured');
-      assert.equal(task.reasons.assistant_steps, 'transcript unreadable');
+      assert.equal(p.status, 2, p.stderr);
+      assert.match(p.stderr, /transcript file \/proc\/self\/mem: /);
+      assert.equal(p.stdout, '');
     });
 
     it('date filter: tasks outside the range are dropped; tasks without a date are counted as no_date', () => {
