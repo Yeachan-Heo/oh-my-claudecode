@@ -175,6 +175,25 @@ describe('omc-doctor occupancy records in the form the win32 publisher writes th
   });
 });
 
+describe('omc-doctor a lower-case record names a directory, not the beginning of a text', { timeout: 120_000 }, () => {
+  test('a record that only starts like a version directory protects nothing, under win32 as under another platform', () => {
+    for (const command of commands) {
+      for (const platform of PLATFORMS) {
+        const dir = mkdtempSync(path.join(tmpdir(), 'Omc-Doctor-Mixed-'));
+        try {
+          const cache = addCache(dir, ['5.1.0', '5.8.0', '5.9.0']);
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
+          writeRecord(dir, path.join(cache, '5.9.0x').toLowerCase());
+          const result = runCommand(command, dir, { preloads: [reportAs(dir, platform)] });
+          expect({ platform, status: result.status, versions: digitVersions(cache) }).toEqual({ platform, status: 0, versions: '5.8.0' });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+});
+
 describe('omc-doctor occupancy records alone pin nothing, also in the form the win32 publisher writes them', { timeout: 120_000 }, () => {
   test('a lower-case record of a version, with no registry pin, moves nothing under any platform name', () => {
     for (const command of commands) {
@@ -520,6 +539,22 @@ fs.lstatSync = function (target, options) {
         return { plugins: { [PLUGIN_ID]: [entryOf(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.0'), '5.7.0'), entryOf(install)] }, env: { CLAUDE_PLUGIN_ROOT: install } };
       }, volume);
       expect({ platform, channel: live.Channel, installed: live.Installed }).toEqual({ platform, channel: 'marketplace omc', installed: '5.8.0' });
+    }
+  });
+
+  // Text is not a path: where no identity is reported the comparison folds the text, and the root Claude Code runs whose path only
+  // starts like the install path (`.../5.8.0-extra` and `.../5.8.0`) is another directory, not a spelling of it, so the channel
+  // is not unknown (it is the registry install, as nothing says the session runs another one).
+  test('Step 1: a root whose path only starts like the install path is another directory, also where no identity is reported', () => {
+    for (const platform of PLATFORMS) {
+      if (hostCannot(platform)) continue;
+      const out = step1(platform, (dir) => {
+        withClone(dir);
+        const install = installAt(dir);
+        installAt(dir, '5.8.0-extra');
+        return { plugins: pinned(install), env: { CLAUDE_PLUGIN_ROOT: `${install}-extra` } };
+      }, volume);
+      expect({ platform, channel: out.Channel, installed: out.Installed }).toEqual({ platform, channel: 'marketplace omc', installed: '5.8.0' });
     }
   });
 

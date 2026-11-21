@@ -403,3 +403,64 @@ describe.skipIf(!posix)('omc-doctor: the shell blocks that move a file aside', {
     expect(defs).toContain('[ ! -L "$C/$N" ]');
   });
 });
+
+// Text is not a path: a tree whose path is only the beginning of the text of another path (`/x/plug` and `/x/plug-config`)
+// is another directory. It neither holds the destination nor excuses a link into it, so the comparison of two paths looks
+// for the separator that ends a name. And the Moved line names the real directory (really) only when a link at
+// plugins/backups or below it leads somewhere else, never for a configuration directory that was given through a link:
+// that is where the configuration lives, not a redirect of the backup directory.
+describe.skipIf(!posix)('omc-doctor: a path that only starts like a tree is not inside it, and (really) names a redirect of the backup directory only', { timeout: 180_000 }, () => {
+  // A directory whose path is the configuration directory's path without its last character, with a `saved` directory in it.
+  const lookalike = (dir: string) => {
+    const root = dir.slice(0, -1);
+    mkdirSync(path.join(root, 'saved'), { recursive: true });
+    return root;
+  };
+
+  test('a plugin root that starts like the configuration directory is no overlap: the cleanup goes on', () => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      const root = lookalike(dir);
+      try {
+        const result = runCommand(command, dir, { env: { OMC_PLUGIN_ROOT: root }, timeout: 20_000 });
+        expect({ command, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, left: ['5.8.0'], moved: 2 });
+        expect(result.stdout).not.toMatch(REFUSED);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('a link into a plugin root that starts like the configuration directory is still refused, and nothing is moved', () => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      const root = lookalike(dir);
+      try {
+        link(path.join(root, 'saved'), path.join(dir, 'plugins', 'backups'));
+        const result = runCommand(command, dir, { env: { OMC_PLUGIN_ROOT: root }, timeout: 20_000 });
+        expect({ command, status: result.status, tree: REFUSED.exec(result.stdout)?.[1], left: readdirSync(cache).sort(), held: readdirSync(path.join(root, 'saved')) }).toEqual({ command, status: 1, tree: 'the plugin root', left: ALL, held: [] });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('a configuration directory given through a link is no redirect: the Moved line has no (really), the versions are in the real directory', () => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      const via = `${dir}-via`;
+      try {
+        symlinkSync(dir, via);
+        const result = runCommand(command, via, { timeout: 20_000 });
+        expect({ command, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, left: ['5.8.0'], moved: 2 });
+        expect(result.stdout).toContain(`Moved 2 unprotected version(s) to ${path.join(via, 'plugins', 'backups', 'oh-my-claudecode')}`);
+        expect(result.stdout).not.toContain('(really');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(via, { force: true });
+      }
+    }
+  });
+});
