@@ -136,6 +136,7 @@ jobs:
           src/__tests__/omc-doctor-dangling-links.test.ts
           src/__tests__/omc-doctor-guide.test.ts
           src/__tests__/omc-doctor-skill-guide.test.ts
+          src/__tests__/omc-doctor-backup-destination.test.ts
           src/__tests__/omc-doctor-cache-refusals.test.ts
           src/__tests__/omc-doctor-config-dir-lexical.test.ts
           src/__tests__/omc-doctor-large-version-parts.test.ts
