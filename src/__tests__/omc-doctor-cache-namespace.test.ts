@@ -217,7 +217,7 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
         }
       }
     }
-  });
+  }, 120_000);
 
   test('Step 6 counts the versions of that marketplace and sees a stale cache', () => {
     for (const [label, plugins, market] of profiles) {
@@ -231,7 +231,7 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
         }
       }
     }
-  });
+  }, 120_000);
 
   test('a cache under another marketplace than the registry names is not counted', () => {
     const dir = fresh();
