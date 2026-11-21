@@ -355,6 +355,7 @@ describe.skipIf(!posix)('omc-doctor: the shell blocks that move a file aside', {
     expect(skillText).toContain('outside `plugins/cache/` and resolved before the first move');
     expect(guideSection('cache-guard')).toContain('The backup directory is settled before the first move.');
     expect(guideSection('cache-guard')).toContain('every `installPath` of the registry');
+    expect(guideSection('cache-guard')).toContain('with no link involved (a plugin root that is the configuration directory itself), is no reason to refuse');
     expect(skillText).toContain('The copy is a new regular file in the configuration directory itself, also when CLAUDE.md is a link');
     expect(defs).toContain('[ ! -L "$C/$N" ]');
   });
