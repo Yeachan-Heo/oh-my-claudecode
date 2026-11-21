@@ -30,6 +30,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Finished work needs judgment | `review` |
 | Something claims to be done | `verify` |
 | Work is landing as a PR | `pr` |
+| A PR is hard for a reviewer to follow | `make-pr-easy-to-review` |
 | An open PR needs driving to merge-ready | `babysit` |
 | The run taught the environment something | `refit` |
 
