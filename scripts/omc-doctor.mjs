@@ -174,6 +174,38 @@ const linkChain = (start) => {
   return { paths, unreadable: true };
 };
 
+// == absence ==
+// An ENOENT does not say that nothing is at a path: a link on the way that points at nothing (a dangling link) gives
+// it too, and then something is there that cannot be read. nothingAt(target) reads the path one component at a time, as
+// the file system does, and is true only when the first missing component lies in a directory that exists (a link to
+// one counts); a link that cannot be followed, or any other error on the way, makes it false. absent(error, target) is
+// whether a failed read of target says "nothing is there", the one reading that may be taken for "none": every other
+// failure is "cannot be read", which the cache commands answer with a refusal and Step 1 with unknown.
+const nothingAt = (target) => {
+  const whole = resolveFrom(target);
+  const root = path.parse(whole).root;
+  let at = root;
+  for (const part of whole.slice(root.length).split(path.sep)) {
+    if (!part || part == '.') continue;
+    at += (at.endsWith(path.sep) ? '' : path.sep) + part;
+    let info;
+    try {
+      info = fs.lstatSync(at);
+    } catch (error) {
+      return !!error && error.code == 'ENOENT';
+    }
+    if (info.isSymbolicLink()) {
+      try {
+        fs.statSync(at);
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+};
+const absent = (error, target) => !!error && error.code == 'ENOENT' && nothingAt(target);
+
 // == marketplaces of the registry ==
 // The marketplaces of the supported plugin IDs in installed_plugins.json, each once, in the order of their last
 // occurrence. It is omc when the registry holds none and when it cannot be read (missing, a FIFO, bad JSON).
@@ -191,13 +223,14 @@ const registryMarketplaces = () => {
 };
 
 // == Step 1: helpers ==
-// The highest version directory name in a cache directory, or null.
+// The highest version directory name in a cache directory, '' when it holds none (or does not exist), null when it
+// cannot be read.
 const highestCached = (dir) => {
   try {
     const names = fs.readdirSync(dir).filter(isVersionDir).sort(compareVersions);
-    return names.length ? names[names.length - 1] : null;
-  } catch {
-    return null;
+    return names.length ? names[names.length - 1] : '';
+  } catch (error) {
+    return absent(error, dir) ? '' : null;
   }
 };
 const MANIFEST_FILES = ['package.json', '.claude-plugin/plugin.json'];
@@ -214,12 +247,14 @@ const manifestVersion = (dir) => {
 };
 // Whether a directory holds a manifest file (a regular file, as in readFile): one that names no usable version is
 // told apart from no manifest at all.
+// A manifest that is a link to nothing, or that cannot be read, is there and holds no usable version.
 const hasManifest = (dir) =>
   MANIFEST_FILES.some((name) => {
+    const file = [dir, name].join(path.sep);
     try {
-      return fs.statSync([dir, name].join(path.sep)).isFile();
-    } catch {
-      return false;
+      return fs.statSync(file).isFile();
+    } catch (error) {
+      return !!error && error.code != 'ENOTDIR' && !absent(error, file);
     }
   });
 // The version a registry entry names through its installPath: the last component when it is a version directory
@@ -360,8 +395,9 @@ const readChannelRegistry = () => {
   let malformed = false;
   let ambiguous = false;
   const merged = new Map();
+  const file = path.join(configDir, 'plugins', 'installed_plugins.json');
   try {
-    const json = JSON.parse(readFile(path.join(configDir, 'plugins', 'installed_plugins.json')));
+    const json = JSON.parse(readFile(file));
     const plugins = json ? json.plugins ?? json : 0;
     if (!plugins || typeof plugins != 'object' || Array.isArray(plugins)) throw 0;
     for (const [key, entries] of Object.entries(plugins)) {
@@ -375,7 +411,7 @@ const readChannelRegistry = () => {
       else if (entries.some((entry) => entryBad(entry, false))) ambiguous = true;
     }
   } catch (error) {
-    unreadable = !(error && error.code == 'ENOENT');
+    unreadable = !absent(error, file);
   }
   return { unreadable, malformed, ambiguous, supported: [...merged] };
 };
@@ -510,12 +546,23 @@ const npmLatest = () => {
 
 // == Step 4 ==
 // Whether CLAUDE.md management is disabled: only an explicit claudeMdEnabled: false in .omc-config.json disables it.
+// A file that is there but cannot be read (a link to nothing, EACCES) may hold the opt-out, so that is neither line.
 const claudeMdOptOut = () => {
+  const file = path.join(configDir, '.omc-config.json');
   let off = false;
+  let cannotRead = '';
   try {
-    off = JSON.parse(readFile(path.join(configDir, '.omc-config.json'))).claudeMdEnabled === false;
-  } catch {}
-  console.log(off ? 'CLAUDE.md management disabled by claudeMdEnabled: false' : 'CLAUDE.md management enabled');
+    off = JSON.parse(readFile(file)).claudeMdEnabled === false;
+  } catch (error) {
+    if (error && error.code && !absent(error, file)) cannotRead = error.code;
+  }
+  console.log(
+    cannotRead
+      ? 'CLAUDE.md management unknown: could not read .omc-config.json (' + cannotRead + ')'
+      : off
+        ? 'CLAUDE.md management disabled by claudeMdEnabled: false'
+        : 'CLAUDE.md management enabled',
+  );
 };
 
 // The OMC version marker of CLAUDE.md (or its companion file) against the newest plugin cache version of the marketplace
@@ -577,9 +624,9 @@ const claudeMdVersion = () => {
     pluginVersion = '(unknown)';
   } else if (running.length) {
     // With roots in two marketplaces the highest of their caches names it.
-    pluginVersion = running.map((market) => highestCached(cacheDirOf(market))).filter(Boolean).sort(compareVersions).pop() ?? '(none)';
+    pluginVersion = running.map((market) => highestCached(cacheDirOf(market))).filter(Boolean).sort(compareVersions).pop() || '(none)';
   } else {
-    for (const market of markets) pluginVersion = highestCached(cacheDirOf(market)) ?? pluginVersion;
+    for (const market of markets) pluginVersion = highestCached(cacheDirOf(market)) || pluginVersion;
   }
   console.log('CLAUDE.md OMC version:', claudeVersion);
   console.log('OMC version source:', claudeSource);
@@ -604,8 +651,9 @@ const cacheVersions = () => {
     try {
       const names = fs.readdirSync(cacheDirOf(market)).filter(isVersionDir);
       console.log(lead + names.length + ' version(s):', names.join(', '));
-    } catch {
-      console.log(lead + '0 versions');
+    } catch (error) {
+      const dir = cacheDirOf(market);
+      console.log(lead + (absent(error, dir) ? '0 versions' : 'could not read ' + dir + ' (' + ((error && error.code) || 'unknown error') + ')'));
     }
   }
 };
@@ -692,8 +740,8 @@ const readRegistry = () => {
     pins = [];
     other = [];
     ids = [];
-    unreadable = !(error && error.code == 'ENOENT');
-    if (unreadable && !reason) reason = 'the file is not a regular file or not JSON of the expected shape';
+    unreadable = !absent(error, registryFile);
+    if (unreadable && !reason) reason = error && error.code == 'ENOENT' ? 'a link on the way to the file points at nothing' : 'the file is not a regular file or not JSON of the expected shape';
   }
   return { unreadable, reason, pins, other, ids };
 };
@@ -812,20 +860,22 @@ const protectionOf = (dir, versions) => {
   try {
     names = fs.readdirSync(occupancyDir);
   } catch (error) {
-    unreadable = unreadable || !(error && error.code == 'ENOENT');
+    // A link to nothing in place of the directory (or of a directory above it) is not an absent registry of records.
+    unreadable = unreadable || !absent(error, occupancyDir);
   }
   // The plugin roots of the records of running sessions.
   const held = [];
   for (const name of names) {
     if (name.length == 69 && /^[a-f0-9]{64}[.]json/.test(name)) {
+      const file = path.join(occupancyDir, name);
       try {
-        if (!fs.lstatSync(path.join(occupancyDir, name)).isFile()) continue;
-        const record = JSON.parse(fs.readFileSync(path.join(occupancyDir, name), 'utf8'));
+        if (!fs.lstatSync(file).isFile()) continue;
+        const record = JSON.parse(fs.readFileSync(file, 'utf8'));
         if (ownerGone(record)) continue;
         if (typeof record.pluginRoot != 'string' || !record.pluginRoot.trim()) throw 0;
         held.push(record.pluginRoot, path.resolve(record.pluginRoot));
       } catch (error) {
-        if (!(error && error.code == 'ENOENT')) unreadable = true;
+        if (!absent(error, file)) unreadable = true;
       }
     }
   }
@@ -994,15 +1044,16 @@ const cacheRepair = (kind) => {
       }
     } catch (error) {
       const code = error && error.code;
+      const missing = absent(error, dir);
       const text =
         lead +
         (moveStarted
           ? 'Cache move failed (' + moved + ' moved before the error): ' + error.message
-          : code == 'ENOENT'
+          : missing
             ? messages.noCache + (market == 'omc' ? '' : ' in plugins/cache/' + market)
-            : 'Nothing moved: could not read ' + dir + ' (' + (code || 'unknown error') + ')');
+            : 'Nothing moved: could not read ' + dir + ' (' + (code || 'unknown error') + (code == 'ENOENT' ? ': a link on the way points at nothing' : '') + ')');
       // A missing cache is nothing to clean, not a failure; a failed move or an unreadable directory is.
-      if (moveStarted || code != 'ENOENT') refuse(text);
+      if (moveStarted || !missing) refuse(text);
       else console.log(text);
       return true;
     }
@@ -1020,7 +1071,7 @@ const cacheRepair = (kind) => {
         fs.statSync(dir);
         return true;
       } catch (error) {
-        return !(error && error.code == 'ENOENT');
+        return !absent(error, dir);
       }
     });
   if (!caches.length) caches.push([markets[0], cacheDirOf(markets[0])]);
