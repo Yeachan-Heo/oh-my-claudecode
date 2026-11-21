@@ -217,6 +217,11 @@ const CLAUDE_ONBOARDING_TEXT = [
 ];
 // The footer below the trust dialog and both first-run dialogs.
 const CLAUDE_DIALOG_FOOTER = 'Entertoconfirm·Esctocancel';
+// The first line of each first-run dialog: every copy of it starts here.
+const CLAUDE_STARTUP_HEADINGS = {
+  claude_bypass_permissions: 'WARNING:ClaudeCoderunninginBypassPermissionsmode',
+  claude_fullscreen_renderer: 'Trythenewfullscreenrenderer?',
+} as const;
 const CLAUDE_CHOICES: readonly string[] = [
   ...Object.values(CLAUDE_STARTUP_CHOICES).flat(),
   ...CLAUDE_TRUST_CHOICES,
@@ -409,9 +414,11 @@ export function claudeDialogFocus(
       const stream = captured.replace(/\s+/g, '');
       return stream.includes(first) || stream.includes(second) ? 'stale' : null;
     }
-    // The latest ❯: the same dialog drawn before Down can remain above it.
-    const [firstAt, secondAt] = [tail.lastIndexOf(`❯${first}`), tail.lastIndexOf(`❯${second}`)];
-    if (firstAt < 0 && secondAt < 0) return null;
+    // The same dialog drawn before Down can remain above the latest copy, ❯
+    // and footer included, so both are read below its latest heading only.
+    const copy = tail.slice(Math.max(0, tail.lastIndexOf(CLAUDE_STARTUP_HEADINGS[kind])));
+    const [firstAt, secondAt] = [copy.lastIndexOf(`❯${first}`), copy.lastIndexOf(`❯${second}`)];
+    if ((firstAt < 0 && secondAt < 0) || !copy.includes(CLAUDE_DIALOG_FOOTER)) return null;
     return secondAt > firstAt ? 'second' : 'first';
   }
   const lines = paneLines(captured);
