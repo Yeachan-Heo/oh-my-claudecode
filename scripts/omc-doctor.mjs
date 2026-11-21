@@ -968,6 +968,55 @@ const protectionOf = (dir, versions) => {
   return { unreadable, reason: registry.unreadable ? registry.reason : '', noIdentity, pinned, kept };
 };
 
+// == backup destination ==
+// A version the cache commands move aside has to be safe from whatever removes, relinks or reads a cache version, so the
+// backup directory is resolved first, the way the file system does (every link on the way; for what does not exist yet
+// its nearest existing parent and the rest of the name), and has to lie outside every tree below. backupPlace(registry)
+// answers { place, problem }: place is the real directory the moves go to, problem is empty when all is well and says
+// why nothing is moved otherwise. The trees: the plugin cache and the cache of every marketplace of the registry, the
+// marketplace clones, the occupancy records, the plugin root variables and every installPath of the registry, each as
+// written and as the file system reads it (a .. after a link). Both directions count (the destination inside a tree, a
+// tree inside the destination). A destination that cannot be resolved (a link to nothing, a loop, no permission) or
+// compared (no file system identity) is refused like an overlap, because a link may lead anywhere.
+const resolvable = (target) => {
+  try {
+    fs.statSync(target);
+    return true;
+  } catch (error) {
+    return !!error && error.code == 'ENOENT' && nothingAt(target);
+  }
+};
+const backupPlace = (registry) => {
+  const chain = linkChain(backups);
+  const place = chain.paths[chain.paths.length - 1];
+  const stop = (reason) => ({ place, problem: 'Nothing moved: ' + reason + '; fix that first, then run this again' });
+  const named = backups + (place == path.resolve(backups) ? '' : ' (really ' + place + ')');
+  if (chain.unreadable) return stop('the backup directory ' + backups + ' cannot be resolved (a link loop, or a part of the path that cannot be examined)');
+  if (!resolvable(backups)) return stop('the backup directory ' + backups + ' cannot be resolved (a link on the way to it points at nothing)');
+  const bothForms = (target) => [...new Set([target, path.resolve(target)])];
+  const installPaths = [...registry.pins.map((entry) => entry.installPath), ...registry.other]
+    .filter((target) => typeof target == 'string' && target.trim())
+    .map((target) => target.trim());
+  const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT].map((root) => (root || '').trim()).filter(Boolean);
+  const trees = [
+    ['the plugin cache', path.join(configDir, 'plugins', 'cache')],
+    ...[...new Set([...registry.ids.map(marketplaceOf), 'omc'])].sort().map((market) => ['the cache of ' + market, cacheDirOf(market)]),
+    ['the marketplace clones', path.join(configDir, 'plugins', 'marketplaces')],
+    ['the occupancy records', occupancyDir],
+    ...roots.flatMap(bothForms).map((root) => ['the plugin root', root]),
+    ...installPaths.flatMap(bothForms).map((target) => ['an install path of the registry', target]),
+  ];
+  let unknown = '';
+  for (const [label, tree] of trees) {
+    const inside = askInside(place, tree);
+    const outside = askInside(tree, place);
+    if (inside == 'yes') return stop('the backup directory ' + named + ' is, or lies inside, ' + label + ' (' + tree + '), where a copy is not safe from the cleanup of cache versions');
+    if (outside == 'yes') return stop('the backup directory ' + named + ' contains ' + label + ' (' + tree + '), so a copy kept there is not outside it');
+    if (!unknown && (inside == 'unknown' || outside == 'unknown')) unknown = 'the file system gives no identity to the backup directory ' + named + ' or to ' + label + ' (' + tree + '), so it cannot be ruled out that they overlap';
+  }
+  return unknown ? stop(unknown) : { place, problem: '' };
+};
+
 // == repair run ==
 // The texts in which the two cache commands differ: cache-outdated cleans up after an update of an outdated plugin,
 // cache-stale cleans up a cache that holds several versions.
@@ -1016,8 +1065,16 @@ const cacheRepair = (kind) => {
         console.log(lead + 'Kept protected cache versions (pinned in installed_plugins.json or in use by a running session):', state.kept.join(', '));
       }
       if (state.pinned.length && free.length) {
+        // Where the moves go is settled before the first one: a link in the way of the backup directory may lead into a
+        // cache version, where the only recovery copy would be removed or relinked by the next cleanup.
+        const target = backupPlace(registry);
+        if (target.problem) {
+          refuse(lead + target.problem);
+          return true;
+        }
+        const redirected = target.place != path.join(realPath(path.dirname(path.dirname(backups))), 'backups', 'oh-my-claudecode');
         moveStarted = true;
-        fs.mkdirSync(backups, { recursive: true });
+        fs.mkdirSync(target.place, { recursive: true });
         free.forEach((name) => {
           let newest;
           try {
@@ -1036,7 +1093,7 @@ const cacheRepair = (kind) => {
           }
           // A backup goes to a destination that does not exist yet: a rename would replace an empty directory or a file
           // of that name, and the cleanup that keeps old versions aside must never erase an earlier copy.
-          const backup = path.join(backups, (market == 'omc' ? '' : market + '-') + name + '-' + Date.now());
+          const backup = path.join(target.place, (market == 'omc' ? '' : market + '-') + name + '-' + Date.now());
           if (taken(backup)) throw new Error('the backup destination ' + backup + ' exists already, so nothing was moved to it');
           // Everything is read again just before the move: a version that became protected is skipped.
           const again = protectionOf(dir, versions);
@@ -1044,10 +1101,12 @@ const cacheRepair = (kind) => {
             skipped++;
             return;
           }
+          const here = backupPlace(registry);
+          if (here.problem || here.place != target.place) throw new Error('the backup directory changed or overlaps a cache tree now, so nothing more was moved: ' + (here.problem || here.place));
           fs.renameSync(path.join(dir, name), backup);
           moved++;
         });
-        console.log(lead + 'Moved', moved, 'unprotected version(s) to', backups + messages.movedEnd);
+        console.log(lead + 'Moved', moved, 'unprotected version(s) to', backups + (redirected ? ' (really ' + target.place + ')' : '') + messages.movedEnd);
         if (skipped) console.log(lead + 'Skipped', skipped, 'version(s) that became protected or unreadable just before the move');
         if (unjudged) {
           console.log(lead + 'Could not judge', unjudged, 'version(s) (more than 20000 entries, or an entry could not be read), so they were left in place');
