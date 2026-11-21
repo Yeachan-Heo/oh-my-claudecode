@@ -222,6 +222,24 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('indexes a quoted registered name with trailing blanks', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(skillsRoot, 'audit'), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, 'audit', 'SKILL.md'),
+      '---\nname: "omc-audit"  \n---\n\n# Audit\n\nAudit body text.\n',
+    );
+    writePlaybook(
+      root,
+      'trailing-blanks.md',
+      '---\nextends: omc-audit\nwhen: Trailing blanks in skill name.\n---\n\n**After** "Audit body text." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('no bundled skill');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('validates a playbook saved with a UTF-8 BOM', () => {
     const { root, skillsRoot } = buildProject();
     writeFileSync(
@@ -231,6 +249,24 @@ describe('check-omc-playbooks', () => {
     const r = runChecker(root, skillsRoot);
     expect(r.status).toBe(0);
     expect(r.stderr).not.toContain('missing an "extends:"');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('parses quoted items in a flow list independently', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(skillsRoot, 'verify'), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, 'verify', 'SKILL.md'),
+      '---\nname: verify\n---\n\n# Verify\n\nCheck the result.\n',
+    );
+    writePlaybook(
+      root,
+      'quoted-flow-list.md',
+      '---\nextends: ["tdd", "verify"]\nwhen: Both quoted items in flow list.\n---\n\n**After** "Write the failing test first." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('invalid extended skill name');
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -534,6 +570,66 @@ describe('check-omc-playbooks', () => {
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('1 project + 1 user playbook(s) valid');
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("check-omc-playbooks YAML frontmatter robustness (upstream #455)", () => {
+  const cases: [string, string][] = [
+    ["a quoted extends and when", '---\nextends: "tdd"\nwhen: \'Run the red-green cycle.\'\n---\n'],
+    ["an extends flow list", "---\nextends: [tdd]\nwhen: Run the red-green cycle.\n---\n"],
+    ["blanks after a delimiter", "--- \nextends: tdd\nwhen: Run the red-green cycle.\n---\t\n"],
+    ["a closing delimiter at the end of the file", "---\nextends: tdd\nwhen: Run the red-green cycle.\n---"],
+  ];
+  for (const [name, front] of cases) {
+    it(`frontmatter written as valid YAML passes: ${name}`, () => {
+      const { root, skillsRoot } = buildProject();
+      // Match upstream's fixture: when the frontmatter ends at the closing
+      // delimiter, the file is frontmatter-only (no anchor body appended).
+      const body = front.endsWith("---")
+        ? ""
+        : "- **In** \"Write the failing test first.\" keep the output artifact path.\n";
+      writeFileSync(join(root, ".omc", "playbooks", "yaml-form.md"), `${front}\n${body}`);
+      const r = runChecker(root, skillsRoot);
+      expect(r.status).toBe(0);
+      rmSync(root, { recursive: true, force: true });
+    });
+  }
+
+  it("a quoted flow list stays one stem, as YAML reads it", () => {
+    const { root, skillsRoot } = buildProject();
+    writeFileSync(
+      join(root, ".omc", "playbooks", "quoted-list.md"),
+      '---\nextends: "[tdd]" \nwhen: Run the cycle.\n---\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('invalid extended skill name "[tdd]"');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("CRLF-encoded playbooks with anchors pass after normalization", () => {
+    const { root, skillsRoot } = buildProject();
+    // Write a CRLF-encoded playbook with anchor text that includes '---' (which
+    // could confuse an LF-only fence regex). The CRLF normalization ensures the
+    // frontmatter is correctly identified and removed before anchor validation.
+    // If normalization were skipped, the LF-only body-fence regex would fail to
+    // match the CRLF-delimited frontmatter and leak it into anchor scanning.
+    const crlfContent = [
+      '---\r',
+      'extends: tdd\r',
+      'when: When the body starts with anchor-like text.\r',
+      '---\r',
+      '- In **Before** "---" (a fence-like anchor) write the failing test.\r',
+      '',
+    ].join('\n');
+    writeFileSync(
+      join(root, ".omc", "playbooks", "crlf-encoded.md"),
+      crlfContent,
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('1 project playbook(s) valid');
     rmSync(root, { recursive: true, force: true });
   });
 });
