@@ -565,15 +565,19 @@ const npmLatest = () => {
 
 // == Step 4 ==
 // Whether CLAUDE.md management is disabled: only an explicit claudeMdEnabled: false in .omc-config.json disables it.
-// A file that is there but cannot be read (a link to nothing, EACCES) may hold the opt-out, so that is neither line.
+// A file that is there but cannot be read (a link to nothing, EACCES), is not a regular file (a directory, a FIFO) or is
+// not JSON (an empty file included) may hold the opt-out, so that is neither line.
 const claudeMdOptOut = () => {
   const file = path.join(configDir, '.omc-config.json');
   let off = false;
   let cannotRead = '';
   try {
-    off = JSON.parse(readFile(file)).claudeMdEnabled === false;
+    off = JSON.parse(readFile(file))?.claudeMdEnabled === false;
   } catch (error) {
-    if (error && error.code && !absent(error, file)) cannotRead = error.code;
+    // readFile throws 0 for a file that is not a regular one.
+    if (error === 0) cannotRead = 'not a regular file';
+    else if (error instanceof SyntaxError) cannotRead = 'not valid JSON';
+    else if (error && error.code && !absent(error, file)) cannotRead = error.code;
   }
   console.log(
     cannotRead
@@ -603,22 +607,26 @@ const claudeMdVersion = () => {
   if (referenced) {
     candidates.push(path.join(configDir, referenced[0]));
   } else {
-    const defaultCompanion = path.join(configDir, 'CLAUDE-omc.md');
-    if (fs.existsSync(defaultCompanion)) candidates.push(defaultCompanion);
     try {
-      const others = fs
-        .readdirSync(configDir)
-        .filter((name) => /^CLAUDE-.*[.]md(?![^])/i.test(name))
-        .sort()
-        .map((name) => path.join(configDir, name));
-      for (const other of others) {
+      // A directory or a FIFO named like a companion is none (the shell block of Step 4 lists regular files only); a link is
+      // kept, as the script has always read through links, and one to nothing is unreadable below. CLAUDE-omc.md comes first.
+      const names = fs
+        .readdirSync(configDir, { withFileTypes: true })
+        .filter((entry) => (entry.isFile() || entry.isSymbolicLink()) && /^CLAUDE-.*[.]md(?![^])/i.test(entry.name))
+        .map((entry) => entry.name)
+        .sort();
+      for (const name of [...names.filter((other) => other == 'CLAUDE-omc.md'), ...names.filter((other) => other != 'CLAUDE-omc.md')]) {
+        const other = path.join(configDir, name);
         if (candidates.includes(other) === false) candidates.push(other);
       }
     } catch {}
   }
-  // The first candidate that carries the marker decides.
+  // The first candidate that carries the marker decides. One ahead of it that is there but cannot be read as a regular file
+  // (a link to nothing, a directory, no permission) may hold the marker that would decide, so the version is unreadable;
+  // one that is not there is skipped.
   let claudeVersion = '(missing)';
   let claudeSource = '(none)';
+  let cannotRead = '';
   for (const file of candidates) {
     try {
       const marker = readFile(file).match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
@@ -627,30 +635,56 @@ const claudeMdVersion = () => {
         claudeSource = file;
         break;
       }
-    } catch {}
+    } catch (error) {
+      if (!cannotRead && !absent(error, file)) cannotRead = file + ' (' + ((error && error.code) || 'not a regular file') + ')';
+    }
   }
-  if (claudeVersion === '(missing)' && candidates.length > 0) {
+  if (cannotRead) {
+    claudeVersion = '(unreadable)';
+    claudeSource = cannotRead;
+  } else if (claudeVersion === '(missing)' && candidates.length > 0) {
     claudeVersion = '(missing marker)';
     claudeSource = 'scanned deterministic CLAUDE sources';
   }
   const roots = pluginRoots();
-  const states = readChannelRegistry().supported.map(([id, entries]) => [marketplaceOf(id), activeEntries(id, entries, roots)]);
+  const registry = readChannelRegistry();
+  const states = registry.supported.map(([id, entries]) => [marketplaceOf(id), activeEntries(id, entries, roots)]);
   const running = [...new Set(states.filter(([, state]) => state.active.length).map(([market]) => market))];
   let pluginVersion = '(none)';
-  if (states.some(([, state]) => state.unknown)) {
+  // A registry that cannot be used (as in Step 1) leaves open which marketplace the session runs, and a cache that cannot be
+  // read may hold the newest version, so no version is named while either is unreadable.
+  const registryUnusable = registry.unreadable || (registry.supported.length > 0 ? registry.malformed : registry.ambiguous);
+  let unreadableCache = '';
+  const latestIn = (market) => {
+    const latest = highestCached(cacheDirOf(market));
+    if (latest === null && !unreadableCache) unreadableCache = cacheDirOf(market);
+    return latest;
+  };
+  if (registryUnusable) {
+    pluginVersion = '(unknown)';
+  } else if (states.some(([, state]) => state.unknown)) {
     // As in Step 1: among the entries of one plugin ID a certain match decides, but a match that is unknown for any ID
     // leaves open which marketplace the session runs.
     pluginVersion = '(unknown)';
   } else if (running.length) {
     // With roots in two marketplaces the highest of their caches names it.
-    pluginVersion = running.map((market) => highestCached(cacheDirOf(market))).filter(Boolean).sort(compareVersions).pop() || '(none)';
+    pluginVersion = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '(none)';
   } else {
-    for (const market of markets) pluginVersion = highestCached(cacheDirOf(market)) || pluginVersion;
+    for (const market of markets) pluginVersion = latestIn(market) || pluginVersion;
   }
+  if (unreadableCache) pluginVersion = '(unknown)';
   console.log('CLAUDE.md OMC version:', claudeVersion);
   console.log('OMC version source:', claudeSource);
   console.log('Latest cached plugin version:', pluginVersion);
-  if (pluginVersion === '(unknown)') {
+  if (registryUnusable) {
+    console.log('Note: installed_plugins.json cannot be used, so it is unknown which plugin install the session runs');
+    console.log('VERSION CHECK SKIPPED: installed_plugins.json cannot be used, so no cache is chosen');
+  } else if (unreadableCache) {
+    console.log('Note: the plugin cache ' + unreadableCache + ' cannot be read, so its version is unknown');
+    console.log('VERSION CHECK SKIPPED: the plugin cache cannot be read, so no version is compared');
+  } else if (claudeVersion === '(unreadable)') {
+    console.log('VERSION CHECK SKIPPED: a CLAUDE source cannot be read, so its OMC:VERSION marker is unknown (see OMC version source)');
+  } else if (pluginVersion === '(unknown)') {
     console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
   } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
     console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');

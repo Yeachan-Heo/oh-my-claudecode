@@ -100,7 +100,7 @@ ls -la "$C"/hooks/*.sh 2>/dev/null
 
 ### Step 4: Check CLAUDE.md
 
-First check whether CLAUDE.md management is disabled. Read `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc-config.json`; only an explicit `"claudeMdEnabled": false` disables it (missing file, missing key, or any other value means enabled).
+First check whether CLAUDE.md management is disabled. Read `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc-config.json`; only an explicit `"claudeMdEnabled": false` disables it (missing file, missing key, or any other value means enabled; a file that cannot be used is unknown, see below).
 
 ```bash
 # Check if the user opted out of global CLAUDE.md management (cross-platform; expands ~ in CLAUDE_CONFIG_DIR like getClaudeConfigDir)
@@ -111,7 +111,7 @@ node "$S" claude-md-optout
 Continue with the CLAUDE.md checks below only when the probe printed exactly `CLAUDE.md management enabled`.
 
 - If it prints `CLAUDE.md management disabled by claudeMdEnabled: false`, report that line as INFO, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`.
-- If it prints neither line, or the command fails (for example `node` is not on `PATH`, which Step 5 diagnoses, or the plugin files are missing, which the message `omc-doctor: plugin files not found` reports), report WARN - could not check the `claudeMdEnabled` opt-out, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`. A third line, `CLAUDE.md management unknown: could not read .omc-config.json (<code>)`, is such a case: the file is there and cannot be read (a link to nothing, no permission), so the opt-out may be in it.
+- If it prints neither line, or the command fails (for example `node` is not on `PATH`, which Step 5 diagnoses, or the plugin files are missing, which the message `omc-doctor: plugin files not found` reports), report WARN - could not check the `claudeMdEnabled` opt-out, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`. A third line, `CLAUDE.md management unknown: could not read .omc-config.json (<reason>)`, is such a case: the file is there and cannot be used (<reason> is an error code for a link to nothing or no permission, `not a regular file`, or `not valid JSON` for an empty file too), so the opt-out may be in it.
 
 ```bash
 C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac
@@ -119,7 +119,7 @@ C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${
 ls -la "$C"/CLAUDE.md 2>/dev/null
 
 # Check for OMC markers (<!-- OMC:START --> is the canonical marker)
-grep -q "<!-- OMC:START -->" "$C/CLAUDE.md" 2>/dev/null && echo "Has OMC config" || echo "Missing OMC config in CLAUDE.md"
+grep -q "<!-- OMC:START -->" "$C/CLAUDE.md" 2>/dev/null; case $? in 0) echo "Has OMC config";; 1) echo "Missing OMC config in CLAUDE.md";; *) [ -e "$C/CLAUDE.md" ] || [ -L "$C/CLAUDE.md" ] && echo "Could not read CLAUDE.md" || echo "Missing OMC config in CLAUDE.md";; esac
 
 # Check companion files for file-split pattern (e.g. CLAUDE-omc.md)
 find "$C" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null
@@ -141,9 +141,9 @@ node "$S" claude-md-version
 - If CLAUDE.md missing: CRITICAL - CLAUDE.md not configured
 - If `<!-- OMC:START -->` found in CLAUDE.md: OK
 - If `<!-- OMC:START -->` found in a companion file (e.g. `CLAUDE-omc.md`): OK - file-split pattern detected
-- If no OMC markers in CLAUDE.md or any companion file: WARN - outdated CLAUDE.md
+- If no OMC markers in CLAUDE.md or any companion file: WARN - outdated CLAUDE.md; `Could not read CLAUDE.md`: WARN, it is there and unreadable
 - If `OMC:VERSION` marker is missing from deterministic CLAUDE source scan (base + referenced companion): WARN - cannot verify CLAUDE.md freshness
-- If `CLAUDE.md OMC version` != `Latest cached plugin version`: WARN - version drift detected (run `omc update` or `omc setup`); a leading `v` on either version is ignored, as in Step 1; no drift is claimed when the command printed `VERSION CHECK SKIPPED` (`(none)` and `(unknown)` are no versions)
+- If `CLAUDE.md OMC version` != `Latest cached plugin version`: WARN - version drift detected (run `omc update` or `omc setup`); a leading `v` on either version is ignored, as in Step 1; no drift is claimed when the command printed `VERSION CHECK SKIPPED` (`(none)`, `(unknown)` and `(unreadable)` are no versions). `(unreadable)` as the CLAUDE.md version or a `Note:` about an unreadable plugin cache or an unusable `installed_plugins.json`: WARN - name the file or directory; it is there, not missing
 
 ### Step 5: Check Ralph Runtime Prerequisites
 
@@ -286,7 +286,7 @@ node "$S" cache-stale
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md
-Skip this fix unless Step 4 printed `CLAUDE.md management enabled`: skip it when Step 4 reported `CLAUDE.md management disabled by claudeMdEnabled: false` or could not check the opt-out.
+Skip this fix unless Step 4 printed `CLAUDE.md management enabled`: skip it when Step 4 reported `CLAUDE.md management disabled by claudeMdEnabled: false` or could not check the opt-out, and when it printed `Could not read CLAUDE.md` or the version `(unreadable)`: write nothing through a file that cannot be read.
 
 Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. If CLAUDE.md is a link that leads into `plugins/cache` or `plugins/marketplaces` of the configuration directory, write nothing and say where it leads: the cache cleanup and the marketplace update remove or replace what lies there. When that file exists, first copy it (`cp -n -p`) to a new `CLAUDE.md.bak-<UTC time>-<pid>` beside it and write only after the copy succeeded; if it fails, leave CLAUDE.md as it is and say so. The copy is a new regular file in the configuration directory itself, also when CLAUDE.md is a link:
 ```
