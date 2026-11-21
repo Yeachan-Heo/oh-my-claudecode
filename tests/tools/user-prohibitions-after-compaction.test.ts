@@ -788,6 +788,17 @@ describe('user prohibitions after compaction', () => {
     expect(pyEval('module.split_substitutions(argument, "_")', 'echo >(cat) $(a)')).toEqual(['echo >(cat) _', ['a']]);
   });
 
+  it('a device target is no file whatever character follows it, and a write behind it is still a write', () => {
+    // `/dev/null` before `;`, `)`, `|`, `&` or `<` is the device as before a blank; `/dev/nullx` is a name like any other. The unbalanced
+    // `)` is no command of bash: it isolates the scan of the target from the first word.
+    const cases: Record<string, boolean> = {
+      'ls 2>/dev/null; echo x': true, 'ls 2>/dev/null|head': true, 'ls 2>/dev/null)': true, 'ls 2>/dev/null& echo x': true, 'ls 2>/dev/null&&echo x': true,
+      'ls >/dev/null<in': true, 'ls >/dev/stderr; echo x': true, 'ls 2>/dev/nullx; echo x': false, 'ls >/dev/null.txt; echo x': false,
+      'ls 2>/dev/null; echo y>f': false, 'ls 2>/dev/null|echo y>f': false, 'ls 2>/dev/null)>f': false, 'ls 2>/dev/null& echo y>f': false,
+    };
+    expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);
+  });
+
   it('a call whose only redirection is to a process substitution or a device is no state-changing call', () => {
     const sessions: Record<string, Row[]> = {
       'p/ps.jsonl': [user(1, 'No-run'), host(2),

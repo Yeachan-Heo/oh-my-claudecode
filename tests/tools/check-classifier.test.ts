@@ -119,7 +119,7 @@ const INFORMATION_ROWS = [
   ['vitest -v', false], ['vitest run -h', false], ['vitest list', false], ['vitest run -t -h', true], ['vitest run', true], ['jest -h', false], ['jest --showConfig', false],
   ['jest --clearCache', false], ['jest', true], ['mocha -V', false], ['mocha --list-reporters', false], ['mocha', true], ['webpack -v', false], ['webpack help', false], ['webpack build', true],
   ['node --test -h', false], ['node --test --v8-options', false], ['node --test', true], ['node --check -v', false], ['node --check a.js', true],
-  ['cargo test -h', false], ['cargo test', true], ['go test -c', false],
+  ['cargo test -h', false], ['cargo test -- -h', false], ['cargo test', true], ['go test -c', false],
   ['go test -n ./...', false], ['go test ./...', true], ['go test -run -h ./...', true],
   // a program that is not in the table: the long words of every program and the short help word, not -v and -V
   ['make test -h', false], ['make test -?', false], ['make test -v', true], ['npm test -- --help', false], ['npm test -- -h', false], ['npm test -V', true],
