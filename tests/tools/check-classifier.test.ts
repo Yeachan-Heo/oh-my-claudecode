@@ -907,6 +907,22 @@ it('the body of a command or process substitution is read as a command of its ow
   assert.equal(isMutation('Bash', { command: nest(8, ['$('], `echo >(${read})`) }), false);
   assert.equal(isMutation('Bash', { command: nest(9, ['$('], `echo >(${read})`) }), true);
   assert.equal(isMutation('Bash', { command: nest(8, ['$('], `echo >(${write})`) }), true);
+  // Known limit: a real shell writes the file in both of these, and the tool counts no write. The tenth level is not read, and it holds no `<(` or `>(`
+  // for the ninth level to count, because the only substitution in it is a `$(`.
+  const literal = 'echo >(echo >(echo >(echo >(echo >(echo >(echo >(echo >(echo >(echo $(tee src/a.ts))))))))))';
+  assert.equal(nest(9, ['>('], `echo $(${write})`), literal);
+  assert.equal(isMutation('Bash', { command: literal }), false, '>( 9 times, then $( at the tenth level');
+  assert.equal(isMutation('Bash', { command: nest(10, ['>(', '$('], write) }), false, '>( $( 10 tee');
+  // The same shapes with the write one level higher or lower are counted.
+  assert.equal(isMutation('Bash', { command: nest(9, ['>(', '$('], write) }), true, '>( $( 9 tee');
+  assert.equal(isMutation('Bash', { command: nest(11, ['>(', '$('], write) }), true, '>( $( 11 tee');
+  // Deliberate caution: the text `<(` or `>(` in a quoted word of the ninth level is counted as a write although the shell prints it and writes nothing.
+  // The check does not tell a quoted word from a substitution there; a change of the code must not remove this without the test saying so.
+  for (const quoted of [`echo "<(x)"`, `echo '>(x)'`]) {
+    assert.equal(isMutation('Bash', { command: nest(9, ['$('], quoted) }), true, `${quoted} at the ninth level`);
+    assert.equal(isMutation('Bash', { command: nest(8, ['$('], quoted) }), false, `${quoted} at the eighth level`);
+    assert.equal(isMutation('Bash', { command: quoted }), false, `${quoted} at the top`);
+  }
   // The levels of nested shell strings are counted apart: a substitution inside `sh -c` and a `sh -c` inside a substitution are read.
   assert.equal(isMutation('Bash', { command: "sh -c 'echo $(tee src/a.ts)'" }), true);
   assert.equal(isMutation('Bash', { command: 'echo $(sh -c "tee src/a.ts")' }), true);
