@@ -129,14 +129,15 @@ describe.skipIf(!posix)('omc-doctor: a link that points at nothing is not an abs
   });
 
   // The destination of a move is never "free" by an ENOENT either: a link to nothing as plugins/backups, or as a directory
-  // above it, makes the move fail, and a failed move ends the command with exit code 1 and moves nothing.
-  test('a backups directory that is a link to nothing makes both cache commands fail with exit code 1 and move nothing', () => {
+  // above it, cannot be resolved, so the command refuses with exit code 1 before it moves anything (the destination is
+  // resolved first, see omc-doctor-backup-destination.test.ts).
+  test('a backups directory that is a link to nothing makes both cache commands refuse with exit code 1 and move nothing', () => {
     for (const command of commands) {
       const { dir, cache } = profile();
       try {
         symlinkSync(GONE, path.join(dir, 'plugins', 'backups'));
         const result = runCommand(command, dir, { timeout: 20_000 });
-        expect({ command, status: result.status, failed: result.stdout.includes('Cache move failed') }).toEqual({ command, status: 1, failed: true });
+        expect({ command, status: result.status, refused: /Nothing moved: the backup directory .* points at nothing/.test(result.stdout) }).toEqual({ command, status: 1, refused: true });
         expect(readdirSync(cache).sort()).toEqual(['5.7.0', '5.8.0']);
       } finally {
         rmSync(dir, { recursive: true, force: true });
