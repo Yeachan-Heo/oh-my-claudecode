@@ -284,6 +284,12 @@ export const TeamPaths = {
     `.omc/state/team-recovery/index-locks/${workspaceHash}/${teamName}/${recoveryId}.lock`,
   scalingRollbackFailure: (teamName: string, recordedAt: number) =>
     `.omc/state/team/${teamName}/scaling-rollback/${recordedAt}.json`,
+  recoveryPaneRollbackFailures: (teamName: string, recoveryId: string) =>
+    `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}`,
+  recoveryPaneSplits: (teamName: string, recoveryId: string) =>
+    `.omc/state/team/${teamName}/recovery/pane-splits/${recoveryId}`,
+  recoveryPaneSplit: (teamName: string, recoveryId: string, paneAttemptId: string) =>
+    `.omc/state/team/${teamName}/recovery/pane-splits/${recoveryId}/${paneAttemptId}.json`,
   recoveryPaneRollbackFailure: (teamName: string, recoveryId: string, paneAttemptId: string, recordedAt: number) =>
     `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}/${paneAttemptId}-${recordedAt}.json`,
   recoveryAuditIndex: () => '.omc/state/team-recovery/audit.jsonl',
