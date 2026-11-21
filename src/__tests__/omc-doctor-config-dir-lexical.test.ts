@@ -1,8 +1,9 @@
 import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { addCache, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_VERSION, commands, locatorLine, PLUGIN_ID, runBlock, runCommand, skillText, STEP1, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 // @ts-expect-error Standalone runtime source is intentionally JavaScript-only.
 import { getClaudeConfigDir } from '../../scripts/lib/config-dir.mjs';
@@ -212,6 +213,62 @@ describe.skipIf(!posix)('omc-doctor: a .. after a link names the same directory 
   });
 });
 
+// A relative value is read against the working directory, and node reads that directory physically: process.cwd() is the real
+// path, so `../x` from a directory reached through a link is the parent of the link target, in the runtime, in the script and
+// for every call the kernel resolves. A shell that cd-ed with the logical `..` and printed the result with `pwd -L` read the
+// parent of the link instead. The blocks make a relative value absolute against the physical directory (`pwd -P`), then fold
+// the text, so the shell, the runtime and the script name one directory. POSIX only: the fixture needs a symlink and the
+// blocks run through bash.
+describe.skipIf(!posix)('omc-doctor: a relative CLAUDE_CONFIG_DIR names one directory in the shell blocks, the runtime and the script', { timeout: 120_000 }, () => {
+  const MODULE = fileURLToPath(new URL('../../scripts/lib/config-dir.mjs', import.meta.url));
+  // `<base>/real/a/b` is the physical working directory, `<base>/work/lnk` leads to it. `<base>/work/x` is what the logical
+  // `..` reaches, `<base>/real/a/x` what the physical one reaches; both hold a CLAUDE.md of another version.
+  const world = (exists: boolean) => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'omc-doctor-relative-')));
+    const cwd = path.join(base, 'real', 'a', 'b');
+    mkdirSync(cwd, { recursive: true });
+    mkdirSync(path.join(base, 'work'), { recursive: true });
+    symlinkSync(path.join('..', 'real', 'a', 'b'), path.join(base, 'work', 'lnk'));
+    if (exists) {
+      for (const [dir, version] of [[path.join(base, 'work', 'x'), '5.1.0'], [path.join(base, 'real', 'a', 'x'), '5.8.0'], [path.join(cwd, 'rel'), '5.8.0'], [path.join(base, 'cfg'), '5.8.0']] as const) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, 'CLAUDE.md'), `<!-- OMC:VERSION:${version} -->\n`);
+      }
+    }
+    return { base, cwd, link: path.join(base, 'work', 'lnk') };
+  };
+  const forms = (w: { base: string; cwd: string; link: string }): Array<[string, string, string]> => [
+    ['a leading ..', '../x', path.join(w.base, 'real', 'a', 'x')],
+    ['a leading .. and a trailing separator', '../x/', path.join(w.base, 'real', 'a', 'x')],
+    ['a leading . and a .. after it', './../x', path.join(w.base, 'real', 'a', 'x')],
+    ['a plain relative path', 'rel', path.join(w.cwd, 'rel')],
+    ['a dot', '.', w.cwd],
+    ['an absolute path through the link keeps the link', `${w.link}/rel`, `${w.link}/rel`],
+    ['a path under the home directory', '~/cfg', path.join(w.base, 'cfg')],
+  ];
+  const env = (w: { base: string }, configured: string) => ({ ...process.env, CLAUDE_CONFIG_DIR: configured, HOME: w.base, USERPROFILE: w.base, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' });
+
+  test.each([true, false])('the first line of the blocks, getClaudeConfigDir() and the script read one directory from a working directory reached through a link (the directories exist: %s)', (exists) => {
+    const w = world(exists);
+    try {
+      for (const [label, configured, expected] of forms(w)) {
+        // The shell: the working directory is the link as the shell knows it (a cd, then the logical PWD).
+        const bash = spawnSync('/bin/bash', ['-c', `cd "${w.link}" && ${prelude}\nprintf %s "$C"`], { encoding: 'utf8', timeout: 20_000, cwd: w.base, env: env(w, configured) }).stdout;
+        // The runtime, run as a process whose working directory is the link: the relative text is read against the real one.
+        const runtime = spawnSync(process.execPath, ['--input-type=module', '-e', `import path from 'node:path'; import { getClaudeConfigDir } from ${JSON.stringify(MODULE)}; process.stdout.write(path.resolve(process.cwd(), getClaudeConfigDir()));`], { encoding: 'utf8', timeout: 20_000, cwd: w.link, env: env(w, configured) }).stdout;
+        expect({ exists, label, bash, runtime }).toEqual({ exists, label, bash: expected, runtime: expected });
+        // The script reads the same directory: where the directory is there, its CLAUDE.md names the source it read.
+        if (exists && label !== 'a dot') {
+          const four = runBlock(CLAUDE_MD_VERSION, w.cwd, { cwd: w.link, timeout: 20_000, env: { CLAUDE_CONFIG_DIR: configured, HOME: w.base, USERPROFILE: w.base } });
+          expect({ label, source: path.resolve(w.cwd, /OMC version source: (.*)/.exec(four.stdout)?.[1] ?? '') }).toEqual({ label, source: path.join(expected, 'CLAUDE.md') });
+        }
+      }
+    } finally {
+      rmSync(w.base, { recursive: true, force: true });
+    }
+  });
+});
+
 // A shell block is run whole, in one Bash call: the tool keeps no variable from one call to the next. So a line that uses
 // `$C` is never outside the block that sets it, and the skill says to run a block whole.
 describe('omc-doctor: no shell line uses $C outside the block that sets it', () => {
@@ -238,7 +295,8 @@ describe('omc-doctor: no shell line uses $C outside the block that sets it', () 
   test('every shell block that uses the directory has the same first line, and the skill says to run a block whole', () => {
     expect(blocks).toHaveLength(5);
     for (const block of blocks) expect(block.split('\n')[0]).toBe(prelude);
-    expect(prelude).toContain('pwd -L');
+    expect(prelude).toContain('pwd -P');
+    expect(prelude).not.toContain('pwd -L');
     expect(skillText).toContain('Run every shell block whole, in one Bash call: the tool keeps no variable from one call to the next');
   });
 
