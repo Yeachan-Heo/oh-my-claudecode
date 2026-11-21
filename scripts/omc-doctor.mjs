@@ -976,17 +976,19 @@ const protectionOf = (dir, versions) => {
 // why nothing is moved otherwise. The trees: the plugin cache and the cache of every marketplace of the registry, the
 // marketplace clones, the occupancy records, the plugin root variables and every installPath of the registry, each as
 // written and as the file system reads it (a .. after a link). Both directions count (the destination inside a tree, a
-// tree inside the destination). A destination that cannot be resolved (a link to nothing, a loop, no permission) or
+// tree inside the destination); a destination the configuration itself writes inside a tree (an active root that is the
+// configuration directory) is not an overlap that a link made. A destination that cannot be resolved (a link to nothing, a loop, no permission) or
 // compared (no file system identity) is refused like an overlap, because a link may lead anywhere.
 const resolvable = (target) => {
   try {
     fs.statSync(target);
     return true;
   } catch (error) {
-    return !!error && error.code == 'ENOENT' && nothingAt(target);
+    // A file where a directory should be is no link: the move fails there and says so (Cache move failed).
+    return !!error && ((error.code == 'ENOENT' && nothingAt(target)) || error.code == 'ENOTDIR');
   }
 };
-const backupPlace = (registry) => {
+const backupPlace = (registry, markets) => {
   const chain = linkChain(backups);
   const place = chain.paths[chain.paths.length - 1];
   const stop = (reason) => ({ place, problem: 'Nothing moved: ' + reason + '; fix that first, then run this again' });
@@ -1000,17 +1002,21 @@ const backupPlace = (registry) => {
   const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT].map((root) => (root || '').trim()).filter(Boolean);
   const trees = [
     ['the plugin cache', path.join(configDir, 'plugins', 'cache')],
-    ...[...new Set([...registry.ids.map(marketplaceOf), 'omc'])].sort().map((market) => ['the cache of ' + market, cacheDirOf(market)]),
+    ...[...new Set([...markets, 'omc'])].map((market) => ['the cache of ' + market, cacheDirOf(market)]),
     ['the marketplace clones', path.join(configDir, 'plugins', 'marketplaces')],
     ['the occupancy records', occupancyDir],
     ...roots.flatMap(bothForms).map((root) => ['the plugin root', root]),
     ...installPaths.flatMap(bothForms).map((target) => ['an install path of the registry', target]),
   ];
+  // What the configuration says without any link: a tree that holds this place already (an active root that is the
+  // configuration directory itself) is no overlap that a link made.
+  const written = path.resolve(backups);
+  const holdsWritten = (tree) => written == path.resolve(tree) || written.startsWith(path.resolve(tree) + path.sep);
   let unknown = '';
   for (const [label, tree] of trees) {
     const inside = askInside(place, tree);
     const outside = askInside(tree, place);
-    if (inside == 'yes') return stop('the backup directory ' + named + ' is, or lies inside, ' + label + ' (' + tree + '), where a copy is not safe from the cleanup of cache versions');
+    if (inside == 'yes' && !holdsWritten(tree)) return stop('the backup directory ' + named + ' is, or lies inside, ' + label + ' (' + tree + '), where a copy is not safe from the cleanup of cache versions');
     if (outside == 'yes') return stop('the backup directory ' + named + ' contains ' + label + ' (' + tree + '), so a copy kept there is not outside it');
     if (!unknown && (inside == 'unknown' || outside == 'unknown')) unknown = 'the file system gives no identity to the backup directory ' + named + ' or to ' + label + ' (' + tree + '), so it cannot be ruled out that they overlap';
   }
@@ -1067,7 +1073,7 @@ const cacheRepair = (kind) => {
       if (state.pinned.length && free.length) {
         // Where the moves go is settled before the first one: a link in the way of the backup directory may lead into a
         // cache version, where the only recovery copy would be removed or relinked by the next cleanup.
-        const target = backupPlace(registry);
+        const target = backupPlace(registry, markets);
         if (target.problem) {
           refuse(lead + target.problem);
           return true;
@@ -1095,14 +1101,15 @@ const cacheRepair = (kind) => {
           // of that name, and the cleanup that keeps old versions aside must never erase an earlier copy.
           const backup = path.join(target.place, (market == 'omc' ? '' : market + '-') + name + '-' + Date.now());
           if (taken(backup)) throw new Error('the backup destination ' + backup + ' exists already, so nothing was moved to it');
-          // Everything is read again just before the move: a version that became protected is skipped.
+          // Everything is read again just before the move: the backup directory (a change stops the command) and the
+          // protection (a version that became protected is skipped).
+          const here = backupPlace(registry, markets);
+          if (here.problem || here.place != target.place) throw new Error('the backup directory changed or overlaps a cache tree now, so nothing more was moved: ' + (here.problem || here.place));
           const again = protectionOf(dir, versions);
           if (again.unreadable || again.noIdentity || !again.pinned.length || again.kept.includes(name)) {
             skipped++;
             return;
           }
-          const here = backupPlace(registry);
-          if (here.problem || here.place != target.place) throw new Error('the backup directory changed or overlaps a cache tree now, so nothing more was moved: ' + (here.problem || here.place));
           fs.renameSync(path.join(dir, name), backup);
           moved++;
         });

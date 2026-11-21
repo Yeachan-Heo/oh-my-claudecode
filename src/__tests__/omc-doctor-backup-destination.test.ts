@@ -194,6 +194,29 @@ describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and 
     }
   });
 
+  // An active root that holds the whole configuration directory (the plugin root variable set to it) already holds the
+  // default destination: no link made that, so the cleanup goes on. A link that leads into the pinned version from there
+  // is still refused, because the cache tree holds the destination.
+  test('a plugin root that holds the configuration directory is no overlap by itself, and a link into the cache under it is still refused', () => {
+    for (const command of commands) {
+      for (const platform of PLATFORMS) {
+        for (const linked of [false, true]) {
+          const { dir, cache, inside } = profile();
+          try {
+            if (linked) link(inside, path.join(dir, 'plugins', 'backups'));
+            const result = runCommand(command, dir, { preloads: [platformPreload(dir, platform)], env: { CLAUDE_PLUGIN_ROOT: dir }, timeout: 20_000 });
+            const tree = REFUSED.exec(result.stdout)?.[1];
+            expect({ command, platform, linked, status: result.status, tree, left: readdirSync(cache).sort() }).toEqual(
+              linked ? { command, platform, linked, status: 1, tree: 'the plugin cache', left: ALL } : { command, platform, linked, status: 0, tree: undefined, left: ['5.8.0'] },
+            );
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+  });
+
   // The check runs again before each move: a link put in place after the first move (by a session, an update or the user)
   // turns the rest of the run into a failed move with exit code 1, and what is not moved stays in the cache.
   test('a destination that becomes a link into the cache after the first move stops the run: the second version stays', () => {
