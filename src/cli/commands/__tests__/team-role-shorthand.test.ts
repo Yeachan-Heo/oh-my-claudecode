@@ -269,6 +269,7 @@ describe('teamCommand role-only shorthand', () => {
     expect(errorSpy.mock.calls.flat().join('\n')).toContain(
       'startup_failure worker=worker-1 reason=worker_startup_evidence_missing_pane_busy claim_error={"ok":false,"error":"claim_conflict"}',
     );
+    expect(errorSpy.mock.calls.flat().join('\n')).not.toContain('claude --dangerously-skip-permissions');
     expect(process.exitCode).toBe(1);
   });
 

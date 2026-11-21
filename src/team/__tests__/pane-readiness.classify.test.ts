@@ -360,6 +360,100 @@ describe('Claude Code first-run dialogs', () => {
     }
   });
 
+  it('leaves the trust dialog that offers Yes, proceed to the trust detector, footer drawn or not', () => {
+    const legacy = 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed\n';
+    expect(detectClaudeStartupDialog(legacy)).toBeNull();
+    expect(detectClaudeStartupDialog(`${legacy}\n  Enter to confirm · Esc to cancel\n`)).toBeNull();
+  });
+
+  it('waits on the trust choices drawn without their question, which the trust detector does not read', () => {
+    expect(detectClaudeStartupDialog('  ❯ No, exit\n    Yes, I trust this folder\n\n  Enter to confirm · Esc to cancel\n'))
+      .toBe('claude_startup_dialog_unidentified');
+  });
+
+  it('reads No, exit above the footer as the bypass warning when its other choice is worded otherwise', () => {
+    expect(detectClaudeStartupDialog('  ❯ No, exit\n    Yes, I agree\n\n  Enter to confirm · Esc to cancel\n'))
+      .toBe('claude_bypass_permissions');
+  });
+
+  it('waits on the renderer offer until its footer is drawn', () => {
+    const offer = read('claude/2.1.328/fullscreen-renderer.txt');
+    expect(detectClaudeStartupDialog(offer.replace('Enter to confirm · Esc to cancel', '')))
+      .toBe('claude_startup_dialog_unidentified');
+  });
+
+  it('reads no focus on the renderer offer while neither choice is marked', () => {
+    const offer = read('claude/2.1.328/fullscreen-renderer.txt').replace('❯ 1. Yes, try it', '  1. Yes, try it');
+    expect(detectClaudeStartupDialog(offer)).toBe('claude_fullscreen_renderer');
+    expect(claudeDialogFocus(offer, 'claude_fullscreen_renderer')).toBeNull();
+  });
+
+  it.each([6, 8])('reads the renderer offer and its focus with the focused choice wrapped over three lines at %i columns', (cols) => {
+    for (const [file, focus] of [
+      ['claude/2.1.328/fullscreen-renderer.txt', 'first'],
+      ['claude/2.1.328/fullscreen-renderer-not-now-focused.txt', 'second'],
+    ] as const) {
+      const wrapped = hardWrap(read(file), cols);
+      expect(detectClaudeStartupDialog(wrapped), file).toBe('claude_fullscreen_renderer');
+      expect(claudeDialogFocus(wrapped, 'claude_fullscreen_renderer'), file).toBe(focus);
+    }
+  });
+
+  it('reads the focus of the latest copy when the offer drawn after Not now focuses Yes again', () => {
+    const stacked = `${read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt')}\n${read('claude/2.1.328/fullscreen-renderer.txt')}`;
+    expect(claudeDialogFocus(stacked, 'claude_fullscreen_renderer')).toBe('first');
+  });
+
+  // Any one part of onboarding on screen names it, as a short pane or a
+  // capture taken while Claude Code draws the screen can show only that part.
+  it.each([
+    " Let's get started.",
+    ' Choose the text style that looks best',
+    ' To change this later, run /theme',
+    '     Dark mode (colorblind-friendly)',
+    '     Light mode (colorblind-friendly)',
+    '     Dark mode (ANSI colors only)',
+    '     Light mode (ANSI colors only)',
+    '     Dark mode\n     Light mode',
+    '  Syntax theme: Monokai Extended',
+    ' (ctrl+t to disable)',
+    ' Security notes:',
+    ' 1. Claude can make mistakes.',
+    ' 2. Due to prompt injection risks, only',
+    ' Press Enter to continue',
+  ])('reads onboarding from %j alone', (part) => {
+    expect(detectClaudeStartupDialog(`${part}\n`)).toBe('claude_onboarding');
+  });
+
+  // The focused theme (❯, and ✔ on the theme in use) is drawn like an input
+  // prompt. Captured before the lines below it are drawn, it is still read as
+  // a choice, so the picker above it still names onboarding.
+  it.each([
+    ['✔ Auto (match terminal)', 'Auto (match terminal)'],
+    ['Dark mode', 'Dark mode'],
+    ['Light mode', 'Light mode'],
+    ['Dark mode (colorblind-friendly)', 'Dark mode (colorblind-friendly)'],
+    ['Light mode (colorblind-friendly)', 'Light mode (colorblind-friendly)'],
+    ['Dark mode (ANSI colors only)', 'Dark mode (ANSI colors only)'],
+    ['Light mode (ANSI colors only)', 'Light mode (ANSI colors only)'],
+  ])('reads onboarding with ❯ %s as the last line drawn', (focused, choice) => {
+    const lines = read('claude/2.1.329/onboarding-theme.txt').replace('❯ ✔ Auto', '    Auto').split('\n');
+    const at = lines.findIndex(line => line.trim() === choice);
+    const picker = [...lines.slice(0, at), ` ❯ ${focused}`].join('\n');
+    expect(detectClaudeStartupDialog(`${picker}\n`)).toBe('claude_onboarding');
+  });
+
+  it('reads a prompt holding typed text as a prompt, even text that begins or starts a choice', () => {
+    const notes = read('claude/2.1.329/onboarding-security-notes.txt');
+    expect(detectClaudeStartupDialog(`${notes}\n❯ Dark mode looks fine\n`)).toBeNull();
+    expect(detectClaudeStartupDialog(`${notes}\n❯ Yes\n`)).toBeNull();
+  });
+
+  it('reads only below the latest input prompt when an earlier one is in the scrollback', () => {
+    const notes = read('claude/2.1.329/onboarding-security-notes.txt');
+    expect(detectClaudeStartupDialog(`❯ earlier request\n⏺ The worker pane showed:\n${notes}\n────\n❯ \n────\n`)).toBeNull();
+  });
+
   it('leaves the trust detector, observePane and classifyPane as they were, for every provider', () => {
     const cursorQuote = `${read('claude/synthetic/output-quoting-first-run-dialogs.txt').split('────')[0]}\n→ ready\n`;
     for (const captured of [...DIALOGS.map(([file]) => read(file)), cursorQuote]) {

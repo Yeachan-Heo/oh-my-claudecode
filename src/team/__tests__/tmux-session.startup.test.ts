@@ -958,14 +958,23 @@ describe('worker pane startup safety', () => {
     expect(downs).toBe(2);
   });
 
-  strictTmuxIt('reads the pane once more after answering Claude Code trust at the last poll before the deadline', async () => {
-    const context = await acceptedContext('claude');
-    const question = 'Quick safety check: Is this a project you created or one you trust?';
-    const frames = {
-      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
-      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+  const trustQuestion = 'Quick safety check: Is this a project you created or one you trust?';
+  const readFrame = (path: string) =>
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames', path), 'utf8');
+  strictTmuxIt.each([
+    ['Claude Code trust', () => ({
+      no: `${trustQuestion}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${trustQuestion}\n  No, exit\n❯ Yes, I trust this folder\n`,
       trusted: '❯ \n',
-    };
+    })],
+    ['the fullscreen renderer offer', () => ({
+      no: readFrame('claude/2.1.328/fullscreen-renderer.txt'),
+      yes: readFrame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      trusted: readFrame('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    })],
+  ] as const)('reads the pane once more after answering %s at the last poll before the deadline', async (_, dialogFrames) => {
+    const context = await acceptedContext('claude');
+    const frames = dialogFrames();
     // The dialog first appears at 29,500 ms of a 30,000 ms wait and takes each key at once.
     let focus: keyof typeof frames = 'no';
     let applied = 0;
@@ -1104,6 +1113,31 @@ describe('worker pane startup safety', () => {
     expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
   });
 
+  // Only a Claude pane is read for Claude Code's first-run screens. Another
+  // provider showing the same text is read by its own rules, as before them.
+  strictTmuxIt('reads a gemini pane that shows the Bypass Permissions warning by gemini rules at every startup check', async () => {
+    const message = 'Read inbox.md, execute now.';
+    const warning = readFrame('claude/2.1.328/bypass-permissions-yes-focused.txt');
+    const sentKeys = () => tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+
+    tmuxState.captures = [warning];
+    await expect(waitForStartupPaneReady(await acceptedContext('gemini'), { timeoutMs: 50, pollIntervalMs: 1, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    expect(sentKeys()).toEqual([]);
+
+    tmuxState.args = [];
+    tmuxState.captures = ['> \n', warning];
+    await expect(deliverStartupInbox(await acceptedContext('gemini'), message))
+      .resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    expect(sentKeys()).toEqual([message, 'Enter', 'Enter']);
+
+    tmuxState.args = [];
+    tmuxState.captures = [`> ${message}\n${warning}`];
+    await expect(retryStartupInboxSubmit(await acceptedContext('gemini'), message, { attemptAlreadyFenced: true }))
+      .resolves.toBe('resubmitted');
+    expect(sentKeys()).toEqual(['Enter']);
+  });
+
   strictTmuxIt('does not resubmit with Enter while the Bypass Permissions warning focuses Yes, I accept', async () => {
     const context = await acceptedContext('claude');
     const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
@@ -1168,6 +1202,36 @@ describe('worker pane startup safety', () => {
     expect(shown).toBe('dismissed');
   });
 
+  // The wait answers a dialog seen at the check before the trigger is typed
+  // once. A dialog still pending at the next check is not answered again: the
+  // trigger is never typed and no key follows the first answer.
+  strictTmuxIt.each([
+    ['the renderer offer drawn again', () => readFrame('claude/2.1.328/fullscreen-renderer.txt')],
+    ['a first-run screen with only its footer on screen', () =>
+      `${readFrame('claude/2.1.325/idle.txt').trimEnd()}\n\n  Enter to confirm · Esc to cancel\n`],
+  ] as const)('stops before typing the trigger when %s follows the answered renderer offer', async (_, pendingAgain) => {
+    const context = await acceptedContext('claude');
+    const idle = readFrame('claude/2.1.325/idle.txt');
+    const offer = readFrame('claude/2.1.328/fullscreen-renderer.txt');
+    // Readiness wait, pre-input check, the retried wait (offer, Down, Not now,
+    // Enter, dismissed), then the second pre-input check.
+    tmuxState.captures = [
+      idle,
+      offer,
+      offer,
+      readFrame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      readFrame('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+      pendingAgain(),
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'selector_persistent',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+      .toEqual(['Down', 'Enter']);
+  });
+
   // A first-run screen can also draw after the trigger text is typed, when only
   // Enter is left to send. Enter would answer the dialog instead of submitting
   // the trigger, so delivery stops there and the dialog gets no key at all.
@@ -1226,6 +1290,24 @@ describe('worker pane startup safety', () => {
     });
     expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
       .toEqual([message]);
+  });
+
+  strictTmuxIt('sends no key while only a first-run screen’s footer is on screen, then answers the offer once its choices show', async () => {
+    const context = await acceptedContext('claude');
+    const footerOnly = '\n  Enter to confirm · Esc to cancel\n';
+    tmuxState.captures = [
+      footerOnly,
+      footerOnly,
+      readFrame('claude/2.1.328/fullscreen-renderer.txt'),
+      readFrame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      readFrame('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    ];
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 5_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    const captures = tmuxState.args.filter(args => args[0] === 'capture-pane' || args[0] === 'send-keys');
+    expect(captures.map(args => args[0] === 'send-keys' ? String(args.at(-1)) : 'capture'))
+      .toEqual(['capture', 'capture', 'capture', 'Down', 'capture', 'Enter', 'capture']);
   });
 
   strictTmuxIt('answers Claude Code’s fullscreen renderer offer with Not now, resending a dropped Down', async () => {
@@ -1689,6 +1771,18 @@ describe('startup readiness wait set by OMC_TEAM_READY_TIMEOUT_MS', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(`timed out after ${waitMs}ms`);
     expect(warnings[0]).toContain(note);
+  });
+
+  strictTmuxIt('reports the timeout of the second wait when a first-run screen drawn at the check before the trigger never shows its choices', async () => {
+    const context = await acceptedContext('claude');
+    const idle = await readFile(join(framesRoot, '2.1.325', 'idle.txt'), 'utf8');
+    tmuxState.captures = [idle, `${idle.trimEnd()}\n\n  Enter to confirm · Esc to cancel\n`];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+
+    await expect(settleOnFakeClock(deliverStartupInbox(context, message)))
+      .resolves.toEqual({ ok: false, reason: 'readiness_timeout' });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    expect(warnings).toHaveLength(1);
   });
 
   strictTmuxIt('reports the wait the caller passed, not one recomputed from the variable', async () => {
