@@ -794,6 +794,7 @@ describe('user prohibitions after compaction', () => {
     const cases: Record<string, boolean> = {
       'ls 2>/dev/null; echo x': true, 'ls 2>/dev/null|head': true, 'ls 2>/dev/null)': true, 'ls 2>/dev/null& echo x': true, 'ls 2>/dev/null&&echo x': true,
       'ls >/dev/null<in': true, 'ls >/dev/stderr; echo x': true, 'ls 2>/dev/nullx; echo x': false, 'ls >/dev/null.txt; echo x': false,
+      'ls >/dev/urandom': false, 'ls >/dev/sda': false, 'ls >/dev/shm/x': false, 'ls >/dev/fd/x': false,
       'ls 2>/dev/null; echo y>f': false, 'ls 2>/dev/null|echo y>f': false, 'ls 2>/dev/null)>f': false, 'ls 2>/dev/null& echo y>f': false,
     };
     expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);

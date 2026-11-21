@@ -1105,9 +1105,9 @@ command substitution. These constructs stay outside the scope of every tool, so 
   places: after a blank, a `=`, a `,` or a `(`, at the start, behind another redirection (`cmd > >(tee x)`, `cmd 2> >(grep e)`) or twice in
   a row. It is no redirection to a file, so `echo >(cat)` writes nothing and `tee >(cat) src/a.ts` writes `src/a.ts` through its own
   operand. Its body is a command of its own and is read as one (`echo >(tee src/a.ts)` and `cmd > >(tee log.txt)` write a file, as do the
-  commands in `$(...)` and backticks). A target that is a device (`/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/N`,
-  `/dev/tcp/host/port`) is no file either, and neither are the descriptor forms (`>&2`, `>&-`, `2>&1`), `[[ a > b ]]`, `(( a > b ))`,
-  `$(( a>b ))` and `${v:-a>b}`; `&>`, `>|`, `>>` and `<>` write. In the read-only judgement of the user prohibitions tool a
+  commands in `$(...)` and backticks). A target that is a device (`/dev/null`, `/dev/zero`, `/dev/full`, `/dev/tty`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`,
+  `/dev/fd/N`, `/dev/tcp/host/port`, `/dev/udp/host/port`) is no file either, and neither are the descriptor forms (`>&2`, `>&-`, `2>&1`), `[[ a > b ]]`, `(( a > b ))`,
+  `$(( a>b ))` and `${v:-a>b}`; `&>`, `>|`, `>>` and `<>` write, and so does any other path under `/dev` (`>/dev/urandom`). In the read-only judgement of the user prohibitions tool a
   command whose first word only reads stays read-only behind a pipe into a writer (`echo hi | tee >(cat) src/a.ts`), as without the
   process substitution. The user prohibitions tool reads the bodies of process substitutions nested in each other or in command
   substitutions down to nine levels and judges each body once, so a text of any depth ends in time linear in its length; a command that
