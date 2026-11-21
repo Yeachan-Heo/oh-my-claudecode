@@ -288,7 +288,7 @@ node "$S" cache-stale
 ### Fix: Missing/Outdated CLAUDE.md
 Skip this fix unless Step 4 printed `CLAUDE.md management enabled`: skip it when Step 4 reported `CLAUDE.md management disabled by claudeMdEnabled: false` or could not check the opt-out.
 
-Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. When that file exists, first copy it (`cp -n -p`) to a new `CLAUDE.md.bak-<UTC time>-<pid>` beside it and write only after the copy succeeded; if it fails, leave CLAUDE.md as it is and say so.:
+Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. When that file exists, first copy it (`cp -n -p`) to a new `CLAUDE.md.bak-<UTC time>-<pid>` beside it and write only after the copy succeeded; if it fails, leave CLAUDE.md as it is and say so. The copy is a new regular file in the configuration directory itself, also when CLAUDE.md is a link:
 ```
 WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
 ```
@@ -301,8 +301,8 @@ The only allowed cleanup is a reversible move (`mv`) to a sibling backup that do
 
 ```bash
 C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L
-# Backup first (optional - ask user): K moves "$C/<name>", or only the files listed after it, to a new "$C/<name>.bak-<UTC time>-<pid>"
-K() { D="$C/$1.bak-$(date -u +%Y%m%d%H%M%S)-$$"; [ ! -e "$D" ] && [ ! -L "$D" ] || { echo "Nothing moved: $D exists" >&2; return 1; }; if [ $# -eq 1 ]; then mv -- "$C/$1" "$D"; else N=$1; shift; mkdir -- "$D" && ( cd -- "$C/$N" && mv -n -- "$@" "$D"/ ); fi; }
+# Backup first (optional - ask user): K moves "$C/<name>", or only the files listed after it, to a new "$C/<name>.bak-<UTC time>-<pid>" (a name that is a link is moved as the link, and refused when files are listed)
+K() { D="$C/$1.bak-$(date -u +%Y%m%d%H%M%S)-$$"; [ ! -e "$D" ] && [ ! -L "$D" ] || { echo "Nothing moved: $D exists" >&2; return 1; }; if [ $# -eq 1 ]; then mv -- "$C/$1" "$D"; else N=$1; shift; [ ! -L "$C/$N" ] || { echo "Nothing moved: $C/$N is a link, so the files in it are not in this configuration directory" >&2; return 1; }; mkdir -- "$D" && ( cd -- "$C/$N" && mv -n -- "$@" "$D"/ ); fi; }
 # K agents
 # K commands
 # K skills
