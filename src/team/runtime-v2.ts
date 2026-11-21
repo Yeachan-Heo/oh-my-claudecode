@@ -2482,7 +2482,7 @@ const pendingRecoveryPanes = new Map<string, PendingRecoveryPane>();
 async function recordRecoveryPaneRollbackFailure(
   input: RecoverDeadWorkerOwnerInput,
   recoveryId: string,
-  pending: PendingRecoveryPane,
+  pending: Pick<PendingRecoveryPane, "ownership" | "paneAttemptId">,
   reason: string,
   liveness: WorkerPaneLiveness,
 ): Promise<string> {
@@ -5233,14 +5233,21 @@ async function runRecoverDeadWorkerV2OwnerAttempt(
               sagaInput.workerName,
             );
           } catch (error) {
-            return {
-              ok: false,
-              error:
-                error instanceof Error &&
-                error.message.startsWith("worker_layout_cleanup_unverified:")
-                  ? "worker_cleanup_incomplete"
-                  : "spawn_failed",
-            };
+            if (
+              !(error instanceof Error) ||
+              !error.message.startsWith("worker_layout_cleanup_unverified:")
+            )
+              return { ok: false, error: "spawn_failed" };
+            await recordRecoveryPaneRollbackFailure(
+              input,
+              sagaInput.recoveryId,
+              { ownership: ownershipResult.ownership, paneAttemptId },
+              error.message,
+              await getOwnedWorkerLiveness(ownershipResult.ownership).catch(
+                () => "unknown" as const,
+              ),
+            );
+            return { ok: false, error: "worker_cleanup_incomplete" };
           }
         }
         let pending: PendingRecoveryPane;
