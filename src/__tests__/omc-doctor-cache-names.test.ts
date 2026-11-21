@@ -30,7 +30,8 @@ describe('omc-doctor: a cache directory that is no semantic version takes no par
   test('Step 1 for a registry entry that names only an installPath: the marketplace cache is read the same way', () => {
     const entry = { plugins: { [PLUGIN_ID]: [{ scope: 'user', installPath: '/nowhere/else' }] }, clone: { omc: '5.9.0' } };
     expect(step1({ ...entry, cache: { omc: ['1e3', '5.7.0'] } }).Installed).toBe('5.7.0');
-    expect(step1({ ...entry, cache: { omc: ['1e3', '4.15.7L'] } }).Installed).toBe('(none)');
+    // A registry entry is an install: with no version anywhere it is unknown, and (none) is kept for nothing installed.
+    expect(step1({ ...entry, cache: { omc: ['1e3', '4.15.7L'] } }).Installed).toBe('(unknown)');
   });
 
   test.skipIf(process.platform === 'win32')('Step 4 names the highest real version, and Step 6 counts only real versions', () => {

@@ -460,9 +460,12 @@ const step1 = () => {
   } else if (!supported.length && ambiguous) {
     out.push('Channel: unknown (installed_plugins.json could not be read completely; do not guess an updater)');
   } else if (!supported.length) {
+    // (none) is for nothing installed: a cache that cannot be read says nothing about that, so its version is unknown.
+    const cached = highestCached(cacheDirOf('omc'));
     out.push(
       'Channel: npm',
-      'Installed: ' + (highestCached(cacheDirOf('omc')) || '(none)'),
+      'Installed: ' + (cached === null ? '(unknown)' : cached || '(none)'),
+      ...(cached === null ? ['Note: the plugin cache ' + cacheDirOf('omc') + ' cannot be read, so it is unknown whether a version is installed'] : []),
       'Updater: omc update',
     );
   } else if (supported.some(([id, entries]) => activeEntries(id, entries, roots).unknown)) {
@@ -494,11 +497,16 @@ const step1 = () => {
         const found = Array.isArray(manifest.plugins) ? manifest.plugins.find((x) => x && x.name == 'oh-my-claudecode') : null;
         latest = found && typeof found.version == 'string' ? semver(found.version) || null : null;
       } catch {}
-      const installed = versions.length ? versions[versions.length - 1] : active.length ? '' : highestCached(cacheDirOf(market));
+      // A registry entry is an install, so a version nothing names is unknown, never (none): the install is there, loaded
+      // or not, and only its version cannot be established (an entry with only an installPath that names none, a manifest
+      // without a usable version, a cache that cannot be read).
+      const cached = versions.length || active.length ? '' : highestCached(cacheDirOf(market));
+      const installed = versions.length ? versions[versions.length - 1] : cached || '';
+      const noVersion = !torn.length && !installed;
       out.push(
         'Plugin: ' + id,
         'Channel: marketplace ' + market,
-        'Installed: ' + (torn.length ? '(unknown)' : installed || '(none)'),
+        'Installed: ' + (torn.length || !installed ? '(unknown)' : installed),
         ...(differing.length
           ? [
               'Registry mismatch: the registry records ' + differing.join(', ') + ' for the install the session runs (' + root + '), but the manifest there holds ' + loaded + ', so Installed is ' + loaded + ' (a partial update or a damaged registry: update or reinstall the plugin with the Updater line, then restart Claude Code)',
@@ -509,8 +517,16 @@ const step1 = () => {
               'Registry mismatch: the registry names ' + torn.join(', ') + ' for one install (the version of an entry and the version its installPath names differ) and no manifest settles which is installed, so Installed is unknown (a partial update or a damaged registry: update or reinstall the plugin with the Updater line, then restart Claude Code)',
             ]
           : []),
-        ...(root && !loaded && !torn.length && hasManifest(root)
+        ...(root && !loaded && !torn.length && versions.length && hasManifest(root)
           ? ['Note: the manifest in ' + root + ' holds no usable version, so Installed is the version the registry records']
+          : []),
+        ...(noVersion
+          ? [
+              'Note: the registry records no version for this install' +
+                (root ? ', and the running root ' + root + (hasManifest(root) ? ' has a manifest that holds no usable version' : ' has no manifest') : '') +
+                (cached === null ? ', and the plugin cache cannot be read' : '') +
+                ', so Installed is unknown (the plugin is registered, it is not missing: update or reinstall it with the Updater line to record a version)',
+            ]
           : []),
         'Latest: ' + (latest || '(unavailable)') + ' (marketplace clone)',
         'Updater: claude plugin marketplace update ' + market + ' && claude plugin update ' + id,

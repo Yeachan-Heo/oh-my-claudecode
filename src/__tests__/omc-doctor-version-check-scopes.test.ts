@@ -68,7 +68,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }))).toMatchObject({ Channel: 'marketplace omc', Installed: '5.8.0', Latest: '5.9.0 (marketplace clone)' });
     });
 
-    test('the active entry may name its version only through its installPath, and one that names none is (none), not the highest cached version', () => {
+    test('the active entry may name its version only through its installPath, and one that names none is unknown, not the highest cached version', () => {
       expect(run((dir) => ({ CLAUDE_PLUGIN_ROOT: base(dir, '5.8.0') }), (dir) => ({ 'oh-my-claudecode@omc': [{ installPath: base(dir, '5.8.0') }, { version: '5.9.0' }] })).Installed).toBe('5.8.0');
       const out = step1({
         plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ installPath: path.join(dir, 'current') }, { version: '5.9.0' }] }),
@@ -78,7 +78,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
           return { CLAUDE_PLUGIN_ROOT: path.join(dir, 'current') };
         },
       });
-      expect(out).toMatchObject({ Channel: 'marketplace omc', Installed: '(none)' });
+      expect(out).toMatchObject({ Channel: 'marketplace omc', Installed: '(unknown)', Note: expect.stringContaining('the registry records no version for this install') });
     });
 
     test('a root that matches no entry, or a stale one, leaves the highest entry as Installed', () => {
