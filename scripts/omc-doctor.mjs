@@ -595,9 +595,27 @@ const claudeMdOptOut = () => {
 // outside the registry) the last supported ID of the registry whose cache holds a version names it; the registry has no other order.
 const claudeMdVersion = () => {
   const markets = registryMarketplaces();
-  // Only regular files are read (readFile), so a FIFO or a directory in place of one is skipped like a missing file.
-  // The candidate files, in order: CLAUDE.md, the CLAUDE-*.md file it references, otherwise CLAUDE-omc.md and then
-  // every CLAUDE-*.md of the config directory in name order.
+  // Only regular files are read (readFile), so a file that is not one is never opened. CLAUDE.md and the file it names are
+  // there and cannot be used when they are a directory or a FIFO (unreadable, below). The files that are scanned, CLAUDE-omc.md
+  // and every other CLAUDE-*.md, are companions only when they are a regular file or a link to one: a directory, a FIFO or a link
+  // to either is not a companion and is skipped, like the shell block of Step 4 (find -L -type f); a link that cannot be followed
+  // (to nothing, a loop, no permission) claims to be one and is unreadable below.
+  const isCompanion = (file) => {
+    try {
+      const info = fs.lstatSync(file);
+      if (!info.isSymbolicLink()) return info.isFile();
+      try {
+        return fs.statSync(file).isFile();
+      } catch {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  };
+  // The candidate files, in order: CLAUDE.md, the CLAUDE-*.md file it references, otherwise CLAUDE-omc.md and then every
+  // CLAUDE-*.md of the config directory in name order. CLAUDE-omc.md is the name the runtime opens (the file system decides
+  // about letter case: on a volume that ignores it, Claude-Omc.md is that file), and the scan matches names in either case.
   const base = path.join(configDir, 'CLAUDE.md');
   let baseContent = '';
   try {
@@ -608,17 +626,13 @@ const claudeMdVersion = () => {
   if (referenced) {
     candidates.push(path.join(configDir, referenced[0]));
   } else {
+    const defaultCompanion = path.join(configDir, 'CLAUDE-omc.md');
+    if (isCompanion(defaultCompanion)) candidates.push(defaultCompanion);
     try {
-      // A directory or a FIFO named like a companion is none (the shell block of Step 4 lists regular files only); a link is
-      // kept, as the script has always read through links, and one to nothing is unreadable below. CLAUDE-omc.md comes first.
-      const names = fs
-        .readdirSync(configDir, { withFileTypes: true })
-        .filter((entry) => (entry.isFile() || entry.isSymbolicLink()) && /^CLAUDE-.*[.]md(?![^])/i.test(entry.name))
-        .map((entry) => entry.name)
-        .sort();
-      for (const name of [...names.filter((other) => other == 'CLAUDE-omc.md'), ...names.filter((other) => other != 'CLAUDE-omc.md')]) {
+      const names = fs.readdirSync(configDir).filter((name) => /^CLAUDE-.*[.]md(?![^])/i.test(name)).sort();
+      for (const name of names) {
         const other = path.join(configDir, name);
-        if (candidates.includes(other) === false) candidates.push(other);
+        if (candidates.includes(other) === false && isCompanion(other)) candidates.push(other);
       }
     } catch {}
   }

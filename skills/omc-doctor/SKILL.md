@@ -122,10 +122,10 @@ ls -la "$C"/CLAUDE.md 2>/dev/null
 grep -q "<!-- OMC:START -->" "$C/CLAUDE.md" 2>/dev/null; case $? in 0) echo "Has OMC config";; 1) echo "Missing OMC config in CLAUDE.md";; *) [ -e "$C/CLAUDE.md" ] || [ -L "$C/CLAUDE.md" ] && echo "Could not read CLAUDE.md" || echo "Missing OMC config in CLAUDE.md";; esac
 
 # Check companion files for file-split pattern (e.g. CLAUDE-omc.md)
-find "$C" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null
+find -L "$C" -maxdepth 1 -type f -iname 'CLAUDE-*.md' -print 2>/dev/null
 while IFS= read -r f; do
   grep -q "<!-- OMC:START -->" "$f" 2>/dev/null && echo "Has OMC config in companion: $f"
-done < <(find "$C" -maxdepth 1 -type f -name 'CLAUDE-*.md' -print 2>/dev/null)
+done < <(find -L "$C" -maxdepth 1 -type f -iname 'CLAUDE-*.md' -print 2>/dev/null)
 
 # Check if CLAUDE.md references a companion file
 grep -o "CLAUDE-[^ )]*\.md" "$C/CLAUDE.md" 2>/dev/null

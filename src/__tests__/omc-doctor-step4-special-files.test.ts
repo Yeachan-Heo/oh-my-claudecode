@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_OPTOUT, CLAUDE_MD_VERSION, PLUGIN_ID, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_OPTOUT, CLAUDE_MD_VERSION, PLUGIN_ID, runCommand, skillText, volumeFoldsCase, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 // Step 4 reads CLAUDE.md, the companion file it names and the other CLAUDE-*.md files of the config directory, and the
 // opt-out probe reads .omc-config.json. Only a regular file is read, like the registry in Step 1, because opening a FIFO
@@ -291,6 +291,104 @@ describe.skipIf(!posix)('omc-doctor Step 4 shell block tells a CLAUDE.md it cann
     expect(markerLine(() => {})).toBe('Missing OMC config in CLAUDE.md');
     expect(markerLine((d) => mkdirSync(path.join(d, 'CLAUDE.md')))).toBe('Could not read CLAUDE.md');
     expect(markerLine((d) => symlinkSync(GONE, path.join(d, 'CLAUDE.md')))).toBe('Could not read CLAUDE.md');
+  });
+});
+
+// One rule for the files that are scanned as companions (CLAUDE-omc.md and every other CLAUDE-*.md), in the script and in the
+// shell block of Step 4 (`find -L -type f`): a regular file and a link to one are companions; a directory, a FIFO and a link
+// to either are not, and are skipped; a link that cannot be followed claims to be one and is unreadable. CLAUDE.md and the
+// file it names are different: they are there, so anything that is not a regular file is unreadable (tested above).
+describe.skipIf(!posix)('omc-doctor: what a CLAUDE-*.md entry is decides whether it is a companion, in the script and in the Step 4 block', { timeout: 120_000 }, () => {
+  const block = bashBlocks().find((b) => b.includes('Has OMC config"')) ?? '';
+  type Setup = (dir: string, name: string) => void;
+  // Each entry is CLAUDE-a.md with the marker 5.8.0 behind it (where it can be read); CLAUDE-z.md is a file with 5.9.0.
+  const kinds: Array<[string, Setup, 'decides' | 'skipped' | 'unreadable']> = [
+    ['a regular file', (d, n) => writeFileSync(path.join(d, n), '<!-- OMC:VERSION:5.8.0 -->\n'), 'decides'],
+    ['a link to a regular file', (d, n) => { writeFileSync(path.join(d, 'target.txt'), '<!-- OMC:VERSION:5.8.0 -->\n'); symlinkSync('target.txt', path.join(d, n)); }, 'decides'],
+    ['a directory', (d, n) => mkdirSync(path.join(d, n)), 'skipped'],
+    ['a FIFO', (d, n) => fifo(path.join(d, n)), 'skipped'],
+    ['a link to a directory', (d, n) => { mkdirSync(path.join(d, 'target-dir')); symlinkSync('target-dir', path.join(d, n)); }, 'skipped'],
+    ['a link to a FIFO', (d, n) => { fifo(path.join(d, 'target-fifo')); symlinkSync('target-fifo', path.join(d, n)); }, 'skipped'],
+    ['a link to nothing', (d, n) => symlinkSync(GONE, path.join(d, n)), 'unreadable'],
+  ];
+  test.each(kinds)('%s named CLAUDE-a.md', (_label, setup, outcome) => {
+    const dir = world();
+    try {
+      writeFileSync(path.join(dir, 'CLAUDE.md'), 'No marker.\n');
+      setup(dir, 'CLAUDE-a.md');
+      writeFileSync(path.join(dir, 'CLAUDE-z.md'), MARKER);
+      const out = run(step4, dir);
+      if (outcome === 'decides') expect(out).toContain('CLAUDE.md OMC version: 5.8.0');
+      if (outcome === 'skipped') expect(out).toContain('CLAUDE.md OMC version: 5.9.0');
+      if (outcome === 'unreadable') expect(out).toMatch(/CLAUDE.md OMC version: \(unreadable\)[\s\S]*CLAUDE-a[.]md \(ENOENT\)/);
+      // The block lists the entries the script reads as companions (a link that cannot be followed is the script's own report).
+      const listed = spawnSync('/bin/bash', ['-c', block], { encoding: 'utf8', timeout: 8_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir } });
+      expect(listed.error).toBeUndefined();
+      expect({ outcome, aListed: listed.stdout.includes('CLAUDE-a.md\n'), zListed: listed.stdout.includes('CLAUDE-z.md\n') }).toEqual({ outcome, aListed: outcome === 'decides', zListed: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The runtime opens CLAUDE-omc.md by that exact name, so the file system decides about letter case: on a volume that
+  // ignores it, Claude-Omc.md is that file and comes first; on one that does not, it is only another CLAUDE-*.md and takes its
+  // place in name order. The scan matches the names of the files in either case (the block says -iname).
+  const upper = 'CLAUDE-a.md';
+  const layout = (dir: string, companionName: string) => {
+    writeFileSync(path.join(dir, 'CLAUDE.md'), 'No marker.\n');
+    writeFileSync(path.join(dir, upper), '<!-- OMC:VERSION:5.8.0 -->\n');
+    writeFileSync(path.join(dir, companionName), MARKER);
+  };
+  const foldedRead = (dir: string) => {
+    const file = path.join(dir, 'fold-read.cjs');
+    writeFileSync(file, `const fs = require('fs'); const path = require('path'); const real = fs.readFileSync;
+fs.readFileSync = function (target, ...rest) {
+  try { return real.call(fs, target, ...rest); } catch (error) {
+    if (error && error.code === 'ENOENT' && typeof target === 'string') {
+      const hit = fs.readdirSync(path.dirname(target)).find((name) => name.toLowerCase() === path.basename(target).toLowerCase());
+      if (hit) return real.call(fs, path.join(path.dirname(target), hit), ...rest);
+    }
+    throw error;
+  }
+};
+`);
+    return file;
+  };
+  test('a volume that ignores letter case opens CLAUDE-omc.md by its exact name: Claude-Omc.md comes first', () => {
+    const dir = world();
+    try {
+      layout(dir, 'Claude-Omc.md');
+      const result = runCommand(step4, dir, { preloads: [writeCaseFoldPreload(dir), foldedRead(dir)], timeout: 10_000 });
+      expect(result.error).toBeUndefined();
+      expect(result.stdout).toContain('CLAUDE.md OMC version: 5.9.0');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(volumeFoldsCase())('a volume that tells letter case apart does not: Claude-Omc.md is read in name order, after CLAUDE-a.md', () => {
+    const dir = world();
+    try {
+      layout(dir, 'Claude-Omc.md');
+      expect(run(step4, dir)).toContain('CLAUDE.md OMC version: 5.8.0');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a CLAUDE-*.md in lower case is scanned, and the block lists it, as the OMC:VERSION marker is read in any case', () => {
+    const dir = world();
+    try {
+      writeFileSync(path.join(dir, 'CLAUDE.md'), 'No marker.\n');
+      writeFileSync(path.join(dir, 'claude-extra.md'), '<!-- omc:version:5.9.0 -->\n');
+      const out = run(step4, dir);
+      expect(out).toContain('CLAUDE.md OMC version: 5.9.0');
+      expect(out).toContain('VERSION MATCH');
+      const listed = spawnSync('/bin/bash', ['-c', block], { encoding: 'utf8', timeout: 8_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir } });
+      expect(listed.stdout).toContain('claude-extra.md\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
