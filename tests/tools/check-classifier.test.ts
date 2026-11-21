@@ -882,11 +882,16 @@ it('a here-document operator inside quotes or a comment opens no body', () => {
   assert.equal(isMutation('Bash', { command: 'cat <<EOF\ntee src/a.ts\nEOF' }), false);
 });
 
-it('the body of a command substitution is read as a command of its own, eight levels deep', () => {
-  const nest = (levels: number) => Array.from({ length: levels }).reduce<string>((inner) => `echo $(${inner})`, 'tee src/a.ts');
-  assert.equal(isMutation('Bash', { command: nest(3) }), true);
-  assert.equal(isMutation('Bash', { command: nest(8) }), true);
-  assert.equal(isMutation('Bash', { command: nest(9) }), false);
+it('the body of a command or process substitution is read as a command of its own, nine levels deep', () => {
+  const nest = (levels: number, open = '$(') => Array.from({ length: levels }).reduce<string>((inner) => `echo ${open}${inner})`, 'tee src/a.ts');
+  for (const open of ['$(', '>(', '<(']) {
+    assert.equal(isMutation('Bash', { command: nest(3, open) }), true, `${open} 3`);
+    assert.equal(isMutation('Bash', { command: nest(9, open) }), true, `${open} 9`);
+    assert.equal(isMutation('Bash', { command: nest(10, open) }), false, `${open} 10`);
+  }
+  // Both kinds count in one depth.
+  assert.equal(isMutation('Bash', { command: `echo $(${nest(8, '>(')})` }), true);
+  assert.equal(isMutation('Bash', { command: `echo $(${nest(9, '>(')})` }), false);
   // The levels of nested shell strings are counted apart: a substitution inside `sh -c` and a `sh -c` inside a substitution are read.
   assert.equal(isMutation('Bash', { command: "sh -c 'echo $(tee src/a.ts)'" }), true);
   assert.equal(isMutation('Bash', { command: 'echo $(sh -c "tee src/a.ts")' }), true);

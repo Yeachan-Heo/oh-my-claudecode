@@ -1429,8 +1429,8 @@ const SHELL_VALUE_OPTIONS = new Set(['-o', '+o', '-O', '+O', '--rcfile', '--init
 const NESTED_MAX_LENGTH = 100000;
 /** Levels of nested shell strings that are read: `sh -c "bash -c '...'"` is two. */
 const NESTED_MAX_DEPTH = 2;
-/** Command substitutions inside command substitutions are read this deep, apart from the nested shell strings above. */
-const SUBSTITUTION_MAX_DEPTH = 8;
+/** Substitutions inside substitutions (command and process) are read this deep, apart from the nested shell strings above. */
+const SUBSTITUTION_MAX_DEPTH = 9;
 
 const baseName = (word) => word.slice(word.lastIndexOf('/') + 1);
 
@@ -1661,7 +1661,7 @@ const ddTargets = (args) => args.filter((arg) => arg.startsWith('of=') && arg.le
  * names the file, not the quotes. The named commands count only as the command word of a command (see
  * commandPrograms), so `rg tee src/a.ts` and `echo cp a src/b.ts` write nothing. The string of a nested shell
  * (`sh -c '...'`, `sudo bash -lc`, `su -c`) is read again, two levels deep; the body of a command substitution is read again
- * as a command of its own, eight levels deep, counted apart from the nested shell strings.
+ * as a command of its own, nine levels deep, counted apart from the nested shell strings.
  */
 function shellWriteTargets(command, depth = 0, substitutions = 0) {
   const QUOTED = String.raw`"(?:[^"\\]|\\[\s\S])*"|'[^']*'`; // a double-quoted string may hold \"
