@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'vitest';
+import { afterAll, describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -265,6 +265,61 @@ describe.skipIf(!posix)('omc-doctor: a relative CLAUDE_CONFIG_DIR names one dire
       }
     } finally {
       rmSync(w.base, { recursive: true, force: true });
+    }
+  });
+});
+
+// A value that is a path of Windows is absolute where the script reads it (win32), so the blocks must not put the working
+// directory in front of it: `C:\Users\x\.claude-alt` is not under `<cwd>/`. The value stays as written (the file system
+// folds a `..` in it as text, as the script does with path.normalize there), and the forms of POSIX keep the reading above.
+// POSIX only: the lines run through bash, and the fixture needs a working directory with a name of POSIX.
+describe.skipIf(!posix)('omc-doctor: the first line of the shell blocks keeps a path of Windows as it is written', { timeout: 120_000 }, () => {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'omc-doctor-winpath-')));
+  const cwd = path.join(base, 'wd', 'sub');
+  mkdirSync(cwd, { recursive: true });
+  afterAll(() => rmSync(base, { recursive: true, force: true }));
+  const first = (block: string, configured: string) =>
+    spawnSync('/bin/bash', ['-c', `${block.split('\n')[0]}\nprintf %s "$C"`], { encoding: 'utf8', timeout: 20_000, cwd, env: { ...process.env, CLAUDE_CONFIG_DIR: configured, HOME: base, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } }).stdout;
+
+  // Each value that path.win32 (the module the script uses on Windows) reads as absolute stays as written, in every block.
+  test.each([
+    ['a drive path with backslashes', 'C:\\Users\\x\\.claude-alt'],
+    ['a drive path with slashes', 'C:/Users/x/.claude'],
+    ['a drive letter in lower case', 'c:\\a\\..\\b'],
+    ['a UNC path with backslashes', '\\\\host\\share\\x'],
+    ['a UNC path with slashes', '//host/share/x'],
+    ['a path rooted on the current drive', '\\Users\\x'],
+    ['a drive path with spaces around it', '  C:\\Users\\x  '],
+  ])('%s is absolute on Windows and no block puts the working directory before it', (_label, configured) => {
+    expect(path.win32.isAbsolute(configured.trim())).toBe(true);
+    for (const block of blocks) expect({ configured, c: first(block, configured) }).toEqual({ configured, c: configured.trim() });
+  });
+
+  // The forms of POSIX are read as before: against the physical working directory, the home directory, or as they stand.
+  test.each([
+    ['an absolute path', '/abs/dir', '/abs/dir'],
+    ['a relative path', 'rel', path.join(cwd, 'rel')],
+    ['a relative path above the working directory', '../x', path.join(base, 'wd', 'x')],
+    ['~/x', '~/x', path.join(base, 'x')],
+    ['~\\x', '~\\x', path.join(base, 'x')],
+    ['an empty value', '', path.join(base, '.claude')],
+    ['a link folded as text', '/abs/link/../dir', '/abs/dir'],
+  ])('%s keeps its reading', (_label, configured, expected) => {
+    for (const block of blocks) expect({ configured, c: first(block, configured) }).toEqual({ configured, c: expected });
+  });
+
+  // The script and the runtime agree with the block where a platform reads the form alike: a path with slashes that the
+  // runtime normalizes to the same directory (`//host/share/x` is `/host/share/x` on POSIX).
+  test('the block and the runtime name the same directory for the forms both read here', () => {
+    for (const configured of ['//host/share/x', '/abs/dir', '/abs/link/../dir']) {
+      const saved = process.env.CLAUDE_CONFIG_DIR;
+      process.env.CLAUDE_CONFIG_DIR = configured;
+      try {
+        expect({ configured, c: path.posix.normalize(first(blocks[0], configured)) }).toEqual({ configured, c: getClaudeConfigDir() });
+      } finally {
+        if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+        else process.env.CLAUDE_CONFIG_DIR = saved;
+      }
     }
   });
 });

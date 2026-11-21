@@ -91,7 +91,7 @@ For Node hooks, compare against the active plugin payload, any validated retaine
 ### Step 3: Check for Legacy Bash Hook Scripts
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in [A-Za-z]:[/\\]*|\\*|//[!/]*);; *) case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac;; esac
 ls -la "$C"/hooks/*.sh 2>/dev/null
 ```
 
@@ -114,7 +114,7 @@ Continue with the CLAUDE.md checks below only when the probe printed exactly `CL
 - If it prints neither line, or the command fails (for example `node` is not on `PATH`, which Step 5 diagnoses, or the plugin files are missing, which the message `omc-doctor: plugin files not found` reports), report WARN - could not check the `claudeMdEnabled` opt-out, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`. A third line, `CLAUDE.md management unknown: could not read .omc-config.json (<reason>)`, is such a case: the file is there and cannot be used (<reason> is an error code for a link to nothing or no permission, `not a regular file`, or `not valid JSON` for an empty file too), so the opt-out may be in it.
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in [A-Za-z]:[/\\]*|\\*|//[!/]*);; *) case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac;; esac
 # Check if CLAUDE.md exists
 ls -la "$C"/CLAUDE.md 2>/dev/null
 
@@ -150,7 +150,7 @@ node "$S" claude-md-version
 Ralph is an agent-driven persistence loop, not a compiled program: its only hard runtime prerequisites are the Node runtime that executes OMC's hook scripts (`persistent-mode.mjs`, `keyword-detector.mjs`) and a writable config directory for `.omc/state/` state files such as `ralph-state.json`.
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in [A-Za-z]:[/\\]*|\\*|//[!/]*);; *) case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac;; esac
 node --version || echo "Node for Ralph: MISSING"
 mkdir -p "$C" 2>/dev/null
 touch "$C/.omc-write-probe" 2>/dev/null && rm -f "$C/.omc-write-probe" && echo "Config dir writable" || echo "Config dir NOT writable"
@@ -179,7 +179,7 @@ Check for legacy agents, commands, and skills installed via curl (before plugin 
 **Important**: Only flag files whose names match actual plugin-provided names. Do NOT flag user's custom agents/commands/skills that are unrelated to OMC.
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in [A-Za-z]:[/\\]*|\\*|//[!/]*);; *) case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac;; esac
 # Check for legacy agents directory
 ls -la "$C"/agents/ 2>/dev/null
 
@@ -300,7 +300,7 @@ Do not move entire `agents/`, `commands/`, or `skills/` roots to resolve a mixed
 The only allowed cleanup is a reversible move (`mv`) to a sibling backup that does not exist yet, `<name>.bak-<UTC time>-<pid>`, made by `K` below, which stops when that name exists (a fixed `.bak` name is replaced or nested into by a second run); deletion (`rm -rf`, `rm`) is never allowed. Move a whole root only when every file inside matches a name shipped in the active plugin's own `agents/`, `commands/`, or `skills/` directory. A `commands/` root that also holds a custom (non-OMC) file is not moved as a whole: move only the individually verified OMC-owned files into one new backup directory (`K commands <file>...`) and leave every other file in place. An `agents/` or `skills/` root that holds a custom file is only reported, as stated above: nothing in it is moved.
 
 ```bash
-C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac
+C="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; C=${C#"${C%%[![:space:]]*}"}; C=${C%"${C##*[![:space:]]}"}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${C#??};; esac; case $C in [A-Za-z]:[/\\]*|\\*|//[!/]*);; *) case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; O=; R=$C; while [ -n "$R" ]; do P=${R%%/*}; case $R in */*) R=${R#*/};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${O%/*};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${O:-/};; *) C=${O#/}; C=${C:-.};; esac;; esac
 # Backup first (optional - ask user): K moves "$C/<name>", or only the files listed after it, to a new "$C/<name>.bak-<UTC time>-<pid>" (a name that is a link is moved as the link, and refused when files are listed)
 K() { D="$C/$1.bak-$(date -u +%Y%m%d%H%M%S)-$$"; [ ! -e "$D" ] && [ ! -L "$D" ] || { echo "Nothing moved: $D exists" >&2; return 1; }; if [ $# -eq 1 ]; then mv -- "$C/$1" "$D"; else N=$1; shift; [ ! -L "$C/$N" ] || { echo "Nothing moved: $C/$N is a link, so the files in it are not in this configuration directory" >&2; return 1; }; mkdir -- "$D" && ( cd -- "$C/$N" && mv -n -- "$@" "$D"/ ); fi; }
 # K agents

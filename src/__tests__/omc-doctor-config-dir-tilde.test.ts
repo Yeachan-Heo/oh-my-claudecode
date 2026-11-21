@@ -14,9 +14,11 @@ const blocks = bashBlocks().filter((b) => b.split('\n').some((l) => !l.startsWit
 const EXPAND = String.raw`const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim(); const configDir = !configured ? path.join(home, '.claude') : configured === '~' ? home : /^~[/\\]/.test(configured) ? path.join(home, configured.slice(2)) : path.normalize(configured);`;
 // A relative value is made absolute against the physical working directory (pwd -P, where process.cwd() and the file system
 // start), then the text is folded as the runtime folds it (path.normalize) before anything reads the directory, whether or not it exists.
+// A path of Windows (a drive, a UNC path, a root on the current drive) is kept as written and skips both steps.
+const WINDOWS = String.raw`case $C in [A-Za-z]:[/\\]*|\\*|//[!/]*);; *) `;
 const ABSOLUTE = String.raw`case $C in /*);; *) L=$(pwd -P 2>/dev/null) && C=$L/$C;; esac; `;
 const FOLD = String.raw`O=; R=$C; while [ -n "$R" ]; do P=${'${R%%/*}'}; case $R in */*) R=${'${R#*/}'};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${'${O%/*}'};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${'${O:-/}'};; *) C=${'${O#/}'}; C=${'${C:-.}'};; esac; `;
-const PRELUDE = String.raw`C="${'${CLAUDE_CONFIG_DIR:-$HOME/.claude}'}"; C=${'${C#"${C%%[![:space:]]*}"}'}; C=${'${C%"${C##*[![:space:]]}"}'}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${'${C#??}'};; esac; `.concat(ABSOLUTE, FOLD.replace(/; $/, ''));
+const PRELUDE = String.raw`C="${'${CLAUDE_CONFIG_DIR:-$HOME/.claude}'}"; C=${'${C#"${C%%[![:space:]]*}"}'}; C=${'${C%"${C##*[![:space:]]}"}'}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${'${C#??}'};; esac; `.concat(WINDOWS, ABSOLUTE, FOLD.replace(/; $/, ''), ';; esac');
 const posix = process.platform !== 'win32';
 
 type World = { root: string; home: string; cwd: string; alt: string };
