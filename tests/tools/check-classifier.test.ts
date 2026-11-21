@@ -158,7 +158,11 @@ it('a weakening option that is given the value false runs the plain check', () =
     assert.equal(checkResult(command, '1 problem (1 error, 0 warnings)', 1).verdict, 'failed', `${command}: a failure is a failure`);
   }
   for (const command of ['eslint --pass-on-no-patterns', 'eslint --pass-on-no-patterns=true', 'eslint --pass-on-no-patterns=0', 'vitest run --passWithNoTests',
-    'vitest run --passWithNoTests=true', 'flake8 --exit-zero=false src', 'eslint --exclude=false src']) {
+    'vitest run --passWithNoTests=true', 'flake8 --exit-zero=false src', 'eslint --exclude=false src',
+    // Vitest 4.1.11 exits 0 on an empty run for both of these. Eslint 9.39.2 rejects them with a type error, so its two rows only keep the pattern
+    // anchored and case-sensitive; they say nothing about eslint.
+    'vitest run --passWithNoTests=false=true', 'vitest run --passWithNoTests=FALSE', 'eslint --pass-on-no-patterns=false=true src',
+    'eslint --pass-on-no-patterns=FALSE src']) {
     assert.equal(classifyCommand(command).narrowed, true, `${command}: weakened`);
   }
 });
