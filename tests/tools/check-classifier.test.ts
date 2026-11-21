@@ -148,6 +148,21 @@ it('an option that makes a check exit 0 or skip its work weakens it', () => {
   assert.equal(classifyCommand('flake8 src').narrowed, false, 'the plain run is not weakened');
 });
 
+it('a weakening option that is given the value false runs the plain check', () => {
+  // Run with eslint 9.39.2 and vitest 4.1.11: `=false` is the default, so a lint error still exits 1 and an empty test run still exits 1.
+  // Another value, the bare flag and the options that take no value stay weakened.
+  for (const command of ['eslint --pass-on-no-patterns=false', 'eslint --pass-on-no-patterns=false src', 'vitest run --passWithNoTests=false']) {
+    const got = classifyCommand(command);
+    assert.equal(got.isCheck, true, `${command}: a run`);
+    assert.equal(got.narrowed, false, `${command}: the plain run`);
+    assert.equal(checkResult(command, '1 problem (1 error, 0 warnings)', 1).verdict, 'failed', `${command}: a failure is a failure`);
+  }
+  for (const command of ['eslint --pass-on-no-patterns', 'eslint --pass-on-no-patterns=true', 'eslint --pass-on-no-patterns=0', 'vitest run --passWithNoTests',
+    'vitest run --passWithNoTests=true', 'flake8 --exit-zero=false src', 'eslint --exclude=false src']) {
+    assert.equal(classifyCommand(command).narrowed, true, `${command}: weakened`);
+  }
+});
+
 it('pipefail: only a pipe into tail is made visible', () => {
   assert.equal(classifyCommand('npm test | tail -5').exitHidden, true, 'pipe without pipefail hides');
   assert.equal(classifyCommand('npm test | head -20').exitHidden, true, 'head hides without pipefail');

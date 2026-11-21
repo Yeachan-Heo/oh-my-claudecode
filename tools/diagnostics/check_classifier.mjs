@@ -12,7 +12,7 @@
 //
 // Pure ESM: no imports, no state, no I/O.
 
-export const RULES_VERSION = '2026.11.20.8';
+export const RULES_VERSION = '2026.11.21.1';
 
 /** Standard temp directories: writes there hold no code. Named in this one place only. */
 export const TEMP_DIRS = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
@@ -530,6 +530,9 @@ function runnerMatch(piece) {
  */
 const WEAKEN = /^(?:--passWithNoTests|--pass-on-no-patterns|--exclude|--testPathIgnorePatterns|--exit-zero|--noCheck)(?:=|$)/;
 
+/** The two boolean options of WEAKEN that take `=false` (eslint, vitest): the run is then the plain check. */
+const OFF_VALUE = /^--(?:passWithNoTests|pass-on-no-patterns)=false$/;
+
 /** go flags take one or two dashes and an optional `test.` prefix: `-run`, `--run`, `-test.run`. */
 const goOptions = (names) => names.flatMap((name) => [`-${name}`, `--${name}`, `-test.${name}`, `--test.${name}`]);
 
@@ -645,7 +648,7 @@ const FILE_TOKEN = /^\S+\.\w{1,8}(?:::\S*)?$/;
 /** Whether one stripped piece of a `runner` narrows or weakens its check. */
 function pieceNarrows(piece, kind, runner) {
   const tokens = piece.replace(ALL_REDIRECTIONS, ' ').split(/\s+/).filter(Boolean);
-  if (tokens.some((t) => WEAKEN.test(t))) return true;
+  if (tokens.some((t) => WEAKEN.test(t) && !OFF_VALUE.test(t))) return true;
   if (kind !== 'test') return false;
   if (optionTokens(tokens, runner).some((t) => selectsSubset(t, runner))) return true;
   if (runner === 'cargo' && cargoNarrows(tokens)) return true;
