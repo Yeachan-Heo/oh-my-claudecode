@@ -23,6 +23,7 @@ import {
 } from '../../scripts/lib/jev-denial-counter.mjs';
 import { ProgressState, classifyTranscript } from '../../scripts/lib/jev-progress.mjs';
 import { refusalText, reserveAgent } from '../../scripts/lib/jev-pool.mjs';
+import { findBashForSyntax } from '../../scripts/lib/shell-checks.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CLEANUPS = [];
@@ -532,6 +533,37 @@ describe('denial counter: /goal guard in the hook', () => {
   });
 });
 
+describe('denial counter: shell-checks refusal in the hook', () => {
+  const haveBash = findBashForSyntax() !== null;
+  const hookEnv = { OMC_SHELL_CHECKS: '1', OMC_SHELL_SYNTAX_TIMEOUT_MS: '3000' };
+
+  it.skipIf(!haveBash)('counter on: three refusals of one session count #1, #2, #3 and escalate at the third with a journal row of the shell-checks guard', () => {
+    const env = { ...hookEnv, OMC_JEV_DENIAL_COUNTER: '1' };
+    const root = tempDir();
+    const runs = [1, 2, 3].map((i) => runBashDeny(env, 'bash-seq', { root, tool_use_id: `tool-${i}` }));
+    for (const [i, run] of runs.entries()) expect(run.permissionDecision, `call ${i + 1}: ${run.reason.slice(0, 200)}`).toBe('deny');
+    const base = runs[0].reason.slice(0, runs[0].reason.indexOf('\n\n'));
+    const hash = keyHash(denialKey('shell-checks', base));
+    expect(runs[0].reason).toContain(`[denial ${hash} #1]`);
+    expect(runs[1].reason).toMatch(/\[denial [0-9a-f]{16} #2\]/);
+    expect(runs[2].reason).toContain(`[denial ${hash} #3]`);
+    expect(runs[2].reason).toContain('[DENIAL COUNTER] The same denial of guard shell-checks has come 3 times');
+    const rows = journal(runs[0].logDir);
+    const decision = rows.find((row) => row.kind === 'denial' && row.guard === 'shell-checks');
+    expect(decision).toMatchObject({ action: 'escalation-1', n: 3, key: hash });
+    expect(rows.some((row) => row.kind === 'outcome' && row.ref === decision.id)).toBe(true);
+  }, 60_000);
+
+  it.skipIf(!haveBash)('counter off: the refusal keeps its text (no marker) and writes no counter files', () => {
+    const run = runBashDeny(hookEnv, 'bash-off');
+    expect(run.permissionDecision).toBe('deny');
+    expect(run.reason.startsWith('[SHELL CHECK] ')).toBe(true);
+    expect(run.reason).not.toContain('[denial ');
+    expect(listRecursive(run.home).some((name) => name.includes('denials-'))).toBe(false);
+    expect(listRecursive(run.logDir).some((name) => name.includes('denials'))).toBe(false);
+  }, 30_000);
+});
+
 // --- hook helpers -------------------------------------------------------------------------------
 
 function listRecursive(dir) {
@@ -591,6 +623,35 @@ function runPoolDeny(extraEnv, sid, extraInput = {}) {
     transcript_path: transcript,
     cwd,
     ...extraInput,
+  });
+  return { ...run, home, logDir, root };
+}
+
+// An echo with a double quote that is never closed and is over 200 characters, so the syntax check runs on every platform where bash exists (the Windows syntax check covers only longer commands); own copy of the integration test's shape.
+const BASH_UNCLOSED = 'echo "this Bash command is longer than two hundred characters on purpose, so the syntax check of the shell checks runs on every platform where bash exists; the double quote after echo is never closed and the command ends inside the still-open string';
+
+/** One Bash call with BASH_UNCLOSED that the opt-in shell checks refuse, with a fresh session and its own transcript; extraInput.root reuses one directory tree (a shared session, as in runGoalDeny), the remaining extraInput fields go into the hook payload. */
+function runBashDeny(extraEnv, sid, extraInput = {}) {
+  const { root: sharedRoot, ...input } = extraInput;
+  const root = sharedRoot ?? tempDir();
+  const home = join(root, 'home');
+  const cwd = join(root, 'proj');
+  const logDir = join(root, 'jev');
+  mkdirSync(home, { recursive: true });
+  mkdirSync(cwd, { recursive: true });
+  // Each call gets its own transcript (its own model response): the counter counts one attempt per model response, so a distinct last assistant message id per call makes each refusal count.
+  const toolUseId = String(input.tool_use_id ?? 'tool-1');
+  const transcript = join(root, `transcript-${toolUseId}.jsonl`);
+  writeFileSync(transcript, `{"type":"assistant","message":{"id":"msg-${toolUseId}","content":[]}}\n`);
+  const run = runHook(home, cwd, { ...extraEnv, OMC_JEV_LOG_DIR: logDir }, {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: BASH_UNCLOSED },
+    session_id: sid,
+    tool_use_id: toolUseId,
+    transcript_path: transcript,
+    cwd,
+    ...input,
   });
   return { ...run, home, logDir, root };
 }
