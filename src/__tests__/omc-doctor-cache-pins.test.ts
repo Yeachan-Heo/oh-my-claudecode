@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { blockOf, read, commands, scriptSection, scriptText, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, addCache, makeCache, volumeFoldsCase, writeCaseFoldPreload, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { blockOf, guideSection, read, commands, scriptSection, scriptText, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, addCache, makeCache, volumeFoldsCase, writeCaseFoldPreload, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (pins, registry shapes, failed moves)', { timeout: 120_000 }, () => {
   function makeConfigDir(versions: string[], pinned: string | null, installed = true, pluginId = 'oh-my-claudecode@omc') {
@@ -165,7 +165,8 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
     expect(ms).toBeGreaterThan(0);
     expect(scriptSection('repair constants')).toContain(`const FRESH_MS = ${ms};`);
     expect(ms / 60_000).toBe(10);
-    expect(read('skills/omc-doctor/SKILL.md')).toContain('modified in the last 10 minutes');
+    // The rule is in the guide of the cache guard, which the skill sends the model to before a cache repair.
+    expect(guideSection('cache-guard')).toContain('modified in the last 10 minutes');
   });
 
   test('the outdated-plugin command always says it only cleans up and does not update, the stale-cache command does not', () => {

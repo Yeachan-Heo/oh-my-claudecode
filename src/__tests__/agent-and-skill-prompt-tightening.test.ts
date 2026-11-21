@@ -18,6 +18,13 @@ function section(text: string, heading: string): string {
   return lines.slice(start + 1, end).join('\n');
 }
 
+// The text of the section "## <name>" of the guide file (the details the skill leaves out), heading line included.
+function guideSection(guide: string, name: string): string {
+  const hits = guide.split(/^(?=## )/m).filter((part) => part.startsWith(`## ${name}\n`));
+  expect(hits).toHaveLength(1);
+  return hits[0].trimEnd();
+}
+
 // Lines inside ```bash fences of a text fragment.
 function bashBlocks(fragment: string): string[] {
   const out: string[] = [];
@@ -249,6 +256,9 @@ describe('ai-slop-cleaner skill', () => {
 describe('omc-doctor skill', () => {
   const text = read('skills/omc-doctor/SKILL.md');
   const script = read('scripts/omc-doctor.mjs');
+  const guide = read('scripts/omc-doctor-guide.md');
+  // The guard of "Fix: Outdated Plugin": the part the skill carries and the section of the guide it sends the model to.
+  const guardOfOutdated = () => section(text, 'Fix: Outdated Plugin') + '\n' + guideSection(guide, 'cache-guard');
   const NO_PRUNE_RULE = 'Do not prune cache versions by age, lexical/version order, or presence of a newer version';
 
   test('no unconditional rmSync; every renameSync call sits behind an if', () => {
@@ -278,7 +288,7 @@ describe('omc-doctor skill', () => {
   });
 
   test('both cache fix sections describe the freshness rule with the threshold of the SessionStart cleanup', () => {
-    const fix = section(text, 'Fix: Outdated Plugin');
+    const fix = guardOfOutdated();
     expect(fix).toContain('modified in the last 10 minutes');
     expect(fix).toContain('`STALE_THRESHOLD_MS` in `src/utils/paths.ts`');
     expect(fix).toContain('it is left in place and reported');
@@ -304,7 +314,7 @@ describe('omc-doctor skill', () => {
     // One place holds the rule: the stale-cache section points at it and lists what it covers.
     const stale = section(text, 'Fix: Stale Cache');
     for (const covered of ['the protection sources', 'the pins in `installed_plugins.json`', 'the `installPath` of other plugins', 'the plugin root variables', 'the occupancy records', 'every link on the way', 'the fail-closed refusals with exit code 1', 'the unreadable and missing cache directories']) expect(stale).toContain(covered);
-    const fix = section(text, 'Fix: Outdated Plugin');
+    const fix = guardOfOutdated();
     expect(fix).toContain('by `version` or by `installPath`');
     expect(fix).toContain('.omc/cache-occupancy/');
     expect(fix).toContain('Paths are compared after resolving symlinks one link at a time, and every link on the way is protected');

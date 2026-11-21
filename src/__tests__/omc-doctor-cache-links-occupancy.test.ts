@@ -4,7 +4,7 @@ import { existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSyn
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { blockOf, commands, ageVersions, runBlock, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { blockOf, commands, GUIDE_GUARD, ageVersions, runBlock, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 // @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
@@ -739,15 +739,16 @@ fs.mkdirSync = function (target, ...rest) {
     }
   });
 
-  // The shell block of a cache command is its comment, the locator line and the call, so the command is the script
-  // run as written: no code of the command sits in the shell text.
-  test('the shell block of each cache command is the comment, the locator line and the call of the script', () => {
+  // The shell block of a cache command is its comment, the locator line, the check that the guide can be printed and the
+  // call, so the command is the script run as written: no code of the command sits in the shell text.
+  test('the shell block of each cache command is the comment, the locator line, the guide check and the call of the script', () => {
     for (const command of commands) {
       const lines = blockOf(command).split('\n');
-      expect(lines).toHaveLength(3);
+      expect(lines).toHaveLength(4);
       expect(lines[0].startsWith('# ')).toBe(true);
       expect(lines[1].startsWith('S=; ')).toBe(true);
-      expect(lines[2]).toBe(`node "$S" ${command}`);
+      expect(lines[2]).toBe(GUIDE_GUARD);
+      expect(lines[3]).toBe(`node "$S" ${command}`);
     }
   });
 

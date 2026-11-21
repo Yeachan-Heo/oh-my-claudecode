@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { bashBlocks, CLAUDE_MD_VERSION, codeOf, read, runBlock, runCommand, scriptSection, scriptText, upperBelow, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { bashBlocks, CLAUDE_MD_VERSION, codeOf, guideText, read, runBlock, runCommand, scriptSection, scriptText, upperBelow, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
 
 const text = read('skills/omc-doctor/SKILL.md');
@@ -695,7 +695,8 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(text).not.toMatch(/marketplace update omc/);
     expect(text).not.toMatch(/claude plugin update oh-my-claudecode@omc/);
     expect(text).not.toMatch(/\/omc-setup\b.*\bnpm install\b/);
-    const diagnosis = text.slice(text.indexOf('### Step 1'), text.indexOf('### Step 2'));
+    // The rules of Step 1 and the details they leave to the guide (the sections of Step 1 and the ordering of versions).
+    const diagnosis = text.slice(text.indexOf('### Step 1'), text.indexOf('### Step 2')) + '\n' + guideText;
     expect(diagnosis).toContain('LATEST comes from the install channel the registry records');
     expect(diagnosis).toContain('`npm view` (the `npm latest:` line, printed by a command of its own that gives npm 20 seconds) is consulted only for `Channel: npm`, so ignore that line for a marketplace install');
     expect(diagnosis).toContain('never compared with an npm-only release');

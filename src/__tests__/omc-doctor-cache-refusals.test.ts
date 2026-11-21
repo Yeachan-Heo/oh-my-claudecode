@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, lutimesSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, backupDir, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, skillText, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, backupDir, commands, digitVersions, makeCache, movedAside, guideSection, PLUGIN_ID, runCommand, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
 
 // The two cache commands refuse to move anything when they cannot tell what is protected, and report a move that failed.
 // A refusal or a failure ends with exit code 1 and says why; a finished move, an empty cache and a cache nothing pins
@@ -177,7 +177,7 @@ describe('omc-doctor cache commands: an installPath that is not absolute', { tim
   });
 
   test('the skill names the refusal among the unreadable sources of the cache guard', () => {
-    expect(skillText).toContain('an `installPath` of any entry that is not absolute (it names another directory for each directory the command runs in)');
+    expect(guideSection('cache-guard')).toContain('an `installPath` of any entry that is not absolute (it names another directory for each directory the command runs in)');
   });
 
   test('an absolute installPath and an entry with only a version are no refusal', () => {

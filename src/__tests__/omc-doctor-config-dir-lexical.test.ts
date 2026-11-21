@@ -246,9 +246,10 @@ describe('omc-doctor: no shell line uses $C outside the block that sets it', () 
   test('every line of the skill that uses $S sits in a shell block that sets it first, with the same locator line', () => {
     expect(locatorLine).not.toBe('');
     const users = bashBlocks().filter((block) => /\$\{?S\b/.test(block.replace(locatorLine, '')));
-    // Six blocks run the seven commands (Step 1 and the npm line share one).
-    expect(users).toHaveLength(6);
-    expect(skillText.match(/^node "\$S" /gm)).toHaveLength(7);
+    // Seven blocks use $S: six run the seven commands (Step 1 and the npm line share one), and the Guide block prints a section.
+    expect(users).toHaveLength(7);
+    // Ten calls: the seven commands, the call of the Guide block and the check of each of the two cache repair blocks that the guide can be printed.
+    expect(skillText.match(/^node "\$S" /gm)).toHaveLength(10);
     for (const block of users) {
       const lines = block.split('\n');
       const set = lines.indexOf(locatorLine);

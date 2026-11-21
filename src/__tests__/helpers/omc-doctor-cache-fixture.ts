@@ -9,6 +9,21 @@ export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../
 export const read = (rel: string): string => readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 
 export const skillText = read('skills/omc-doctor/SKILL.md');
+// The guide file beside the script: the details of the rules that the skill leaves out (Step 1 in the rarer cases, the
+// rest of the cache guard, the folding of a `..` and the locator). The skill names each section where a rule needs it.
+export const guideText = read('scripts/omc-doctor-guide.md');
+// What a rule of the skill says together with the details it leaves to the guide.
+export const skillAndGuide = `${skillText}\n${guideText}`;
+// The text of the section "## <name>" of the guide file, heading line included.
+export const guideSection = (name: string, text: string = guideText): string => {
+  const hits = text.split(/^(?=## )/m).filter((part) => part.startsWith(`## ${name}\n`));
+  if (hits.length !== 1) throw new Error(`expected exactly one guide section ${name}, found ${hits.length}`);
+  return hits[0].trimEnd();
+};
+// The two lines the skill uses for the guide: the template call of the Guide block, and the check that stops a cache repair
+// block when the guide cannot be printed.
+export const GUIDE_CALL = 'node "$S" guide SECTION';
+export const GUIDE_GUARD = 'node "$S" guide cache-guard >/dev/null || exit 1';
 
 // The commands of the doctor script that the skill runs, one per Bash call (scripts/omc-doctor.mjs).
 export const SCRIPT = path.join(ROOT, 'scripts', 'omc-doctor.mjs');

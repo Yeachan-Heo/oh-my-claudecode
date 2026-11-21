@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allCommands, bashBlocks, blockOf, codeOf, commands, locatorLine, ROOT, runBlock, runCommand, SCRIPT, scriptSection, scriptText, skillText } from './helpers/omc-doctor-cache-fixture.js';
+import { allCommands, bashBlocks, blockOf, codeOf, commands, GUIDE_CALL, GUIDE_GUARD, locatorLine, ROOT, runBlock, runCommand, SCRIPT, scriptSection, scriptText, skillText } from './helpers/omc-doctor-cache-fixture.js';
 import { copyPluginSyncPayload } from '../installer/index.js';
 import { versionCommand } from './helpers/omc-doctor-step1.js';
 
@@ -21,7 +21,8 @@ describe('omc-doctor: the skill calls the script through one locator, and holds 
     // No inline code in a shell block either: a block is a comment, the locator line and calls, or plain shell checks.
     for (const block of bashBlocks().filter((b) => b.includes('node "$S"'))) {
       for (const line of block.split('\n')) {
-        expect({ line: line.slice(0, 60), ok: line.startsWith('#') || line === locatorLine || /^node "\$S" [a-z0-9-]+$/.test(line) }).toEqual({ line: line.slice(0, 60), ok: true });
+        const ok = line.startsWith('#') || line === locatorLine || /^node "\$S" [a-z0-9-]+$/.test(line) || line === GUIDE_CALL || line === GUIDE_GUARD;
+        expect({ line: line.slice(0, 60), ok }).toEqual({ line: line.slice(0, 60), ok: true });
       }
     }
   });
@@ -30,7 +31,8 @@ describe('omc-doctor: the skill calls the script through one locator, and holds 
   // npm with a limit, because the plain command has none (and `timeout` of the shell is not on every system).
   test('the only inline program of the skill is the global package lookup of the locator, and it has a time limit', () => {
     const inline = skillText.split('\n').filter((line) => /\bnode -[pe]\b/.test(line));
-    expect(inline).toHaveLength(6);
+    // The locator line of the six blocks that run the commands, and of the Guide block.
+    expect(inline).toHaveLength(7);
     for (const line of inline) expect(line).toBe(locatorLine);
     expect(locatorLine).toContain('spawnSync("npm root -g",');
     expect(locatorLine).toContain('timeout:5000');
@@ -42,8 +44,8 @@ describe('omc-doctor: the skill calls the script through one locator, and holds 
     const withLocator = bashBlocks().filter((block) => block.split('\n').some((line) => line.startsWith('S=; ')));
     const callers = bashBlocks().filter((block) => block.includes('node "$S" '));
     expect(withLocator).toEqual(callers);
-    // Six blocks run the seven commands (Step 1 and its npm line share one block).
-    expect(callers).toHaveLength(6);
+    // Six blocks run the seven commands (Step 1 and its npm line share one block), and the Guide block prints a section.
+    expect(callers).toHaveLength(7);
     for (const block of callers) {
       const lines = block.split('\n');
       expect(lines.filter((line) => line.startsWith('S=; '))).toEqual([locatorLine]);
@@ -69,13 +71,21 @@ describe('omc-doctor: the skill calls the script through one locator, and holds 
     for (const command of called) expect({ command, known: dispatch.includes(command.includes('-') ? `'${command}'` : command) }).toEqual({ command, known: true });
   });
 
-  test('the shell blocks of the two cache commands and of the probe are the comment, the locator line and the call', () => {
-    for (const command of ['claude-md-optout', 'claude-md-version', 'cache-versions', ...commands]) {
+  test('the shell blocks of the probe and of the version commands are the comment, the locator line and the call, those of the two cache commands add the guide check', () => {
+    for (const command of ['claude-md-optout', 'claude-md-version', 'cache-versions']) {
       const lines = blockOf(command).split('\n');
       expect(lines).toHaveLength(3);
       expect(lines[0].startsWith('# ')).toBe(true);
       expect(lines[1]).toBe(locatorLine);
       expect(lines[2]).toBe(`node "$S" ${command}`);
+    }
+    for (const command of commands) {
+      const lines = blockOf(command).split('\n');
+      expect(lines).toHaveLength(4);
+      expect(lines[0].startsWith('# ')).toBe(true);
+      expect(lines[1]).toBe(locatorLine);
+      expect(lines[2]).toBe(GUIDE_GUARD);
+      expect(lines[3]).toBe(`node "$S" ${command}`);
     }
   });
 });
