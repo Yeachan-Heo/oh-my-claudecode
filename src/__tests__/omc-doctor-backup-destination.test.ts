@@ -399,6 +399,7 @@ describe.skipIf(!posix)('omc-doctor: the shell blocks that move a file aside', {
     expect(guideSection('cache-guard')).toContain('every `installPath` of the registry');
     expect(guideSection('cache-guard')).toContain('with no link involved (a plugin root that is the configuration directory itself), is no reason to refuse');
     expect(skillText).toContain('The copy is a new regular file in the configuration directory itself, also when CLAUDE.md is a link');
+    expect(skillText).toContain('If CLAUDE.md is a link that leads into `plugins/cache` or `plugins/marketplaces` of the configuration directory, write nothing and say where it leads');
     expect(defs).toContain('[ ! -L "$C/$N" ]');
   });
 });

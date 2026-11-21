@@ -288,7 +288,7 @@ node "$S" cache-stale
 ### Fix: Missing/Outdated CLAUDE.md
 Skip this fix unless Step 4 printed `CLAUDE.md management enabled`: skip it when Step 4 reported `CLAUDE.md management disabled by claudeMdEnabled: false` or could not check the opt-out.
 
-Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. When that file exists, first copy it (`cp -n -p`) to a new `CLAUDE.md.bak-<UTC time>-<pid>` beside it and write only after the copy succeeded; if it fails, leave CLAUDE.md as it is and say so. The copy is a new regular file in the configuration directory itself, also when CLAUDE.md is a link:
+Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. If CLAUDE.md is a link that leads into `plugins/cache` or `plugins/marketplaces` of the configuration directory, write nothing and say where it leads: the cache cleanup and the marketplace update remove or replace what lies there. When that file exists, first copy it (`cp -n -p`) to a new `CLAUDE.md.bak-<UTC time>-<pid>` beside it and write only after the copy succeeded; if it fails, leave CLAUDE.md as it is and say so. The copy is a new regular file in the configuration directory itself, also when CLAUDE.md is a link:
 ```
 WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
 ```
