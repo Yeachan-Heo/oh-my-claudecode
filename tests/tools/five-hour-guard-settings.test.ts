@@ -1,0 +1,351 @@
+// Behaviour tests of the settings tool of the five-hour limit guard (tools/five-hour-guard/five-hour-guard-settings.py):
+// check, add, remove on copies of settings.json in a temporary directory (see five-hour-guard-support.ts), and the hook
+// command that `add` writes, run through `sh -c` the way Claude Code runs it.
+import { afterAll, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  ENV, CONFIG_DIR, HAS_PYTHON3, HOOK, PYBIN, SETTINGS_TOOL, TMP, cleanup, fixture, readJson, readText, runCommand, runPyCode, runSync, sleep,
+  writePause, type Fixture,
+} from './five-hour-guard-support.js';
+
+afterAll(cleanup);
+
+// Another program writes settings.json between the read of the tool and its replace: the wrapper acts when the tool creates its
+// temporary file. Modes: content (changed, modification time put back), mtime (only the modification time moves), always.
+const RACE_DRIVER = [
+  'import json, os, runpy, sys',
+  'mode, settings = sys.argv[1], sys.argv[2]',
+  'sys.argv = sys.argv[3:]',
+  'count = [0]',
+  'real_open = os.open',
+  'def other_writer(path, *args, **kwargs):',
+  "    if str(path).endswith('.tmp'):",
+  '        count[0] += 1',
+  "        if mode == 'always' or count[0] == 1:",
+  '            st = os.stat(settings)',
+  "            if mode == 'mtime':",
+  '                os.utime(settings, ns=(st.st_atime_ns, st.st_mtime_ns + 5000000000))',
+  '            else:',
+  '                data = json.load(open(settings))',
+  "                data['other_writer_%d' % count[0]] = True",
+  "                with open(settings, 'w') as f:",
+  '                    json.dump(data, f, indent=2)',
+  "                    f.write('\\n')",
+  "                if mode == 'content':",
+  '                    os.utime(settings, ns=(st.st_atime_ns, st.st_mtime_ns))',
+  '    return real_open(path, *args, **kwargs)',
+  'os.open = other_writer',
+  "runpy.run_path(sys.argv[0], run_name='__main__')",
+].join('\n');
+// Records how the tool creates its files (path, O_EXCL, mode asked for) under the umask given as the first argument.
+const OPEN_SPY_DRIVER = [
+  'import json, os, runpy, sys',
+  'log, umask = sys.argv[1], int(sys.argv[2], 8)',
+  'sys.argv = sys.argv[3:]',
+  'os.umask(umask)',
+  'seen = []',
+  'real_open = os.open',
+  'def spy(path, flags, mode=0o777, *args, **kwargs):',
+  "    if '.tmp' in str(path) or 'before-five-hour-guard' in str(path):",
+  "        seen.append({'path': os.path.basename(str(path)), 'excl': bool(flags & os.O_EXCL), 'mode': mode})",
+  '    return real_open(path, flags, mode, *args, **kwargs)',
+  'os.open = spy',
+  'try:',
+  "    runpy.run_path(sys.argv[0], run_name='__main__')",
+  'finally:',
+  "    json.dump(seen, open(log, 'w'))",
+].join('\n');
+
+/** shlex.quote of Python: what `add` writes around a path. */
+const quote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'"'"'`)}'`);
+
+describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 }, () => {
+  const base = () => ({
+    env: { OMC_X: '1' },
+    hooks: {
+      PreToolUse: [{ matcher: 'Write|Edit', hooks: [{ type: 'command', command: '/x/other-hook.py', timeout: 10 }] }],
+      Stop: [{ hooks: [{ type: 'command', command: '/x/stop-hook.py' }] }],
+    },
+    model: 'opus',
+    note: 'café über 日本語', // non-ASCII text must come back as it was, not as \uXXXX escapes
+  });
+  const tool = (f: Fixture, action: string, extra: string[] = []) =>
+    runSync(SETTINGS_TOOL, [action, '--settings', f.settings, '--pause-file', f.pause, '--hook-log', f.hookLog, '--hook', HOOK, '--python', PYBIN, ...extra]);
+  const backups = (f: Fixture) => readdirSync(f.dir).filter((n) => n.startsWith('settings.json.before-five-hour-guard-'));
+  const entryCommand = (f: Fixture, python = PYBIN) =>
+    `[ -f ${quote(f.pause)} ] && [ -f ${quote(HOOK)} ] && [ -x ${quote(python)} ] || exit 0; exec ${quote(python)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)} --log ${quote(f.hookLog)}`;
+  const write = (f: Fixture, doc: unknown) => writeFileSync(f.settings, JSON.stringify(doc, null, 2) + '\n', 'utf8');
+
+  it('check, add, add again, remove: backup, atomic replace, rest of the file unchanged', () => {
+    const f = fixture('settings-basic');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    chmodSync(f.settings, 0o600);
+    const hardLink = join(f.dir, 'settings.hardlink');
+    linkSync(f.settings, hardLink); // a second name of the old file: a replace-by-rename leaves it with the old content
+
+    expect(tool(f, 'check').status, 'check: no entry yet').toBe(1);
+    const add = tool(f, 'add');
+    expect(add.status, add.stderr).toBe(0);
+    expect(backups(f)).toHaveLength(1);
+    expect(readText(join(f.dir, backups(f)[0])), 'the backup is the original file').toBe(original);
+    expect(readText(hardLink), 'atomic write: the old inode keeps the old content').toBe(original);
+    expect(statSync(f.settings).mode & 0o777, 'file mode kept').toBe(0o600);
+    expect(readdirSync(f.dir).some((n) => n.endsWith('.tmp')), 'no temporary file left').toBe(false);
+    const expected = base();
+    expected.hooks.PreToolUse.push({ matcher: '*', hooks: [{ type: 'command', command: entryCommand(f), timeout: 21600 }] } as never);
+    expect(readJson(f.settings), 'only the hook entry is added, the rest is unchanged').toEqual(expected);
+    expect(tool(f, 'check').status).toBe(0);
+
+    const bytes = readText(f.settings);
+    const again = tool(f, 'add');
+    expect(again.status).toBe(0);
+    expect(again.stdout).toMatch(/already registered, nothing to do/);
+    expect(readText(f.settings), 'add twice changes nothing').toBe(bytes);
+    expect(backups(f), 'add twice makes no new backup').toHaveLength(1);
+
+    const rm = tool(f, 'remove');
+    expect(rm.status, rm.stderr).toBe(0);
+    expect(readText(f.settings), 'remove restores the original bytes').toBe(original);
+    expect(backups(f)).toHaveLength(2);
+    expect(tool(f, 'remove').stdout).toMatch(/nothing to do/);
+    expect(backups(f), 'remove with no entry makes no backup').toHaveLength(2);
+  });
+
+  it('an entry with another hook path is replaced in place, in one write, between the entries around it', () => {
+    const f = fixture('settings-moved');
+    const doc = base();
+    const old = { matcher: '*', hooks: [{ type: 'command', command: '[ -f /p ] || exit 0; exec python3 -I /old/dir/five-hour-guard-hook.py --pause-file /p', timeout: 21600 }] };
+    doc.hooks.PreToolUse.splice(1, 0, old as never); // between two other entries: the position matters
+    doc.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/last.py' }] } as never);
+    write(f, doc);
+
+    expect(tool(f, 'check').status, 'the old entry is ours: it is found by the hook file name').toBe(0);
+    const r = tool(f, 'add');
+    expect(r.status, r.stderr).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'replaced, not appended').toHaveLength(3);
+    expect(pre[1].hooks[0].command, 'the new entry sits where the old one was').toBe(entryCommand(f));
+    expect(pre[0].hooks[0].command).toBe('/x/other-hook.py');
+    expect(pre[2].hooks[0].command).toBe('/x/last.py');
+    expect({ ...readJson(f.settings), hooks: null }).toEqual({ ...base(), hooks: null });
+  });
+
+  it('the written command runs: a missing hook file, interpreter or pause file is fail-open (exit 0, silent), a valid pause holds the session and logs it', async () => {
+    const f = fixture('settings-command');
+    write(f, base());
+    expect(tool(f, 'add').status).toBe(0);
+    const cmd: string = readJson(f.settings).hooks.PreToolUse.at(-1).hooks[0].command;
+    const silentExit0 = async (command: string, what: string) => {
+      const p = runCommand(command, 'other0001');
+      await Promise.race([p.done, sleep(20000)]);
+      expect(p.exited && p.code === 0 && p.out === '' && p.err === '', what).toBe(true);
+      await p.stop();
+    };
+    await silentExit0(cmd, 'no pause file');
+    writePause(f);
+    await silentExit0(cmd.split(HOOK).join(join(TMP, 'absent-hook.py')), 'pause in force, hook script missing: not exit 2');
+    await silentExit0(cmd.split(PYBIN).join(join(TMP, 'absent-python')), 'pause in force, interpreter missing: not exit 127');
+    const c = runCommand(cmd, 'other0001'); // pause in force, everything present
+    await sleep(700);
+    expect(c.exited, 'held').toBe(false);
+    expect(readText(f.hookLog)).toMatch(/hold-start other000 Bash/);
+    unlinkSync(f.pause);
+    await Promise.race([c.done, sleep(20000)]);
+    expect(c.exited && c.code === 0).toBe(true);
+    expect(readText(f.hookLog)).toMatch(/hold-end other000 Bash waited=\d+s/);
+  });
+
+  it('the interpreter defaults to the path the tool was started with, not to a fixed one', () => {
+    const f = fixture('settings-python');
+    write(f, base());
+    const link = join(f.dir, 'python-link'); // another name for the same interpreter: only "the one that runs the tool" gives this path
+    symlinkSync(PYBIN, link);
+    const r = spawnSync(link, ['-I', SETTINGS_TOOL, 'add', '--settings', f.settings, '--pause-file', f.pause, '--hook', HOOK], { encoding: 'utf8', env: ENV, timeout: 60000 });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse.at(-1).hooks[0].command).toBe(entryCommand(f, link).replace(` --log ${quote(f.hookLog)}`, ''));
+  });
+
+  it('a foreign hook that shares a group with ours survives add and remove', () => {
+    const f = fixture('settings-mixed');
+    write(f, { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }, { type: 'command', command: 'x /old/five-hour-guard-hook.py' }] }] } });
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre).toHaveLength(2);
+    expect(pre[0].hooks[0].command, 'our entry first, where the group was').toBe(entryCommand(f));
+    expect(pre[1], 'the foreign hook stays with its matcher').toEqual({ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }] });
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }] }]);
+
+    const shared = fixture('settings-mixed-remove'); // `remove` on a group that still holds both hooks, as another tool may have written it
+    write(shared, { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }, { type: 'command', command: entryCommand(shared) }] }] } });
+    expect(tool(shared, 'remove').status).toBe(0);
+    expect(readJson(shared.settings).hooks.PreToolUse, 'the foreign hook of the shared group stays').toEqual([{ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }] }]);
+  });
+
+  it('a settings.json that is a symbolic link is written through: the file it points to gets the entry, the link stays a link', () => {
+    const f = fixture('settings-symlink');
+    const real = join(f.dir, 'dotfiles');
+    mkdirSync(real);
+    const target = join(real, 'settings-real.json');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(target, original, 'utf8');
+    chmodSync(target, 0o640);
+    symlinkSync(target, f.settings);
+    const add = tool(f, 'add');
+    expect(add.status, add.stderr).toBe(0);
+    expect(lstatSync(f.settings).isSymbolicLink(), 'still a link').toBe(true);
+    expect(readlinkSync(f.settings)).toBe(target);
+    expect(readJson(target).hooks.PreToolUse.at(-1).hooks[0].command, 'the file behind the link has the entry').toBe(entryCommand(f));
+    expect(statSync(target).mode & 0o777, 'the mode of the file behind the link is kept').toBe(0o640);
+    expect(readdirSync(real), 'no temporary file, no backup in the directory behind the link').toEqual(['settings-real.json']);
+    expect(backups(f), 'the backup sits next to the link').toHaveLength(1);
+    expect(readText(join(f.dir, backups(f)[0]))).toBe(original);
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readText(target), 'remove goes through the link too').toBe(original);
+    expect(lstatSync(f.settings).isSymbolicLink()).toBe(true);
+  });
+
+  it('a settings.json written by another program while the tool works is not overwritten blindly: it is read again once, then the tool gives up', () => {
+    const run = (name: string, mode: string) => {
+      const f = fixture(name);
+      write(f, base());
+      const r = runPyCode(RACE_DRIVER, [mode, f.settings, SETTINGS_TOOL, 'add', '--settings', f.settings, '--pause-file', f.pause, '--hook-log', f.hookLog, '--hook', HOOK, '--python', PYBIN]);
+      return { f, r };
+    };
+    const c = run('settings-race-content', 'content'); // the content changes, the modification time is put back: only the content comparison sees it
+    expect(c.r.status, c.r.stderr).toBe(0);
+    expect(c.r.stderr).toMatch(/changed while it was being updated, reading it again/);
+    const doc = readJson(c.f.settings);
+    expect(doc.other_writer_1, 'the change of the other program is kept').toBe(true);
+    expect(doc.hooks.PreToolUse.at(-1).hooks[0].command, 'and our entry is added').toBe(entryCommand(c.f));
+    expect(backups(c.f), 'one backup, of the file as it was when it was written over').toHaveLength(1);
+    expect(readJson(join(c.f.dir, backups(c.f)[0])).other_writer_1).toBe(true);
+
+    const m = run('settings-race-mtime', 'mtime'); // only the modification time moves
+    expect(m.r.status, m.r.stderr).toBe(0);
+    expect(m.r.stderr).toMatch(/reading it again/);
+    expect(readJson(m.f.settings).hooks.PreToolUse.at(-1).hooks[0].command).toBe(entryCommand(m.f));
+
+    const a = run('settings-race-always', 'always'); // the file changes every time: give up
+    expect(a.r.status).toBe(2);
+    expect(a.r.stderr).toMatch(/changed again while it was being updated: nothing was written/);
+    expect(readJson(a.f.settings).other_writer_2, 'the file is what the other program wrote').toBe(true);
+    expect(readText(a.f.settings)).not.toContain('five-hour-guard-hook');
+    expect(readdirSync(a.f.dir).some((n) => n.endsWith('.tmp')), 'no temporary file left').toBe(false);
+    expect(backups(a.f), 'no backup of a file that was not replaced').toHaveLength(0);
+  });
+
+  it('the temporary file and the backup are created readable by the owner only and get the mode of the original before any content is written', () => {
+    for (const umask of ['0', '77']) {
+      const f = fixture(`settings-modes-${umask}`);
+      write(f, base());
+      chmodSync(f.settings, 0o644);
+      const spyLog = join(f.dir, 'open-calls.json');
+      const r = runPyCode(OPEN_SPY_DRIVER, [spyLog, umask, SETTINGS_TOOL, 'add', '--settings', f.settings, '--pause-file', f.pause, '--hook', HOOK, '--python', PYBIN]);
+      expect(r.status, r.stderr).toBe(0);
+      const seen: Array<{ path: string; excl: boolean; mode: number }> = readJson(spyLog);
+      expect(seen.map((c) => (c.path.endsWith('.tmp') ? 'tmp' : 'backup')).sort(), `umask ${umask}: both files are created by os.open`).toEqual(['backup', 'tmp']);
+      for (const c of seen) {
+        expect(c.excl, `${c.path}: created exclusively`).toBe(true);
+        expect(c.mode & 0o077, `${c.path}: created with no access for group and others, whatever the umask`).toBe(0);
+      }
+      expect(statSync(f.settings).mode & 0o777, `umask ${umask}: the mode of the original is restored`).toBe(0o644);
+      expect(statSync(join(f.dir, backups(f)[0])).mode & 0o777, `umask ${umask}: the backup has the mode of the original`).toBe(0o644);
+    }
+  });
+
+  it('a missing settings.json: add creates it with mode 0600, remove has nothing to do, check says it is not installed', () => {
+    const f = fixture('settings-missing');
+    const check = tool(f, 'check');
+    expect(check.status).toBe(1);
+    expect(check.stdout).toMatch(/does not exist, the guard hook is not installed/);
+    const rm = tool(f, 'remove');
+    expect(rm.status, rm.stderr).toBe(0);
+    expect(rm.stdout).toMatch(/no settings file, nothing to do/);
+    expect(existsSync(f.settings), 'remove creates nothing').toBe(false);
+    const add = tool(f, 'add');
+    expect(add.status, add.stderr).toBe(0);
+    expect(add.stdout).toMatch(/the file did not exist, it was created/);
+    expect(readJson(f.settings)).toEqual({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: entryCommand(f), timeout: 21600 }] }] } });
+    expect(statSync(f.settings).mode & 0o777).toBe(0o600);
+    expect(backups(f), 'nothing to back up').toHaveLength(0);
+    const nodir = tool({ ...f, settings: join(f.dir, 'no-such-dir', 'settings.json') }, 'add');
+    expect(nodir.status, 'the directory has to exist').toBe(2);
+    expect(nodir.stderr).toMatch(/the directory of .* does not exist/);
+  });
+
+  it('the default settings path takes CLAUDE_CONFIG_DIR like the guard and OMC do: surrounding blanks removed, a leading ~ expanded', () => {
+    const f = fixture('settings-tilde');
+    const home = join(f.dir, 'home');
+    mkdirSync(join(home, 'cfg'), { recursive: true });
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    for (const dir of ['cfg', '.claude']) writeFileSync(join(home, dir, 'settings.json'), JSON.stringify(base(), null, 2) + '\n', 'utf8');
+    const env = { ...ENV, HOME: home, USERPROFILE: home };
+    const viaTilde = runSync(SETTINGS_TOOL, ['check'], { env: { ...env, CLAUDE_CONFIG_DIR: '  ~/cfg  ' } });
+    expect(viaTilde.status, viaTilde.stderr).toBe(1);
+    expect(viaTilde.stdout).toContain(join(home, 'cfg', 'settings.json'));
+    const blank = runSync(SETTINGS_TOOL, ['check'], { env: { ...env, CLAUDE_CONFIG_DIR: '   ' } });
+    expect(blank.stdout, 'a blank value counts as unset').toContain(join(home, '.claude', 'settings.json'));
+  });
+
+  it('add refuses relative or missing paths; a settings file of the wrong shape is an error, not a crash', () => {
+    const f = fixture('settings-refuse');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const refused = (extra: string[], pattern: RegExp) => {
+      const r = tool(f, 'add', extra);
+      expect(r.status, `${extra.join(' ')}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(pattern);
+      expect(readText(f.settings), 'nothing written').toBe(original);
+      expect(backups(f), 'no backup either').toHaveLength(0);
+    };
+    refused(['--hook', 'tools/five-hour-guard-hook.py'], /not absolute/);
+    refused(['--hook', join(f.dir, 'absent-hook.py')], /hook .* does not exist/);
+    refused(['--python', join(f.dir, 'absent-python')], /interpreter .* does not exist/);
+    const rel = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', 'pause.json', '--hook', HOOK, '--python', PYBIN]);
+    expect(rel.status).toBe(2);
+    expect(rel.stderr).toMatch(/pause file path 'pause\.json' is not absolute/);
+    for (const [label, doc] of [['hooks null', '{"hooks": null}'], ['PreToolUse not a list', '{"hooks": {"PreToolUse": {}}}'], ['group not an object', '{"hooks": {"PreToolUse": [1]}}'], ['top level not an object', '[]']]) {
+      writeFileSync(f.settings, doc, 'utf8');
+      for (const action of ['check', 'add', 'remove']) {
+        const r = tool(f, action);
+        expect(r.status, `${label}, ${action}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${label}, ${action}: an error message, not a traceback`).not.toMatch(/Traceback/);
+      }
+      expect(readText(f.settings), `${label}: file untouched`).toBe(doc);
+    }
+  });
+
+  it('settings path: --settings, then settings_file of the configuration, then CLAUDE_CONFIG_DIR, then the home directory; an unreadable file is an error, not a write', () => {
+    const f = fixture('settings-path', { config: {} });
+    const target = join(f.dir, 'from-config.json');
+    writeFileSync(f.cfg, JSON.stringify({ pause_file: f.pause, settings_file: target }), 'utf8');
+    writeFileSync(target, JSON.stringify(base(), null, 2) + '\n', 'utf8');
+    const viaConfig = runSync(SETTINGS_TOOL, ['check', '--config', f.cfg]);
+    expect(viaConfig.status).toBe(1);
+    expect(viaConfig.stdout).toMatch(/from-config\.json: 0 entry/);
+
+    writeFileSync(join(CONFIG_DIR, 'settings.json'), JSON.stringify(base(), null, 2) + '\n', 'utf8');
+    const viaEnv = runSync(SETTINGS_TOOL, ['check']);
+    expect(viaEnv.stdout).toContain(join(CONFIG_DIR, 'settings.json'));
+    const home = join(f.dir, 'home');
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify(base(), null, 2) + '\n', 'utf8');
+    const noConfigDir: NodeJS.ProcessEnv = { ...ENV, HOME: home, USERPROFILE: home };
+    delete noConfigDir.CLAUDE_CONFIG_DIR;
+    const viaHome = runSync(SETTINGS_TOOL, ['check'], { env: noConfigDir });
+    expect(viaHome.stdout).toContain(join(home, '.claude', 'settings.json'));
+
+    const broken = join(f.dir, 'broken.json');
+    writeFileSync(broken, '{ nope', 'utf8');
+    const r = runSync(SETTINGS_TOOL, ['add', '--settings', broken, '--pause-file', f.pause, '--hook', HOOK]);
+    expect(r.status).toBe(2);
+    expect(readText(broken), 'unreadable settings are left alone').toBe('{ nope');
+    const noPause = runSync(SETTINGS_TOOL, ['add', '--settings', target]);
+    expect(noPause.status).toBe(2);
+    expect(noPause.stderr).toMatch(/"pause_file" is not set/);
+  });
+});
