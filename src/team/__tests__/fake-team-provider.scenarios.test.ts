@@ -249,6 +249,66 @@ describe.skipIf(process.platform === 'win32')('fake team provider scenarios', ()
     expect(run.output()).toContain('fake-claude failed at await-trust-answer: trust_declined');
   });
 
+  it('claude-onboarding: Enter on the theme picker answers onboarding and fails', async () => {
+    const run = startFake('claude-onboarding');
+    await run.waitForOutput(frame('claude/2.1.329/onboarding-theme.txt'));
+    expect(await traceSteps()).not.toContain('selector-read');
+    run.press('\r');
+    expect(await run.exitCode).toBe(1);
+    expect(run.output()).toContain('fake-claude failed at await-onboarding-answer: onboarding_answered');
+  });
+
+  it('claude-bypass-permissions: Enter alone takes the default "No, exit" and quits', async () => {
+    const run = startFake('claude-bypass-permissions');
+    await run.waitForOutput(frame('claude/2.1.328/bypass-permissions.txt'));
+    run.press('\r');
+    expect(await run.exitCode).toBe(1);
+    expect(run.output()).toContain('fake-claude failed at await-bypass-answer: bypass_declined');
+  });
+
+  it('claude-bypass-permissions: draws the idle prompt only after Down then Enter, and traces every read', async () => {
+    const run = startFake('claude-bypass-permissions');
+    await run.waitForOutput(frame('claude/2.1.328/bypass-permissions.txt'));
+    expect(await traceSteps()).not.toContain('selector-read');
+    run.press(DOWN);
+    await run.waitForOutput('❯ Yes, I accept');
+    const focusLines = (text: string) => text.split('\n').filter(line => /No, exit|Yes, I accept/.test(line));
+    expect(focusLines(run.output().split('\x1b[H\x1b[J').at(-1)!))
+      .toEqual(focusLines(frame('claude/2.1.328/bypass-permissions-yes-focused.txt')));
+    run.press('\r');
+    await run.waitForOutput(frame('claude/2.1.325/idle.txt'));
+    expect((await traceSteps()).filter(step => step === 'selector-read')).toHaveLength(2);
+  });
+
+  it('claude-fullscreen-renderer: answers trust, then takes Not now only after Down, then runs the lifecycle', async () => {
+    const run = startFake('claude-fullscreen-renderer');
+    await run.waitForOutput(frame('claude/2.1.325/trust.txt'));
+    run.press(DOWN);
+    await run.waitForOutput('❯ Yes, ');
+    run.press('\r');
+    await run.waitForOutput(frame('claude/2.1.328/fullscreen-renderer.txt'));
+    run.press(DOWN);
+    await run.waitForOutput('❯ 2. Not now');
+    const focusLines = (text: string) => text.split('\n').filter(line => /1\. Yes, try it|2\. Not now/.test(line));
+    expect(focusLines(run.output().split('\x1b[H\x1b[J').at(-1)!))
+      .toEqual(focusLines(frame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt')));
+    run.press('\r');
+    await run.waitForOutput(frame('claude/2.1.328/idle-after-fullscreen-renderer.txt'));
+    await runClaimLifecycle(run, '\ntask completed\n❯ ');
+  });
+
+  it('claude-fullscreen-renderer: Enter on "1. Yes, try it" fails', async () => {
+    const run = startFake('claude-fullscreen-renderer');
+    await run.waitForOutput(frame('claude/2.1.325/trust.txt'));
+    run.press(DOWN);
+    await run.waitForOutput('❯ Yes, ');
+    run.press('\r');
+    await run.waitForOutput(frame('claude/2.1.328/fullscreen-renderer.txt'));
+    run.press('\r');
+    expect(await run.exitCode).toBe(1);
+    expect(run.output()).toContain('fake-claude failed at await-renderer-answer: fullscreen_renderer_accepted');
+  });
+
   it('claude-slow-banner: holds the bypass banner for seconds before the idle prompt', async () => {
     const run = startFake('claude-slow-banner');
     await run.waitForOutput(frame('claude/unversioned/startup-banner-bypass.txt'));
