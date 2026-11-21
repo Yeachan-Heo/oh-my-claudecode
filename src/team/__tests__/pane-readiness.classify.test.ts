@@ -431,6 +431,7 @@ describe('Claude Code first-run dialogs', () => {
   it.each([
     ['✔ Auto (match terminal)', 'Auto (match terminal)'],
     ['Dark mode', 'Dark mode'],
+    ['✔ Dark mode', 'Dark mode'],
     ['Light mode', 'Light mode'],
     ['Dark mode (colorblind-friendly)', 'Dark mode (colorblind-friendly)'],
     ['Light mode (colorblind-friendly)', 'Light mode (colorblind-friendly)'],
@@ -447,6 +448,31 @@ describe('Claude Code first-run dialogs', () => {
     const notes = read('claude/2.1.329/onboarding-security-notes.txt');
     expect(detectClaudeStartupDialog(`${notes}\n❯ Dark mode looks fine\n`)).toBeNull();
     expect(detectClaudeStartupDialog(`${notes}\n❯ Yes\n`)).toBeNull();
+  });
+
+  it('reads an empty input prompt as a prompt, even with a theme name right below it', () => {
+    expect(detectClaudeStartupDialog('Security notes:\n❯\nDark mode\n')).toBeNull();
+  });
+
+  // Asked about a dialog that is not the live one, claudeDialogFocus names no
+  // focus when neither of its choices is on screen, and 'stale' when any one is.
+  it('reads no renderer focus on an idle pane, and a stale one when either choice is left above the prompt', () => {
+    expect(claudeDialogFocus(read('claude/2.1.325/idle.txt'), 'claude_fullscreen_renderer')).toBeNull();
+    expect(claudeDialogFocus('  ❯ 1. Yes, try it\n────\n❯ \n────\n', 'claude_fullscreen_renderer')).toBe('stale');
+    expect(claudeDialogFocus('    2. Not now\n────\n❯ \n────\n', 'claude_fullscreen_renderer')).toBe('stale');
+    expect(claudeDialogFocus('  ❯ 1. Yes,\n  try it\n────\n❯ \n────\n', 'claude_fullscreen_renderer')).toBe('stale');
+  });
+
+  // Claude Code draws a no-break space after the ❯ of its own input prompt.
+  it('reads the renderer focus when a no-break space follows its ❯', () => {
+    const offer = read('claude/2.1.328/fullscreen-renderer.txt').replace('❯ 1. Yes, try it', '❯\u00a01. Yes, try it');
+    expect(detectClaudeStartupDialog(offer)).toBe('claude_fullscreen_renderer');
+    expect(claudeDialogFocus(offer, 'claude_fullscreen_renderer')).toBe('first');
+  });
+
+  it('reads only below the boxed input prompt of Claude Code 2.1.142', () => {
+    const notes = read('claude/2.1.329/onboarding-security-notes.txt');
+    expect(detectClaudeStartupDialog(`⏺ The worker pane showed:\n${notes}\n${read('claude/2.1.142/idle-gutter.txt')}`)).toBeNull();
   });
 
   it('reads only below the latest input prompt when an earlier one is in the scrollback', () => {

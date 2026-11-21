@@ -1138,11 +1138,16 @@ describe('worker pane startup safety', () => {
     expect(sentKeys()).toEqual(['Enter']);
   });
 
-  strictTmuxIt('does not resubmit with Enter while the Bypass Permissions warning focuses Yes, I accept', async () => {
+  // Enter resubmits the typed trigger only while no first-run screen is drawn
+  // below it: on any of them Enter would answer the screen instead.
+  strictTmuxIt.each([
+    ['the Bypass Permissions warning focusing Yes, I accept', (): string => readFrame('claude/2.1.328/bypass-permissions-yes-focused.txt')],
+    ['the fullscreen renderer offer', (): string => readFrame('claude/2.1.328/fullscreen-renderer.txt')],
+    ['Claude Code onboarding', (): string => readFrame('claude/2.1.329/onboarding-security-notes.txt')],
+    ['a first-run screen with only its footer on screen', (): string => '\n  Enter to confirm · Esc to cancel\n'],
+  ] as const)('does not resubmit with Enter while %s is drawn below the typed trigger', async (_, screen) => {
     const context = await acceptedContext('claude');
-    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
-    const warning = readFileSync(join(corpus, 'claude/2.1.328/bypass-permissions-yes-focused.txt'), 'utf8');
-    tmuxState.captures = [`❯ Read inbox.md, execute now.\n${warning}`];
+    tmuxState.captures = [`❯ Read inbox.md, execute now.\n${screen()}`];
 
     await expect(retryStartupInboxSubmit(context, 'Read inbox.md, execute now.', { attemptAlreadyFenced: true }))
       .resolves.toBe('unavailable');
@@ -1162,6 +1167,24 @@ describe('worker pane startup safety', () => {
       reason: 'claude_bypass_permissions_consent_required',
     });
     expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  // Only a first-run screen with an answer (the renderer offer, or one whose
+  // choices are off screen) sends the check before the trigger back to the
+  // wait. The bypass warning, onboarding and the folder trust dialog stop the
+  // start on that one read, even when the next read would show an idle pane.
+  strictTmuxIt.each([
+    ['the Bypass Permissions warning', 'claude/2.1.328/bypass-permissions.txt', 'claude_bypass_permissions_consent_required'],
+    ['Claude Code onboarding', 'claude/2.1.329/onboarding-theme.txt', 'claude_onboarding_required'],
+    ['the folder trust dialog', 'claude/2.1.325/trust.txt', 'selector_persistent'],
+  ] as const)('stops on the one read of %s at the check before the trigger is typed', async (_, file, reason) => {
+    const context = await acceptedContext('claude');
+    const idle = readFrame('claude/2.1.325/idle.txt');
+    tmuxState.captures = [idle, readFrame(file), idle];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({ ok: false, reason });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    expect(tmuxState.args.filter(args => args[0] === 'capture-pane')).toHaveLength(2);
   });
 
   strictTmuxIt('answers a fullscreen renderer offer that first shows at the check before the trigger is typed, then delivers', async () => {
@@ -1204,12 +1227,15 @@ describe('worker pane startup safety', () => {
 
   // The wait answers a dialog seen at the check before the trigger is typed
   // once. A dialog still pending at the next check is not answered again: the
-  // trigger is never typed and no key follows the first answer.
+  // trigger is never typed and no key follows the first answer. The bypass
+  // warning and onboarding keep their own reasons there too.
   strictTmuxIt.each([
-    ['the renderer offer drawn again', () => readFrame('claude/2.1.328/fullscreen-renderer.txt')],
+    ['the renderer offer drawn again', () => readFrame('claude/2.1.328/fullscreen-renderer.txt'), 'selector_persistent'],
     ['a first-run screen with only its footer on screen', () =>
-      `${readFrame('claude/2.1.325/idle.txt').trimEnd()}\n\n  Enter to confirm · Esc to cancel\n`],
-  ] as const)('stops before typing the trigger when %s follows the answered renderer offer', async (_, pendingAgain) => {
+      `${readFrame('claude/2.1.325/idle.txt').trimEnd()}\n\n  Enter to confirm · Esc to cancel\n`, 'selector_persistent'],
+    ['the Bypass Permissions warning', () => readFrame('claude/2.1.328/bypass-permissions.txt'), 'claude_bypass_permissions_consent_required'],
+    ['Claude Code onboarding', () => readFrame('claude/2.1.329/onboarding-theme.txt'), 'claude_onboarding_required'],
+  ] as const)('stops before typing the trigger when %s follows the answered renderer offer', async (_, pendingAgain, reason) => {
     const context = await acceptedContext('claude');
     const idle = readFrame('claude/2.1.325/idle.txt');
     const offer = readFrame('claude/2.1.328/fullscreen-renderer.txt');
@@ -1224,10 +1250,7 @@ describe('worker pane startup safety', () => {
       pendingAgain(),
     ];
 
-    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
-      ok: false,
-      reason: 'selector_persistent',
-    });
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({ ok: false, reason });
     expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
       .toEqual(['Down', 'Enter']);
   });
