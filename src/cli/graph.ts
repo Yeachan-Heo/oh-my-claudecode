@@ -21,8 +21,10 @@ import {
   JournalCorruptionError,
 } from '../graph/runtime/types.js';
 import type { RunOptions, RunResult } from '../graph/runtime/types.js';
-import { AgentNodeExecutor } from '../graph/runtime/executors/agent.js';
-import { CommandNodeExecutor } from '../graph/runtime/executors/command.js';
+// Lazy-import executors to avoid bundling the Agent SDK in cli.cjs.
+// These are only loaded when the user actually runs a graph command.
+// import { AgentNodeExecutor } from '../graph/runtime/executors/agent.js';
+// import { CommandNodeExecutor } from '../graph/runtime/executors/command.js';
 import { createStdinApprovalGate } from '../graph/runtime/approval.js';
 import {
   createRemoteApprovalGate,
@@ -194,6 +196,10 @@ async function runAction(
   } else {
     prompter = createStdinApprovalGate();
   }
+
+  // Lazy-load executors to keep Agent SDK out of the CLI bundle.
+  const { CommandNodeExecutor } = await import('../graph/runtime/executors/command.js');
+  const { AgentNodeExecutor } = await import('../graph/runtime/executors/agent.js');
 
   const options: RunOptions = {
     runsRoot,

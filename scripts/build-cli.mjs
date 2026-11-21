@@ -14,6 +14,10 @@ const sharedExternal = [
   '@ast-grep/napi', 'better-sqlite3',
   // Avoid bundling jsonc-parser's UMD internals
   'jsonc-parser',
+  // Avoid bundling the Agent SDK and its vulnerable fast-uri in the CLI bundle.
+  // The SDK is only needed by the MCP server (bridge/mcp-server.cjs), not by the CLI itself.
+  // The CLI should remain lightweight for command-line operations.
+  '@anthropic-ai/claude-agent-sdk',
 ];
 
 const cliConfig = {
