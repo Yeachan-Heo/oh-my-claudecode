@@ -133,6 +133,7 @@ jobs:
           src/__tests__/omc-doctor-plugin-dir-diagnosis.test.ts
           src/__tests__/omc-doctor-config-dir-tilde.test.ts
           src/__tests__/omc-doctor-cache-names.test.ts
+          src/__tests__/omc-doctor-dangling-links.test.ts
           src/__tests__/omc-doctor-cache-refusals.test.ts
           src/__tests__/omc-doctor-config-dir-lexical.test.ts
           src/__tests__/omc-doctor-large-version-parts.test.ts
