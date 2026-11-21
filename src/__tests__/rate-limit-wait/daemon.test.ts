@@ -11,6 +11,7 @@ import {
   isDaemonRunning,
   getDaemonStatus,
   formatDaemonState,
+  createMinimalDaemonEnv,
 } from '../../features/rate-limit-wait/daemon.js';
 import { shouldResumeBlockedPanesOnStatusChange } from '../../features/rate-limit-wait/daemon-state.js';
 import type { DaemonState, DaemonConfig, RateLimitStatus } from '../../features/rate-limit-wait/types.js';
@@ -426,5 +427,26 @@ describe('daemon', () => {
       expect(content).not.toContain('secret');
       expect(content).not.toContain('credential');
     });
+  });
+});
+
+describe('daemon child environment allowlist', () => {
+  const originalEnv = process.env;
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('forwards the quota pass limit and weekly unit, and no credential', () => {
+    process.env = {
+      ...originalEnv,
+      OMC_PANEL_QUOTA_PASS_LIMIT_S: '45',
+      OMC_PANEL_QUOTA_WEEK_UNIT: '7',
+      ANTHROPIC_API_KEY: 'sk-test-not-forwarded',
+    };
+    const env = createMinimalDaemonEnv();
+    expect(env.OMC_PANEL_QUOTA_PASS_LIMIT_S).toBe('45');
+    expect(env.OMC_PANEL_QUOTA_WEEK_UNIT).toBe('7');
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 });

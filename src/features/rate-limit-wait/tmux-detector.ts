@@ -9,6 +9,7 @@
  * - Text inputs are sanitized to prevent command injection
  */
 
+import { execFileSync } from 'node:child_process';
 import { tmuxExec, tmuxSpawn } from '../../cli/tmux-utils.js';
 import { getNewPaneTail } from './pane-fresh-capture.js';
 import type { TmuxPane, PaneAnalysisResult, BlockedPane } from './types.js';
@@ -19,7 +20,7 @@ import {
   herdrWorkspaceIdFromPaneId,
   type HerdrAgentLikeInfo,
 } from '../../team/herdr-session.js';
-import { isHerdrPaneId, resolveTeamMultiplexer } from '../../team/tmux-session.js';
+import { isHerdrPaneId, paneCurrentCommandLooksReady, resolveTeamMultiplexer } from '../../team/tmux-session.js';
 
 /**
  * Validate tmux pane ID format to prevent command injection
@@ -313,19 +314,36 @@ function parseTmuxPanes(result: string): TmuxPane[] {
   return panes;
 }
 
-function listTmuxPanesStrict(): TmuxPane[] | null {
+/**
+ * With `withServer`, every line also carries the server's pid and start time, and each pane gets them as `server`: a
+ * pane id is unique only within one run of the tmux server. A listing whose lines do not all carry that value is
+ * reported as unreadable (null), because the caller asked for a binding it could then not make.
+ */
+export function listTmuxPanesStrict(withServer = false): TmuxPane[] | null {
   if (!isTmuxAvailable()) {
     return null;
   }
 
   try {
-    // Format: session_name:window_index.pane_index pane_id pane_active window_name pane_title
-    const format = '#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}';
+    // Format: [pid:start_time ]session_name:window_index.pane_index pane_id pane_active window_name pane_title
+    const format = (withServer ? '#{pid}:#{start_time} ' : '')
+      + '#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}';
     const result = tmuxExec(['list-panes', '-a', '-F', format], {
       stripTmux: true,
       timeout: 5000,
     });
 
+    if (withServer) {
+      const panes: TmuxPane[] = [];
+      for (const line of result.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const split = line.indexOf(' ');
+        const server = line.slice(0, split);
+        if (!/^\d+:\d+$/.test(server)) return null;
+        for (const pane of parseTmuxPanes(line.slice(split + 1))) panes.push({ ...pane, server });
+      }
+      return panes;
+    }
     return parseTmuxPanes(result);
   } catch (error) {
     console.error('[TmuxDetector] Error listing panes:', error);
@@ -615,43 +633,78 @@ export function sendResumeSequence(paneId: string): boolean {
 }
 
 /**
- * Send custom text to a tmux pane
+ * What happened to text typed into a pane: it went in with its Enter (`delivered`), nothing was sent and the same
+ * call can safely be repeated (`not_attempted`), or part of it may have gone in or the outcome is not known
+ * (`unconfirmed`: the text was typed and the Enter failed, or a call timed out or died).
  */
-export function sendToPane(paneId: string, text: string, pressEnter = true): boolean {
+export type PaneSendOutcome = 'delivered' | 'not_attempted' | 'unconfirmed';
+
+// A tmux call that ran and exited non-zero, or that never started, sent nothing. A timeout, a signal or an error of
+// unknown shape can have come after the key was typed.
+function tmuxCallSentNothing(error: unknown): boolean {
+  const failure = error as { status?: unknown; signal?: unknown; code?: unknown } | null;
+  if (typeof failure?.status === 'number' && failure.status !== 0 && !failure.signal) return true;
+  return failure?.code === 'ENOENT' || failure?.code === 'EACCES';
+}
+
+/**
+ * Send custom text to a tmux pane and report all three outcomes (see PaneSendOutcome). The text and the Enter
+ * are two tmux calls, so a failure of the second leaves the text typed in the pane: that is `unconfirmed`, never
+ * `not_attempted`.
+ */
+export function sendToPaneOutcome(paneId: string, text: string, pressEnter = true): PaneSendOutcome {
   if (!isTmuxAvailable()) {
-    return false;
+    return 'not_attempted';
   }
 
   // Herdr panes (wN:pM) are addressed through the herdr agent surface.
   if (isHerdrPaneId(paneId)) {
-    return false;
+    return 'not_attempted';
   }
 
   // Validate pane ID to prevent command injection
   if (!isValidPaneId(paneId)) {
     console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
-    return false;
+    return 'not_attempted';
   }
 
+  let sanitizedText: string;
   try {
-    const sanitizedText = sanitizeForTmux(text);
+    sanitizedText = sanitizeForTmux(text);
+  } catch (error) {
+    console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
+    return 'not_attempted';
+  }
+  try {
     // Send text with -l flag (literal) to avoid key interpretation issues in TUI apps
     tmuxExec(['send-keys', '-t', paneId, '-l', sanitizedText], {
       stripTmux: true,
       timeout: 2000,
     });
-    // Send Enter as a separate command so it is interpreted as a key press
-    if (pressEnter) {
+  } catch (error) {
+    console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
+    return tmuxCallSentNothing(error) ? 'not_attempted' : 'unconfirmed';
+  }
+  // Send Enter as a separate command so it is interpreted as a key press
+  if (pressEnter) {
+    try {
       tmuxExec(['send-keys', '-t', paneId, 'Enter'], {
         stripTmux: true,
         timeout: 2000,
       });
+    } catch (error) {
+      console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
+      return 'unconfirmed';
     }
-    return true;
-  } catch (error) {
-    console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
-    return false;
   }
+  return 'delivered';
+}
+
+/**
+ * Send custom text to a tmux pane
+ */
+export function sendToPane(paneId: string, text: string, pressEnter = true): boolean {
+  return sendToPaneOutcome(paneId, text, pressEnter) === 'delivered';
 }
 
 // ---------------------------------------------------------------------------
@@ -831,4 +884,76 @@ export function formatBlockedPanesSummary(blockedPanes: BlockedPane[]): string {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * tmux adapter for the opt-in worker panel quota wait (OMC_PANEL_QUOTA_WAIT=1).
+ * Strict capture: a pane that cannot be read is skipped, not treated as an empty screen.
+ */
+export const panelQuotaTmux = {
+  // null when the inventory cannot be read (tmux missing, server unreachable, timeout): the pass keeps its saved waits.
+  listPanes: (): TmuxPane[] | null => listTmuxPanesStrict(true),
+  capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines),
+  sendContinue: (pane: TmuxPane): PaneSendOutcome => sendToPaneOutcome(pane.id, 'continue', true),
+  providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id),
+};
+
+/**
+ * Whether the provider still runs in a pane. After the provider exits the pane keeps running the user's
+ * shell, which shows the old error in its scrollback and would take a typed key as a command. False for a
+ * dead pane or for the shell at its own prompt, true when something else runs in the foreground, null when
+ * that cannot be told.
+ *
+ * A provider started through a shell wrapper script shows the shell as `pane_current_command`, so a shell
+ * name alone does not mean the provider is gone: the terminal's foreground process group tells. At the
+ * prompt it is the shell's own group; while a wrapper script or the provider runs it is another group.
+ */
+function paneProviderRunning(paneId: string): boolean | null {
+  if (!isTmuxAvailable() || !isValidPaneId(paneId)) {
+    return null;
+  }
+  try {
+    const status = tmuxExec(
+      ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_pid} #{pane_current_command}'],
+      { stripTmux: true, stdio: 'pipe', timeout: 3000 },
+    ).trim();
+    const [dead, panePid, ...commandParts] = status.split(/\s+/);
+    if (dead === '1') {
+      return false;
+    }
+    // A login shell may be reported as "-bash".
+    const command = commandParts.join(' ').replace(/^-+/, '');
+    if (command === '') {
+      return null;
+    }
+    if (!paneCurrentCommandLooksReady(command)) {
+      return true;
+    }
+    return shellHasForegroundJob(panePid);
+  } catch {
+    return null;
+  }
+}
+
+/** True when a job other than the shell itself holds the terminal of the pane's shell; null when ps cannot tell. */
+function shellHasForegroundJob(shellPid: string): boolean | null {
+  if (!/^\d+$/.test(shellPid)) {
+    return null;
+  }
+  try {
+    const [pgid, tpgid] = execFileSync('ps', ['-o', 'pgid=,tpgid=', '-p', shellPid], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 3000,
+    })
+      .trim()
+      .split(/\s+/);
+    if (!/^\d+$/.test(pgid ?? '') || !/^-?\d+$/.test(tpgid ?? '')) {
+      return null;
+    }
+    // tpgid is -1 when the process has no controlling terminal.
+    return Number(tpgid) < 0 ? null : tpgid !== pgid;
+  } catch {
+    return null;
+  }
 }

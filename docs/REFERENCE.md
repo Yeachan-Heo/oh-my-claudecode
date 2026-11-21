@@ -733,6 +733,8 @@ omc graph run ./my-graph.json --approval-mode remote --checkpoint
 - `--approval-timeout <seconds>` bounds the wait; an expired gate resolves to `--approval-timeout-policy deny` (default, fail-closed) or `approve`
 - `--checkpoint` snapshots the working tree before the run; after a denial you can restore it: `omc graph approvals decide <runId> <activationId> denied --rollback <checkpointId>`
 - Malformed decision artifacts are ignored, never trusted; the runner journal remains the record of outcomes
+- `omc graph status <run_id> [--runs-root DIR]` prints the derived state of one run as JSON and changes nothing. `--runs-root` defaults to `.omc/graph-runs` relative to the current directory, the same location `omc graph run` writes to; the JSON output reports that default as the relative path `.omc/graph-runs` in `runs_root`. Exit codes: 0 succeeded, 1 failed, 2 missing or usage error, 3 in progress, 4 unreadable. Run ids are 1 to 128 characters.
+- `omc graph gc [--runs-root DIR] [--retention-days N] [--current <run_id>]` removes expired final runs. It is a dry run unless `OMC_GRAPH_GC=1` is set; see the Graph Run Switches in `docs/HOOKS.md`. Exit codes: 0 ok, 1 a removal or repair failed, 2 usage or configuration error.
 
 ### Non-interactive automation and CI/CD
 
