@@ -875,13 +875,20 @@ function isModelRoutingContextEnabled(env = process.env) {
 // with no model at all (a general-purpose agent without one, an agent definition without a
 // `model:` field or with `inherit`): Jev's answer then sets the model and the effort as
 // usual. A call or an agent definition (plugin, project or user) that names any other
-// model, fable for example, is a deliberate choice and is still left alone.
+// model, fable for example, is a deliberate choice and is left alone, unless
+// OMC_JEV_MODEL_ROUTING_NAMED_MODELS=1 asks about those calls too.
 function isUnpinnedModel(model) {
   return !model || String(model).trim().toLowerCase() === 'inherit';
 }
 
 function isModelRoutingAllAgentsEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_ALL_AGENTS ?? '').trim().toLowerCase());
+}
+
+// OMC_JEV_MODEL_ROUTING_NAMED_MODELS=1 also asks about a call whose model (its own, an
+// agents.<name>.model override or an agent definition) is none of the models Jev may choose.
+function isModelRoutingNamedModelsEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_NAMED_MODELS ?? '').trim().toLowerCase());
 }
 
 // OMC_JEV_MODEL_ROUTING_HINTS=1 adds the routing hints to the model-routing questions.
@@ -1156,6 +1163,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // The marker is the caller's own instruction, so it works whether or not the point is on;
   // Jev is then asked only the questions the marker leaves open.
   const marker = isModelRoutingMarkerEnabled() ? parseModelRoutingMarker(toolInput.prompt) : null;
+  const markerHadModel = Boolean(marker?.model);
   if (marker?.model && isForceInheritEnabled() && !resolveTierAliasToSafeModel(marker.model)) {
     // A tier alias the provider cannot resolve is not set (the marker then sets no model).
     marker.rejected.push('force-inherit');
@@ -1181,14 +1189,24 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // definition is unpinned; only OMC_JEV_MODEL_ROUTING_ALL_AGENTS asks about those.
   const unpinned = !knownTier && isModelRoutingAllAgentsEnabled()
     && isUnpinnedModel(selectedModel || readNativeAgentDefinitionModel(originalInput.subagent_type, directory));
-  if (!knownTier && !unpinned && !marker) return;
+  // With OMC_JEV_MODEL_ROUTING_NAMED_MODELS a call that names a model other than haiku, sonnet
+  // or opus (fable, a non-Claude model) is asked about as well, whether or not
+  // OMC_JEV_MODEL_ROUTING_FABLE adds fable to the answers. A model from the marker counts as the
+  // call's model, as for a known tier, so Jev is asked only the effort question.
+  const namedModel = isModelRoutingNamedModelsEnabled()
+    ? selectedModel || readNativeAgentDefinitionModel(originalInput.subagent_type, directory)
+    : null;
+  const named = !knownTier && Boolean(namedModel) && String(namedModel).trim() !== '' && !isUnpinnedModel(namedModel)
+    && !['haiku', 'sonnet', 'opus'].includes(isTierAlias(namedModel) ? namedModel.toLowerCase() : normalizeToCcAlias(namedModel));
+  if (!knownTier && !unpinned && !named && !marker) return;
 
   // What the marker settles is not asked: a model leaves the effort question, an effort
   // leaves the model-tier question, both leave no question and no Jev request at all.
   const questions = { ...MODEL_ROUTING_QUESTIONS };
-  if (marker?.model) delete questions['model-tier'];
+  // A marker model that forceInherit refused still pins a named call: Jev does not replace its model.
+  if (marker?.model || (markerHadModel && named)) delete questions['model-tier'];
   if (marker?.effort) delete questions.effort;
-  const askJev = jevOptedIn && (knownTier || unpinned) && Object.keys(questions).length > 0;
+  const askJev = jevOptedIn && (knownTier || unpinned || named) && Object.keys(questions).length > 0;
 
   // No twin tier for a call without a known model: nothing comparable to log.
   const heuristic = knownTier ? model : null;
@@ -1240,12 +1258,16 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // With forceInherit a call without a model deliberately inherits the session model,
     // and a tier alias the provider cannot resolve is denied: set the alias on such a call
     // only when it resolves to a provider model.
+    // A call that names a model keeps it, and only gets the effort, where the provider is not
+    // Claude or forceInherit is on and does not resolve the alias, and where a marker model that
+    // forceInherit refused still pins the call.
     const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice);
+    const keepsNamedModel = named && (markerHadModel || ((isNonClaudeProviderEnv() || isForceInheritEnabled()) && !resolveTierAliasToSafeModel(jevChoice)));
     const allowedJevChoices = ['haiku', 'sonnet', 'opus'];
     if (isModelRoutingFableOptinEnabled()) {
       allowedJevChoices.push('fable');
     }
-    if (jevChoice && allowedJevChoices.includes(jevChoice) && !inheritsSessionModel) {
+    if (jevChoice && allowedJevChoices.includes(jevChoice) && !inheritsSessionModel && !keepsNamedModel) {
       ensureUpdated().model = jevChoice;
     }
 
@@ -1267,7 +1289,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // resolve to a different version.
     const baselineModel = inheritsSession
       ? inheritedModel
-      : knownTier && !isTierAlias(selectedModel) ? selectedModel : knownTier ? model : modifiedInput.model;
+      : knownTier && !isTierAlias(selectedModel) ? selectedModel : knownTier ? model : named ? namedModel : modifiedInput.model;
     // Resolve the baseline effort: the effort the call would run on without Jev, checking
     // explicit call effort, agent definition effort, and inherited session effort in order.
     // Use the original baseEffort saved before any modifications, but resolve inherited values.
