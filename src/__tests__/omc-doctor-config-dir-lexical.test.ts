@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { addCache, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_VERSION, commands, locatorLine, PLUGIN_ID, runBlock, runCommand, skillText, STEP1, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
@@ -109,6 +109,105 @@ describe.skipIf(!posix)('omc-doctor: a .. after a link in CLAUDE_CONFIG_DIR is r
       expect(dir(path.join(f.base, 'missing', 'dir'))).toBe(path.join(f.base, 'missing', 'dir'));
     } finally {
       rmSync(f.base, { recursive: true, force: true });
+    }
+  });
+});
+
+// The same text must name the same directory when it is not there yet. `cd` folds a `..` after a link only for a target that
+// exists, so a prelude that leaned on it left `<base>/link/../profile` as written when `<base>/profile` was missing, and the
+// `mkdir -p` of Step 5 then followed the link and made `<parent of the link target>/profile`, a profile the runtime never
+// reads. The shell blocks fold the text themselves, as the runtime does (path.normalize), before anything reads or writes.
+// POSIX only: the fixture needs a symlink and the blocks run through bash.
+describe.skipIf(!posix)('omc-doctor: a .. after a link names the same directory whether or not it exists', { timeout: 120_000 }, () => {
+  // `<base>/profile` is where the runtime reads; `<base>/real/profile` is where a file system that follows the link leads.
+  const world = () => {
+    const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor-nonexistent-'));
+    mkdirSync(path.join(base, 'real', 'x'), { recursive: true });
+    symlinkSync(path.join('real', 'x'), path.join(base, 'link'));
+    return base;
+  };
+  const runtimeDir = (configured: string, home: string) => {
+    const saved = { dir: process.env.CLAUDE_CONFIG_DIR, home: process.env.HOME };
+    process.env.CLAUDE_CONFIG_DIR = configured;
+    process.env.HOME = home;
+    try {
+      return getClaudeConfigDir() as string;
+    } finally {
+      if (saved.dir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = saved.dir;
+      process.env.HOME = saved.home;
+    }
+  };
+  const bashDir = (configured: string, home: string, cwd: string) =>
+    spawnSync('/bin/bash', ['-c', `${prelude}\nprintf %s "$C"`], { encoding: 'utf8', timeout: 20_000, cwd, env: { ...process.env, CLAUDE_CONFIG_DIR: configured, HOME: home, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } }).stdout;
+
+  test('the example of the review: link/../profile with a target that does not exist is the profile beside the link', () => {
+    const base = world();
+    try {
+      const configured = `${base}/link/../profile`;
+      const textual = path.join(base, 'profile');
+      expect(existsSync(textual)).toBe(false);
+      expect({ bash: bashDir(configured, base, base), runtime: runtimeDir(configured, base) }).toEqual({ bash: textual, runtime: textual });
+      // Step 5 makes the directory: where the text names it, not under the parent of the link target.
+      const step5 = blocks.find((b) => b.includes('mkdir -p "$C"')) ?? '';
+      const ran = spawnSync('/bin/bash', ['-c', step5], { encoding: 'utf8', timeout: 20_000, cwd: base, env: { ...process.env, CLAUDE_CONFIG_DIR: configured, HOME: base, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } });
+      expect(ran.stdout).toContain('Config dir writable');
+      expect({ intended: existsSync(textual), underLinkTarget: existsSync(path.join(base, 'real', 'profile')) }).toEqual({ intended: true, underLinkTarget: false });
+      // The script reads the directory the shell block made: its Step 4 source is a file of that very directory.
+      writeFileSync(path.join(textual, 'CLAUDE.md'), '<!-- OMC:VERSION:5.8.0 -->\n');
+      const four = runBlock(CLAUDE_MD_VERSION, textual, { env: { CLAUDE_CONFIG_DIR: configured, HOME: base, USERPROFILE: base }, cwd: base, timeout: 20_000 });
+      expect(four.stdout).toContain(`OMC version source: ${path.join(textual, 'CLAUDE.md')}`);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test('the shell prelude, the runtime and the folded text agree for every form, with the target present and absent', () => {
+    for (const exists of [false, true]) {
+      const base = world();
+      try {
+        if (exists) mkdirSync(path.join(base, 'profile'), { recursive: true });
+        const parent = path.dirname(base);
+        const forms: Array<[string, string, string]> = [
+          ['an absolute path', `${base}/link/../profile`, path.join(base, 'profile')],
+          ['a path under the home directory', '~/link/../profile', path.join(base, 'profile')],
+          ['a .. after the link that leaves the base', `${base}/link/../../out`, path.join(parent, 'out')],
+          ['repeated separators, dots and a trailing separator', `${base}//profile///./sub/`, path.join(base, 'profile', 'sub')],
+          ['surrounding spaces', `  ${base}/link/../profile  `, path.join(base, 'profile')],
+          ['a .. past the root', '/../../nonexistent-omc-root/a/../b', '/nonexistent-omc-root/b'],
+          ['the root itself', '/a/..', '/'],
+          ['an empty value', '', path.join(base, '.claude')],
+          ['a plain path', `${base}/profile`, path.join(base, 'profile')],
+        ];
+        for (const [label, configured, expected] of forms) {
+          expect({ exists, label, bash: bashDir(configured, base, base), runtime: runtimeDir(configured, base) }).toEqual({ exists, label, bash: expected, runtime: expected });
+        }
+        // A relative value is read against the working directory: the runtime keeps the text, the shell makes it absolute.
+        const relative = 'link/../profile';
+        expect({ exists, bash: path.resolve(base, bashDir(relative, base, base)), runtime: path.resolve(base, runtimeDir(relative, base)) }).toEqual({ exists, bash: path.join(base, 'profile'), runtime: path.join(base, 'profile') });
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('every block that uses the directory reads the text, so none of them reads the parent of the link target', () => {
+    const base = world();
+    try {
+      const configured = `${base}/link/../profile`;
+      const textual = path.join(base, 'profile');
+      const decoy = path.join(base, 'real', 'profile');
+      mkdirSync(path.join(textual, 'hooks'), { recursive: true });
+      mkdirSync(path.join(decoy, 'hooks'), { recursive: true });
+      writeFileSync(path.join(textual, 'hooks', 'keyword-detector.sh'), '#!/bin/bash\n');
+      writeFileSync(path.join(decoy, 'hooks', 'decoy.sh'), '#!/bin/bash\n');
+      const ran = (block: string) => spawnSync('/bin/bash', ['-c', block], { encoding: 'utf8', timeout: 20_000, cwd: base, env: { ...process.env, CLAUDE_CONFIG_DIR: configured, HOME: base, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } }).stdout;
+      const listing = ran(blocks.find((b) => b.includes('hooks/*.sh')) ?? '');
+      expect(listing).toContain('keyword-detector.sh');
+      expect(listing).not.toContain('decoy.sh');
+      for (const block of blocks) expect(ran(`${block.split('\n')[0]}\nprintf %s "$C"`)).toBe(textual);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
     }
   });
 });

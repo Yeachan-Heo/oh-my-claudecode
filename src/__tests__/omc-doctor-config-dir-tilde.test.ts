@@ -12,7 +12,9 @@ import { addCache, backupDir, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_OPTOUT, CLAU
 // The shell blocks as written (they are run), selected by what they read outside their comment lines.
 const blocks = bashBlocks().filter((b) => b.split('\n').some((l) => !l.startsWith('#') && l.includes('CLAUDE_CONFIG_DIR')));
 const EXPAND = String.raw`const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim(); const configDir = !configured ? path.join(home, '.claude') : configured === '~' ? home : /^~[/\\]/.test(configured) ? path.join(home, configured.slice(2)) : path.normalize(configured);`;
-const PRELUDE = String.raw`C="${'${CLAUDE_CONFIG_DIR:-$HOME/.claude}'}"; C=${'${C#"${C%%[![:space:]]*}"}'}; C=${'${C%"${C##*[![:space:]]}"}'}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${'${C#??}'};; esac; L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L`;
+// The text is folded as the runtime folds it (path.normalize) before anything reads the directory, whether or not it exists.
+const FOLD = String.raw`O=; R=$C; while [ -n "$R" ]; do P=${'${R%%/*}'}; case $R in */*) R=${'${R#*/}'};; *) R=;; esac; case $P in ''|.);; ..) case $O in ''|*/..) case $C in /*);; *) O=$O/..;; esac;; *) O=${'${O%/*}'};; esac;; *) O=$O/$P;; esac; done; case $C in /*) C=${'${O:-/}'};; *) C=${'${O#/}'}; C=${'${C:-.}'};; esac; `;
+const PRELUDE = String.raw`C="${'${CLAUDE_CONFIG_DIR:-$HOME/.claude}'}"; C=${'${C#"${C%%[![:space:]]*}"}'}; C=${'${C%"${C##*[![:space:]]}"}'}; case "$C" in '') C=$HOME/.claude;; '~') C=$HOME;; '~/'*|'~\'*) C=$HOME/${'${C#??}'};; esac; `.concat(FOLD, String.raw`L=$(CDPATH= cd -- "$C" 2>/dev/null && pwd -L) && C=$L`);
 const posix = process.platform !== 'win32';
 
 type World = { root: string; home: string; cwd: string; alt: string };
