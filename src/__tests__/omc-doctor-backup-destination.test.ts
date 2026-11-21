@@ -168,6 +168,29 @@ describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and 
     }
   });
 
+  // The tests run as root, which ignores permissions, so the error is injected for the examination of plugins/backups.
+  test.each(['EACCES', 'EIO'])('a destination that cannot be examined (%s) is refused like an overlap, nothing moved', (code) => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        const file = path.join(dir, 'examine-errors.cjs');
+        writeFileSync(file, `const fs = require('fs'), path = require('path');
+const real = fs.lstatSync;
+fs.lstatSync = function (target, ...rest) {
+  if (path.resolve(String(target)) === ${JSON.stringify(path.join(dir, 'plugins', 'backups'))}) { const error = new Error('${code}: injected'); error.code = '${code}'; throw error; }
+  return real.call(fs, target, ...rest);
+};
+`);
+        const result = runCommand(command, dir, { preloads: [file], timeout: 20_000 });
+        expect({ command, status: result.status, refused: /Nothing moved: the backup directory \S+ cannot be resolved \(a link loop, or a part of the path that cannot be examined\)/.test(result.stdout) }).toEqual({ command, status: 1, refused: true });
+        expect(readdirSync(cache).sort()).toEqual(ALL);
+        expect(result.stdout).not.toMatch(/Moved \d/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('a link that leads outside every tree still works, and the Moved line names the real directory; no link says nothing of the kind', () => {
     for (const command of commands) {
       for (const via of ['plugins/backups', 'plugins/backups/oh-my-claudecode', 'none'] as const) {
