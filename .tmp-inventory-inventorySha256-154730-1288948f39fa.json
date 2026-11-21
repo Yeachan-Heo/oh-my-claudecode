@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "repository": "Yeachan-Heo/oh-my-claudecode",
+  "provenance": {
+    "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
+    "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
+    "generator": "scripts/generate-inventory-graph.mjs"
+  },
+  "inventorySha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}

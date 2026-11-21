@@ -6,13 +6,14 @@
  * Claude Code does (stdin JSON payload), against a built dist tree.
  */
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, beforeAll, vi } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync, readFileSync, linkSync, realpathSync, utimesSync } from 'node:fs';
 import * as nodeFs from 'fs';
 import { basename, join } from 'node:path';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { clearWorktreeCache } from '../lib/worktree-paths.js';
 
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -173,8 +174,19 @@ describe('session-start.mjs PreCompact checkpoint restore (issue #3730)', () => 
   let home: string;
   let project: string;
 
+  beforeAll(() => {
+    // PreCompact tests manage their own temp directories with explicit paths.
+    // This test does NOT use OMC_STATE_DIR; instead it manages state directly in {project}/.omc.
+    // The per-test setup no longer forces OMC_STATE_DIR globally (finding P1).
+    // If OMC_STATE_DIR was inherited, delete it so getOmcRoot() uses the checkout's .omc.
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+  });
+
   beforeEach(() => {
-    tempDir = mkdtempSync(join(homedir(), 'omc-precompact-session-start-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'omc-precompact-session-start-'));
     home = join(tempDir, 'home');
     mkdirSync(home, { recursive: true });
     project = makeProject(tempDir);
@@ -982,6 +994,14 @@ process.stdout.write(JSON.stringify(restorePreCompactCheckpoint(process.env.OMC_
 // Template/installed parity: both self-contained helper copies must reject
 // the same traversal and TOCTOU payloads.
 describe('precompact-restore helper parity (issue #3730 security)', () => {
+  beforeAll(() => {
+    // PreCompact tests manage their own temp directories with explicit paths.
+    // Clear OMC_STATE_DIR so getOmcRoot() returns {tempDir}/.omc not a centralized temp.
+    // The per-test setup sets OMC_STATE_DIR, but this test manages its own state (finding P1)
+    delete process.env.OMC_STATE_DIR;
+    clearWorktreeCache();
+  });
+
   const TEMPLATE_HELPER = join(__dirname, '..', '..', 'templates', 'hooks', 'lib', 'precompact-restore.mjs');
   const INSTALLED_HELPER = join(__dirname, '..', '..', 'scripts', 'lib', 'precompact-restore.mjs');
 
@@ -989,7 +1009,7 @@ describe('precompact-restore helper parity (issue #3730 security)', () => {
   let project: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(homedir(), 'omc-precompact-template-parity-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'omc-precompact-template-parity-'));
     project = join(tempDir, 'project');
     mkdirSync(join(project, '.omc', 'state', 'checkpoints'), { recursive: true });
     writeFileSync(

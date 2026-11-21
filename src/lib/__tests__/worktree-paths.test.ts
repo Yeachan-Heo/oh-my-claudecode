@@ -67,7 +67,12 @@ function canonicalTestPath(path: string): string {
 }
 
 
-const TEST_DIR = mkdtempSync(join(homedir(), 'worktree-paths-test-'));
+// Get the original home directory that was captured by vitest global setup
+// before it redirected HOME. Create TEST_DIR there.
+// This addresses P1: fixtures are created under the original home at module load time,
+// but tests use a separate temp HOME, preventing pollution of the real home.
+const originalHome = process.env.__VITEST_ORIG_HOME || homedir();
+const TEST_DIR = mkdtempSync(join(originalHome, 'worktree-paths-test-'));
 
 describe('worktree-paths', () => {
   let previousHome: string | undefined;
@@ -76,6 +81,9 @@ describe('worktree-paths', () => {
   beforeEach(() => {
     previousHome = process.env.HOME;
     previousUserProfile = process.env.USERPROFILE;
+    // Set HOME to TEST_DIR (created at module load under original home)
+    // This avoids pollution: tests use TEST_DIR as their fake home,
+    // leaving the original real home untouched.
     process.env.HOME = TEST_DIR;
     process.env.USERPROFILE = TEST_DIR;
     clearWorktreeCache();
@@ -794,7 +802,10 @@ describe('worktree-paths', () => {
 
     it('getOmcRoot ignores marker when absent (regression: monorepo flow unchanged)', () => {
       const result = getOmcRoot(workspaceDir);
-      expect(result).toBe(join(TEST_DIR, '.omc'));
+      // When no marker is found, getOmcRoot() falls back to home directory
+      // HOME is set by the main beforeEach to a temp directory
+      const expectedHome = process.env.HOME || homedir();
+      expect(result).toBe(join(expectedHome, '.omc'));
     });
 
     it('getOmcRoot anchors to marker dir when marker exists in cwd', () => {
@@ -1056,15 +1067,17 @@ describe('worktree-paths', () => {
   // ==========================================================================
 
   describe('resolveSessionStatePaths', () => {
-    let workDir: string;
-
-    beforeEach(() => {
-      workDir = resolve(mkdtempSync(join(homedir(), 'omc-ssp-')));
-      clearWorktreeCache();
-    });
+    // These tests use TEST_DIR from the main describe, which is already
+    // set up as a git repository by the main beforeEach.
+    // Define workDir as an alias to TEST_DIR for clarity.
+    const workDir = TEST_DIR;
 
     afterEach(() => {
-      rmSync(workDir, { recursive: true, force: true });
+      // Clean up session state directories that were created during tests
+      const sessionsDir = join(TEST_DIR, '.omc', 'state', 'sessions');
+      if (existsSync(sessionsDir)) {
+        rmSync(sessionsDir, { recursive: true, force: true });
+      }
       clearWorktreeCache();
     });
 
