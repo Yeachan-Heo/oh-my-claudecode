@@ -1217,7 +1217,6 @@ describe('recovery pane rollback evidence', () => {
     await expect(execute()).resolves.toMatchObject({ outcome: 'failed', recoveryId });
     expect(paneMocks.splitTeamWorkerPaneWithEvidence).toHaveBeenCalled();
 
-    paneMocks.splitTeamWorkerPaneWithEvidence.mockRejectedValueOnce(new Error('owner died after split'));
     await expectStillActivePastDeadline(teamName, requestId, recoveryId, execute);
   });
 
