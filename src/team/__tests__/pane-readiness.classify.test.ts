@@ -314,6 +314,19 @@ describe('Claude Code first-run dialogs', () => {
     expect(claudeDialogFocus(`${notNow}\n${offer.replace('❯ 1. Yes, try it', '  1. Yes, try it')}`, 'claude_fullscreen_renderer')).toBeNull();
   });
 
+  it('reads no renderer focus while the latest copy, below an old one, has drawn its ❯ but not its footer', () => {
+    const notNow = read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt');
+    const offer = read('claude/2.1.328/fullscreen-renderer.txt');
+    const upToChoices = offer.slice(0, offer.indexOf('2. Not now') + '2. Not now'.length);
+    expect(claudeDialogFocus(`${notNow}\n${upToChoices}\n`, 'claude_fullscreen_renderer')).toBeNull();
+  });
+
+  it('reads the renderer focus with the heading scrolled off a short pane', () => {
+    const offer = read('claude/2.1.328/fullscreen-renderer.txt');
+    const bottom = offer.slice(offer.indexOf('  ❯ 1. Yes, try it'));
+    expect(claudeDialogFocus(bottom, 'claude_fullscreen_renderer')).toBe('first');
+  });
+
   it('reads no bypass focus while the latest copy, below an old one focused on Yes, I accept, has drawn no ❯ of its own', () => {
     const accepted = read('claude/2.1.328/bypass-permissions-yes-focused.txt');
     const warning = read('claude/2.1.328/bypass-permissions.txt').replace('❯ No, exit', '  No, exit');
