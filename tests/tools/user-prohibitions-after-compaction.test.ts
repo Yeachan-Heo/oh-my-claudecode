@@ -809,6 +809,7 @@ describe('user prohibitions after compaction', () => {
     for (const text of [ruleV2, ruleV3]) {
       for (const [named] of devices) expect(text, named).toContain(named);
       expect(text).toContain('process substitution');
+      expect(text).toContain('nested more than nine levels deep');
     }
     expect(limits).toContain('not to a device file');
     const commands = devices.map(([, path]) => `ls >${path}`);
