@@ -3,7 +3,8 @@
 // Bash call: node omc-doctor.mjs <command>. Every command prints the lines the skill's diagnosis reads and ends with
 // exit code 0, except the two cache commands, which end with 1 when they refuse to move anything or a move fails,
 // and an unknown command, which ends with 2. The guide command ends with 1 when its file is missing and with 2 for an
-// unknown section.
+// unknown section. A command that needs the working directory to resolve a relative path, after that directory was
+// deleted, says so and ends with 1.
 //
 //   step1              the install channel (marketplace, plugin-dir, npm or unknown), the installed version, the
 //                      channel's latest version and the command that updates it, one block of lines per plugin
@@ -1244,7 +1245,14 @@ const COMMANDS = {
 };
 const name = process.argv[2];
 if (Object.hasOwn(COMMANDS, name)) {
-  COMMANDS[name]();
+  try {
+    COMMANDS[name]();
+  } catch (error) {
+    // process.cwd(), and every path.resolve of a relative path, throws ENOENT (uv_cwd) once the working directory is deleted.
+    if (!error || error.syscall != 'uv_cwd') throw error;
+    console.error('omc-doctor: current directory no longer exists, so a relative path (the configuration directory, a plugin root or an install path that is not absolute) cannot be resolved; change to a directory that exists and run the command again');
+    process.exitCode = 1;
+  }
 } else {
   console.error('omc-doctor.mjs: unknown command ' + JSON.stringify(name) + '; use one of ' + Object.keys(COMMANDS).join(', '));
   process.exitCode = 2;

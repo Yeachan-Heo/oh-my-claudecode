@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { addCache, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_VERSION, commands, locatorLine, PLUGIN_ID, runBlock, runCommand, skillText, STEP1, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_VERSION, commands, locatorLine, PLUGIN_ID, runBlock, runCommand, SCRIPT, skillText, STEP1, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 // @ts-expect-error Standalone runtime source is intentionally JavaScript-only.
 import { getClaudeConfigDir } from '../../scripts/lib/config-dir.mjs';
 
@@ -320,6 +320,62 @@ describe.skipIf(!posix)('omc-doctor: the first line of the shell blocks keeps a 
         if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
         else process.env.CLAUDE_CONFIG_DIR = saved;
       }
+    }
+  });
+});
+
+// A relative path is read against the working directory. When that directory was deleted, the script ended with an unhandled
+// ENOENT (uv_cwd) and a stack trace, and a shell block went on with the relative text and found nothing (a false "missing").
+// Both now say that the current directory no longer exists and end with exit code 1; an absolute path needs no working
+// directory and is read as before. POSIX only: the fixture removes the directory the shell is in.
+describe.skipIf(!posix)('omc-doctor: a deleted working directory is named, not shown as a stack trace or as nothing found', { timeout: 120_000 }, () => {
+  const MESSAGE = 'current directory no longer exists';
+  // Runs `command` in a shell whose working directory was deleted after it entered it; HOME and the profile live elsewhere.
+  const fromDeleted = (base: string, command: string, configured: string) =>
+    spawnSync('/bin/bash', ['-c', `mkdir "$G" && cd "$G" && rmdir "$G" && ${command}`], { encoding: 'utf8', timeout: 30_000, cwd: base, env: { ...process.env, G: path.join(base, 'gone'), CLAUDE_CONFIG_DIR: configured, HOME: base, OMC_PLUGIN_ROOT: '', CLAUDE_PLUGIN_ROOT: '' } });
+
+  test('every command that reads a relative CLAUDE_CONFIG_DIR says so and ends with 1, without a stack trace', () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'omc-doctor-deleted-cwd-')));
+    try {
+      for (const command of ['step1', 'claude-md-optout', 'claude-md-version', 'cache-versions', 'cache-outdated', 'cache-stale']) {
+        const result = fromDeleted(base, `${JSON.stringify(process.execPath)} ${JSON.stringify(SCRIPT)} ${command}`, 'rel');
+        expect({ command, status: result.status, says: result.stderr.includes(MESSAGE), trace: /uv_cwd|\n\s+at /.test(result.stderr), out: result.stdout }).toEqual({ command, status: 1, says: true, trace: false, out: '' });
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test('an absolute CLAUDE_CONFIG_DIR needs no working directory: the commands run as usual', () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'omc-doctor-deleted-cwd-')));
+    try {
+      const configured = path.join(base, 'cfg');
+      mkdirSync(configured);
+      writeFileSync(path.join(configured, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
+      for (const [command, expected] of [['claude-md-optout', 'CLAUDE.md management enabled'], ['claude-md-version', 'CLAUDE.md OMC version: 5.9.0'], ['cache-versions', '0 versions']] as const) {
+        const result = fromDeleted(base, `${JSON.stringify(process.execPath)} ${JSON.stringify(SCRIPT)} ${command}`, configured);
+        expect({ command, status: result.status, out: result.stdout.includes(expected), says: result.stderr.includes(MESSAGE) }).toEqual({ command, status: 0, out: true, says: false });
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test('every shell block that makes a relative value absolute says so and ends with 1; an absolute value runs on', () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'omc-doctor-deleted-cwd-')));
+    try {
+      const configured = path.join(base, 'cfg');
+      mkdirSync(path.join(configured, 'hooks'), { recursive: true });
+      for (const block of blocks) {
+        const script = path.join(base, 'block.sh');
+        writeFileSync(script, block);
+        const relative = fromDeleted(base, `/bin/bash ${JSON.stringify(script)}`, 'rel');
+        expect({ status: relative.status, says: relative.stderr.includes(MESSAGE), out: relative.stdout }).toEqual({ status: 1, says: true, out: '' });
+        const absolute = fromDeleted(base, `/bin/bash ${JSON.stringify(script)}`, configured);
+        expect({ says: absolute.stderr.includes(MESSAGE) }).toEqual({ says: false });
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
     }
   });
 });
