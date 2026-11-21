@@ -909,25 +909,25 @@ describe('recovery owner retry deadline', () => {
     expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();
   });
 
-  // An idle split whose pane could not be proven leaves only this evidence:
-  // no pending pane, no launch record, no worker row.
-  function writeRollbackFailure(teamName: string, recoveryId: string): void {
-    const path = absPath(cwd, TeamPaths.recoveryPaneRollbackFailure(teamName, recoveryId, 'attempt-x', Date.now()));
-    mkdirSync(join(path, '..'), { recursive: true });
-    writeFileSync(path, JSON.stringify({ schema_version: 1, recovery_id: recoveryId, pane_id: null,
-      pane_attempt_id: 'attempt-x', reason: 'pane_membership_unverified' }));
+  // An owner that died right after splitting a recovery pane leaves only the
+  // record it wrote before the split: no pending pane, launch record or worker row.
+  const paneSplitDir = (teamName: string, recoveryId: string) =>
+    absPath(cwd, `.omc/state/team/${teamName}/recovery/pane-splits/${recoveryId}`);
+  function writePaneSplit(teamName: string, recoveryId: string): void {
+    mkdirSync(paneSplitDir(teamName, recoveryId), { recursive: true });
+    writeFileSync(join(paneSplitDir(teamName, recoveryId), 'attempt-x.json'), JSON.stringify({ schema_version: 1,
+      recovery_id: recoveryId, request_id: 'stuck-request', worker_name: 'worker-1', pane_attempt_id: 'attempt-x' }));
   }
 
   it.each([
-    ['present', (teamName: string) => writeRollbackFailure(teamName, 'stuck-recovery')],
+    ['present', (teamName: string) => writePaneSplit(teamName, 'stuck-recovery')],
     ['unreadable', (teamName: string) => {
-      const dir = join(absPath(cwd, TeamPaths.recoveryPaneRollbackFailure(teamName, 'stuck-recovery', 'a', 0)), '..');
-      mkdirSync(join(dir, '..'), { recursive: true });
-      writeFileSync(dir, 'not a directory');
+      mkdirSync(join(paneSplitDir(teamName, 'stuck-recovery'), '..'), { recursive: true });
+      writeFileSync(paneSplitDir(teamName, 'stuck-recovery'), 'not a directory');
     }],
-  ])('keeps retrying past the deadline when rollback-failure evidence for the recovery is %s', async (_label, seed) => {
-    cwd = mkdtempFixture('runtime-owner-deadline-rollback-evidence-');
-    const teamName = 'deadline-rollback-evidence';
+  ])('keeps retrying past the deadline when a pane split record for the recovery is %s', async (_label, seed) => {
+    cwd = mkdtempFixture('runtime-owner-deadline-pane-split-');
+    const teamName = 'deadline-pane-split';
     await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
     seed(teamName);
 
@@ -939,11 +939,11 @@ describe('recovery owner retry deadline', () => {
     });
   });
 
-  it('fails past the deadline when the rollback-failure evidence belongs to another recovery', async () => {
-    cwd = mkdtempFixture('runtime-owner-deadline-other-evidence-');
-    const teamName = 'deadline-other-evidence';
+  it('fails past the deadline when the pane split record belongs to another recovery', async () => {
+    cwd = mkdtempFixture('runtime-owner-deadline-other-split-');
+    const teamName = 'deadline-other-split';
     await seedElectedUnknownLiveness(teamName, PAST_DEADLINE_MS);
-    writeRollbackFailure(teamName, 'older-recovery');
+    writePaneSplit(teamName, 'older-recovery');
 
     await expect(execute(teamName)).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
     expect((await readRevisionedTeamConfig(teamName, cwd))?.config.active_recovery).toBeUndefined();

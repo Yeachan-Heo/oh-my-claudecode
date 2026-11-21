@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync as createTempDir, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync as createTempDir, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isProcessAlive } from '../../platform/process-utils.js';
@@ -330,6 +330,12 @@ async function attachPersistedPriorLaunch(teamName: string, configPath: string):
       await bootstrap.catch(() => ({ outcome: 'provider_spawn_failed' as const }));
     }
   }
+}
+
+// Records a recovery writes before it splits a pane, one per pane attempt.
+function paneSplitRecords(teamName: string, recoveryId: string): string[] {
+  const dir = absPath(cwd, `.omc/state/team/${teamName}/recovery/pane-splits/${recoveryId}`);
+  return existsSync(dir) ? readdirSync(dir) : [];
 }
 
 describe('recovery pane rollback evidence', () => {
@@ -863,6 +869,7 @@ describe('recovery pane rollback evidence', () => {
     let launchedPath = '';
     let expectedLaunchAttemptId = '';
     let launchAttemptForCleanup: Awaited<ReturnType<typeof prepareWorkerLaunchAttempt>> | undefined;
+    let splitRecordsDuringSpawn: string[] = [];
     paneMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (
       _sessionName: string,
       ownership: { paneId: string },
@@ -891,6 +898,7 @@ describe('recovery pane rollback evidence', () => {
         context: config.launchContext,
       });
       launchAttemptForCleanup = attempt;
+      splitRecordsDuringSpawn = paneSplitRecords(teamName, recoveryId);
       const gateSpec = JSON.parse(config.envVars.OMC_RECOVERY_GATE_SPEC);
       launchedPath = `${gateSpec.runPath}.launched`;
       expectedLaunchAttemptId = attempt.attempt_id;
@@ -936,6 +944,9 @@ describe('recovery pane rollback evidence', () => {
     try {
       await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId, instanceId: TEAM_INSTANCE_ID }))
         .resolves.toMatchObject({ outcome: 'recovered', committed: true, recoveryId });
+      // The split was recorded before it ran and cleared once the worker row took the pane.
+      expect(splitRecordsDuringSpawn).toHaveLength(1);
+      expect(paneSplitRecords(teamName, recoveryId)).toEqual([]);
       expect(bootstrapResult).toBeDefined();
       expect(existsSync(launchedPath)).toBe(true);
       expect(JSON.parse(readFileSync(launchedPath, 'utf8'))).toMatchObject({
@@ -1161,6 +1172,125 @@ describe('recovery pane rollback evidence', () => {
     expect(readRecoveryOutcome(cwd, requestId)?.kind).not.toBe('final');
     const config = JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8'));
     expect(config.active_recovery).toMatchObject({ recovery_id: recoveryId });
+  });
+
+  async function seedSplitRecovery(teamName: string, requestId: string, recoveryId: string): Promise<() => Promise<unknown>> {
+    await seedLayoutCleanupFailure(teamName);
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID }, recoveryId);
+    writeRecoveryIntent(teamName, requestId, recoveryId, 0);
+    return () => executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId, instanceId: TEAM_INSTANCE_ID });
+  }
+
+  async function expectStillActivePastDeadline(teamName: string, requestId: string, recoveryId: string,
+    execute: () => Promise<unknown>): Promise<void> {
+    writeRecoveryIntent(teamName, requestId, recoveryId, 301_000);
+    await expect(execute()).resolves.not.toMatchObject({ error: 'recovery_request_timeout' });
+    expect(readRecoveryOutcome(cwd, requestId)?.kind).not.toBe('final');
+    const config = JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8'));
+    expect(config.active_recovery).toMatchObject({ recovery_id: recoveryId });
+  }
+
+  it('keeps the recovery active past the deadline when the evidence for an unproven split pane cannot be written', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-evidence-unwritable-'));
+    const teamName = 'evidence-unwritable-team';
+    const requestId = 'evidence-unwritable-request';
+    const recoveryId = 'evidence-unwritable-recovery';
+    const execute = await seedSplitRecovery(teamName, requestId, recoveryId);
+    paneMocks.blockPane('%2');
+    const evidenceDir = absPath(cwd, TeamPaths.recoveryPaneRollbackFailures(teamName, recoveryId));
+    mkdirSync(evidenceDir, { recursive: true });
+    chmodSync(evidenceDir, 0o555);
+    try {
+      await expect(execute()).resolves.toMatchObject({ outcome: 'failed', recoveryId });
+      expect(paneMocks.splitTeamWorkerPaneWithEvidence).toHaveBeenCalled();
+      expect(readdirSync(evidenceDir)).toEqual([]);
+
+      await expectStillActivePastDeadline(teamName, requestId, recoveryId, execute);
+    } finally {
+      chmodSync(evidenceDir, 0o755);
+    }
+  });
+
+  it('keeps the recovery active past the deadline when the owner fails right after the split', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-split-crash-'));
+    const teamName = 'split-crash-team';
+    const requestId = 'split-crash-request';
+    const recoveryId = 'split-crash-recovery';
+    const execute = await seedSplitRecovery(teamName, requestId, recoveryId);
+    // The pane may exist, but nothing after the split ran to track it.
+    paneMocks.splitTeamWorkerPaneWithEvidence.mockRejectedValueOnce(new Error('owner died after split'));
+
+    await expect(execute()).resolves.toMatchObject({ outcome: 'failed', recoveryId });
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).toHaveBeenCalled();
+
+    paneMocks.splitTeamWorkerPaneWithEvidence.mockRejectedValueOnce(new Error('owner died after split'));
+    await expectStillActivePastDeadline(teamName, requestId, recoveryId, execute);
+  });
+
+  it('does not split a recovery pane when the split cannot be recorded first', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-split-unrecordable-'));
+    const teamName = 'split-unrecordable-team';
+    const requestId = 'split-unrecordable-request';
+    const recoveryId = 'split-unrecordable-recovery';
+    const execute = await seedSplitRecovery(teamName, requestId, recoveryId);
+    const splitsDir = absPath(cwd, `.omc/state/team/${teamName}/recovery/pane-splits`);
+    mkdirSync(splitsDir, { recursive: true });
+    chmodSync(splitsDir, 0o555);
+    try {
+      await expect(execute()).resolves.toMatchObject({ outcome: 'failed', error: 'runtime_owner_unavailable', recoveryId });
+    } finally {
+      chmodSync(splitsDir, 0o755);
+    }
+    expect(paneMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
+    const config = JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8'));
+    expect(config.active_recovery).toMatchObject({ recovery_id: recoveryId });
+  });
+
+  it('lets the deadline end a recovery once its failed split pane is killed', async () => {
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-split-killed-'));
+    const teamName = 'split-killed-team';
+    const requestId = 'split-killed-request';
+    const recoveryId = 'split-killed-recovery';
+    const execute = await seedSplitRecovery(teamName, requestId, recoveryId);
+    let splitRecordsDuringSpawn: string[] = [];
+    paneMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (_sessionName, ownership, config) => {
+      splitRecordsDuringSpawn = paneSplitRecords(teamName, recoveryId);
+      const attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: ownership.paneId,
+        instanceId: TEAM_INSTANCE_ID, provider: 'claude', runtimeCliPath: '/runtime-cli.cjs',
+        context: (config as { launchContext: Parameters<typeof prepareWorkerLaunchAttempt>[0]['context'] }).launchContext });
+      const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+        attempt, [process.execPath, '-e', 'setTimeout(() => process.exit(0), 50)'], cwd));
+      await expect(awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+      await expect(awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 })).resolves.toBe(true);
+      await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
+      let reads = 0;
+      return Object.defineProperty({ ownership }, 'attempt', {
+        enumerable: true,
+        get: () => {
+          if (reads++ === 0) throw new Error('startup failed');
+          return attempt;
+        },
+      });
+    });
+    paneMocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: string }) => {
+      paneMocks.setPaneLiveness(ownership.paneId, 'dead');
+    });
+    try {
+      await expect(execute()).resolves.toMatchObject({ outcome: 'failed', error: 'spawn_failed', recoveryId });
+    } finally {
+      paneMocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: string }) => {
+        await paneMocks.killTeamPane(ownership.paneId);
+      });
+    }
+    expect(splitRecordsDuringSpawn).toHaveLength(1);
+    expect(existsSync(absPath(cwd, TeamPaths.recoveryPaneRollbackFailures(teamName, recoveryId)))).toBe(false);
+
+    // Nothing of this split is left alive, so the deadline applies again.
+    writeRecoveryIntent(teamName, requestId, recoveryId, 301_000);
+    await expect(execute()).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+    const config = JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8'));
+    expect(config.active_recovery).toBeUndefined();
   });
 
   it('rejects a persisted provider descriptor whose validated path has changed', async () => {
