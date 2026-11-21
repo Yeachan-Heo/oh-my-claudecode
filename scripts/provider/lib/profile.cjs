@@ -45,7 +45,7 @@ const PROFILE_DEFAULTS = Object.freeze({
   }),
   launch: Object.freeze({ disableJevInPrintMode: false, jevWithoutCompaction: false }),
   envPassthrough: Object.freeze({ names: Object.freeze([]), prefixes: Object.freeze([]) }),
-  limits: Object.freeze({ maxSessions: 4, slotWaitMs: 120000, taskTimeoutSeconds: 1800 }),
+  limits: Object.freeze({ maxSessions: 4, slotWaitMs: 120000 }),
   quota: Object.freeze({
     adapter: 'none',
     url: null,
@@ -205,7 +205,6 @@ const SCHEMA = {
   limits: {
     maxSessions: rule.int(1),
     slotWaitMs: rule.int(0),
-    taskTimeoutSeconds: rule.int(1),
   },
   quota: {
     adapter: rule.oneOf('monitor-limits', 'none'),

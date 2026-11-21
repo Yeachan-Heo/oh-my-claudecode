@@ -1,6 +1,6 @@
 'use strict';
 // Result validator for provider tasks. Pure evaluation: no omc calls and no file writes.
-// `provider-task result` and `wait` call evaluateResult from this module.
+// `provider-task result` calls evaluateResult from this module.
 // A richer status is composed from three native OMC channels (the task contract has only five states):
 // (1) workers/<name>/status.json with state 'blocked' and a reason field,
 // (2) a 'failed' task with an error field, (3) a 'completed' task with a DoneClaim payload in its result field.
@@ -319,8 +319,7 @@ function evaluateResult({ task = null, workerStatus = null, taskFile = null, fac
   } else if (task && ['pending', 'in_progress'].includes(task.status)) {
     // worker_dead only with proof of death: workerStatus.state === 'failed' or heartbeat.alive === false.
     // An old last_turn_at is not proof; 'unknown' is not proof either (a fresh worker has not written its
-    // status yet). Without proof a task in progress is in_progress (not a verdict: handoff false, no errors,
-    // wait does not record it as a result); a hung task is closed by the wait limit.
+    // status yet). Without proof a task in progress is in_progress (not a verdict: handoff false, no errors).
     const state = workerStatus?.state;
     const dead = state === 'failed' || heartbeat?.alive === false;
     if (dead) {
@@ -338,16 +337,16 @@ function evaluateResult({ task = null, workerStatus = null, taskFile = null, fac
 
   // failed, capped and unknown end with a handoff to the lead (escalation to the advisor goes through the lead).
   if ([vocab.STATUSES.FAILED, vocab.STATUSES.CAPPED, vocab.STATUSES.UNKNOWN].includes(evaluation.status)) evaluation.handoff = true;
-  // An abandon with a reason does not change the status but forces a handoff (wait exits with code 2 and a HANDOFF line).
+  // An abandon with a reason does not change the status but forces a handoff to the lead.
   if (taskFile?.abandon) evaluation.handoff = true;
   return evaluation;
 }
 
-// Evaluation of a missing OMC task in one function, for status and result (provider-task) and for wait.
+// Evaluation of a missing OMC task in one function, for status and result (provider-task).
 // Why: a grace period counted from the start field wrongly gave start_failed to tasks waiting in the
 // start-lock queue. Returns { state, verdict }:
-//   'queue'        - _start is alive and waits for the start lock; keep waiting without a verdict;
-//   'grace'        - the grace period of 60 s is running (from omc_started_at, without it from the start field); keep waiting;
+//   'queue'        - _start is alive and waits for the start lock; no verdict yet;
+//   'grace'        - the grace period of 60 s is running (from omc_started_at, without it from the start field); no verdict yet;
 //   'start_failed' - verdict { status: 'start_failed', cause: 'environment', handoff: true, errors }.
 // Order of rules: (1) omc_started_at present: grace 60 s from it, after it start_failed; (2) no omc_started_at,
 // start_pid present: a live process (pid exists, with a recorded start time the /proc start time matches) is

@@ -2,7 +2,6 @@
 // provider-task: the doctor smoke test and the task lifecycle (start, status, result, kill, list) on fakes: the fake `omc`
 // (OMC_PROVIDER_TASK_OMC_BIN), the fake `provider-team` (OMC_PROVIDER_TASK_TEAM_BIN), the fake `claude` of the doctor
 // (OMC_PROVIDER_CLAUDE_BIN), a loopback quota endpoint and a key file. No network beyond loopback, no real key.
-// `wait` as a command is covered by task-wait-cli.test.mjs.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -557,7 +556,7 @@ process.exit(code);
     const f = fixture();
     const scenario = f.scenario({});
     const a = spawnSync(process.execPath, [TASK], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: f.home } });
-    check(a.status === 2 && /Usage/.test(a.stderr) && ['doctor', 'start', 'status', 'result', 'kill', 'list', 'wait'].every((p) => a.stderr.includes(p)), js(a.stderr.slice(0, 400)));
+    check(a.status === 2 && /Usage/.test(a.stderr) && ['doctor', 'start', 'status', 'result', 'kill', 'list'].every((p) => a.stderr.includes(p)), js(a.stderr.slice(0, 400)));
     const b = f.run(['status'], scenario);
     check(b.status === 2 && /Usage/.test(b.stderr), js({ s: b.status, e: b.stderr.slice(0, 200) }));
     const c = f.run(['kill'], scenario);
@@ -898,7 +897,7 @@ process.exit(0);
   // The evaluation of a missing OMC task by the real result module: the start-lock queue, the grace period from omc_started_at, a dead _start, the queue ceiling.
   const withModule = { OMC_PROVIDER_TASK_RESULT_MODULE: RESULT_MODULE };
 
-  it('(T1) queue: a start 70 s ago, a live start_pid without omc_started_at -> status pending; result in_progress without a write; wait with a short limit issues no verdict (timed_out)', async () => {
+  it('(T1) queue: a start 70 s ago, a live start_pid without omc_started_at -> status pending; result in_progress without a write', async () => {
     const f = fixture();
     const empty = f.scenario({ listTasks: { ok: true, data: { count: 0, tasks: [] } } });
     const peer = livePeer();
@@ -911,10 +910,6 @@ process.exit(0);
       const wr = JSON.parse(rr.stdout);
       check(rr.status === 0 && wr.status === 'in_progress' && wr.handoff === false, js(wr));
       check(!f.task('f0000001').verdict, 'result wrote a verdict in the queue');
-      const rw = f.run(['wait', 'f0000001', '--timeout', '10'], empty);
-      check(rw.status === 1 && rw.stdout.includes('in progress: 1') && !rw.stdout.includes('start_failed'), js({ s: rw.status, o: rw.stdout, e: rw.stderr.slice(0, 200) }));
-      const dw = f.task('f0000001');
-      check(!dw.verdict && !dw.delivered, 'wait issued a verdict in the queue');
     } finally { try { peer.kill(); } catch { /* already dead */ } }
   }, 60000);
 
@@ -946,7 +941,7 @@ process.exit(0);
     check(!f.task('f0000003').verdict, 'result wrote a verdict in the grace period');
   });
 
-  it('(T4) a dead _start: the start_pid of an ended process, a start 5 s ago -> start_failed at once in status, result and wait (no grace period)', () => {
+  it('(T4) a dead _start: the start_pid of an ended process, a start 5 s ago -> start_failed at once in status and result (no grace period)', () => {
     const f = fixture();
     const empty = f.scenario({ listTasks: { ok: true, data: { count: 0, tasks: [] } } });
     const dead = deadPid();
@@ -959,8 +954,6 @@ process.exit(0);
     check(rr.status === 0 && wr.status === 'start_failed' && wr.cause === 'environment', js(wr));
     check((wr.errors || []).some((b) => b.includes('the _start process exited before it launched provider-team')), js(wr.errors));
     check(f.task('f0000004').verdict, 'result did not write the verdict of a dead _start');
-    const rw = f.run(['wait', 'f0000004', '--timeout', '10'], empty, withModule);
-    check(rw.status === 2 && rw.stdout.includes('start_failed') && rw.stdout.includes('HANDOFF'), js({ s: rw.status, o: rw.stdout, e: rw.stderr.slice(0, 200) }));
   });
 
   it('(T5) a live start_pid whose start_pid_starttime differs from the /proc start time -> the process is treated as dead (start_failed)', () => {
@@ -1069,7 +1062,7 @@ setTimeout(()=>process.exit(0), 3200);`], { stdio: 'ignore' });
     cleanup();
   }, 120000);
 
-  // A launcher queued on the start lock has no team yet, so `kill` and the time limit of `wait` shut down nothing; after they record killed or the verdict,
+  // A launcher queued on the start lock has no team yet, so `kill` shuts down nothing; after killed (or a verdict written by `result`) is recorded,
   // the launcher must not start the team when it takes the lock (quota and the worktree would be used by a task already reported as ended).
   const queuedLauncher = async (f, text, extraEnv = {}) => {
     const lockDir = join(f.state, 'locks');
@@ -1089,28 +1082,6 @@ process.exit(0);
     const release = () => { try { peer.kill('SIGKILL'); } catch { /* already dead */ } try { unlinkSync(lock); } catch { /* none */ } };
     return { id: r.id, marker, lock, release };
   };
-  it('(T10) a launcher queued on the start lock does not start the team after `wait` ended the task at its time limit (the explicit --limit, and the profile deadline without --limit); the timeout stays failed/timeout in result and status (not killed), the start lock is released', async () => {
-    for (const viaProfile of [false, true]) {
-      const f = fixture(viaProfile ? { limits: { taskTimeoutSeconds: 1 } } : {});
-      const q = await queuedLauncher(f, `Test a queued launcher after the time limit ${viaProfile ? 'from the profile' : 'from --limit'}`);
-      try {
-        const w = f.run(['wait', q.id, ...(viaProfile ? [] : ['--limit', '1']), '--timeout', '10'], f.scenario({}));
-        check(w.status === 2 && new RegExp(`${q.id} -> failed .*timeout`).test(w.stdout), `wait: ${js({ s: w.status, o: w.stdout, e: w.stderr.slice(0, 300) })}`);
-        const z = f.task(q.id);
-        check(z.verdict && z.verdict.status === 'failed' && z.verdict.cause === 'timeout' && !z.killed, js(z));
-        check(f.shutdowns().length === 1, `the shutdown of the limit: ${js(f.omcCalls())}`);
-        for (const command of ['result', 'status']) {
-          const out = JSON.parse(f.run([command, q.id], f.scenario({})).stdout);
-          check(out.status === 'failed' && !/killed/.test(js(out)), `${command} after the timeout: ${js(out)}`);
-        }
-        q.release();
-        check(await waitFor(() => (f.task(q.id) || {}).start_error === 'cancelled before the team was started', 20000), `the launcher did not cancel: ${js(f.task(q.id))}`);
-        check(!existsSync(q.marker), 'the team was started after the verdict');
-        check(!existsSync(q.lock), 'the start lock of the cancelled launcher was not released');
-        check((f.task(q.id).omc_started_at ?? null) === null, js(f.task(q.id)));
-      } finally { q.release(); }
-    }
-  }, 120000);
   it('(T11) a launcher queued on the start lock does not start the team after `kill`: the task stays killed, the launcher cancels and releases the lock', async () => {
     const f = fixture();
     const q = await queuedLauncher(f, 'Test a queued launcher after a kill');

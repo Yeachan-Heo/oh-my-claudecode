@@ -91,7 +91,7 @@ describe.skipIf(process.platform === 'win32')('provider profile', () => {
     const { env } = writeProfile(join(tmp.dir, 'defaults'));
     const { profile: p } = profile.loadProfile(env);
     expect(p.contextWindow).toBe(200000);
-    expect(p.limits).toEqual({ maxSessions: 6, slotWaitMs: 120000, taskTimeoutSeconds: 1800 });
+    expect(p.limits).toEqual({ maxSessions: 6, slotWaitMs: 120000 });
     expect(p.quota.thresholds).toEqual({ pause: 96, stop: 99, weeklyAsWindow: true });
     expect(p.worker.model).toBe('sonnet');
     expect(p.worker.effort).toBe('high');

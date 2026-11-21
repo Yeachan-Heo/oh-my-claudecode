@@ -2,7 +2,7 @@
 'use strict';
 // provider-task: lifecycle of one provider task on top of `omc team`. A task is a team of one worker of the
 // `executor` role started through provider-team; the worker runs on the provider of the profile.
-// Subcommands: doctor | start | status | result | kill | list | wait (and the internal `_start`).
+// Subcommands: doctor | start | status | result | kill | list (and the internal `_start`).
 //
 // doctor: a smoke test of the provider executor: `claude -p "Reply with just: ok" --output-format json` with
 // the settings of a provider worker (the provider env block without the key in the file, the Bash guard, the
@@ -38,8 +38,6 @@
 // process (one verdict per task); in_progress is not a verdict.
 // kill ID: records killed in the task file, then `omc team shutdown <team> --force`.
 // list [--refresh]: all task files with their status.
-// wait ID... [--timeout S] [--any] [--limit S]: see lib/task-wait.cjs; exit 2 on a handoff line, 1 at the time limits, 0 otherwise.
-// Without --limit the limit is limits.taskTimeoutSeconds of the profile.
 //
 // Test variables (loopback and fakes only): OMC_PROVIDER_TASK_OMC_BIN (fake omc), OMC_PROVIDER_TASK_TEAM_BIN (fake
 // provider-team), OMC_PROVIDER_TASK_RESULT_MODULE and OMC_PROVIDER_TASK_LOG_MODULE (injected modules),
@@ -354,38 +352,6 @@ function doctor() {
   fail(EXIT.CONFIG, 'the executor answered with valid JSON without a model (no model field and no modelUsage keys); check the provider configuration');
 }
 
-// ===== wait =====
-// Parsing of the arguments and the call of the wait loop; the output: a row per task `id -> status verified=... error=...`, the
-// number of tasks in progress, HANDOFF lines for evaluations with a handoff.
-function waitCommand(args) {
-  const ids = [];
-  let timeoutS = null;
-  let limitS = null;
-  let any = false;
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === '--any') any = true;
-    else if (a === '--timeout') timeoutS = args[++i];
-    else if (a === '--limit') limitS = args[++i];
-    else if (a.startsWith('--')) fail(EXIT.CONFIG, `wait: unknown flag ${a}`);
-    else ids.push(a);
-  }
-  if (!ids.length) fail(EXIT.CONFIG, 'wait: give at least one task id (8 characters [0-9a-f])');
-  const { wait } = require('./lib/task-wait.cjs');
-  // Without --limit the task deadline of the profile applies (limits.taskTimeoutSeconds, 1800 by default): past it the wait loop shuts the
-  // team down and records failed/timeout, so repeated waits cannot leave an overdue worker running.
-  const profile = profileOf();
-  wait({ ids, timeoutS, any, limitS: limitS ?? profile.limits.taskTimeoutSeconds, env, profile })
-    .then((r) => {
-      for (const w of r.results) console.log(`${w.id} -> ${w.status} verified=${w.verified ? 'yes' : 'no'} error=${w.error}`);
-      console.log(`in progress: ${r.in_progress}`);
-      for (const w of r.results) if (w.handoff) console.log(`HANDOFF ${w.id} ${w.status} ${w.error}`);
-      if (r.timed_out) console.error(`provider-task wait: the time limits were reached, ${r.in_progress} tasks in progress; run wait again`);
-      process.exit(r.handoff ? EXIT.CONFIG : r.timed_out ? EXIT.FAILURE : EXIT.OK);
-    })
-    .catch((e) => fail(e && e.errorCode ? e.errorCode : EXIT.FAILURE, e && e.message));
-}
-
 // ===== start =====
 // start [--cwd DIR] [--brief FILE] [--max-tool-calls N] [--] TEXT
 function parseStart(rest) {
@@ -530,9 +496,9 @@ async function startInternal(id) {
   };
   // The moment of the actual start is taking the start lock: omc_started_at (ISO) goes under the lock of the task file BEFORE provider-team
   // runs - the grace period of a missing OMC task counts from it, not from the start entry. The same write checks cancellation (one critical
-  // section): a task that was killed, or already has a verdict (a `kill`, the time limit of `wait`, a start_failed of the queue ceiling), while
-  // this launcher waited for the start lock must not start a team. `kill` and the limit shut down a team that does not exist yet (omc answers
-  // "No team state found"), so nothing else would stop it; `wait` and `kill` write killed or the verdict before they shut down.
+  // section): a task that was killed (`kill`), or already has a verdict (a `result` call, e.g. a start_failed of the queue ceiling), while
+  // this launcher waited for the start lock must not start a team. `kill` shuts down a team that does not exist yet (omc answers
+  // "No team state found"), so nothing else would stop it; `kill` records killed before the shutdown call, `result` the verdict before it is printed.
   const isCancelled = (d) => Boolean(d && (d.killed || d.verdict));
   let cancelled = false;
   try {
@@ -652,8 +618,8 @@ function readHeartbeat(z, worker, e) {
   try { const d = JSON.parse(r.stdout); return d && d.ok && d.data ? (d.data.heartbeat ?? null) : null; } catch { return null; }
 }
 
-// Status of the worker from omc team api read-worker-status (data.status; the team state files go through omc team api, the same
-// source as in lib/task-wait.cjs), in the cwd of the task. A failed spawn or bad JSON gives null.
+// Status of the worker from omc team api read-worker-status (data.status; the team state files go through omc team api),
+// in the cwd of the task. A failed spawn or bad JSON gives null.
 function readWorkerStatus(z, worker, e) {
   if (!worker) return null;
   const r = callOmc(e, ['team', 'api', 'read-worker-status', '--input', JSON.stringify({ team_name: z.team, worker }), '--json'], { cwd: z.cwd || process.cwd() });
@@ -678,7 +644,7 @@ function taskHeader(id, e) {
     return row ? journal.resultHeader(row) : null;
   } catch (e2) { console.error(`provider-task: the task journal is unavailable (${e2.message})`); return null; }
 }
-// Evaluation of a missing OMC task by evaluateMissingTask of the result module (one function for status, result and wait).
+// Evaluation of a missing OMC task by evaluateMissingTask of the result module (one function for status and result).
 // Without the module, or without that function: the fallback rule, a grace period of 60 s from the start field.
 function missingTaskEvaluation(z, e) {
   const file = moduleFile('result', e);
@@ -712,7 +678,7 @@ function verdictWithoutTask(z, e) {
   return full;
 }
 
-// Printing of the saved verdict (the saved one wins: a second result after the evaluation of a parallel wait does not evaluate again).
+// Printing of the saved verdict (the saved one wins: a second result call after a parallel one does not evaluate again).
 // result_raw comes from the OMC task, header from the task journal; killed after the verdict wins in the output.
 function printSavedVerdict(z, id, e) {
   if (!z) { console.log(JSON.stringify({ id, team: null, status: STATUSES.UNKNOWN, errors: ['the task file vanished'] })); process.exit(EXIT.OK); }
@@ -746,7 +712,7 @@ function resultCommand(rest) {
     if (z.killed || (typeof z.start_exit_code === 'number' && z.start_exit_code !== 0)) {
       const verdict = verdictWithoutTask(z, env);
       const written = changeTask(id, env, (d) => (d.verdict ? null : { ...d, verdict, verdict_ts: new Date().toISOString() }));
-      if (written === null) printSavedVerdict(readTask(id, env), id, env); // overtaken by a parallel wait
+      if (written === null) printSavedVerdict(readTask(id, env), id, env); // overtaken by a parallel result call
       const out = { id, team: z.team, ...verdict, result_raw: null };
       const header = taskHeader(id, env); // the header AFTER the write: the status of the verdict of this call
       if (header) out.header = header;
@@ -777,7 +743,7 @@ function resultCommand(rest) {
   const worker = (task && task.owner) || null;
   // The heartbeat of the worker (a failed call, no owner or bad JSON: null).
   const heartbeat = readHeartbeat(z, worker, env);
-  // The worker status from omc team api read-worker-status (data.status), the same source as lib/task-wait.cjs.
+  // The worker status from omc team api read-worker-status (data.status).
   const workerStatus = readWorkerStatus(z, worker, env);
   // Facts from the task journal BEFORE the evaluation; an error of the module does not stop the command (stderr).
   const facts = evaluationFacts(id, env);
@@ -793,7 +759,7 @@ function resultCommand(rest) {
   const inProgress = out.status === STATUSES.IN_PROGRESS;
   const evaluated = { ...out };
   delete evaluated.result_raw;
-  // The write only when a parallel wait has not written a verdict earlier; when overtaken, the saved one is printed (not this one).
+  // The write only when a parallel result call has not written a verdict earlier; when overtaken, the saved one is printed (not this one).
   const written = !inProgress ? changeTask(id, env, (d) => (d.verdict ? null : { ...d, verdict: evaluated, verdict_ts: new Date().toISOString() })) : null;
   if (written === null && !inProgress) printSavedVerdict(readTask(id, env), id, env);
   if (written !== null && written.killed) out.status = 'killed'; // killed after the verdict wins in the output (a fresh object from under the lock)
@@ -850,8 +816,7 @@ const USAGE = `Usage: provider-task <subcommand>
   status <id>    - status of the task as JSON
   result <id>    - evaluation of the result as JSON (lib/task-result.cjs, or the injected module)
   kill <id>      - ends the team of the task (omc team shutdown --force; killed is written first)
-  list [--refresh] - tasks from the state files (statuses from the files; --refresh asks omc)
-  wait <id...> [--timeout S] [--any] [--limit S] - waits for tasks and delivers the result (lib/task-wait.cjs)`;
+  list [--refresh] - tasks from the state files (statuses from the files; --refresh asks omc)`;
 switch (argv[0]) {
   case 'doctor': doctor(); break;
   case 'start': startCommand(argv.slice(1)); break;
@@ -860,6 +825,5 @@ switch (argv[0]) {
   case 'result': resultCommand(argv.slice(1)); break;
   case 'kill': killCommand(argv.slice(1)); break;
   case 'list': listCommand(argv.slice(1)); break;
-  case 'wait': waitCommand(argv.slice(1)); break;
   default: fail(EXIT.CONFIG, USAGE);
 }
