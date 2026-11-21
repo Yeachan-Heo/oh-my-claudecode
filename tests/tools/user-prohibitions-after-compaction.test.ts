@@ -799,6 +799,22 @@ describe('user prohibitions after compaction', () => {
     expect(pyEval('{c: module.is_read_only_command(c) for c in argument}', Object.keys(cases))).toEqual(cases);
   });
 
+  it('the rule text of rules v2 and v3 and the limits name what the read-only judgement reads as no write: the device files and the process substitution', () => {
+    // The text of the rule is a field of the report (`rule`), not compared between versions; it has to say what the code does.
+    const devices: Array<[string, string]> = [['/dev/null', '/dev/null'], ['/dev/zero', '/dev/zero'], ['/dev/full', '/dev/full'], ['/dev/tty', '/dev/tty'],
+      ['/dev/stdin', '/dev/stdin'], ['/dev/stdout', '/dev/stdout'], ['/dev/stderr', '/dev/stderr'], ['/dev/fd/N', '/dev/fd/3'], ['/dev/tcp/', '/dev/tcp/host/9'],
+      ['/dev/udp/', '/dev/udp/host/9']];
+    const [ruleV2, ruleV3, limits] = pyEval('[module.RULE_TEXT_V2, module.RULE_TEXT, " ".join(module.LIMITS_V2)]', null);
+    for (const text of [ruleV2, ruleV3]) {
+      for (const [named] of devices) expect(text, named).toContain(named);
+      expect(text).toContain('process substitution');
+    }
+    expect(limits).toContain('not to a device file');
+    const commands = devices.map(([, path]) => `ls >${path}`);
+    const verdicts = pyEval('[module.is_read_only_command(c) for c in argument]', commands);
+    expect(verdicts, commands.join('\n')).toEqual(devices.map(() => true));
+  });
+
   it('a call whose only redirection is to a process substitution or a device is no state-changing call', () => {
     const sessions: Record<string, Row[]> = {
       'p/ps.jsonl': [user(1, 'No-run'), host(2),

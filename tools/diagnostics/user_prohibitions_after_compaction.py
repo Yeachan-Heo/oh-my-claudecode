@@ -114,9 +114,13 @@ c. Candidates for general prohibitions (no targets) and for class other. Matchin
      READ_ONLY_COMMANDS holds ls, cat, head, tail, grep, rg, wc, stat, echo, pwd, which, date, file, printf, du,
      df, whoami and uname. Also read-only: sed -n without an in-place flag (-i), awk without a redirection, find
      without -delete, -exec, -execdir, -ok or -okdir, and git with the subcommand status, log, diff, show,
-     branch, rev-parse or merge-base. A write redirection is > or >> not followed by & and not aimed at /dev/null
-     (2>&1, 2>/dev/null and >>/dev/null do not count). Words are split on whitespace; a compound command such as "ls && rm x"
-     is judged by its first word only.
+     branch, rev-parse or merge-base. A write redirection is > or >> not followed by & and not aimed at a device file
+     (/dev/null, /dev/zero, /dev/full, /dev/tty, /dev/stdin, /dev/stdout, /dev/stderr, /dev/fd/N, /dev/tcp/... or /dev/udp/...);
+     2>&1, 2>/dev/null, >>/dev/null and >/dev/stderr do not count (amended, for rules v2 and v3: /dev/null was the only device,
+     and a process substitution was read as a file). A process substitution (>(...) or <(...)) is one word that names no file, so
+     "echo >(cat)" is read-only, and its body is judged as a command of its own, so "echo >(tee f)" is state-changing; so is a
+     command with a process substitution nested more than nine levels deep. Words are split on whitespace; a compound command such
+     as "ls && rm x" is judged by its first word only.
    Classes with targets, and commit, push, merge and restart, match as in rule v1.
 d. Overlaps. A call that matches several prohibitions is a candidate for each of them. Records are pairs
    (prohibition, call): candidates.total counts pairs, candidates.unique_calls counts distinct calls, and
@@ -1779,7 +1783,7 @@ LIMITS_V2 = [
     "A Bash command is judged by its first word (after environment variables and launch wrappers); a compound command such as `ls && rm x` is treated as read-only, so it is not counted (undercount).",
     "Under rule v2 `git branch` is read-only, so `git branch -D` gives no candidate (undercount).",
     "A launch wrapper with an option outside its table (`sudo -n`, `nice -5`, `--`) stays the first word: `sudo -n ls` is then state-changing (counted as run or other, an overcount) and `sudo -n git commit` is no commit (undercount).",
-    "A write redirection to a file (`>`, `>>`, not to /dev/null, not inside quotes or comments) makes any command state-changing; this extends the awk rule of the contract.",
+    "A write redirection to a file (`>`, `>>`, not to a device file such as /dev/null, not inside quotes or comments) makes any command state-changing; this extends the awk rule of the contract.",
     "The revocation check of rule v2 looks only in the same message; a bare permission word can match a question and revoke a prohibition that was not lifted.",
     "Prohibitions of classes edit, delete, run, install and deploy with a target match calls as in rule v1; without a target they match by the general patterns of rule v2.",
     "Copies of user messages rebuilt after a compaction in user rows are not removed; they count like ordinary messages.",
