@@ -1246,16 +1246,37 @@ describe('recovery pane rollback evidence', () => {
     const recoveryId = 'split-killed-recovery';
     const execute = await seedSplitRecovery(teamName, requestId, recoveryId);
     let splitRecordsDuringSpawn: string[] = [];
+    let fixtureFailure: unknown;
+    const stopPath = join(cwd, 'provider-stop');
     paneMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (_sessionName, ownership, config) => {
       splitRecordsDuringSpawn = paneSplitRecords(teamName, recoveryId);
-      const attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: ownership.paneId,
-        instanceId: TEAM_INSTANCE_ID, provider: 'claude', runtimeCliPath: '/runtime-cli.cjs',
-        context: (config as { launchContext: Parameters<typeof prepareWorkerLaunchAttempt>[0]['context'] }).launchContext });
-      const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
-        attempt, [process.execPath, '-e', 'setTimeout(() => process.exit(0), 50)'], cwd));
-      await expect(awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
-      await expect(awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 })).resolves.toBe(true);
-      await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
+      let attempt: Awaited<ReturnType<typeof prepareWorkerLaunchAttempt>>;
+      let bootstrap: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+      try {
+        attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: ownership.paneId,
+          instanceId: TEAM_INSTANCE_ID, provider: 'claude', runtimeCliPath: '/runtime-cli.cjs',
+          context: (config as { launchContext: Parameters<typeof prepareWorkerLaunchAttempt>[0]['context'] }).launchContext });
+        // The provider runs until the test has seen it start, so the started
+        // check cannot lose a race with its exit.
+        bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(attempt, [process.execPath, '-e', [
+          "const fs=require('node:fs')",
+          `const stopPath=${JSON.stringify(stopPath)}`,
+          'const deadline=Date.now()+30000',
+          'const timer=setInterval(()=>{if(fs.existsSync(stopPath)){clearInterval(timer);process.exit(0)}if(Date.now()>deadline){clearInterval(timer);process.exit(2)}},10)',
+        ].join(';')], cwd));
+        if (!(await awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 10_000, pollIntervalMs: 5 })).ok
+          || !await awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 10_000, pollIntervalMs: 5 }))
+          throw new Error('fixture provider did not start');
+        writeFileSync(stopPath, 'stop');
+        const exit = await bootstrap;
+        if (exit.outcome !== 'ran' || exit.exitCode !== 0 || exit.signal !== null)
+          throw new Error(`fixture provider ended with ${JSON.stringify(exit)}`);
+      } catch (error) {
+        fixtureFailure = error;
+        throw error;
+      } finally {
+        try { writeFileSync(stopPath, 'stop'); } finally { await bootstrap?.catch(() => undefined); }
+      }
       let reads = 0;
       return Object.defineProperty({ ownership }, 'attempt', {
         enumerable: true,
@@ -1271,6 +1292,8 @@ describe('recovery pane rollback evidence', () => {
     } finally {
       restoreKill();
     }
+    // A fixture failure inside the mock would also surface as spawn_failed.
+    expect(fixtureFailure).toBeUndefined();
     expect(splitRecordsDuringSpawn).toHaveLength(1);
     expect(existsSync(absPath(cwd, `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}`))).toBe(false);
 
