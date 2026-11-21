@@ -166,6 +166,15 @@ describe.skipIf(!posix)('omc-doctor claude-md-version names a CLAUDE source it c
     }
   });
 
+  test('CLAUDE-omc.md is read first, ahead of a CLAUDE-*.md that sorts before it', () => {
+    const out = check((d) => {
+      writeFileSync(path.join(d, 'CLAUDE.md'), 'No marker.\n');
+      writeFileSync(path.join(d, 'CLAUDE-a.md'), '<!-- OMC:VERSION:5.8.0 -->\n');
+      writeFileSync(path.join(d, 'CLAUDE-omc.md'), MARKER);
+    }).out;
+    expect(out).toContain('CLAUDE.md OMC version: 5.9.0');
+  });
+
   test('what is not there is skipped, and an unreadable file after the one that decides does not matter', () => {
     // CLAUDE.md names a file that is not there: a CLAUDE.md without a marker, as before.
     expect(check((d) => writeFileSync(path.join(d, 'CLAUDE.md'), 'See CLAUDE-gone.md.\n')).out).toContain('CLAUDE.md OMC version: (missing marker)');
