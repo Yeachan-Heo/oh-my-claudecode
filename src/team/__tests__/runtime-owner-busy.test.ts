@@ -912,7 +912,7 @@ describe('recovery owner retry deadline', () => {
   // An owner that died right after splitting a recovery pane leaves only the
   // record it wrote before the split: no pending pane, launch record or worker row.
   const paneSplitDir = (teamName: string, recoveryId: string) =>
-    absPath(cwd, `.omc/state/team/${teamName}/recovery/pane-splits/${recoveryId}`);
+    absPath(cwd, TeamPaths.recoveryPaneSplits(teamName, recoveryId));
   function writePaneSplit(teamName: string, recoveryId: string): void {
     mkdirSync(paneSplitDir(teamName, recoveryId), { recursive: true });
     writeFileSync(join(paneSplitDir(teamName, recoveryId), 'attempt-x.json'), JSON.stringify({ schema_version: 1,

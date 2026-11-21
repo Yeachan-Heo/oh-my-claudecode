@@ -2479,10 +2479,51 @@ function validateRecoveryAttemptSecret(
 
 const pendingRecoveryPanes = new Map<string, PendingRecoveryPane>();
 
+/**
+ * Written before a recovery splits a pane, removed once that pane is dead or
+ * carried by the worker row. Until then the pane may be alive and tracked
+ * nowhere else, so the owner deadline keeps the recovery active.
+ */
+async function recordRecoveryPaneSplit(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+  paneAttemptId: string,
+): Promise<void> {
+  await writeAtomic(
+    absPath(
+      input.cwd,
+      TeamPaths.recoveryPaneSplit(input.teamName, recoveryId, paneAttemptId),
+    ),
+    JSON.stringify({
+      schema_version: 1,
+      request_id: input.requestId,
+      recovery_id: recoveryId,
+      worker_name: input.workerName,
+      pane_attempt_id: paneAttemptId,
+      recorded_at: new Date().toISOString(),
+    }),
+  );
+}
+
+// A record left behind only keeps the deadline from ending the recovery.
+async function clearRecoveryPaneSplit(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+  paneAttemptId: string,
+): Promise<void> {
+  await rm(
+    absPath(
+      input.cwd,
+      TeamPaths.recoveryPaneSplit(input.teamName, recoveryId, paneAttemptId),
+    ),
+    { force: true },
+  ).catch(() => undefined);
+}
+
 async function recordRecoveryPaneRollbackFailure(
   input: RecoverDeadWorkerOwnerInput,
   recoveryId: string,
-  pending: Pick<PendingRecoveryPane, "ownership" | "paneAttemptId">,
+  pending: PendingRecoveryPane,
   reason: string,
   liveness: WorkerPaneLiveness,
 ): Promise<string> {
@@ -2637,6 +2678,7 @@ async function cleanupRecoveryPaneAttempt(
     );
     if (liveness === "dead" && providerStopped) {
       pendingRecoveryPanes.delete(recoveryId);
+      await clearRecoveryPaneSplit(input, recoveryId, pending.paneAttemptId);
       return true;
     }
   }
@@ -3214,18 +3256,18 @@ async function finalizeRecoveryPastDeadline(
         (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
       ).catch(() => true);
       if (persistedLaunch) return null;
-      // A split whose pane could not be proven leaves only this evidence, and
-      // shutdown cannot find that pane, so the recovery must stay active.
-      const rollbackEvidence = await readdir(
+      // A split pane that nothing above tracks may still be alive, and
+      // shutdown cannot find it, so the recovery must stay active.
+      const untrackedSplit = await readdir(
         absPath(
           input.cwd,
-          TeamPaths.recoveryPaneRollbackFailures(input.teamName, recoveryId),
+          TeamPaths.recoveryPaneSplits(input.teamName, recoveryId),
         ),
       ).then(
         (entries) => entries.length > 0,
         (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
       );
-      if (rollbackEvidence) return null;
+      if (untrackedSplit) return null;
       const progress = readRecoveryOutcome(input.cwd, input.requestId);
       if (
         progress?.kind === "final" ||
@@ -5176,6 +5218,15 @@ async function runRecoverDeadWorkerV2OwnerAttempt(
           }))
         )
           return { ok: false, error: "worker_activation_failed" };
+        try {
+          await recordRecoveryPaneSplit(
+            input,
+            sagaInput.recoveryId,
+            paneAttemptId,
+          );
+        } catch {
+          return { ok: false, error: "runtime_owner_unavailable" };
+        }
         const split = await splitTeamWorkerPaneWithEvidence(
           splitTarget,
           splitDirection,
@@ -5234,20 +5285,16 @@ async function runRecoverDeadWorkerV2OwnerAttempt(
             );
           } catch (error) {
             if (
-              !(error instanceof Error) ||
-              !error.message.startsWith("worker_layout_cleanup_unverified:")
+              error instanceof Error &&
+              error.message.startsWith("worker_layout_cleanup_unverified:")
             )
-              return { ok: false, error: "spawn_failed" };
-            await recordRecoveryPaneRollbackFailure(
+              return { ok: false, error: "worker_cleanup_incomplete" };
+            await clearRecoveryPaneSplit(
               input,
               sagaInput.recoveryId,
-              { ownership: ownershipResult.ownership, paneAttemptId },
-              error.message,
-              await getOwnedWorkerLiveness(ownershipResult.ownership).catch(
-                () => "unknown" as const,
-              ),
+              paneAttemptId,
             );
-            return { ok: false, error: "worker_cleanup_incomplete" };
+            return { ok: false, error: "spawn_failed" };
           }
         }
         let pending: PendingRecoveryPane;
@@ -5403,6 +5450,11 @@ async function runRecoverDeadWorkerV2OwnerAttempt(
         );
         if (!persisted.ok) throw new Error("worker_activation_failed");
         if (!persisted.value) throw new Error("stale_state_revision");
+        await clearRecoveryPaneSplit(
+          input,
+          sagaInput.recoveryId,
+          pending.paneAttemptId,
+        );
         const manifestSync = await resolveCommittedRecoveryManifestSync(
           () => readTeamManifest(input.teamName, input.cwd),
           {
