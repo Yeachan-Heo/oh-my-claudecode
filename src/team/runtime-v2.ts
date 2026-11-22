@@ -3244,7 +3244,6 @@ async function finalizeRecoveryPastDeadline(
         !current ||
         current.config.runtime_owner_epoch?.epoch !== fence.epoch ||
         current.config.runtime_owner_epoch.nonce !== fence.nonce ||
-        pendingRecoveryPanes.has(recoveryId) ||
         current.config.workers.some(
           (worker) => worker.recovery_id === recoveryId,
         )
