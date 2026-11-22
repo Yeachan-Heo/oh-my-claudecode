@@ -1090,6 +1090,8 @@ process.exit(0);
       check(k.status === 0 && f.task(q.id).killed && f.shutdowns().length === 1, js({ s: k.status, z: f.task(q.id), c: f.omcCalls() }));
       q.release();
       check(await waitFor(() => (f.task(q.id) || {}).start_error === 'cancelled before the team was started', 20000), `the launcher did not cancel: ${js(f.task(q.id))}`);
+      // the launcher writes start_error first and removes the start lock right after it, so the release is awaited, not assumed
+      check(await waitFor(() => !existsSync(q.lock), 5000), `the start lock was not released: ${js(f.task(q.id))}`);
       check(!existsSync(q.marker) && !existsSync(q.lock), `marker ${existsSync(q.marker)}, lock ${existsSync(q.lock)}`);
       check(JSON.parse(f.run(['status', q.id], f.scenario({})).stdout).status === 'killed', 'status killed');
     } finally { q.release(); }
@@ -1108,6 +1110,8 @@ process.exit(0);
       check(await waitFor(() => (f.task(q.id) || {}).start_error === 'cancelled before the team was started', 20000), `the launcher did not cancel: ${js(f.task(q.id))}`);
       const z = f.task(q.id);
       check(z.verdict && z.verdict.status === 'failed' && !z.killed, js(z));
+      // the launcher writes start_error first and removes the start lock right after it, so the release is awaited, not assumed
+      check(await waitFor(() => !existsSync(q.lock), 5000), `the start lock was not released: ${js(f.task(q.id))}`);
       check(!existsSync(q.marker) && !existsSync(q.lock), `marker ${existsSync(q.marker)}, lock ${existsSync(q.lock)}`);
       check((z.omc_started_at ?? null) === null, js(z));
       const out = JSON.parse(f.run(['status', q.id], f.scenario({})).stdout);
