@@ -795,7 +795,7 @@ module.exports = { STATUSES: ['success'], evaluateResult: ({ taskFile }) => {
     check(f.task('e0000005').verdict && f.task('e0000005').verdict.evidence === 'foreign-verdict', js(f.task('e0000005').verdict));
   });
 
-  it('(L24) the worker status through omc team api read-worker-status (one source as in the wait loop): workerStatus blocked -> result blocked; blocked does not get lost; no status.json file under <cwd>/.omc/state/team', async () => {
+  it('(L24) the worker status through omc team api read-worker-status (one source for status and result): workerStatus blocked -> result blocked; blocked does not get lost; no status.json file under <cwd>/.omc/state/team', async () => {
     const f = fixture();
     const r = await f.start(['Test the worker status']);
     check(r.status === 0 && /^[0-9a-f]{8}$/.test(r.id), `start: ${js(r.stdout)}`);
@@ -1092,6 +1092,26 @@ process.exit(0);
       check(await waitFor(() => (f.task(q.id) || {}).start_error === 'cancelled before the team was started', 20000), `the launcher did not cancel: ${js(f.task(q.id))}`);
       check(!existsSync(q.marker) && !existsSync(q.lock), `marker ${existsSync(q.marker)}, lock ${existsSync(q.lock)}`);
       check(JSON.parse(f.run(['status', q.id], f.scenario({})).stdout).status === 'killed', 'status killed');
+    } finally { q.release(); }
+  }, 120000);
+  it('(T13) a launcher queued on the start lock does not start the team after a verdict is written to its task file: the task stays failed, not killed, the launcher cancels and releases the lock', async () => {
+    const f = fixture();
+    const q = await queuedLauncher(f, 'Test a queued launcher after a verdict');
+    try {
+      // a verdict written straight into the task file (the same shape a verdict of `result` has), no `killed` field
+      const p = join(f.tasks, `${q.id}.json`);
+      const d = JSON.parse(readFileSync(p, 'utf8'));
+      d.verdict = { status: 'failed', cause: null, gaps: null, required: null, unverified: null, evidence: null, points: null, escalation: null, handoff: false, errors: [] };
+      d.verdict_ts = new Date().toISOString();
+      writeFileSync(p, JSON.stringify(d, null, 2));
+      q.release();
+      check(await waitFor(() => (f.task(q.id) || {}).start_error === 'cancelled before the team was started', 20000), `the launcher did not cancel: ${js(f.task(q.id))}`);
+      const z = f.task(q.id);
+      check(z.verdict && z.verdict.status === 'failed' && !z.killed, js(z));
+      check(!existsSync(q.marker) && !existsSync(q.lock), `marker ${existsSync(q.marker)}, lock ${existsSync(q.lock)}`);
+      check((z.omc_started_at ?? null) === null, js(z));
+      const out = JSON.parse(f.run(['status', q.id], f.scenario({})).stdout);
+      check(out.status === 'failed' && !/killed/.test(js(out)), `status after the verdict: ${js(out)}`);
     } finally { q.release(); }
   }, 120000);
   it('(T12) the cancellation check of a queued launcher does not fail open: with the task file lock busy past the lock limit the check cannot run under the lock, and the launcher still sees killed in the file (read without the lock), cancels, releases the start lock and starts no team', async () => {

@@ -223,7 +223,7 @@ const redactRow = (w) => {
 
 const profileOf = (opts, env) => opts.profile || loadProfile(env).profile;
 
-// Journal row for an id (the "facts from the journal" of the wait command); null when there is no task file.
+// Journal row for an id (the facts for provider-task result); null when there is no task file.
 const taskRow = (id, opts = {}) => {
   const env = opts.env || process.env;
   const profile = profileOf(opts, env);
