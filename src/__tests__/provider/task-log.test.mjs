@@ -442,4 +442,24 @@ describe.skipIf(process.platform === 'win32')('provider task journal', () => {
     const plain = buildTask(f, { status: 'failed' });
     assert.equal(taskRow(plain.id, { env: f.env, git: false }).class, 'other', 'without an integrity row the last class stays');
   });
+
+  it('(20) a live change of .git against the baseline of a worker that its wrapper has not checked yet gives the class integrity (the result is read before claude exits); a checked baseline, an unchanged .git and a vanished directory give none', () => {
+    const f = fixture();
+    const { taskRow } = logModule();
+    const { baselineFile, gitDigest, markBaselineChecked, writeBaseline } = require('../../../scripts/provider/lib/git-integrity.cjs');
+    const repo = join(f.dir, 'repo');
+    spawnSync('git', ['init', repo], { encoding: 'utf8' });
+    spawnSync('git', ['-C', repo, '-c', 'user.name=a', '-c', 'user.email=a@b', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'p'], { encoding: 'utf8' });
+    const z = buildTask(f, {});
+    const file = baselineFile(f.state, z.team, 'executor');
+    assert.ok(writeBaseline(file, repo, gitDigest(repo)), 'baseline written');
+    assert.equal(taskRow(z.id, { env: f.env, git: false }).class, null, 'unchanged .git');
+    writeFileSync(join(repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    assert.equal(taskRow(z.id, { env: f.env, git: false }).class, 'integrity', 'a hook added after the baseline');
+    markBaselineChecked(file);
+    assert.equal(taskRow(z.id, { env: f.env, git: false }).class, null, 'a checked baseline is not compared again');
+    const gone = buildTask(f, {});
+    assert.ok(writeBaseline(baselineFile(f.state, gone.team, 'executor'), join(f.dir, 'no-such-dir'), gitDigest(repo)), 'baseline of a vanished directory');
+    assert.equal(taskRow(gone.id, { env: f.env, git: false }).class, null, 'no data is not a violation');
+  });
 });

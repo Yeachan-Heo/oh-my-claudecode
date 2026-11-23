@@ -35,7 +35,7 @@ const { acquireSlot, releaseSlot } = require('./lib/slots.cjs');
 const { gate } = require('./lib/quota.cjs');
 const { resolveEndpoint } = require('./lib/proxy-state.cjs');
 const { failureClass } = require('./lib/failure-class.cjs');
-const { gitDigest, compareDigest } = require('./lib/git-integrity.cjs');
+const { baselineFile, compareDigest, gitDigest, markBaselineChecked, writeBaseline } = require('./lib/git-integrity.cjs');
 const { addNeed } = require('./lib/hook-need.cjs');
 const { addRescue } = require('./lib/hook-rescue.cjs');
 const { FAILURE_CLASSES, TASK_TEAM_RE, WORKER_EVENT_RESULTS: RESULT } = require('./lib/vocab.cjs');
@@ -225,7 +225,9 @@ if (!direct && !env.OMC_TEAM_WORKER) {
     const subagent = profile.subagentModel ? (aliasId(profile.subagentModel) || profile.subagentModel) : aliasId(profile.models.haiku ? 'haiku' : profile.models.default);
     Object.assign(settings.env, { ...(subagent ? { CLAUDE_CODE_SUBAGENT_MODEL: subagent } : {}), ...(profile.worker.disableJev ? { OMC_JEV: 'off' } : {}), OMC_PROVIDER_ADVISOR_COMMAND: profile.advisor.commandName });
     // The advisor controls of the lead (switches, protocol, limits, caps) pass the executor env filter only through the settings env block.
-    Object.assign(settings.env, advisorControls(env));
+    Object.assign(settings.env, advisorControls(env, (variable) => console.error(`provider-worker: ${variable} has a value that is not valid (paths must be absolute); it is not passed to the advisor`)));
+    // The advisor and the rescue hook in the session load the profile like the wrapper does, so they find the profiles file the wrapper used (a path, no secret).
+    if (typeof profile.file === 'string' && profile.file) settings.env.OMC_PROVIDER_PROFILES_FILE = profile.file;
     // Hook for AskUserQuestion (always a denial with NEED:; the tool-call counter when a limit is set or the team is a task team) and the limit in the settings env block.
     addNeed(settings, { script: join(__dirname, 'provider-hook-need.cjs'), counter: maxToolCalls > 0 || TASK_TEAM_RE.test(team) });
     if (maxToolCalls > 0) Object.assign(settings.env, { OMC_PROVIDER_MAX_TOOL_CALLS: String(maxToolCalls) });
@@ -279,6 +281,9 @@ if (!direct && !env.OMC_TEAM_WORKER) {
   // Digest of the shared part of .git is taken AFTER the slot: the observation window covers the work of the worker, not the wait for a slot
   // (up to the slot wait limit), so compatible .git changes by other sessions during the wait do not end the task as an integrity failure.
   const digestBefore = gitDigest(gitCwd);
+  // The baseline goes to disk for `provider-task result`: the worker posts its result before claude exits, so the reader cannot wait for the check below.
+  const baseline = digestBefore && onProvider ? baselineFile(stateDir, team, name) : null;
+  if (baseline) writeBaseline(baseline, gitCwd, digestBefore);
   // A signal during an `await` before the spawn (the quota gate above) is not lost: checked here (before the spawn, after taking the slot), the slot is released and the exit code is 128 + signal.
   if (interrupted) {
     if (slot) releaseSlot(slot.file);
@@ -325,13 +330,14 @@ if (!direct && !env.OMC_TEAM_WORKER) {
   }
   if (result.error) fail(127, `cannot start claude: ${result.error.code || result.error.message}`);
   // Integrity check of .git after the worker ends: a change of the shared part (config, hooks, info/*) makes the task failed with the class integrity
-  // (an event row with the class integrity, which the task journal and the result validator read, so a completed claim is not delivered as success), with a message for the lead on stderr (pane) and no result handed over (the lead decides). The check only detects: a hook written by the worker may stay on disk, the lead removes it.
+  // (an event row with the class integrity, which the task journal and the result validator read), with a message for the lead on stderr (pane) and no result handed over (the lead decides).
+  // The worker posts its result BEFORE claude exits, so this check can run after a verdict was read: `provider-task result` therefore also compares the baseline written above
+  // with the live .git until this check has marked it, and upgrades a saved success when the row appears later. The check only detects: a hook written by the worker may stay on disk, the lead removes it.
   if (digestBefore) {
     const difference = compareDigest(digestBefore, gitDigest(gitCwd));
-    if (difference) {
-      record({ ...baseRow, result: RESULT.INTEGRITY, class: FAILURE_CLASSES.INTEGRITY, git_change: difference, launcher_exit: result.status ?? (result.signal ? `signal:${result.signal}` : null) });
-      fail(1, `the worker changed .git of the repository (${gitCwd}): ${difference}; task failed (class integrity), the result is not handed over; the check only detects: a hook written by the worker may have stayed on disk, the lead removes it`);
-    }
+    if (difference) record({ ...baseRow, result: RESULT.INTEGRITY, class: FAILURE_CLASSES.INTEGRITY, git_change: difference, launcher_exit: result.status ?? (result.signal ? `signal:${result.signal}` : null) });
+    if (baseline) markBaselineChecked(baseline); // after the row: from here on the wrapper verdict decides, not a later live comparison
+    if (difference) fail(1, `the worker changed .git of the repository (${gitCwd}): ${difference}; task failed (class integrity), the result is not handed over; the check only detects: a hook written by the worker may have stayed on disk, the lead removes it`);
   }
   // Exit code: a signal to the wrapper wins over the child signal and the child code (wrapper interrupted: 128 + that signal, also when the child ignored it and ended normally);
   // otherwise the child code, or 128 + the child signal number.

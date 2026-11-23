@@ -1166,6 +1166,61 @@ process.exit(0);
     check(w.status === 'success' && typeof w.header === 'string' && w.header.includes('status success'), js(w));
   });
 
+  it('(T14) integrity reaches the verdict whatever the order of events (the worker posts its result before claude exits): (a) .git changed while the wrapper has not checked yet: the first result is failed; (b) a success saved first is turned into failed by the next result once the integrity row appears; (c) after the wrapper check a later change of .git by someone else does not touch a success', async () => {
+    const f = fixture();
+    const { baselineFile, gitDigest, markBaselineChecked, writeBaseline } = require('../../../scripts/provider/lib/git-integrity.cjs');
+    const repo = join(f.dir, 'repo-int');
+    spawnSync('git', ['init', repo], { encoding: 'utf8' });
+    spawnSync('git', ['-C', repo, '-c', 'user.name=a', '-c', 'user.email=a@b', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'p'], { encoding: 'utf8' });
+    const hook = join(repo, '.git', 'hooks', 'pre-commit');
+    const modules = { OMC_PROVIDER_TASK_RESULT_MODULE: RESULT_MODULE, OMC_PROVIDER_TASK_LOG_MODULE: LOG_MODULE };
+    // One completed task with a green DoneClaim, a start row and a git baseline of its worker (as the wrapper writes them at its start).
+    const completedTask = async (label) => {
+      const r = await f.start([`Integrity order ${label}`]);
+      check(r.status === 0 && await waitFor(() => (f.task(r.id) || {}).start_exit_code === 0), `start: ${js(f.task(r.id))}`);
+      const team = f.task(r.id).team;
+      const scenario = f.scenario({
+        listTasks: { ok: true, data: { count: 1, tasks: [{ id: 'task-1', subject: `ptask-${r.id} Integrity order ${label}`, status: 'completed', owner: 'worker-1' }] } },
+        readTask: { 'task-1': { id: 'task-1', status: 'completed', owner: 'worker-1', result: 'Summary: done.\nFiles: none\nVerification: tests 3/3 OK\nRisks: none\nStatus: success' } },
+      });
+      mkdirSync(f.state, { recursive: true });
+      writeFileSync(join(f.state, 'workers.jsonl'), `${js({ ts: new Date().toISOString(), point: 'team-worker', role: 'executor', name: 'worker-1', team, provider: 'acme', session_id: '00000000-0000-0000-0000-000000000001', started_with: { model: 'haiku', effort: 'max' } })}\n`, { flag: 'a' });
+      const baseline = baselineFile(f.state, team, 'worker-1');
+      check(writeBaseline(baseline, repo, gitDigest(repo)), 'baseline written');
+      return { id: r.id, team, scenario, baseline };
+    };
+    const result = (t) => { const rr = f.run(['result', t.id], t.scenario, modules); check(rr.status === 0, `result exit ${rr.status}: ${rr.stderr.slice(0, 200)}`); return JSON.parse(rr.stdout); };
+    const rowOf = (t) => js({ ts: new Date().toISOString(), point: 'team-worker', name: `${t.team}/worker-1`, team: t.team, result: 'integrity', class: 'integrity', git_change: 'added hooks/pre-commit', launcher_exit: 0 });
+    // (a)
+    const a = await completedTask('a');
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n');
+    const wa = result(a);
+    check(wa.status === 'failed' && wa.handoff === true && wa.errors.some((e) => e.startsWith('integrity:')), js(wa));
+    check(f.task(a.id).verdict.status === 'failed', js(f.task(a.id).verdict));
+    unlinkSync(hook);
+    // (b)
+    const b = await completedTask('b');
+    const first = result(b);
+    check(first.status === 'success' && first.handoff === false, js(first));
+    check(f.task(b.id).verdict.status === 'success', 'the first verdict is success');
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n');
+    writeFileSync(join(f.state, 'workers.jsonl'), `${rowOf(b)}\n`, { flag: 'a' });
+    markBaselineChecked(b.baseline);
+    const second = result(b);
+    check(second.status === 'failed' && second.handoff === true && second.errors.some((e) => e.startsWith('integrity:')), js(second));
+    check(f.task(b.id).verdict.status === 'failed' && f.task(b.id).verdict.handoff === true, js(f.task(b.id).verdict));
+    const third = result(b);
+    check(third.status === 'failed' && third.errors.filter((e) => e.startsWith('integrity:')).length === 1, js(third));
+    unlinkSync(hook);
+    // (c)
+    const c = await completedTask('c');
+    markBaselineChecked(c.baseline);
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n');
+    const wc = result(c);
+    check(wc.status === 'success' && wc.handoff === false, js(wc));
+    unlinkSync(hook);
+  });
+
   it('(T12) start: the task file has start_pid and start_pid_starttime consistent with /proc, and after _start ends also omc_started_at', async () => {
     const f = fixture();
     const stop = join(f.dir, 'stop-t12');

@@ -691,6 +691,24 @@ function printSavedVerdict(z, id, e) {
   process.exit(EXIT.OK);
 }
 
+// A saved verdict is final, with one exception: an integrity failure of the worker that became known only after the verdict was written (the worker posts its
+// result before claude exits, and the wrapper checks .git when it exits) turns a verdict that is not failed or killed into failed with a handoff, once. Without
+// the journal facts (module missing, no integrity class) the verdict stays as saved.
+function upgradeSavedVerdict(id, z, e) {
+  const status = z.verdict && z.verdict.status;
+  if (z.killed || !status || status === STATUSES.FAILED || status === 'killed') return z;
+  const facts = evaluationFacts(id, e);
+  if (!facts || facts.class !== FAILURE_CLASSES.INTEGRITY) return z;
+  const next = { ...z.verdict, errors: Array.isArray(z.verdict.errors) ? [...z.verdict.errors] : [] };
+  const resultModule = moduleFile('result', e);
+  let reject = null;
+  try { if (existsSync(resultModule)) reject = require(resultModule).rejectIntegrity; } catch { reject = null; }
+  if (typeof reject === 'function') reject(next);
+  else { next.status = STATUSES.FAILED; next.handoff = true; next.errors.push('integrity: the worker changed the shared part of .git, fail closed, the result is not accepted'); }
+  changeTask(id, e, (d) => (d.verdict && d.verdict.status !== STATUSES.FAILED && d.verdict.status !== 'killed' ? { ...d, verdict: next, verdict_ts: new Date().toISOString() } : null));
+  return readTask(id, e) || z;
+}
+
 // ===== result =====
 // result <id>: reads the OMC task (omc team api), the worker status (read-worker-status), the task file and the heartbeat of the worker; with the
 // result module available (lib/task-result.cjs, or OMC_PROVIDER_TASK_RESULT_MODULE) calls evaluateResult({ task, workerStatus, taskFile, facts,
@@ -706,7 +724,7 @@ function resultCommand(rest) {
   const z = readTask(id, env);
   if (!z) fail(EXIT.CONFIG, `result: no task file ${id} in ${tasksDir()}`);
   // A saved verdict: printed without a new evaluation and without a write (one evaluation per task); killed after the verdict wins in the output.
-  if (z.verdict) printSavedVerdict(z, id, env);
+  if (z.verdict) printSavedVerdict(upgradeSavedVerdict(id, z, env), id, env);
   const { task, error } = readOmcTask(z, env);
   if (!task) {
     if (z.killed || (typeof z.start_exit_code === 'number' && z.start_exit_code !== 0)) {

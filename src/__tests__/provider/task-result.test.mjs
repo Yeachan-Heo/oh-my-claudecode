@@ -177,6 +177,34 @@ describe.skipIf(process.platform === 'win32')('provider task result validator', 
     assert.equal(clean.handoff, false, js(clean));
   });
 
+  it('(13c) integrity is rejected in every channel except killed: NEED:, ESCALATE, blocked task and worker status, a failed task, an empty result, a task in progress, worker_dead; killed stays killed', () => {
+    const facts = { class: 'integrity' };
+    const marked = (w) => w.errors.some((b) => b.startsWith('integrity:'));
+    const cases = {
+      need: { task: { status: 'completed', result: 'NEED: which database to use?' } },
+      escalate: { task: { status: 'completed', result: 'ESCALATE: architect\nSummary: x' } },
+      blockedTask: { task: { status: 'blocked', result: 'x' } },
+      blockedWorker: { task: { status: 'in_progress' }, workerStatus: { state: 'blocked', reason: 'waiting' } },
+      failedTask: { task: { status: 'failed', error: 'boom' } },
+      empty: { task: { status: 'completed', result: '' } },
+      running: { task: { status: 'in_progress' } },
+      dead: { task: { status: 'in_progress' }, heartbeat: { alive: false, last_turn_at: new Date(NOW - 1000).toISOString() } },
+      invalid: { task: { status: 'completed', result: 'Summary: x\nStatus: super' } },
+    };
+    for (const [name, input] of Object.entries(cases)) {
+      const w = evaluateResult({ ...input, facts }, { now: NOW });
+      assert.equal(w.status, 'failed', `${name}: ${js(w)}`);
+      assert.equal(w.handoff, true, `${name}: ${js(w)}`);
+      assert.ok(marked(w), `${name}: ${js(w.errors)}`);
+      assert.equal(w.errors.filter((b) => b.startsWith('integrity:')).length, 1, `${name}: the integrity error once`);
+    }
+    const killed = evaluateResult({ task: { status: 'completed', result: DONECLAIM }, taskFile: { killed: '2026-11-14T20:00:00.000Z' }, facts });
+    assert.equal(killed.status, 'killed', js(killed));
+    assert.ok(!marked(killed), js(killed));
+    const clean = evaluateResult({ task: { status: 'completed', result: 'NEED: which database to use?' }, facts: { class: 'other' } });
+    assert.equal(clean.status, 'blocked', js(clean));
+  });
+
   it('(14) facts: model_mismatch is fail closed, failed with cause model even with a valid success', () => {
     const w = evaluateResult({ task: { status: 'completed', result: DONECLAIM }, facts: { warnings: ['model_mismatch'] } });
     assert.equal(w.status, 'failed', js(w));

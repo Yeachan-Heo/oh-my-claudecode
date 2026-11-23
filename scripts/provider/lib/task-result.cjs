@@ -193,7 +193,7 @@ function validateValues(fields, errors) {
 }
 
 // Completed tasks. Order of rules in this branch: request channel -> empty result -> failed (empty_response);
-// integrity class -> failed; model_mismatch -> failed (model); strict parsing (invalid -> unknown); then the facts from the journal (a green
+// model_mismatch -> failed (model); strict parsing (invalid -> unknown); then the facts from the journal (a green
 // declaration with bash_last_code != 0, success_without_changes) and the announcement heuristic, each moving
 // success to unknown; finally the cause from the failure-class map when the payload gave none.
 function evaluateCompleted(evaluation, task, facts, warnings) {
@@ -210,13 +210,6 @@ function evaluateCompleted(evaluation, task, facts, warnings) {
     evaluation.status = vocab.STATUSES.FAILED;
     evaluation.cause = EMPTY_RESPONSE;
     if (!empty) evaluation.errors.push(`${EMPTY_RESPONSE}: journal warning with a non-empty result`);
-    evaluation.handoff = true;
-    return;
-  }
-  // Fail closed: an integrity failure of the worker (it changed the shared part of .git; class integrity in the journal) means the result is not accepted.
-  if (facts?.class === vocab.FAILURE_CLASSES.INTEGRITY) {
-    evaluation.status = vocab.STATUSES.FAILED;
-    evaluation.errors.push('integrity: the worker changed the shared part of .git, fail closed, the result is not accepted');
     evaluation.handoff = true;
     return;
   }
@@ -278,6 +271,16 @@ function evaluateCompleted(evaluation, task, facts, warnings) {
     const mapped = FAILURE_CLASS_TO_CAUSE[facts?.class];
     if (mapped) evaluation.cause = mapped;
   }
+}
+
+// The integrity rejection of an evaluation (also applied by provider-task to a verdict that was saved before the integrity row existed).
+const INTEGRITY_ERROR = 'integrity: the worker changed the shared part of .git, fail closed, the result is not accepted';
+function rejectIntegrity(evaluation) {
+  evaluation.status = vocab.STATUSES.FAILED;
+  evaluation.handoff = true;
+  evaluation.errors = Array.isArray(evaluation.errors) ? evaluation.errors : [];
+  if (!evaluation.errors.includes(INTEGRITY_ERROR)) evaluation.errors.push(INTEGRITY_ERROR);
+  return evaluation;
 }
 
 // Result validator. Takes the OMC task (omc team api read-task / list-tasks), the worker status
@@ -342,6 +345,10 @@ function evaluateResult({ task = null, workerStatus = null, taskFile = null, fac
     evaluation.handoff = true;
   }
 
+  // An integrity failure of the worker (it changed the shared part of .git; class integrity in the journal) rejects the result in every channel: a completed claim,
+  // a request for a decision, a blocked task and a task in progress all end as failed with a handoff. Only a human decision (killed) keeps its place.
+  if (facts?.class === vocab.FAILURE_CLASSES.INTEGRITY && evaluation.status !== 'killed') rejectIntegrity(evaluation);
+
   // failed, capped and unknown end with a handoff to the lead (escalation to the advisor goes through the lead).
   if ([vocab.STATUSES.FAILED, vocab.STATUSES.CAPPED, vocab.STATUSES.UNKNOWN].includes(evaluation.status)) evaluation.handoff = true;
   // An abandon with a reason does not change the status but forces a handoff to the lead.
@@ -404,4 +411,4 @@ function evaluateMissingTask(taskFile, { now = Date.now(), isStartAlive = isStar
     : { state: 'grace', verdict: null };
 }
 
-module.exports = { STATUSES, CAUSES, evaluateResult, evaluateMissingTask, START_GRACE_MS, START_LOCK_LIMIT_MS, QUEUE_EXTRA_MS };
+module.exports = { STATUSES, CAUSES, INTEGRITY_ERROR, rejectIntegrity, evaluateResult, evaluateMissingTask, START_GRACE_MS, START_LOCK_LIMIT_MS, QUEUE_EXTRA_MS };

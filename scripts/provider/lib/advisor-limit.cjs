@@ -41,8 +41,9 @@ const RETRY_MAX_MS = 30_000;
 const enabled = (env = process.env) => env.OMC_PROVIDER_ADVISOR_LIMIT === '1';
 const limitFile = (env = process.env, profile = null) => env.OMC_PROVIDER_ADVISOR_LIMIT_FILE || statePath(profile || {}, env, 'advisor-limit.json');
 // Key of a task in the counters. Native task ids are only team-local (every team numbers its tasks from 1), so the bare id would let one team use up
-// the allowance of the same id in another team. The key is qualified with the state root of the team and the team name; without an id there is no key.
-const taskKey = ({ stateRoot = '', team = '', id = null } = {}) => (id === null || id === undefined || id === '' ? null : [String(stateRoot || ''), String(team || ''), String(id)].join('|'));
+// the allowance of the same id in another team. The key is qualified with the state root of the team and the team name; the triple is serialised as JSON
+// so that no separator character inside a part can make two different triples one key. Without an id there is no key.
+const taskKey = ({ stateRoot = '', team = '', id = null } = {}) => (id === null || id === undefined || id === '' ? null : JSON.stringify([String(stateRoot || ''), String(team || ''), String(id)]));
 const positive = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
 // Limits: the environment wins over the profile (advisor.limits), the profile over the built-in defaults.
 const limits = (env = process.env, profile = null) => {

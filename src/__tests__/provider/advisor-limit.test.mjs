@@ -41,7 +41,7 @@ describe.skipIf(process.platform === 'win32')('advisor limit and queue', () => {
     JOURNAL = join(TMP, 'data', 'advisor.jsonl');
     STATE = join(TMP, 'data', 'advisor-limit.json');
     STATE_ROOT = join(TMP, 'team-state');
-    Z1 = [STATE_ROOT, 'team-l', 'z-1'].join('|');
+    Z1 = JSON.stringify([STATE_ROOT, 'team-l', 'z-1']);
     mkdirSync(join(STATE_ROOT, 'tasks'), { recursive: true });
     writeFileSync(join(STATE_ROOT, 'tasks', 'z-1.json'), js({ id: 'z-1', subject: 'limit task', description: 'x', status: 'in_progress', owner: 'worker-l' }));
   });
@@ -232,6 +232,13 @@ setTimeout(() => process.exit(0), 3000);
     check(again.status === 2 && !again.called && rows().at(-1).limit_reason === 'task', js({ s: again.status, e: again.stderr.slice(0, 150) }));
     const counters = Object.values(state(file).tasks);
     check(counters.length === 2 && counters.every((c) => c.used === 1 && c.reserved === 0), js(state(file).tasks));
+  });
+  it('(L9c) the task key is injective: a separator character inside the state root, the team or the id does not merge two different triples; no id gives no key', () => {
+    const triples = [['/srv/a|b', 'c', '1'], ['/srv/a', 'b|c', '1'], ['/srv/a', 'b', 'c|1'], ['/srv/a|b|c', '', '1'], ['/srv/a', 'b', 'c', ], ['', 'a|b', '1']];
+    const keys = triples.map(([stateRoot, team, id]) => lim.taskKey({ stateRoot, team, id }));
+    check(new Set(keys).size === triples.length, js(keys));
+    check(lim.taskKey({ stateRoot: '/r', team: 't', id: null }) === null && lim.taskKey({ stateRoot: '/r', team: 't', id: '' }) === null, 'a key without an id');
+    check(lim.taskKey({ stateRoot: '/r', team: 't', id: 7 }) === lim.taskKey({ stateRoot: '/r', team: 't', id: '7' }), 'a numeric id and its string differ');
   });
   it('(L10) ok with the limit: the line "ADVISOR-LIMIT: 3 left" in the answer; commit: used + 1, slots empty, the bucket released (top 0); permissions of the state 0600, the directory 0700', () => {
     const file = join(TMP, 'l10', 'limit.json');

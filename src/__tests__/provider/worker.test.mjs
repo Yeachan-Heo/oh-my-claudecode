@@ -682,6 +682,24 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
       expect(Object.keys(bad.settingsOf(r2).env).filter((k) => /^OMC_PROVIDER_ADVISOR_/.test(k)).sort()).toEqual(['OMC_PROVIDER_ADVISOR_COMMAND', 'OMC_PROVIDER_ADVISOR_MODEL']);
     });
 
+    it('(15d) the advisor path controls are copied only as absolute paths: a relative path is not passed on and is reported by variable name (never by value) on stderr; the settings env also names the profiles file the wrapper loaded, so the advisor and the rescue hook see the same profile', () => {
+      const f = fixture();
+      const absolute = { OMC_PROVIDER_ADVISOR_LOG_FILE: join(f.dir, 'abs-advisor.jsonl'), OMC_PROVIDER_ADVISOR_LIMIT_FILE: join(f.dir, 'abs-limit.json') };
+      const ok = f.run({ ...TEAM, ...absolute });
+      expect(ok.status, ok.stderr).toBe(0);
+      expect(f.settingsOf(ok).env).toMatchObject(absolute);
+      expect(f.settingsOf(ok).env.OMC_PROVIDER_PROFILES_FILE).toBe(f.file);
+      expect(ok.stderr).not.toMatch(/not valid/);
+      const bad = f.run({ ...TEAM, OMC_PROVIDER_ADVISOR_LOG_FILE: 'advisor-secret-name.jsonl', OMC_PROVIDER_ADVISOR_LIMIT_FILE: '../limit-secret-name.json' });
+      expect(bad.status, bad.stderr).toBe(0);
+      const env = f.settingsOf(bad).env;
+      expect(env).not.toHaveProperty('OMC_PROVIDER_ADVISOR_LOG_FILE');
+      expect(env).not.toHaveProperty('OMC_PROVIDER_ADVISOR_LIMIT_FILE');
+      expect(bad.stderr).toMatch(/OMC_PROVIDER_ADVISOR_LOG_FILE/);
+      expect(bad.stderr).toMatch(/OMC_PROVIDER_ADVISOR_LIMIT_FILE/);
+      expect(bad.stderr).not.toMatch(/secret-name/);
+    });
+
     it('(14) with rescue off: no rescue hooks; the task id stays; the existing guard hook is untouched', () => {
       const f = fixture();
       const r = f.run({ ...TEAM, OMC_TEAM_WORKER: 'ptask-abc12345/worker-1' });
@@ -955,6 +973,34 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
     const failed = f.run(env, ['--dangerously-skip-permissions', '--model', 'sonnet'], { fake: { ...touch, exit: 3 } });
     expect(failed.status).toBe(1);
     expect(f.rows().at(-1).class).toBe(vocab.FAILURE_CLASSES.INTEGRITY);
+  });
+
+  it('(24d) the worker keeps a git baseline for the task reader: written at the start (the digest of the shared .git, the working directory), marked checked after the wrapper check, after a clean run and after an integrity failure alike; a Claude role and a directory outside a repository write none', () => {
+    const f = fixture();
+    const repo = join(f.dir, 'repo-baseline');
+    spawnSync('git', ['init', repo], { encoding: 'utf8' });
+    spawnSync('git', ['-C', repo, '-c', 'user.name=a', '-c', 'user.email=a@b', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'p'], { encoding: 'utf8' });
+    const file = join(f.state, 'git-baseline', 'team-a', 'worker-1.json');
+    const env = { ...TEAM, OMC_TEAM_WORKER_CWD: repo };
+    const clean = f.run(env, ['--dangerously-skip-permissions', '--model', 'sonnet']);
+    expect(clean.status, clean.stderr).toBe(0);
+    const written = JSON.parse(readFileSync(file, 'utf8'));
+    expect(written.cwd).toBe(repo);
+    expect(written.checked).toBe(true);
+    expect(written.entries.length).toBeGreaterThan(0);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    unlinkSync(file);
+    const attack = f.run(env, ['--dangerously-skip-permissions', '--model', 'sonnet'], { fake: { touch: join(repo, '.git', 'hooks', 'pre-commit') } });
+    expect(attack.status).toBe(1);
+    expect(JSON.parse(readFileSync(file, 'utf8')).checked).toBe(true);
+    expect(f.rows().at(-1).result).toBe(vocab.WORKER_EVENT_RESULTS.INTEGRITY);
+    unlinkSync(file);
+    const claude = f.run({ ...env, OMC_TEAM_ROLE: 'reviewer' }, ['--dangerously-skip-permissions', '--model', 'sonnet']);
+    expect(claude.status, claude.stderr).toBe(0);
+    expect(existsSync(file)).toBe(false);
+    const outside = f.run({ ...TEAM, OMC_TEAM_WORKER_CWD: tmp.dir }, ['--version']);
+    expect(outside.status, outside.stderr).toBe(0);
+    expect(existsSync(file)).toBe(false);
   });
 
   it('(26) a provider role gets --strict-mcp-config with an empty --mcp-config, a settings file without mcpServers and with the subagent model and OMC_JEV=off; a Claude role gets no MCP flags; an own --mcp-config of the caller stays without a duplicate', () => {

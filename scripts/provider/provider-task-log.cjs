@@ -35,7 +35,8 @@ const { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rename
 const { spawnSync } = require('node:child_process');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
-const { loadProfile, statePath } = require('./lib/profile.cjs');
+const { loadProfile, stateDirOf, statePath } = require('./lib/profile.cjs');
+const { liveChange } = require('./lib/git-integrity.cjs');
 const { mask } = require('./lib/redact.cjs');
 const { EXIT, FAILURE_CLASSES, TASK_WARNINGS, taskSubject } = require('./lib/vocab.cjs');
 
@@ -71,7 +72,7 @@ const readJsonlRows = (file) => {
 
 // Rows point=team-worker and team=task team of the worker event journal: session_id, started_with and name from
 // the newest row that has them (the `end` row carries no session_id), class and the end marker from the last row
-// with a class field / result=end; the class integrity of any row wins (a later row must not hide it).
+// with a class field / result=end; the class integrity of any row wins (a later row must not hide it), and so does a live change of .git against the baseline of a worker whose wrapper has not checked it yet (the result is read before claude exits).
 const sessionOfTask = (profile, env, team) => {
   const rows = readJsonlRows(statePath(profile, env, 'workers.jsonl')).filter((w) => w && w.point === 'team-worker' && w.team === team);
   if (!rows.length) return null;
@@ -81,7 +82,7 @@ const sessionOfTask = (profile, env, team) => {
     session_id: typeof withField('session_id')?.session_id === 'string' ? withField('session_id').session_id : null,
     started_with: withField('started_with')?.started_with && typeof withField('started_with').started_with === 'object' ? withField('started_with').started_with : null,
     name: typeof withField('name')?.name === 'string' ? withField('name').name : null,
-    class: rows.some((w) => w.class === FAILURE_CLASSES.INTEGRITY) ? FAILURE_CLASSES.INTEGRITY : fromEnd.find((w) => w.class != null)?.class ?? null,
+    class: rows.some((w) => w.class === FAILURE_CLASSES.INTEGRITY) || liveChange(stateDirOf(profile, env), team) ? FAILURE_CLASSES.INTEGRITY : fromEnd.find((w) => w.class != null)?.class ?? null,
     end_ts: fromEnd.find((w) => w.result === 'end' && typeof w.ts === 'string')?.ts ?? null,
   };
 };

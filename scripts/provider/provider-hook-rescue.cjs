@@ -24,12 +24,19 @@ const { createHash } = require('node:crypto');
 const { join } = require('node:path');
 const { mask } = require('./lib/redact.cjs');
 const { rescueParams } = require('./lib/hook-rescue.cjs');
-const { advisorModel, stateDirOf } = require('./lib/profile.cjs');
+const { ProfileError, advisorModel, loadProfile, stateDirOf } = require('./lib/profile.cjs');
 
 // Provider state directory (same rule as the other hooks: OMC_PROVIDER_STATE_DIR from the settings env block).
 const stateDir = (env = process.env) => stateDirOf({ name: env.OMC_PROVIDER || 'default' }, env);
 
-const modelOk = (model) => model !== null && model !== undefined && advisorModel({}, { OMC_PROVIDER_ADVISOR_MODEL: model }) === model; // a bad value: the advisor refuses the consultation with exit code 2; the hook warns in the denial
+// The advisor validates its model against the profile of the session (provider-advisor.cjs loads it by OMC_PROVIDER and the profiles file); the note
+// of the rescue package does the same, so a model that the profile lists is not reported as disallowed. Without a loadable profile the built-in defaults
+// apply, as in the advisor. A bad value: the advisor refuses the consultation with exit code 2; the hook warns in the denial.
+const modelOk = (env) => {
+  let profile = {};
+  try { profile = loadProfile(env, { name: env.OMC_PROVIDER, onWarning: () => {} }).profile; } catch (e) { if (!(e instanceof ProfileError)) throw e; }
+  return advisorModel(profile, env) !== null;
+};
 
 // ---- classification of a check run (test/build/typecheck/lint without a pipe, &&, || or ;: those mask the exit code) ----
 const CHECK_BINARIES = new Set(['pytest', 'py.test', 'vitest', 'jest', 'mocha', 'tsc', 'tsgo', 'mypy', 'pyright', 'eslint', 'biome', 'ruff', 'pylint', 'rubocop', 'golangci-lint', 'shellcheck']);
@@ -141,14 +148,24 @@ function logEvent(env, input, name, sig, counter, exitCode) {
 }
 
 // ---- rescue package (text of the hint and of the denial; the error line passes through mask, no secrets and no quotes) ----
-function rescuePackage(sig, repeats, line, state, p, advisor) {
+// The consultation command of the package, matching the advisor switches of the session (set by the lead, copied into the settings env block): with the
+// journal on the event parameter is required (--event test-failure --failure-no N), with the shaped input on the question needs the DECISION field.
+function consultationCommand(advisor, sig, repeats, lineMasked, env) {
+  const flags = env.OMC_PROVIDER_ADVISOR_JOURNAL === '1' ? ` --event test-failure --failure-no ${Math.max(1, Number(repeats) || 1)}` : '';
+  const question = env.OMC_PROVIDER_ADVISOR_INPUT === '1'
+    ? `DECISION: how to get past a check run that keeps failing without progress (signature ${sig})\nTRIED: attempts without progress: ${repeats}\nTEST TAIL: ${lineMasked}`
+    : `RESCUE: signature ${sig} | attempts without progress: ${repeats} | last error: ${lineMasked}`;
+  return `${advisor}${flags} "${question}"`;
+}
+
+function rescuePackage(sig, repeats, line, state, p, advisor, env = process.env) {
   const lineMasked = mask(String(line ?? '')).replace(/["\n]/g, ' ').slice(0, 200) || 'no error text';
-  const modelNote = modelOk(p.model) ? '' : '\nNOTE: OMC_PROVIDER_ADVISOR_MODEL has a disallowed value; the consultation will end with exit code 2. Do not loop: only the lead can fix the parameter.';
+  const modelNote = modelOk(env) ? '' : '\nNOTE: OMC_PROVIDER_ADVISOR_MODEL has a disallowed value; the consultation will end with exit code 2. Do not loop: only the lead can fix the parameter.';
   return `RESCUE: the check run (test/build/typecheck/lint) has failed ${repeats} times without progress (signature ${sig}); the run was blocked before it started.
 Last error (redacted): ${lineMasked}
 Last green check: ${state.last_green_ts || 'none'}; whether the code changed since: unknown.
 Before you retry the check, call the consultation with exactly this command (by its bare name):
-  ${advisor} "RESCUE: signature ${sig} | attempts without progress: ${repeats} | last error: ${lineMasked}"
+  ${consultationCommand(advisor, sig, repeats, lineMasked, env)}
 A successful consultation (exit code 0) resets the counter and releases this run. Consultations used: ${state.consultations}/${p.limit}.${modelNote}`;
 }
 
@@ -241,7 +258,7 @@ function eventDecision(input, command, event, state, ctx) {
       }
       state.gate_denials += 1;
       state.last_denial_ts = new Date().toISOString();
-      const body = rescuePackage(state.signature, state.repeats, state.last_error, state, p, advisorCommand(env));
+      const body = rescuePackage(state.signature, state.repeats, state.last_error, state, p, advisorCommand(env), env);
       save();
       log('denial', state.signature, state.gate_denials, null);
       return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: body } };
@@ -282,7 +299,7 @@ function eventDecision(input, command, event, state, ctx) {
       log('hint', sig, state.repeats, post.code);
       save();
       if (p.mode === 'shadow') return null; // shadow: no additionalContext
-      return { continue: true, hookSpecificOutput: { hookEventName: event, additionalContext: rescuePackage(sig, state.repeats, line, state, p, advisorCommand(env)) } };
+      return { continue: true, hookSpecificOutput: { hookEventName: event, additionalContext: rescuePackage(sig, state.repeats, line, state, p, advisorCommand(env), env) } };
     }
     save();
     log('failure', sig, state.repeats, post.code);

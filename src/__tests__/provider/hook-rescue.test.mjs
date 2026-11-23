@@ -6,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { makeTmp } from './_helpers.mjs';
+import { makeTmp, writeProfile } from './_helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const SCRIPT = join(process.cwd(), 'scripts', 'provider', 'provider-hook-rescue.cjs');
@@ -292,5 +292,22 @@ describe.skipIf(process.platform === 'win32')('provider hook rescue', () => {
     expect(rescue.rescueParams({ OMC_PROVIDER_ADVISOR_MODEL: 'opus' }, () => {}, profile).model).toBeNull();
     expect(rescue.rescueParams({ OMC_PROVIDER_ADVISOR_MODEL: ' Haiku ' }, () => {}, { advisor: { defaultModel: 'haiku', models: ['haiku'] } }).model).toBe('haiku');
     expect(rescue.addRescue({}, { env: {}, team: '', script: SCRIPT }).env.OMC_PROVIDER_ADVISOR_MODEL).toBe('opus');
+  });
+
+  it('model note of the rescue package: the model is checked against the profile of the session (loaded like the advisor does), so a model that the profile lists gets no note, a model outside its list gets the note, and without a profiles file the built-in list applies', () => {
+    mkdirSync(join(tmp.dir, 'note-profile'), { recursive: true });
+    const profiles = writeProfile(join(tmp.dir, 'note-profile'), { advisor: { defaultModel: 'haiku', models: ['haiku', 'sonnet'] } });
+    const base = { PATH: process.env.PATH, HOME: tmp.home, OMC_PROVIDER: 'acme', OMC_PROVIDER_PROFILES_FILE: profiles.env.OMC_PROVIDER_PROFILES_FILE };
+    const state = { ...R.initialState(), consultations: 0 };
+    const pack = (override, source = base) => R.rescuePackage('sig0123456789abc', 2, 'boom', state, { limit: 2 }, 'provider-advisor', { ...source, ...override });
+    const NOTE = /OMC_PROVIDER_ADVISOR_MODEL has a disallowed value/;
+    expect(pack({ OMC_PROVIDER_ADVISOR_MODEL: 'haiku' })).not.toMatch(NOTE);
+    expect(pack({ OMC_PROVIDER_ADVISOR_MODEL: 'Sonnet' })).not.toMatch(NOTE);
+    expect(pack({})).not.toMatch(NOTE);
+    expect(pack({ OMC_PROVIDER_ADVISOR_MODEL: 'opus' })).toMatch(NOTE);
+    expect(pack({ OMC_PROVIDER_ADVISOR_MODEL: 'gpt-5' })).toMatch(NOTE);
+    const noFile = { PATH: process.env.PATH, HOME: tmp.home, OMC_PROVIDER: 'acme', OMC_PROVIDER_PROFILES_FILE: join(tmp.dir, 'no-such-profiles.jsonc') };
+    expect(pack({ OMC_PROVIDER_ADVISOR_MODEL: 'haiku' }, noFile)).toMatch(NOTE);
+    expect(pack({ OMC_PROVIDER_ADVISOR_MODEL: 'sonnet' }, noFile)).not.toMatch(NOTE);
   });
 });

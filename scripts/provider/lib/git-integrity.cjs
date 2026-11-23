@@ -6,7 +6,7 @@
 // a git repository or git is unavailable (no check then, nothing is blocked).
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { readdirSync, readFileSync } = require('node:fs');
+const { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 
 // Only config keys that matter for identity and isolation are hashed, not the whole file: unrelated
@@ -87,4 +87,46 @@ function compareDigest(before, after) {
   return changes.length > 20 ? `${list}, +${changes.length - 20} more` : list;
 }
 
-module.exports = { gitDigest, compareDigest, RELEVANT_CONFIG_KEYS };
+// Baseline of a worker: the digest taken at the start of its observation window is kept in <stateDir>/git-baseline/<team>/<worker>.json
+// ({ cwd, digest, entries, checked }), so that a reader of the task (provider-task result) can compare it with the live state of .git while the
+// wrapper has not run its own check yet (the worker posts its result before claude exits). The wrapper marks the baseline `checked` after its own
+// check: from then on the wrapper's verdict (the integrity event row) is the only source, and later changes of .git by someone else do not count.
+const safeName = (text) => String(text ?? '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+/, '').slice(0, 80) || 'x';
+const baselineDir = (stateDir, team) => join(stateDir, 'git-baseline', safeName(team));
+const baselineFile = (stateDir, team, worker) => join(baselineDir(stateDir, team), `${safeName(worker)}.json`);
+
+function writeBaseline(file, cwd, digest) {
+  if (!digest) return false;
+  try {
+    mkdirSync(join(file, '..'), { recursive: true, mode: 0o700 });
+    writeFileSync(file, `${JSON.stringify({ cwd, digest: digest.digest, entries: digest.entries, checked: false })}\n`, { encoding: 'utf8', mode: 0o600 });
+    chmodSync(file, 0o600);
+    return true;
+  } catch { return false; } // a missing baseline only disables the early check; the wrapper check stays
+}
+
+function markBaselineChecked(file) {
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, `${JSON.stringify({ ...data, checked: true })}\n`, { encoding: 'utf8', mode: 0o600 });
+  } catch { /* no baseline: nothing to mark */ }
+}
+
+// Description of a change of .git since the baselines of a team that its wrappers have not checked yet; null when there is none (also when
+// the working directory is gone or is no repository any more: no data is not a violation).
+function liveChange(stateDir, team) {
+  let names;
+  try { names = readdirSync(baselineDir(stateDir, team)); } catch { return null; }
+  for (const name of names.sort()) {
+    let data;
+    try { data = JSON.parse(readFileSync(join(baselineDir(stateDir, team), name), 'utf8')); } catch { continue; }
+    if (!data || data.checked || typeof data.cwd !== 'string' || !Array.isArray(data.entries)) continue;
+    const now = gitDigest(data.cwd);
+    if (!now) continue;
+    const difference = compareDigest({ digest: data.digest, entries: data.entries }, now);
+    if (difference) return difference;
+  }
+  return null;
+}
+
+module.exports = { gitDigest, compareDigest, RELEVANT_CONFIG_KEYS, baselineFile, writeBaseline, markBaselineChecked, liveChange };

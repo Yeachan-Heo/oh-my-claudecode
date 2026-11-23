@@ -4,6 +4,7 @@
 // away from processes that must use the default provider, and the allow-list that
 // builds a worker's environment from scratch.
 
+const { isAbsolute } = require('node:path');
 const { ADVISOR_EVENTS } = require('./vocab.cjs');
 
 const CREDENTIAL_ENV = Object.freeze(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']);
@@ -79,11 +80,13 @@ const PROVIDER_ENV_KEYS = Object.freeze(Object.keys(providerEnv(SAMPLE_PROFILE))
 // Everything a non-provider child process must not inherit.
 const DENY_ENV = Object.freeze([...new Set([...PROVIDER_ENV_KEYS, ...CREDENTIAL_ENV, ...MARKER_ENV, FABLE_ENV])]);
 
-// Variables that the executor and its hooks receive only from the settings env block.
+// Variables that the executor and its hooks receive only from the settings env block. The only other OMC_PROVIDER_* values that reach the executor
+// are the validated advisor controls of the lead (ADVISOR_CONTROLS below), which the worker wrapper copies into the same block.
 const HOOK_ENV = Object.freeze([
   'OMC_PROVIDER',
   'OMC_PROVIDER_SETTINGS_FILE',
   'OMC_PROVIDER_STATE_DIR',
+  'OMC_PROVIDER_PROFILES_FILE',
   'OMC_PROVIDER_GUARD',
   'OMC_PROVIDER_TASK_ID',
   'OMC_PROVIDER_MAX_TOOL_CALLS',
@@ -103,6 +106,8 @@ const HOOK_ENV = Object.freeze([
 const isSwitch = (v) => v === '1';
 const isPositiveInt = (v) => /^[1-9][0-9]{0,8}$/.test(v);
 const isText = (v) => v.trim() !== '' && v.length <= 4096 && ![...v].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127);
+// The files are written by the advisor in the cwd of the worker, which is the task worktree: a relative path would put them where the worker can edit them.
+const isAbsolutePath = (v) => isText(v) && isAbsolute(v);
 const ADVISOR_CONTROLS = Object.freeze({
   OMC_PROVIDER_ADVISOR_INPUT: isSwitch,
   OMC_PROVIDER_ADVISOR_JOURNAL: isSwitch,
@@ -122,16 +127,19 @@ const ADVISOR_CONTROLS = Object.freeze({
   OMC_PROVIDER_ADVISOR_CAP_MATERIAL_TAIL: isPositiveInt,
   OMC_PROVIDER_ADVISOR_CAP_ADVICE: isPositiveInt,
   OMC_PROVIDER_ADVISOR_DIFF_BASE: (v) => isText(v) && !/\s/.test(v) && !v.startsWith('-'),
-  OMC_PROVIDER_ADVISOR_LOG_FILE: isText,
-  OMC_PROVIDER_ADVISOR_LIMIT_FILE: isText,
+  OMC_PROVIDER_ADVISOR_LOG_FILE: isAbsolutePath,
+  OMC_PROVIDER_ADVISOR_LIMIT_FILE: isAbsolutePath,
 });
 
-// The validated advisor controls of `env` as { name: value } for the settings env block of a worker.
-function advisorControls(env) {
+// The validated advisor controls of `env` as { name: value } for the settings env block of a worker. A value that is set but fails its check is
+// reported to `skipped(name)` (the name only, never the value) and not copied.
+function advisorControls(env, skipped = () => {}) {
   const result = {};
   for (const [name, valid] of Object.entries(ADVISOR_CONTROLS)) {
     const value = env[name];
-    if (typeof value === 'string' && valid(value)) result[name] = value;
+    if (typeof value !== 'string' || value === '') continue;
+    if (valid(value)) result[name] = value;
+    else skipped(name);
   }
   return result;
 }
