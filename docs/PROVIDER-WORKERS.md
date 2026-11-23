@@ -284,7 +284,7 @@ Two small opt-in changes outside `scripts/provider/` let a provider session work
 
 ## Preset: Z.ai
 
-`examples/provider/zai.providers.jsonc` holds the Z.ai coding endpoint: base URL `https://api.z.ai/api/anthropic`, models `glm-5.3[1m]` and `glm-5.3-flash[1m]`, model prefix `glm-`, quota adapter `monitor-limits`, error codes 1308, 1310 (quota) and 1305 (throttle), and a 1000000-token context window. Choose the key source yourself. The preset contains no personal or machine-specific values.
+`examples/provider/zai.providers.jsonc` holds the Z.ai coding endpoint: base URL `https://api.z.ai/api/anthropic`, models `glm-5.4[1m]` (opus and sonnet) and `glm-5.3-flash[1m]` (haiku), model prefix `glm-`, quota adapter `monitor-limits`, error codes 1308, 1310 (quota) and 1305 (throttle), and a 1000000-token context window. Choose the key source yourself. The preset contains no personal or machine-specific values.
 
 ## Local proxy
 

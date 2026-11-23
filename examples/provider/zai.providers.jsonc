@@ -10,8 +10,8 @@
       // One key source: file, env or command. The file must contain only the key.
       "apiKey": { "file": "~/.config/claude-omc/keys/zai.key" },
       "models": {
-        "opus": { "id": "glm-5.3[1m]" },
-        "sonnet": { "id": "glm-5.3[1m]" },
+        "opus": { "id": "glm-5.4[1m]" },
+        "sonnet": { "id": "glm-5.4[1m]" },
         "haiku": { "id": "glm-5.3-flash[1m]" },
         "default": "sonnet"
       },
