@@ -378,6 +378,39 @@ describe('agent messages to files in the compaction', () => {
     expect(record.agent_messages).toMatchObject({ mode: 'plan', moved: 2, written: 0 });
     expect(spilled(store)).toHaveLength(0);
   });
+
+  // Many long reports and results that each cut little: the results alone give back under the bound of the too-few-results gate, the reports moved to files do the rest.
+  const reportHeavy = () => {
+    const m = [user('Task: coordinate the agents.')];
+    for (let k = 0; k < 24; k++) {
+      m.push(user(report('a1', `Report ${k}: ${filler(11000)}`, `N${k} done`)), assistant('Noted.'));
+      if (k < 23) {
+        m.push({ role: 'assistant', text: 'Read.', toolUses: [{ tool_use_id: `t${k}`, tool: 'Bash', input: { command: `cat a${k}.txt` } }] });
+        m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${k}`, text: `RESULT ${k} ${'x'.repeat(3000)}`, isError: false }] });
+      }
+    }
+    for (let k = 0; k < 12; k++) m.push(k % 2 ? assistant(`tail ${k}`) : user(`tail ${k}`));
+    return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+  };
+
+  it('with the token cascade the gate counts what the agent stage saves: reports that carry the cut are not handed to the summary for the results alone', async () => {
+    const env = { OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
+    // The results alone are short of the bound, so without the stage the summary runs.
+    const off = await compactRun(env, reportHeavy(), { trigger: 'auto' });
+    expect(off.record).toMatchObject({ result: 'fallback', reason: 'too_few_results' });
+    expect(off.record.max_reduction_tokens).toBeLessThan(0.3);
+    const on = await compactRun({ ...env, OMC_JEV_COMPACT_AGENT_TRIM: '1' }, reportHeavy(), { trigger: 'auto' });
+    expect(on.record).toMatchObject({ result: 'jev', agent_messages: { installed: true } });
+    expect(on.record.agent_messages.moved).toBeGreaterThan(0);
+    expect(on.record.max_reduction_tokens).toBeGreaterThanOrEqual(0.3);
+    expect(spilled(on.store).length).toBe(on.record.agent_messages.moved);
+  });
+
+  it('a stage in shadow mode saves nothing, so the gate still hands a session of short results to the summary', async () => {
+    const { record, store } = await compactRun({ OMC_JEV: 'compaction:shadow', OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_AGENT_TRIM: '1' }, reportHeavy(), { trigger: 'auto' });
+    expect(record).toMatchObject({ result: 'fallback', reason: 'too_few_results' });
+    expect(spilled(store)).toHaveLength(0);
+  });
 });
 
 // Only the host's outer frame leaves a report: a report that quotes a whole envelope (its header, its block and its note) keeps the quoted copy as written.

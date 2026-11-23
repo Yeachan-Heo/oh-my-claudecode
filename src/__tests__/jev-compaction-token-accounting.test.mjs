@@ -347,6 +347,38 @@ describe('token accounting: record of a compaction', () => {
     expect(record.tokens_before).toBeGreaterThan(0);
     expect(record.tokens_before).not.toBe(130000);
   });
+
+  it('counts the images of results in the estimate from rows (the host answers no API form): before and after', async () => {
+    const IMAGE = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } };
+    const messages = conversation(30, 4000).map((m) => {
+      const image = m.toolResults?.length && Number(m.toolResults[0].tool_use_id.slice(1)) % 2 === 0;
+      return image ? Object.freeze({ ...m, toolResults: [{ ...m.toolResults[0], result: [IMAGE, IMAGE] }] }) : m;
+    });
+    const imagesCount = messages.reduce((s, m) => s + (m.toolResults || []).reduce((t, r) => t + (r.result || []).length, 0), 0);
+    expect(imagesCount).toBe(30);
+    // The list the host would have sent, built from the rows: a text, the calls, the results with the blocks of their images.
+    const api = messages.map((m) => ({
+      role: m.role,
+      content: [
+        ...(m.text ? [{ type: 'text', text: m.text }] : []),
+        ...(m.toolUses || []).map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input })),
+        ...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: [{ type: 'text', text: r.text }, ...(r.result || [])] })),
+      ],
+    }));
+    const expected = Math.round(listTokens(api));
+    const fake = fakeDollar({ env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' }, usage: usageOf });
+    // The host answers the rows for the API read too: no API form, so the estimate comes from the rows.
+    fake.$.session.messages = async () => messages;
+    const handlers = {};
+    register((event, hook) => { handlers[event] = hook; });
+    await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', agentId: 'agent-1', messages }), async () => ({ messages: [] }));
+    const [record] = fake.records();
+    expect(record).toMatchObject({ result: 'jev', tokens_source: 'estimate', tokens_before: expected });
+    // The results the cut keeps still hold their images: the tokens after cannot stand under them (30 images at 2348 tokens, the default RATE_IMAGE).
+    expect(record.tokens_before).toBeGreaterThan(30 * 2348);
+    expect(record.tokens_after).toBeLessThan(record.tokens_before);
+    expect(record.tokens_after).toBeGreaterThan(0);
+  });
 });
 
 describe('token accounting: own threshold window', () => {

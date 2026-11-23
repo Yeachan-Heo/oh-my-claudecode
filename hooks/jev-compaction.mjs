@@ -145,7 +145,7 @@
  * any other case, before Jev is asked, the floor (every removable result gone) is predicted: above the threshold less FLOOR_MARGIN of the window
  * the host's summary runs (floor_above_threshold; no_window when the window is unknown). The gates on characters (too_few_results of decide, the preflight of the own
  * threshold) are also measured in tokens (cutInTokens): an image has no characters and costs RATE_IMAGE, so a session that fails them on characters goes on when its
- * tokens reach the same bounds, and the record has max_reduction_tokens. The compaction record gains cut, cascade_pass,
+ * tokens reach the same bounds (the agent stage's trim and, with the stage active, the reports it plans to move to files count in decide's gate), and the record has max_reduction_tokens. The compaction record gains cut, cascade_pass,
  * cascade_target_tokens, cascade_predicted_tokens, cascade_tokens_source, cascade_dropped, floor_pred and tokens_after_pred. Host handoff
  * (OMC_JEV_COMPACT_HOST_HANDOFF=1, opt-in with caution: the host's contract is not documented in this repository): the result also carries
  * tokensBefore and tokensAfter, and a manual or automatic cut under HOST_MIN_CUT goes to the host's summary (cut_below_host_min). Question naming
@@ -2451,15 +2451,16 @@ export function listTokens(api, rates = DEFAULT_RATES) {
   return tok;
 }
 
-// The messages as API blocks (a text, a call with its name and input, a result with its text): the estimate's input when the API form is missing. `images`: a
-// result also carries a block for each image it holds (the gates of cutInTokens count them; the estimate of the tokens before leaves them out).
-function rowsAsApi(messages, images = false) {
+// The messages as API blocks (a text, a call with its name and input, a result with its text and a block for each image it holds): the estimate's input when
+// the API form is missing. Every estimate from rows counts the images (the gates of cutInTokens, the tokens before and the tokens after), as itemTokens does
+// for the results a cut removes.
+function rowsAsApi(messages) {
   return messages.map((m) => ({
     role: m.role,
     content: [
       ...(m.text ? [{ type: 'text', text: m.text }] : []),
       ...(m.toolUses || []).map((u) => ({ type: 'tool_use', name: u.tool, input: u.input })),
-      ...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: images && imagesOf(r) ? [{ type: 'text', text: r.text || '' }, ...Array.from({ length: imagesOf(r) }, () => ({ type: 'image' }))] : r.text || '' })),
+      ...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: imagesOf(r) ? [{ type: 'text', text: r.text || '' }, ...Array.from({ length: imagesOf(r) }, () => ({ type: 'image' }))] : r.text || '' })),
     ],
   }));
 }
@@ -2492,16 +2493,18 @@ function itemTokens(c, rates = DEFAULT_RATES) {
 // threshold). The characters of a call's input and of a result's text leave out what costs tokens without being text, an image, so with the token cascade
 // (OMC_JEV_COMPACT_TARGET_PERCENT) a session that fails the gate on characters is measured here, and it passes when this reaches the same bound: `removable` is
 // what every result that is no pinned one gives back when it goes to its trace (as in the floor), less the tokens of `envelopes` (the characters build adds, of the
-// reminder class), and `listed` the tokens of the list it is a share of (the API form, else the rows with their images). No candidate that saves a token: nothing is counted.
-export function cutInTokens(candidates, messages, api, envelopes = 0, rates = DEFAULT_RATES) {
-  let removable = 0;
+// reminder class), and `listed` the tokens of the list it is a share of (the API form, else the rows with their images). `textTokens`: what the text stages take off
+// that the cascade plans before Jev is asked (the agent trim and the reports moved to files), which the compaction counts as a cut of its own. Nothing that saves a
+// token, in a candidate or in a text stage: nothing is counted.
+export function cutInTokens(candidates, messages, api, envelopes = 0, rates = DEFAULT_RATES, textTokens = 0) {
+  let removable = Math.max(0, textTokens);
   for (const c of candidates) {
     if (isPinned(c, rates)) continue;
     const t = itemTokens(c, rates);
     removable += Math.max(0, t.full - t.trace);
   }
   if (removable <= 0) return { removable: 0, listed: 0 };
-  return { removable: removable - rates.RATE_NOTE * envelopes, listed: listTokens(api ?? rowsAsApi(messages, true), rates) };
+  return { removable: removable - rates.RATE_NOTE * envelopes, listed: listTokens(api ?? rowsAsApi(messages), rates) };
 }
 // The bound of the gates in tokens: MIN_REDUCTION of the list, and `minGain` tokens (the own threshold's OWN_MIN_GAIN of the window; none for decide).
 export function worthInTokens(cut, minGain = 0) {
@@ -3903,11 +3906,21 @@ async function decide($, e, cfg, record, started) {
   // Agent messages to files: decided on the rows as the trim leaves them, filed as they came (source); the window of rows and the files are the same in the plan and in the run.
   const agentOpts = agentSkip ? { sessionId: record.session_id, source: messages, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates, checked: new Map() } : undefined;
   const movedTokens = (st) => cfg.rates.RATE_MOVED * st.moved_chars - cfg.rates.RATE_TRACE * st.trace_chars;
+  // What the stage plans to move (a plan, no write): asked once, by the gate below or by the floor, whichever comes first.
+  let agentPlan;
+  const planAgents = () => (agentPlan ??= moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: false, deadline }));
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) {
     // The characters leave out what costs tokens without being text (an image). With the token cascade a session that fails them goes on when its tokens
     // reach the same bound (the floor below is the check that follows the tokens); without it the gate is the characters alone.
-    const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes, cfg.rates);
+    // The text the agent stage takes off (the trim, and with the stage active the reports it moves to files) is part of the cut: a session of reports that no
+    // result of its own would carry is for the plan below, which counts the stage, and not for the summary.
+    let stageTokens = 0;
+    if (cfg.targetPercent !== undefined) {
+      stageTokens = trimTokens;
+      if (agentOpts && cfg.mode === 'active') stageTokens += movedTokens((await planAgents()).stats);
+    }
+    const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens);
     if (cut) record.max_reduction_tokens = cut.listed ? Math.round((cut.removable / cut.listed) * 1000) / 1000 : 0;
     if (!cut || !worthInTokens(cut)) return { fallback: 'too_few_results' };
   }
@@ -3948,7 +3961,7 @@ async function decide($, e, cfg, record, started) {
       // the reply stage is left out with it so that both are counted once, in the plan. A session that only those two stages would spare goes to the
       // host's summary here, which is the safe side.
       if (agentOpts && cfg.mode === 'active') {
-        const planned = await moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: false, deadline });
+        const planned = await planAgents();
         agentsFloor = Math.max(0, movedTokens(planned.stats));
         record.floor_agents_tokens = Math.round(agentsFloor);
       }

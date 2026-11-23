@@ -244,6 +244,16 @@ describe('cutInTokens and worthInTokens', () => {
     expect(Math.abs(bare.listed - cutInTokens([candidate(1)], rows, apiOf(rows)).listed) / bare.listed).toBeLessThan(0.02);
   });
 
+  it('adds the tokens that the text stages take off to what can be cut, also when no candidate saves a token, and never a negative amount', () => {
+    const rows = session(10);
+    const bare = cutInTokens([candidate(1)], rows, undefined);
+    expect(cutInTokens([candidate(1)], rows, undefined, 0, undefined, 700).removable).toBeCloseTo(bare.removable + 700, 6);
+    expect(cutInTokens([candidate(1)], rows, undefined, 0, undefined, -700)).toEqual(bare);
+    const only = cutInTokens([], rows, undefined, 0, undefined, 700);
+    expect(only.removable).toBe(700);
+    expect(only.listed).toBe(bare.listed);
+  });
+
   it('is worth it from MIN_REDUCTION of the list, and also from minGain tokens for the own threshold', () => {
     expect(worthInTokens({ removable: 300, listed: 1000 })).toBe(true);
     expect(worthInTokens({ removable: 299, listed: 1000 })).toBe(false);
