@@ -74,11 +74,14 @@ function isConfigForceInheritProxyEnv() {
   const config = loadOmcConfig();
   return config.routing?.forceInherit === true && !hasNormalClaudeActiveModel();
 }
-function isNonClaudeProviderEnv() {
+// aliasIsClaude: a session model that is a native alias (sonnet, opus, haiku, fable, with an
+// optional context suffix such as [1m]) counts as a Claude model, as in src/config/models.ts.
+// Only the named-model gate asks for it; the proxy mapping check keeps the plain rule.
+function isNonClaudeProviderEnv(aliasIsClaude = false) {
   if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-  // A native alias (sonnet, opus, haiku, fable) is a Claude model, as in src/config/models.ts.
-  if (modelId && !modelId.toLowerCase().includes('claude') && !TIER_ALIASES.has(modelId.toLowerCase())) return true;
+  const isNativeAlias = aliasIsClaude && TIER_ALIASES.has(modelId.replace(/\[\d+[mk]\]$/i, '').toLowerCase());
+  if (modelId && !isNativeAlias && !modelId.toLowerCase().includes('claude')) return true;
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
   if (baseUrl && !baseUrl.includes('anthropic.com')) return true;
   return isConfigForceInheritProxyEnv();
@@ -1169,7 +1172,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // Jev is then asked only the questions the marker leaves open.
   const marker = isModelRoutingMarkerEnabled() ? parseModelRoutingMarker(toolInput.prompt) : null;
   const markerHadModel = Boolean(marker?.model);
-  if (marker?.model && isForceInheritEnabled() && !resolveTierAliasToSafeModel(marker.model)) {
+  if (marker?.model && isForceInheritEnabled() && !resolveTierAliasToSafeModel(marker.model, true)) {
     // A tier alias the provider cannot resolve is not set (the marker then sets no model).
     marker.rejected.push('force-inherit');
     marker.model = undefined;
@@ -1266,8 +1269,8 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // A call that names a model keeps it, and only gets the effort, where the provider is not
     // Claude or forceInherit is on and does not resolve the alias, and where a marker model that
     // forceInherit refused still pins the call.
-    const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice);
-    const keepsNamedModel = named && (markerHadModel || ((isNonClaudeProviderEnv() || isForceInheritEnabled()) && !resolveTierAliasToSafeModel(jevChoice, true)));
+    const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice, true);
+    const keepsNamedModel = named && (markerHadModel || ((isNonClaudeProviderEnv(true) || isForceInheritEnabled()) && !resolveTierAliasToSafeModel(jevChoice, true)));
     const allowedJevChoices = ['haiku', 'sonnet', 'opus'];
     if (isModelRoutingFableOptinEnabled()) {
       allowedJevChoices.push('fable');

@@ -530,6 +530,28 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       expect(requests).toHaveLength(1);
     }, 15000);
 
+    it.each(["sonnet[1m]", "opus[1m]", "haiku[200k]"])("a native alias with a context suffix (%s) is a Claude provider too", async (model) => {
+      const input = agentInput({ model: "fable" });
+      expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: model })).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
+      expect(requests).toHaveLength(1);
+    }, 15000);
+
+    it("the alias exception is local to the named-model gate: under forceInherit a session alias does not make a plain tier mapping count as a proxy mapping", async () => {
+      // forceInherit from the environment, a session alias, a plain (not provider-specific) mapping,
+      // no foreign base URL, Jev off: the call is judged as without the alias exception.
+      const input = agentInput({ model: "sonnet" });
+      const result = await runEnforcer(
+        input,
+        { ...env, OMC_JEV: "off", OMC_ROUTING_FORCE_INHERIT: "true", ANTHROPIC_MODEL: "sonnet", ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-4-5" },
+        cwd,
+      );
+      expect(result.exitCode, result.stderr).toBe(0);
+      const output = JSON.parse(result.stdout);
+      expect(output.hookSpecificOutput?.permissionDecision).not.toBe("deny");
+      expect(output.hookSpecificOutput?.updatedInput ?? input.tool_input).toEqual(input.tool_input);
+      expect(requests).toHaveLength(0);
+    }, 15000);
+
     it("a session model that is not a Claude name still keeps the named model", async () => {
       const input = agentInput({ model: "fable" });
       expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: "deepseek-chat" })).toEqual({ ...input.tool_input, effort: "medium" });

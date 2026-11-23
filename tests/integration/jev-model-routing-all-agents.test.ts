@@ -241,7 +241,36 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for every agent call", () => 
       });
       expect(routed).toEqual({ ...agentInput().tool_input, model: "sonnet", effort: "medium" });
     }, 15000);
+
+    it("OMC_SUBAGENT_MODEL alone does not resolve the tier: the call keeps inheriting, the effort is set", async () => {
+      const only = { ...forceInherit, OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1", OMC_SUBAGENT_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect(await routedInput(agentInput(), only)).toEqual({ ...agentInput().tool_input, effort: "medium" });
+      // With the native mapping of the tier the alias is set, as before.
+      const mapped = { ...only, CLAUDE_CODE_BEDROCK_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect(await routedInput(agentInput(), mapped)).toEqual({ ...agentInput().tool_input, model: "sonnet", effort: "medium" });
+      expect(requests).toHaveLength(2);
+    }, 30000);
+
+    it("a use marker model needs the native mapping too: OMC_SUBAGENT_MODEL alone does not set it", async () => {
+      const marked = agentInput({ prompt: "use sonnet\nFind why src/auth/session.test.ts fails intermittently and fix it." });
+      const only = { ...forceInherit, OMC_JEV_MODEL_ROUTING_MARKER: "1", OMC_SUBAGENT_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect((await routedInput(marked, only)).model).toBeUndefined();
+      const mapped = { ...only, ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect((await routedInput(marked, mapped)).model).toBe("sonnet");
+    }, 30000);
   });
+
+  it("a project definition without a model hides a user definition of the same name that names fable: the call is unpinned and asked", async () => {
+    writeAgent(join(cwd, ".claude", "agents"), "shadowed-agent", "");
+    writeAgent(join(cwd, "claude", "agents"), "shadowed-agent", "model: fable\n");
+    const input = agentInput({ subagent_type: "shadowed-agent" });
+    expect(await routedInput(input, { OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1" })).toEqual({
+      ...input.tool_input,
+      model: "sonnet",
+      effort: "medium",
+    });
+    expect(requests).toHaveLength(1);
+  }, 15000);
 
   it("a degraded Jev call leaves a call without a model as it was", async () => {
     status = 500;
