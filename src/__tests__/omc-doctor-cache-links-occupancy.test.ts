@@ -312,6 +312,37 @@ process.kill = function (pid, signal) {
 
   // The shared reader (readOccupiedPluginRoots) inspects an entry with lstat and skips everything that is
   // not a regular file; opening a FIFO for reading would block until a writer shows up.
+  // A record of a Windows session in a configuration directory that a Linux or macOS doctor shares (WSL): its plugin root is a
+  // Windows path and its process identity is a tick count, neither of which this system can judge. It is unreadable, not gone.
+  // A relative plugin root is the same kind of record: resolved against the working directory it names nothing certain.
+  test.skipIf(process.platform === 'win32')('an occupancy record written by a Windows session cannot be judged here: nothing is moved, the record stays', () => {
+    const roots = (cache: string) => [
+      ['a drive path', 'C:\\Users\\u\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.9.0', {}],
+      ['a UNC path', '\\\\server\\share\\cache\\5.9.0', {}],
+      ['a UNC path with slashes', '//server/share/cache/5.9.0', {}],
+      ['a drive path of a gone process', 'C:\\cache\\5.9.0', { pid: deadPid() }],
+      ['a relative plugin root (names another directory for each working directory)', 'plugins/cache/omc/oh-my-claudecode/5.9.0', {}],
+      ['a tick-count start identity under a POSIX path', path.join(cache, '5.9.0'), { processStartIdentity: 'ticks:638000000000000000' }],
+    ] as const;
+    for (const command of commands) {
+      for (const [label, root, overrides] of roots('')) {
+        const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] });
+          const target = label.startsWith('a tick') ? path.join(cache, '5.9.0') : root;
+          const file = writeRecord(dir, target, overrides);
+          expect(existsSync(file)).toBe(true);
+          const result = runCommand(command, dir);
+          expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ label, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+          expect(result.stdout).toContain('Nothing moved');
+          expect({ label, record: existsSync(file) }).toEqual({ label, record: true });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   test.skipIf(process.platform === 'win32')('an occupancy entry that is not a regular file is skipped without being opened, so the command does not hang', () => {
     for (const command of commands) {
       for (const kind of ['fifo', 'link to a fifo', 'directory'] as const) {

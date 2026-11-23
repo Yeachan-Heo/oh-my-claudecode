@@ -778,8 +778,9 @@ const refuse = (text) => {
 // system, so it counts as unreadable instead of protecting nothing. An installPath that is not absolute (and no
 // Windows path) names another directory for each directory the command runs in, so it counts as unreadable too: the
 // pin it carries could not be told from a version nothing protects.
-const windowsPath = (target) => /^(?:[A-Za-z]:[/\\]|\\\\)/.test(target);
-const foreignPath = (target) => process.platform != 'win32' && windowsPath(target);
+// A UNC path may be written with forward slashes (//server/share); where that names an existing directory it is a POSIX path.
+const windowsPath = (target) => /^(?:[A-Za-z]:[/\\]|\\\\|\/\/(?!\/))/.test(target);
+const foreignPath = (target) => process.platform != 'win32' && windowsPath(target) && !(target.startsWith('//') && isDirectory(target));
 const relativePath = (target) => !path.isAbsolute(target) && !windowsPath(target);
 const readRegistry = () => {
   let unreadable = false;
@@ -960,6 +961,12 @@ const protectionOf = (dir, versions) => {
       try {
         if (!fs.lstatSync(file).isFile()) continue;
         const record = readJson(file);
+        // A record of a Windows session (a Windows or a relative plugin root, a tick-count start identity) cannot be judged here: neither
+        // "owner gone" nor the root can be read, so the command stops instead of treating the record as gone or as relative.
+        if ((typeof record.pluginRoot == 'string' && record.pluginRoot.trim() && (foreignPath(record.pluginRoot.trim()) || relativePath(record.pluginRoot.trim()))) || (process.platform != 'win32' && typeof record.processStartIdentity == 'string' && record.processStartIdentity.startsWith('ticks:'))) {
+          unreadable = true;
+          continue;
+        }
         if (ownerGone(record)) continue;
         if (typeof record.pluginRoot != 'string' || !record.pluginRoot.trim()) throw 0;
         held.push(record.pluginRoot, path.resolve(record.pluginRoot));

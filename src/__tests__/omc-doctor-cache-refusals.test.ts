@@ -99,7 +99,7 @@ describe('omc-doctor cache commands: exit code of a refusal and of a failure', {
 // The installPath of an entry of OMC written as a Windows path cannot be read on another system: before, it protected
 // nothing, so the install it names (reached on WSL through /mnt/c) was moved. It is an unreadable entry like any other.
 describe.skipIf(!posix)('omc-doctor cache commands: an installPath written as a Windows path on another system', { timeout: 120_000 }, () => {
-  const foreign = ['C:\\Users\\u\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.8.1', 'c:/Users/u/.claude/plugins/cache/omc/oh-my-claudecode/5.8.1', '\\\\server\\share\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.8.1', 'D:\\5.8.1'];
+  const foreign = ['C:\\Users\\u\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.8.1', 'c:/Users/u/.claude/plugins/cache/omc/oh-my-claudecode/5.8.1', '\\\\server\\share\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.8.1', '//server/share/.claude/plugins/cache/omc/oh-my-claudecode/5.8.1', 'D:\\5.8.1'];
 
   test('the command moves nothing, says which entry and path made it so, and ends with exit code 1', () => {
     for (const command of commands) {
