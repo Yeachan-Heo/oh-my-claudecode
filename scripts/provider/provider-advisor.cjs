@@ -280,11 +280,12 @@ if (input.enabled(env)) { // the mode is on: the input is built by advisor-input
 
 // ===== Limit: consultation limit per task/group and the top-model queue: OMC_PROVIDER_ADVISOR_LIMIT=1 turns it on (off by default) =====
 if (limit.enabled(env)) {
-  // Limit keys: the task = the number of the in_progress task of the worker from $OMC_TEAM_STATE_ROOT/tasks/*.json (the same set as the plan);
+  // Limit keys: the task = the number of the in_progress task of the worker from $OMC_TEAM_STATE_ROOT/tasks/*.json (the same set as the plan), qualified with the state root and the team;
   // the group = the team name (OMC_TEAM_WORKER before the slash), not the worker name. With no team the dimension is skipped.
   // No keys at all: the limit does not work (a warning on stderr), not a shared counter under an empty key.
-  const limitTask = (() => { const z = inProgressTasks()[0]; return z ? String(z.id) : null; })();
   const limitGroup = env.OMC_TEAM_WORKER ? String(env.OMC_TEAM_WORKER).split('/')[0] : null;
+  // Native task ids are only team-local, so the task key is qualified with the state root and the team (a bare id would share a counter between teams).
+  const limitTask = (() => { const z = inProgressTasks()[0]; return z ? limit.taskKey({ stateRoot: env.OMC_TEAM_STATE_ROOT, team: limitGroup, id: z.id }) : null; })();
   const limitPath = limit.limitFile(env, profile);
   const lim = limit.limits(env, profile);
   // Every call of the limit library under a guard: an infrastructure error (lock, state path, damaged file) is a message on stderr, a limit-error

@@ -643,6 +643,45 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
       expect(u.env.OMC_PROVIDER).toBe('acme');
     });
 
+    it('(15b) the advisor model in the settings env is resolved with the selected profile (also with rescue off): a profile that lists only sonnet gives sonnet, a model outside the built-in list gives that model, an env value outside the profile models gives null', () => {
+      const team = { ...TEAM, OMC_TEAM_WORKER: 'ptask-abc12345/worker-1' };
+      const only = fixture({ advisor: { defaultModel: 'sonnet', models: ['sonnet'] } });
+      const r1 = only.run(team);
+      expect(r1.status, r1.stderr).toBe(0);
+      expect(only.settingsOf(r1).env.OMC_PROVIDER_ADVISOR_MODEL).toBe('sonnet');
+      const custom = fixture({ advisor: { defaultModel: 'haiku', models: ['haiku', 'sonnet'] } });
+      const r2 = custom.run({ ...team, OMC_PROVIDER_ADVISOR_MODEL: 'Sonnet' });
+      expect(r2.status, r2.stderr).toBe(0);
+      expect(custom.settingsOf(r2).env.OMC_PROVIDER_ADVISOR_MODEL).toBe('sonnet');
+      const r3 = custom.run(team);
+      expect(custom.settingsOf(r3).env.OMC_PROVIDER_ADVISOR_MODEL).toBe('haiku');
+      const r4 = only.run({ ...team, OMC_PROVIDER_ADVISOR_MODEL: 'opus' });
+      expect(only.settingsOf(r4).env.OMC_PROVIDER_ADVISOR_MODEL).toBeNull();
+    });
+
+    it('(15c) the advisor controls of the lead (switches, protocol, event, limits, caps, files) are copied into the settings env after validation, while the child process env stays filtered; invalid values and the test-only variables are not copied', () => {
+      const f = fixture();
+      const controls = {
+        OMC_PROVIDER_ADVISOR_INPUT: '1', OMC_PROVIDER_ADVISOR_PROTOCOL: 'final', OMC_PROVIDER_ADVISOR_JOURNAL: '1', OMC_PROVIDER_ADVISOR_LIMIT: '1',
+        OMC_PROVIDER_ADVISOR_EVENT: 'final', OMC_PROVIDER_ADVISOR_LIMIT_PER_TASK: '3', OMC_PROVIDER_ADVISOR_LIMIT_PER_GROUP: '5', OMC_PROVIDER_ADVISOR_TOP_SLOTS: '1',
+        OMC_PROVIDER_ADVISOR_QUEUE_WAIT_MS: '2500', OMC_PROVIDER_ADVISOR_CAP_ADVICE: '1200', OMC_PROVIDER_ADVISOR_DIFF_BASE: 'main',
+        OMC_PROVIDER_ADVISOR_LOG_FILE: join(f.dir, 'advisor-rows.jsonl'), OMC_PROVIDER_ADVISOR_LIMIT_FILE: join(f.dir, 'advisor-limit-state.json'),
+      };
+      const r = f.run({ ...TEAM, ...controls, OMC_PROVIDER_ADVISOR_CLAUDE_BIN: join(f.dir, 'no-claude'), OMC_PROVIDER_ADVISOR_TIMEOUT_MS: '5', OMC_PROVIDER_ADVISOR_ROLE_FILE: join(f.dir, 'no-role.md') });
+      expect(r.status, r.stderr).toBe(0);
+      const u = f.settingsOf(r);
+      expect(u.env).toMatchObject(controls);
+      for (const name of ['OMC_PROVIDER_ADVISOR_CLAUDE_BIN', 'OMC_PROVIDER_ADVISOR_TIMEOUT_MS', 'OMC_PROVIDER_ADVISOR_ROLE_FILE']) {
+        expect(u.env, name).not.toHaveProperty(name);
+        expect(r.env, name).not.toContain(name);
+      }
+      for (const name of Object.keys(controls)) expect(r.env, name).not.toContain(name);
+      const bad = fixture();
+      const r2 = bad.run({ ...TEAM, OMC_PROVIDER_ADVISOR_INPUT: 'yes', OMC_PROVIDER_ADVISOR_JOURNAL: '0', OMC_PROVIDER_ADVISOR_LIMIT: 'true', OMC_PROVIDER_ADVISOR_PROTOCOL: 'Final Gate!', OMC_PROVIDER_ADVISOR_EVENT: 'whenever', OMC_PROVIDER_ADVISOR_LIMIT_PER_TASK: '-1', OMC_PROVIDER_ADVISOR_TOP_SLOTS: 'x', OMC_PROVIDER_ADVISOR_CAP_ADVICE: '1.5' });
+      expect(r2.status, r2.stderr).toBe(0);
+      expect(Object.keys(bad.settingsOf(r2).env).filter((k) => /^OMC_PROVIDER_ADVISOR_/.test(k)).sort()).toEqual(['OMC_PROVIDER_ADVISOR_COMMAND', 'OMC_PROVIDER_ADVISOR_MODEL']);
+    });
+
     it('(14) with rescue off: no rescue hooks; the task id stays; the existing guard hook is untouched', () => {
       const f = fixture();
       const r = f.run({ ...TEAM, OMC_TEAM_WORKER: 'ptask-abc12345/worker-1' });
@@ -897,6 +936,25 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
     const outside = f.run({ ...TEAM, OMC_TEAM_WORKER_CWD: tmp.dir }, ['--version']);
     expect(outside.status, outside.stderr).toBe(0);
     expect(outside.called).toBe(true);
+  });
+
+  it('(24c) an integrity failure is persisted as the class integrity in the integrity row, also after a clean exit 0 of the executor and after a failed run (the task journal reads the class, so a completed claim cannot be delivered as successful)', () => {
+    const f = fixture();
+    const repo = join(f.dir, 'repo-integrity-class');
+    spawnSync('git', ['init', repo], { encoding: 'utf8' });
+    spawnSync('git', ['-C', repo, '-c', 'user.name=a', '-c', 'user.email=a@b', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'p'], { encoding: 'utf8' });
+    const env = { ...TEAM, OMC_TEAM_WORKER_CWD: repo };
+    const touch = { touch: join(repo, '.git', 'hooks', 'pre-commit') };
+    const clean = f.run(env, ['--dangerously-skip-permissions', '--model', 'sonnet']);
+    expect(clean.status, clean.stderr).toBe(0);
+    expect(f.rows().some((row) => row.class === vocab.FAILURE_CLASSES.INTEGRITY)).toBe(false);
+    const attack = f.run(env, ['--dangerously-skip-permissions', '--model', 'sonnet'], { fake: touch });
+    expect(attack.status).toBe(1);
+    expect(f.rows().at(-1).result).toBe(vocab.WORKER_EVENT_RESULTS.INTEGRITY);
+    expect(f.rows().at(-1).class).toBe(vocab.FAILURE_CLASSES.INTEGRITY);
+    const failed = f.run(env, ['--dangerously-skip-permissions', '--model', 'sonnet'], { fake: { ...touch, exit: 3 } });
+    expect(failed.status).toBe(1);
+    expect(f.rows().at(-1).class).toBe(vocab.FAILURE_CLASSES.INTEGRITY);
   });
 
   it('(26) a provider role gets --strict-mcp-config with an empty --mcp-config, a settings file without mcpServers and with the subagent model and OMC_JEV=off; a Claude role gets no MCP flags; an own --mcp-config of the caller stays without a duplicate', () => {

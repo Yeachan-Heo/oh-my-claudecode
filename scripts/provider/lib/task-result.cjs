@@ -193,7 +193,7 @@ function validateValues(fields, errors) {
 }
 
 // Completed tasks. Order of rules in this branch: request channel -> empty result -> failed (empty_response);
-// model_mismatch -> failed (model); strict parsing (invalid -> unknown); then the facts from the journal (a green
+// integrity class -> failed; model_mismatch -> failed (model); strict parsing (invalid -> unknown); then the facts from the journal (a green
 // declaration with bash_last_code != 0, success_without_changes) and the announcement heuristic, each moving
 // success to unknown; finally the cause from the failure-class map when the payload gave none.
 function evaluateCompleted(evaluation, task, facts, warnings) {
@@ -210,6 +210,13 @@ function evaluateCompleted(evaluation, task, facts, warnings) {
     evaluation.status = vocab.STATUSES.FAILED;
     evaluation.cause = EMPTY_RESPONSE;
     if (!empty) evaluation.errors.push(`${EMPTY_RESPONSE}: journal warning with a non-empty result`);
+    evaluation.handoff = true;
+    return;
+  }
+  // Fail closed: an integrity failure of the worker (it changed the shared part of .git; class integrity in the journal) means the result is not accepted.
+  if (facts?.class === vocab.FAILURE_CLASSES.INTEGRITY) {
+    evaluation.status = vocab.STATUSES.FAILED;
+    evaluation.errors.push('integrity: the worker changed the shared part of .git, fail closed, the result is not accepted');
     evaluation.handoff = true;
     return;
   }

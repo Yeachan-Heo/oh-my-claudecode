@@ -28,7 +28,7 @@ const { homedir } = require('node:os');
 const SIGNAL_NUMBERS = require('node:os').constants.signals;
 const { dirname, join } = require('node:path');
 const { ProfileError, loadProfile, stateDirOf, statePath } = require('./lib/profile.cjs');
-const { executorEnv, isForeignProvider, stripProviderEnv } = require('./lib/env.cjs');
+const { advisorControls, executorEnv, isForeignProvider, stripProviderEnv } = require('./lib/env.cjs');
 const { mask } = require('./lib/redact.cjs');
 const settingsLib = require('./lib/settings.cjs');
 const { acquireSlot, releaseSlot } = require('./lib/slots.cjs');
@@ -38,7 +38,7 @@ const { failureClass } = require('./lib/failure-class.cjs');
 const { gitDigest, compareDigest } = require('./lib/git-integrity.cjs');
 const { addNeed } = require('./lib/hook-need.cjs');
 const { addRescue } = require('./lib/hook-rescue.cjs');
-const { TASK_TEAM_RE, WORKER_EVENT_RESULTS: RESULT } = require('./lib/vocab.cjs');
+const { FAILURE_CLASSES, TASK_TEAM_RE, WORKER_EVENT_RESULTS: RESULT } = require('./lib/vocab.cjs');
 
 const POINT = 'team-worker';
 const fail = (code, text) => { console.error(`provider-worker: ${mask(text)}`); process.exit(code); };
@@ -224,6 +224,8 @@ if (!direct && !env.OMC_TEAM_WORKER) {
     const aliasId = (alias) => (profile.models[alias] && profile.models[alias].id) || null;
     const subagent = profile.subagentModel ? (aliasId(profile.subagentModel) || profile.subagentModel) : aliasId(profile.models.haiku ? 'haiku' : profile.models.default);
     Object.assign(settings.env, { ...(subagent ? { CLAUDE_CODE_SUBAGENT_MODEL: subagent } : {}), ...(profile.worker.disableJev ? { OMC_JEV: 'off' } : {}), OMC_PROVIDER_ADVISOR_COMMAND: profile.advisor.commandName });
+    // The advisor controls of the lead (switches, protocol, limits, caps) pass the executor env filter only through the settings env block.
+    Object.assign(settings.env, advisorControls(env));
     // Hook for AskUserQuestion (always a denial with NEED:; the tool-call counter when a limit is set or the team is a task team) and the limit in the settings env block.
     addNeed(settings, { script: join(__dirname, 'provider-hook-need.cjs'), counter: maxToolCalls > 0 || TASK_TEAM_RE.test(team) });
     if (maxToolCalls > 0) Object.assign(settings.env, { OMC_PROVIDER_MAX_TOOL_CALLS: String(maxToolCalls) });
@@ -232,7 +234,7 @@ if (!direct && !env.OMC_TEAM_WORKER) {
     for (const [variable, value] of [['OMC_PROVIDER_RESCUE', profile.rescue.mode], ['OMC_PROVIDER_RESCUE_THRESHOLD', String(profile.rescue.threshold)], ['OMC_PROVIDER_RESCUE_ADVISOR_LIMIT', String(profile.rescue.advisorLimit)]]) {
       if (!rescueEnv[variable]) rescueEnv[variable] = value;
     }
-    addRescue(settings, { env: rescueEnv, team, script: join(__dirname, 'provider-hook-rescue.cjs') });
+    addRescue(settings, { env: rescueEnv, team, script: join(__dirname, 'provider-hook-rescue.cjs'), profile });
     writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     chmodSync(file, 0o600);
     base.push('--settings', file);
@@ -323,11 +325,11 @@ if (!direct && !env.OMC_TEAM_WORKER) {
   }
   if (result.error) fail(127, `cannot start claude: ${result.error.code || result.error.message}`);
   // Integrity check of .git after the worker ends: a change of the shared part (config, hooks, info/*) makes the task failed with the class integrity
-  // (an event row), with a message for the lead on stderr (pane) and no result handed over (the lead decides). The check only detects: a hook written by the worker may stay on disk, the lead removes it.
+  // (an event row with the class integrity, which the task journal and the result validator read, so a completed claim is not delivered as success), with a message for the lead on stderr (pane) and no result handed over (the lead decides). The check only detects: a hook written by the worker may stay on disk, the lead removes it.
   if (digestBefore) {
     const difference = compareDigest(digestBefore, gitDigest(gitCwd));
     if (difference) {
-      record({ ...baseRow, result: RESULT.INTEGRITY, git_change: difference, launcher_exit: result.status ?? (result.signal ? `signal:${result.signal}` : null) });
+      record({ ...baseRow, result: RESULT.INTEGRITY, class: FAILURE_CLASSES.INTEGRITY, git_change: difference, launcher_exit: result.status ?? (result.signal ? `signal:${result.signal}` : null) });
       fail(1, `the worker changed .git of the repository (${gitCwd}): ${difference}; task failed (class integrity), the result is not handed over; the check only detects: a hook written by the worker may have stayed on disk, the lead removes it`);
     }
   }

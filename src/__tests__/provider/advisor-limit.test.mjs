@@ -24,7 +24,7 @@ const js = JSON.stringify;
 const check = (condition, message) => expect(Boolean(condition), typeof message === 'function' ? message() : message).toBe(true);
 
 describe.skipIf(process.platform === 'win32')('advisor limit and queue', () => {
-  let tmp; let TMP; let FAKE; let JOURNAL; let STATE; let STATE_ROOT; let n = 0;
+  let tmp; let TMP; let FAKE; let JOURNAL; let STATE; let STATE_ROOT; let Z1; let n = 0; // Z1: the task key of the fixture task (state root, team and task id)
   const base = () => ({
     PATH: process.env.PATH, HOME: TMP, OMC_PROVIDER_ADVISOR_CLAUDE_BIN: FAKE, OMC_PROVIDER_ADVISOR_LOG_FILE: JOURNAL, OMC_PROVIDER_ADVISOR_LIMIT_FILE: STATE,
     OMC_TEAM_WORKER: 'team-l/worker-l', OMC_TEAM_STATE_ROOT: STATE_ROOT, OMC_PROVIDER_ADVISOR_LIMIT: '1', OMC_PROVIDER_ADVISOR_LIMIT_PER_TASK: '4', OMC_PROVIDER_ADVISOR_LIMIT_PER_GROUP: '4', OMC_PROVIDER_ADVISOR_TOP_SLOTS: '2', OMC_PROVIDER_ADVISOR_QUEUE_WAIT_MS: '4000',
@@ -41,6 +41,7 @@ describe.skipIf(process.platform === 'win32')('advisor limit and queue', () => {
     JOURNAL = join(TMP, 'data', 'advisor.jsonl');
     STATE = join(TMP, 'data', 'advisor-limit.json');
     STATE_ROOT = join(TMP, 'team-state');
+    Z1 = [STATE_ROOT, 'team-l', 'z-1'].join('|');
     mkdirSync(join(STATE_ROOT, 'tasks'), { recursive: true });
     writeFileSync(join(STATE_ROOT, 'tasks', 'z-1.json'), js({ id: 'z-1', subject: 'limit task', description: 'x', status: 'in_progress', owner: 'worker-l' }));
   });
@@ -210,14 +211,34 @@ setTimeout(() => process.exit(0), 3000);
     check(/continue without the advisor or report to the lead/.test(r2.stderr) && /OMC_PROVIDER_ADVISOR_LIMIT_PER_TASK/.test(r2.stderr), js(r2.stderr.slice(0, 200)));
     const w = rows().at(-1);
     check(w.status === 'refused-task-limit' && w.limit_reason === 'task' && w.limit_left === 0, js(w));
-    check(state().tasks['z-1'].used === 1 && state().tasks['z-1'].reserved === 0, js(state().tasks)); // the refusal did not raise it
+    check(state().tasks[Z1].used === 1 && state().tasks[Z1].reserved === 0, js(state().tasks)); // the refusal did not raise it
+  });
+  it('(L9b) task ids are team-local: the same task id in another team (its own state root) does not share the per-task counter, while the same team and task is still refused; the counters of both teams are kept apart in the state file', () => {
+    const file = join(TMP, 'l9b.json');
+    const rootOf = (name) => {
+      const root = join(TMP, `team-state-${name}`);
+      mkdirSync(join(root, 'tasks'), { recursive: true });
+      writeFileSync(join(root, 'tasks', '1.json'), js({ id: '1', subject: 'native task', description: 'x', status: 'in_progress', owner: 'worker-l' }));
+      return root;
+    };
+    const one = { OMC_PROVIDER_ADVISOR_LIMIT_FILE: file, OMC_PROVIDER_ADVISOR_LIMIT_PER_TASK: '1', OMC_PROVIDER_ADVISOR_LIMIT_PER_GROUP: '5' };
+    const a = { ...one, OMC_TEAM_WORKER: 'team-one/worker-l', OMC_TEAM_STATE_ROOT: rootOf('one') };
+    const b = { ...one, OMC_TEAM_WORKER: 'team-two/worker-l', OMC_TEAM_STATE_ROOT: rootOf('two') };
+    const first = advisor(a, ['question-L9b-first']);
+    check(first.status === 0 && first.called, js({ s: first.status, e: first.stderr.slice(0, 150) }));
+    const other = advisor(b, ['question-L9b-other-team']);
+    check(other.status === 0 && other.called && other.stdout.includes('ADVISOR-LIMIT: 0 left'), js({ s: other.status, e: other.stderr.slice(0, 150), o: other.stdout.slice(-60) }));
+    const again = advisor(a, ['question-L9b-same-team']);
+    check(again.status === 2 && !again.called && rows().at(-1).limit_reason === 'task', js({ s: again.status, e: again.stderr.slice(0, 150) }));
+    const counters = Object.values(state(file).tasks);
+    check(counters.length === 2 && counters.every((c) => c.used === 1 && c.reserved === 0), js(state(file).tasks));
   });
   it('(L10) ok with the limit: the line "ADVISOR-LIMIT: 3 left" in the answer; commit: used + 1, slots empty, the bucket released (top 0); permissions of the state 0600, the directory 0700', () => {
     const file = join(TMP, 'l10', 'limit.json');
     const r = advisor({ OMC_PROVIDER_ADVISOR_LIMIT_FILE: file }, ['question-L10']);
     check(r.status === 0 && r.stdout.includes('STUB-ANSWER') && r.stdout.includes('ADVISOR-LIMIT: 3 left'), js(r.stdout.slice(-100)));
     const st = state(file);
-    check(st.tasks['z-1'].used === 1 && st.tasks['z-1'].reserved === 0 && st.slots.length === 0 && st.top.length === 0, js(st));
+    check(st.tasks[Z1].used === 1 && st.tasks[Z1].reserved === 0 && st.slots.length === 0 && st.top.length === 0, js(st));
     check((statSync(file).mode & 0o777) === 0o600, (statSync(file).mode & 0o777).toString(8));
     check((statSync(dirname(file)).mode & 0o777) === 0o700, (statSync(dirname(file)).mode & 0o777).toString(8));
   });
@@ -228,7 +249,7 @@ setTimeout(() => process.exit(0), 3000);
     const w = rows().at(-1);
     check(w.status === 'ok' && w.retry_429 === 1, js(w));
     const st = state(file);
-    check(st.tasks['z-1'].used === 1 && st.tasks['z-1'].reserved === 0 && st.top.length === 0, js(st));
+    check(st.tasks[Z1].used === 1 && st.tasks[Z1].reserved === 0 && st.top.length === 0, js(st));
   });
   it('(L12) an answer from the journal: the same question plus diff (the input hash) -> advice from the journal with no model call and no slot; a type=cache row in the journal; status() counts journal_hits outside the consultations', () => {
     const on = { OMC_PROVIDER_ADVISOR_JOURNAL: '1', OMC_PROVIDER_ADVISOR_INPUT: '1', OMC_PROVIDER_ADVISOR_LIMIT_FILE: join(TMP, 'l12.json') };
@@ -243,7 +264,7 @@ setTimeout(() => process.exit(0), 3000);
     const wc = rows().at(-1);
     check(wc.type === 'cache' && wc.source_id === endA.consultation_id && wc.status === 'from-journal' && !('advice' in wc), js(wc));
     const st = state(on.OMC_PROVIDER_ADVISOR_LIMIT_FILE);
-    check(st.tasks['z-1'].used === 1 && st.tasks['z-1'].reserved === 0, js(st.tasks)); // the cache did not consume a slot
+    check(st.tasks[Z1].used === 1 && st.tasks[Z1].reserved === 0, js(st.tasks)); // the cache did not consume a slot
     const stat = journalLib.status({ path: JOURNAL, windowHours: 5 });
     check(stat.journal_hits >= 1, js(stat.journal_hits));
   });
@@ -262,10 +283,10 @@ setTimeout(() => process.exit(0), 3000);
   it('(L14) refunds of the slot on the error paths: (a) a rate-limit refusal twice (after the retry is exhausted): exit 5, status refused-limit, a refund (reserved 0); (b) a fake timeout: exit 124, status timeout, a refund (reserved 0); the bucket released in both', () => {
     const file = join(TMP, 'l14.json');
     const a2 = advisor({ OMC_PROVIDER_ADVISOR_TIMEOUT_MS: '30000', OMC_PROVIDER_ADVISOR_LIMIT_FILE: file }, ['question-L14a'], { scenario: '429-twice' });
-    check(a2.status === 5 && rows().at(-1).status === 'refused-limit' && state(file).tasks['z-1'].used === 0 && state(file).tasks['z-1'].reserved === 0, js({ s: a2.status, w: rows().at(-1).status, z: state(file).tasks }));
+    check(a2.status === 5 && rows().at(-1).status === 'refused-limit' && state(file).tasks[Z1].used === 0 && state(file).tasks[Z1].reserved === 0, js({ s: a2.status, w: rows().at(-1).status, z: state(file).tasks }));
     check(rows().at(-1).retry_429 === 1, 'no trace of the retry with refused-limit');
     const t2 = advisor({ OMC_PROVIDER_ADVISOR_TIMEOUT_MS: '500', OMC_PROVIDER_ADVISOR_LIMIT_FILE: file }, ['question-L14b'], { scenario: 'sleep' });
-    check(t2.status === 124 && rows().at(-1).status === 'timeout' && state(file).tasks['z-1'].used === 0 && state(file).tasks['z-1'].reserved === 0, js({ s: t2.status, w: rows().at(-1).status, z: state(file).tasks }));
+    check(t2.status === 124 && rows().at(-1).status === 'timeout' && state(file).tasks[Z1].used === 0 && state(file).tasks[Z1].reserved === 0, js({ s: t2.status, w: rows().at(-1).status, z: state(file).tasks }));
     check(state(file).top.length === 0, 'the bucket was not released after the errors');
   });
 

@@ -7,9 +7,11 @@ const { TASK_TEAM_RE } = require('./vocab.cjs');
 
 // Parameters of the rescue come from OMC_PROVIDER_RESCUE, OMC_PROVIDER_RESCUE_THRESHOLD, OMC_PROVIDER_RESCUE_ADVISOR_LIMIT and
 // OMC_PROVIDER_ADVISOR_MODEL. A bad value of the first three: a message on stderr and the default; a bad advisor model passes
-// through as null (the advisor refuses the consultation with exit code 2, it validates the value itself).
+// through as null (the advisor refuses the consultation with exit code 2, it validates the value itself). The advisor model is
+// resolved with the profile when one is given (advisor.defaultModel and advisor.models of the selected profile), otherwise with
+// the built-in advisor defaults.
 const RESCUE_MODES = new Set(['off', 'shadow', 'active']);
-function rescueParams(env = process.env, stderr = (t) => process.stderr.write(t)) {
+function rescueParams(env = process.env, stderr = (t) => process.stderr.write(t), profile = {}) {
   const value = (key, allowed, fallback) => {
     const s = String(env[key] ?? '').trim();
     if (!s) return fallback;
@@ -28,7 +30,7 @@ function rescueParams(env = process.env, stderr = (t) => process.stderr.write(t)
     mode: value('OMC_PROVIDER_RESCUE', RESCUE_MODES, 'off'),
     threshold: number('OMC_PROVIDER_RESCUE_THRESHOLD', 1, 2),
     limit: number('OMC_PROVIDER_RESCUE_ADVISOR_LIMIT', 0, 2),
-    model: advisorModel({}, env),
+    model: advisorModel(profile || {}, env),
   };
 }
 
@@ -41,8 +43,8 @@ function rescueCommand(script, mode) {
 
 // Adds the validated parameters to the env block of the settings and, unless the mode is off, the hooks (PreToolUse, PostToolUse,
 // PostToolUseFailure for Bash). The task key for the hooks comes from the team name.
-function addRescue(settings, { env = process.env, team = '', script = '' } = {}) {
-  const p = rescueParams(env);
+function addRescue(settings, { env = process.env, team = '', script = '', profile = {} } = {}) {
+  const p = rescueParams(env, undefined, profile);
   settings.env = {
     ...(settings.env && typeof settings.env === 'object' ? settings.env : {}),
     OMC_PROVIDER_RESCUE: p.mode,

@@ -164,6 +164,19 @@ describe.skipIf(process.platform === 'win32')('provider task result validator', 
     assert.equal(fromPayload.cause, 'quota', js(fromPayload));
   });
 
+  it('(13b) facts.class integrity is fail closed: a valid completed success claim is failed with a handoff, whatever the payload says; a payload with a failed status stays failed with the handoff', () => {
+    const w = evaluateResult({ task: { status: 'completed', result: DONECLAIM }, facts: { class: 'integrity' } });
+    assert.equal(w.status, 'failed', js(w));
+    assert.equal(w.handoff, true, js(w));
+    assert.ok(w.errors.some((b) => b.startsWith('integrity:')), js(w.errors));
+    const partial = evaluateResult({ task: { status: 'completed', result: `${DONECLAIM.replace('Status: success', 'Status: partial_success')}\nGaps: x` }, facts: { class: 'integrity' } });
+    assert.equal(partial.status, 'failed', js(partial));
+    assert.equal(partial.handoff, true, js(partial));
+    const clean = evaluateResult({ task: { status: 'completed', result: DONECLAIM }, facts: { class: 'other' } });
+    assert.equal(clean.status, 'success', js(clean));
+    assert.equal(clean.handoff, false, js(clean));
+  });
+
   it('(14) facts: model_mismatch is fail closed, failed with cause model even with a valid success', () => {
     const w = evaluateResult({ task: { status: 'completed', result: DONECLAIM }, facts: { warnings: ['model_mismatch'] } });
     assert.equal(w.status, 'failed', js(w));

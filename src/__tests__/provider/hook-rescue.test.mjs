@@ -283,4 +283,14 @@ describe.skipIf(process.platform === 'win32')('provider hook rescue', () => {
     expect(active.hooks.PreToolUse.length).toBe(2);
     expect(active.env.OMC_PROVIDER_TASK_ID).toBeUndefined();
   });
+
+  it('advisor model: addRescue and rescueParams resolve the model with the profile when one is given (its default and its list, not the built-in ones), also with the mode off; without a profile the built-in default applies', () => {
+    const profile = { advisor: { defaultModel: 'sonnet', models: ['sonnet'] } };
+    const off = rescue.addRescue({}, { env: { OMC_PROVIDER_RESCUE: 'off' }, team: 'plain-team', script: SCRIPT, profile });
+    expect(off.env.OMC_PROVIDER_ADVISOR_MODEL).toBe('sonnet');
+    expect(rescue.rescueParams({}, () => {}, profile).model).toBe('sonnet');
+    expect(rescue.rescueParams({ OMC_PROVIDER_ADVISOR_MODEL: 'opus' }, () => {}, profile).model).toBeNull();
+    expect(rescue.rescueParams({ OMC_PROVIDER_ADVISOR_MODEL: ' Haiku ' }, () => {}, { advisor: { defaultModel: 'haiku', models: ['haiku'] } }).model).toBe('haiku');
+    expect(rescue.addRescue({}, { env: {}, team: '', script: SCRIPT }).env.OMC_PROVIDER_ADVISOR_MODEL).toBe('opus');
+  });
 });

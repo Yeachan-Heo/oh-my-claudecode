@@ -4,6 +4,8 @@
 // away from processes that must use the default provider, and the allow-list that
 // builds a worker's environment from scratch.
 
+const { ADVISOR_EVENTS } = require('./vocab.cjs');
+
 const CREDENTIAL_ENV = Object.freeze(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']);
 const MARKER_ENV = Object.freeze(['OMC_PROVIDER', 'OMC_PROVIDER_SETTINGS_FILE']);
 const FABLE_ENV = 'ANTHROPIC_DEFAULT_FABLE_MODEL';
@@ -94,6 +96,46 @@ const HOOK_ENV = Object.freeze([
   'OMC_ALLOW_LOOPBACK_PROXY_PORT',
 ]);
 
+// Advisor controls of the lead (documented in docs/PROVIDER-WORKERS.md): the executor env drops every OMC_PROVIDER_* name, so the validated values go
+// into the settings env block of the worker, where the advisor command reads them. A value that does not pass its check is not copied (the advisor
+// then behaves as if it were unset). The test-only variables (OMC_PROVIDER_ADVISOR_CLAUDE_BIN, _TIMEOUT_MS, _ROLE_FILE) and the model, which has its
+// own profile-aware resolution, are not in this list.
+const isSwitch = (v) => v === '1';
+const isPositiveInt = (v) => /^[1-9][0-9]{0,8}$/.test(v);
+const isText = (v) => v.trim() !== '' && v.length <= 4096 && ![...v].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127);
+const ADVISOR_CONTROLS = Object.freeze({
+  OMC_PROVIDER_ADVISOR_INPUT: isSwitch,
+  OMC_PROVIDER_ADVISOR_JOURNAL: isSwitch,
+  OMC_PROVIDER_ADVISOR_LIMIT: isSwitch,
+  OMC_PROVIDER_ADVISOR_PROTOCOL: (v) => /^[a-z0-9-]{1,40}$/.test(v),
+  OMC_PROVIDER_ADVISOR_EVENT: (v) => Object.values(ADVISOR_EVENTS).includes(v),
+  OMC_PROVIDER_ADVISOR_LIMIT_PER_TASK: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_LIMIT_PER_GROUP: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_TOP_SLOTS: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_QUEUE_WAIT_MS: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_CAP_INPUT: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_CAP_FILE: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_CAP_FILES_TOTAL: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_CAP_FILE_COUNT: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_CAP_DIFF_FILE: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_CAP_MATERIAL_HEAD: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_CAP_MATERIAL_TAIL: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_CAP_ADVICE: isPositiveInt,
+  OMC_PROVIDER_ADVISOR_DIFF_BASE: (v) => isText(v) && !/\s/.test(v) && !v.startsWith('-'),
+  OMC_PROVIDER_ADVISOR_LOG_FILE: isText,
+  OMC_PROVIDER_ADVISOR_LIMIT_FILE: isText,
+});
+
+// The validated advisor controls of `env` as { name: value } for the settings env block of a worker.
+function advisorControls(env) {
+  const result = {};
+  for (const [name, valid] of Object.entries(ADVISOR_CONTROLS)) {
+    const value = env[name];
+    if (typeof value === 'string' && valid(value)) result[name] = value;
+  }
+  return result;
+}
+
 // Allow-list for executor environments (built from these names, not by removing known ones).
 const BASE_ENV = Object.freeze(['PATH', 'HOME', 'USER', 'LANG', 'TMPDIR', 'TZ', 'TERM', 'COLORTERM', 'TMUX', 'TMUX_PANE', 'SHELL', 'LOGNAME', 'DISABLE_AUTOUPDATER', 'DISABLE_ERROR_REPORTING']);
 const SESSION_ENV = Object.freeze(['SSH_AUTH_SOCK', 'CLAUDE_CONFIG_DIR', 'XDG_RUNTIME_DIR']);
@@ -152,6 +194,8 @@ module.exports = {
   MARKER_ENV,
   DENY_ENV,
   HOOK_ENV,
+  ADVISOR_CONTROLS,
+  advisorControls,
   BASE_ENV,
   stripProviderEnv,
   stripOverrides,

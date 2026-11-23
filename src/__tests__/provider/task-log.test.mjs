@@ -425,4 +425,21 @@ describe.skipIf(process.platform === 'win32')('provider task journal', () => {
     assert.equal(w.tokens_cache, 1000, 'cache 500 + 500 per row');
     assert.equal(w.bash_calls, 1, 'Bash as before (the last turn without tool_use)');
   });
+
+  it('(19) an integrity row of the worker gives the task class integrity: after a clean exit (no end row), after a failure class, and also when a later row of the same team carries another class', () => {
+    const f = fixture();
+    const { taskRow } = logModule();
+    const rowsOf = (z, extra) => appendFileSync(join(f.state, 'workers.jsonl'), extra.map((w) => JSON.stringify({ ts: new Date().toISOString(), point: 'team-worker', name: `${z.team}/executor`, team: z.team, ...w })).join('\n') + '\n');
+    const clean = buildTask(f, {});
+    rowsOf(clean, [{ result: 'integrity', git_change: 'hooks/pre-commit', launcher_exit: 0, class: 'integrity' }]);
+    assert.equal(taskRow(clean.id, { env: f.env, git: false }).class, 'integrity', 'integrity after exit 0');
+    const failed = buildTask(f, { status: 'failed' });
+    rowsOf(failed, [{ result: 'integrity', git_change: 'config', launcher_exit: 1, class: 'integrity' }]);
+    assert.equal(taskRow(failed.id, { env: f.env, git: false }).class, 'integrity', 'integrity after a failure class');
+    const later = buildTask(f, {});
+    rowsOf(later, [{ result: 'integrity', git_change: 'config', launcher_exit: 0, class: 'integrity' }, { result: 'end', exit_code: 1, class: 'throttle' }]);
+    assert.equal(taskRow(later.id, { env: f.env, git: false }).class, 'integrity', 'a later class overwrote the integrity failure');
+    const plain = buildTask(f, { status: 'failed' });
+    assert.equal(taskRow(plain.id, { env: f.env, git: false }).class, 'other', 'without an integrity row the last class stays');
+  });
 });
