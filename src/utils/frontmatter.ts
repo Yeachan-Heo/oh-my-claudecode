@@ -207,9 +207,13 @@ function stripTrailingComment(value: string): string {
       continue;
     }
     if (char === '"' || char === "'") {
-      // A quote opens a scalar only at the start of the value or of a flow item.
-      const before = value.slice(0, i).trimEnd();
-      if (before === "" || /[[{,:]$/.test(before)) quote = char;
+      // A quote opens a scalar only at the start of the value, of a flow item
+      // (after `[`, `{` or `,`) or of a flow mapping value (after `:` and
+      // whitespace). In `[a:", b]` the quote is part of the plain scalar `a:"`.
+      const before = value.slice(0, i);
+      if (before.trim() === "" || /[[{,]\s*$/.test(before) || /:\s+$/.test(before)) {
+        quote = char;
+      }
       continue;
     }
     if (char === "#" && (i === 0 || value[i - 1] === " " || value[i - 1] === "\t")) {

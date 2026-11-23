@@ -623,6 +623,13 @@ describe("parseFrontmatter trailing comments", () => {
     });
   });
 
+  it("does not open a quote after a colon inside a plain flow item", () => {
+    const { aliases } = parse('aliases: [a:", "b # c", working]');
+    expect(aliases).toBe('[a:", "b # c", working]');
+    expect(parseFrontmatterAliases(aliases)).toEqual(['a:"', "b # c", "working"]);
+    expect(parse('map: {k: "v # x"} # c').map).toBe('{k: "v # x"}');
+  });
+
   it("reads a commented alias list as a list", () => {
     expect(parseFrontmatterAliases(parse("aliases: [foo, bar] # legacy").aliases)).toEqual([
       "foo",
