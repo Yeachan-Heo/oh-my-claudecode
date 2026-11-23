@@ -518,6 +518,14 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard hook', { timeout: 90000 }, () => 
     expect(await hookHeld(f, 'other0001', { env: { ...ENV, ANTHROPIC_BASE_URL: 'https://api.anthropic.com' } })).toBe(true);
   });
 
+  it('a Bedrock or Vertex session (routing flag, no base URL) passes; the flag set to anything but 1 does not exempt', async () => {
+    const f = fixture('hook-cloud');
+    writePause(f);
+    expect(await hookPasses(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_BEDROCK: '1' } }), 'Bedrock flag passes').toBe(true);
+    expect(await hookPasses(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_VERTEX: '1' } }), 'Vertex flag passes').toBe(true);
+    expect(await hookHeld(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_BEDROCK: '0', CLAUDE_CODE_USE_VERTEX: '' } }), 'flags that are off hold').toBe(true);
+  });
+
   it('a valid pause holds for as long as it lasts (2.5 s of polling), exit 0 only after the pause file is gone', async () => {
     const f = fixture('hook-long');
     writePause(f);

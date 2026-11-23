@@ -3,8 +3,8 @@
 // command that `add` writes, run through `sh -c` the way Claude Code runs it.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, copyFileSync, existsSync, readFileSync, linkSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   ENV, CONFIG_DIR, HAS_PYTHON3, HOOK, PYBIN, SETTINGS_TOOL, TMP, cleanup, fixture, readJson, readText, runCommand, runPyCode, runSync, sleep,
   writePause, type Fixture,
@@ -289,6 +289,34 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(viaTilde.stdout).toContain(join(home, 'cfg', 'settings.json'));
     const blank = runSync(SETTINGS_TOOL, ['check'], { env: { ...env, CLAUDE_CONFIG_DIR: '   ' } });
     expect(blank.stdout, 'a blank value counts as unset').toContain(join(home, '.claude', 'settings.json'));
+  });
+
+  it('the registration block of the README installs and checks, it does not remove (copying it whole must leave the hook registered)', () => {
+    const readme = readFileSync(join(dirname(SETTINGS_TOOL), 'README.md'), 'utf8');
+    const step = readme.slice(readme.indexOf('3. Register the hook'));
+    const block = step.split('```')[1];
+    const actions = [...block.matchAll(/five-hour-guard-settings\.py (\w+)/g)].map((m) => m[1]);
+    expect(actions).toEqual(['add', 'check']);
+  });
+
+  it('add refuses a hook file whose name is not the one the entry is recognised by, so every accepted entry can be checked and removed', () => {
+    const f = fixture('settings-renamed-hook');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const renamed = join(f.dir, 'hold.py');
+    copyFileSync(HOOK, renamed);
+    const r = tool(f, 'add', ['--hook', renamed]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/file name .* five-hour-guard-hook\.py/);
+    expect(readText(f.settings), 'nothing written').toBe(original);
+    expect(backups(f), 'no backup either').toHaveLength(0);
+    const copy = join(f.dir, 'opt', 'five-hour-guard-hook.py');
+    mkdirSync(join(f.dir, 'opt'));
+    copyFileSync(HOOK, copy);
+    expect(tool(f, 'add', ['--hook', copy]).status, 'the same file name in another directory is accepted').toBe(0);
+    expect(tool(f, 'check').status, 'and found by check').toBe(0);
+    expect(tool(f, 'remove').stdout, 'and removed').toMatch(/remove: done/);
+    expect(readJson(f.settings).hooks.PreToolUse, 'nothing of ours is left').toEqual(base().hooks.PreToolUse);
   });
 
   it('add refuses relative or missing paths; a settings file of the wrong shape is an error, not a crash', () => {

@@ -68,7 +68,7 @@ other's pause.
 | the hook runs longer than its `timeout` in `settings.json` (21600 s, longer than a window plus margin) | Claude Code cancels the hook and, on `PreToolUse`, the tool call goes on, according to its [hooks documentation](https://code.claude.com/docs/en/hooks) ("Timeouts", read on 2026-11-21) |
 | the session id starts with a prefix of `exclude` | the tool call passes |
 | the pause names `only` prefixes and the session id starts with none of them | the tool call passes |
-| `ANTHROPIC_BASE_URL` is set to a host outside `anthropic.com` | the tool call passes: that session does not use the Anthropic window |
+| `ANTHROPIC_BASE_URL` is set to a host outside `anthropic.com`, or `CLAUDE_CODE_USE_BEDROCK=1` or `CLAUDE_CODE_USE_VERTEX=1` is set | the tool call passes: that session does not use the Anthropic window |
 | any exception inside the hook | exit 0 |
 
 A dead guard therefore releases the sessions within `--heartbeat` seconds (300 by default, 1800 at most), and a pause file
@@ -159,14 +159,14 @@ believed (`reset-too-far`). Read the log once after you start the guard.
    ```
    python3 -I ~/.claude/five-hour-guard/five-hour-guard-settings.py add --config ~/.claude/five-hour-guard/config.json
    python3 -I ~/.claude/five-hour-guard/five-hour-guard-settings.py check --config ~/.claude/five-hour-guard/config.json
-   python3 -I ~/.claude/five-hour-guard/five-hour-guard-settings.py remove --config ~/.claude/five-hour-guard/config.json
    ```
 
    `add` and `remove` write a timestamped backup next to `settings.json` and then replace the file atomically. The
    temporary file and the backup are created readable by the owner only and get the mode of the original before any
    content is written. The rest of the file is kept as it is; a hook of another tool, also in the same group, stays (in
    a group of its own with its matcher). `add` twice changes nothing. `add` with another hook path replaces the entry in
-   place. `add` refuses paths that are not absolute and a hook or interpreter file that does not exist (exit 2). The
+   place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, and a hook file whose
+   name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The
    entry has a `timeout` of 21600 s (`--timeout`), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
    another program writes `settings.json` while the tool works, the tool reads it again once and then gives up (exit 2,
@@ -254,7 +254,11 @@ of `exclude` in the file takes effect when the guard is restarted. Sessions rout
 - Run the stop command from a terminal outside the held sessions: in a held session the command itself waits.
 - Removing the pause file by hand lets the sessions go for one check at most: a running guard writes it again on the
   next tick. It helps when the guard is dead, and then the sessions are released after `--heartbeat` seconds anyway.
-- Remove the hook entry with `five-hour-guard-settings.py remove`.
+- Remove the hook entry:
+
+  ```
+  python3 -I ~/.claude/five-hour-guard/five-hour-guard-settings.py remove --config ~/.claude/five-hour-guard/config.json
+  ```
 
 ## Limits
 

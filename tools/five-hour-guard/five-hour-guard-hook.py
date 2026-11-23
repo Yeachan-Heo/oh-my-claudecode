@@ -74,7 +74,10 @@ def log(msg):
 
 
 def foreign_provider():
-    """Sessions routed to another API provider (a base URL outside anthropic.com) do not draw on the Anthropic five-hour window."""
+    """Sessions routed to another API provider do not draw on the Anthropic five-hour window: a base URL outside
+    anthropic.com, or the Bedrock or Vertex routing flag of Claude Code (set to 1, without any base URL)."""
+    if os.environ.get('CLAUDE_CODE_USE_BEDROCK') == '1' or os.environ.get('CLAUDE_CODE_USE_VERTEX') == '1':
+        return True
     base = os.environ.get('ANTHROPIC_BASE_URL', '')
     return bool(base) and 'anthropic.com' not in base
 

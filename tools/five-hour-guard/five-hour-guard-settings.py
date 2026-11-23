@@ -14,7 +14,8 @@
 # with another hook path replaces the entry in place, in one write (there is no moment without a hook entry). Only our hook
 # is touched: when a group of settings.json holds our hook next to another one, the other hook stays (in a group of its
 # own, matcher kept). `add` refuses (exit 2) a hook, interpreter or pause path that is not absolute and a hook or
-# interpreter file that does not exist.
+# interpreter file that does not exist, and a hook file whose name does not contain five-hour-guard-hook.py (the entry could
+# not be found again by `check` and `remove`).
 # A missing settings.json: `add` creates it (an empty object plus the entry, mode 0600; the directory must exist),
 # `remove` has nothing to do (exit 0), `check` reports "not installed" (exit 1).
 # Configuration: the same JSON file as the guard (--config or OMC_FIVE_HOUR_GUARD_CONFIG); keys used here: settings_file,
@@ -172,6 +173,8 @@ def run_once():
         for label, path in (('hook', A.hook), ('interpreter', A.python)):
             if not os.path.isfile(path):
                 fail(f'the {label} {path!r} does not exist: the entry would be written but the shell guard of the command would let every call through')
+        if MARK not in os.path.basename(A.hook):
+            fail(f'the file name of the hook {A.hook!r} does not contain {MARK}: the entry is recognised by that name, so `check` and `remove` would not find it (copy the hook to another directory, keep its name)')
         entry = {'matcher': '*', 'hooks': [{'type': 'command', 'command': command(), 'timeout': A.timeout}]}
         if ours:
             if ours == [entry]:
