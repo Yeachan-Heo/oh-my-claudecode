@@ -77,7 +77,8 @@ function isConfigForceInheritProxyEnv() {
 function isNonClaudeProviderEnv() {
   if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-  if (modelId && !modelId.toLowerCase().includes('claude')) return true;
+  // A native alias (sonnet, opus, haiku, fable) is a Claude model, as in src/config/models.ts.
+  if (modelId && !modelId.toLowerCase().includes('claude') && !TIER_ALIASES.has(modelId.toLowerCase())) return true;
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
   if (baseUrl && !baseUrl.includes('anthropic.com')) return true;
   return isConfigForceInheritProxyEnv();
@@ -123,10 +124,13 @@ const BUILTIN_TIER_MODEL_DEFAULTS = {
   opus:   'claude-opus-4-8',
   fable:  'claude-fable-5',
 };
-function resolveTierAliasToSafeModel(tierAlias) {
+// nativeOnly skips OMC_SUBAGENT_MODEL: Claude Code does not read it, so it is no proof that
+// the provider serves the alias on a call.
+function resolveTierAliasToSafeModel(tierAlias, nativeOnly = false) {
   const keys = TIER_TO_DEFAULT_ENV_KEYS[(tierAlias || '').toLowerCase()];
   if (!keys) return '';
   for (const key of keys) {
+    if (nativeOnly && key === 'OMC_SUBAGENT_MODEL') continue;
     const value = (process.env[key] || '').trim();
     // CC-native vars (ANTHROPIC_DEFAULT_* and CLAUDE_CODE_BEDROCK_*) are read by CC's own
     // model resolution, which handles [1m] suffixes correctly for explicit model= calls.
@@ -906,9 +910,10 @@ function isModelRoutingFableOptinEnabled(env = process.env) {
 function readNativeAgentDefinitionModel(subagentType, directory) {
   const fromPlugin = readAgentDefinitionModel(subagentType);
   if (fromPlugin || typeof subagentType !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(subagentType)) return fromPlugin;
+  // The first definition file found wins, with or without a model: a missing field does not
+  // let a lower-priority definition of the same name take over.
   for (const agentsDir of [join(directory || process.cwd(), '.claude', 'agents'), join(getClaudeConfigDir(), 'agents')]) {
-    const model = readAgentDefinitionModel(subagentType, agentsDir);
-    if (model) return model;
+    if (existsSync(join(agentsDir, `${subagentType}.md`))) return readAgentDefinitionModel(subagentType, agentsDir);
   }
   return null;
 }
@@ -1262,7 +1267,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // Claude or forceInherit is on and does not resolve the alias, and where a marker model that
     // forceInherit refused still pins the call.
     const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice);
-    const keepsNamedModel = named && (markerHadModel || ((isNonClaudeProviderEnv() || isForceInheritEnabled()) && !resolveTierAliasToSafeModel(jevChoice)));
+    const keepsNamedModel = named && (markerHadModel || ((isNonClaudeProviderEnv() || isForceInheritEnabled()) && !resolveTierAliasToSafeModel(jevChoice, true)));
     const allowedJevChoices = ['haiku', 'sonnet', 'opus'];
     if (isModelRoutingFableOptinEnabled()) {
       allowedJevChoices.push('fable');

@@ -519,6 +519,56 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       const routed = await routedInput(agentInput({ model: "opus" }), { ...NAMED, ...proxy });
       expect(routed.model).toBe("sonnet");
     }, 15000);
+
+    it.each([
+      ["ANTHROPIC_MODEL=sonnet", { ANTHROPIC_MODEL: "sonnet" }],
+      ["CLAUDE_MODEL=fable", { CLAUDE_MODEL: "fable" }],
+      ["ANTHROPIC_MODEL=claude-sonnet-5", { ANTHROPIC_MODEL: "claude-sonnet-5" }],
+    ])("a native alias as the session model (%s) is a Claude provider: Jev's alias replaces the name", async (_label, session) => {
+      const input = agentInput({ model: "fable" });
+      expect(await routedInput(input, { ...NAMED, ...session })).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
+      expect(requests).toHaveLength(1);
+    }, 15000);
+
+    it("a session model that is not a Claude name still keeps the named model", async () => {
+      const input = agentInput({ model: "fable" });
+      expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: "deepseek-chat" })).toEqual({ ...input.tool_input, effort: "medium" });
+      expect(requests).toHaveLength(1);
+    }, 15000);
+
+    it("the definition that wins by name decides, even without a model: a user definition it shadows is not read", async () => {
+      writeAgent(projectAgents(), "shadowed-agent", "description: no model here\n");
+      writeAgent(userAgents(), "shadowed-agent", "model: fable\n");
+      const input = agentInput({ subagent_type: "shadowed-agent" });
+      expect(await routedInput(input, NAMED)).toEqual(input.tool_input);
+      expect(requests).toHaveLength(0);
+      // The user definition alone is asked about, as before.
+      const alone = agentInput({ subagent_type: "user-only-agent" });
+      writeAgent(userAgents(), "user-only-agent", "model: fable\n");
+      expect(await routedInput(alone, NAMED)).toEqual({ ...alone.tool_input, model: "sonnet", effort: "medium" });
+      expect(requests).toHaveLength(1);
+    }, 30000);
+
+    it("OMC_SUBAGENT_MODEL alone does not make the tier resolvable: the name stays, the effort is set", async () => {
+      const only = { OMC_SUBAGENT_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect(await routedInput(call(), { ...NAMED, ...proxy, ...only })).toEqual({ ...call().tool_input, effort: "medium" });
+      expect(await routedInput(call(), { ...NAMED, ...forceInherit, ...only })).toEqual({ ...call().tool_input, effort: "medium" });
+      expect(requests).toHaveLength(2);
+      // With the native mapping of the tier the alias is set, as before.
+      const mapped = { ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" };
+      expect(await routedInput(call(), { ...NAMED, ...proxy, ...only, ...mapped })).toEqual({
+        ...call().tool_input,
+        model: "sonnet",
+        effort: "medium",
+      });
+      const bedrock = { CLAUDE_CODE_BEDROCK_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect(await routedInput(call(), { ...NAMED, ...forceInherit, ...only, ...bedrock })).toEqual({
+        ...call().tool_input,
+        model: "sonnet",
+        effort: "medium",
+      });
+      expect(requests).toHaveLength(4);
+    }, 30000);
   });
 
   describe("applied log (OMC_JEV_APPLIED_LOG)", () => {
