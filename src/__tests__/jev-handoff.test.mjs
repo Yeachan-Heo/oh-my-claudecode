@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
 import assert from 'node:assert/strict';
 import { afterAll, describe, it } from 'vitest';
@@ -17,7 +17,7 @@ import { jevLogFiles, rotateJevLog } from '../../scripts/jev-resolve.mjs';
 import {
   DEFAULT_HANDOFF_FILE, DEFAULT_LAUNCHER_COMMAND, DEFAULT_TAKEOVER_MARKER, HANDOFF_BLOCK_BYTES, LAUNCHER_ATTEMPT_LIMIT, LAUNCHER_IN_FLIGHT_MS,
   assessMode, handedOverText, handoffFileName, handoffModeTools, handoffStepBytes, handoffSteps, handoffWarnBytes,
-  isHandoffFileName, isLauncherCommand, launcherCommand, launcherGate, modelAlias, readHandoffState, readTakeoverLine, refusalText,
+  isHandoffFileName, isLauncherCommand, launcherCommand, launcherGate, modelAlias, overrideUltragoalDenial, readHandoffState, readTakeoverLine, refusalText,
   successorUseLine, takeoverMarker, warningText, writeHandoffState,
 } from '../../scripts/lib/jev-handoff.mjs';
 
@@ -794,5 +794,105 @@ describe('handoff hook (OMC_JEV_HANDOFF=1)', () => {
     const other = runHook(world, 'Write', { file_path: world.handoff, content: 'x' }, { env: { OMC_JEV_HANDOFF: 'true' } });
     assert.equal(denied(other.output, 'ULTRAGOAL /GOAL REQUIRED'), true);
     assert.equal(existsSync(join(world.stateDir, 'sessions', SID, 'handoff.json')), false);
+  });
+});
+
+// --- concurrent launcher calls -----------------------------------------------------------------------------------------
+
+const HANDOFF_MODULE_URL = new URL('../../scripts/lib/jev-handoff.mjs', import.meta.url).href;
+
+// Runs overrideUltragoalDenial for the same session in `count` child processes that start together. The read of the handoff
+// state waits 40 ms in every child, so a check that is not held under a lock together with the update that follows it lets
+// every child see the state as it was before any of them recorded its attempt.
+async function overrideInParallel(count, { handoffFile, stateDir, logs, sessionId, command }) {
+  const script = `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const read = fs.readFileSync;
+    fs.readFileSync = (path, ...rest) => {
+      const content = read(path, ...rest);
+      if (String(path).endsWith('handoff.json')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40);
+      return content;
+    };
+    syncBuiltinESMExports();
+    const handoff = await import(${JSON.stringify(HANDOFF_MODULE_URL)});
+    process.once('message', () => {
+      const out = handoff.overrideUltragoalDenial({
+        stateDir: ${JSON.stringify(stateDir)}, handoffFile: ${JSON.stringify(handoffFile)}, sessionId: ${JSON.stringify(sessionId)},
+        data: { tool_name: 'Bash', tool_input: { command: ${JSON.stringify(command)} }, cwd: '/' },
+        sizeBytes: ${HANDOFF_BLOCK_BYTES + 1}, overLimit: true, env: { OMC_JEV_LOG_DIR: ${JSON.stringify(logs)} },
+      });
+      process.send({ allowed: out?.suppressOutput === true, reason: out?.hookSpecificOutput?.permissionDecisionReason ?? '' }, () => process.disconnect());
+    });
+    process.send('ready');
+  `;
+  const children = [];
+  try {
+    const workers = Array.from({ length: count }, () => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+      children.push(child);
+      let stderr = '';
+      let value;
+      child.stderr.on('data', (chunk) => { stderr += chunk; });
+      const ready = new Promise((resolveReady, reject) => {
+        child.on('message', (message) => { if (message === 'ready') resolveReady(); else value = message; });
+        child.on('error', reject);
+        child.on('exit', (code) => { if (code !== 0) reject(new Error(stderr)); });
+      });
+      const done = new Promise((resolveDone, reject) => {
+        child.on('error', reject);
+        child.on('exit', (code) => (code === 0 ? resolveDone(value) : reject(new Error(stderr))));
+      });
+      return { child, ready, done };
+    });
+    await Promise.all(workers.map((worker) => worker.ready));
+    for (const worker of workers) worker.child.send('go');
+    return await Promise.all(workers.map((worker) => worker.done));
+  } finally {
+    for (const child of children) if (child.exitCode === null) child.kill();
+  }
+}
+
+describe('handoff launcher admission under concurrency', () => {
+  it('eight parallel launcher calls with one registered brief: exactly one is let through and the state records exactly that attempt', { timeout: 180_000 }, async () => {
+    const world = newWorld();
+    const handoffFile = handoffFileOf(world);
+    const brief = join(world.project, 'HANDOFF.md');
+    mkdirSync(join(world.stateDir, 'sessions', SID), { recursive: true });
+    writeHandoffState(handoffFile, SID, { handoff_path: brief });
+    const results = await overrideInParallel(8, { handoffFile, stateDir: world.stateDir, logs: world.logs, sessionId: SID, command: `jev-session --role worker --brief ${brief} --name "successor"` });
+    assert.equal(results.filter((result) => result.allowed).length, 1, `exactly one launcher call may pass: ${JSON.stringify(results)}`);
+    assert.equal(results.filter((result) => /may still be running/.test(result.reason)).length, 7, `the others wait for the first: ${JSON.stringify(results)}`);
+    assert.equal(readHandoffState(handoffFile).launcher_attempts, 1);
+  });
+
+  it('a launcher call is refused as in flight when the session lock is held by another process; other tools still pass', { timeout: 180_000 }, async () => {
+    const world = newWorld();
+    const handoffFile = handoffFileOf(world);
+    const brief = join(world.project, 'HANDOFF.md');
+    mkdirSync(join(world.stateDir, 'sessions', SID), { recursive: true });
+    writeHandoffState(handoffFile, SID, { handoff_path: brief });
+    const holder = spawn(process.execPath, ['--input-type=module', '-e', `
+      const lockModule = await import(${JSON.stringify(new URL('../../scripts/lib/state-lock.mjs', import.meta.url).href)});
+      const lock = lockModule.acquireStateFileLockAtPathSync(${JSON.stringify(`${handoffFile}.lock`)}, 5, true, false, 300, 300, 3000);
+      process.once('message', () => { lockModule.releaseStateFileLockSync(lock); process.disconnect(); });
+      process.send(lock ? 'held' : 'failed');
+    `], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    try {
+      await new Promise((resolveHeld, reject) => {
+        holder.once('message', (message) => (message === 'held' ? resolveHeld() : reject(new Error('the holder did not get the lock'))));
+        holder.once('error', reject);
+      });
+      const base = { stateDir: world.stateDir, handoffFile, sessionId: SID, sizeBytes: HANDOFF_BLOCK_BYTES + 1, overLimit: true, env: { OMC_JEV_LOG_DIR: world.logs } };
+      const launcher = overrideUltragoalDenial({ ...base, data: { tool_name: 'Bash', tool_input: { command: `jev-session --role worker --brief ${brief} --name "successor"` }, cwd: '/' } });
+      assert.equal(launcher.hookSpecificOutput.permissionDecision, 'deny');
+      assert.match(launcher.hookSpecificOutput.permissionDecisionReason, /may still be running/);
+      assert.equal(readHandoffState(handoffFile).launcher_attempts, undefined);
+      const read = overrideUltragoalDenial({ ...base, data: { tool_name: 'Read', tool_input: { file_path: '/etc/hosts' }, cwd: '/' } });
+      assert.equal(read.suppressOutput, true);
+    } finally {
+      if (holder.connected) holder.send('release');
+      else if (holder.exitCode === null) holder.kill();
+    }
   });
 });

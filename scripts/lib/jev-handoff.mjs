@@ -16,7 +16,7 @@
 import { createHash } from 'crypto';
 import { existsSync, lstatSync, openSync, readFileSync, readSync, closeSync, statSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
-import { atomicWriteFileSync } from './atomic-write.mjs';
+import { acquireStateFileLockAtPathSync, atomicWriteFileSync, releaseStateFileLockSync } from './atomic-write.mjs';
 import { jevLogFiles } from '../jev-resolve.mjs';
 import { denialLogDir, writeDenialRow } from './jev-denial-counter.mjs';
 import { maskSecrets } from './jev-mask.mjs';
@@ -371,6 +371,26 @@ export function writeHandoffState(handoffFile, sessionId, state) {
   } catch { /* the state does not stop the hook */ }
 }
 
+// Runs fn under the session's handoff lock (a lock file beside the state file). The launcher admission and every other
+// read-modify-write of the state run under it, so parallel calls of one session cannot all read the state before any of them
+// recorded its change. The wait is synchronous and ends well inside the hook timeout. Returns true when fn ran, false when the
+// lock was not obtained in time or could not be taken at all (fn did not run). An error thrown by fn propagates after the release.
+const LOCK_BUDGET_MS = 700;
+function underHandoffLock(handoffFile, fn) {
+  let lock = null;
+  try {
+    lock = acquireStateFileLockAtPathSync(`${handoffFile}.lock`, Math.ceil(LOCK_BUDGET_MS / 8), true, false, 300, 300, LOCK_BUDGET_MS);
+  } catch { lock = null; }
+  if (!lock) return false;
+  try { fn(); } finally { releaseStateFileLockSync(lock); }
+  return true;
+}
+
+// A read-modify-write of the state that is not an admission: under the lock when it is obtained, otherwise as before.
+function updateHandoffState(handoffFile, fn) {
+  if (!underHandoffLock(handoffFile, fn)) fn();
+}
+
 // The first line of the handoff file that starts with the takeover marker; the successor's name is the line without the ISO time.
 export function readTakeoverLine(path, env = process.env) {
   try {
@@ -426,14 +446,14 @@ export function handoffBeforeGuard({ stateDir, handoffFile, sessionId, data, siz
   // An ordinary session (a size below the warning threshold) registers nothing.
   if ((toolName === 'Write' || toolName === 'Edit') && typeof sizeBytes === 'number' && sizeBytes > handoffWarnBytes(env)
     && sizeBytes <= HANDOFF_BLOCK_BYTES && isHandoffFileName(toolInput.file_path ?? toolInput.path ?? '', env)) {
-    state = registerHandoffWrite(handoffFile, sessionId, state, toolName, toolInput);
+    updateHandoffState(handoffFile, () => { state = registerHandoffWrite(handoffFile, sessionId, readHandoffState(handoffFile), toolName, toolInput); });
   }
   if (typeof sizeBytes === 'number' && sizeBytes > handoffWarnBytes(env)) {
     const last = typeof state.last_warning_bytes === 'number' ? state.last_warning_bytes : null;
     if (last === null || sizeBytes - last >= handoffStepBytes(env)) {
       const useLine = successorUseLine({ sessionId, transcriptPath: data.transcript_path ?? data.transcriptPath, stateDir, env });
       const deliver = () => {
-        writeHandoffState(handoffFile, sessionId, { ...readHandoffState(handoffFile), last_warning_bytes: sizeBytes });
+        updateHandoffState(handoffFile, () => writeHandoffState(handoffFile, sessionId, { ...readHandoffState(handoffFile), last_warning_bytes: sizeBytes }));
         writeHandoffRow(stateDir, env, data, 'warning', sizeBytes);
       };
       return { output: null, context: warningText({ sizeBytes, useLine, facts: sessionFacts(env), env }), deliver };
@@ -454,31 +474,43 @@ export function overrideUltragoalDenial({ stateDir, handoffFile, sessionId, data
     return { continue: true, suppressOutput: true };
   }
   if (!handoffFile) return null; // no state path for this session: today's denial, unchanged
-  let state = readHandoffState(handoffFile);
-  if (isHandedOver(state, state.handoff_path, env)) return null; // handed over (the hash of another session's write): handoffBeforeGuard issued the denial
-  const mode = assessMode({ sessionId, sizeBytes, ultragoalDenial: true, state, env });
-  if (mode !== 'handoff') return null;
-  // The context of the restrictions on Write/Edit and Bash in handoff mode.
-  const logDir = denialLogDir(stateDir, env);
-  const context = { cwd: String(data.cwd ?? ''), sessionStateDir: dirname(handoffFile), state, logDir, env };
-  const gate = launcherGate({ state, logDir });
-  if (gate.status === 'started' && state.successor_started !== true) {
-    state = { ...state, successor_started: true }; // a start seen in the launcher's journal is kept in the state
-    writeHandoffState(handoffFile, sessionId, state);
-  }
-  if (handoffModeTools(toolName, toolInput, context)) {
-    writeHandoffRow(stateDir, env, data, 'handoff-allowed', sizeBytes);
-    if (toolName === 'Write' || toolName === 'Edit') state = registerHandoffWrite(handoffFile, sessionId, state, toolName, toolInput);
-    if ((toolName === 'Bash' || toolName === 'PowerShell') && isLauncherCommand(toolInput.command ?? '', env)) {
-      // The launcher call is let through; whether it started a session is read from the launcher's journal at the next call.
-      writeHandoffState(handoffFile, sessionId, { ...state, launcher_attempts: (Number(state.launcher_attempts) || 0) + 1, launcher_attempt_ts: Date.now() });
+  // The admission of a launcher call (the read of the state, the check of the gate and the record of the attempt) runs under the
+  // session's handoff lock: parallel launcher calls of one session are let through one at a time, and each sees the attempt of
+  // the one before it. When the lock is not obtained in time the launcher call is refused as still in flight (a duplicate
+  // successor is worse than a call the session repeats), and any other call is judged without the lock as before.
+  let result;
+  const decide = (locked) => {
+    let state = readHandoffState(handoffFile);
+    if (isHandedOver(state, state.handoff_path, env)) return null; // handed over (the hash of another session's write): handoffBeforeGuard issued the denial
+    const mode = assessMode({ sessionId, sizeBytes, ultragoalDenial: true, state, env });
+    if (mode !== 'handoff') return null;
+    // The context of the restrictions on Write/Edit and Bash in handoff mode.
+    const logDir = denialLogDir(stateDir, env);
+    const context = { cwd: String(data.cwd ?? ''), sessionStateDir: dirname(handoffFile), state, logDir, env };
+    const gate = launcherGate({ state, logDir });
+    if (gate.status === 'started' && state.successor_started !== true) {
+      state = { ...state, successor_started: true }; // a start seen in the launcher's journal is kept in the state
+      writeHandoffState(handoffFile, sessionId, state);
     }
-    return { continue: true, suppressOutput: true };
-  }
-  writeHandoffRow(stateDir, env, data, 'handoff-refused', sizeBytes);
-  const useLine = successorUseLine({ sessionId, transcriptPath: data.transcript_path ?? data.transcriptPath, stateDir, env });
-  return {
-    continue: true,
-    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: refusalText({ useLine, facts: sessionFacts(env), launcherStatus: gate.status, env }) },
+    const launcherCall = (toolName === 'Bash' || toolName === 'PowerShell') && isLauncherCommand(toolInput.command ?? '', env);
+    const permitted = handoffModeTools(toolName, toolInput, context);
+    const unlockedLauncher = permitted && launcherCall && !locked;
+    if (permitted && !unlockedLauncher) {
+      writeHandoffRow(stateDir, env, data, 'handoff-allowed', sizeBytes);
+      if (toolName === 'Write' || toolName === 'Edit') state = registerHandoffWrite(handoffFile, sessionId, state, toolName, toolInput);
+      if (launcherCall) {
+        // The launcher call is let through; whether it started a session is read from the launcher's journal at the next call.
+        writeHandoffState(handoffFile, sessionId, { ...state, launcher_attempts: (Number(state.launcher_attempts) || 0) + 1, launcher_attempt_ts: Date.now() });
+      }
+      return { continue: true, suppressOutput: true };
+    }
+    writeHandoffRow(stateDir, env, data, 'handoff-refused', sizeBytes);
+    const useLine = successorUseLine({ sessionId, transcriptPath: data.transcript_path ?? data.transcriptPath, stateDir, env });
+    return {
+      continue: true,
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: refusalText({ useLine, facts: sessionFacts(env), launcherStatus: unlockedLauncher ? 'in-flight' : gate.status, env }) },
+    };
   };
+  const ran = underHandoffLock(handoffFile, () => { result = decide(true); });
+  return ran ? result : decide(false);
 }

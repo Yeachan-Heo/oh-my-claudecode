@@ -145,7 +145,9 @@ export function rotateJevLog(path, maxBytes, now = new Date()) {
 /**
  * The files of one Jev log, newest first: the live file <name>.jsonl and its
  * rotated archives <name>-<YYYYMMDD-HHmmss>-<pid>.jsonl (see rotateJevLog),
- * ordered by their stamp, newest archive first. Only files that exist. With
+ * ordered by their stamp, newest archive first. Only files that exist; a directory that
+ * is missing gives an empty list, any other failure to look at the files (no permission,
+ * a path through a regular file) is thrown, so a failed read is not taken for an empty log. With
  * sinceMs, an archive whose rotation time is older than that is left out (every
  * row of an archive is older than its rotation time). The stamp holds whole
  * seconds, cut down from the rotation time, while sinceMs and the row times of
@@ -158,9 +160,9 @@ export function rotateJevLog(path, maxBytes, now = new Date()) {
 export function jevLogFiles(dir, name, sinceMs = 0) {
   const files = [];
   const live = join(dir, `${name}.jsonl`);
-  if (existsSync(live)) files.push(live);
+  try { statSync(live); files.push(live); } catch (error) { if (error?.code !== "ENOENT") throw error; }
   let names = [];
-  try { names = readdirSync(dir); } catch { return files; }
+  try { names = readdirSync(dir); } catch (error) { if (error?.code === "ENOENT") return files; throw error; }
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(`^${escaped}-(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})-\\d+\\.jsonl$`);
   const archives = [];

@@ -5,7 +5,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -181,6 +181,25 @@ describe('account probe', () => {
     expect(result.code).toBe(2);
     expect(result.err).toContain('read error');
     expect(readFileSync(f.alarm, 'utf8')).toBe(before);
+  });
+
+  it('a log directory that cannot be listed gives exit 2 and keeps the alarm file (a failed read is no evidence that the alarm is over)', () => {
+    const f = fixture();
+    opening(f, NOW - 30 * MIN);
+    appendRows(join(f.logs, 'shadow.jsonl'), [skipped(NOW - 10 * MIN)]);
+    expect(run(f).code).toBe(3);
+    const before = readFileSync(f.alarm, 'utf8');
+    // The log directory path now leads through a regular file: the listing fails with ENOTDIR, an error other than a missing directory.
+    renameSync(f.logs, `${f.logs}-moved`);
+    writeFileSync(f.logs, 'not a directory');
+    const result = run(f);
+    expect(result.code).toBe(2);
+    expect(result.err).toContain('read error');
+    expect(readFileSync(f.alarm, 'utf8')).toBe(before);
+    // A log directory that does not exist is still no log (an unused Jev), not a read error.
+    rmSync(f.logs, { force: true });
+    expect(run(f).code).toBe(0);
+    expect(existsSync(f.alarm)).toBe(false);
   });
 
   it('--alarm-file moves the alarm file and the probe log; OMC_JEV_LOG_DIR and OMC_JEV_BREAKER_DIR are the defaults', () => {
