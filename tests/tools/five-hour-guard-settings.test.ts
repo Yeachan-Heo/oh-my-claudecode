@@ -354,6 +354,18 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readme, 'no claim that edits are picked up while a session runs').not.toMatch(/normally picks up edits/);
   });
 
+  it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
+    const f = fixture('settings-timeout');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    for (const bad of ['0', '-5']) {
+      const r = tool(f, 'add', ['--timeout', bad]);
+      expect(r.status, `${bad}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/--timeout must be at least 1/);
+    }
+    expect(readText(f.settings), 'nothing written').toBe(original);
+  });
+
   it('add refuses relative or missing paths; a settings file of the wrong shape is an error, not a crash', () => {
     const f = fixture('settings-refuse');
     const original = JSON.stringify(base(), null, 2) + '\n';

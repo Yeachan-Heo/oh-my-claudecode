@@ -88,6 +88,11 @@ check_range('--interval', A.interval, MIN_INTERVAL_S)
 check_range('--heartbeat', A.heartbeat, 2 * A.interval, MAX_HEARTBEAT_S)   # a pause must outlive one missed tick
 check_range('--warn-every', A.warn_every, 0, 86400)
 check_range('--test-pause', A.test_pause, 0, MAX_TEST_PAUSE_S)
+if not 0 < A.threshold <= 100:
+    fail(f'--threshold must be greater than 0 and at most 100 percent, not {A.threshold:g}')
+if A.resume_below is not None and not 0 <= A.resume_below <= A.threshold:
+    # above the threshold one tick would enter the pause and the next would leave it, again and again
+    fail(f'--resume-below must be between 0 and the threshold ({A.threshold:g}) percent, not {A.resume_below:g}')
 
 
 def load_config(path):
@@ -136,6 +141,8 @@ def check_writable_dir(path, label):
         fail(f'the directory {d} of {label} does not exist or is not writable')
 
 
+if not os.path.isabs(PAUSE_FILE):
+    fail(f'"pause_file" must be an absolute path, not {PAUSE_FILE!r}: the hook entry accepts only an absolute path and would read another file')
 check_writable_dir(PAUSE_FILE, 'pause_file')
 if STATE:
     check_writable_dir(STATE, 'state_file')
@@ -181,11 +188,17 @@ def write_json(path, obj):
 
 
 def load_state():
+    """The stored state, or a fresh one when the file is missing or does not have the shape this guard writes."""
     try:
         with open(STATE) as f:
-            return json.load(f)
+            st = json.load(f)
+        if st.get('paused') is not True:
+            return {'paused': False}
+        if all(type(st.get(k)) in (int, float) and math.isfinite(st[k]) for k in ('since', 'resume_at')):
+            return st
     except Exception:
-        return {'paused': False}
+        pass
+    return {'paused': False}
 
 
 NEEDS = ('the guard needs the OMC status line showing rate limits, or a running `omc wait`, to keep that file fresh '
@@ -226,7 +239,10 @@ def read_cache():
     problem = None
     if pct is None:
         problem = ('cache-no-percent', f'the usage cache {CACHE} has no fiveHourPercent (no five-hour window on this account?): {NEEDS}')
-    elif age > A.max_age:
+    elif not math.isfinite(pct) or pct < 0:
+        pct = None
+        problem = ('cache-invalid-percent', f'the usage cache {CACHE} has a fiveHourPercent that is not a percentage (not finite or negative): it is not acted on')
+    elif not age <= A.max_age:   # not "age > max": a timestamp that is not a number gives an age that is neither
         problem = ('cache-stale', f'the usage data is {age:.0f} s old, older than --max-age ({A.max_age:g} s), so it is not acted on: {NEEDS}')
     return pct, reset_ts, age, problem
 
@@ -253,6 +269,18 @@ def hook_check(where):
         for path in paths:
             if not os.path.isfile(path):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which does not exist: the shell guard of the entry lets every call through, so a pause would hold no session')
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            continue
+        if '--pause-file' in tokens[:-1]:
+            read = tokens[tokens.index('--pause-file') + 1]
+            if os.path.abspath(read) != os.path.abspath(PAUSE_FILE):
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} reads the pause file {read}, but the guard writes {PAUSE_FILE}: a pause would hold no session. Run five-hour-guard-settings.py add again')
+        if '-x' in tokens[:-1]:
+            interpreter = tokens[tokens.index('-x') + 1]
+            if not os.access(interpreter, os.X_OK):
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} names the interpreter {interpreter}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
 
 
 def publish(state, pct=None, only=None):
@@ -305,6 +333,8 @@ def tick(state):
             if reset_ts and now < reset_ts <= now + MAX_RESET_AHEAD_S:
                 enter_pause(state, pct, reset_ts)
                 return
+            if not reset_ts:
+                warn_data('reset-missing', f'5h {pct} %, but the usage cache has no reset time (the API sent none, or an invalid one): no pause. {NEEDS}')
             if reset_ts and reset_ts > now:
                 warn_data('reset-too-far', f'5h {pct} %, but the reset time {ts(reset_ts)} is more than {MAX_RESET_AHEAD_S // 60} minutes ahead '
                           f'(a window is 5 hours): the data is not believed, no pause')

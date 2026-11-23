@@ -61,15 +61,15 @@ other's pause.
 |---|---|
 | no pause file | the shell guard of the hook command exits 0 without starting Python (2 to 4 ms per tool call, measured on a loaded machine) |
 | `python3` or the hook file named in the entry is missing | the same shell guard exits 0 |
-| pause file unreadable, not JSON, not an object, or `paused` is not true | the tool call passes |
-| `valid_until` or `resume_at` missing, not a number, NaN or infinite | the tool call passes |
+| pause file unreadable, not JSON, not an object, or `paused` is not the JSON value `true` (`"false"`, `1` and `"true"` are not) | the tool call passes |
+| `valid_until` or `resume_at` missing, not a JSON number (a string or a boolean is not one), NaN or infinite; `exclude` or `only` present and not a list of strings | the tool call passes |
 | `valid_until` in the past (the guard is dead: it renews the file every tick) | the tool call passes |
 | `valid_until` more than 3600 s ahead, or `resume_at` more than 21600 s ahead (the guard writes `valid_until` at most 1800 s ahead and believes no reset time further than 5 h 15 min, plus a margin of at most 1800 s) | the tool call passes |
 | `resume_at` more than 900 s in the past | the tool call passes |
 | the hook runs longer than its `timeout` in `settings.json` (21600 s, longer than a window plus margin) | Claude Code cancels the hook and, on `PreToolUse`, the tool call goes on, according to its [hooks documentation](https://code.claude.com/docs/en/hooks) ("Timeouts", read on 2026-11-21) |
 | the session id starts with a prefix of `exclude` | the tool call passes |
 | the pause names `only` prefixes and the session id starts with none of them | the tool call passes |
-| `ANTHROPIC_BASE_URL` is set to a host outside `anthropic.com`, or `CLAUDE_CODE_USE_BEDROCK=1` or `CLAUDE_CODE_USE_VERTEX=1` is set | the tool call passes: that session does not use the Anthropic window |
+| `ANTHROPIC_BASE_URL` is set to a host outside `anthropic.com`, or `CLAUDE_CODE_USE_BEDROCK=1`, `CLAUDE_CODE_USE_VERTEX=1` or `CLAUDE_CODE_USE_FOUNDRY=1` is set, or `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is not blank | the tool call passes: that session does not use the Anthropic subscription window. The hook sees only the environment of the session: a session that has `ANTHROPIC_API_KEY` set but runs on the subscription (the key was declined at the prompt) is not held either, so leave the variable unset in subscription sessions you want to protect |
 | any exception inside the hook | exit 0 |
 
 A dead guard therefore releases the sessions within `--heartbeat` seconds (300 by default, 1800 at most), and a pause file
@@ -106,8 +106,8 @@ nothing and the hook lets everything through:
 
 The guard does not stay silent about it: at start, and then at most once per `--warn-every` seconds (600) for each kind of
 problem, it logs a `WARNING` when the cache does not exist (`cache-missing`), cannot be read (`cache-unreadable`), is
-older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-percent`), or shows a reset time that is not
-believed (`reset-too-far`). Read the log once after you start the guard.
+older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-percent`), or shows a percentage that is not a percentage (`cache-invalid-percent`), a high percentage with no reset time
+(`reset-missing`) or a reset time that is not believed (`reset-too-far`). Read the log once after you start the guard.
 
 ## Requirements and platforms
 
@@ -168,7 +168,7 @@ believed (`reset-too-far`). Read the log once after you start the guard.
    a group of its own with its matcher). `add` twice changes nothing. `add` with another hook path replaces the entry in
    place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, and a hook file whose
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The
-   entry has a `timeout` of 21600 s (`--timeout`), longer than any window. A `settings.json` that is a symbolic link is
+   entry has a `timeout` of 21600 s (`--timeout`, at least 1), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
    another program writes `settings.json` while the tool works (also while the backup is made), the tool reads it again
    once and then gives up (exit 2, nothing written). A write inside the instant between its last comparison and the
@@ -227,8 +227,8 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 |---|---|---|
 | `--config <file>` | `$OMC_FIVE_HOUR_GUARD_CONFIG` | configuration file |
 | `--cache`, `--pause-file`, `--state`, `--log`, `--settings`, `--exclude` | from the file | the keys above (`--exclude` takes comma separated prefixes; `--settings ""` turns the hook entry check off) |
-| `--threshold <percent>` | 97 | pause at or above this five-hour percentage |
-| `--resume-below <percent>` | threshold minus 10 | resume early when a fresh cache shows less |
+| `--threshold <percent>` | 97 | pause at or above this five-hour percentage; above 0 and at most 100 |
+| `--resume-below <percent>` | threshold minus 10 | resume early when a fresh cache shows less; from 0 up to the threshold (a higher value would enter and leave the pause on alternate ticks) |
 | `--max-age <seconds>` | 180 | data older than this is not acted on |
 | `--margin <seconds>` | 150 | resume this long after the reset time; 0 to 1800 |
 | `--interval <seconds>` | 30 | seconds between checks; at least 0.1 |
@@ -240,7 +240,8 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 | `--dry-run` | off | log what would happen and write nothing |
 
 A configuration error (a missing required key, a wrong type, a number that is not finite or outside its range, a
-directory of the pause or state file that is missing) exits with status 2.
+directory of the pause or state file that is missing, a `pause_file` that is not absolute) exits with status 2. A state
+file that does not have the shape the guard writes is ignored: the guard starts without a pause.
 
 ## Which sessions load the hook
 

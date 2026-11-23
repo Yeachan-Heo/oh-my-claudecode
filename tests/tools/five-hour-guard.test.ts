@@ -481,6 +481,59 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(existsSync(g.pause), 'a pause that is already over is not carried into the new run').toBe(false);
   });
 
+  it('refuses a threshold outside 0-100 and a resume level above the threshold (one tick would enter and the next leave the pause)', () => {
+    const f = fixture('thresholds', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const refused = (args: string[], pattern: RegExp) => {
+      const r = runSync(GUARD, guardArgs(f, ['--once', ...args]));
+      expect(r.status, `${args.join(' ')}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, args.join(' ')).toMatch(pattern);
+      expect(existsSync(f.pause), 'no pause was written').toBe(false);
+    };
+    refused(['--resume-below', '100', '--threshold', '97'], /--resume-below must be between 0 and the threshold/);
+    refused(['--resume-below', '98'], /--resume-below must be between 0 and the threshold/);
+    refused(['--resume-below', '-1'], /--resume-below must be between 0 and the threshold/);
+    refused(['--threshold', '101'], /--threshold must be greater than 0 and at most 100/);
+    refused(['--threshold', '0'], /--threshold must be greater than 0 and at most 100/);
+    expect(guardOnce(f, ['--resume-below', '97']).status, 'resume level equal to the threshold is allowed').toBe(0);
+  });
+
+  it('the pause file must be an absolute path (the hook entry only accepts an absolute one)', () => {
+    const f = fixture('relative-pause');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: 'pause.json', state_file: f.state }), 'utf8');
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, r.stderr).toBe(2);
+    expect(r.stderr).toMatch(/"pause_file" must be an absolute path/);
+  });
+
+  it('a state file of the wrong shape is a start from nothing, not a crash that the unit would restart for ever', () => {
+    const f = fixture('bad-state', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    for (const bad of ['[]', '"paused"', '{"paused":"yes","resume_at":1}', '{"paused":true,"resume_at":"x","since":1}', '{"paused":true,"resume_at":' + (Date.now() / 1000 + 600) + '}',
+      '{"paused":true,"resume_at":NaN,"since":1}', 'not json']) {
+      writeFileSync(f.state, bad, 'utf8');
+      const r = guardOnce(f);
+      expect(r.stdout, `state ${bad}`).toMatch(/guard start/);
+      expect(r.stdout, `state ${bad}`).not.toMatch(/ERROR/);
+    }
+  });
+
+  it('a usage entry that cannot be believed is a warning and holds nothing: percentage not finite or negative, timestamp not a number, no reset time at a high percentage', () => {
+    const run = (name: string, text: string) => {
+      const f = fixture(name);
+      writeFileSync(f.cache, text, 'utf8');
+      const r = guardOnce(f);
+      expect(existsSync(f.pause), `${name}: nothing is held`).toBe(false);
+      return r.stdout;
+    };
+    const ts = Date.now();
+    const reset = new Date(ts + HOUR_MS).toISOString();
+    expect(run('bad-nan', `{"timestamp": ${ts}, "data": {"fiveHourPercent": NaN, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
+    expect(run('bad-neg', `{"timestamp": ${ts}, "data": {"fiveHourPercent": -3, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
+    expect(run('bad-inf', `{"timestamp": ${ts}, "data": {"fiveHourPercent": Infinity, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
+    expect(run('bad-ts', `{"timestamp": NaN, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-stale\)/);
+    expect(run('no-reset', `{"timestamp": ${ts}, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": null}}`)).toMatch(/WARNING \(reset-missing\): 5h 99\.0 %, but the usage cache has no reset time/);
+    expect(run('no-reset-low', `{"timestamp": ${ts}, "data": {"fiveHourPercent": 50, "fiveHourResetsAt": null}}`), 'a low percentage without a reset time is fine').not.toMatch(/WARNING/);
+  });
+
   it('hook entry check: a loud warning when settings.json has no hook entry or the entry names a hook file that does not exist', () => {
     const f = fixture('hook-check', { config: {}, cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
@@ -491,6 +544,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(guardOnce(f).stdout, 'an entry whose hook file exists: no warning').not.toMatch(/WARNING/);
     writeFileSync(f.settings, entry(`exec ${PYBIN} -I /nonexistent-dir/five-hour-guard-hook.py --pause-file ${f.pause}`), 'utf8');
     expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): the hook entry in .* names \/nonexistent-dir\/five-hour-guard-hook\.py, which does not exist/);
+    writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.dir}/old-pause.json`), 'utf8');
+    expect(guardOnce(f).stdout, 'a hook that reads another pause file than the guard writes').toMatch(/WARNING \(start\): the hook entry in .* reads the pause file .*old-pause\.json, but the guard writes .*pause\.json/);
+    writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x /nonexistent-dir/python3 ] || exit 0; exec /nonexistent-dir/python3 -I ${HOOK} --pause-file ${f.pause}`), 'utf8');
+    expect(guardOnce(f).stdout, 'an interpreter that does not exist').toMatch(/WARNING \(start\): the hook entry in .* names the interpreter \/nonexistent-dir\/python3, which does not exist/);
   });
 });
 
@@ -549,6 +606,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard hook', { timeout: 90000 }, () => 
     for (const url of ['https://proxy-anthropic.com', 'https://anthropic.com.gateway.example.test', 'https://gateway.example.test/anthropic.com', 'gateway.example.test:8080']) {
       expect(await hookPasses(f, 'other0001', withUrl(url)), `${url} is not Anthropic: passes`).toBe(true);
     }
+  });
+
+  it('a session that does not draw on the subscription passes: API key, auth token, Foundry; a blank value or an OAuth token does not exempt', async () => {
+    const f = fixture('hook-auth');
+    writePause(f);
+    const withEnv = (env: Record<string, string>) => ({ env: { ...ENV, ...env } });
+    expect(await hookPasses(f, 'other0001', withEnv({ ANTHROPIC_API_KEY: 'sk-test-0000' })), 'API key').toBe(true);
+    expect(await hookPasses(f, 'other0001', withEnv({ ANTHROPIC_AUTH_TOKEN: 'token-test-0000' })), 'auth token').toBe(true);
+    expect(await hookPasses(f, 'other0001', withEnv({ CLAUDE_CODE_USE_FOUNDRY: '1' })), 'Foundry flag').toBe(true);
+    expect(await hookHeld(f, 'other0001', withEnv({ ANTHROPIC_API_KEY: '  ', ANTHROPIC_AUTH_TOKEN: '' })), 'blank values hold').toBe(true);
+    expect(await hookHeld(f, 'other0001', withEnv({ CLAUDE_CODE_OAUTH_TOKEN: 'oauth-test-0000' })), 'a subscription token holds').toBe(true);
+  });
+
+  it('a pause file with a value of the wrong type is not a pause: paused must be true, times numbers, exclude and only lists of strings', async () => {
+    const f = fixture('hook-types');
+    expect(await hookPasses(f, 'other0001'), 'no pause file: passes').toBe(true);
+    for (const over of [{ paused: 'false' }, { paused: 'true' }, { paused: 1 }, { valid_until: String(now() + 60) }, { resume_at: String(now() + 600) },
+      { valid_until: true }, { only: 'other0001' }, { exclude: 'zzz' }, { exclude: [5] }, { only: [null] }]) {
+      writePause(f, over);
+      expect(await hookPasses(f, 'other0001'), `${JSON.stringify(over)} passes`).toBe(true);
+    }
+    writePause(f);
+    expect(await hookHeld(f, 'other0001'), 'a well-formed pause holds').toBe(true);
   });
 
   it('a valid pause holds for as long as it lasts (2.5 s of polling), exit 0 only after the pause file is gone', async () => {

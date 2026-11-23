@@ -46,11 +46,14 @@ def pause_state():
         return None
     now = time.time()
     try:
-        if not p.get('paused'):
-            return None
-        valid_until, resume_at = float(p['valid_until']), float(p['resume_at'])
-        if not (math.isfinite(valid_until) and math.isfinite(resume_at)):
-            return None   # NaN and infinity would compare false and hold for ever
+        if p.get('paused') is not True:
+            return None   # "false", 1 or "true" are not a pause: only the JSON value true is
+        valid_until, resume_at = p['valid_until'], p['resume_at']
+        if not all(type(x) in (int, float) and math.isfinite(x) for x in (valid_until, resume_at)):
+            return None   # a string, a boolean, NaN or infinity: NaN and infinity would compare false and hold for ever
+        for key in ('exclude', 'only'):
+            if not isinstance(p.get(key, []), list) or not all(isinstance(x, str) for x in p.get(key, [])):
+                return None   # a string would be read as a list of one-letter prefixes
         if now > valid_until:
             return None
         if now > resume_at + DEADLINE_GRACE_S:
@@ -75,11 +78,15 @@ def log(msg):
 
 
 def foreign_provider():
-    """Sessions routed to another API provider do not draw on the Anthropic five-hour window: a base URL outside
-    anthropic.com (the host is compared, not the text: `proxy-anthropic.com` is foreign, `API.ANTHROPIC.COM` is not), or the Bedrock or Vertex routing flag of Claude Code (set to 1, without any base URL)."""
-    if os.environ.get('CLAUDE_CODE_USE_BEDROCK') == '1' or os.environ.get('CLAUDE_CODE_USE_VERTEX') == '1':
+    """Sessions that do not draw on the Anthropic subscription window are never held: they authenticate with an API key or
+    an auth token, route through Bedrock, Vertex or Foundry (flag set to 1), or use a base URL whose host is not
+    anthropic.com (the host is compared, not the text: `proxy-anthropic.com` is foreign, `API.ANTHROPIC.COM` is not)."""
+    env = os.environ
+    if any(env.get(k, '').strip() for k in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')):
         return True
-    base = os.environ.get('ANTHROPIC_BASE_URL', '').strip()
+    if any(env.get(k) == '1' for k in ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')):
+        return True
+    base = env.get('ANTHROPIC_BASE_URL', '').strip()
     if not base:
         return False
     try:

@@ -37,6 +37,9 @@ ap.add_argument('--hook', default=os.path.join(os.path.dirname(os.path.abspath(_
 ap.add_argument('--python', default=sys.executable, help='interpreter written into the hook command (default: the one running this script)')
 ap.add_argument('--timeout', type=int, default=21600, help='seconds; Claude Code cancels a hook that runs longer (on PreToolUse the tool call then goes on), so keep it above the longest pause (5 h window plus margin)')
 A = ap.parse_args()
+if A.timeout < 1:
+    print(f'five-hour-guard-settings: --timeout must be at least 1 second, not {A.timeout}: Claude Code would cancel the hook at once', file=sys.stderr)
+    sys.exit(2)
 
 
 def fail(msg):

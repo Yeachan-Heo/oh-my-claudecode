@@ -28,7 +28,7 @@ mkdirSync(HOME_DIR, { recursive: true });
 mkdirSync(CONFIG_DIR, { recursive: true });
 
 export const ENV: NodeJS.ProcessEnv = { ...process.env, HOME: HOME_DIR, USERPROFILE: HOME_DIR, CLAUDE_CONFIG_DIR: CONFIG_DIR };
-for (const key of ['OMC_FIVE_HOUR_GUARD_CONFIG', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX']) delete ENV[key];
+for (const key of ['OMC_FIVE_HOUR_GUARD_CONFIG', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) delete ENV[key];
 
 export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 export const now = () => Date.now() / 1000;
