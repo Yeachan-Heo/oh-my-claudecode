@@ -1035,7 +1035,7 @@ const protectionOf = (dir, versions) => {
 // its nearest existing parent and the rest of the name), and has to lie outside every tree below. backupPlace(registry)
 // answers { place, problem }: place is the real directory the moves go to, problem is empty when all is well and says
 // why nothing is moved otherwise. The trees: the plugin cache (the cache of every marketplace lies inside it), the
-// marketplace clones, the occupancy records, the plugin root variables and every installPath of the registry, each as
+// marketplace clones, every cache namespace (a link may take one out of the cache), the occupancy records, the plugin root variables and every installPath of the registry, each as
 // written and as the file system reads it (a .. after a link). Both directions count (the destination inside a tree, a
 // tree inside the destination); a destination the configuration itself writes inside a tree (an active root that is the
 // configuration directory) is not an overlap that a link made. A destination that cannot be resolved (a link to nothing, a loop, no permission) or
@@ -1061,8 +1061,18 @@ const backupPlace = (registry) => {
     .filter((target) => typeof target == 'string' && target.trim())
     .map((target) => target.trim());
   const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT].map((root) => (root || '').trim()).filter(Boolean);
+  // A cache namespace (or the plugin directory in it) may be a link out of plugins/cache: its versions then lie
+  // elsewhere, so each one is a tree of its own, resolved by the comparisons below.
+  const namespaces = [...new Set([...registry.ids.map(marketplaceOf), 'omc'])].map(cacheDirOf);
+  const cacheRoot = path.join(configDir, 'plugins', 'cache');
+  try {
+    for (const market of fs.readdirSync(cacheRoot)) namespaces.push(cacheDirOf(market), path.join(cacheRoot, market));
+  } catch (error) {
+    // No readable cache root: the cache commands report that themselves.
+  }
   const trees = [
-    ['the plugin cache', path.join(configDir, 'plugins', 'cache')],
+    ['the plugin cache', cacheRoot],
+    ...[...new Set(namespaces)].map((tree) => ['the plugin cache', tree]),
     ['the marketplace clones', path.join(configDir, 'plugins', 'marketplaces')],
     ['the occupancy records', occupancyDir],
     ...roots.flatMap(bothForms).map((root) => ['the plugin root', root]),

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -150,6 +150,31 @@ describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and 
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }
+      }
+    }
+  });
+
+  // A cache namespace that is itself a link out of plugins/cache has its versions somewhere else: the plugin cache tree
+  // as written does not hold them, so the namespace is a tree of its own and a destination inside it is refused.
+  test.each([
+    ['the namespace directory (plugins/cache/omc)', 'omc'],
+    ['the plugin directory (plugins/cache/omc/oh-my-claudecode)', 'omc/oh-my-claudecode'],
+  ])('a backup directory inside an unpinned version of a cache that %s relocated by a link is refused, nothing moved', (_name, moved) => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        const relocated = path.join(dir, 'relocated', moved);
+        mkdirSync(path.dirname(relocated), { recursive: true });
+        renameSync(path.join(dir, 'plugins', 'cache', moved), relocated);
+        link(relocated, path.join(dir, 'plugins', 'cache', moved));
+        const free = path.join(realpathSync(cache), '5.9.0');
+        link(free, path.join(dir, 'plugins', 'backups'));
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, tree: REFUSED.exec(result.stdout)?.[1] }).toEqual({ command, status: 1, tree: 'the plugin cache' });
+        expect(readdirSync(cache).sort()).toEqual(ALL);
+        expect(result.stdout).not.toMatch(/Moved \d/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
       }
     }
   });
