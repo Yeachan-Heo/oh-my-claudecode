@@ -179,6 +179,29 @@ describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and 
     }
   });
 
+  // A rename cannot cross a file system. A destination on another device than the cache (reported here by a preload that
+  // gives everything under the vault another device number) is refused before the directory is created, not half way.
+  test('a redirected backup directory on another file system than the cache is refused before anything is created or moved', () => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        const vault = path.join(dir, 'vault');
+        mkdirSync(vault, { recursive: true });
+        link(vault, path.join(dir, 'plugins', 'backups'));
+        const preload = path.join(dir, 'other-device.cjs');
+        writeFileSync(preload, `const fs = require('fs');\nconst real = fs.statSync;\nfs.statSync = function (target, options) {\n  const stat = real.apply(this, arguments);\n  if (stat && String(target).includes(${JSON.stringify(path.sep + 'vault')}) && typeof stat.dev == 'bigint') stat.dev += 7n;\n  return stat;\n};\n`);
+        const result = runCommand(command, dir, { preloads: [preload], timeout: 20_000 });
+        expect({ command, status: result.status }).toEqual({ command, status: 1 });
+        expect(result.stdout).toMatch(/Nothing moved: the backup directory \S+ \(really \S+\) is on another file system than the cache/);
+        expect(result.stdout).not.toMatch(/Cache move failed|Moved \d/);
+        expect(readdirSync(cache).sort()).toEqual(ALL);
+        expect(readdirSync(vault)).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   test.each([
     ['plugins/backups is a link to nothing', (dir: string) => link(GONE, path.join(dir, 'plugins', 'backups')), /a link on the way to it points at nothing/],
     ['its child oh-my-claudecode is a link to nothing', (dir: string) => link(GONE, path.join(dir, 'plugins', 'backups', 'oh-my-claudecode')), /a link on the way to it points at nothing/],

@@ -369,11 +369,15 @@ const anyOf = (answers) => (answers.includes('yes') ? 'yes' : answers.includes('
 // The cache directory a registry version names, as written and without a leading v.
 const versionDirPaths = (market, version) =>
   [...new Set([version, dropV(version)])].map((name) => cacheDirOf(market) + path.sep + name);
-// The paths a registry entry names as its install: its installPath and the cache directory its version names.
+// The paths a registry entry names as its install: its installPath, or, for an entry that has none, the cache directory
+// its version names (an installPath says where the install is, so the version must not name a second place).
 const entryInstallPaths = (market, entry) =>
   [
-    entry?.installPath,
-    ...(typeof entry?.version == 'string' && entry.version.trim() ? versionDirPaths(market, entry.version.trim()) : []),
+    ...(typeof entry?.installPath == 'string' && entry.installPath.trim()
+      ? [entry.installPath]
+      : typeof entry?.version == 'string' && entry.version.trim()
+        ? versionDirPaths(market, entry.version.trim())
+        : []),
   ]
     .filter((target) => typeof target == 'string' && target.trim())
     .map((target) => target.trim());
@@ -681,6 +685,7 @@ const claudeMdVersion = () => {
   // A registry that cannot be used (as in Step 1) leaves open which marketplace the session runs, and a cache that cannot be
   // read may hold the newest version, so no version is named while either is unreadable.
   const registryUnusable = registry.unreadable || (registry.supported.length > 0 ? registry.malformed : registry.ambiguous);
+  const rootsConflict = roots.length > 1 && askSame(roots[0], roots[1]) == 'no';
   let unreadableCache = '';
   const latestIn = (market) => {
     const latest = highestCached(cacheDirOf(market));
@@ -693,8 +698,10 @@ const claudeMdVersion = () => {
     // As in Step 1: among the entries of one plugin ID a certain match decides, but a match that is unknown for any ID
     // leaves open which marketplace the session runs.
     pluginVersion = '(unknown)';
+  } else if (rootsConflict) {
+    // As in Step 1 (Channel: unknown): the session runs one of two different roots, and the runtime reads CLAUDE_PLUGIN_ROOT alone.
+    pluginVersion = '(unknown)';
   } else if (running.length) {
-    // With roots in two marketplaces the highest of their caches names it.
     pluginVersion = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '(none)';
   } else {
     for (const market of markets) pluginVersion = latestIn(market) || pluginVersion;
@@ -711,6 +718,8 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: the plugin cache cannot be read, so no version is compared');
   } else if (claudeVersion === '(unreadable)') {
     console.log('VERSION CHECK SKIPPED: a CLAUDE source cannot be read, so its OMC:VERSION marker is unknown (see OMC version source)');
+  } else if (rootsConflict) {
+    console.log('VERSION CHECK SKIPPED: OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories, so it is unknown which plugin install the session runs and no cache is chosen');
   } else if (pluginVersion === '(unknown)') {
     console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
   } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
@@ -1146,6 +1155,19 @@ const cacheRepair = (kind) => {
         const target = backupPlace(registry);
         if (target.problem) {
           refuse(lead + target.problem);
+          return true;
+        }
+        // A rename cannot cross file systems: refuse before the destination is created, not with the first move.
+        let apart = '';
+        try {
+          let up = target.place;
+          while (!taken(up) && path.dirname(up) != up) up = path.dirname(up);
+          const there = fs.statSync(up, { bigint: true }).dev;
+          const here = fs.statSync(dir, { bigint: true }).dev;
+          if (there && here && there != here) apart = up;
+        } catch {}
+        if (apart) {
+          refuse(lead + 'Nothing moved: the backup directory ' + backups + (target.place == path.resolve(backups) ? '' : ' (really ' + target.place + ')') + ' is on another file system than the cache ' + dir + ', and a version cannot be moved across file systems; point plugins/backups at a directory on the cache file system, then run this again');
           return true;
         }
         const redirected = target.place != path.join(realPath(path.dirname(path.dirname(backups))), 'backups', 'oh-my-claudecode');

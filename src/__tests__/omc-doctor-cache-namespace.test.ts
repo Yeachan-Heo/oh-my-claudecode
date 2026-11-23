@@ -274,7 +274,7 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
   // CLAUDE_PLUGIN_ROOT), and no registry has an order there. Step 4 does the same: the marketplace whose registry entry holds
   // a plugin root is the one it reads, whichever key comes last; only where no entry holds a root (none set, a checkout outside
   // the registry) the last supported ID whose cache holds a version names it, as above. Both variables name a root here, as in
-  // Step 1 (the runtime reads CLAUDE_PLUGIN_ROOT alone); with roots in two marketplaces the highest version of them names it.
+  // Step 1 (the runtime reads CLAUDE_PLUGIN_ROOT alone); with two different roots no version is named and the check is skipped, as Step 1 says Channel: unknown.
   describe('with several supported IDs the marketplace of the active root names the cache, not the order of the registry', () => {
     const OLD = '5.8.0';
     const NEW = '5.9.0';
@@ -324,7 +324,7 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
-    test('a root inside the install counts as that install, and roots in two marketplaces give the highest of the two caches', () => {
+    test('a root inside the install counts as that install, and two different roots skip the check', () => {
       for (const platform of PLATFORMS) {
         if (hostCannot(platform)) continue;
         for (const order of ORDERS) {
@@ -333,11 +333,27 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
             const deeper = path.join(caches[OMC], 'scripts');
             mkdirSync(deeper);
             expect({ platform, order, out: claudeMdAt(dir, OLD, platform, { CLAUDE_PLUGIN_ROOT: deeper }) }).toEqual({ platform, order, out: [`Latest cached plugin version: ${OLD}`, MATCH] });
-            expect({ platform, order, out: claudeMdAt(dir, NEW, platform, { OMC_PLUGIN_ROOT: caches[OMC], CLAUDE_PLUGIN_ROOT: caches[OWN] }) })
-              .toEqual({ platform, order, out: [`Latest cached plugin version: ${NEW}`, MATCH] });
+            // Two different roots are no answer, as in Step 1 (Channel: unknown): the runtime reads CLAUDE_PLUGIN_ROOT alone, so
+            // the highest cache of the two would name a version the session may not run.
+            const out = claudeMdAt(dir, NEW, platform, { OMC_PLUGIN_ROOT: caches[OMC], CLAUDE_PLUGIN_ROOT: caches[OWN] });
+            expect({ platform, order, out }).toEqual({ platform, order, out: ['Latest cached plugin version: (unknown)', expect.stringMatching(/^VERSION CHECK SKIPPED: OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories/)] });
           } finally {
             rmSync(dir, { recursive: true, force: true });
           }
+        }
+      }
+    });
+
+    test('roots on two versions of one marketplace skip the check, whichever variable holds the older one, instead of a false drift against the highest cache', () => {
+      for (const [omcRoot, claudeRoot] of [[NEW, OLD], [OLD, NEW]]) {
+        const dir = fresh();
+        try {
+          const cache = addCache(dir, [OLD, NEW], 'omc');
+          writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD, installPath: path.join(cache, OLD) }, { scope: 'user', version: NEW, installPath: path.join(cache, NEW) }] });
+          const out = claudeMdAt(dir, claudeRoot, 'linux', { OMC_PLUGIN_ROOT: path.join(cache, omcRoot), CLAUDE_PLUGIN_ROOT: path.join(cache, claudeRoot) });
+          expect({ omcRoot, claudeRoot, out }).toEqual({ omcRoot, claudeRoot, out: ['Latest cached plugin version: (unknown)', expect.stringMatching(/^VERSION CHECK SKIPPED: OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories/)] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
         }
       }
     });

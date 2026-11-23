@@ -421,6 +421,22 @@ describe('omc-doctor Step 1 takes the installed version from the manifest of the
       expect('Note' in block).toBe(false);
     });
 
+    // The cache directory a version names stands in for a missing installPath only: an entry that has an installPath says where
+    // its install is, so a root on the directory its version would name is not that install (it is a checkout).
+    test('OMC_PLUGIN_ROOT on the directory the version names, beside an installPath that names another version, is a checkout, not the registry install', () => {
+      const block = run({ entry: torn, root: (dir) => cache(dir, '5.9.0'), files: (dir) => ({ [path.join(cache(dir, '5.9.0'), 'package.json')]: manifest('5.9.0'), [path.join(cache(dir, '5.8.0'), 'README.md')]: 'x' }), variable: 'OMC_PLUGIN_ROOT' });
+      expect(block.Channel).toBe('plugin-dir');
+      expect(block.Installed).toBe('5.9.0');
+      expect(block.Updater).toMatch(/^none/);
+    });
+
+    test('CLAUDE_PLUGIN_ROOT on that directory matches no entry, so the contradiction of the entry stays visible instead of being settled by the root', () => {
+      const block = run({ entry: torn, root: (dir) => cache(dir, '5.9.0'), files: (dir) => ({ [path.join(cache(dir, '5.9.0'), 'package.json')]: manifest('5.9.0'), [path.join(cache(dir, '5.8.0'), 'README.md')]: 'x' }) });
+      expect(Object.keys(block)).toEqual(KEYS);
+      expect(block.Installed).toBe('(unknown)');
+      expect(block['Registry mismatch']).toContain('names 5.8.0, 5.9.0 for one install');
+    });
+
     test('with no root variable the entry contradicts itself all the same, in either direction', () => {
       for (const [version, leaf] of [['5.9.0', '5.8.0'], ['5.8.0', '5.9.0']]) {
         const block = step1({ plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ version, installPath: cache(dir, leaf) }] }), clone: { omc: '5.9.0' }, setup: (dir) => write(path.join(cache(dir, leaf), 'README.md'), 'x') });
