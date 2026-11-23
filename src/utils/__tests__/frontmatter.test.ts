@@ -572,3 +572,54 @@ describe("parseFrontmatter block scalars", () => {
     });
   });
 });
+
+describe("parseFrontmatter trailing comments", () => {
+  const parse = (yaml: string) => parseFrontmatter(`---\n${yaml}\n---\nbody`).metadata;
+
+  it("drops a trailing comment from plain, quoted and flow values", () => {
+    expect(
+      parse(
+        [
+          "model: opus # Requires deep reasoning",
+          'name: "my-skill"  # quoted',
+          "agent: 'planner' # single",
+          'aliases: [a, "b #c"] # list',
+          "empty: # nothing here",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      model: "opus",
+      name: "my-skill",
+      agent: "planner",
+      aliases: '[a, "b #c"]',
+      empty: "",
+    });
+  });
+
+  it("keeps a # that is not preceded by whitespace or is inside quotes", () => {
+    expect(
+      parse(
+        [
+          "path: docs/#x/**",
+          "lang: C#",
+          'quoted: "a #b"',
+          "single: 'it''s #fine'",
+          "apostrophe: don't #x",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      path: "docs/#x/**",
+      lang: "C#",
+      quoted: "a #b",
+      single: "it's #fine",
+      apostrophe: "don't",
+    });
+  });
+
+  it("reads a commented alias list as a list", () => {
+    expect(parseFrontmatterAliases(parse("aliases: [foo, bar] # legacy").aliases)).toEqual([
+      "foo",
+      "bar",
+    ]);
+  });
+});

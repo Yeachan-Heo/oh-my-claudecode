@@ -189,6 +189,37 @@ function foldBlockScalarRows(rows: BlockScalarRow[]): string {
 }
 
 /**
+ * Drop a trailing YAML comment from a one-line value. A `#` starts a comment only
+ * at the start of the value or after whitespace, and never inside a quoted scalar,
+ * so `a#b`, `docs/#x` and `"a #b"` are kept.
+ */
+function stripTrailingComment(value: string): string {
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (quote) {
+      if (quote === '"' && char === "\\") {
+        i++;
+      } else if (char === quote) {
+        if (quote === "'" && value[i + 1] === "'") i++;
+        else quote = null;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      // A quote opens a scalar only at the start of the value or of a flow item.
+      const before = value.slice(0, i).trimEnd();
+      if (before === "" || /[[{,:]$/.test(before)) quote = char;
+      continue;
+    }
+    if (char === "#" && (i === 0 || value[i - 1] === " " || value[i - 1] === "\t")) {
+      return value.slice(0, i).trimEnd();
+    }
+  }
+  return value;
+}
+
+/**
  * Parse YAML-like frontmatter from markdown content.
  * Returns { metadata, body } where metadata is a flat string map.
  */
@@ -234,7 +265,7 @@ export function parseFrontmatter(content: string): {
       if (colonIndex === -1) continue;
 
       const key = line.slice(0, colonIndex).trim();
-      const rawValue = line.slice(colonIndex + 1).trim();
+      const rawValue = stripTrailingComment(line.slice(colonIndex + 1).trim());
 
       const blockHeader = parseBlockScalarHeader(rawValue);
       if (blockHeader) {
