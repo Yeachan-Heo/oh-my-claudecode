@@ -616,6 +616,13 @@ describe("parseFrontmatter trailing comments", () => {
     });
   });
 
+  it("skips an escaped double quote and treats a tab before # as whitespace", () => {
+    expect(parse(['d: "a \\" #b" # c', "t: x\t# tab"].join("\n"))).toEqual({
+      d: 'a \\" #b',
+      t: "x",
+    });
+  });
+
   it("reads a commented alias list as a list", () => {
     expect(parseFrontmatterAliases(parse("aliases: [foo, bar] # legacy").aliases)).toEqual([
       "foo",
