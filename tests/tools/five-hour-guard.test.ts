@@ -176,6 +176,19 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(g2); }
   });
 
+  it('a path key of the configuration that is not a string is a configuration error (exit 2, no traceback), not a crash', () => {
+    const f = fixture('cfg-types');
+    for (const key of ['pause_file', 'state_file', 'usage_cache', 'log_file', 'settings_file']) {
+      for (const bad of [42, ['a'], { a: 1 }, true]) {
+        writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, [key]: bad }), 'utf8');
+        const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+        expect(r.status, `${key}=${JSON.stringify(bad)}: ${r.stderr}`).toBe(2);
+        expect(r.stderr, `${key}`).toContain(`"${key}" must be a string`);
+        expect(r.stderr).not.toContain('Traceback');
+      }
+    }
+  });
+
   it('refuses at start a pause or state file in a directory that is not there; a directory that vanishes later is an ERROR, not the end of the guard', async () => {
     const f = fixture('no-dir');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: join(f.dir, 'missing', 'pause.json'), state_file: f.state }), 'utf8');
@@ -524,6 +537,18 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard hook', { timeout: 90000 }, () => 
     expect(await hookPasses(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_BEDROCK: '1' } }), 'Bedrock flag passes').toBe(true);
     expect(await hookPasses(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_VERTEX: '1' } }), 'Vertex flag passes').toBe(true);
     expect(await hookHeld(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_BEDROCK: '0', CLAUDE_CODE_USE_VERTEX: '' } }), 'flags that are off hold').toBe(true);
+  });
+
+  it('the provider is decided by the host of the base URL: case, subdomains, a scheme-less value and look-alike hosts', async () => {
+    const f = fixture('hook-host');
+    writePause(f);
+    const withUrl = (url: string) => ({ env: { ...ENV, ANTHROPIC_BASE_URL: url } });
+    for (const url of ['https://API.ANTHROPIC.COM', 'https://eu.api.anthropic.com:8443/v1', 'api.anthropic.com', 'https://anthropic.com']) {
+      expect(await hookHeld(f, 'other0001', withUrl(url)), `${url} is Anthropic: held`).toBe(true);
+    }
+    for (const url of ['https://proxy-anthropic.com', 'https://anthropic.com.gateway.example.test', 'https://gateway.example.test/anthropic.com', 'gateway.example.test:8080']) {
+      expect(await hookPasses(f, 'other0001', withUrl(url)), `${url} is not Anthropic: passes`).toBe(true);
+    }
   });
 
   it('a valid pause holds for as long as it lasts (2.5 s of polling), exit 0 only after the pause file is gone', async () => {

@@ -13,7 +13,8 @@ import {
 afterAll(cleanup);
 
 // Another program writes settings.json between the read of the tool and its replace: the wrapper acts when the tool creates its
-// temporary file. Modes: content (changed, modification time put back), mtime (only the modification time moves), always.
+// temporary file (mode backup: when it creates the backup). Modes: content (changed, modification time put back), mtime (only the
+// modification time moves), always, backup (as content, but at the creation of the backup).
 const RACE_DRIVER = [
   'import json, os, runpy, sys',
   'mode, settings = sys.argv[1], sys.argv[2]',
@@ -21,7 +22,7 @@ const RACE_DRIVER = [
   'count = [0]',
   'real_open = os.open',
   'def other_writer(path, *args, **kwargs):',
-  "    if str(path).endswith('.tmp'):",
+  "    if (str(path).endswith('.tmp')) if mode != 'backup' else ('before-five-hour-guard' in str(path)):",
   '        count[0] += 1',
   "        if mode == 'always' or count[0] == 1:",
   '            st = os.stat(settings)',
@@ -33,7 +34,7 @@ const RACE_DRIVER = [
   "                with open(settings, 'w') as f:",
   '                    json.dump(data, f, indent=2)',
   "                    f.write('\\n')",
-  "                if mode == 'content':",
+  "                if mode in ('content', 'backup'):",
   '                    os.utime(settings, ns=(st.st_atime_ns, st.st_mtime_ns))',
   '    return real_open(path, *args, **kwargs)',
   'os.open = other_writer',
@@ -238,6 +239,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(backups(a.f), 'no backup of a file that was not replaced').toHaveLength(0);
   });
 
+  it('a write that lands while the backup is being made is not lost: the comparison runs after the backup, right before the replace', () => {
+    const f = fixture('settings-race-backup');
+    write(f, base());
+    const r = runPyCode(RACE_DRIVER, ['backup', f.settings, SETTINGS_TOOL, 'add', '--settings', f.settings, '--pause-file', f.pause, '--hook-log', f.hookLog, '--hook', HOOK, '--python', PYBIN]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/reading it again/);
+    const doc = readJson(f.settings);
+    expect(doc.other_writer_1, 'the change made during the backup is kept').toBe(true);
+    expect(doc.hooks.PreToolUse.at(-1).hooks[0].command, 'and our entry is added').toBe(entryCommand(f));
+    expect(backups(f), 'the backup of the abandoned attempt is gone, one backup is left').toHaveLength(1);
+    expect(readJson(join(f.dir, backups(f)[0])).other_writer_1, 'and it holds the file as it was when it was written over').toBe(true);
+    expect(readdirSync(f.dir).some((n) => n.endsWith('.tmp')), 'no temporary file left').toBe(false);
+  });
+
   it('the temporary file and the backup are created readable by the owner only and get the mode of the original before any content is written', () => {
     for (const umask of ['0', '77']) {
       const f = fixture(`settings-modes-${umask}`);
@@ -317,6 +332,26 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(tool(f, 'check').status, 'and found by check').toBe(0);
     expect(tool(f, 'remove').stdout, 'and removed').toMatch(/remove: done/);
     expect(readJson(f.settings).hooks.PreToolUse, 'nothing of ours is left').toEqual(base().hooks.PreToolUse);
+  });
+
+  it('a path key of the configuration that is not a string is refused with exit 2 and a message, not a traceback', () => {
+    const f = fixture('settings-cfg-types');
+    for (const key of ['pause_file', 'settings_file', 'hook_log_file']) {
+      writeFileSync(f.cfg, JSON.stringify({ pause_file: f.pause, settings_file: f.settings, hook_log_file: f.hookLog, [key]: 42 }), 'utf8');
+      for (const action of ['add', 'check']) {
+        const r = runSync(SETTINGS_TOOL, [action, '--config', f.cfg, '--hook', HOOK, '--python', PYBIN]);
+        expect(r.status, `${key}, ${action}: ${r.stderr}`).toBe(2);
+        expect(r.stderr).toContain(`"${key}" must be a string`);
+        expect(r.stderr).not.toContain('Traceback');
+      }
+    }
+  });
+
+  it('the README says that sessions already running and the headless AFK sessions need attention', () => {
+    const readme = readFileSync(join(dirname(SETTINGS_TOOL), 'README.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(readme, 'AFK and factory sessions skip user-level hooks').toContain('OMC_AFK_INCLUDE_USER_SETTINGS=1');
+    expect(readme, 'a hook snapshot is kept by running sessions').toMatch(/restart each session/i);
+    expect(readme, 'no claim that edits are picked up while a session runs').not.toMatch(/normally picks up edits/);
   });
 
   it('add refuses relative or missing paths; a settings file of the wrong shape is an error, not a crash', () => {

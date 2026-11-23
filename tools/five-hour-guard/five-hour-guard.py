@@ -109,6 +109,8 @@ CFG = load_config(A.config)
 def setting(cli, key, required=False):
     """Command line value (an empty string counts: it disables an optional feature), else the configuration value."""
     v = cli if cli is not None else CFG.get(key)
+    if v is not None and not isinstance(v, str):
+        fail(f'"{key}" must be a string (a file path), not {v!r}')
     if required and not v:
         fail(f'"{key}" is not set: give it in the configuration file (--config or OMC_FIVE_HOUR_GUARD_CONFIG) or on the command line')
     return v or ''

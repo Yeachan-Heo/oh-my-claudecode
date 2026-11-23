@@ -4,7 +4,8 @@ An opt-in guard for people who run many Claude Code sessions at once on one Clau
 Claude subscription (OAuth login), and only while something keeps OMC's usage cache fresh: the OMC status line with rate
 limits shown (`elements.rateLimits` is not `false`) or a running `omc wait`.** Without that the guard sees no usage and
 holds nothing; it says so in its log (`WARNING`, see "Input: the usage cache"). When the five-hour usage window reaches a
-threshold (97 % by default), every tool call of every session waits until the window resets, plus a margin. Nothing is
+threshold (97 % by default), every tool call of every session that loads the hook waits until the window resets, plus a margin (see "Which sessions load
+the hook"). Nothing is
 denied and no signal is sent to any process: the sessions stay alive, keep their id and their connections, and stop
 spending after at most one more model response. When the window resets, the waiting tool calls continue exactly where
 they stopped.
@@ -169,12 +170,15 @@ believed (`reset-too-far`). Read the log once after you start the guard.
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The
    entry has a `timeout` of 21600 s (`--timeout`), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
-   another program writes `settings.json` while the tool works, the tool reads it again once and then gives up (exit 2,
-   nothing written); run `check` after `add` to see the result. Without a `settings.json`, `add` creates it (the
+   another program writes `settings.json` while the tool works (also while the backup is made), the tool reads it again
+   once and then gives up (exit 2, nothing written). A write inside the instant between its last comparison and the
+   rename cannot be told apart by any tool, since a rename has no compare-and-swap; run `check` after `add` to see the
+   result. Without a `settings.json`, `add` creates it (the
    directory has to exist; mode 0600), `remove` has nothing to do and `check` reports "not installed" (exit 1). The
    default path is `$CLAUDE_CONFIG_DIR/settings.json` (blanks removed, a leading `~` expanded, as the guard and OMC do),
-   else `~/.claude/settings.json`. Claude Code normally picks up edits of hooks in settings files while a session runs;
-   use the try below to confirm.
+   else `~/.claude/settings.json`. Claude Code keeps the hook snapshot a session started with, so restart each session
+   that is already running after `add` (a running session also keeps the entry after `remove` until it is restarted;
+   without a pause file that costs nothing); only sessions started afterwards load the new entry.
 4. Check the installation without waiting for a real limit (see "Try it").
 5. Run the guard.
 
@@ -209,7 +213,7 @@ stop your other sessions:
 python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-hour-guard/config.json --test-pause 20 --test-only <session id prefix>
 ```
 
-While it runs, a tool call of that session waits (the hook log shows `hold-start` and `hold-end` when `hook_log_file` is
+While it runs, a tool call of that session (started after `add`) waits (the hook log shows `hold-start` and `hold-end` when `hook_log_file` is
 set). The test refuses to start when the pause file already exists, and it removes the file at its end only when the file
 is still its own. `--dry-run` runs one check and logs what the guard would do without writing anything:
 
@@ -237,6 +241,16 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 
 A configuration error (a missing required key, a wrong type, a number that is not finite or outside its range, a
 directory of the pause or state file that is missing) exits with status 2.
+
+## Which sessions load the hook
+
+Only a session that read the `settings.json` holding the entry when it started waits in the hook. The headless sessions
+that OMC starts, factory chain links and `omc ralph afk`, pass `--setting-sources project,local` by default and so do
+not load user-level hooks (`docs/REFERENCE.md`, "Headless factory and AFK settings"); with the default installation into
+`~/.claude/settings.json` they go on issuing tool calls during a pause. To hold them either set
+`OMC_AFK_INCLUDE_USER_SETTINGS=1` in the environment that launches OMC (the same document explains the trust this
+asks for: user-level hooks then run in unattended sessions), or register the entry in the settings of the project with
+`five-hour-guard-settings.py add --settings <project>/.claude/settings.local.json`.
 
 ## Session exceptions
 

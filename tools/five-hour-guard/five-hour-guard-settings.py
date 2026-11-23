@@ -8,8 +8,9 @@
 # A settings.json that is a symbolic link is written through: the file it points to is replaced and the link stays a link.
 # The temporary file and the backup are created readable by the owner only and get the mode of the original before any
 # content is written (settings.json can hold tokens in "env"). Another program may write the file while this tool works:
-# before the replace the tool compares the file with what it read, reads again once when it differs, and gives up (exit 2,
-# nothing written) when it differs again. Run `check` after `add` to see the result.
+# after the backup is made and right before the replace the tool compares the file with what it read, reads again once when
+# it differs, and gives up (exit 2, nothing written) when it differs again. The instant between that comparison and the
+# rename remains: a rename has no compare-and-swap, so a write inside it is lost. Run `check` after `add` to see the result.
 # The hook entry is identified by the file name five-hour-guard-hook.py in its command, so `add` twice is a no-op and `add`
 # with another hook path replaces the entry in place, in one write (there is no moment without a hook entry). Only our hook
 # is touched: when a group of settings.json holds our hook next to another one, the other hook stays (in a group of its
@@ -52,6 +53,10 @@ if A.config:
             raise ValueError('not a JSON object')
     except Exception as e:
         fail(f'cannot read configuration {A.config}: {e!r}')
+
+for _key in ('settings_file', 'pause_file', 'hook_log_file'):
+    if CFG.get(_key) is not None and not isinstance(CFG[_key], str):
+        fail(f'"{_key}" must be a string (a file path), not {CFG[_key]!r}')
 
 CONFIG_DIR = os.path.expanduser((os.environ.get('CLAUDE_CONFIG_DIR') or '').strip() or '~/.claude')
 SETTINGS = A.settings or CFG.get('settings_file') or os.path.join(CONFIG_DIR, 'settings.json')
@@ -116,20 +121,25 @@ def store(raw, snapshot, mode, out):
     target = os.path.realpath(SETTINGS)
     tmp = f'{target}.{os.getpid()}.tmp'
     write_private(tmp, out, mode if raw is not None else 0o600)
+    backup = None
+    made = []   # files this run created and must remove when it does not replace settings.json
     try:
-        if read_settings()[1] != snapshot:
-            raise Changed()
         if raw is not None:
             backup = f"{SETTINGS}.before-five-hour-guard-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
             write_private(backup, raw, mode, snapshot[1])
+            made.append(backup)
+        # the comparison comes last, right before the replace: a write that lands while the backup is made is seen too
+        if read_settings()[1] != snapshot:
+            raise Changed()
         os.replace(tmp, target)
     except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        for path in [tmp] + made:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
         raise
-    return backup if raw is not None else None
+    return backup
 
 
 def run_once():

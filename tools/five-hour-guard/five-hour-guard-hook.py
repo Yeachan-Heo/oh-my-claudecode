@@ -14,6 +14,7 @@
 # Both paths come from the hook command that five-hour-guard-settings.py writes into settings.json; the hook reads no
 # configuration file (it runs on every tool call). Without --pause-file there is nothing to wait for: exit 0.
 import json, math, os, sys, time
+from urllib.parse import urlparse
 
 DEADLINE_GRACE_S = 900       # never hold longer than this past the stored resume time
 MAX_VALID_AHEAD_S = 3600     # the guard renews valid_until every tick and sets it at most 1800 s ahead
@@ -75,11 +76,17 @@ def log(msg):
 
 def foreign_provider():
     """Sessions routed to another API provider do not draw on the Anthropic five-hour window: a base URL outside
-    anthropic.com, or the Bedrock or Vertex routing flag of Claude Code (set to 1, without any base URL)."""
+    anthropic.com (the host is compared, not the text: `proxy-anthropic.com` is foreign, `API.ANTHROPIC.COM` is not), or the Bedrock or Vertex routing flag of Claude Code (set to 1, without any base URL)."""
     if os.environ.get('CLAUDE_CODE_USE_BEDROCK') == '1' or os.environ.get('CLAUDE_CODE_USE_VERTEX') == '1':
         return True
-    base = os.environ.get('ANTHROPIC_BASE_URL', '')
-    return bool(base) and 'anthropic.com' not in base
+    base = os.environ.get('ANTHROPIC_BASE_URL', '').strip()
+    if not base:
+        return False
+    try:
+        host = (urlparse(base if '://' in base else '//' + base).hostname or '').rstrip('.').lower()
+    except ValueError:
+        return True   # not a URL we can read: not Anthropic's, and the hook is fail-open
+    return not (host == 'anthropic.com' or host.endswith('.anthropic.com'))
 
 
 def main():
