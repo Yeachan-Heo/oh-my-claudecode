@@ -35,6 +35,15 @@ const SHUTDOWN_ACK_TIMEOUT_MS = 30_000;
 // Live lanes pick a fake-team-provider.mjs scenario; only the default one
 // meets every assertion below.
 const FAKE_PROVIDER_SCENARIO = process.env.OMC_FAKE_PROVIDER_SCENARIO;
+// These lanes expect the start to fail at a first-run screen that must get no
+// key, so they run their own case instead.
+const STOP_SCENARIOS: Record<string, { reason: string; step: string }> = {
+  'claude-bypass-permissions': { reason: 'claude_bypass_permissions_consent_required', step: 'await-bypass-answer' },
+  'claude-onboarding': { reason: 'claude_onboarding_required', step: 'await-onboarding-answer' },
+};
+const STOP_SCENARIO = FAKE_PROVIDER_SCENARIO && Object.hasOwn(STOP_SCENARIOS, FAKE_PROVIDER_SCENARIO)
+  ? STOP_SCENARIOS[FAKE_PROVIDER_SCENARIO]
+  : undefined;
 // The worker environment is allowlisted, so the shim carries this setting.
 const FAKE_SLOW_BANNER_MS = process.env.OMC_FAKE_SLOW_BANNER_MS;
 const execFileAsync = promisify(execFile);
@@ -267,7 +276,29 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     if (leftovers.length > 0) throw new Error(`smoke cleanup left live resources:\n${leftovers.join('\n')}`);
   });
 
-  it('launches a worker that claims and completes its task, then acks shutdown and leaves nothing behind', async () => {
+  it.runIf(STOP_SCENARIO)('fails the start at a first-run screen without sending it a key', async () => {
+    const startedAt = Date.now();
+    const runtime = await startTeamV2({
+      teamName: `tmux-smoke-${randomUUID().slice(0, 8)}`,
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Smoke task', description: 'Claim this task, complete it, then wait for shutdown.' }],
+      pluginConfig: {},
+      cwd,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(runtime.startupFailures, await traceDiagnostics()).toEqual([
+      expect.objectContaining({ worker: 'worker-1', reason: `worker_notify_failed:${STOP_SCENARIO!.reason}` }),
+    ]);
+    const steps = (await readTrace()).map(entry => entry.step);
+    expect(steps, await traceDiagnostics()).toContain(STOP_SCENARIO!.step);
+    expect(steps, await traceDiagnostics()).not.toContain('selector-read');
+    // Well inside the 30 s readiness wait the warning would otherwise sit through.
+    expect(elapsedMs).toBeLessThan(15_000);
+  }, 180_000);
+
+  it.skipIf(STOP_SCENARIO)('launches a worker that claims and completes its task, then acks shutdown and leaves nothing behind', async () => {
     const teamName = `tmux-smoke-${randomUUID().slice(0, 8)}`;
     const runtime = await startTeamV2({
       teamName,

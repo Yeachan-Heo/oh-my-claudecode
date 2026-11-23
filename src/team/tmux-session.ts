@@ -65,7 +65,9 @@ import {
   paneHasStartupBanner,
   paneHasTrustPrompt,
   paneLooksReady,
-  claudeTrustFocus,
+  claudeDialogFocus,
+  detectClaudeStartupDialog,
+  type ClaudeStartupDialogKind,
   type PaneTrustPromptKind,
 } from "./pane-readiness.js";
 
@@ -4538,6 +4540,8 @@ export type StartupPaneReadyResult =
         | "selector_persistent"
         | "cursor_workspace_untrusted"
         | "codex_workspace_untrusted"
+        | "claude_bypass_permissions_consent_required"
+        | "claude_onboarding_required"
         | "pane_busy"
         | "provider_exited"
         | "readiness_timeout";
@@ -4620,7 +4624,7 @@ export async function waitForStartupPaneReady(
       ? Number(opts.pollIntervalMs)
       : 250;
   const deadline = Date.now() + timeoutMs;
-  const handledSelectors = new Set<PaneTrustPromptKind>();
+  const handledSelectors = new Set<PaneTrustPromptKind | ClaudeStartupDialogKind>();
   let claudeTrustDownSentAt = -Infinity;
   // Set right after Enter answers Claude's trust dialog: the pane is read once
   // more even when that Enter went out at the last poll before the deadline.
@@ -4646,7 +4650,9 @@ export async function waitForStartupPaneReady(
     });
     if (!observation.ok) return { ok: false, reason: "capture_failed" };
     const captured = observation.captured;
-    const selector = detectPaneTrustPromptKind(captured, context.provider);
+    const selector =
+      (context.provider === "claude" ? detectClaudeStartupDialog(captured) : null) ??
+      detectPaneTrustPromptKind(captured, context.provider);
     if (selector) {
       // This Codex dialog persists workspace trust and can enable folder
       // settings. Never type a task or grant that trust on the user's behalf.
@@ -4658,28 +4664,46 @@ export async function waitForStartupPaneReady(
       if (selector === "cursor_workspace_trust") {
         return { ok: false, reason: "cursor_workspace_untrusted" };
       }
+      // Accepting Bypass Permissions mode is the user's call, and the warning
+      // focuses "No, exit", so any key could also end the session. Send none.
+      if (selector === "claude_bypass_permissions")
+        return { ok: false, reason: "claude_bypass_permissions_consent_required" };
+      // Onboarding (theme, security notes) is the user's to finish. Send none.
+      if (selector === "claude_onboarding")
+        return { ok: false, reason: "claude_onboarding_required" };
+      // A first-run dialog with its choices off screen: wait for them, and
+      // type nothing into it meanwhile.
+      if (selector === "claude_startup_dialog_unidentified") {
+        await sleep(pollIntervalMs);
+        continue;
+      }
+      const claudeDialog =
+        selector === "claude_directory" ||
+        selector === "claude_fullscreen_renderer";
       const providerSupportsSelector =
         selector === "codex_hooks"
           ? context.provider === "codex"
-          : selector === "claude_directory"
+          : claudeDialog
             ? context.provider === "claude"
             : context.provider === "codex" || context.provider === "claude";
       if (!providerSupportsSelector)
         return { ok: false, reason: "selector_unsupported" };
       if (handledSelectors.has(selector))
         return { ok: false, reason: "selector_persistent" };
-      if (selector === "claude_directory") {
-        // This dialog focuses "No, exit" first. Claude Code 2.1.328 was
-        // measured to drop a Down sent right after the dialog drew, so Down is
-        // resent while "No" stays focused, and Enter is sent only when the last
-        // capture showed the affirmative choice focused. An answered dialog
-        // above a live input prompt gets no key: it would reach the prompt.
-        const focus = claudeTrustFocus(captured);
+      if (claudeDialog) {
+        // Both dialogs are answered with their second choice: "Yes, I trust
+        // this folder" and the renderer offer's "Not now". Each focuses its
+        // first choice. Claude Code 2.1.328 was measured to drop a Down sent
+        // right after the trust dialog drew, so Down is resent while the first
+        // choice stays focused, and Enter is sent only when the last capture
+        // showed the second choice focused. An answered dialog above a live
+        // input prompt gets no key: it would reach the prompt.
+        const focus = claudeDialogFocus(captured, selector);
         if (focus === "stale")
           return { ok: false, reason: "selector_persistent" };
-        if (focus !== "yes") {
+        if (focus !== "second") {
           if (
-            focus === "no" &&
+            focus === "first" &&
             Date.now() - claudeTrustDownSentAt >= CLAUDE_TRUST_DOWN_RESEND_MS
           ) {
             await sendTeamPaneKey(
@@ -4705,7 +4729,7 @@ export async function waitForStartupPaneReady(
         context.ownership.tmuxServerIdentity,
       );
       handledSelectors.add(selector);
-      readAfterTrustAnswer = selector === "claude_directory";
+      readAfterTrustAnswer = claudeDialog;
       await sleep(pollIntervalMs);
       continue;
     }
@@ -4725,7 +4749,9 @@ async function startupPaneSubmitBlockReason(
   context: StartupPaneContext,
   attemptAlreadyFenced: boolean,
 ): Promise<
-  Extract<StartupPaneReadyResult, { ok: false }>["reason"] | undefined
+  | Extract<StartupPaneReadyResult, { ok: false }>["reason"]
+  | "claude_startup_dialog_pending"
+  | undefined
 > {
   if (!(await startupContextIsActive(context, attemptAlreadyFenced)))
     return "attempt_inactive";
@@ -4743,6 +4769,14 @@ async function startupPaneSubmitBlockReason(
       : {}),
   });
   if (!observation.ok || !observation.captured.trim()) return "capture_failed";
+  const startupDialog =
+    context.provider === "claude"
+      ? detectClaudeStartupDialog(observation.captured)
+      : null;
+  if (startupDialog === "claude_bypass_permissions")
+    return "claude_bypass_permissions_consent_required";
+  if (startupDialog === "claude_onboarding") return "claude_onboarding_required";
+  if (startupDialog) return "claude_startup_dialog_pending";
   const selector = detectPaneTrustPromptKind(
     observation.captured,
     context.provider,
@@ -4768,10 +4802,25 @@ export async function deliverStartupInbox(
   });
   if (!ready.ok) return { ok: false, reason: ready.reason };
   try {
-    const preInputBlockReason = await startupPaneSubmitBlockReason(
+    let preInputBlockReason = await startupPaneSubmitBlockReason(
       context,
       options.attemptAlreadyFenced ?? false,
     );
+    // A first-run dialog can draw after the wait saw the input prompt. Nothing
+    // is typed yet, so the wait handles it like any startup dialog, once.
+    if (preInputBlockReason === "claude_startup_dialog_pending") {
+      const answered = await waitForStartupPaneReady(context, {
+        timeoutMs: resolveStartupReadyTimeoutMs(process.env),
+        attemptAlreadyFenced: options.attemptAlreadyFenced,
+      });
+      if (!answered.ok) return { ok: false, reason: answered.reason };
+      preInputBlockReason = await startupPaneSubmitBlockReason(
+        context,
+        options.attemptAlreadyFenced ?? false,
+      );
+    }
+    if (preInputBlockReason === "claude_startup_dialog_pending")
+      return { ok: false, reason: "selector_persistent" };
     if (preInputBlockReason) return { ok: false, reason: preInputBlockReason };
     await sendLiteralPaneText(
       context.ownership.paneId,
@@ -4784,6 +4833,9 @@ export async function deliverStartupInbox(
         context,
         options.attemptAlreadyFenced ?? false,
       );
+      // The trigger is typed: Enter would now answer the dialog, not submit it.
+      if (submitBlockReason === "claude_startup_dialog_pending")
+        return { ok: false, reason: "selector_persistent" };
       if (submitBlockReason) return { ok: false, reason: submitBlockReason };
       await sendTeamPaneKey(
         context.ownership.paneId,
@@ -4889,6 +4941,8 @@ export async function retryStartupInboxSubmit(
   });
   if (
     !observation.ok ||
+    (context.provider === "claude" &&
+      detectClaudeStartupDialog(observation.captured)) ||
     detectPaneTrustPromptKind(observation.captured, context.provider)
   )
     return "unavailable";

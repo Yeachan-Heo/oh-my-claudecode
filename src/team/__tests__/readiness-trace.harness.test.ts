@@ -109,8 +109,11 @@ const SETS: Record<string, (fixtures: Fixture[], contexts: Map<string, StartupPa
   },
   trust: (fixtures, contexts) => {
     const idle = readFileSync(join(FIXTURE_ROOT, 'claude/2.1.325/idle.txt'), 'utf8');
-    const dialogs = fixtures.filter(fixture =>
-      fixture.provider === 'claude' && /❯\s*No, exit/.test(readFileSync(join(FIXTURE_ROOT, fixture.file), 'utf8')));
+    // Claude's other "No, exit" dialog, the Bypass Permissions warning, is not a trust dialog.
+    const dialogs = fixtures.filter(fixture => {
+      const text = readFileSync(join(FIXTURE_ROOT, fixture.file), 'utf8');
+      return fixture.provider === 'claude' && /❯\s*No, exit/.test(text) && /^\s*Yes, (?:proceed|I trust this folder)/m.test(text);
+    });
     // An answered dialog left above the live input prompt: keys reach the
     // prompt, so the pane stays as recorded.
     const stale = (file: string) => {

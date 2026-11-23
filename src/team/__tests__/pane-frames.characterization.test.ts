@@ -45,6 +45,7 @@ type Row = Outputs &
   { state: StateName; state_wrong?: string };
 
 const TRUST_READY = 'a trust prompt is reported ready';
+const TRUST_MID_DRAW = 'the trust dialog caught while Claude Code draws it (about 4 ms): its focused "❯ No, exit" line reads as an idle prompt and the trust detector does not read it yet';
 const BUSY_READY = 'ready and busy at once: the input box stays drawn while the provider works';
 const SHELL_IDLE = 'the provider has exited and its shell prompt reads as idle; the nudge and the monitor rule it out only when provider liveness confirms the exit';
 const CURSOR_UNREAD = 'without the provider, Cursor\'s → prompt and stop hint are not read; no Cursor frame has been recorded';
@@ -71,8 +72,26 @@ const TABLE: Readonly<Record<string, Row>> = {
   'claude/2.1.325/idle.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/2.1.325/trust-just-answered.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
   'claude/2.1.325/trust.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
+  // Claude Code's first-run dialogs are read only by the startup wait (detectClaudeStartupDialog).
+  'claude/2.1.328/bypass-permissions-yes-focused.txt': { ready: true, busy: false, trust: null, state: 'idle' },
+  'claude/2.1.328/bypass-permissions.txt': { ready: true, busy: false, trust: null, state: 'idle' },
+  'claude/2.1.328/fullscreen-renderer-not-now-focused.txt': { ready: true, busy: false, trust: null, state: 'idle' },
+  'claude/2.1.328/fullscreen-renderer.txt': { ready: true, busy: false, trust: null, state: 'idle' },
+  'claude/2.1.328/idle-after-fullscreen-renderer.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/2.1.328/trust-yes-focused.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
+  // Claude Code's onboarding is read only by the startup wait (detectClaudeStartupDialog).
+  'claude/2.1.329/onboarding-security-notes.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
+  'claude/2.1.329/onboarding-theme.txt': { ready: true, busy: false, trust: null, state: 'idle' },
+  'claude/2.1.330/bypass-permissions-body-partial.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
+  'claude/2.1.330/bypass-permissions-no-choices.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
+  'claude/2.1.330/bypass-permissions.txt': { ready: true, busy: false, trust: null, state: 'idle' },
+  'claude/2.1.330/trust-body-partial.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
+  'claude/2.1.330/trust-no-choice-partial.txt': { ready: true, busy: false, trust: null, known_wrong: true, reason: TRUST_MID_DRAW, state: 'idle', state_wrong: TRUST_MID_DRAW },
+  'claude/2.1.330/trust-yes-choice-partial.txt': { ready: true, busy: false, trust: null, known_wrong: true, reason: TRUST_MID_DRAW, state: 'idle', state_wrong: TRUST_MID_DRAW },
+  'claude/2.1.330/trust.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
+  'claude/2.1.330/trust-yes-focused.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
   'claude/synthetic/loading-in-scrollback.txt': { ready: false, busy: false, trust: null, known_wrong: true, reason: '"loading" anywhere in scrollback reads as bootstrapping, so an idle pane is never ready', state: 'idle' },
+  'claude/synthetic/output-quoting-first-run-dialogs.txt': { ready: true, busy: false, trust: null, state: 'idle' },
   'claude/synthetic/prompt-glyph-in-output.txt': { ready: true, busy: false, trust: null, known_wrong: true, reason: 'a quoted "> " line in model output reads as an idle prompt before any input box exists', state: 'idle', state_wrong: 'a quoted "> " line in model output reads as an idle prompt' },
   'claude/synthetic/shell-prompt-after-exit-dollar.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
   'claude/synthetic/shell-prompt-after-exit-heavy-angle.txt': { ready: true, busy: false, trust: null, known_wrong: true, reason: 'the provider has exited; a shell prompt using ❯ reads as an idle provider prompt', state: 'idle', state_wrong: SHELL_IDLE },
@@ -169,10 +188,14 @@ describe('the decision state on the frame corpus (characterization)', () => {
     expect(name).toBe(TABLE[file]!.state);
   });
 
-  it('reads one recorded frame wrongly: the Codex prompt drawn just before its trust dialog', () => {
+  it('reads three recorded frames wrongly: the Codex prompt drawn just before its trust dialog, and the Claude trust dialog caught mid-draw', () => {
     const wrongRecorded = manifest
       .filter(entry => entry.source === 'recorded' && TABLE[entry.file]!.state_wrong !== undefined)
       .map(entry => entry.file);
-    expect(wrongRecorded).toEqual(['codex/0.167.0/idle-before-trust.txt']);
+    expect(wrongRecorded).toEqual([
+      'claude/2.1.330/trust-no-choice-partial.txt',
+      'claude/2.1.330/trust-yes-choice-partial.txt',
+      'codex/0.167.0/idle-before-trust.txt',
+    ]);
   });
 });
