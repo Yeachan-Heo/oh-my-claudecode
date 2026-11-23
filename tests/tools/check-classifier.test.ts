@@ -959,6 +959,59 @@ it('here-documents: the body is input, so a runner name or a summary line in it 
   assert.equal(checkResult('npm test <<EOF\nx\nEOF', ' Tests  3 passed (3)\n', 0).verdict, 'passed');
 });
 
+it('an escaped operator is a character of its word: it splits no command and ends no check', () => {
+  const isCheck = (command: string) => classifyCommand(command).isCheck;
+  // Bash passes the escaped character on to echo, so `npm test` is printed text and nothing ran.
+  for (const operator of [';', '|', '&', '||', '&&', ';;']) {
+    const escaped = operator.split('').map((char) => `\\${char}`).join('');
+    assert.equal(isCheck(`echo a ${escaped} npm test`), false, `echo a ${escaped} npm test`);
+    assert.equal(isCheck(`echo a${escaped} npm test`), false, `glued: echo a${escaped} npm test`);
+    assert.equal(isCheck(`echo a ${escaped}npm test`), false, `no space behind: echo a ${escaped}npm test`);
+  }
+  // A backslash that is itself escaped does not escape what follows: the operator splits.
+  for (const operator of [';', '|', '&', '||', '&&']) {
+    assert.equal(isCheck(`echo a \\\\${operator} npm test`), true, `echo a \\\\${operator} npm test`);
+  }
+  assert.equal(isCheck('echo a \\\\\\; npm test'), false, 'three backslashes: the third escapes the semicolon');
+  assert.equal(isCheck('echo a \\;; npm test'), true, 'an escaped semicolon, then a real one');
+  assert.equal(isCheck('echo a \\| tee f; npm test'), true, 'a real separator after an escaped one');
+  assert.equal(isCheck("echo 'a\\';npm test"), true, 'a backslash ends a single-quoted string: it escapes nothing behind it');
+  // The redirections that carry an `&` or a `|` are still no split, and an escaped `>` does not make the `&` behind it one.
+  assert.equal(isCheck('npm test 2>&1'), true);
+  assert.equal(isCheck('npm test &> out.log'), true);
+  assert.equal(isCheck('npm test >| out.log'), true);
+  assert.equal(isCheck('echo a \\>& npm test'), true, 'an escaped > is a character, so the & behind it puts the echo in the background');
+  // A printed example of a command is no evidence: the exit status of echo says nothing about the tests.
+  assert.equal(checkResult('echo \\; npm test', 'Tests  3 passed (3)\n', 0).verdict, 'undetermined');
+  assert.equal(checkResult('echo a \\| npm test', '', 0).verdict, 'undetermined');
+  assert.equal(checkResult('echo a \\& npm test', '', 0).verdict, 'undetermined');
+  assert.equal(checkResult('echo a ; npm test', '', 0).verdict, 'passed', 'the same text with a real separator still is a check');
+  // `set -o pipefail` behind an escaped separator is an argument of echo, not a statement: the pipe still hides the status.
+  assert.equal(classifyCommand('echo \\; set -o pipefail; npm test | tail -5').pipefail, false);
+  assert.equal(classifyCommand('echo a; set -o pipefail; npm test | tail -5').pipefail, true);
+});
+
+it('here-documents: only a whole line ends a body (the tag alone, tabs before it only for <<-)', () => {
+  const isCheck = (command: string) => classifyCommand(command).isCheck;
+  // Each line below starts with the tag but is no terminator, so the body goes on and the shell runs nothing of it.
+  for (const line of ['EOF is still body', 'EOF-x', 'EOF;', 'EOF.', 'EOF ', ' EOF', '\tEOF']) {
+    assert.equal(isCheck(`cat <<EOF\n${line}\nnpm test\nEOF`), false, `<<EOF: ${JSON.stringify(line)} is body`);
+  }
+  for (const line of ['EOF is still body', 'EOF ', '  EOF', ' \tEOF']) {
+    assert.equal(isCheck(`cat <<-EOF\n${line}\nnpm test\n\tEOF`), false, `<<-EOF: ${JSON.stringify(line)} is body`);
+  }
+  // The whole line ends it: the tag alone, and for <<- tabs in front of it.
+  assert.equal(isCheck('cat <<EOF\nx\nEOF\nnpm test'), true, '<<EOF: the tag alone');
+  assert.equal(isCheck('cat <<-EOF\nx\n\t\tEOF\nnpm test'), true, '<<-EOF: tabs in front');
+  assert.equal(isCheck('cat <<-EOF\nx\nEOF\nnpm test'), true, '<<-EOF: no tab at all');
+  assert.equal(isCheck('cat <<EOF\r\nx\r\nEOF\r\nnpm test'), true, 'a line break of two characters ends the line');
+  // The body that the shell reads on is no summary: cat printed it, nothing ran.
+  const command = 'cat <<EOF\nEOF is still body\nnpm test\nTests  3 passed (3)\nEOF\n';
+  assert.equal(checkResult(command, 'EOF is still body\nnpm test\nTests  3 passed (3)\n', 0).verdict, 'undetermined');
+  // Two operators of one line: the body of <<A ends at the bare A (the tab line is its body), the body of <<-A at the tab line.
+  assert.equal(isCheck('cat <<A; cat <<-A\n\tA\nnpm test\nA\ny\n\tA'), false);
+});
+
 it('write targets are read as the shell reads them: quotes and escaped spaces do not hide an ignored file', () => {
   const edits = (command: string) => isMutation('Bash', { command });
   // An ignored target stays ignored in quotes (docs, lockfiles, temp directories).

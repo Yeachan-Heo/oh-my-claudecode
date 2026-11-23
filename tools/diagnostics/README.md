@@ -213,6 +213,8 @@ Top level: `tasks`, `summary_by_provider`, `coverage` (`with_transcript`, `total
   The target of a redirection and a command substitution are never a command word (`echo hi > pytest` and
   `echo $(date) pytest` run only `echo`), and the body of a substitution is not read. The body of a here-document (`<<EOF`, `<<-EOF`
   with a tab-indented terminator) is cut line by line, and an operator inside quotes or a `#` comment (`echo "<<EOF"`) opens no body.
+  Only a whole line ends a body: the tag alone, or for `<<-` the tag behind tabs (`EOF is still body` and ` EOF` stay body lines).
+  An escaped separator is a character of its word: `echo \; npm test` runs only `echo`, while `echo \\; npm test` (an escaped backslash) splits.
   A command longer than 100000 characters with a word longer than 50000 is split on whitespace and operators without reading quotes.
 
 # Decision-outcome join

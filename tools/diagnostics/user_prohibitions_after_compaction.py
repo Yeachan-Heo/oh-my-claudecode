@@ -393,7 +393,7 @@ LAUNCH_WRAPPERS = {
 }
 for _word in ("!", "{", "if", "then", "elif", "else", "do", "while", "until"):
     LAUNCH_WRAPPERS[_word] = (frozenset(), 0)
-HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?[ \t]*\\?(['\"]?)(\w+)\1")
+HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*\\?(['\"]?)(\w+)\2")
 
 
 def closing_backtick(text, index):
@@ -661,7 +661,8 @@ class QuoteScan:
 def without_heredoc_bodies(text):
     """Cut here-document bodies and their terminator lines out of shell text, so body text is never read as shell.
     The rest of the line with the "<<TAG" operator stays (`cat <<EOF > f`); several operators on one line take their
-    bodies in order; an operator with no terminator line is left alone, and "<<<" is a here-string. One forward pass
+    bodies in order; an operator with no terminator line is left alone, and "<<<" is a here-string. A terminator is a whole
+    line: the tag alone, or for "<<-" the tag behind tabs ("EOF is still body" and " EOF" are body lines). One forward pass
     over the operators; a tag with no terminator line is searched for once."""
     edits = []  # (start, end, replacement), sorted by start before they are applied
     quotes = QuoteScan(text)
@@ -678,12 +679,13 @@ def without_heredoc_bodies(text):
             if line_end == -1:
                 break  # no line follows, so no body
             resume = line_end
-        tag = match.group(2)
-        if tag in missing:
+        tag = match.group(3)
+        kind = (tag, match.group(1))
+        if kind in missing:
             continue
-        found = re.compile(r"\n[ \t]*" + re.escape(tag) + r"\b").search(text, resume)
+        found = re.compile(r"\n" + (r"\t*" if match.group(1) else "") + re.escape(tag) + r"(?=\r?(?:\n|\Z))").search(text, resume)
         if found is None:
-            missing.add(tag)
+            missing.add(kind)
             continue
         edits.append((match.start(), match.end(), "<< " + tag + " "))
         edits.append((resume, found.end(), ""))

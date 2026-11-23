@@ -121,7 +121,11 @@ function splitSubstitutions(text, placeholder, processes = false) {
  */
 function executedText(command) {
   const plain = command
-    .replace(/"[^"]*"|'[^']*'/g, (quoted) => quoted.slice(1, -1).replace(/[\s;&|#!<>()'"]/g, '_'))
+    .replace(/"[^"]*"|'[^']*'/g, (quoted) => {
+      const body = quoted.slice(1, -1).replace(/[\s;&|#!<>()'"]/g, '_');
+      // A backslash is a plain character in single quotes: at the end of the string it must not escape the character behind the string.
+      return quoted[0] === "'" ? body.replace(/\\$/, '_') : body;
+    })
     .replace(/(^|(?<!\\)\s)#[^\n]*/g, '$1');
   return splitSubstitutions(plain, '_').text;
 }
@@ -132,16 +136,34 @@ const joinContinuations = (command) => command.replace(/\\\r?\n/g, '');
 /**
  * Split a shell command into pieces with the operator that follows each piece:
  * `|`, `||`, `&&`, `;`, newline, `&`. The redirections `2>&1`, `<&3`, `&>` and `>|` are not splits
- * (`&` is skipped right after `>` or `<` and right before `>`, `|` right after `>`).
+ * (`&` is skipped right after `>` or `<` and right before `>`, `|` right after `>`). A backslash escapes the character behind it, so
+ * `echo \; npm test` is one command that prints and an escaped backslash does not escape what follows it (`echo \\; npm test` splits).
+ * One pass over the characters.
  */
 function shellPieces(command) {
   const list = [];
-  const op = /\|\||&&|;|\n|(?<![<>])&(?!>)|(?<!>)\|/g;
   let start = 0;
-  let m;
-  while ((m = op.exec(command)) !== null) {
-    list.push({ text: command.slice(start, m.index).trim(), sep: m[0] });
-    start = m.index + m[0].length;
+  let previous = ''; // the character before this one, or '' when it was escaped (then it is no operator)
+  let i = 0;
+  while (i < command.length) {
+    const ch = command[i];
+    if (ch === '\\') {
+      previous = '';
+      i += 2;
+      continue;
+    }
+    const next = command[i + 1];
+    let length = 0;
+    if ((ch === '|' && next === '|') || (ch === '&' && next === '&')) length = 2;
+    else if (ch === ';' || ch === '\n') length = 1;
+    else if (ch === '&' && previous !== '<' && previous !== '>' && next !== '>') length = 1;
+    else if (ch === '|' && previous !== '>') length = 1;
+    if (length > 0) {
+      list.push({ text: command.slice(start, i).trim(), sep: command.slice(i, i + length) });
+      start = i + length;
+    }
+    previous = command[i + Math.max(length, 1) - 1];
+    i += Math.max(length, 1);
   }
   list.push({ text: command.slice(start).trim(), sep: null });
   return list;
@@ -732,9 +754,11 @@ function readCommand(command) {
   }
   // A here-document body is input, not shell (it is cut out before the lines are joined, as isMutation reads it).
   const bare = executedText(joinContinuations(withoutHeredocBodies(command)));
-  // Only a `set` statement changes the option; the last one wins.
-  const pipefail = [...bare.matchAll(/(?:^|[;&\n])\s*set\s+([+-])\w*o\s+pipefail\b/g)].at(-1)?.[1] === '-';
   const pieces = shellPieces(bare);
+  // Only a `set` statement changes the option; the last one wins. A statement starts the text or follows `;`, `&`, `&&` or a newline
+  // (an escaped separator is no separator: `echo \; set -o pipefail` prints).
+  const setPipefail = pieces.map((piece, i) => (i === 0 || [';', '&', '&&', '\n'].includes(pieces[i - 1].sep) ? /^set\s+([+-])\w*o\s+pipefail\b/.exec(piece.text)?.[1] : undefined));
+  const pipefail = setPipefail.filter((sign) => sign !== undefined).at(-1) === '-';
   let check = null;
   let hidden;
   const checks = [];
@@ -1359,15 +1383,17 @@ class QuoteScan {
  * shell. The rest of the line that holds the `<<TAG` operator stays (`cat <<EOF > src/a.ts`,
  * `cat <<EOF | tee f`): it still carries the redirections. Several operators on one line take their bodies
  * in order. An operator with no terminator line is left alone (`$((1 << 3))`), and `<<<` is a here-string.
- * Linear in the length of the text: one pass finds the operators, one pass lists the lines that start with a
+ * A terminator is a whole line: the tag alone, or for `<<-` the tag behind tabs (`EOF is still body` and ` EOF` are body lines, and
+ * so is the tag with a space or any other text behind it). A CRLF line break ends the line too.
+ * Linear in the length of the text: one pass finds the operators, one pass lists the lines that hold nothing but a
  * word (a possible terminator) by that word, and every tag walks its own list forward only, because the
  * position that the next body starts at never moves back.
  */
 function withoutHeredocBodies(text) {
-  const operator = /(?<!<)<<(?!<)-?[ \t]*\\?(['"]?)(\w+)\1/g;
+  const operator = /(?<!<)<<(?!<)(-?)[ \t]*\\?(['"]?)(\w+)\2/g;
   const quotes = new QuoteScan(text);
   const edits = []; // [start, end, replacement], sorted by start before they are applied
-  let terminators = null; // tag -> { lines: [{ index, end }], next } for the lines `[ \t]*TAG` after a newline
+  let terminators = null; // tag -> { plain, tabbed }: the lines `TAG` (for `<<`) and `\t*TAG` (for `<<-`) after a newline, each { lines: [{ index, end }], next }
   let lineEnd = -1; // the newline that ends the line of the operators being read
   let resume = -1; // the newline before the next body of that line
   for (let m = operator.exec(text); m !== null; m = operator.exec(text)) {
@@ -1380,17 +1406,20 @@ function withoutHeredocBodies(text) {
     }
     if (terminators === null) {
       terminators = new Map();
-      for (const line of text.matchAll(/\n[ \t]*(\w+)/g)) {
-        const entry = terminators.get(line[1]) ?? { lines: [], next: 0 };
-        entry.lines.push({ index: line.index, end: line.index + line[0].length });
-        terminators.set(line[1], entry);
+      for (const line of text.matchAll(/\n(\t*)(\w+)(?=\r?(?:\n|$))/g)) {
+        const entry = terminators.get(line[2]) ?? { plain: { lines: [], next: 0 }, tabbed: { lines: [], next: 0 } };
+        const found = { index: line.index, end: line.index + line[0].length };
+        entry.tabbed.lines.push(found);
+        if (line[1] === '') entry.plain.lines.push(found);
+        terminators.set(line[2], entry);
       }
     }
-    const tag = m[2];
+    const tag = m[3];
     const entry = terminators.get(tag);
     if (entry === undefined) continue;
-    while (entry.next < entry.lines.length && entry.lines[entry.next].index < resume) entry.next += 1;
-    const found = entry.lines[entry.next];
+    const candidates = m[1] === '-' ? entry.tabbed : entry.plain;
+    while (candidates.next < candidates.lines.length && candidates.lines[candidates.next].index < resume) candidates.next += 1;
+    const found = candidates.lines[candidates.next];
     if (found === undefined) continue;
     edits.push([m.index, m.index + m[0].length, `<< ${tag} `], [resume, found.end, '']);
     quotes.skip(resume, found.end);
