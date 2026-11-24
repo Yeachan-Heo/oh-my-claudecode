@@ -651,6 +651,52 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(runSync(GUARD, guardArgs(b, ['--once'])).status, 'the lock goes with the first guard').toBe(0);
   });
 
+  it('without fcntl (Windows) the pause file and state file are still locked, through msvcrt.locking: a second guard on one pause_file does not start', async () => {
+    // the driver hides fcntl and offers an msvcrt whose locking is a byte-range lock on the file, here played by flock of the real fcntl
+    const driver = ['import sys, runpy, types, fcntl as real', 'm = types.ModuleType("msvcrt")', 'm.LK_NBLCK = 2',
+      'def locking(fd, mode, n):', '    assert mode == 2 and n == 1', '    real.flock(fd, real.LOCK_EX | real.LOCK_NB)',
+      'm.locking = locking', 'sys.modules["msvcrt"] = m', 'sys.modules["fcntl"] = None', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const a = fixture('nofcntl-a', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const b = fixture('nofcntl-b', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(b.cfg, JSON.stringify({ usage_cache: b.cache, pause_file: a.pause, state_file: b.state }), 'utf8');
+    const first = spawnPyCode(driver, [GUARD, ...guardArgs(a)]);
+    try {
+      await waitFor(() => /guard start/.test(readText(a.log)), 20000, 'first guard');
+      const second = runPyCode(driver, [GUARD, ...guardArgs(b, ['--once'])]);
+      expect(second.status, `${second.stdout}${second.stderr}`).toBe(2);
+      expect(second.stderr).toMatch(/another guard holds .*pause\.json\.lock: one guard per pause file/);
+    } finally { await stopGuard(first); }
+  });
+
+  it('the shell check of the hook entry is validated too: a stale file in `[ -f ... ]` would end the entry before Python on every call', () => {
+    const f = fixture('preflight-drift', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (pauseTest: string, hookTest: string) => `[ -f ${pauseTest} ] && [ -f ${hookTest} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`;
+    const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+    put(entry(f.pause, HOOK));
+    expect(guardOnce(f).stdout, 'the generated shape is accepted').not.toMatch(/WARNING/);
+    for (const [pauseTest, hookTest] of [['/old/pause.json', HOOK], [f.pause, '/old/five-hour-guard-hook.py']]) {
+      put(entry(pauseTest, hookTest));
+      expect(guardOnce(f).stdout, `${pauseTest} ${hookTest}`).toMatch(/WARNING \(start\): the shell check of the hook entry .* tests the file \/old\//);
+    }
+  });
+
+  it('a file that appears at pause_file after the start check is never removed as a leftover: exit 2, the file is kept', () => {
+    // the driver puts the file in place when the guard first reads its state file, which is after the checks of the start and before the removal of a leftover
+    const driver = ['import builtins, os, runpy, sys', 'real, target, text = builtins.open, sys.argv[1], sys.argv[2]', 'done = []',
+      'def spy(path, *a, **k):', '    if str(path).endswith("state.json") and not done:', '        done.append(1)',
+      '        with real(target, "w") as f: f.write(text)', '    return real(path, *a, **k)',
+      'builtins.open = spy', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    for (const leftover of [false, true]) {
+      const f = fixture(`pause-race-${leftover}`, { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+      if (leftover) writePause(f, { pid: deadPid() }); // a guard pause when the start looks, replaced before the removal
+      const r = runPyCode(driver, [f.pause, 'my notes, not a pause\n', GUARD, ...guardArgs(f, ['--once'])]);
+      expect(r.status, `${leftover}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/is not a pause file of this guard/);
+      expect(readText(f.pause), 'the foreign file is untouched').toBe('my notes, not a pause\n');
+    }
+  });
+
   it('a stored pause with times outside any window the guard writes is ignored, not a crash at start', () => {
     const f = fixture('state-bounds', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     for (const bad of [{ since: 1, resume_at: 1e300 }, { since: 1e300, resume_at: now() + 600 }, { since: -1e300, resume_at: now() + 600 }, { since: 1, resume_at: -1e300 },

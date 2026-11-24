@@ -28,12 +28,17 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, json, math, os, re, shlex, signal, sys, time
+import argparse, datetime, json, math, os, re, shlex, signal, stat, sys, time
 
 try:
     import fcntl
-except ImportError:   # Windows: no lock between two guards
+except ImportError:   # Windows: msvcrt.locking is the lock between two guards
     fcntl = None
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
+LOCKING = fcntl is not None or msvcrt is not None   # without any lock the pid and the heartbeat in the pause file are all there is
 
 HOOK_NAME = 'five-hour-guard-hook.py'
 MAX_RESET_AHEAD_S = 5 * 3600 + 900   # a window is 5 h long: a reset time further ahead is not believed (15 min of slack)
@@ -200,7 +205,7 @@ OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
 
 
 def entry_parts(command):
-    """(hook scripts, interpreter files, log files, pause files) that a hook entry command names, by the option or position
+    """(hook scripts, interpreter files, log files, pause files, preflight files) that a hook entry command names, by the option or position
     they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their file names say, and neither is
     an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file as data). The hook
     script is the command word of a simple command, or the first argument after it when the command word is a Python or the
@@ -235,7 +240,7 @@ def entry_parts(command):
             args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
             if args and HOOK_NAME in os.path.basename(words[args[0]]):
                 hooks.append(words[args[0]])
-    return hooks, found['-x'], found['--log'], found['--pause-file']
+    return hooks, found['-x'], found['--log'], found['--pause-file'], found['-f']
 
 
 def command_hooks(groups):
@@ -265,7 +270,7 @@ def registered_runtime_files():
         with open(SETTINGS or default_settings()) as f:
             groups = json.load(f).get('hooks', {}).get('PreToolUse', [])
         for _group, command in command_hooks(groups):
-            hooks, interpreters, logs, _pauses = entry_parts(command)
+            hooks, interpreters, logs, _pauses, _tests = entry_parts(command)
             found += [('registered hook', t) for t in hooks if os.path.isabs(t)]
             found += [('registered interpreter', t) for t in interpreters if os.path.isabs(t)]
             found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
@@ -434,7 +439,7 @@ def hook_check(where):
         log(f'WARNING ({where}): the hook entry in {SETTINGS} has the matcher {matchers[0]!r}, which does not cover every tool: calls of other tools would go on during a pause. Run five-hour-guard-settings.py add again')
     for command in ours:
         try:
-            hooks, interpreters, _logs, pauses = entry_parts(command)
+            hooks, interpreters, _logs, pauses, tests = entry_parts(command)
         except ValueError:
             log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote or NUL character): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
             continue
@@ -446,6 +451,9 @@ def hook_check(where):
         for read in pauses:
             if os.path.abspath(read) != os.path.abspath(PAUSE_FILE):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} reads the pause file {read}, but the guard writes {PAUSE_FILE}: a pause would hold no session. Run five-hour-guard-settings.py add again')
+        for test in tests:   # the shell preflight `[ -f X ]` ends the command at once, before Python, when X is not a file: X must be the pause file or the hook
+            if os.path.abspath(test) != os.path.abspath(PAUSE_FILE) and os.path.abspath(test) not in [os.path.abspath(h) for h in hooks]:
+                log(f'WARNING ({where}): the shell check of the hook entry in {SETTINGS} tests the file {test}, which is neither the pause file {PAUSE_FILE} nor the hook: the entry would let every call through while it does not exist. Run five-hour-guard-settings.py add again')
         for interpreter in interpreters:
             if not os.access(interpreter, os.X_OK):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} names the interpreter {interpreter}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
@@ -461,9 +469,26 @@ def publish(state, pct=None, only=None):
     write_json(PAUSE_FILE, doc)
 
 
-def unpublish():
-    """Remove the pause file. False when it could not be removed (logged), so that a caller can keep its state and try again."""
+def unpublish(strict=False):
+    """Remove the pause file. False when it could not be removed (logged), so that a caller can keep its state and try again.
+    The file is looked at again right before it is removed: one that is not a regular pause document of this guard any more
+    (somebody created or replaced it since the last check) is never removed; strict makes that a configuration error (exit 2)."""
     if A.dry_run:
+        return True
+    try:
+        before = os.lstat(PAUSE_FILE)
+        ours = stat.S_ISREG(before.st_mode) and is_guard_pause(PAUSE_FILE)
+        after = os.lstat(PAUSE_FILE)
+        ours = ours and (before.st_ino, before.st_mtime_ns, before.st_size) == (after.st_ino, after.st_mtime_ns, after.st_size)
+    except FileNotFoundError:
+        return True
+    except Exception as e:
+        log(f'cannot remove pause file: {e!r}')
+        return False
+    if not ours:
+        if strict:
+            fail(f'the file {PAUSE_FILE} is not a pause file of this guard (it changed since the start check): it is left untouched; check "pause_file", or remove the file yourself')
+        log(f'the file {PAUSE_FILE} is not a pause file of this guard any more: left alone')
         return True
     try:
         os.unlink(PAUSE_FILE)
@@ -577,7 +602,7 @@ def is_guard_pause(path):
 def drop_leftover_pause():
     """A pause file with no state behind it is a leftover of a dead guard: remove it (main has checked that it is a pause file
     of this guard and that no live process owns it). False when it could not be removed."""
-    return unpublish()
+    return unpublish(strict=True)
 
 
 LOCK_FDS = []
@@ -590,7 +615,10 @@ def lock_one(path, what):
     except OSError as e:
         fail(f'cannot open the lock file {path}: {e!r}')
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)   # one byte at the start of the empty file; released when the process ends
     except OSError:
         os.close(fd)
         fail(f'another guard holds {path}: one guard per {what}')
@@ -601,7 +629,7 @@ def lock_state():
     """One guard per state file and one per pause file. flock on a sibling file: the state file itself is replaced on every
     write, so every write would give it a new inode and a new lock; two guards with different state files but one pause
     file would otherwise overwrite each other's pause and remove it on stop."""
-    if fcntl is None or A.dry_run or A.test_pause:
+    if not LOCKING or A.dry_run or A.test_pause:
         return
     lock_one(STATE + '.lock', 'state file')
     lock_one(PAUSE_FILE + '.lock', 'pause file')
@@ -646,7 +674,9 @@ def main():
         # the start would remove it as a leftover: never remove a file that is not a pause of this guard (a mistyped path)
         fail(f'the file {PAUSE_FILE} exists and is not a pause file of this guard: it is left untouched; check "pause_file", or remove the file yourself')
     lock_state()   # one guard per pause file: a pid in the file proves nothing (it may be reused after a crash), the lock does
-    if fcntl is None:   # no lock on this platform: the heartbeat and the pid are all there is
+    if os.path.lexists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):   # again, now that no other guard can be changing it
+        fail(f'the file {PAUSE_FILE} appeared or changed since the start check and is not a pause file of this guard: it is left untouched')
+    if not LOCKING:   # no lock on this platform: the heartbeat and the pid are all there is
         owner, valid_until = None, 0
         try:
             with open(PAUSE_FILE) as f:
