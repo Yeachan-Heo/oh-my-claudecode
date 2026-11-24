@@ -35,6 +35,15 @@ const SHUTDOWN_ACK_TIMEOUT_MS = 30_000;
 // Live lanes pick a fake-team-provider.mjs scenario; only the default one
 // meets every assertion below.
 const FAKE_PROVIDER_SCENARIO = process.env.OMC_FAKE_PROVIDER_SCENARIO;
+// These lanes expect the start to fail at a first-run screen that must get no
+// key, so they run their own case instead.
+const STOP_SCENARIOS: Record<string, { reason: string; step: string }> = {
+  'claude-bypass-permissions': { reason: 'claude_bypass_permissions_consent_required', step: 'await-bypass-answer' },
+  'claude-onboarding': { reason: 'claude_onboarding_required', step: 'await-onboarding-answer' },
+};
+const STOP_SCENARIO = FAKE_PROVIDER_SCENARIO && Object.hasOwn(STOP_SCENARIOS, FAKE_PROVIDER_SCENARIO)
+  ? STOP_SCENARIOS[FAKE_PROVIDER_SCENARIO]
+  : undefined;
 // The worker environment is allowlisted, so the shim carries this setting.
 const FAKE_SLOW_BANNER_MS = process.env.OMC_FAKE_SLOW_BANNER_MS;
 const execFileAsync = promisify(execFile);
@@ -151,6 +160,9 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
   let runRoot = '';
   let runtimeCliPath = '';
   let cwd = '';
+  let binDir = '';
+  // A preserved team keeps its recovery owner, which writes into the fixture.
+  let ownerTeam: { teamName: string; cwd: string } | null = null;
   let tracePath = '';
   let socketsBefore = new Set<string>();
   const savedEnv = new Map<string, string | undefined>();
@@ -168,7 +180,7 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
     // Short root: tmux socket paths must stay under the Darwin sun_path limit.
     fixtureRoot = await mkdtemp(join(tmpdir(), 'omc-smoke-'));
     runRoot = await mkdtemp(join(SMOKE_CACHE, 'run-'));
-    const binDir = join(runRoot, 'bin');
+    binDir = join(runRoot, 'bin');
     // Every runtime-cli process names its entry in argv. A per-run link gives
     // the leftover scan a marker that concurrent runs in this checkout lack;
     // node resolves the link, so the bundle still loads from its real home.
@@ -235,6 +247,15 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
 
   afterEach(async () => {
     const leftovers: string[] = [];
+    if (ownerTeam) {
+      const owner = (await readTeamConfig(ownerTeam.teamName, ownerTeam.cwd).catch(() => null))?.runtime_owner_epoch;
+      ownerTeam = null;
+      if (owner && observeProcessIdentity({ pid: owner.pid, process_started_at: owner.process_started_at }) === 'matching') {
+        try { process.kill(owner.pid, 'SIGKILL'); } catch { /* exited concurrently */ }
+        await waitFor('recovery owner to exit', () => isProcessAlive(owner.pid), alive => !alive, 5_000)
+          .catch(() => leftovers.push(`recovery owner pid ${owner.pid} still alive`));
+      }
+    }
     const providers = new Map((await readTrace()).map(entry => [entry.pid, entry.process_started_at]));
     for (const [pid, processStartedAt] of providers) {
       const state = processStartedAt
@@ -242,6 +263,8 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
         : isProcessAlive(pid) ? 'unknown' : 'dead';
       if (state === 'matching') {
         try { process.kill(pid, 'SIGKILL'); } catch { /* exited concurrently */ }
+        await waitFor(`provider ${pid} to exit`, () => isProcessAlive(pid), alive => !alive, 5_000)
+          .catch(() => leftovers.push(`provider pid ${pid} still alive after SIGKILL`));
       } else if (state === 'unknown') {
         leftovers.push(`provider pid ${pid}: identity unverifiable, not signalled`);
       }
@@ -262,12 +285,36 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       else process.env[key] = value;
     }
     savedEnv.clear();
-    await rm(fixtureRoot, { recursive: true, force: true });
-    await rm(runRoot, { recursive: true, force: true });
+    // A lock directory can still be released while the tree is removed;
+    // retry ENOTEMPTY rather than fail the run on cleanup.
+    await rm(fixtureRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await rm(runRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     if (leftovers.length > 0) throw new Error(`smoke cleanup left live resources:\n${leftovers.join('\n')}`);
   });
 
-  it('launches a worker that claims and completes its task, then acks shutdown and leaves nothing behind', async () => {
+  it.runIf(STOP_SCENARIO)('fails the start at a first-run screen without sending it a key', async () => {
+    const startedAt = Date.now();
+    const runtime = await startTeamV2({
+      teamName: `tmux-smoke-${randomUUID().slice(0, 8)}`,
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Smoke task', description: 'Claim this task, complete it, then wait for shutdown.' }],
+      pluginConfig: {},
+      cwd,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(runtime.startupFailures, await traceDiagnostics()).toEqual([
+      expect.objectContaining({ worker: 'worker-1', reason: `worker_notify_failed:${STOP_SCENARIO!.reason}` }),
+    ]);
+    const steps = (await readTrace()).map(entry => entry.step);
+    expect(steps, await traceDiagnostics()).toContain(STOP_SCENARIO!.step);
+    expect(steps, await traceDiagnostics()).not.toContain('selector-read');
+    // Well inside the 30 s readiness wait the warning would otherwise sit through.
+    expect(elapsedMs).toBeLessThan(15_000);
+  }, 180_000);
+
+  it.skipIf(STOP_SCENARIO)('launches a worker that claims and completes its task, then acks shutdown and leaves nothing behind', async () => {
     const teamName = `tmux-smoke-${randomUUID().slice(0, 8)}`;
     const runtime = await startTeamV2({
       teamName,
@@ -347,4 +394,79 @@ describe.skipIf(!SMOKE_ENABLED)('team tmux smoke: fake claude worker lifecycle',
       10_000,
     );
   }, 180_000);
+  it('ends a recovery whose worker liveness stays unknown, so shutdown is not blocked', async () => {
+    await writeExecutable(join(binDir, 'claude'), [
+      '#!/bin/sh',
+      `export PATH=${shellQuote(binDir)}:"$PATH"`,
+      'export OMC_FAKE_OUTLIVE_TERMINAL=1',
+      `exec ${shellQuote(process.execPath)} --import ${shellQuote(TSX_LOADER_URL)} ${shellQuote(FAKE_PROVIDER)} --trace ${shellQuote(tracePath)} "$@"`,
+    ]);
+    const teamName = `tmux-smoke-${randomUUID().slice(0, 8)}`;
+    const runtime = await startTeamV2({
+      teamName,
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Smoke task', description: 'Claim this task, complete it, then wait for shutdown.' }],
+      pluginConfig: {},
+      cwd,
+    });
+    const leaderCwd = runtime.cwd;
+    ownerTeam = { teamName: runtime.teamName, cwd: leaderCwd };
+    expect(runtime.startupFailures, await traceDiagnostics()).toEqual([]);
+    await waitFor(
+      'task 1 to be completed through the worker API',
+      async () => {
+        const envelope = await executeTeamApiOperation('read-task', { team_name: runtime.teamName, task_id: '1' }, leaderCwd);
+        return envelope.ok ? (envelope.data.task as { status?: string }).status : null;
+      },
+      status => status === 'completed',
+      30_000,
+      traceDiagnostics,
+    );
+
+    // The launch wrapper runs the provider as its child. Killing it orphans a
+    // live provider in the launch process group, so the launch supervisor
+    // cannot prove cleanup and liveness stays unknown, as when a real claude
+    // outlived its killed wrapper.
+    const providerPid = (await readTrace())[0]!.pid;
+    const { stdout: ppid } = await execFileAsync('ps', ['-o', 'ppid=', '-p', String(providerPid)]);
+    const wrapperPid = Number(ppid.trim());
+    const { stdout: wrapperArgs } = await execFileAsync('ps', ['-o', 'args=', '-p', String(wrapperPid)]);
+    expect(wrapperArgs).toMatch(/^\/bin\/sh .*launch\.sh /);
+    process.kill(wrapperPid, 'SIGKILL');
+    await waitFor('launch wrapper to exit', () => isProcessAlive(wrapperPid), alive => !alive, 5_000);
+    expect(isProcessAlive(providerPid), await traceDiagnostics()).toBe(true);
+
+    const admittedAt = Date.now();
+    const recovered = await executeTeamApiOperation('recover-worker', {
+      team_name: runtime.teamName, worker: 'worker-1', request_id: 'smoke-liveness-unknown', timeout_ms: 180_000,
+    }, leaderCwd);
+    expect(recovered).toMatchObject({ ok: true, data: { result: { outcome: 'failed', error: 'recovery_request_timeout' } } });
+
+    // The owner keeps no request alive past the longest client wait.
+    const ended = await waitFor(
+      'the recovery owner to finalize the request and clear active_recovery',
+      async () => {
+        const config = await readTeamConfig(runtime.teamName, leaderCwd);
+        return { active: config?.active_recovery ?? null, last: config?.last_recovery?.phase ?? null };
+      },
+      state => state.active === null,
+      Math.max(0, admittedAt + 300_000 - Date.now()) + 30_000,
+      traceDiagnostics,
+    );
+    expect(ended.last).toBe('failed');
+    const replay = await executeTeamApiOperation('recover-worker', {
+      team_name: runtime.teamName, worker: 'worker-1', request_id: 'smoke-liveness-unknown', timeout_ms: 180_000,
+    }, leaderCwd);
+    expect(replay).toMatchObject({ ok: true, data: { result: { outcome: 'failed', error: 'recovery_request_timeout',
+      message: expect.stringContaining('deadline exceeded') } } });
+
+    // Shutdown now runs. It keeps state because the orphan is still alive.
+    const shutdown = await shutdownTeamV2(runtime.teamName, leaderCwd, {
+      instanceId: runtime.instanceId,
+      force: true,
+      timeoutMs: SHUTDOWN_ACK_TIMEOUT_MS,
+    });
+    expect(shutdown).toEqual({ outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['worker-1'] });
+  }, 480_000);
 });

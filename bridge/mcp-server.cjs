@@ -18627,6 +18627,56 @@ function ensureDirSync(dir) {
     throw err;
   }
 }
+function shouldRetryRename(error2) {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  const err = error2;
+  return err?.code === "EPERM" || err?.code === "EBUSY" || err?.code === "EACCES";
+}
+function renameSyncWithRetry(tempPath, filePath, renameImpl, maxAttempts = 10, delayMs = 3) {
+  let lastError = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      renameImpl(tempPath, filePath);
+      return;
+    } catch (error2) {
+      if (!shouldRetryRename(error2)) {
+        throw error2;
+      }
+      lastError = error2;
+      if (attempt < maxAttempts - 1) {
+        try {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+        } catch {
+        }
+      }
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
+}
+async function renameWithRetry(tempPath, filePath, maxAttempts = 10, delayMs = 3) {
+  let lastError = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      await fs2.rename(tempPath, filePath);
+      return;
+    } catch (error2) {
+      if (!shouldRetryRename(error2)) {
+        throw error2;
+      }
+      lastError = error2;
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve17) => setTimeout(resolve17, delayMs));
+      }
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
+}
 function writeAllSync(fd, content, label) {
   const bytes = Buffer.from(content, "utf-8");
   let offset = 0;
@@ -18775,7 +18825,7 @@ async function atomicWriteJson(filePath, data, hooks) {
       verifyPrivateTempFile(fd.fd, tempPath, "atomic JSON write");
       backupPath = preservePriorTarget(filePath);
       hooks?.beforeRename?.();
-      await fs2.rename(tempPath, filePath);
+      await renameWithRetry(tempPath, filePath);
       let publishedIdentity = null;
       try {
         verifyPublishedFile(fd.fd, filePath, "atomic JSON write");
@@ -18829,7 +18879,9 @@ function atomicWriteFileSync(filePath, content, hooks, operations) {
     verifyPrivateTempFile(fd, tempPath, "atomic write", operations);
     backupPath = preservePriorTarget(filePath, operations);
     hooks?.beforeRename?.();
-    (operations?.rename ?? fsSync.renameSync)(tempPath, filePath);
+    renameSyncWithRetry(tempPath, filePath, (src, dst) => {
+      (operations?.rename ?? fsSync.renameSync)(src, dst);
+    });
     let publishedIdentity = null;
     try {
       verifyPublishedFile(fd, filePath, "atomic write", operations);
@@ -22543,6 +22595,12 @@ function resolveStateAnchorRoot(worktreeRoot) {
 }
 var worktreePathRenderScope = new import_node_async_hooks.AsyncLocalStorage();
 var projectIdentifierOperationScope = new import_node_async_hooks.AsyncLocalStorage();
+function withWorktreePathRenderScope(fn) {
+  return worktreePathRenderScope.run(
+    { gitTopLevelProbes: /* @__PURE__ */ new Map(), projectIdentifiers: /* @__PURE__ */ new Map() },
+    fn
+  );
+}
 var gitShowToplevelProbeForTests;
 function gitErrorStderr(error2) {
   if (!error2 || typeof error2 !== "object") {
@@ -23909,6 +23967,12 @@ Error: ${sgLoadError}`
         };
       }
       const lang = toLangEnum(sg, language);
+      const multiCaptureNames = new Set(
+        Array.from(
+          pattern.matchAll(/(?<![\w$])\$\$\$([A-Z_][A-Z0-9_]*)(?![\w$])/g),
+          (m) => m[1]
+        )
+      );
       const changes = [];
       let totalReplacements = 0;
       for (const filePath of files) {
@@ -23925,18 +23989,20 @@ Error: ${sgLoadError}`
             let finalReplacement = replacement;
             const matchedText = match.text();
             try {
-              const metaVars = replacement.match(/\$\$?\$?[A-Z_][A-Z0-9_]*/g) || [];
-              for (const metaVar of metaVars) {
-                const varName = metaVar.replace(/^\$+/, "");
-                const captured = match.getMatch(varName);
-                if (captured) {
-                  const safeText = captured.text().replace(/\$/g, "$$$$");
-                  finalReplacement = finalReplacement.replaceAll(
-                    metaVar,
-                    safeText
-                  );
+              finalReplacement = replacement.replace(
+                /\$\$\$([A-Z_][A-Z0-9_]*)|\$\$?([A-Z_][A-Z0-9_]*)/g,
+                (metaVar, multiName, singleName) => {
+                  if (multiName !== void 0 && multiCaptureNames.has(multiName)) {
+                    const nodes = match.getMultipleMatches(multiName);
+                    if (nodes.length === 0) return "";
+                    return content.slice(
+                      nodes[0].range().start.index,
+                      nodes[nodes.length - 1].range().end.index
+                    );
+                  }
+                  return match.getMatch(multiName ?? singleName)?.text() ?? metaVar;
                 }
-              }
+              );
             } catch {
             }
             edits.push({
@@ -23947,9 +24013,15 @@ Error: ${sgLoadError}`
               before: matchedText
             });
           }
-          edits.sort((a, b) => b.start - a.start);
+          edits.sort((a, b) => a.start - b.start);
+          let keptEnd = 0;
+          const keptEdits = edits.filter((edit) => {
+            if (edit.start < keptEnd) return false;
+            keptEnd = edit.end;
+            return true;
+          });
           let newContent = content;
-          for (const edit of edits) {
+          for (const edit of keptEdits.reverse()) {
             const before = newContent.slice(edit.start, edit.end);
             newContent = newContent.slice(0, edit.start) + edit.replacement + newContent.slice(edit.end);
             changes.push({
@@ -29225,7 +29297,10 @@ var stateListActiveTool = {
     session_id: external_exports.string().optional().describe("Explicit session ID to scope the listing. Overrides OMC_SESSION_ID when provided."),
     all: external_exports.boolean().optional().describe("When true, list active modes across all sessions (legacy + every session-scoped dir). Overrides the default current-session scope.")
   },
-  handler: async (args) => {
+  // Aggregate reads resolve a state path per session x mode. getGitTopLevel caches only hits, so a
+  // non-git cwd re-runs `git rev-parse` per resolution. The scope memoizes git probes and project ids
+  // for this call only.
+  handler: (args) => withWorktreePathRenderScope(async () => {
     const { workingDirectory, session_id, all } = args;
     try {
       const root = resolveStateWorkingDirectory(workingDirectory);
@@ -29352,7 +29427,7 @@ ${modeList}`
         isError: true
       };
     }
-  }
+  })
 };
 var stateGetStatusTool = {
   name: "state_get_status",
@@ -29363,7 +29438,8 @@ var stateGetStatusTool = {
     workingDirectory: external_exports.string().optional().describe("Working directory (defaults to cwd)"),
     session_id: external_exports.string().optional().describe("Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).")
   },
-  handler: async (args) => {
+  // Same per-call git probe memo as state_list_active.
+  handler: (args) => withWorktreePathRenderScope(async () => {
     const { mode, workingDirectory, session_id } = args;
     try {
       const root = resolveStateWorkingDirectory(workingDirectory);
@@ -29504,7 +29580,7 @@ No active sessions for this mode.`);
         isError: true
       };
     }
-  }
+  })
 };
 var stateMigrateNonGitTool = {
   name: "state_migrate_non_git",
@@ -29985,15 +30061,18 @@ function pruneOldEntries(directory, daysOld = DEFAULT_CONFIG3.workingMemoryDays)
       if (!workingMemory) {
         return { pruned: 0, remaining: 0 };
       }
-      const entryRegex = /### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\n([\s\S]*?)(?=### |$)/g;
+      const entryHeading = /^### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})$/;
+      const preamble = [];
       const entries = [];
-      let match = entryRegex.exec(workingMemory);
-      while (match !== null) {
-        entries.push({
-          timestamp: match[1],
-          content: match[2].trim()
-        });
-        match = entryRegex.exec(workingMemory);
+      for (const line of workingMemory.split("\n")) {
+        const heading = entryHeading.exec(line);
+        if (heading) {
+          entries.push({ timestamp: heading[1], lines: [] });
+        } else if (entries.length > 0) {
+          entries[entries.length - 1].lines.push(line);
+        } else {
+          preamble.push(line);
+        }
       }
       const cutoff = /* @__PURE__ */ new Date();
       cutoff.setDate(cutoff.getDate() - daysOld);
@@ -30002,8 +30081,13 @@ function pruneOldEntries(directory, daysOld = DEFAULT_CONFIG3.workingMemoryDays)
         return entryDate >= cutoff;
       });
       const pruned = entries.length - kept.length;
-      const newContent = kept.map((entry) => `### ${entry.timestamp}
-${entry.content}`).join("\n\n");
+      const newContent = [
+        preamble.join("\n").trim(),
+        ...kept.map(
+          (entry) => `### ${entry.timestamp}
+${entry.lines.join("\n").trim()}`
+        )
+      ].filter(Boolean).join("\n\n");
       notepadContent = replaceSection(
         notepadContent,
         WORKING_MEMORY_HEADER,
@@ -30768,21 +30852,23 @@ var projectMemoryWriteTool = {
     try {
       const root = validateWorkingDirectory(workingDirectory);
       ensureOmcDir("", root);
-      let finalMemory;
-      if (merge2) {
-        const existing = await loadProjectMemory(root);
-        if (existing) {
-          finalMemory = mergeProjectMemory(existing, memory);
+      await withProjectMemoryLock(root, async () => {
+        let finalMemory;
+        if (merge2) {
+          const existing = await loadProjectMemory(root);
+          if (existing) {
+            finalMemory = mergeProjectMemory(existing, memory);
+          } else {
+            finalMemory = memory;
+          }
         } else {
           finalMemory = memory;
         }
-      } else {
-        finalMemory = memory;
-      }
-      if (!finalMemory.version) finalMemory.version = "1.0.0";
-      if (!finalMemory.lastScanned) finalMemory.lastScanned = Date.now();
-      if (!finalMemory.projectRoot) finalMemory.projectRoot = root;
-      await saveProjectMemory(root, finalMemory);
+        if (!finalMemory.version) finalMemory.version = "1.0.0";
+        if (!finalMemory.lastScanned) finalMemory.lastScanned = Date.now();
+        if (!finalMemory.projectRoot) finalMemory.projectRoot = root;
+        await saveProjectMemory(root, finalMemory);
+      });
       return {
         content: [{
           type: "text",
@@ -30854,34 +30940,36 @@ var projectMemoryAddDirectiveTool = {
     const { directive, context = "", priority = "normal", workingDirectory } = args;
     try {
       const root = validateWorkingDirectory(workingDirectory);
-      const memory = await loadProjectMemory(root);
-      if (!memory) {
+      return await withProjectMemoryLock(root, async () => {
+        const memory = await loadProjectMemory(root);
+        if (!memory) {
+          return {
+            content: [{
+              type: "text",
+              text: "Project memory does not exist. Run a session first to auto-detect project environment."
+            }]
+          };
+        }
+        const newDirective = {
+          timestamp: Date.now(),
+          directive,
+          context,
+          source: "explicit",
+          priority
+        };
+        memory.userDirectives = addDirective(memory.userDirectives, newDirective);
+        await saveProjectMemory(root, memory);
         return {
           content: [{
             type: "text",
-            text: "Project memory does not exist. Run a session first to auto-detect project environment."
-          }]
-        };
-      }
-      const newDirective = {
-        timestamp: Date.now(),
-        directive,
-        context,
-        source: "explicit",
-        priority
-      };
-      memory.userDirectives = addDirective(memory.userDirectives, newDirective);
-      await saveProjectMemory(root, memory);
-      return {
-        content: [{
-          type: "text",
-          text: `Successfully added directive to project memory.
+            text: `Successfully added directive to project memory.
 
 - **Directive:** ${directive}
 - **Priority:** ${priority}
 - **Context:** ${context || "(none)"}`
-        }]
-      };
+          }]
+        };
+      });
     } catch (error2) {
       return {
         content: [{
@@ -31543,7 +31631,10 @@ async function searchSessionHistory(rawOptions) {
   const literalWorkingDirectory = rawOptions.workingDirectory ? (0, import_path41.resolve)(rawOptions.workingDirectory) : workingDirectory;
   const currentProjectRoots = [currentProjectRoot, literalWorkingDirectory].concat(getMainRepoRoot(currentProjectRoot) ?? []).concat(getClaudeWorktreeParent(currentProjectRoot) ?? []).filter((value, index, arr) => Boolean(value) && arr.indexOf(value) === index);
   const transcriptProjectRoots = currentProjectRoots.filter((root) => isWithinProject(root, [currentProjectRoot]));
-  const targets = scopeMode === "all" ? buildAllProjectTargets() : buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots);
+  const targets = scopeMode === "all" ? buildAllProjectTargets() : uniqueSortedTargets([
+    ...buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots),
+    ...scopeMode === "project" ? buildAllProjectTargets() : []
+  ]);
   const matchRetainer = createMatchRetainer(limit);
   for (const target of targets) {
     await collectMatchesFromFile(target, {

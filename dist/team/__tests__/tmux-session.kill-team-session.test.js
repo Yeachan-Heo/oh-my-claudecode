@@ -27,7 +27,8 @@ function strictTmuxIdentity() {
 }
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal();
-    const run = (args) => {
+    const run = (rawArgs) => {
+        const args = rawArgs[0] === '-u' ? rawArgs.slice(1) : rawArgs;
         mocked.execCalls.push(args);
         const commandArgs = args[0]?.toLowerCase().endsWith('cmd.exe') ? args.slice(1) : args;
         const socket = commandArgs[0] === '-S' ? commandArgs[1] : undefined;
@@ -96,7 +97,7 @@ vi.mock('child_process', async (importOriginal) => {
         // Keep if-shell opaque: the nested guard condition and native success
         // script contain quoting that the small fixture tokenizer cannot parse.
         if (cmd.includes('if-shell')) {
-            const socket = cmd.match(/tmux\s+'-S'\s+'([^']+)'/)?.[1];
+            const socket = cmd.match(/tmux\s+(?:-u\s+)?'-S'\s+'([^']+)'/)?.[1];
             return socket ? ['-S', socket, 'if-shell', cmd] : ['if-shell', cmd];
         }
         return parseTmuxShellCmd(cmd);

@@ -30,6 +30,7 @@ const BEST_EFFORT_ACTION_EXECUTION_MS = ACTIONS.filter(([, actionClass]) => acti
 const REQUIRED_ACTION_MAX_ATTEMPTS = 3;
 const LOCK_WAIT = new Int32Array(new SharedArrayBuffer(4));
 const DISCOVERY_FILE = 'discovery.json';
+const WORKER_EXITS_FILE = 'worker-exits.jsonl';
 export function sessionEndJobPath(directory, sessionId) { validateSessionId(sessionId); return path.join(getOmcRoot(directory), 'state', 'session-end-jobs', `${sessionId}.json`); }
 export function sessionEndJobsDirectory(directory) { return path.join(getOmcRoot(directory), 'state', 'session-end-jobs'); }
 function digest(value) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
@@ -406,12 +407,20 @@ export function releaseSessionEndJob(directory, sessionId, nonce, generation, re
     if (action.status !== 'claimed' || !action.runner || action.runner.phase !== 'reserved')
         continue;
     action.status = 'pending';
+    action.attempts--;
     action.claimantNonce = undefined;
     action.runner = undefined;
 } job.owner = null; if (job.phase !== 'complete') {
     job.phase = 'recoverable-failure';
     job.recoverableFailure = { reason, releasedAt: nowIso(), ownerNonce: nonce };
 } }); }
+/** Evidence for a worker that exits still owning its job: it cannot be written to the manifest it failed to release (#4844). */
+export function recordSessionEndWorkerExit(directory, entry) { try {
+    const file = path.join(sessionEndJobsDirectory(directory), WORKER_EXITS_FILE);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify({ at: nowIso(), ...entry })}\n`);
+}
+catch { /* best effort evidence only */ } }
 export function updateSessionEndJob(directory, sessionId, expectedOwner, mutate) { return mutateLatest(directory, sessionId, (job) => { if (job.owner?.nonce !== expectedOwner || job.phase === 'complete')
     throw new Error('owner-conflict'); mutate(job); }); }
 export function claimSessionEndAction(directory, sessionId, ownerNonce, name, deadlineAt) { return updateSessionEndJob(directory, sessionId, ownerNonce, (job) => { const action = job.actions[name]; if (!action || !['pending', 'retryable'].includes(action.status) || action.claimantNonce)

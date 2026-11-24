@@ -41,20 +41,31 @@ function runTeamApi(command) {
 }
 
 const stdin = createInterface({ input: process.stdin });
+// Real claude has been seen to outlive its killed launch wrapper as an
+// orphan. This knob keeps the fake alive the same way.
+const OUTLIVE_TERMINAL = process.env.OMC_FAKE_OUTLIVE_TERMINAL === '1';
+if (OUTLIVE_TERMINAL) {
+  process.on('SIGHUP', () => trace('sighup-ignored'));
+  process.stdout.on('error', () => undefined);
+}
 // The bootstrap starts providers in their own session, so a closed pane
 // delivers EOF rather than SIGHUP. Exit like a CLI that lost its terminal.
 stdin.on('close', () => {
   trace('stdin-closed');
-  process.exit(129);
+  if (OUTLIVE_TERMINAL) void sleep(2_147_483_647);
+  else process.exit(129);
 });
 const stdinLines = stdin[Symbol.asyncIterator]();
 
 const FRAMES_ROOT = join(dirname(fileURLToPath(import.meta.url)), 'pane-frames');
 const CLEAR_SCREEN = '\x1b[H\x1b[J';
-const DOWN_KEYS = ['\x1b[B', '\x1bOB'];
 const SLOW_BANNER_MS = Number(process.env.OMC_FAKE_SLOW_BANNER_MS) || 3_000;
 const BUSY_MS = 2_000;
 const PROVIDER_EXIT_MS = 1_000;
+const TRUST_BUSY_MS = 1_000;
+const TRUST_IGNORE_MS = 600;
+// Down (normal and application cursor mode), then Enter.
+const SELECTOR_KEYS = ['\x1b[B', '\x1bOB', '\r', '\n'];
 
 function showFrame(name, file) {
   return {
@@ -69,7 +80,10 @@ function pause(name, ms) {
 
 async function nextLine(eofError) {
   const { value, done } = await stdinLines.next();
-  if (done) throw new Error(eofError);
+  if (done) {
+    if (OUTLIVE_TERMINAL) return new Promise(() => undefined);
+    throw new Error(eofError);
+  }
   return value;
 }
 
@@ -159,20 +173,92 @@ const writeShutdownAck = {
   },
 };
 
-// Claude's trust dialog defaults to "No, exit": Enter alone quits, Down then
-// Enter trusts the folder.
-function awaitClaudeTrustAnswer() {
+// Claude's two-choice dialogs focus their first choice ("No, exit" in the
+// trust dialog) and read raw keys: Down moves the focus to the second choice
+// and redraws, Enter confirms the focused choice, and confirming the first one
+// fails with firstChoiceError. Keys that arrive in one read act against the
+// focus drawn before that read, so a Down and an Enter read together still
+// confirm the first choice. That is the hypothesis the recorded 2.1.328
+// failures fit, not observed behavior. busyMs blocks the event loop after the
+// first draw so keys sent meanwhile reach the selector in one read (an
+// unconfirmed hypothesis). ignoreMs drops every key read that soon after the
+// first draw, as Claude Code 2.1.328 was measured to drop a Down sent right
+// after the trust dialog appeared. Every read is traced, so a run shows
+// whether the dialog got any key at all.
+const TRUST_CHOICES = [/❯\s*No, exit/, /^\s*Yes, (?:proceed|I trust this folder)/];
+
+function moveFocus(frame, [first, second]) {
+  const lines = frame.split('\n');
+  const from = lines.findIndex(line => first.test(line));
+  const to = lines.findIndex(line => second.test(line));
+  const column = lines[from].indexOf('❯');
+  lines[from] = `${lines[from].slice(0, column)} ${lines[from].slice(column + 1)}`;
+  lines[to] = `${lines[to].slice(0, column)}❯${lines[to].slice(column + 1)}`;
+  return lines.join('\n');
+}
+
+function claudeSelector(file, {
+  name = 'await-trust-answer',
+  choices = TRUST_CHOICES,
+  firstChoiceError = 'trust_declined',
+  busyMs = 0,
+  ignoreMs = 0,
+} = {}) {
   return {
-    name: 'await-trust-answer',
-    run: async () => {
-      for (;;) {
-        const line = await nextLine('stdin_closed_before_trust_answer');
-        if (DOWN_KEYS.some(key => line.includes(key))) return;
-        if (line.trim() === '') throw new Error('trust_declined');
-      }
-    },
+    name,
+    run: () => new Promise((resolve, reject) => {
+      const frame = readFileSync(join(FRAMES_ROOT, file), 'utf8').trimEnd();
+      let secondFocused = false;
+      if (process.stdin.isTTY) process.stdin.setRawMode(true);
+      const finish = (error) => {
+        process.stdin.off('data', onKeys);
+        if (process.stdin.isTTY) process.stdin.setRawMode(false);
+        if (error) reject(error);
+        else resolve();
+      };
+      let drawnAt = Infinity;
+      const onKeys = (chunk) => {
+        trace('selector-read', { dialog: name, keys: String(chunk) });
+        if (Date.now() - drawnAt < ignoreMs) return;
+        const focusedBeforeRead = secondFocused;
+        for (let rest = String(chunk); rest; ) {
+          const key = SELECTOR_KEYS.find(candidate => rest.startsWith(candidate));
+          rest = rest.slice(key?.length ?? 1);
+          if (key === '\r' || key === '\n') return finish(focusedBeforeRead ? undefined : new Error(firstChoiceError));
+          if (key && !secondFocused) {
+            secondFocused = true;
+            process.stdout.write(`${CLEAR_SCREEN}${moveFocus(frame, choices)}`);
+          }
+        }
+      };
+      process.stdin.on('data', onKeys);
+      process.stdout.write(`${CLEAR_SCREEN}${frame}`, () => {
+        drawnAt = Date.now();
+        const busyUntil = Date.now() + busyMs;
+        while (Date.now() < busyUntil);
+      });
+    }),
   };
 }
+
+// Claude Code 2.1.328 on a fresh CLAUDE_CONFIG_DIR, after the trust dialog.
+const claudeBypassWarning = claudeSelector('claude/2.1.328/bypass-permissions.txt', {
+  name: 'await-bypass-answer',
+  choices: [/❯\s*No, exit/, /^\s*Yes, I accept/],
+  firstChoiceError: 'bypass_declined',
+});
+// Claude Code 2.1.329 on a config with no completed onboarding, before the
+// trust dialog. Enter on the focused theme answers the picker for the user.
+const claudeOnboardingThemePicker = claudeSelector('claude/2.1.329/onboarding-theme.txt', {
+  name: 'await-onboarding-answer',
+  choices: [/❯ ✔ Auto \(match terminal\)/, /^\s+Dark mode$/],
+  firstChoiceError: 'onboarding_answered',
+});
+const claudeFullscreenRendererOffer = claudeSelector('claude/2.1.328/fullscreen-renderer.txt', {
+  name: 'await-renderer-answer',
+  choices: [/❯\s*1\. Yes, try it/, /^\s*2\. Not now/],
+  firstChoiceError: 'fullscreen_renderer_accepted',
+});
 
 function lifecycle({ startup, working = [], completed = completedPrompt }) {
   return [...startup, awaitStartupTrigger, readInbox, claimTask, ...working, completeTask, completed, awaitShutdownRequest, writeShutdownAck];
@@ -183,7 +269,28 @@ const CLAUDE_IDLE = 'claude/2.1.325/idle.txt';
 const SCENARIOS = {
   default: lifecycle({ startup: [banner, idlePrompt] }),
   'claude-trust': lifecycle({
-    startup: [showFrame('trust-prompt', 'claude/2.1.325/trust.txt'), awaitClaudeTrustAnswer(), showFrame('idle-prompt', CLAUDE_IDLE)],
+    startup: [claudeSelector('claude/2.1.325/trust.txt'), showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  'claude-trust-busy-startup': lifecycle({
+    startup: [claudeSelector('claude/2.1.325/trust.txt', { busyMs: TRUST_BUSY_MS }), showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  'claude-trust-ignores-early-keys': lifecycle({
+    startup: [claudeSelector('claude/2.1.325/trust.txt', { ignoreMs: TRUST_IGNORE_MS }), showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  'claude-onboarding': lifecycle({
+    startup: [claudeOnboardingThemePicker, showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  'claude-bypass-permissions': lifecycle({
+    startup: [claudeBypassWarning, showFrame('idle-prompt', CLAUDE_IDLE)],
+  }),
+  // The trust dialog, then the offer: the order after the bypass warning was
+  // accepted once for the config directory (inferred from the 2.1.328 recordings).
+  'claude-fullscreen-renderer': lifecycle({
+    startup: [
+      claudeSelector('claude/2.1.325/trust.txt'),
+      claudeFullscreenRendererOffer,
+      showFrame('idle-prompt', 'claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    ],
   }),
   'claude-slow-banner': lifecycle({
     startup: [showFrame('startup-banner', 'claude/unversioned/startup-banner-bypass.txt'), pause('slow-startup', SLOW_BANNER_MS), showFrame('idle-prompt', CLAUDE_IDLE)],
@@ -215,7 +322,7 @@ const SCENARIOS = {
     startup: [showFrame('quoted-output', 'claude/synthetic/prompt-glyph-in-output.txt'), pause('drawing-input-box', BUSY_MS), showFrame('idle-prompt', CLAUDE_IDLE)],
   }),
   'wrapped-trust-35col': lifecycle({
-    startup: [showFrame('trust-prompt', 'claude/2.1.310/trust-35col.txt'), awaitClaudeTrustAnswer(), showFrame('idle-prompt', CLAUDE_IDLE)],
+    startup: [claudeSelector('claude/2.1.310/trust-35col.txt'), showFrame('idle-prompt', CLAUDE_IDLE)],
   }),
   'provider-exit-to-shell-prompt': [
     showFrame('idle-prompt', CLAUDE_IDLE),

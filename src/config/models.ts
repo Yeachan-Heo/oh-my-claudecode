@@ -26,6 +26,19 @@ const TIER_ENV_KEYS: Record<ModelTier, readonly string[]> = {
 };
 
 /**
+ * Parse a provider flag env var that accepts both "1" and "true" (case-insensitive).
+ * Returns true only when the value (after trim) equals "1" or "true" (case-insensitive).
+ * Empty strings, "0", "false", and null/undefined return false.
+ *
+ * This matches SessionStart's behavior: CLAUDE_CODE_USE_BEDROCK=true
+ * or CLAUDE_CODE_USE_BEDROCK=1 both enable Bedrock.
+ */
+function isTruthyProviderFlag(value: string | undefined): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
+/**
  * Canonical Claude family defaults.
  * Keep these date-less so version bumps are a one-line edit per family.
  */
@@ -217,7 +230,7 @@ export function getBuiltinExternalDefaultModel(provider: 'codex' | 'gemini' | 'a
 
 function hasBedrockModelId(modelIds: readonly string[]): boolean {
   for (const modelId of modelIds) {
-    if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
+    if (/^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
       return true;
     }
     if (
@@ -247,7 +260,7 @@ function hasBedrockModelId(modelIds: readonly string[]): boolean {
  */
 export function isBedrock(): boolean {
   // Primary signal: Claude Code's own env var
-  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) {
     return true;
   }
 
@@ -273,7 +286,7 @@ export function isBedrock(): boolean {
  */
 export function isProviderSpecificModelId(modelId: string): boolean {
   // Bedrock prefixed formats (region.anthropic.claude-*, anthropic.claude-*)
-  if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
+  if (/^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) {
     return true;
   }
   // Bedrock ARN formats
@@ -322,7 +335,7 @@ export function isSubagentSafeModelId(modelId: string): boolean {
  * expects full Vertex model paths.
  */
 export function isVertexAI(): boolean {
-  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') {
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) {
     return true;
   }
 
@@ -410,11 +423,11 @@ export function shouldAutoForceInherit(): boolean {
     return true;
   }
 
-  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) {
     return true;
   }
 
-  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') {
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) {
     return true;
   }
 

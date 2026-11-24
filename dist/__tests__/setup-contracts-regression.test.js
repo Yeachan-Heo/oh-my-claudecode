@@ -387,8 +387,9 @@ describe('Contract 9: hooks/hooks.json portability', () => {
                 for (const hook of hookGroup.hooks) {
                     if (hook.type !== 'command')
                         continue;
-                    if (!hook.command.includes('${CLAUDE_PLUGIN_ROOT}')) {
-                        violations.push({ event: eventType, command: hook.command });
+                    const text = [hook.command, ...(hook.args ?? [])].join(' ');
+                    if (!text.includes('${CLAUDE_PLUGIN_ROOT}')) {
+                        violations.push({ event: eventType, command: text });
                     }
                 }
             }
@@ -431,11 +432,13 @@ describe('Contract 9: hooks/hooks.json portability', () => {
                 for (const hook of hookGroup.hooks) {
                     if (hook.type !== 'command')
                         continue;
-                    if (!hook.command.startsWith('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs ')) {
-                        violations.push({ event: eventType, command: hook.command, reason: 'not direct node run.cjs' });
+                    const args = hook.args ?? [];
+                    const text = [hook.command, ...args].join(' ');
+                    if (hook.command !== 'node' || args[0] !== '${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs') {
+                        violations.push({ event: eventType, command: text, reason: 'not direct node run.cjs' });
                     }
-                    if (/^(?:"\/bin\/sh"|sh)\s/.test(hook.command) || hook.command.includes('find-node.sh')) {
-                        violations.push({ event: eventType, command: hook.command, reason: 'uses sh/find-node bootstrap' });
+                    if (/^(?:"\/bin\/sh"|sh)\s/.test(hook.command) || text.includes('find-node.sh')) {
+                        violations.push({ event: eventType, command: text, reason: 'uses sh/find-node bootstrap' });
                     }
                 }
             }
@@ -565,12 +568,12 @@ describe('Contract 11: SessionEnd hooks are async (issue #3240)', () => {
         if (!existsSync(HOOKS_JSON_PATH))
             return;
         const hooksJson = JSON.parse(readFileSync(HOOKS_JSON_PATH, 'utf-8'));
-        const commands = (hooksJson.hooks.SessionEnd ?? [])
+        const texts = (hooksJson.hooks.SessionEnd ?? [])
             .flatMap(group => group.hooks)
             .filter(hook => hook.type === 'command')
-            .map(hook => hook.command);
-        expect(commands).toContain('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs');
-        expect(commands).toContain('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/wiki-session-end.mjs');
+            .map(hook => [hook.command, ...(hook.args ?? [])].join(' '));
+        expect(texts).toContain('node ${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs ${CLAUDE_PLUGIN_ROOT}/scripts/session-end.mjs');
+        expect(texts).toContain('node ${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs ${CLAUDE_PLUGIN_ROOT}/scripts/wiki-session-end.mjs');
     });
     it('non-SessionEnd hooks do not unconditionally carry async:true', () => {
         if (!existsSync(HOOKS_JSON_PATH))

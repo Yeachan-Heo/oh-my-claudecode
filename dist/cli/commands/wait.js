@@ -222,7 +222,9 @@ export async function waitDetectCommand(options) {
         console.log(chalk.gray('Install tmux to use session detection and auto-resume'));
         process.exit(1);
     }
-    console.log(chalk.blue('Scanning for blocked Claude Code sessions...\n'));
+    if (!options.json) {
+        console.log(chalk.blue('Scanning for blocked Claude Code sessions...\n'));
+    }
     const config = {
         paneLinesToCapture: options.lines,
     };

@@ -288,6 +288,8 @@ export interface TeamRecoveryAttempt {
   phase: 'reserved' | 'requeued' | 'ready' | 'active' | 'services_pending' | 'adopted' | 'failed';
   /** Pane identity of the worker before a recovery replaces its config row. */
   original_pane_id?: string;
+  /** Set on last_recovery when the owner ended the request at its deadline. */
+  failure_reason?: 'recovery_request_timeout';
   state_revision: number;
   created_at: string;
   updated_at: string;

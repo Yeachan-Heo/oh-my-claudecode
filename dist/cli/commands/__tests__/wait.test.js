@@ -13,7 +13,7 @@ const boundary = vi.hoisted(() => ({
     isDaemonRunning: vi.fn(),
 }));
 vi.mock('../../../features/rate-limit-wait/index.js', () => boundary);
-import { waitCommand } from '../wait.js';
+import { waitCommand, waitDetectCommand } from '../wait.js';
 describe('wait command degraded usage heading', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -48,6 +48,38 @@ describe('wait command degraded usage heading', () => {
         await waitCommand({});
         const output = log.mock.calls.map(([message]) => String(message)).join('\n');
         expect(output).toContain('Usage API Rate Limited');
+    });
+});
+describe('wait detect --json', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        boundary.isTmuxAvailable.mockReturnValue(true);
+        boundary.detectBlockedPanes.mockResolvedValue({
+            success: true,
+            message: 'No blocked Claude Code sessions detected.',
+            state: { isRunning: false, pid: null, blockedPanes: [] },
+        });
+    });
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+    it('prints only the JSON result on stdout', async () => {
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        await waitDetectCommand({ json: true, lines: 15 });
+        const output = log.mock.calls.map(([message]) => String(message)).join('\n');
+        expect(JSON.parse(output)).toEqual({
+            success: true,
+            message: 'No blocked Claude Code sessions detected.',
+            state: { isRunning: false, pid: null, blockedPanes: [] },
+        });
+        expect(boundary.detectBlockedPanes).toHaveBeenCalledWith({ paneLinesToCapture: 15 });
+    });
+    it('keeps the scanning line in text mode', async () => {
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        await waitDetectCommand({ lines: 15 });
+        const output = log.mock.calls.map(([message]) => String(message)).join('\n');
+        expect(output).toContain('Scanning for blocked Claude Code sessions...');
+        expect(output).toContain('No blocked Claude Code sessions detected.');
     });
 });
 //# sourceMappingURL=wait.test.js.map

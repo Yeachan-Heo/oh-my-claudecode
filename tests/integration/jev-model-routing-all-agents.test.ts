@@ -241,7 +241,52 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for every agent call", () => 
       });
       expect(routed).toEqual({ ...agentInput().tool_input, model: "sonnet", effort: "medium" });
     }, 15000);
+
+    it("OMC_SUBAGENT_MODEL alone does not resolve the tier: the call keeps inheriting, the effort is set", async () => {
+      const only = { ...forceInherit, OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1", OMC_SUBAGENT_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect(await routedInput(agentInput(), only)).toEqual({ ...agentInput().tool_input, effort: "medium" });
+      // With the native mapping of the tier the alias is set, as before.
+      const mapped = { ...only, CLAUDE_CODE_BEDROCK_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect(await routedInput(agentInput(), mapped)).toEqual({ ...agentInput().tool_input, model: "sonnet", effort: "medium" });
+      expect(requests).toHaveLength(2);
+    }, 30000);
+
+    it("a use marker model needs the native mapping too: OMC_SUBAGENT_MODEL alone does not set it", async () => {
+      const marked = agentInput({ prompt: "use sonnet\nFind why src/auth/session.test.ts fails intermittently and fix it." });
+      const only = { ...forceInherit, OMC_JEV_MODEL_ROUTING_MARKER: "1", OMC_SUBAGENT_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect((await routedInput(marked, only)).model).toBeUndefined();
+      const mapped = { ...only, ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect((await routedInput(marked, mapped)).model).toBe("sonnet");
+    }, 30000);
   });
+
+  it.each([
+    ["usable winner", { CLAUDE_CODE_BEDROCK_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6", ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
+    ["unusable winner and a usable later default", { CLAUDE_CODE_BEDROCK_SONNET_MODEL: "other-proxy-model", ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" }, false],
+    ["a Vertex mapping under the Bedrock flag", { ANTHROPIC_DEFAULT_SONNET_MODEL: "vertex_ai/claude-sonnet-4-6" }, false],
+    ["a Bedrock mapping under a padded Vertex session model", { ANTHROPIC_MODEL: " vertex_ai/claude-opus-4-6 ", CLAUDE_CODE_USE_BEDROCK: "", ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" }, false],
+    ["a Vertex mapping under both flags", { CLAUDE_CODE_USE_VERTEX: "1", ANTHROPIC_DEFAULT_SONNET_MODEL: "vertex_ai/claude-sonnet-4-6" }, true],
+    ["blank winner and a usable later default", { CLAUDE_CODE_BEDROCK_SONNET_MODEL: " ", ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" }, true],
+  ])("the first native mapping decides for a call without a model and for a use marker: %s", async (_label, mapping, set) => {
+    const base = { OMC_ROUTING_FORCE_INHERIT: "true", CLAUDE_CODE_USE_BEDROCK: "1", ...mapping };
+    const bare = await routedInput(agentInput(), { ...base, OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1" });
+    expect(bare.model).toBe(set ? "sonnet" : undefined);
+    const marked = agentInput({ prompt: "use sonnet\nFind why src/auth/session.test.ts fails intermittently and fix it." });
+    const routed = await routedInput(marked, { ...base, OMC_JEV_MODEL_ROUTING_MARKER: "1" });
+    expect(routed.model).toBe(set ? "sonnet" : undefined);
+  }, 30000);
+
+  it("a project definition without a model hides a user definition of the same name that names fable: the call is unpinned and asked", async () => {
+    writeAgent(join(cwd, ".claude", "agents"), "shadowed-agent", "");
+    writeAgent(join(cwd, "claude", "agents"), "shadowed-agent", "model: fable\n");
+    const input = agentInput({ subagent_type: "shadowed-agent" });
+    expect(await routedInput(input, { OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1" })).toEqual({
+      ...input.tool_input,
+      model: "sonnet",
+      effort: "medium",
+    });
+    expect(requests).toHaveLength(1);
+  }, 15000);
 
   it("a degraded Jev call leaves a call without a model as it was", async () => {
     status = 500;

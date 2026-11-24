@@ -60,11 +60,9 @@ export interface ClaudeMdFileStatus {
     manualReview: boolean;
 }
 /**
- * Check for hook conflicts in both profile-level (~/.claude/settings.json)
- * and project-level (./.claude/settings.json).
- *
- * Claude Code settings precedence: project > profile > defaults.
- * We check both levels so the diagnostic is complete.
+ * Check for hook conflicts in profile settings (~/.claude/settings.json),
+ * project settings (./.claude/settings.json), and project-local settings
+ * (./.claude/settings.local.json).
  */
 export declare function checkHookConflicts(): ConflictReport['hookConflicts'];
 /**
