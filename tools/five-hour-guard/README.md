@@ -37,7 +37,7 @@ Three standalone scripts, Python 3 standard library only:
    `threshold - 10` percent (the window was reset sooner than the cache said), and it extends the pause while the cache
    still shows the threshold with a later reset time.
 
-The pause is stored in the state file before its pause file is published, so a pause file never exists without a stored pause behind it (a failing state write delays the pause to the next tick that can write). Paths are compared with the case rules of the platform (Windows, macOS), also for files that do not exist yet. The guard and the hook append to their logs without following a symbolic link at the last component and only to a regular file (a link
+The pause is stored in the state file before its pause file is published, so a pause file never exists without a stored pause behind it (a failing state write delays the pause to the next tick that can write). Paths are compared with the case rules of the platform (Windows, macOS), also for files that do not exist yet. The wiring check also warns about a relative path in the entry (it would be resolved in each session's working directory) and about a launcher or interpreter that is not a regular file. `add` refuses a value of the wrong type for the keys `state_file`, `log_file` and `usage_cache` as the guard does, and treats the bundled hook as a protected file even when another hook is registered. The guard and the hook append to their logs without following a symbolic link at the last component and only to a regular file (a link
 in a shared directory cannot redirect the write). The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit (also when an earlier removal of the file failed and is still
 pending: the stop tries it once more; and also when the unpaused state cannot be written at that moment: the file goes anyway, the stored pause stays and a restart keeps it only while it lasts), so a stop or a restart (also
 `systemctl --user restart`, which a change of `exclude` needs) releases the waiting sessions. The restarted guard brings
@@ -170,7 +170,7 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    content is written. The rest of the file is kept as it is; a hook of another tool, also in the same group, stays (in
    a group of its own with its matcher). `add` twice changes nothing. `add` with another hook path replaces the entry in
    place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, an interpreter that is not
-   executable or cannot run the hook (it is tried once: Python 3 with the standard library), a hook that does not hold a pause (`add` runs the selected hook against a pause of its own in a private directory: it must hold, and exit 0 when the pause is removed), two of the pause file, hook log,
+   executable or cannot run the hook (it is tried once: Python 3 with the standard library), a hook that does not hold a pause (`add` runs the selected hook against a pause of its own in a private directory: it must keep holding for a moment, and exit 0 when the pause is removed), two of the pause file, hook log,
    `settings.json`, hook, interpreter, configuration file and the two scripts that are one file, and a hook file whose
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The tool counts a command as
    the hook only when that file is its script (the command word, or the argument of a Python, or of a command that has

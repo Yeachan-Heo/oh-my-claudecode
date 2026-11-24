@@ -59,7 +59,7 @@ if A.config:
     except Exception as e:
         fail(f'cannot read configuration {A.config}: {e!r}')
 
-for _key in ('settings_file', 'pause_file', 'hook_log_file'):
+for _key in ('settings_file', 'pause_file', 'hook_log_file', 'state_file', 'log_file', 'usage_cache'):   # every key of the guard that the checks here use
     if CFG.get(_key) is not None and not isinstance(CFG[_key], str):
         fail(f'"{_key}" must be a string (a file path), not {CFG[_key]!r}')
     if CFG.get(_key) and '\0' in CFG[_key]:
@@ -151,6 +151,9 @@ def probe_hook():
                 time.sleep(0.05)
             if p.poll() is not None or not os.path.exists(log):
                 fail(f'the hook {A.hook!r} does not hold a valid pause (it ended with status {p.poll()} at once): it is not the hook of the guard, so the entry would protect nothing')
+            time.sleep(1.5)   # a hook that lets go by itself while the pause is in force protects nothing: it must still be holding
+            if p.poll() is not None:
+                fail(f'the hook {A.hook!r} ended with status {p.returncode} while the pause was still in force: it does not hold, so the entry would protect nothing')
             os.unlink(pause)
             try:
                 p.wait(timeout=30)
@@ -321,6 +324,9 @@ def run_once():
         distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python), ('configuration file', A.config),
                     ('settings tool script', os.path.abspath(__file__)), ('guard script', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'five-hour-guard.py'))]
         # the files the guard writes or reads under the same configuration: registering must not make one of them settings.json
+        bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), MARK)   # the guard refuses any output that is this file, whichever hook is registered
+        if not same_file(bundled, A.hook):
+            distinct.append(('bundled hook script', bundled))
         for key, label in (('state_file', 'state file'), ('log_file', 'guard log')):
             if isinstance(CFG.get(key), str) and CFG[key]:
                 distinct.append((label, CFG[key]))

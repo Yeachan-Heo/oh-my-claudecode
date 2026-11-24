@@ -554,6 +554,46 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readText(f.settings)).toBe(original);
   });
 
+  it('add refuses a value of the wrong type for every guard key that its checks use, as the guard does at start', () => {
+    const f = fixture('settings-wrong-types');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    for (const key of ['usage_cache', 'state_file', 'log_file']) {
+      writeFileSync(f.cfg, JSON.stringify({ pause_file: f.pause, settings_file: f.settings, [key]: [] }), 'utf8');
+      const r = runSync(SETTINGS_TOOL, ['add', '--config', f.cfg, '--hook', HOOK, '--python', PYBIN]);
+      expect(r.status, `${key}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, key).toMatch(new RegExp(`"${key}" must be a string`));
+      expect(readText(f.settings)).toBe(original);
+    }
+  });
+
+  it('a custom hook does not hide the bundled one from the collision checks: a pause file that is the bundled hook is refused, as the guard refuses it at start', () => {
+    const f = fixture('settings-bundled-hook');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const custom = join(f.dir, 'custom', 'five-hour-guard-hook.py');
+    mkdirSync(dirname(custom), { recursive: true });
+    copyFileSync(HOOK, custom);
+    writeFileSync(f.cfg, JSON.stringify({ pause_file: HOOK, settings_file: f.settings }), 'utf8');
+    const r = runSync(SETTINGS_TOOL, ['add', '--config', f.cfg, '--hook', custom, '--python', PYBIN]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/same file/);
+    expect(readText(f.settings)).toBe(original);
+  });
+
+  it('add keeps the probe pause in place: a hook that holds for a moment and then lets go by itself is refused', () => {
+    const f = fixture('settings-probe-early-exit');
+    const hook = join(f.dir, 'early', 'five-hour-guard-hook.py');
+    mkdirSync(dirname(hook), { recursive: true });
+    writeFileSync(hook, 'import sys, time\nopen(sys.argv[sys.argv.index("--log") + 1], "a").write("hold-start\\n")\ntime.sleep(0.8)\n', 'utf8');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const r = tool(f, 'add', ['--hook', hook]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/while the pause was still in force/);
+    expect(readText(f.settings)).toBe(original);
+  });
+
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
     const f = fixture('settings-timeout');
     const original = JSON.stringify(base(), null, 2) + '\n';

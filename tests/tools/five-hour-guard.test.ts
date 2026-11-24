@@ -5,7 +5,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, GUARD, HOOK, UNIT, PYBIN, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
   readJson, readText, runPyCode, runSync, sleep, spawnPy, spawnPyCode, startHook, waitFor, writeCache, writePause, type Fixture, type Proc,
@@ -806,6 +806,32 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): .* runs .* directly, but it is not an executable file/);
     chmodSync(copy, 0o755);
     expect(guardOnce(f).stdout).not.toMatch(/WARNING/);
+  });
+
+  it('the paths of the hook entry must be absolute: a relative one that happens to resolve from the working directory of the guard is reported', () => {
+    const f = fixture('relative-paths', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const rel = (p: string) => relative(f.dir, p);
+    const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+    const run = () => runSync(GUARD, guardArgs(f, ['--once']), { cwd: f.dir });
+    put(`[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`);
+    expect(run().stdout, 'the generated shape').not.toMatch(/WARNING/);
+    put(`[ -f ${f.pause} ] && [ -f ${rel(HOOK)} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${rel(HOOK)} --pause-file ${f.pause}`);
+    expect(run().stdout, 'a relative hook').toMatch(/WARNING \(start\): .* uses the relative path /);
+    put(`[ -f ${rel(f.pause)} ] && [ -f ${HOOK} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${rel(f.pause)}`);
+    expect(run().stdout, 'a relative pause file').toMatch(/uses the relative path /);
+  });
+
+  it('a launcher or interpreter that is a directory is not a program: a searchable directory named like a Python is reported, though `[ -x ]` accepts it', () => {
+    const f = fixture('launcher-directory', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const dir = join(f.dir, 'python3-dir');
+    mkdirSync(dir);
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command',
+      command: `[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x ${dir} ] || exit 0; exec ${dir} -I ${HOOK} --pause-file ${f.pause}` }] }] } }), 'utf8');
+    const out = guardOnce(f).stdout;
+    expect(out).toMatch(/runs the hook with .*python3-dir, which does not exist or cannot be run/);
+    expect(out).toMatch(/names the interpreter .*python3-dir, which does not exist or cannot be run/);
   });
 
   it('a stored pause with times outside any window the guard writes is ignored, not a crash at start', () => {

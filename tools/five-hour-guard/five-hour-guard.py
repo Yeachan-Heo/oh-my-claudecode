@@ -458,10 +458,13 @@ def hook_check(where):
         log(f'WARNING ({where}): the hook entry in {SETTINGS} has the matcher {matchers[0]!r}, which does not cover every tool: calls of other tools would go on during a pause. Run five-hour-guard-settings.py add again')
     for command in ours:
         try:
-            hooks, interpreters, _logs, pauses, tests, launchers = entry_parts(command)
+            hooks, interpreters, logs, pauses, tests, launchers = entry_parts(command)
         except ValueError:
             log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote or NUL character): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
             continue
+        for token in hooks + interpreters + launchers + pauses + tests + logs:   # a hook runs in the working directory of a session: a relative path means another file there
+            if not os.path.isabs(token):
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} uses the relative path {token}: it is resolved in the working directory of each session, so a pause would hold no session. Run five-hour-guard-settings.py add again')
         for path in hooks:
             if not os.path.isfile(path):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which does not exist: the shell guard of the entry lets every call through, so a pause would hold no session')
@@ -476,17 +479,17 @@ def hook_check(where):
         for launcher in launchers:   # the program that runs the hook must be a Python and the one the preflight `[ -x ... ]` tests
             path = launcher if os.path.isabs(launcher) else shutil.which(launcher)
             if HOOK_NAME in os.path.basename(launcher):
-                if not (path and os.path.isfile(path) and os.access(path, os.X_OK)):
+                if not (path and os.path.isfile(path) and os.access(path, os.X_OK)):   # isfile: a searchable directory passes `[ -x ]` and still cannot be run
                     log(f'WARNING ({where}): the hook entry in {SETTINGS} runs {launcher} directly, but it is not an executable file (a copied script is mode 0644): the shell would refuse it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
                 continue
             if not re.match(r'(python|pypy|py$)', os.path.basename(launcher).lower()):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which is not a Python: it would not run the hook, so a pause would hold no session. Run five-hour-guard-settings.py add again')
-            elif not path or not os.access(path, os.X_OK):
+            elif not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which does not exist or cannot be run: a pause would hold no session. Run five-hour-guard-settings.py add again')
             elif interpreters and not any(same_file(path, i) for i in interpreters):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, but its shell check tests {interpreters[0]}: the two must be the same interpreter. Run five-hour-guard-settings.py add again')
         for interpreter in interpreters:
-            if not os.access(interpreter, os.X_OK):
+            if not os.path.isfile(interpreter) or not os.access(interpreter, os.X_OK):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} names the interpreter {interpreter}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
 
 
