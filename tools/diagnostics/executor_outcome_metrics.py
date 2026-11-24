@@ -547,7 +547,48 @@ def strip_comments(line):
     return line
 
 
-HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)\s*(['\"]?)([A-Za-z0-9_][A-Za-z0-9_-]*)\2")  # not a here-string (<<<)
+HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*")  # not a here-string (<<<)
+HEREDOC_WORD_END = re.compile(r"[\s;&|()<>]")
+
+
+def heredoc_delimiter(line, start):
+    """The delimiter word of a here-document operator whose word starts at `start`, as the shell reads it: unquoted characters up
+    to a blank or one of ;&|()<>, a backslash taking the next character literally, and '...' or "..." pieces (the quotes are
+    removed: <<'EOF-TEXT', <<"A B" and <<E\\OF have the delimiters EOF-TEXT, A B and EOF). Returns (delimiter, end), or None when
+    there is no word or a quote has no end on the line."""
+    tag = []
+    at = start
+    length = len(line)
+    while at < length:
+        char = line[at]
+        if char == "\\":
+            if at + 1 >= length:
+                break
+            tag.append(line[at + 1])
+            at += 2
+        elif char == "'":
+            close = line.find("'", at + 1)
+            if close == -1:
+                return None
+            tag.append(line[at + 1:close])
+            at = close + 1
+        elif char == '"':
+            inner = at + 1
+            while inner < length and line[inner] != '"':
+                if line[inner] == "\\" and inner + 1 < length and line[inner + 1] in '"\\$`':
+                    inner += 1
+                tag.append(line[inner])
+                inner += 1
+            if inner >= length:
+                return None
+            at = inner + 1
+        elif HEREDOC_WORD_END.match(char):
+            break
+        else:
+            tag.append(char)
+            at += 1
+    word = "".join(tag)
+    return (word, at) if word else None
 
 
 class QuoteScan:
@@ -632,9 +673,13 @@ def drop_heredocs(command):
             search = match.end()
             if quotes.inert(match.start()):
                 continue  # `echo "<<EOF"` and `# <<EOF` hold text, not an operator
-            expected.append((match.group(3), match.group(1) == "-"))
+            word = heredoc_delimiter(line, match.end())
+            if word is None:
+                continue
+            search = word[1]
+            expected.append((word[0], match.group(1) == "-"))
             pieces.append(line[position:match.start()])
-            position = match.end()
+            position = word[1]
         pieces.append(line[position:])
         kept.append("".join(pieces))
     return "\n".join(kept)

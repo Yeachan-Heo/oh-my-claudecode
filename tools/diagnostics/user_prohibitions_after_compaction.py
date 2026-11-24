@@ -393,7 +393,8 @@ LAUNCH_WRAPPERS = {
 }
 for _word in ("!", "{", "if", "then", "elif", "else", "do", "while", "until"):
     LAUNCH_WRAPPERS[_word] = (frozenset(), 0)
-HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*\\?(['\"]?)(\w+)\2")
+HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*")
+HEREDOC_WORD_END_RE = re.compile(r"[\s;&|()<>]")
 
 
 def closing_backtick(text, index):
@@ -658,28 +659,78 @@ class QuoteScan:
         return bool(frames) and frames[-1] in ("'", '"')
 
 
+def heredoc_delimiter(text, start):
+    """The delimiter word of a here-document operator whose word starts at `start`, as the shell reads it: unquoted characters up
+    to a blank or one of ;&|()<>, a backslash taking the next character literally, and '...' or "..." pieces (the quotes are
+    removed: <<'EOF-TEXT', <<"A B" and <<E\\OF have the delimiters EOF-TEXT, A B and EOF). Returns (delimiter, end), or None when
+    there is no word, a quote has no end, or the word would hold a line break."""
+    tag = []
+    at = start
+    length = len(text)
+    while at < length:
+        char = text[at]
+        if char == "\\":
+            if at + 1 >= length:
+                break
+            tag.append(text[at + 1])
+            at += 2
+        elif char == "'":
+            close = text.find("'", at + 1)
+            if close == -1:
+                return None
+            tag.append(text[at + 1:close])
+            at = close + 1
+        elif char == '"':
+            inner = at + 1
+            while inner < length and text[inner] != '"':
+                if text[inner] == "\\" and inner + 1 < length and text[inner + 1] in '"\\$`':
+                    inner += 1
+                tag.append(text[inner])
+                inner += 1
+            if inner >= length:
+                return None
+            at = inner + 1
+        elif HEREDOC_WORD_END_RE.match(char):
+            break
+        else:
+            tag.append(char)
+            at += 1
+    word = "".join(tag)
+    return None if word == "" or "\n" in word else (word, at)
+
+
 def without_heredoc_bodies(text):
     """Cut here-document bodies and their terminator lines out of shell text, so body text is never read as shell.
     The rest of the line with the "<<TAG" operator stays (`cat <<EOF > f`); several operators on one line take their
-    bodies in order; an operator with no terminator line is left alone, and "<<<" is a here-string. A terminator is a whole
-    line: the tag alone, or for "<<-" the tag behind tabs ("EOF is still body" and " EOF" are body lines). One forward pass
-    over the operators; a tag with no terminator line is searched for once."""
+    bodies in order; an operator with no terminator line is left alone, and "<<<" is a here-string. The delimiter is the whole
+    word (heredoc_delimiter). A terminator is a whole line: the delimiter alone, or for "<<-" the delimiter behind tabs
+    ("EOF is still body" and " EOF" are body lines). One forward pass over the operators; a delimiter with no terminator line is
+    searched for once."""
     edits = []  # (start, end, replacement), sorted by start before they are applied
     quotes = QuoteScan(text)
-    missing = set()  # tags with no terminator line after the position being read
+    missing = set()  # delimiters with no terminator line after the position being read
     line_end = -1  # the newline that ends the line of the operators being read
     resume = -1  # the newline before the next body of that line
-    for match in HEREDOC_RE.finditer(text):
+    position = 0
+    while True:
+        match = HEREDOC_RE.search(text, position)
+        if match is None:
+            break
+        position = match.end()
         if line_end < match.start() < resume:
             continue  # inside a body that is already cut
         if quotes.inert(match.start()):
             continue  # `echo "<<EOF"` and `# <<EOF` hold text, not an operator
+        word = heredoc_delimiter(text, match.end())
+        if word is None:
+            continue
+        tag, operator_end = word
+        position = operator_end
         if match.start() > line_end:
-            line_end = text.find("\n", match.end())
+            line_end = text.find("\n", operator_end)
             if line_end == -1:
                 break  # no line follows, so no body
             resume = line_end
-        tag = match.group(3)
         kind = (tag, match.group(1))
         if kind in missing:
             continue
@@ -687,7 +738,7 @@ def without_heredoc_bodies(text):
         if found is None:
             missing.add(kind)
             continue
-        edits.append((match.start(), match.end(), "<< " + tag + " "))
+        edits.append((match.start(), operator_end, "<< " + re.sub(r"[^\w-]", "_", tag) + " "))
         edits.append((resume, found.end(), ""))
         quotes.skip(resume, found.end())
         resume = found.end()

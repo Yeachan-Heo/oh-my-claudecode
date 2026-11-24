@@ -1132,6 +1132,21 @@ describe('user prohibitions after compaction', () => {
     ])).toEqual([false, true, true]);
   });
 
+  it('a here-document delimiter is the whole word, quoted or not', () => {
+    const cut = pyEval('[module.without_heredoc_bodies(text) for text in argument]', [
+      "cat <<'EOF-TEXT'\ngit commit -m x\nEOF-TEXT\nnext", 'cat <<EOF.x\ngit commit\nEOF.x\nnext', 'cat <<"EOF TEXT"\ngit commit\nEOF TEXT\nnext',
+      "cat <<-'a/b'\n\tgit commit\n\ta/b\nnext", 'cat <<E\\OF\ngit commit\nEOF\nnext', 'cat <<EOF-TEXT\nEOF\ngit commit\nEOF-TEXT\nnext',
+      "cat <<'EOF-TEXT\ngit commit\nEOF-TEXT", 'cat <<\ngit commit', 'echo $((1 << 3))\ngit commit',
+    ]);
+    expect(cut).toEqual([
+      'cat << EOF-TEXT \nnext', 'cat << EOF_x \nnext', 'cat << EOF_TEXT \nnext', 'cat << a_b \nnext', 'cat << EOF \nnext', 'cat << EOF-TEXT \nnext',
+      "cat <<'EOF-TEXT\ngit commit\nEOF-TEXT", 'cat <<\ngit commit', 'echo $((1 << 3))\ngit commit',
+    ]);
+    expect(pyEval('[module.command_matches("commit", text) for text in argument]', [
+      "cat <<'EOF-TEXT'\ngit commit -m x\nEOF-TEXT", "cat <<'EOF-TEXT'\nx\nEOF-TEXT\ngit commit -m x", 'cat <<EOF-TEXT\nEOF\ngit commit\nEOF-TEXT',
+    ])).toEqual([false, true, false]);
+  });
+
   it('the body of a command substitution is read as a command of its own, eight levels deep, apart from the nested shell strings', () => {
     const nest = (levels: number) => Array.from({ length: levels }).reduce<string>((inner) => `echo $(${inner})`, 'git commit -m x');
     const got = pyEval('[module.command_matches("commit", text) for text in argument]', [

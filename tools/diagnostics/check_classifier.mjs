@@ -120,14 +120,44 @@ function splitSubstitutions(text, placeholder, processes = false) {
  * keeps `npm test` as its command and the check inside a substitution (`echo $(npm test)`) names none.
  */
 function executedText(command) {
-  const plain = command
-    .replace(/"[^"]*"|'[^']*'/g, (quoted) => {
-      const body = quoted.slice(1, -1).replace(/[\s;&|#!<>()'"]/g, '_');
-      // A backslash is a plain character in single quotes: at the end of the string it must not escape the character behind the string.
-      return quoted[0] === "'" ? body.replace(/\\$/, '_') : body;
-    })
-    .replace(/(^|(?<!\\)\s)#[^\n]*/g, '$1');
+  const plain = neutralizeQuotes(command).replace(/(^|(?<!\\)\s)#[^\n]*/g, '$1');
   return splitSubstitutions(plain, '_').text;
+}
+
+/**
+ * Replace each quoted string by its text with whitespace and shell operators turned into `_` (the quotes themselves are dropped).
+ * One pass, as the shell reads it: a backslash outside strings escapes the character behind it (`\"` opens no string), a
+ * single-quoted string ends at the next `'`, and a double-quoted one at its first quote that is not escaped (`"a \" ; b"` is one
+ * string). A string with no end is left as it is. A backslash is a plain character in single quotes: at the end of the string it
+ * must not escape the character behind the string.
+ */
+function neutralizeQuotes(text) {
+  let out = '';
+  let from = 0;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') {
+      i += 2;
+    } else if (ch === "'" || ch === '"') {
+      let end;
+      if (ch === "'") end = text.indexOf("'", i + 1);
+      else {
+        end = i + 1;
+        while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+        if (end >= text.length) end = -1;
+      }
+      if (end === -1) {
+        i += 1;
+        continue;
+      }
+      const body = text.slice(i + 1, end).replace(/[\s;&|#!<>()'"]/g, '_');
+      out += text.slice(from, i) + (ch === "'" ? body.replace(/\\$/, '_') : body);
+      i = end + 1;
+      from = i;
+    } else i += 1;
+  }
+  return out + text.slice(from);
 }
 
 /** Backslash-newline joins one logical command, so it joins before the shell is split. */
@@ -1433,49 +1463,98 @@ class QuoteScan {
 }
 
 /**
+ * The delimiter word of a here-document operator whose word starts at `from`, as the shell reads it: unquoted characters up to a
+ * blank or one of `;&|()<>`, a backslash taking the next character literally, and `'...'` or `"..."` pieces (the quotes are
+ * removed, so `<<'EOF-TEXT'`, `<<"A B"` and `<<E\OF` have the delimiters `EOF-TEXT`, `A B` and `EOF`). Returns `{ tag, end }`, or null
+ * when there is no word, a quote has no end, or the word would hold a line break.
+ */
+function heredocDelimiter(text, from) {
+  let tag = '';
+  let i = from;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') {
+      if (i + 1 >= text.length) break;
+      tag += text[i + 1];
+      i += 2;
+    } else if (ch === "'") {
+      const close = text.indexOf("'", i + 1);
+      if (close === -1) return null;
+      tag += text.slice(i + 1, close);
+      i = close + 1;
+    } else if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') {
+        if (text[j] === '\\' && j + 1 < text.length && '"\\$`'.includes(text[j + 1])) j += 1;
+        tag += text[j];
+        j += 1;
+      }
+      if (j >= text.length) return null;
+      i = j + 1;
+    } else if (/[\s;&|()<>]/.test(ch)) break;
+    else {
+      tag += ch;
+      i += 1;
+    }
+  }
+  return tag === '' || tag.includes('\n') ? null : { tag, end: i };
+}
+
+/**
  * Cut here-document bodies and their terminator lines out of shell text, so body text is never read as
  * shell. The rest of the line that holds the `<<TAG` operator stays (`cat <<EOF > src/a.ts`,
  * `cat <<EOF | tee f`): it still carries the redirections. Several operators on one line take their bodies
  * in order. An operator with no terminator line is left alone (`$((1 << 3))`), and `<<<` is a here-string.
- * A terminator is a whole line: the tag alone, or for `<<-` the tag behind tabs (`EOF is still body` and ` EOF` are body lines, and
- * so is the tag with a space or any other text behind it). A CRLF line break ends the line too.
- * Linear in the length of the text: one pass finds the operators, one pass lists the lines that hold nothing but a
- * word (a possible terminator) by that word, and every tag walks its own list forward only, because the
- * position that the next body starts at never moves back.
+ * The delimiter is the whole word (heredocDelimiter). A terminator is a whole line: the delimiter alone, or for `<<-` the delimiter
+ * behind tabs (`EOF is still body` and ` EOF` are body lines, and so is the delimiter with a space or any other text behind it).
+ * A CRLF line break ends the line too.
+ * Linear in the length of the text: one pass finds the operators, one pass lists the lines by their text (the tabs of a line
+ * apart), and every delimiter walks its own list forward only, because the position that the next body starts at never moves back.
  */
 function withoutHeredocBodies(text) {
-  const operator = /(?<!<)<<(?!<)(-?)[ \t]*\\?(['"]?)(\w+)\2/g;
+  const operator = /(?<!<)<<(?!<)(-?)[ \t]*/g;
   const quotes = new QuoteScan(text);
   const edits = []; // [start, end, replacement], sorted by start before they are applied
-  let terminators = null; // tag -> { plain, tabbed }: the lines `TAG` (for `<<`) and `\t*TAG` (for `<<-`) after a newline, each { lines: [{ index, end }], next }
+  let terminators = null; // line text -> { plain, tabbed }: the lines `TAG` (for `<<`) and `\t*TAG` (for `<<-`) after a newline, each { lines: [{ index, end }], next }
   let lineEnd = -1; // the newline that ends the line of the operators being read
   let resume = -1; // the newline before the next body of that line
   for (let m = operator.exec(text); m !== null; m = operator.exec(text)) {
     if (m.index > lineEnd && m.index < resume) continue; // inside a body that is already cut
     if (quotes.inert(m.index)) continue; // `echo "<<EOF"` and `# <<EOF` hold text, not an operator
+    const word = heredocDelimiter(text, m.index + m[0].length);
+    if (word === null) continue;
+    operator.lastIndex = word.end;
     if (m.index > lineEnd) {
-      lineEnd = text.indexOf('\n', m.index + m[0].length);
+      lineEnd = text.indexOf('\n', word.end);
       if (lineEnd === -1) break; // no line follows, so no body
       resume = lineEnd;
     }
     if (terminators === null) {
       terminators = new Map();
-      for (const line of text.matchAll(/\n(\t*)(\w+)(?=\r?(?:\n|$))/g)) {
-        const entry = terminators.get(line[2]) ?? { plain: { lines: [], next: 0 }, tabbed: { lines: [], next: 0 } };
-        const found = { index: line.index, end: line.index + line[0].length };
-        entry.tabbed.lines.push(found);
-        if (line[1] === '') entry.plain.lines.push(found);
-        terminators.set(line[2], entry);
+      for (let at = text.indexOf('\n'); at !== -1;) {
+        const next = text.indexOf('\n', at + 1);
+        const contentEnd = (next === -1 ? text.length : next) - (text[(next === -1 ? text.length : next) - 1] === '\r' ? 1 : 0);
+        let start = at + 1;
+        while (start < contentEnd && text[start] === '\t') start += 1;
+        if (start < contentEnd) {
+          const line = text.slice(start, contentEnd);
+          const entry = terminators.get(line) ?? { plain: { lines: [], next: 0 }, tabbed: { lines: [], next: 0 } };
+          const found = { index: at, end: contentEnd };
+          entry.tabbed.lines.push(found);
+          if (start === at + 1) entry.plain.lines.push(found);
+          terminators.set(line, entry);
+        }
+        at = next;
       }
     }
-    const tag = m[3];
+    const tag = word.tag;
     const entry = terminators.get(tag);
     if (entry === undefined) continue;
     const candidates = m[1] === '-' ? entry.tabbed : entry.plain;
     while (candidates.next < candidates.lines.length && candidates.lines[candidates.next].index < resume) candidates.next += 1;
     const found = candidates.lines[candidates.next];
     if (found === undefined) continue;
-    edits.push([m.index, m.index + m[0].length, `<< ${tag} `], [resume, found.end, '']);
+    edits.push([m.index, word.end, `<< ${tag.replace(/[^\w-]/g, '_')} `], [resume, found.end, '']);
     quotes.skip(resume, found.end);
     resume = found.end;
   }

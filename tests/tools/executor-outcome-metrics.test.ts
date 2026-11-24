@@ -572,6 +572,15 @@ describe.skipIf(!hasPython3)('executor_outcome_metrics.py', () => {
       assert.deepEqual(got, ['S', 'S', 'S', 'S', 'S', 'S', 'S', null, null]);
     });
 
+    it('a here-document delimiter is the whole word: dots, slashes and quoted blanks end the body only as a whole line', () => {
+      const commands = [
+        "cat <<'EOF.TEXT'\npytest\nEOF.TEXT", 'cat <<"EOF TEXT"\npytest\nEOF TEXT', "cat <<-'a/b'\n\tpytest\n\ta/b", 'cat <<E\\OF\npytest\nEOF',
+        "cat <<'EOF.TEXT'\nx\nEOF.TEXT\npytest", 'cat <<EOF.x\nEOF\npytest\nEOF.x', "cat <<'EOF-TEXT'\npytest\nEOF-TEXT",
+      ];
+      const got = pyEval(`[m.classify_call("Bash", c, {"is_error": False}, None, None) for c in ${JSON.stringify(commands)}]`) as Array<string | null>;
+      assert.deepEqual(got, [null, null, null, null, 'S', null, null]);
+    });
+
     it('many here-document operators on one line and one very long word are read in a short time', () => {
       const started = Date.now();
       const got = pyEval(

@@ -1032,6 +1032,53 @@ it('a tail that names a file or reads a redirected one can fail, so its failure 
   assert.equal(status('set -o pipefail; node --check a.js | tail -5'), 'failed');
 });
 
+it('a double-quoted string ends at its first unescaped quote, and an escaped quote outside strings opens none', () => {
+  const isCheck = (command: string) => classifyCommand(command).isCheck;
+  // Bash prints the text: the `;` and the runner name are inside the string.
+  for (const command of [
+    'echo "quoted \\" ; npm test"',
+    'echo "it\'s \\"x\\" ; npm test"',
+    'echo "a \\" b \\" ; npm test"',
+    'echo \\" "x ; npm test"',
+    "echo '\\\" ; npm test'",
+    'echo "\\\\\\" ; npm test"',
+  ]) {
+    assert.equal(isCheck(command), false, command);
+  }
+  // An escaped backslash does not escape the closing quote: the `;` is outside the string and splits.
+  assert.equal(isCheck('echo "a \\\\" ; npm test'), true);
+  assert.equal(isCheck('echo "a" ; npm test'), true);
+  assert.equal(isCheck('echo \\" ; npm test'), true, 'an escaped quote is a character; the semicolon splits');
+  assert.equal(isCheck("echo 'a\\' ; npm test"), true, 'a backslash is a plain character in single quotes');
+  assert.equal(checkResult('echo "quoted \\" ; npm test"', 'quoted " ; npm test\n', 0).verdict, 'undetermined');
+  // A string with no end stays text up to the end, as before.
+  assert.equal(isCheck('echo "a ; npm test'), true);
+  // A quoted word is still an argument that narrows a run.
+  assert.equal(classifyCommand('pytest "tests/a \\" b.py"').narrowed, true);
+});
+
+it('a here-document delimiter is the whole word, quoted or not: hyphens, dots and quoted blanks included', () => {
+  const isCheck = (command: string) => classifyCommand(command).isCheck;
+  for (const [operator, tag] of [
+    ["<<'EOF-TEXT'", 'EOF-TEXT'], ['<<EOF-TEXT', 'EOF-TEXT'], ['<<EOF.x', 'EOF.x'], ['<<"EOF TEXT"', 'EOF TEXT'], ["<<'a/b'", 'a/b'],
+    ["<<-'EOF-TEXT'", 'EOF-TEXT'], ['<<E\\OF', 'EOF'], ['<<EOF=1', 'EOF=1'], ['<< "x;y"', 'x;y'], ['<<\\EOF-1', 'EOF-1'],
+  ]) {
+    assert.equal(isCheck(`cat ${operator}\nnpm test\n${tag}\n`), false, `${operator}: the body is cut`);
+    assert.equal(isCheck(`cat ${operator}\nnpm test\n${tag}\nnpm test`), true, `${operator}: the line after the terminator is a command`);
+  }
+  // The body goes on past a line that only starts like the delimiter: a shorter word, or the word with something behind it.
+  assert.equal(isCheck('cat <<EOF-TEXT\nEOF\nnpm test\nEOF-TEXT'), false, 'the prefix EOF ends nothing');
+  assert.equal(isCheck("cat <<'EOF-TEXT'\nEOF-TEXT x\nnpm test\nEOF-TEXT"), false, 'the whole word and more ends nothing');
+  assert.equal(isCheck('cat <<-"EOF-TEXT"\n\tEOF-TEXT\nnpm test\n\t\tEOF-TEXT\nnpm test'), true, 'tabs strip for <<- (the first tab line ends it)');
+  // The body of the printed example is no result.
+  const command = "cat <<'EOF-TEXT'\nnpm test\nTests  3 passed (3)\nEOF-TEXT\n";
+  assert.equal(checkResult(command, 'npm test\nTests  3 passed (3)\n', 0).verdict, 'undetermined');
+  // An operator with no word, or whose word has no terminator line, is left alone.
+  assert.equal(isCheck('echo $((1 << 3))\nnpm test'), true);
+  assert.equal(isCheck('cat <<\nnpm test'), true);
+  assert.equal(isCheck("cat <<'EOF-TEXT\nnpm test\nEOF-TEXT"), true, 'an unclosed quote ends no word');
+});
+
 it('an escaped operator is a character of its word: it splits no command and ends no check', () => {
   const isCheck = (command: string) => classifyCommand(command).isCheck;
   // Bash passes the escaped character on to echo, so `npm test` is printed text and nothing ran.
@@ -1755,6 +1802,30 @@ it('the setting of pipefail, the tail that reads its input and the runs of one r
     `node --check a.js && tail -${'q'.repeat(40000)} missing.txt`,
   ], 'classifyCheckResult', "classifyCheckResult({ command, output: '', isError: true, exitCode: 1 })");
   assert.deepEqual(flags.map((one) => one.verdict), ['undetermined', 'failed', 'undetermined']);
+});
+
+it('quoted strings and here-document delimiter words are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const word = 'a'.repeat(40000);
+  const got = classifyInChild<{ isCheck: boolean }>([
+    `echo "${long('a \\" ')}" ; npm test`,
+    `echo "${long('a \\" ')}`,
+    long('\\" '),
+    long('" '),
+    long("' "),
+    long('"\\'),
+    `cat <<'${word}'\nnpm test\n${word}\nnpm test`,
+    `cat <<${word}-x\nnpm test\n${word}-x`,
+    long('cat <<"'),
+    long("cat <<'a b' "),
+    `${long('cat <<A; ')}\nA\nnpm test`,
+    long('cat <<\\'),
+    `cat <<"${'x\\"'.repeat(15000)}"\nnpm test`,
+  ]);
+  assert.equal(got.length, 13);
+  assert.equal(got[0].isCheck, true, 'the semicolon behind a long string splits');
+  assert.equal(got[6].isCheck, true, 'the line after a delimiter of 40000 characters is a command');
+  assert.equal(got[7].isCheck, false, 'a body behind a delimiter of 40000 characters is cut');
 });
 
 it('a redirection with a digit descriptor is no argument, glued to the word or not', () => {
