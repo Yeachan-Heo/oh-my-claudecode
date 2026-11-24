@@ -169,6 +169,7 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
     for (const platform of PLATFORMS) {
       const { dir } = makeCache(['5.8.0', '5.9.0.omc-stale-12', '5.9.0-beta.1.omc-stale-12']);
       try {
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '0.0.1' }] });
         expect({ platform, out: claudeMd(dir, '5.8.0', platform)[2] }).toEqual({ platform, out: 'Latest cached plugin version: 5.8.0' });
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -206,6 +207,11 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
         try {
           addCache(dir, ['5.7.0', '5.8.4'], market);
           if (plugins) writeRegistry(dir, plugins);
+          // No supported ID: the session root is the plugin-dir checkout of Step 1 and no cache is a reference for it.
+          if (!plugins || !Object.keys(plugins).some((key) => key.toLowerCase().includes('oh-my-claudecode'))) {
+            expect({ label, platform, out: claudeMd(dir, '5.8.4', platform).slice(2) }).toEqual({ label, platform, out: ['Latest cached plugin version: (unknown)', expect.stringMatching(/^VERSION CHECK SKIPPED: .*plugin-dir/)] });
+            continue;
+          }
           expect({ label, platform, out: claudeMd(dir, '5.8.4', platform) }).toEqual({
             label,
             platform,
@@ -400,6 +406,36 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
 
     // OMC_PLUGIN_ROOT on a checkout outside the registry is the install the session runs (Step 1: Channel: plugin-dir) and the
     // runtime reads that checkout, so a stale cache beside it says nothing about the marker.
+    // A CLAUDE_PLUGIN_ROOT alone, with no supported ID in the registry, is the plugin-dir checkout of Step 1 (a claude --plugin-dir session).
+    test.skipIf(process.platform === 'win32')('a plugin root variable alone beside an old cache is a checkout: the comparison is skipped', () => {
+      const dir = fresh();
+      try {
+        addCache(dir, [OLD], 'omc');
+        const checkout = path.join(dir, 'checkout');
+        mkdirSync(checkout);
+        const out = claudeMdAt(dir, NEW, 'linux', { CLAUDE_PLUGIN_ROOT: checkout });
+        expect(out).toEqual(['Latest cached plugin version: (unknown)', expect.stringMatching(/^VERSION CHECK SKIPPED: .*plugin-dir/)]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // A supported entry whose installPath lies outside plugins/cache and is the active root: its own package names the version.
+    test.skipIf(process.platform === 'win32')('a registered install outside the cache is judged by its own manifest, not by the cache beside it', () => {
+      const dir = fresh();
+      try {
+        addCache(dir, [OLD], 'omc');
+        const root = path.join(dir, 'external');
+        mkdirSync(root);
+        writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claudecode', version: NEW }));
+        writeRegistry(dir, { [OMC]: [{ scope: 'user', version: NEW, installPath: root }] });
+        expect(claudeMdAt(dir, NEW, 'linux', { CLAUDE_PLUGIN_ROOT: root })).toEqual([`Latest cached plugin version: ${NEW}`, MATCH]);
+        expect(claudeMdAt(dir, OLD, 'linux', { CLAUDE_PLUGIN_ROOT: root })).toEqual([`Latest cached plugin version: ${NEW}`, DRIFT]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     test('an explicit checkout outside the registry skips the comparison with the cache beside it', () => {
       for (const marker of [OLD, NEW]) {
         const { dir } = setup([OMC, OWN]);
@@ -442,7 +478,7 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
             mkdirSync(custom, { recursive: true });
             writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD, installPath: custom }], [OWN]: [{ scope: 'user', version: NEW }] });
             expect({ platform, order, out: claudeMdAt(dir, NEW, platform, { CLAUDE_PLUGIN_ROOT: custom }) })
-              .toEqual({ platform, order, out: ['Latest cached plugin version: (none)', 'VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache'] });
+              .toEqual({ platform, order, out: ['Latest cached plugin version: (unknown)', expect.stringMatching(/^VERSION CHECK SKIPPED: .*outside the plugin cache/)] });
           } finally {
             rmSync(dir, { recursive: true, force: true });
           }

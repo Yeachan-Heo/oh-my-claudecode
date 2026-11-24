@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { bashBlocks, CLAUDE_MD_VERSION, codeOf, guideText, read, runBlock, runCommand, scriptSection, scriptText, upperBelow, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { bashBlocks, CLAUDE_MD_VERSION, codeOf, guideText, PLUGIN_ID, read, runBlock, runCommand, scriptSection, scriptText, upperBelow, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1, versionCommand } from './helpers/omc-doctor-step1.js';
 
 const text = read('skills/omc-doctor/SKILL.md');
@@ -217,6 +217,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
       const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-version-'));
       try {
         for (const version of prefix.versions) mkdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', version), { recursive: true });
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '0.0.1' }] }); // a supported ID, so the session root is no plugin-dir checkout
         writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
         const run = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
         expect(run.error).toBeUndefined();

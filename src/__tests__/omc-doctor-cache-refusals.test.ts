@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, lutimesSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lutimesSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 import { addCache, backupDir, commands, digitVersions, makeCache, movedAside, guideSection, PLUGIN_ID, runCommand, writeRegistry, writeRegistryFile } from './helpers/omc-doctor-cache-fixture.js';
 
 // The two cache commands refuse to move anything when they cannot tell what is protected, and report a move that failed.
@@ -156,6 +157,48 @@ describe.skipIf(!posix)('omc-doctor cache commands: an installPath written as a 
           rmSync(dir, { recursive: true, force: true });
         }
       }
+    }
+  });
+
+  // Every source that can protect a version (an installPath, a root variable, an occupancy record) against every kind of spelling of
+  // the path of 5.7.0: the outcome is "kept" (5.7.0 stays, the others are moved), "refused" (exit code 1, nothing moved) or
+  // "moved" (the spelling names no cache version, so it protects nothing). 5.8.0 is pinned by its version throughout.
+  describe.skipIf(!posix)('input matrix: source of protection x spelling of the path', () => {
+    type Outcome = 'kept' | 'refused' | 'moved';
+    const spellings: Array<[string, (dir: string, cache: string) => string, Outcome]> = [
+      ['the real path', (_d, cache) => path.join(cache, '5.7.0'), 'kept'],
+      ['a path that does not exist', (dir) => path.join(dir, 'nowhere', '5.7.0'), 'moved'],
+      ['a relative path', () => 'plugins/cache/omc/oh-my-claudecode/5.7.0', 'refused'],
+      ['a link to it', (dir, cache) => { const at = path.join(dir, 'lnk'); symlinkSync(path.join(cache, '5.7.0'), at); return at; }, 'kept'],
+      ['a .. after a version', (_d, cache) => path.join(cache, '5.8.0') + path.sep + '..' + path.sep + '5.7.0', 'kept'],
+      // Names nothing for the file system, but the text lies inside 5.7.0, and protection errs on keeping.
+      ['a .. before a missing component', (_d, cache) => path.join(cache, 'missing') + path.sep + '..' + path.sep + '5.7.0', 'kept'],
+      ['upper case (the volume tells the names apart)', (_d, cache) => path.join(cache, '5.7.0').replace('oh-my-claudecode', 'OH-MY-CLAUDECODE'), 'moved'],
+      ['a Windows drive path', () => 'C:\\cache\\5.7.0', 'refused'],
+      ['a forward-slash UNC path', () => '//server/share/5.7.0', 'refused'],
+    ];
+    const sources = ['installPath', 'OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT', 'occupancy record'] as const;
+    for (const source of sources) {
+      test.each(spellings)(`${source}: %s`, (label, make, expected) => {
+        for (const command of commands) {
+          const { dir, cache } = makeCache(['5.7.0', '5.8.0', '5.9.0']);
+          try {
+            const target = make(dir, cache);
+            const entry: Record<string, unknown> = { scope: 'user', version: '5.8.0' };
+            const plugins: Record<string, unknown[]> = { [PLUGIN_ID]: [entry] };
+            if (source == 'installPath') plugins[PLUGIN_ID].push({ scope: 'user', installPath: target });
+            writeRegistry(dir, plugins);
+            if (source == 'occupancy record') writeRecord(dir, target);
+            const env = source == 'OMC_PLUGIN_ROOT' || source == 'CLAUDE_PLUGIN_ROOT' ? { [source]: target } : {};
+            const result = runCommand(command, dir, { timeout: 20_000, env });
+            const got: Outcome = result.status == 1 && movedAside(dir) == 0 ? 'refused' : digitVersions(cache).includes('5.7.0') ? 'kept' : 'moved';
+            // A root variable that does not exist names no directory and is ignored; a relative installPath/record is refused.
+            expect({ source, label, command, got }).toEqual({ source, label, command, got: expected });
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      });
     }
   });
 

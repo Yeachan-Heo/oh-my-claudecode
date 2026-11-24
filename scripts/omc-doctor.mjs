@@ -692,8 +692,11 @@ const claudeMdVersion = () => {
   const registryUnusable = registry.unreadable || (registry.supported.length > 0 ? registry.malformed : registry.ambiguous);
   // The checkout Step 1 reports as plugin-dir: an existing OMC_PLUGIN_ROOT that is no install a supported entry names.
   const explicitRoot = (process.env.OMC_PLUGIN_ROOT || '').trim();
-  // (CLAUDE_PLUGIN_ROOT alone is a locator the shell blocks set to the plugin itself, so it is no checkout here.)
-  const checkout = !!explicitRoot && isDirectory(explicitRoot) && !registry.supported.some(([id, entries]) => entries.some((entry) => entryInstallPaths(marketplaceOf(id), entry).some((target) => askSame(target, explicitRoot) != 'no')));
+  // With no supported plugin ID in the registry a CLAUDE_PLUGIN_ROOT alone is the plugin-dir checkout too (Step 1), and the runtime
+  // reads its package, so no cache beside it is a reference.
+  const claudeOnly = !registry.supported.length && !explicitRoot && roots.length > 0;
+  const checkout = claudeOnly || (!!explicitRoot && isDirectory(explicitRoot) && !registry.supported.some(([id, entries]) => entries.some((entry) => entryInstallPaths(marketplaceOf(id), entry).some((target) => askSame(target, explicitRoot) != 'no'))));
+  const external = running.length == 1 && askInside(roots[0], cacheDirOf(running[0])) != 'yes';
   const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
   const rootsConflict = sameRoots == 'no';
   let unreadableCache = '';
@@ -717,6 +720,10 @@ const claudeMdVersion = () => {
   } else if (running.length > 1) {
     // Entries of several marketplaces hold the same root: which of their caches the session runs is not told by the root.
     pluginVersion = '(unknown)';
+  } else if (external) {
+    // The matched root lies outside the managed cache (a registered external install): the runtime reads the package of that root,
+    // so its manifest names the version, not the highest cache beside it.
+    pluginVersion = manifestVersion(roots[0]) || '(unknown)';
   } else if (running.length) {
     pluginVersion = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '(none)';
   } else {
@@ -740,6 +747,8 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: the plugin root the session runs is recorded by more than one marketplace, so it is unknown which cache is the install and no cache is chosen');
   } else if (rootsConflict) {
     console.log('VERSION CHECK SKIPPED: OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories, so it is unknown which plugin install the session runs and no cache is chosen');
+  } else if (external && pluginVersion === '(unknown)') {
+    console.log('VERSION CHECK SKIPPED: the plugin root the session runs lies outside the plugin cache and its manifest names no usable version, so no cache is chosen');
   } else if (pluginVersion === '(unknown)') {
     console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
   } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {

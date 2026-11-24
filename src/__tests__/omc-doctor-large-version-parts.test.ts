@@ -133,6 +133,7 @@ describe('omc-doctor: numeric parts of a version are ordered as digit strings of
       for (const [low, high] of cores.slice(0, 4)) {
         const { dir } = makeCache([low, high]);
         try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '0.0.1' }] }); // a supported ID, so the session root is no plugin-dir checkout
           writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
           // The shell block of the skill, so it runs through bash.
           const run = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });

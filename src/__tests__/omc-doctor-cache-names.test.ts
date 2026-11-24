@@ -39,6 +39,7 @@ describe('omc-doctor: a cache directory that is no semantic version takes no par
       const { dir } = makeCache(['5.8.0', '5.9.0']);
       try {
         mkdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', junk), { recursive: true });
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '0.0.1' }] }); // a supported ID, so the session root is no plugin-dir checkout
         writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
         const four = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
         expect({ junk, line: four.stdout.split('\n').find((l) => l.startsWith('Latest cached plugin version:')) }).toEqual({ junk, line: 'Latest cached plugin version: 5.9.0' });

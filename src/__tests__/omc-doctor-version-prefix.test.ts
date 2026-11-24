@@ -63,6 +63,7 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
     const verdict = (marker: string) => {
       const { dir } = makeCache(['5.9.0']);
       try {
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '0.0.1' }] }); // a supported ID, so the session root is no plugin-dir checkout
         writeFileSync(path.join(dir, 'CLAUDE.md'), `<!-- OMC:VERSION:${marker} -->\n`);
         const run = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
         expect(run.error).toBeUndefined();
