@@ -1429,17 +1429,33 @@ function sourceUnknown(text, outputs) {
 }
 // What a notification says about its source, block by block (a row may hold several): 'secret' or 'held' when a call on a secret path started the task of a block
 // (by its <task-id>), 'unknown' when a block's task is tied to no call still in the conversation and its output file is not either (an earlier compaction removed
-// the call, and with it what said whether it was on a secret path), otherwise 'known'. The worst block decides: secret, then held, then unknown.
+// the call, and with it what said whether it was on a secret path), otherwise 'known'. The worst block decides: secret, then held, then unknown. A marker of the host
+// that no block follows (only its own line between them) is a notification without a task, so 'unknown' too: a row of envelopes may hold one next to a block.
+const NOTE_MARKER = DELIVERY_NOTES[0];
+const NOTE_BLOCK_OPEN = /<task-notification[\s>]/g;
 function sourceByTask(text, outputs) {
-  let worst = text.includes('<task-notification') ? 'known' : 'unknown'; // a row that holds no block names no task at all
-  for (const block of text.split(/(?=<task-notification[\s>])/)) {
-    if (!block.startsWith('<task-notification')) continue;
+  let worst = 'known';
+  let at = 0;
+  let blocks = 0;
+  while (at < text.length) {
+    NOTE_BLOCK_OPEN.lastIndex = at;
+    const open = NOTE_BLOCK_OPEN.exec(text);
+    const outside = text.slice(at, open ? open.index : text.length);
+    for (let m = outside.indexOf(NOTE_MARKER); m >= 0; m = outside.indexOf(NOTE_MARKER, m + NOTE_MARKER.length)) {
+      if (!open || !withoutTags(outside.slice(m + NOTE_MARKER.length)).split('\n').every((l) => !l.trim() || NOTE_HOST_LINE.test(l.trim()))) worst = 'unknown';
+    }
+    if (!open) break;
+    const close = text.indexOf('</task-notification>', open.index);
+    const end = close < 0 ? text.length : close + '</task-notification>'.length;
+    const block = text.slice(open.index, end);
+    blocks++;
+    at = end;
     const id = /<task-id>\s*([\w-]{1,64})\s*<\/task-id>/.exec(block)?.[1];
     if (id && outputs.ids.secret.has(id)) return 'secret';
     if (id && outputs.ids.held.has(id)) worst = 'held';
     else if (worst === 'known' && !(id && outputs.ids.known.has(id)) && !namesKnownFile(block, outputs.known)) worst = 'unknown';
   }
-  return worst;
+  return blocks ? worst : 'unknown'; // a row that holds no block names no task at all
 }
 // Whether a notification block names an output file that a call still in the conversation produced: its source is then known, whatever its task id says.
 const namesKnownFile = (text, known) => [...text.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)].some((m) => { const f = outputFileOf(m[1].trim()); return Boolean(f) && (known.has(f) || known.has(f.slice(f.lastIndexOf('/') + 1))); });
