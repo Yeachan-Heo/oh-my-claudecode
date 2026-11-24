@@ -79,6 +79,12 @@ describe('panel quota wait: saved state is checked before it is trusted', () => 
       ['a record cut off in the middle', () => writeFileSync(file, JSON.stringify({ panes: { '%7': RESUMING } }).slice(0, 60))],
       ['a JSON value that is not a state', () => writeFileSync(file, '[1,2,3]\n')],
       ['a state whose panes are not an object', () => writeFileSync(file, '{"panes":"none"}\n')],
+      ['a state whose panes are an array', () => writeFileSync(file, '{"panes":[]}\n')],
+      ['a wait without a reset time', () => writeFileSync(file, JSON.stringify({ panes: { '%7': { ...RESUMING, state: 'waiting_quota', untilMs: undefined } } }))],
+      ['a wait whose reset time is not a number', () => writeFileSync(file, JSON.stringify({ panes: { '%7': { ...RESUMING, state: 'waiting_quota', untilMs: '2026-11-16' } } }))],
+      ['a pane entry with an unknown state', () => writeFileSync(file, JSON.stringify({ panes: { '%7': { ...RESUMING, state: 'paused' } } }))],
+      ['a pane entry whose wait count is not a number', () => writeFileSync(file, JSON.stringify({ panes: { '%7': { ...RESUMING, waits: 'one' } } }))],
+      ['a cursor that is not a pane key', () => writeFileSync(file, JSON.stringify({ panes: {}, cursor: 7 }))],
       ['a path that cannot be read as a file', () => mkdirSync(file)],
     ];
 

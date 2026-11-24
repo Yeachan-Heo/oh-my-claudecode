@@ -63,6 +63,7 @@
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { z } from 'zod';
 import { atomicWriteFileSync } from '../../lib/atomic-write.js';
 
 export type PanelEnv = Readonly<Record<string, string | undefined>>;
@@ -272,6 +273,30 @@ function screenSignature(content: string): string {
   return createHash('sha256').update(String(content)).digest('hex').slice(0, 16);
 }
 
+// The shape of a saved state. Unknown keys are kept as they are. A wait carries the time its reset is due: an entry
+// without it would be taken for a due wait and resumed at once.
+const finiteNumber = z.number().finite();
+const PanelEntrySchema = z
+  .object({
+    key: z.string(),
+    pane: z.string(),
+    session: z.string(),
+    windowIndex: finiteNumber,
+    paneIndex: finiteNumber,
+    server: z.string().optional(),
+    waits: z.number().int().nonnegative(),
+    state: z.enum(['waiting_quota', 'resuming', 'resumed', 'quota-ended']).optional(),
+    unconfirmed: z.boolean().optional(),
+    sig: z.string().nullable().optional(),
+    updatedAt: finiteNumber.optional(),
+    resumedAt: finiteNumber.optional(),
+    untilMs: finiteNumber.optional(),
+    resetMs: finiteNumber.nullable().optional(),
+  })
+  .passthrough()
+  .refine((entry) => entry.state !== 'waiting_quota' || entry.untilMs !== undefined, { message: 'a wait has no reset time' });
+const PanelStateSchema = z.object({ panes: z.record(PanelEntrySchema), cursor: z.string().optional() }).passthrough();
+
 /**
  * Reads the state file. A file that does not exist is an empty state; a file that cannot be read, parsed or does not
  * have the shape of a state throws. A pass that took an unreadable file for an empty one would overwrite the saved
@@ -285,11 +310,12 @@ export function loadState(file: string): PanelState {
     if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { panes: {} };
     throw error;
   }
-  const parsed = JSON.parse(text) as Partial<PanelState> | null;
-  if (!parsed || typeof parsed !== 'object' || !parsed.panes || typeof parsed.panes !== 'object') {
-    throw new Error('the file is not a quota wait state');
+  const checked = PanelStateSchema.safeParse(JSON.parse(text));
+  if (!checked.success) {
+    const issue = checked.error.issues[0];
+    throw new Error(`the file is not a quota wait state (${issue.path.join('.') || 'state'}: ${issue.message})`);
   }
-  return parsed as PanelState;
+  return checked.data as PanelState;
 }
 
 export function saveState(file: string, state: PanelState): void {
