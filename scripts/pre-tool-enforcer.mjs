@@ -87,31 +87,41 @@ function isAnthropicBaseUrl(baseUrl) {
   }
 }
 // forNamedGate: provider detection as in src/config/models.ts, which only the named-model gate
-// asks for (the proxy mapping check and the forceInherit gate keep the plain rules):
-// - a session model that is a native alias (sonnet, opus, haiku, fable, with an optional context
-//   suffix such as [1m]) counts as a Claude model;
-// - with no session model variable, the native tier defaults identify the provider: a Bedrock or
-//   Vertex ID, or a name that is not Claude's, in one of them is a non-Claude provider. OMC_MODEL_*
-//   is not read here: Claude Code does not read it.
+// asks for (the proxy mapping check and the forceInherit gate keep the plain rules). The model
+// values it reads are the session model (CLAUDE_MODEL, then ANTHROPIC_MODEL) and, when neither
+// is set, the native default of each tier; all of them go through isNonClaudeModelName.
+// OMC_MODEL_* is not read here: Claude Code does not read it.
 function isNonClaudeProviderEnv(forNamedGate = false) {
   if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
-  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-  const isNativeAlias = forNamedGate && TIER_ALIASES.has(modelId.replace(/\[\d+[mk]\]$/i, '').toLowerCase());
-  if (modelId && !isNativeAlias && !modelId.toLowerCase().includes('claude')) return true;
-  if (forNamedGate && !modelId.trim() && nativeTierDefaultIds().some(isProviderSpecificOrNonClaudeId)) return true;
+  if (forNamedGate) {
+    if (providerDetectionModelIds().some(isNonClaudeModelName)) return true;
+  } else {
+    const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+    if (modelId && !modelId.toLowerCase().includes('claude')) return true;
+  }
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
   if (baseUrl && !isAnthropicBaseUrl(baseUrl)) return true;
   return isConfigForceInheritProxyEnv();
 }
-// The first native default of each tier (CLAUDE_CODE_BEDROCK_<TIER>_MODEL, then ANTHROPIC_DEFAULT_<TIER>_MODEL).
-function nativeTierDefaultIds() {
+// A model name is not Claude's when it is a provider-specific ID (Bedrock, Vertex) or does not
+// contain "claude" and is not a native alias. The value is trimmed, a context suffix ([1m],
+// [200k]) is dropped and the case is ignored; a blank value is not a name.
+function isNonClaudeModelName(value) {
+  const name = String(value).trim().replace(/\[\d+[mk]\]$/i, '');
+  if (!name) return false;
+  if (isProviderSpecificModelId(name)) return true;
+  const lower = name.toLowerCase();
+  return !lower.includes('claude') && !TIER_ALIASES.has(lower);
+}
+// The model values that identify the provider: the first non-blank of CLAUDE_MODEL and
+// ANTHROPIC_MODEL; with neither, the first non-blank native default of each tier
+// (CLAUDE_CODE_BEDROCK_<TIER>_MODEL, then ANTHROPIC_DEFAULT_<TIER>_MODEL).
+function providerDetectionModelIds() {
+  const session = [process.env.CLAUDE_MODEL, process.env.ANTHROPIC_MODEL].map((v) => (v || '').trim()).find(Boolean);
+  if (session) return [session];
   return Object.values(TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG)
     .map((keys) => keys.map((key) => (process.env[key] || '').trim()).find(Boolean))
     .filter(Boolean);
-}
-function isProviderSpecificOrNonClaudeId(modelId) {
-  const lower = modelId.toLowerCase();
-  return isProviderSpecificModelId(modelId) || (!lower.includes('claude') && !TIER_ALIASES.has(lower));
 }
 function acceptsProxyAnthropicDefaultTierValue(key, value) {
   return key.startsWith('ANTHROPIC_DEFAULT_')

@@ -614,6 +614,93 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       expect(await routedInput(input, { ...NAMED, ...tierEnv })).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
     }, 15000);
 
+    // One classification for every variable the named-model gate reads: the session models
+    // (CLAUDE_MODEL, then ANTHROPIC_MODEL; blank ones are skipped) and, with neither set, the native
+    // default of each tier. A value is trimmed, a context suffix ([1m], [200k]) is dropped and the
+    // case is ignored before it is compared with the native aliases.
+    const TIER_DEFAULT_KEYS = [
+      "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+      "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
+      "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
+      "CLAUDE_CODE_BEDROCK_FABLE_MODEL",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL",
+      "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    ];
+    // Jev answers sonnet and the call names fable: true when the alias replaced the name.
+    async function aliasReplaces(extraEnv: NodeJS.ProcessEnv) {
+      const input = agentInput({ model: "fable" });
+      const before = requests.length;
+      const routed = await routedInput(input, { ...NAMED, ...extraEnv });
+      expect(requests).toHaveLength(before + 1);
+      if (routed.model === "sonnet") {
+        expect(routed).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
+        return true;
+      }
+      expect(routed).toEqual({ ...input.tool_input, effort: "medium" });
+      return false;
+    }
+    const CLAUDE_VALUES = ["opus[1m]", "OPUS[1M]", " sonnet ", "fable[200k]", "Haiku", "Claude-Opus-4-8", "claude-opus-4-8[1m]"];
+    const OTHER_VALUES = [
+      "global.anthropic.claude-opus-4-6-v1:0",
+      " global.anthropic.claude-opus-4-6-v1:0[1m] ",
+      "US.ANTHROPIC.CLAUDE-OPUS-4-6-V1:0",
+      "anthropic.claude-3-haiku-20240307-v1:0",
+      "vertex_ai/claude-opus-4-6",
+      "GLM-5",
+      "glm-5[1m]",
+      "opusplan",
+    ];
+
+    it.each(TIER_DEFAULT_KEYS)("a suffixed alias in %s is a Claude provider", async (key) => {
+      expect(await aliasReplaces({ [key]: "opus[1m]" })).toBe(true);
+    }, 15000);
+
+    it.each(CLAUDE_VALUES)("a Claude value (%j) in a tier default is a Claude provider", async (value) => {
+      expect(await aliasReplaces({ ANTHROPIC_DEFAULT_OPUS_MODEL: value })).toBe(true);
+    }, 15000);
+
+    // The sonnet defaults are left out: Jev answers sonnet, and a native mapping of that tier is what lets the alias through.
+    it.each(TIER_DEFAULT_KEYS.filter((key) => !key.includes("SONNET")))("a Bedrock ID in %s is a non-Claude provider", async (key) => {
+      expect(await aliasReplaces({ [key]: "global.anthropic.claude-opus-4-6-v1:0" })).toBe(false);
+    }, 15000);
+
+    it.each(OTHER_VALUES)("a provider or non-Claude value (%j) in a tier default is a non-Claude provider", async (value) => {
+      expect(await aliasReplaces({ CLAUDE_CODE_BEDROCK_FABLE_MODEL: value })).toBe(false);
+    }, 15000);
+
+    it.each(["CLAUDE_MODEL", "ANTHROPIC_MODEL"])("%s with a suffixed, padded or upper-case alias is a Claude provider", async (key) => {
+      for (const value of ["opus[1m]", " SONNET[200K] ", "fable"]) {
+        expect(await aliasReplaces({ [key]: value }), value).toBe(true);
+      }
+    }, 30000);
+
+    it.each(["CLAUDE_MODEL", "ANTHROPIC_MODEL"])("%s with a non-Claude name, padded or suffixed, is a non-Claude provider", async (key) => {
+      for (const value of [" deepseek-chat ", "deepseek-chat[1m]", "opusplan"]) {
+        expect(await aliasReplaces({ [key]: value }), value).toBe(false);
+      }
+    }, 30000);
+
+    it("blank values are skipped: a blank session model or tier default does not decide the provider", async () => {
+      // Blank CLAUDE_MODEL: ANTHROPIC_MODEL decides.
+      expect(await aliasReplaces({ CLAUDE_MODEL: "  ", ANTHROPIC_MODEL: "opus[1m]" })).toBe(true);
+      expect(await aliasReplaces({ CLAUDE_MODEL: "  ", ANTHROPIC_MODEL: "deepseek-chat" })).toBe(false);
+      // Both blank: the tier defaults decide.
+      expect(await aliasReplaces({ CLAUDE_MODEL: "", ANTHROPIC_MODEL: " ", ANTHROPIC_DEFAULT_OPUS_MODEL: "opus[1m]" })).toBe(true);
+      expect(await aliasReplaces({ CLAUDE_MODEL: "", ANTHROPIC_MODEL: " ", ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5" })).toBe(false);
+      // A blank native default is skipped for the next one of the same tier.
+      expect(await aliasReplaces({ CLAUDE_CODE_BEDROCK_OPUS_MODEL: " ", ANTHROPIC_DEFAULT_OPUS_MODEL: "opus" })).toBe(true);
+      expect(await aliasReplaces({ CLAUDE_CODE_BEDROCK_OPUS_MODEL: " ", ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5" })).toBe(false);
+      // Nothing set at all: a Claude provider.
+      expect(await aliasReplaces({ CLAUDE_CODE_BEDROCK_OPUS_MODEL: "", ANTHROPIC_DEFAULT_SONNET_MODEL: "  " })).toBe(true);
+    }, 60000);
+
+    it("a session model decides alone: tier defaults are not read next to it", async () => {
+      expect(await aliasReplaces({ ANTHROPIC_MODEL: "opus[1m]", CLAUDE_CODE_BEDROCK_OPUS_MODEL: "global.anthropic.claude-opus-4-6-v1:0" })).toBe(true);
+      expect(await aliasReplaces({ ANTHROPIC_MODEL: "deepseek-chat", ANTHROPIC_DEFAULT_OPUS_MODEL: "opus" })).toBe(false);
+    }, 30000);
+
     it("a session model that is not a Claude name still keeps the named model", async () => {
       const input = agentInput({ model: "fable" });
       expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: "deepseek-chat" })).toEqual({ ...input.tool_input, effort: "medium" });
