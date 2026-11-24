@@ -683,9 +683,9 @@ Opt-in task lists of agents: an MCP tool the agent sends its list to, and a `Pos
 
 ### Storage model
 
-- One file per agent and session: `<log dir>/lists/<session id>/<agent id or main>.json`. `<log dir>` is `OMC_TASK_LIST_LOG_DIR` or `<home>/.omc/state/task-list`.
+- One file per agent and session: `<log dir>/lists/<session id>/<agent id or main>.json`. `<log dir>` is `OMC_TASK_LIST_LOG_DIR` or `<state root>/state/task-list`, the state root of the project of the call (`OMC_STATE_DIR`, worktrees and a workspace marker apply).
 - Every list call is first written as one event file in `<key>.events/` (no lock), then folded into the list file under a lock; the list is what the events give when they are replayed in the order of their calls, so a hook that was held up cannot put an older list over a newer one. Task ownership of the built-in `Task*` tools is kept in `_task/<id>.json`.
-- A list keeps its newest 50 tasks; every text is masked and cut. Session directories idle for 7 days are removed by an hourly sweep that moves a directory aside before it judges it and merges it back when it is in use.
+- A list keeps its newest 50 tasks; every text is masked and cut (the tool refuses a content or note over 2000 characters). Session directories idle for 7 days are removed by an hourly sweep that moves a directory aside before it judges it and merges it back when it is in use.
 - Every function fails open: it returns `null` or `false` and never breaks the hook.
 
 ### Rules

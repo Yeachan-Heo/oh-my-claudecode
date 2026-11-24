@@ -14,7 +14,7 @@ const TASK_LIST_STATUSES = ['pending', 'in_progress', 'completed'] as const;
 
 const taskListArray = (value: unknown): unknown[] | null => {
   if (Array.isArray(value)) return value;
-  if (typeof value === 'string' && value.trim().startsWith('[')) {
+  if (typeof value === 'string' && value.length <= TASK_LIST_JSON_MAX && value.trim().startsWith('[')) {
     try {
       const parsed: unknown = JSON.parse(value);
       return Array.isArray(parsed) ? parsed : null;
@@ -29,6 +29,11 @@ const taskListArray = (value: unknown): unknown[] | null => {
 // instead of accepted, since the hook would not save the call (an event over the size the reader accepts) and the answer would be a false
 // "accepted", and an argument of any length would be walked.
 const TASK_LIST_MAX = 50;
+// A text of a task (content, note) is at most this long, and a list sent as JSON text at most TASK_LIST_JSON_MAX characters: the lengths are
+// checked before a string is trimmed, parsed or masked, so a call with an enormous text is refused without being walked. The hook cuts a text
+// to the same length before it masks it (RAW_TEXT_MAX in scripts/lib/jev-task-list.mjs), so a call accepted here is saved as sent.
+const TASK_LIST_TEXT_MAX = 2000;
+const TASK_LIST_JSON_MAX = 2 * TASK_LIST_MAX * TASK_LIST_TEXT_MAX + 10_000;
 
 const taskListPositive = (value: unknown): boolean => {
   const n = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value;
@@ -37,9 +42,9 @@ const taskListPositive = (value: unknown): boolean => {
 
 const taskListSchema = {
   items: z.array(z.object({
-    content: z.string().describe('One checkable result'),
+    content: z.string().max(TASK_LIST_TEXT_MAX).describe('One checkable result'),
     status: z.enum(TASK_LIST_STATUSES),
-    note: z.string().optional().describe('Task in progress: 1-2 sentences, what you are doing now and why'),
+    note: z.string().max(TASK_LIST_TEXT_MAX).optional().describe('Task in progress: 1-2 sentences, what you are doing now and why'),
   })).optional().describe('The whole list in order; replaces the previous one'),
   advance: z.boolean().optional().describe('Complete the task in progress and start the next pending one'),
   done: z.array(z.number().int().min(1).max(TASK_LIST_MAX)).max(TASK_LIST_MAX).optional().describe('1-based numbers of tasks to mark completed'),
@@ -54,9 +59,10 @@ type TaskListItem = { content?: unknown; status?: unknown; note?: unknown };
 const taskListItemOk = (x: TaskListItem | null | undefined): boolean =>
   !!x &&
   typeof x.content === 'string' &&
+  x.content.length <= TASK_LIST_TEXT_MAX &&
   x.content.trim() !== '' &&
   TASK_LIST_STATUSES.includes(x.status as typeof TASK_LIST_STATUSES[number]) &&
-  (x.note === undefined || typeof x.note === 'string');
+  (x.note === undefined || (typeof x.note === 'string' && x.note.length <= TASK_LIST_TEXT_MAX));
 
 export const taskListTool = {
   name: 'task_list',
@@ -67,7 +73,7 @@ export const taskListTool = {
     const fail = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
     const items = input.items === undefined ? undefined : taskListArray(input.items);
     if (input.items !== undefined && (!items || items.length === 0 || items.length > 50 || !(items as TaskListItem[]).every(taskListItemOk))) {
-      return fail('items: 1-50 tasks, each with a non-empty content, a status pending, in_progress or completed, and a note that, when present, is a string.');
+      return fail('items: 1-50 tasks, each with a non-empty content, a status pending, in_progress or completed, and a note that, when present, is a string of at most 2000 characters (content too).');
     }
     const done = input.done === undefined ? undefined : taskListArray(input.done);
     if (input.done !== undefined && (!done || done.length > TASK_LIST_MAX || !done.every(taskListPositive))) return fail('done: a list of at most 50 task numbers, each from 1 to 50.');

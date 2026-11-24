@@ -244,6 +244,17 @@ describe('task list: state hook (PostToolUse)', () => {
     expect(existsSync(listFile(sid, 'ag10'))).toBe(false);
   });
 
+  it('without OMC_TASK_LIST_LOG_DIR the hook stores the list under the state root of the project, not under the home directory', async () => {
+    const sid = session();
+    const central = join(TMP, 'central-state');
+    const w = await hook('jev-task-list-state.mjs', postToolUse(sid, LIST_TOOL, { items: [{ content: 'A', status: 'pending' }] }), envFor({ OMC_TASK_LIST_LOG_DIR: undefined, OMC_STATE_DIR: central }));
+    expect(w.json?.continue).toBe(true);
+    const found = readdirSync(central, { recursive: true }).filter((name) => String(name).endsWith(join(sid, 'main.json')));
+    expect(found.length).toBe(1);
+    expect(String(found[0]).includes(join('state', 'task-list', 'lists'))).toBe(true);
+    expect(existsSync(join(DOM, '.omc'))).toBe(false);
+  });
+
   it('opt-in: without OMC_TASK_LIST=1 the hook writes nothing and still answers quietly', async () => {
     const sid = session();
     const offLogs = join(TMP, 'off-logs');
@@ -1671,6 +1682,20 @@ describe('task list: the hook accepts what the task_list tool accepts', () => {
     }
     expect((await taskListTool.handler({ done: [51] })).isError).toBe(true);
     expect((await taskListTool.handler({ done: [50] })).isError).toBeUndefined();
+  });
+
+  it('a text longer than 2000 characters is refused by the tool before it is walked, and the hook cuts a text before it masks it', async () => {
+    const long = (n) => `a b ${'x'.repeat(n)}`;
+    for (const args of [{ items: [{ content: long(2000), status: 'pending' }] }, { items: [{ content: 'A', status: 'in_progress', note: long(2000) }] }, { items: JSON.stringify([{ content: 'A'.repeat(5000), status: 'pending' }]) }, { items: `[${' '.repeat(2_000_000)}]` }]) {
+      expect((await taskListTool.handler(args)).isError, JSON.stringify(args).slice(0, 60)).toBe(true);
+    }
+    expect((await taskListTool.handler({ items: [{ content: 'x'.repeat(2000), status: 'in_progress', note: 'y'.repeat(2000) }] })).isError).toBeUndefined();
+    const sid = session();
+    const huge = 'a=b '.repeat(10_000_000); // 40 MB of text in one task, the slowest shape for the masking rules
+    const began = Date.now();
+    const saved = L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: huge, status: 'pending', activeForm: 'x' }] }), envFor());
+    expect(Date.now() - began).toBeLessThan(1000); // the masking rules run over 2000 characters, not over 40 MB
+    expect(saved.items[0].content.length).toBeLessThanOrEqual(500);
   });
 
   it('a call with a note of another type changes nothing in the hook, and update_plan keeps its own rules', () => {

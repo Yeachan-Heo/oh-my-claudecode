@@ -41,6 +41,8 @@ let counter = 0;
 //   after-list-publish  right after a file was renamed to the list PAUSE_MATCH: the list is published and the events it folded are not removed yet
 //   before-moved-list-step  before the merge of a moved tree looks for the list file of the moved tree (<root>/.<session>.<hex>.sweeping/<key>.json): the merge
 //                       holds the lock of the live list and has not moved or judged anything yet
+//   before-moved-adopt  before the moved list file (<root>/.<session>.<hex>.sweeping/<key>.json) is read for the adoption of its base: the merge holds
+//                       the lock of the live list, has found the live list there already and has not adopted or parked the snapshot yet
 //   before-moved-event-check  before the first read of the token of a ".lock" file (the check that the lock is still the process's own): the merge of a moved
 //                       tree holds the lock of the live list and has read the live record, and has not judged or moved any event yet
 // The process writes PAUSE_MARK and waits until PAUSE_GO exists (with several kinds both names get the suffix ".<kind>").
@@ -130,6 +132,10 @@ if (kinds.includes('before-list-rename') || kinds.includes('after-list-publish')
 if (kinds.includes('before-moved-list-step')) {
   const exists = fs.existsSync;
   fs.existsSync = (p) => { if (typeof p === 'string' && /\\.sweeping\\/[^/]+\\.json$/.test(p)) hold('before-moved-list-step'); return exists(p); };
+}
+if (kinds.includes('before-moved-adopt')) {
+  const read = fs.readFileSync;
+  fs.readFileSync = (p, ...rest) => { if (typeof p === 'string' && /\\.sweeping\\/[^/]+\\.json$/.test(p)) hold('before-moved-adopt'); return read(p, ...rest); };
 }
 if (kinds.includes('before-moved-event-check')) {
   const read = fs.readFileSync;
@@ -683,6 +689,40 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
     const rs = await s.exited;
     expect(rs.code, rs.stderr).toBe(0);
     expect(existsSync(join(hidden, 'main.json'))).toBe(true); // the snapshot was not moved
+    expect(existsSync(join(session, 'main.json.moved'))).toBe(false); // nor parked where no reader looks
+    rmSync(join(lists, '.sweep'), { force: true });
+    L.sweep(env, Date.now()); // the next sweep holds the lock for the whole merge
+    expect(existsSync(hidden)).toBe(false);
+    L.syncList('race-session', 'main', env);
+    expect(L.readList('race-session', 'main', env).items.map((x) => x.content).sort()).toEqual(['From the snapshot', 'In its window', 'In the new directory']);
+  }, TOTAL_MS);
+
+  // The lock goes after the merge found the live list and before the base of the snapshot is adopted: adoptMovedBase then refuses because the lock is not the
+  // merge's any more, and that refusal must not be taken for an incompatible snapshot (parked as <key>.json.moved and removed from the hidden tree).
+  it('a merge of a hidden tree whose lock was lost while the snapshot was being adopted keeps the snapshot in the hidden tree', async () => {
+    counter += 1;
+    const dir = join(TMP, `sweep-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const lists = join(logs, 'lists');
+    const session = join(lists, 'race-session');
+    const hidden = join(lists, '.race-session.0123456789ab.sweeping');
+    const files = (name) => join(dir, name);
+    const create = (id, subject, at) => L.recordListCall({ session_id: 'race-session', tool_name: 'TaskCreate', tool_input: { subject }, tool_response: `Task #${id} created successfully: ${subject}`, tool_use_id: `toolu_${id}` }, env, at);
+    create(1, 'From the snapshot', Date.now() - 60_000);
+    create(2, 'In its window', Date.now() - 1000);
+    renameSync(session, hidden);
+    expect(create(3, 'In the new directory', Date.now())).not.toBeNull(); // the directory made again has a list of its own
+    expect(existsSync(join(session, 'main.json'))).toBe(true);
+    rmSync(join(lists, '.sweep'), { force: true });
+    const s = startChild(dir, { kind: 'sweep', done: files('s-done') }, { kind: 'before-moved-adopt', mark: files('s-paused'), go: files('s-go') }, env);
+    await waitUntil(files('s-paused')); // the merge holds the lock, found the live list and is about to read the snapshot
+    rmSync(join(session, 'main.json.lock'), { force: true }); // the lock is gone
+    writeFileSync(files('s-go'), '1');
+    const rs = await s.exited;
+    expect(rs.code, rs.stderr).toBe(0);
+    expect(existsSync(join(hidden, 'main.json'))).toBe(true); // the snapshot was neither adopted nor removed
     expect(existsSync(join(session, 'main.json.moved'))).toBe(false); // nor parked where no reader looks
     rmSync(join(lists, '.sweep'), { force: true });
     L.sweep(env, Date.now()); // the next sweep holds the lock for the whole merge

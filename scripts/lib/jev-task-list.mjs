@@ -6,7 +6,7 @@
 //   <logdir>/lists/<session_id>/<agent_id|main>.json   the list of one agent (main = the main thread, no agent_id in the hook input)
 //   <logdir>/lists/<session_id>/<key>.events/*.json    the list calls of the last seconds, and those no fold has taken yet (event journal, see foldEvents)
 //   <lists>/<session_id>/_task/<id>.json               which agent created a Task* task (the Task* store is one per session, without owner)
-// <logdir> is OMC_TASK_LIST_LOG_DIR or ~/.omc/state/task-list. Every function is fail-open: it returns null/false and never throws.
+// <logdir> is OMC_TASK_LIST_LOG_DIR or, for the hooks, <state root>/state/task-list (see hookEnv); ~/.omc/state/task-list only where no hook resolved it. Every function is fail-open: it returns null/false and never throws.
 
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -14,6 +14,7 @@ import { appendFileSync, closeSync, existsSync, fstatSync, fsyncSync, linkSync, 
 import { basename, dirname, join } from 'node:path';
 import { atomicWriteFileSync } from './atomic-write.mjs';
 import { rotateJevLog } from '../jev-resolve.mjs';
+import { resolveOmcStateRoot } from './state-root.mjs';
 
 export const LIST_TOOL_RE = /^mcp__(?:plugin_oh-my-claudecode_)?t__task_list$/; // also the bare server name without the plugin prefix
 export const MAIN = 'main';
@@ -48,6 +49,17 @@ export function isListTool(name, key = MAIN) {
 
 // The log directory: OMC_TASK_LIST_LOG_DIR overrides the default under the user's state directory.
 export const taskListLogDir = (env = process.env) => env.OMC_TASK_LIST_LOG_DIR || join(homedir(), '.omc', 'state', 'task-list');
+// The environment the hooks hand to the storage: without OMC_TASK_LIST_LOG_DIR the log directory is task-list under the state root the
+// project of the call resolves to (worktree, OMC_STATE_DIR and workspace marker, the root every other state file of the session uses).
+export async function hookEnv(data, env = process.env) {
+  if (env.OMC_TASK_LIST_LOG_DIR) return env;
+  try {
+    const root = await resolveOmcStateRoot(typeof data?.cwd === 'string' && data.cwd ? data.cwd : process.cwd());
+    return root ? { ...env, OMC_TASK_LIST_LOG_DIR: join(root, 'state', 'task-list') } : env;
+  } catch {
+    return env;
+  }
+}
 export const listsDir = (env = process.env) => join(taskListLogDir(env), 'lists');
 // The file key of an agent: main only when the hook input has no agent_id; an agent_id outside the safe pattern keeps its own key
 // (unsafe characters as "_" plus a short sha256 of the original), so it never writes the main thread's list.
@@ -470,7 +482,11 @@ function mergeListFile(source, target, env, adopted, held = null) {
     if (adoptMovedBase(source, target, env, held)) {
       adopted.push(target);
     } else {
+      // a refusal is not a lost lock: with the lock gone the live directory is another one, the snapshot is neither adopted nor parked, and the
+      // caller keeps it in the moved tree for the next sweep (checked again after the link, since the lock can go between the two)
+      if (held && !held()) throw new Error('lock lost');
       try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
+      if (held && !held()) throw new Error('lock lost');
       storeEvent('moved_list_set_aside', target, env);
     }
   }
@@ -703,10 +719,13 @@ const LIST_INPUT_KEYS = ['items', 'todos', 'done', 'start', 'advance', 'subject'
 const ARRAY_KEYS = new Set(['items', 'todos', 'done']);
 const TASK_KEYS = ['content', 'subject', 'status', 'note'];
 const KEEP_CHARS = Math.max(CONTENT_MAX, NOTE_MAX);
+// The most of a text the masking walks: the text of a call is cut to this before the masking rules run, so a call with an enormous text cannot
+// hold the hook up. task_list refuses a text longer than this (src/tools/task-list-tools.ts), so a call it accepts is read whole.
+const RAW_TEXT_MAX = 2000;
 const idText = (value) => (typeof value === 'string' ? value.slice(0, 200) : null);
 function boundedValue(value) {
   if (typeof value === 'string') {
-    const masked = maskListText(value);
+    const masked = maskListText(value.length > RAW_TEXT_MAX ? value.slice(0, RAW_TEXT_MAX) : value);
     return masked.length > KEEP_CHARS ? `${masked.slice(0, KEEP_CHARS - 1)}…` : masked;
   }
   if (Array.isArray(value)) return value.map(boundedValue);
