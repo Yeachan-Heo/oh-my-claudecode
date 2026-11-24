@@ -356,6 +356,30 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     });
   }, 60_000);
 
+  // A pane that has left the window of the team after the first two reads (and may have been repurposed) is not read at the fence: the read
+  // stands behind the proof of membership that precedes the kill of the pane, so none of its processes is signalled on the strength of it.
+  it('reads no tree at the fence of a pane that left the window of the team after the earlier reads, and signals only the earlier trees', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    await withAcceptedProvider('pane-tree-moved-team', async () => {
+      let reads = 0;
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+        paneState.events.push('capture');
+        if (++reads === 2) {
+          tmuxUtilsMocks.tmuxExecAsync.mockImplementation(async (args: string[]) => ({
+            stdout: args.includes('list-panes') ? '%1\n%3\n' : '',
+            stderr: '',
+          }));
+        }
+        return FIXTURE_TREE;
+      });
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      await shutdownTeamV2('pane-tree-moved-team', cwd, { timeoutMs: 0, force: true });
+
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledTimes(2);
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([FIXTURE_TREE, FIXTURE_TREE]);
+    });
+  }, 60_000);
+
   it('a failed read at the fence does not hold up the shutdown: the earlier trees are signalled and the pane is killed', async () => {
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     await withAcceptedProvider('pane-tree-fence-failure-team', async () => {
@@ -371,18 +395,12 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     });
   }, 60_000);
 
-  it('without OMC_TEAM_KILL_PANE_TREE nothing is read before the requests: the one read is the one before the fence', async () => {
-    await withAcceptedProvider('pane-tree-off-team', async (teamRoot) => {
-      const requestFile = join(teamRoot, 'workers', 'worker-1', 'shutdown-request.json');
-      const requestWrittenAtCapture: boolean[] = [];
-      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
-        requestWrittenAtCapture.push(await exists(requestFile));
-        return FIXTURE_TREE;
-      });
+  it('without OMC_TEAM_KILL_PANE_TREE no tree is read, not even the proof of membership that precedes a read, and none is signalled', async () => {
+    await withAcceptedProvider('pane-tree-off-team', async () => {
       const { shutdownTeamV2 } = await import('../runtime-v2.js');
       await shutdownTeamV2('pane-tree-off-team', cwd, { timeoutMs: 0, force: true });
-      expect(requestWrittenAtCapture).toEqual([true]);
-      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([null, FIXTURE_TREE]);
+      expect(tmuxSessionMocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([null, null]);
     });
   }, 60_000);
 

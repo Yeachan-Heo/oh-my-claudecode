@@ -458,12 +458,20 @@ describe('recovery pane rollback evidence', () => {
   // the pane is read while the provider is still live (the hook of the real retirement), and signalled first in the cleanup, once the provider is
   // gone and before the pane is killed. The cleanup asks for the kill of the pane without looking at the liveness of the pane first, so a pane
   // that died with its provider is still asked for a kill, and its tree is signalled all the same.
+  // A pane that has left the target of the team by then (and may have been repurposed) is not read: its tree is neither read nor signalled.
   it.each([
-    ['with the switch, the pane alive when the provider is gone', true, false],
-    ['with the switch, the pane dead when the provider is gone', true, true],
-    ['without the switch', false, false],
-  ])('signals the tree of a rolled back recovery pane first, before the kill of the pane, %s', async (_what, treeKill, paneDiesWithProvider) => {
+    ['with the switch, the pane alive when the provider is gone', true, false, false],
+    ['with the switch, the pane dead when the provider is gone', true, true, false],
+    ['without the switch', false, false, false],
+    ['with the switch, the pane no longer a pane of the team', true, false, true],
+  ])('signals the tree of a rolled back recovery pane first, before the kill of the pane, %s', async (_what, treeKill, paneDiesWithProvider, paneLeftTheTeam) => {
     if (treeKill) process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const verifyDefault = paneMocks.verifyTeamTargetOwnership.getMockImplementation()!;
+    if (paneLeftTheTeam) {
+      paneMocks.verifyTeamTargetOwnership.mockImplementation(async target => (
+        target.paneId === '%2' ? { kind: 'foreign' } as unknown as Awaited<ReturnType<typeof verifyDefault>> : verifyDefault(target)
+      ));
+    }
     cwd = mkdtempSync(join(tmpdir(), 'recovery-rollback-tree-'));
     const teamName = 'rollback-tree-team';
     const requestId = 'rollback-tree-request';
@@ -537,8 +545,10 @@ describe('recovery pane rollback evidence', () => {
         .resolves.toMatchObject({ outcome: 'failed', error: 'spawn_failed', recoveryId });
 
       // The kill of the pane comes twice: from the cleanup of the retirement and from the loop that confirms the pane is gone.
-      expect(events).toEqual(treeKill ? ['capture:live', 'terminate:gone', 'kill-pane', 'kill-pane'] : ['kill-pane', 'kill-pane']);
-      if (treeKill) expect(paneMocks.capturePaneProcessTree).toHaveBeenCalledWith(fixtureTmuxServerIdentity(), '%2');
+      const treeRead = treeKill && !paneLeftTheTeam;
+      expect(events).toEqual(treeRead ? ['capture:live', 'terminate:gone', 'kill-pane', 'kill-pane'] : ['kill-pane', 'kill-pane']);
+      if (treeRead) expect(paneMocks.capturePaneProcessTree).toHaveBeenCalledWith(fixtureTmuxServerIdentity(), '%2');
+      else expect(paneMocks.capturePaneProcessTree).not.toHaveBeenCalledWith(fixtureTmuxServerIdentity(), '%2');
       expect(providerState()).toBe('gone');
       // The rollback ran to its end: nothing is retained as evidence of a pane that could not be cleaned.
       expect(existsSync(absPath(cwd, `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}`))).toBe(false);
@@ -546,6 +556,7 @@ describe('recovery pane rollback evidence', () => {
       writeFileSync(stopPath, 'stop');
       await bootstrap.catch(() => undefined);
       paneMocks.killOwnedWorkerPane.mockImplementation(defaultKill);
+      paneMocks.verifyTeamTargetOwnership.mockImplementation(verifyDefault);
       paneMocks.capturePaneProcessTree.mockReset();
       paneMocks.terminatePaneProcessTree.mockReset();
     }

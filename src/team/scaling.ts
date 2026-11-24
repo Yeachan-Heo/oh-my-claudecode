@@ -55,6 +55,7 @@ import {
   adoptWorkerPaneOwnership,
   capturePaneProcessTree,
   terminatePaneProcessTree,
+  verifyTeamTargetOwnership,
   sanitizeName,
   getOwnedWorkerLiveness,
   killOwnedWorkerPane,
@@ -68,6 +69,7 @@ import {
   isHerdrSessionTarget,
   providerForTeamTarget,
 } from "./tmux-session.js";
+import { capturePaneProcessTreeOfWorkerPane } from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget } from "./herdr-session.js";
 import {
   TeamPaths,
@@ -113,6 +115,17 @@ const CLI_AGENT_TYPES = new Set<CliAgentType>([
   "cursor",
   "antigravity",
 ]);
+
+/** The read of the pane process tree for a cleanup that signals it (see capturePaneProcessTreeOfWorkerPane for what it requires of the pane). */
+function readWorkerPaneProcessTree(
+  ownership: WorkerPaneOwnership | null | undefined,
+): Promise<PaneProcessTree | null> {
+  return capturePaneProcessTreeOfWorkerPane(ownership, {
+    verifyTeamTargetOwnership: (target) => verifyTeamTargetOwnership(target),
+    capturePaneProcessTree: (identity, paneId) =>
+      capturePaneProcessTree(identity, paneId),
+  });
+}
 
 export function isScalingEnabled(
   env: NodeJS.ProcessEnv = process.env,
@@ -873,17 +886,8 @@ export async function scaleUpOwned(
                 "scale_up_rollback",
                 killPane,
                 async () => {
-                  if (
-                    process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
-                    ownership?.tmuxServerIdentity &&
-                    ownership.paneId.startsWith("%") &&
-                    ownership.paneId !== ownership.leaderPaneId &&
-                    !ownership.reservedPaneIds.includes(ownership.paneId)
-                  )
-                    fencedTree = await capturePaneProcessTree(
-                      ownership.tmuxServerIdentity,
-                      ownership.paneId,
-                    );
+                  fencedTree =
+                    await readWorkerPaneProcessTree(ownership);
                 },
               ).catch(() => false)
             : await killPane();
@@ -2311,9 +2315,8 @@ export async function scaleDownOwned(
                 workerPaneOwnershipInput(config, worker.name, worker.pane_id!),
               );
               if (!adopted.ok || !adopted.ownership.tmuxServerIdentity) return;
-              const tree = await capturePaneProcessTree(
-                adopted.ownership.tmuxServerIdentity,
-                adopted.ownership.paneId,
+              const tree = await readWorkerPaneProcessTree(
+                adopted.ownership,
               );
               if (tree)
                 earlyPaneTrees.set(worker.name, {
@@ -2413,15 +2416,7 @@ export async function scaleDownOwned(
         const earlyPaneTree = earlyPaneTrees.get(worker.name);
         const earlyTree =
           earlyPaneTree?.paneId === paneId ? earlyPaneTree.tree : null;
-        const paneTree =
-          process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
-          paneOwnership?.tmuxServerIdentity &&
-          paneId.startsWith("%")
-            ? await capturePaneProcessTree(
-                paneOwnership.tmuxServerIdentity,
-                paneOwnership.paneId,
-              )
-            : null;
+        const paneTree = await readWorkerPaneProcessTree(paneOwnership);
         let attempt: Awaited<ReturnType<typeof loadWorkerLaunchAttempt>> = null;
         try {
           attempt = await loadWorkerLaunchAttempt({
@@ -2503,15 +2498,7 @@ export async function scaleDownOwned(
               }
             },
             async () => {
-              if (
-                process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
-                paneOwnership?.tmuxServerIdentity &&
-                paneId.startsWith("%")
-              )
-                fencedTree = await capturePaneProcessTree(
-                  paneOwnership.tmuxServerIdentity,
-                  paneOwnership.paneId,
-                );
+              fencedTree = await readWorkerPaneProcessTree(paneOwnership);
             },
           );
         } catch {

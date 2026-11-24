@@ -152,6 +152,8 @@ const mocks = vi.hoisted(() => {
     killOwnedWorkerPane: vi.fn<(ownership: { paneId: string }) => Promise<void>>(async () => {}),
     capturePaneProcessTree: vi.fn<(identity: unknown, paneId: string) => Promise<unknown>>(async () => null),
     terminatePaneProcessTree: vi.fn<(tree: unknown) => Promise<void>>(async () => undefined),
+    // The proof that a pane is still a pane of the team's provider target, asked before a pane tree is read (set to owned before each test).
+    verifyTeamTargetOwnership: vi.fn<(target: { paneId: string }) => Promise<{ kind: string }>>(async () => ({ kind: 'owned' })),
     killTeamSession: vi.fn(async () => {}),
     resolveSplitPaneWorkerPaneIds: vi.fn(async (_session: string | undefined, paneIds: string[]) => paneIds),
     splitTeamWorkerPaneWithEvidence: vi.fn(),
@@ -367,6 +369,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     killOwnedWorkerPane: mocks.killOwnedWorkerPane,
     capturePaneProcessTree: mocks.capturePaneProcessTree,
     terminatePaneProcessTree: mocks.terminatePaneProcessTree,
+    verifyTeamTargetOwnership: mocks.verifyTeamTargetOwnership,
     killTeamSession: mocks.killTeamSession,
     resolveSplitPaneWorkerPaneIds: mocks.resolveSplitPaneWorkerPaneIds,
     getWorkerLiveness: mocks.getWorkerLiveness,
@@ -987,6 +990,8 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.capturePaneProcessTree.mockResolvedValue(null);
     mocks.terminatePaneProcessTree.mockReset();
     mocks.terminatePaneProcessTree.mockResolvedValue(undefined);
+    mocks.verifyTeamTargetOwnership.mockReset();
+    mocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: 'owned' });
     mocks.getWorkerLiveness.mockReset();
     mocks.workerPaneBelongsToProviderTarget.mockReset();
     mocks.killTeamSession.mockResolvedValue(undefined);
@@ -3065,15 +3070,18 @@ describe('runtime v2 startup inbox dispatch', () => {
       expect(tree()).toEqual(['provider terminated', 'kill-pane']);
     });
 
-    // The tree is read only of a pane the kill of the pane would not refuse at once. The proof of the pane of a start refuses the pane of the
-    // leader and a reserved one before the launch, so the launch turns the ownership that the rollback holds into one of them.
+    // The tree is read only of a pane the kill of the pane would not refuse. The proof of the pane of a start refuses the pane of the
+    // leader and a reserved one before the launch, so the launch turns the ownership that the rollback holds into one of them; a pane
+    // that has left the target of the team by the time of the rollback is one the proof of membership no longer holds for.
     it.each([
-      ['the pane of the leader', (paneId: string) => ({ leaderPaneId: paneId })],
-      ['a reserved pane', (paneId: string) => ({ reservedPaneIds: [paneId] })],
-    ])('a failed startup reads and signals no tree of %s', async (_what, excluded) => {
+      ['the pane of the leader', (paneId: string) => ({ leaderPaneId: paneId }), 'owned'],
+      ['a reserved pane', (paneId: string) => ({ reservedPaneIds: [paneId] }), 'owned'],
+      ['a pane that left the target of the team', () => ({}), 'foreign'],
+    ])('a failed startup reads and signals no tree of %s', async (_what, excluded, membership) => {
       cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-excluded-');
       mocks.sendToWorker.mockResolvedValue(false);
       useFencedRetirement();
+      mocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: membership });
       const spawnDefault = mocks.spawnOwnedWorkerInPane.getMockImplementation()!;
       mocks.spawnOwnedWorkerInPane.mockImplementation(async (...args: unknown[]) => {
         const ownership = args[1] as { paneId: string };

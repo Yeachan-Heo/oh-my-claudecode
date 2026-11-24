@@ -137,6 +137,7 @@ import {
   isHerdrSessionTarget,
   providerForTeamTarget,
 } from "./tmux-session.js";
+import { capturePaneProcessTreeOfWorkerPane } from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget, herdrCloseWorkspace, herdrWorkspaceExists } from "./herdr-session.js";
 import { classifyPane, observePane } from "./pane-readiness.js";
 import {
@@ -1178,13 +1179,25 @@ function configuredPaneOwnership(
   };
 }
 
+/** The read of the pane process tree for a cleanup that signals it (see capturePaneProcessTreeOfWorkerPane for what it requires of the pane). */
+function readWorkerPaneProcessTree(
+  ownership: WorkerPaneOwnership | null | undefined,
+): Promise<PaneProcessTree | null> {
+  return capturePaneProcessTreeOfWorkerPane(ownership, {
+    verifyTeamTargetOwnership: (target) => verifyTeamTargetOwnership(target),
+    capturePaneProcessTree: (identity, paneId) =>
+      capturePaneProcessTree(identity, paneId),
+  });
+}
+
 /**
  * The two halves of the opt-in tree kill (OMC_TEAM_KILL_PANE_TREE) for a rollback that retires a launch attempt and then kills the pane: `read`
  * is the last argument of retireAndCleanupCurrentWorkerLaunchAttempt, which runs it right before the provider is terminated, and `terminate` runs
  * first in the cleanup, before anything asks whether the pane is still alive. A descendant that left the provider's process group is no longer
  * below the pane's root once the provider is gone, and the kill of the pane reads the tree only after that. The tree is read only of a pane that
- * the kill of the pane would not refuse at once (not the pane of the leader, not a reserved one) and, when `proved` is given, that it proves
- * to be the pane of the team; what is not read is not signalled.
+ * the kill of the pane would not refuse (not the pane of the leader, not a reserved one, one that shows to be a pane of the team when it is read:
+ * readWorkerPaneProcessTree) and, when `proved` is given, that it also proves to be the pane of the team in that way; what is not read is
+ * not signalled.
  */
 function paneTreeFence(
   ownership: WorkerPaneOwnership | null | undefined,
@@ -1199,15 +1212,9 @@ function paneTreeFence(
       if (
         process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
         ownership?.tmuxServerIdentity &&
-        ownership.paneId.startsWith("%") &&
-        ownership.paneId !== ownership.leaderPaneId &&
-        !ownership.reservedPaneIds.includes(ownership.paneId) &&
         (!proved || (await proved()))
       )
-        tree = await capturePaneProcessTree(
-          ownership.tmuxServerIdentity,
-          ownership.paneId,
-        );
+        tree = await readWorkerPaneProcessTree(ownership);
     },
     terminate: async () => {
       if (tree) await terminatePaneProcessTree(tree);
@@ -9236,9 +9243,8 @@ export async function shutdownTeamV2(
             workerPaneOwnershipInput(startConfig, worker.name, worker.pane_id),
           );
           if (!ownership.ok || !ownership.ownership.tmuxServerIdentity) return;
-          const tree = await capturePaneProcessTree(
-            ownership.ownership.tmuxServerIdentity,
-            ownership.ownership.paneId,
+          const tree = await readWorkerPaneProcessTree(
+            ownership.ownership,
           );
           if (tree)
             earlyPaneTrees.set(worker.name, {
@@ -9379,13 +9385,7 @@ export async function shutdownTeamV2(
     const earlyPaneTree = earlyPaneTrees.get(worker.name);
     const earlyTree =
       earlyPaneTree?.paneId === worker.pane_id ? earlyPaneTree.tree : null;
-    const paneTree =
-      paneOwnership?.tmuxServerIdentity && worker.pane_id.startsWith("%")
-        ? await capturePaneProcessTree(
-            paneOwnership.tmuxServerIdentity,
-            paneOwnership.paneId,
-          )
-        : null;
+    const paneTree = await readWorkerPaneProcessTree(paneOwnership);
     const attempt = await loadWorkerLaunchAttempt({
       cwd,
       teamName: sanitized,
@@ -9433,15 +9433,7 @@ export async function shutdownTeamV2(
           }
         },
         async () => {
-          if (
-            process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
-            paneOwnership?.tmuxServerIdentity &&
-            paneOwnership.paneId.startsWith("%")
-          )
-            fencedTree = await capturePaneProcessTree(
-              paneOwnership.tmuxServerIdentity,
-              paneOwnership.paneId,
-            );
+          fencedTree = await readWorkerPaneProcessTree(paneOwnership);
         },
       ))
     )

@@ -87,6 +87,7 @@ import {
   type WorkerLaunchContext,
 } from "./worker-launch-ack.js";
 import { resolveRuntimeCliPath } from "./runtime-owner-client.js";
+import { capturePaneProcessTreeOfWorkerPane } from "./pane-tree-read.js";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
@@ -4143,8 +4144,8 @@ export async function spawnOwnedWorkerInPane(
   } catch (error) {
     // The pane's process tree is read right before the provider is terminated (the last argument), and signalled first in the cleanup: a
     // descendant that left the provider's process group is no longer below the pane's root once the provider is gone, and the kill of the
-    // pane reads the tree after that (OMC_TEAM_KILL_PANE_TREE). Not read of the pane of the leader or a reserved one, which the kill of the
-    // pane refuses.
+    // pane reads the tree after that (OMC_TEAM_KILL_PANE_TREE). Not read of a pane that the kill of the pane refuses (the pane of the leader,
+    // a reserved one, one that no longer shows to be a pane of the team).
     let fencedTree: PaneProcessTree | null = null;
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
       attempt,
@@ -4159,17 +4160,10 @@ export async function spawnOwnedWorkerInPane(
         }
       },
       async () => {
-        if (
-          process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
-          ownership.tmuxServerIdentity &&
-          ownership.paneId.startsWith("%") &&
-          ownership.paneId !== ownership.leaderPaneId &&
-          !ownership.reservedPaneIds.includes(ownership.paneId)
-        )
-          fencedTree = await capturePaneProcessTree(
-            ownership.tmuxServerIdentity,
-            ownership.paneId,
-          );
+        fencedTree = await capturePaneProcessTreeOfWorkerPane(ownership, {
+          verifyTeamTargetOwnership,
+          capturePaneProcessTree,
+        });
       },
     ).catch(() => false);
     if (!cleaned)

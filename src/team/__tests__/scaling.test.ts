@@ -162,6 +162,8 @@ const tmuxSessionMocks = vi.hoisted(() => {
     waitForPaneReady: vi.fn(),
     capturePaneProcessTree: vi.fn(),
     terminatePaneProcessTree: vi.fn(),
+    // The proof that a pane is still a pane of the team's provider target, asked before a pane tree is read; owned unless a test says otherwise.
+    verifyTeamTargetOwnership: vi.fn(async (_target: { paneId: string }): Promise<{ kind: string }> => ({ kind: 'owned' })),
   };
 });
 
@@ -242,6 +244,7 @@ vi.mock('../tmux-session.js', () => ({
   waitForPaneReady: tmuxSessionMocks.waitForPaneReady,
   capturePaneProcessTree: tmuxSessionMocks.capturePaneProcessTree,
   terminatePaneProcessTree: tmuxSessionMocks.terminatePaneProcessTree,
+  verifyTeamTargetOwnership: tmuxSessionMocks.verifyTeamTargetOwnership,
 }));
 
 vi.mock('../git-worktree.js', () => ({
@@ -1124,12 +1127,14 @@ describe('scaleUp duplicate worker guard', () => {
     }
   });
 
-  // The tree is read only of a pane the kill of the pane would not refuse at once: not the pane of the leader, not a reserved one. The
-  // mocked adoption reports the new pane (%12) as such a pane, and the mocked tree would be signalled if it were read.
+  // The tree is read only of a pane the kill of the pane would not refuse: not the pane of the leader, not a reserved one, and one that still
+  // shows to be a pane of the team's provider target when it is read. The mocked adoption reports the new pane (%12) as such a pane (and the
+  // mocked proof of membership holds), and the mocked tree would be signalled if it were read.
   it.each([
-    ['the pane of the leader', { leaderPaneId: '%12' }],
-    ['a reserved pane', { reservedPaneIds: ['%12'] }],
-  ])('a rolled back scale up reads and signals no pane tree of %s', async (_what, excluded) => {
+    ['the pane of the leader', { leaderPaneId: '%12' }, 'owned'],
+    ['a reserved pane', { reservedPaneIds: ['%12'] }, 'owned'],
+    ['a pane that left the target of the team', {}, 'foreign'],
+  ])('a rolled back scale up reads and signals no pane tree of %s', async (_what, excluded, membership) => {
     const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
@@ -1147,6 +1152,7 @@ describe('scaleUp duplicate worker guard', () => {
         ? { ...adopted, ownership: { ...adopted.ownership, ...excluded } as typeof adopted.ownership }
         : adopted;
     });
+    tmuxSessionMocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: membership });
     tmuxSessionMocks.capturePaneProcessTree.mockReset();
     tmuxSessionMocks.capturePaneProcessTree.mockResolvedValue(tree);
     tmuxSessionMocks.terminatePaneProcessTree.mockReset();
@@ -1167,6 +1173,7 @@ describe('scaleUp duplicate worker guard', () => {
     } finally {
       if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
       else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: 'owned' });
       tmuxSessionMocks.capturePaneProcessTree.mockReset();
       tmuxSessionMocks.terminatePaneProcessTree.mockReset();
     }

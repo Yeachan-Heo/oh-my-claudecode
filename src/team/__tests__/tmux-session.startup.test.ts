@@ -1215,14 +1215,16 @@ describe('worker pane startup safety', () => {
     }
 
     // `killed`: whether the cleanup gets as far as the kill of the pane (it does not for the pane of the leader or a reserved one, which the kill refuses).
-    const rows: Array<[string, boolean, () => WorkerPaneOwnership, string, boolean]> = [
-      ['a pane of the team with the switch', true, () => ownership('%2'), 'worker_start_provider_failed', true],
-      ['a pane of the team without the switch', false, () => ownership('%2'), 'worker_start_provider_failed', true],
-      ['the pane of the leader with the switch', true, () => ownership('%1'), 'worker_launch_cleanup_unverified', false],
-      ['a reserved pane with the switch', true, () => ({ ...ownership('%2'), reservedPaneIds: ['%2'] }), 'worker_launch_cleanup_unverified', false],
+    // `moved`: the pane has left the target of the team (and been repurposed) by the time the launch fails, so it no longer shows to be a pane of the team.
+    const rows: Array<[string, boolean, () => WorkerPaneOwnership, string, boolean, boolean]> = [
+      ['a pane of the team with the switch', true, () => ownership('%2'), 'worker_start_provider_failed', true, false],
+      ['a pane of the team without the switch', false, () => ownership('%2'), 'worker_start_provider_failed', true, false],
+      ['the pane of the leader with the switch', true, () => ownership('%1'), 'worker_launch_cleanup_unverified', false, false],
+      ['a reserved pane with the switch', true, () => ({ ...ownership('%2'), reservedPaneIds: ['%2'] }), 'worker_launch_cleanup_unverified', false, false],
+      ['a pane that left the target of the team with the switch', true, () => ownership('%2'), 'worker_launch_cleanup_unverified', false, true],
     ];
 
-    strictTmuxIt.each(rows)('%s', async (_what, treeKill, owned, rejection, killed) => {
+    strictTmuxIt.each(rows)('%s', async (_what, treeKill, owned, rejection, killed, moved) => {
       if (treeKill) process.env.OMC_TEAM_KILL_PANE_TREE = '1';
       cwd = await createFixture('omc-startup-launch-failed-tree-');
       process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
@@ -1230,7 +1232,10 @@ describe('worker pane startup safety', () => {
       await startPane();
       // The first two answers are the reads of the hook (the root before and after the process list); a read after them finds the pane dead.
       tmuxState.paneRoots = [{ pid: paneRoot!.pid!, dead: false }, { pid: paneRoot!.pid!, dead: false }, { pid: paneRoot!.pid!, dead: true }];
-      tmuxState.afterEnter = attempt => markProviderExited(attempt);
+      tmuxState.afterEnter = async attempt => {
+        await markProviderExited(attempt);
+        if (moved) tmuxState.ownedPaneIds = '%9\n';
+      };
       let descendantAliveAtKill: boolean | undefined;
       tmuxState.onKillPane = () => { descendantAliveAtKill = isAlive(descendantPid); };
 
