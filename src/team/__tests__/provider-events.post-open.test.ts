@@ -178,7 +178,9 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   });
 
   // The hook runs as its own process, so a preload wraps fs/promises.open there.
-  const runHook = (kind: keyof typeof SWAPS | 'none') => {
+  const runHook = (kind: keyof typeof SWAPS | 'parentBeforeOpen' | 'none') => {
+    // The launch creates the log; the hook only appends.
+    writeFileSync(path, '');
     const preload = join(root, 'swap-preload.mjs');
     writeFileSync(preload, [
       "import fsp from 'node:fs/promises';",
@@ -189,8 +191,9 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
       `const kind = ${JSON.stringify(kind)};`,
       `const outside = ${JSON.stringify(outside)};`,
       'fsp.open = async (...args) => {',
-      '  const handle = await real(...args);',
       '  const path = String(args[0]);',
+      "  if (kind === 'parentBeforeOpen' && path.endsWith('provider-events.jsonl')) { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(outside, dir); }",
+      '  const handle = await real(...args);',
       "  if (path.endsWith('provider-events.jsonl')) {",
       "    if (kind === 'leaf') { renameSync(path, `${path}.moved`); writeFileSync(path, ''); }",
       "    if (kind === 'parent') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(outside, dir); }",
@@ -227,6 +230,15 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     expect(readFileSync(join(outside, 'provider-events.jsonl'), 'utf8')).toBe('');
   });
 
+  // O_CREAT through the swapped directory would create the file outside the
+  // team before any post-open check could refuse it.
+  it('hook creates nothing outside the team when the worker directory becomes a symlink right before the open', () => {
+    rmSync(join(outside, 'provider-events.jsonl'));
+    expectSilentExit(runHook('parentBeforeOpen'));
+    expect(existsSync(join(outside, 'provider-events.jsonl'))).toBe(false);
+    expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
+  });
+
   it('hook appends nothing when the worker directory becomes a symlink to the same file after the open', () => {
     expectSilentExit(runHook('parentSameLeaf'));
     expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
@@ -247,13 +259,14 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   it('hook writes nothing on Windows, where O_NOFOLLOW cannot refuse a symlinked leaf', () => {
     const preload = join(root, 'win32-preload.mjs');
     writeFileSync(preload, "Object.defineProperty(process, 'platform', { value: 'win32' });\n");
+    writeFileSync(path, '');
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, HOOK, 'Stop'], {
       env: { PATH: process.env.PATH ?? '', OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' },
       encoding: 'utf8',
       timeout: 10_000,
     });
     expectSilentExit(result);
-    expect(existsSync(path)).toBe(false);
+    expect(readFileSync(path, 'utf8')).toBe('');
   });
 
   it('hook appends one line through the same preload when nothing is swapped', () => {

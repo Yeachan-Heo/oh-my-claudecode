@@ -8,6 +8,10 @@
 // Directories are checked again after the open, so one swapped for a symlink
 // in between makes the hook skip the write. A no-op on Windows, which ignores
 // O_NOFOLLOW.
+// It never creates the file: the worker launch does (ensureProviderEventsLog()
+// in src/team/provider-events.ts). O_CREAT through a directory swapped for a
+// symlink just before the open would leave a file outside the team that no
+// later check can remove, so a missing file means no write.
 // Always exits 0 and never prints: hook output or a nonzero exit would show as
 // `hook error` in the worker pane and change what the pane reads as.
 // The event name comes from argv (src/team/provider-events.ts PROVIDER_EVENT_NAMES
@@ -28,14 +32,14 @@ try {
   // OMC_TEAM_WORKER is `<team>/<worker>`.
   const worker = (process.env.OMC_TEAM_WORKER ?? '').split('/').pop() ?? '';
   if (process.platform !== 'win32' && /^[A-Za-z]+$/.test(event) && attempt && stateRoot && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(worker) && !worker.includes('..')) {
-    // No mkdir: a missing worker directory means the team is gone, and the hook
-    // must not recreate cleaned-up state.
+    // No mkdir or create: a missing worker directory or file means the team is
+    // gone or the launch did not set it up, and the hook must not recreate it.
     // The root is <storage anchor>/state/team/<team>.
     const dirs = [dirname(dirname(stateRoot)), dirname(stateRoot), stateRoot, join(stateRoot, 'workers'), join(stateRoot, 'workers', worker)];
     const path = join(dirs[4], 'provider-events.jsonl');
     const before = await Promise.all(dirs.map(dir => lstat(dir)));
     const handle = before.every(stats => stats.isDirectory())
-      ? await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+      ? await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK)
       : undefined;
     try {
       const opened = await handle?.stat();

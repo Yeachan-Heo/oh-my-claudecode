@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { buildLaunchArgs } from '../model-contract.js';
 import {
+  ensureProviderEventsLog,
   parseLatestProviderEvent,
   providerEventSettingsPath,
   readLatestProviderEvent,
@@ -35,6 +36,8 @@ function linkTeamPathComponent(base: string, outside: string, component: (typeof
 // ancestor check never meets a symlinked temp dir (TMPDIR=/tmp on macOS).
 function makeTeamRoot(prefix: string): { base: string; root: string } {
   const base = mkdtempSync(join(tmpdir(), prefix));
+  // A repository, so state for cwd `base` resolves to <base>/.omc.
+  execFileSync('git', ['init', '-q', base]);
   const root = join(base, '.omc', ...TEAM_PATH);
   mkdirSync(root, { recursive: true });
   return { base, root };
@@ -263,6 +266,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
 
   it('appends one v1 line for the current attempt and prints nothing', async () => {
     mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    await ensureProviderEventsLog(base, 'demo', 'worker-1');
     const env = { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' };
     for (const event of ['SessionStart', 'UserPromptSubmit', 'StopFailure']) {
       const result = run(await hookCommand(event), env);
@@ -399,7 +403,19 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
   it('writes nothing when the event argument is omitted', () => {
     const hook = join(__dirname, '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs');
     mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    writeFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'), '');
     const result = spawnSync(process.execPath, [hook], {
+      env: { PATH: process.env.PATH ?? '', OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' },
+      encoding: 'utf8',
+    });
+    expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toEqual({ status: 0, stdout: '', stderr: '' });
+    expect(readFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')).toBe('');
+  });
+
+  it('creates no log when the launch did not create one', () => {
+    const hook = join(__dirname, '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs');
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    const result = spawnSync(process.execPath, [hook, 'Stop'], {
       env: { PATH: process.env.PATH ?? '', OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' },
       encoding: 'utf8',
     });
@@ -409,7 +425,10 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
 
   it('writes nothing for a bad event name, a missing attempt or state root, or an unsafe worker name', () => {
     const hook = join(__dirname, '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs');
-    for (const worker of ['worker-1', 'w..1']) mkdirSync(join(root, 'workers', worker), { recursive: true });
+    for (const worker of ['worker-1', 'w..1']) {
+      mkdirSync(join(root, 'workers', worker), { recursive: true });
+      writeFileSync(join(root, 'workers', worker, 'provider-events.jsonl'), '');
+    }
     const good = { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' };
     const cases: Array<{ event: string; env: Record<string, string> }> = [
       { event: '', env: good },
@@ -429,13 +448,68 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       });
       expect({ event, env, status: result.status, stdout: result.stdout, stderr: result.stderr })
         .toEqual({ event, env, status: 0, stdout: '', stderr: '' });
-      for (const dir of ['workers', join('workers', 'worker-1'), join('workers', 'w..1')]) {
-        expect({ event, env, written: existsSync(join(root, dir, 'provider-events.jsonl')) })
-          .toEqual({ event, env, written: false });
+      expect({ event, env, created: existsSync(join(root, 'workers', 'provider-events.jsonl')) })
+        .toEqual({ event, env, created: false });
+      for (const worker of ['worker-1', 'w..1']) {
+        expect({ event, env, written: readFileSync(join(root, 'workers', worker, 'provider-events.jsonl'), 'utf8') })
+          .toEqual({ event, env, written: '' });
       }
     }
     // The same environment with a good event does write, so the cases above fail on their guard.
     expect(spawnSync(process.execPath, [hook, 'Stop'], { cwd: root, env: { PATH: process.env.PATH ?? '', ...good } }).status).toBe(0);
-    expect(existsSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'))).toBe(true);
+    expect(readFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')).toMatch(/"event":"Stop"/);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('ensureProviderEventsLog', () => {
+  let base = '';
+  let root = '';
+  let outside = '';
+  beforeEach(() => {
+    ({ base, root } = makeTeamRoot('provider-events-log-'));
+    outside = mkdtempSync(join(tmpdir(), 'provider-events-log-outside-'));
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('creates an empty log that the reader treats as no event', async () => {
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    await ensureProviderEventsLog(base, 'demo', 'worker-1');
+    const path = join(root, 'workers', 'worker-1', 'provider-events.jsonl');
+    expect(lstatSync(path).isFile()).toBe(true);
+    expect(readFileSync(path, 'utf8')).toBe('');
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+  });
+
+  it('keeps the events of an earlier launch on a relaunch', async () => {
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    const path = join(root, 'workers', 'worker-1', 'provider-events.jsonl');
+    writeFileSync(path, line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
+    await ensureProviderEventsLog(base, 'demo', 'worker-1');
+    expect(readFileSync(path, 'utf8')).toBe(line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
+  });
+
+  it('creates nothing when the worker directory is missing', async () => {
+    await expect(ensureProviderEventsLog(base, 'demo', 'worker-1')).rejects.toThrow();
+    expect(existsSync(join(root, 'workers'))).toBe(false);
+  });
+
+  it('creates nothing outside the team through a symlinked worker directory or leaf', async () => {
+    mkdirSync(join(root, 'workers'), { recursive: true });
+    symlinkSync(outside, join(root, 'workers', 'worker-1'));
+    await expect(ensureProviderEventsLog(base, 'demo', 'worker-1')).rejects.toThrow('team_instance_path_symlink');
+    mkdirSync(join(root, 'workers', 'worker-2'));
+    symlinkSync(join(outside, 'created.jsonl'), join(root, 'workers', 'worker-2', 'provider-events.jsonl'));
+    await expect(ensureProviderEventsLog(base, 'demo', 'worker-2')).rejects.toThrow();
+    expect(existsSync(join(outside, 'provider-events.jsonl'))).toBe(false);
+    expect(existsSync(join(outside, 'created.jsonl'))).toBe(false);
+  });
+
+  it('refuses a FIFO at once', async () => {
+    mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
+    execFileSync('mkfifo', [join(root, 'workers', 'worker-1', 'provider-events.jsonl')]);
+    await expect(ensureProviderEventsLog(base, 'demo', 'worker-1')).rejects.toThrow();
   });
 });

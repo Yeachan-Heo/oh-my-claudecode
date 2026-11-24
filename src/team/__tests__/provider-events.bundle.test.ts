@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildSync } from 'esbuild';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -23,6 +23,8 @@ describe.skipIf(process.platform === 'win32')('provider event hook from a bundle
     pkg = realpathSync(mkdtempSync(join(tmpdir(), "provider-events-bundle-it's-")));
     stateRoot = join(pkg, 'state');
     mkdirSync(join(stateRoot, 'workers', 'worker-1'), { recursive: true });
+    // The launch creates the log; the hook only appends.
+    writeFileSync(join(stateRoot, 'workers', 'worker-1', 'provider-events.jsonl'), '');
     mkdirSync(join(pkg, 'scripts'));
     copyFileSync(
       join(REPO_ROOT, 'scripts', 'team-provider-event-hook.mjs'),

@@ -13,6 +13,7 @@ import { constants, type Stats } from 'node:fs';
 import { lstat, open, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertTeamStatePathSafe, canonicalTeamStateRoot } from './state-paths.js';
 
 /** Hook events the worker records. Adding an event here is the whole change. */
 export const PROVIDER_EVENT_NAMES = ['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure'] as const;
@@ -49,6 +50,25 @@ export function parseLatestProviderEvent(content: string, attemptId: string): La
 
 export function providerEventsPath(teamStateRoot: string, workerName: string): string {
   return join(teamStateRoot, 'workers', workerName, PROVIDER_EVENTS_FILE);
+}
+
+/**
+ * Creates the worker's empty event log before its provider starts; a relaunch
+ * keeps the existing one. The hook only appends to an existing file, so it
+ * never creates one, even through a directory swapped for a symlink. Throws
+ * when the path is unsafe, the worker directory is missing, or the leaf is not
+ * a regular file.
+ */
+export async function ensureProviderEventsLog(cwd: string, teamName: string, workerName: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  const path = providerEventsPath(canonicalTeamStateRoot(cwd, teamName), workerName);
+  await assertTeamStatePathSafe(cwd, path);
+  const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    if (!(await handle.stat()).isFile()) throw new Error('provider_events_log_not_a_file');
+  } finally {
+    await handle.close();
+  }
 }
 
 const sameNode = (a: Stats, b: Stats): boolean => a.dev === b.dev && a.ino === b.ino;

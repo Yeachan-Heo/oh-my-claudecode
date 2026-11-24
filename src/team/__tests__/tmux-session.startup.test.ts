@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -1978,6 +1978,32 @@ describe('worker pane startup safety', () => {
         expect(isAlive(descendantPid)).toBe(true);
       }
     }, 30_000);
+  });
+
+  // The provider event hook only appends, so the launch must create the log.
+  strictTmuxIt('creates an empty provider event log for a claude worker before its provider starts', async () => {
+    cwd = await createFixture('omc-startup-provider-events-');
+    process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
+    processMocks.isProcessIdentityLive.mockResolvedValue('dead');
+
+    await expect(spawnOwnedWorkerInPane('startup:0', ownership(), {
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      instanceId: randomUUID(),
+      envVars: {},
+      launchArgs: ['--version'],
+      launchBinary: '/usr/bin/claude',
+      cwd,
+      provider: 'claude',
+      launchBootstrapPath: '/runtime-cli.js',
+      launchStateCwd: cwd,
+      launchContext: { kind: 'initial' },
+    })).rejects.toThrow('worker_launch_cleanup_unverified');
+
+    const log = join(getOmcRoot(cwd), 'state', 'team', 'startup-team', 'workers', 'worker-1', 'provider-events.jsonl');
+    expect(lstatSync(log).isFile()).toBe(true);
+    expect(readFileSync(log, 'utf8')).toBe('');
+    delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
   });
 
   it('refuses an owned worker launch without its immutable instance id', async () => {
