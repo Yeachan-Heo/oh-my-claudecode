@@ -57,7 +57,9 @@ export function providerEventsPath(teamStateRoot: string, workerName: string): s
  * keeps the existing one. The hook only appends to an existing file, so it
  * never creates one, even through a directory swapped for a symlink. Throws
  * when the path is unsafe, the worker directory is missing, or the leaf is not
- * a regular file.
+ * a regular file. Node has no openat(), so a directory swapped between the
+ * check and the open is still followed here, as for every other launch-time
+ * write into the worker directory (writeWorkerOverlay()).
  */
 export async function ensureProviderEventsLog(cwd: string, teamName: string, workerName: string): Promise<void> {
   if (process.platform === 'win32') return;

@@ -34,6 +34,15 @@ function linkTeamPathComponent(base: string, outside: string, component: (typeof
 
 // Fixtures live at <temp>/.omc/state/team/demo like production, so the
 // ancestor check never meets a symlinked temp dir (TMPDIR=/tmp on macOS).
+// The fixtures and ensureProviderEventsLog() resolve state for cwd `base` to
+// <base>/.omc only without a centralized state dir.
+const inheritedStateDir = process.env.OMC_STATE_DIR;
+beforeEach(() => { delete process.env.OMC_STATE_DIR; });
+afterEach(() => {
+  if (inheritedStateDir === undefined) delete process.env.OMC_STATE_DIR;
+  else process.env.OMC_STATE_DIR = inheritedStateDir;
+});
+
 function makeTeamRoot(prefix: string): { base: string; root: string } {
   const base = mkdtempSync(join(tmpdir(), prefix));
   // A repository, so state for cwd `base` resolves to <base>/.omc.
@@ -295,6 +304,8 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       const target = join(outside, 'events.jsonl');
       writeFileSync(target, '');
       symlinkSync(target, join(root, 'workers', 'worker-1', 'provider-events.jsonl'));
+      // worker-2 resolves into `outside`, where a log already waits to be appended to.
+      writeFileSync(join(outside, 'provider-events.jsonl'), '');
       symlinkSync(outside, join(root, 'workers', 'worker-2'));
       // A dangling leaf link: following it with O_CREAT would create its target outside the team.
       mkdirSync(join(root, 'workers', 'worker-3'));
@@ -306,7 +317,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
         expect(result.stderr).toBe('');
       }
       expect(readFileSync(target, 'utf8')).toBe('');
-      expect(existsSync(join(outside, 'provider-events.jsonl'))).toBe(false);
+      expect(readFileSync(join(outside, 'provider-events.jsonl'), 'utf8')).toBe('');
       expect(existsSync(join(outside, 'created.jsonl'))).toBe(false);
     } finally {
       rmSync(outside, { recursive: true, force: true });
@@ -429,6 +440,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       mkdirSync(join(root, 'workers', worker), { recursive: true });
       writeFileSync(join(root, 'workers', worker, 'provider-events.jsonl'), '');
     }
+    writeFileSync(join(root, 'workers', 'provider-events.jsonl'), '');
     const good = { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' };
     const cases: Array<{ event: string; env: Record<string, string> }> = [
       { event: '', env: good },
@@ -448,9 +460,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       });
       expect({ event, env, status: result.status, stdout: result.stdout, stderr: result.stderr })
         .toEqual({ event, env, status: 0, stdout: '', stderr: '' });
-      expect({ event, env, created: existsSync(join(root, 'workers', 'provider-events.jsonl')) })
-        .toEqual({ event, env, created: false });
-      for (const worker of ['worker-1', 'w..1']) {
+      for (const worker of ['', 'worker-1', 'w..1']) {
         expect({ event, env, written: readFileSync(join(root, 'workers', worker, 'provider-events.jsonl'), 'utf8') })
           .toEqual({ event, env, written: '' });
       }
