@@ -70,10 +70,11 @@
  *     scan, which runs before ownership, reads by name; its verdict is only a hint and is decided again under the lock.
  *   - Removal never follows a symbolic link: a link is unlinked, its target is left alone. Every directory is opened
  *     without following links, checked to be the one that was seen, and its entries are removed relative to that open
- *     directory, so a directory swapped for a link while the tree is walked cannot redirect the removal. Two steps are
- *     by name, because the operations have no form relative to a directory: the final rmdir of the top directory, and
- *     the rmdir of an emptied subdirectory where the platform's operations have no `rmdir` (macOS). A directory
- *     swapped in at that moment is removed only if it is empty, and rmdir never follows a link.
+ *     directory, so a directory swapped for a link while the tree is walked cannot redirect the removal. One step is by
+ *     name, because the operations have no form relative to a directory: the final rmdir of the top directory. A
+ *     directory swapped in at that moment is removed only if it is empty, and rmdir never follows a link. Where the
+ *     platform's operations have no `rmdir` (macOS), a tree that has a subdirectory is refused before anything is
+ *     removed, because removing the emptied subdirectory by its path would follow a swapped ancestor.
  *   - An invalid retention value stops the command before anything is touched.
  */
 

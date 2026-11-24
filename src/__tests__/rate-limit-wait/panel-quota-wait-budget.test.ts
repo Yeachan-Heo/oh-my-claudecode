@@ -176,6 +176,22 @@ describe('panel quota wait: the budget of a pass is shared fairly', () => {
     expect(r.sent).toEqual(['%2']);
   });
 
+  it('a new error whose capture used up the pass is rotated past, so a wait that comes due behind it is served in the next pass', async () => {
+    const [slowNew, waiting] = [paneAt(1), paneAt(2)];
+    const r = rig([slowNew, waiting], { panes: { [paneKey(waiting)]: waitingEntry(waiting, BASE_MS + HOUR_MS) } });
+    r.slow.add(slowNew.id);
+
+    await r.pass();
+    expect(r.captured, 'the capture of the new error used up the pass').toEqual(['%1']);
+    expect(r.sent).toEqual([]);
+
+    // The saved reset of the other pane comes due.
+    r.clock.now = BASE_MS + HOUR_MS;
+    await r.pass();
+    expect(r.captured[0], 'the pane that was captured is not the first one again').toBe('%2');
+    expect(r.sent).toEqual(['%2']);
+  });
+
   it('a pass that reached every pane has nothing left to rotate: the cursor is cleared', async () => {
     const [first, second] = [paneAt(1), paneAt(2)];
     const r = rig([first, second], { panes: {}, cursor: paneKey(second) });

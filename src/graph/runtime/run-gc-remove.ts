@@ -48,10 +48,11 @@ export interface ScannedRun {
 // Every directory is opened without following a link (O_NOFOLLOW), checked to be the one that was just seen, and its
 // entries are removed relative to the open directory (`unlink`, and `rmdir` of an emptied subdirectory), so a directory
 // swapped for a link while the tree is walked cannot redirect the removal. The same code serves every platform that has
-// directory-relative operations; where there are none nothing is removed. Two steps are by name where the operations
-// have no form that is relative to a directory: the final rmdir of the top directory, and the rmdir of an emptied
-// subdirectory on a platform whose operations have no `rmdir` (macOS). A directory swapped in at that moment is removed
-// only if it is empty, and a link is never followed by rmdir.
+// directory-relative operations; where there are none nothing is removed. One step is by name, because the operations
+// have no form that is relative to a directory: the final rmdir of the top directory. A platform whose operations have no
+// `rmdir` (macOS) removes only a tree without subdirectories and refuses any other before anything is removed, because the
+// rmdir of an emptied subdirectory by its path would follow an ancestor that was swapped for a link. A directory swapped in
+// at the final step is removed only if it is empty, and a link is never followed by rmdir.
 export function removeTree(
   path: string,
   interlock: { afterLstat?: (path: string) => void; operationsFor?: OperationsFor } = {},
@@ -84,7 +85,22 @@ function removeEntriesOf(
 ): void {
   const operations = operationsFor(directoryFd);
   if (operations === null) throw new Error("this platform has no directory-relative file operations; nothing was removed");
-  for (const name of operations.readDir()) {
+  const names = operations.readDir();
+  // Without a directory-relative rmdir an emptied subdirectory could only be removed by its path, which follows any
+  // ancestor that was swapped for a link, so a tree that has a subdirectory is refused before anything in it is removed.
+  if (operations.rmdir === undefined) {
+    for (const name of names) {
+      let stat;
+      try {
+        stat = operations.lstat(name);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      if (stat.isDirectory()) throw new Error("this platform has no directory-relative rmdir; nothing was removed");
+    }
+  }
+  for (const name of names) {
     let stat;
     try {
       stat = operations.lstat(name);
@@ -112,7 +128,7 @@ function removeEntriesOf(
     } finally {
       closeSync(childFd);
     }
-    ignoreMissing(() => (operations.rmdir === undefined ? rmdirSync(entry) : operations.rmdir(name)));
+    ignoreMissing(() => operations.rmdir?.(name));
   }
 }
 

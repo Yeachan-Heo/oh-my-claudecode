@@ -579,7 +579,9 @@ export async function runPanelQuotaPass(
       endQuota(entry, deps, now, `wait limit reached (${max})`, entry.resetMs ?? null);
       continue;
     }
-    if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: false }; break; }
+    // The capture of this pane is done, so a pass that has no time left here has worked on the pane: it goes to the end of the
+    // next pass, and a pane behind it that comes due is not kept waiting by it again.
+    if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
     const reading = await withTimeLimit(deps.readQuota(), timeLeft());
     if (reading === TIME_LIMIT) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
     const plan = planForReading(reading, now, settleMs, weekUnit);

@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { removeRun, removeTree, repairTornTail, type RepairInterlock, scanRuns, type ScannedRun } from "../../runtime/run-gc.js";
-import { KINDS_WITH_OPERATIONS, NOW, OLD, SCENARIOS, ageTree, decisionOf, gc, journalText, makeFinishedRun, makeRealRun, makeRoot, makeScenarioRun, makeTornRun, noOperations, operationCalls, removeTempBases, scannedFirst, snapshot, withBase } from "./run-gc-fixtures.js";
+import { KINDS_WITH_OPERATIONS, NOW, OLD, SCENARIOS, ageTree, decisionOf, gc, journalText, makeFinishedRun, makeRealRun, makeRoot, makeScenarioRun, makeTornRun, macLike, noOperations, operationCalls, removeTempBases, scannedFirst, snapshot, withBase } from "./run-gc-fixtures.js";
 
 afterEach(() => {
   removeTempBases();
@@ -228,6 +228,16 @@ describe.runIf(process.platform === "linux")("decisions and removal under owners
         const before = snapshot(outside);
 
         const result = gc(root, { remove: (realRoot, id, scanned) => removeRun(realRoot, id, { ...scanned, operationsFor } as ScannedRun) });
+        if (operationsFor === macLike) {
+          // No directory-relative rmdir: a tree with a subdirectory is refused, and what is left is only a quarantined copy.
+          expect(decisionOf(result, "run-tree").action).toBe("failed");
+          expect(decisionOf(result, "run-tree").error).toMatch(/no directory-relative rmdir; nothing was removed/);
+          const left = readdirSync(root).filter((name) => name.startsWith(".deleted-run-tree-"));
+          expect(left, "the refused run is left in quarantine, whole").toHaveLength(1);
+          expect(existsSync(join(root, left[0], "artifacts", "top.txt"))).toBe(true);
+          expect(snapshot(outside), "the target of a link inside the run was touched").toBe(before);
+          return;
+        }
         expect(decisionOf(result, "run-tree").action, JSON.stringify(result.runs)).toBe("deleted");
         expect(existsSync(dir)).toBe(false);
         expect(readdirSync(root)).toEqual([]);
@@ -257,7 +267,8 @@ describe.runIf(process.platform === "linux")("decisions and removal under owners
             },
           }),
         ).toThrow();
-        expect(swapped, "the interlock did not run").toBe(true);
+        // Without a directory-relative rmdir the tree is refused before the walk, so the interlock has nothing to swap.
+        if (operationsFor !== macLike) expect(swapped, "the interlock did not run").toBe(true);
         expect(snapshot(outside), "a file outside the removed tree was deleted through the swapped link").toBe(before);
       });
     });
@@ -334,6 +345,51 @@ describe.runIf(process.platform === "linux")("a failed put-back of a moved direc
       const kept = readdirSync(root).filter((name) => name !== "run-rollback" && existsSync(join(root, name, "journal.jsonl")));
       expect(kept, "a later pass deleted the directory that could not be put back").toHaveLength(1);
       expect(readFileSync(join(root, kept[0], "journal.jsonl"), "utf8")).toBe(replacementJournal);
+    });
+  });
+});
+
+// Where the operations have no rmdir relative to a directory, an emptied subdirectory could only be removed by its path,
+// and an ancestor swapped for a link would redirect that removal. Such a platform refuses a tree that has a subdirectory.
+describe.runIf(process.platform === "linux")("removal of a nested directory on a platform whose operations have no rmdir", () => {
+  it("an ancestor swapped for a link while a deeper directory is removed does not remove a directory outside the tree", () => {
+    withBase((base) => {
+      const tree = join(base, "tree");
+      mkdirSync(join(tree, "artifacts", "deep"), { recursive: true });
+      const outside = join(base, "outside");
+      mkdirSync(join(outside, "deep"), { recursive: true });
+      const before = snapshot(outside);
+
+      expect(() =>
+        removeTree(tree, {
+          operationsFor: macLike,
+          afterLstat: (entry) => {
+            if (!entry.endsWith(join("artifacts", "deep"))) return;
+            renameSync(join(tree, "artifacts"), join(base, "parked"));
+            symlinkSync(outside, join(tree, "artifacts"));
+          },
+        }),
+      ).toThrow();
+      expect(existsSync(join(outside, "deep")), "a directory outside the tree was removed through the swapped ancestor").toBe(true);
+      expect(snapshot(outside)).toBe(before);
+    });
+  });
+
+  it("a tree that has a subdirectory is refused before anything in it is removed, and a flat tree is removed", () => {
+    withBase((base) => {
+      const tree = join(base, "tree");
+      mkdirSync(join(tree, "sub"), { recursive: true });
+      writeFileSync(join(tree, "sub", "file.txt"), "x\n");
+      writeFileSync(join(tree, "top.txt"), "y\n");
+      const before = snapshot(tree);
+      expect(() => removeTree(tree, { operationsFor: macLike })).toThrow(/no directory-relative rmdir; nothing was removed/);
+      expect(snapshot(tree), "something was removed").toBe(before);
+
+      const flat = join(base, "flat");
+      mkdirSync(flat);
+      writeFileSync(join(flat, "a.txt"), "a\n");
+      removeTree(flat, { operationsFor: macLike });
+      expect(existsSync(flat)).toBe(false);
     });
   });
 });
