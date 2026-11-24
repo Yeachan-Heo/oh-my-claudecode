@@ -126,16 +126,28 @@ def setting(cli, key, required=False):
     return v or ''
 
 
+def claude_config_dir():
+    """Claude Code configuration directory as OMC resolves it (src/utils/config-dir.ts): CLAUDE_CONFIG_DIR with surrounding
+    blanks removed; ~, ~/x and ~\\x are expanded (both separators), anything else is kept; default ~/.claude."""
+    home = os.path.expanduser('~')
+    configured = os.environ.get('CLAUDE_CONFIG_DIR', '').strip()
+    if not configured:
+        return os.path.normpath(os.path.join(home, '.claude'))
+    if configured == '~':
+        return os.path.normpath(home)
+    if configured.startswith('~/') or configured.startswith('~\\'):
+        return os.path.normpath(os.path.join(home, configured[2:]))
+    return os.path.normpath(configured)
+
+
 def default_settings():
     """The settings.json the settings tool registers the hook in when no path is given (the same rule as the tool)."""
-    base = os.environ.get('CLAUDE_CONFIG_DIR', '').strip() or '~/.claude'
-    return os.path.join(os.path.expanduser(base), 'settings.json')
+    return os.path.join(claude_config_dir(), 'settings.json')
 
 
 def default_usage_cache():
     """The file OMC's status line and `omc wait` write (src/hud/usage-api.ts); the guard only reads it."""
-    base = os.environ.get('CLAUDE_CONFIG_DIR', '').strip() or '~/.claude'
-    return os.path.join(os.path.expanduser(base), 'plugins', 'oh-my-claudecode', '.usage-cache-anthropic.json')
+    return os.path.join(claude_config_dir(), 'plugins', 'oh-my-claudecode', '.usage-cache-anthropic.json')
 
 
 PAUSE_FILE = setting(A.pause_file, 'pause_file', required=True)
@@ -184,6 +196,26 @@ def check_distinct(files):
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def entry_parts(command):
+    """(hook scripts, interpreter files, log files, pause files) that a hook entry command names, by the option or position
+    they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their file names say.
+    Raises ValueError for a command the shell cannot parse."""
+    tokens = shlex.split(command)
+    operands = {}
+    for i, t in enumerate(tokens[:-1]):
+        if t in ('-f', '-x', '--pause-file', '--log'):
+            operands[i + 1] = t
+    hooks = [t for i, t in enumerate(tokens) if i not in operands and HOOK_NAME in os.path.basename(t)]
+    return (hooks, [tokens[i] for i, o in operands.items() if o == '-x'], [tokens[i] for i, o in operands.items() if o == '--log'],
+            [tokens[i] for i, o in operands.items() if o == '--pause-file'], tokens)
+
+
+def command_hooks(groups):
+    """The command handlers of PreToolUse groups that run our hook: [(group, handler command)]."""
+    return [(g, h.get('command')) for g in groups for h in g.get('hooks', [])
+            if h.get('type') == 'command' and isinstance(h.get('command'), str) and HOOK_NAME in h['command']]
+
+
 def registered_runtime_files():
     """The hook script and the interpreter that the hook entry in settings.json names (they can be anywhere: `add --hook` takes
     any path). Best effort: an unreadable settings file gives none (hook_check says so later)."""
@@ -191,15 +223,11 @@ def registered_runtime_files():
     try:
         with open(SETTINGS or default_settings()) as f:
             groups = json.load(f).get('hooks', {}).get('PreToolUse', [])
-        for g in groups:
-            for h in g.get('hooks', []):
-                command = h.get('command') or ''
-                if HOOK_NAME not in command:
-                    continue
-                tokens = shlex.split(command)
-                found += [('registered hook', t) for t in tokens if HOOK_NAME in os.path.basename(t) and os.path.isabs(t)]
-                found += [('registered interpreter', tokens[i + 1]) for i, t in enumerate(tokens[:-1]) if t == '-x' and os.path.isabs(tokens[i + 1])]
-                found += [('registered hook log', tokens[i + 1]) for i, t in enumerate(tokens[:-1]) if t == '--log' and os.path.isabs(tokens[i + 1])]
+        for _group, command in command_hooks(groups):
+            hooks, interpreters, logs, _pauses, _tokens = entry_parts(command)
+            found += [('registered hook', t) for t in hooks if os.path.isabs(t)]
+            found += [('registered interpreter', t) for t in interpreters if os.path.isabs(t)]
+            found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
     except Exception:
         pass
     return found
@@ -353,8 +381,9 @@ def hook_check(where):
         with open(SETTINGS) as f:
             data = json.load(f)
         groups = data.get('hooks', {}).get('PreToolUse', [])
-        ours = [h.get('command') or '' for g in groups for h in g.get('hooks', []) if HOOK_NAME in (h.get('command') or '')]
-        matchers = [g.get('matcher') for g in groups if any(HOOK_NAME in (h.get('command') or '') for h in g.get('hooks', []))]
+        entries = command_hooks(groups)
+        ours = [c for _g, c in entries]
+        matchers = [g.get('matcher') for g, _c in entries]
     except Exception as e:
         log(f'WARNING ({where}): cannot read the hook entries of {SETTINGS}: {e!r}')
         return
@@ -364,25 +393,19 @@ def hook_check(where):
         log(f'WARNING ({where}): the hook entry in {SETTINGS} has the matcher {matchers[0]!r}, which does not cover every tool: calls of other tools would go on during a pause. Run five-hour-guard-settings.py add again')
     for command in ours:
         try:
-            paths = [t for t in shlex.split(command) if HOOK_NAME in os.path.basename(t)]
-        except ValueError:
-            paths = []
-        for path in paths:
-            if not os.path.isfile(path):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which does not exist: the shell guard of the entry lets every call through, so a pause would hold no session')
-        try:
-            tokens = shlex.split(command)
+            hooks, interpreters, _logs, pauses, _tokens = entry_parts(command)
         except ValueError:
             log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
             continue
-        if '--pause-file' not in tokens[:-1]:
+        for path in hooks:
+            if not os.path.isfile(path):
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which does not exist: the shell guard of the entry lets every call through, so a pause would hold no session')
+        if not pauses:
             log(f'WARNING ({where}): the hook entry in {SETTINGS} has no value for --pause-file: the hook would start without a pause file and hold nothing. Run five-hour-guard-settings.py add again')
-        else:
-            read = tokens[tokens.index('--pause-file') + 1]
+        for read in pauses:
             if os.path.abspath(read) != os.path.abspath(PAUSE_FILE):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} reads the pause file {read}, but the guard writes {PAUSE_FILE}: a pause would hold no session. Run five-hour-guard-settings.py add again')
-        if '-x' in tokens[:-1]:
-            interpreter = tokens[tokens.index('-x') + 1]
+        for interpreter in interpreters:
             if not os.access(interpreter, os.X_OK):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} names the interpreter {interpreter}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
 
@@ -422,19 +445,24 @@ def enter_pause(state, pct, reset_ts):
 
 
 def leave_pause(state, why):
-    if not unpublish():
-        raise OSError(f'the pause file {PAUSE_FILE} could not be removed: the pause stays in the state and is left again at the next tick')
-    if not state.get('leave_pending'):
-        log(f'RESUMED ({why}): pause file removed, waiting tool calls continue')
-    # persist first: when the write fails the state keeps the pause (in memory too) and remembers that the pause was already
-    # left, so the next tick finishes it whatever the cache shows by then; a pause is never published again after it was left
-    state['leave_pending'] = why
-    write_json(STATE, {**{k: v for k, v in state.items() if k != 'leave_pending'}, 'paused': False, 'since': None, 'resume_at': None})
-    state.pop('leave_pending', None)
+    """Leave the pause in this order: the state is written first, the pause file removed after. When the write fails nothing has
+    changed (the pause stays in force, in memory, on disk and as a file) and the next tick tries again; when the removal fails
+    the state is already unpaused and the removal is retried by the next tick (and by the next start, as a leftover)."""
+    write_json(STATE, {**{k: v for k, v in state.items() if k != 'unlink_pending'}, 'paused': False, 'since': None, 'resume_at': None})
     state.update(paused=False, since=None, resume_at=None)
+    if not unpublish():
+        state['unlink_pending'] = True
+        raise OSError(f'the pause file {PAUSE_FILE} could not be removed: the removal is tried again at the next tick')
+    state.pop('unlink_pending', None)
+    log(f'RESUMED ({why}): pause file removed, waiting tool calls continue')
 
 
 def tick(state):
+    if state.get('unlink_pending'):
+        if not unpublish():
+            raise OSError(f'the pause file {PAUSE_FILE} could not be removed: the removal is tried again at the next tick')
+        state.pop('unlink_pending', None)
+        log('RESUMED (pause file removed on retry): waiting tool calls continue')
     pct, reset_ts, age, problem = read_cache()
     if problem:
         warn_data(*problem)
@@ -455,9 +483,6 @@ def tick(state):
             log(f'[dry run] 5h {pct} %, cache age {age:.0f} s: no action')
         return
     # paused: the hook, its interpreter or the settings entry can be removed while a pause lasts for hours
-    if state.get('leave_pending'):
-        leave_pause(state, state['leave_pending'])   # the pause file is gone, only the state write is left to do
-        return
     if LAST_WIRING_CHECK[0] is None or time.monotonic() - LAST_WIRING_CHECK[0] >= A.warn_every:
         hook_check('pause')
     if fresh and pct < RESUME_BELOW:
@@ -579,19 +604,17 @@ def main():
     if os.path.exists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):
         # the start would remove it as a leftover: never remove a file that is not a pause of this guard (a mistyped path)
         fail(f'the file {PAUSE_FILE} exists and is not a pause file of this guard: it is left untouched; check "pause_file", or remove the file yourself')
-    owner, valid_until = None, 0
-    try:
-        with open(PAUSE_FILE) as f:
-            doc = json.load(f)
-        owner, valid_until = doc.get('pid'), doc.get('valid_until') or 0
-    except Exception:
-        pass
-    if owner is not None and owner != os.getpid() and valid_until > time.time() and pid_alive(owner):
-        # a guard that is alive renews valid_until every tick: a pause whose heartbeat has lapsed is a leftover, and its pid may
-        # belong to an unrelated process by now. Another guard (an older one that takes no lock on the pause file) with a
-        # current heartbeat would replace the pause on the first tick and the two would remove each other's: refuse to start
-        fail(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: another guard uses it; two guards must not share one pause_file')
-    lock_state()
+    lock_state()   # one guard per pause file: a pid in the file proves nothing (it may be reused after a crash), the lock does
+    if fcntl is None:   # no lock on this platform: the heartbeat and the pid are all there is
+        owner, valid_until = None, 0
+        try:
+            with open(PAUSE_FILE) as f:
+                doc = json.load(f)
+            owner, valid_until = doc.get('pid'), doc.get('valid_until') or 0
+        except Exception:
+            pass
+        if owner is not None and owner != os.getpid() and valid_until > time.time() and pid_alive(owner):
+            fail(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: another guard uses it; two guards must not share one pause_file')
     state = load_state()
     if state.get('paused'):
         if state.get('resume_at') and time.time() < state['resume_at']:

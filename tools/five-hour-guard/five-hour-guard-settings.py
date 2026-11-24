@@ -63,7 +63,21 @@ for _key in ('settings_file', 'pause_file', 'hook_log_file'):
     if CFG.get(_key) and '\0' in CFG[_key]:
         fail(f'"{_key}" holds a NUL character: not a file path')
 
-CONFIG_DIR = os.path.expanduser((os.environ.get('CLAUDE_CONFIG_DIR') or '').strip() or '~/.claude')
+def claude_config_dir():
+    """Claude Code configuration directory as OMC resolves it (src/utils/config-dir.ts): CLAUDE_CONFIG_DIR with surrounding
+    blanks removed; ~, ~/x and ~\\x are expanded (both separators), anything else is kept; default ~/.claude."""
+    home = os.path.expanduser('~')
+    configured = (os.environ.get('CLAUDE_CONFIG_DIR') or '').strip()
+    if not configured:
+        return os.path.normpath(os.path.join(home, '.claude'))
+    if configured == '~':
+        return os.path.normpath(home)
+    if configured.startswith('~/') or configured.startswith('~\\'):
+        return os.path.normpath(os.path.join(home, configured[2:]))
+    return os.path.normpath(configured)
+
+
+CONFIG_DIR = claude_config_dir()
 SETTINGS = A.settings or CFG.get('settings_file') or os.path.join(CONFIG_DIR, 'settings.json')
 PAUSE_FILE = A.pause_file or CFG.get('pause_file')
 HOOK_LOG = A.hook_log if A.hook_log is not None else CFG.get('hook_log_file')
@@ -98,7 +112,8 @@ def command():
 
 
 def hook_is_ours(h):
-    return MARK in (h.get('command') or '')
+    # a handler of another type (prompt, http) does not run a command: it is not our hook, whatever its command field says
+    return h.get('type') == 'command' and MARK in (h.get('command') or '')
 
 
 def is_ours(group):

@@ -302,6 +302,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     const viaTilde = runSync(SETTINGS_TOOL, ['check'], { env: { ...env, CLAUDE_CONFIG_DIR: '  ~/cfg  ' } });
     expect(viaTilde.status, viaTilde.stderr).toBe(1);
     expect(viaTilde.stdout).toContain(join(home, 'cfg', 'settings.json'));
+    const viaBackslash = runSync(SETTINGS_TOOL, ['check'], { env: { ...env, CLAUDE_CONFIG_DIR: '~\\cfg' } });
+    expect(viaBackslash.stdout, 'the ~\\ form is expanded like OMC does').toContain(join(home, 'cfg', 'settings.json'));
     const blank = runSync(SETTINGS_TOOL, ['check'], { env: { ...env, CLAUDE_CONFIG_DIR: '   ' } });
     expect(blank.stdout, 'a blank value counts as unset').toContain(join(home, '.claude', 'settings.json'));
   });
@@ -477,6 +479,17 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
     expect(r.stderr).toMatch(/same file/);
     expect(readText(f.settings)).toBe(original);
+  });
+
+  it('a handler that is not a command is not our hook: check does not report it, add registers a real entry next to it', () => {
+    const f = fixture('settings-handler-type');
+    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'prompt', command: 'x /old/five-hour-guard-hook.py' }] }] } });
+    expect(tool(f, 'check').status).toBe(1);
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre).toHaveLength(2);
+    expect(pre[0].hooks[0].type, 'the other handler stays as it was').toBe('prompt');
+    expect(tool(f, 'check').status).toBe(0);
   });
 
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
