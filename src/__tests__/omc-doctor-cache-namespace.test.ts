@@ -398,6 +398,22 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
+    // OMC_PLUGIN_ROOT on a checkout outside the registry is the install the session runs (Step 1: Channel: plugin-dir) and the
+    // runtime reads that checkout, so a stale cache beside it says nothing about the marker.
+    test('an explicit checkout outside the registry skips the comparison with the cache beside it', () => {
+      for (const marker of [OLD, NEW]) {
+        const { dir } = setup([OMC, OWN]);
+        try {
+          const checkout = path.join(dir, 'checkout');
+          mkdirSync(checkout);
+          const out = claudeMdAt(dir, marker, 'linux', { OMC_PLUGIN_ROOT: checkout });
+          expect({ marker, out }).toEqual({ marker, out: ['Latest cached plugin version: (unknown)', expect.stringMatching(/^VERSION CHECK SKIPPED: .*plugin-dir/)] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
     test('with no root that an entry holds the last supported ID whose cache has a version names it: no root, a checkout outside the registry, a root that does not exist', () => {
       for (const platform of PLATFORMS) {
         if (hostCannot(platform)) continue;

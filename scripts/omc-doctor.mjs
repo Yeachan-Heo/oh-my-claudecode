@@ -688,6 +688,10 @@ const claudeMdVersion = () => {
   // A registry that cannot be used (as in Step 1) leaves open which marketplace the session runs, and a cache that cannot be
   // read may hold the newest version, so no version is named while either is unreadable.
   const registryUnusable = registry.unreadable || (registry.supported.length > 0 ? registry.malformed : registry.ambiguous);
+  // The checkout Step 1 reports as plugin-dir: an existing OMC_PLUGIN_ROOT that is no install a supported entry names.
+  const explicitRoot = (process.env.OMC_PLUGIN_ROOT || '').trim();
+  // (CLAUDE_PLUGIN_ROOT alone is a locator the shell blocks set to the plugin itself, so it is no checkout here.)
+  const checkout = !!explicitRoot && isDirectory(explicitRoot) && !registry.supported.some(([id, entries]) => entries.some((entry) => entryInstallPaths(marketplaceOf(id), entry).some((target) => askSame(target, explicitRoot) != 'no')));
   const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
   const rootsConflict = sameRoots == 'no';
   let unreadableCache = '';
@@ -701,6 +705,9 @@ const claudeMdVersion = () => {
   } else if (states.some(([, state]) => state.unknown)) {
     // As in Step 1: among the entries of one plugin ID a certain match decides, but a match that is unknown for any ID
     // leaves open which marketplace the session runs.
+    pluginVersion = '(unknown)';
+  } else if (checkout) {
+    // As in Step 1 (Channel: plugin-dir): the session runs the explicit checkout, which the runtime reads, so a cache beside it is no answer.
     pluginVersion = '(unknown)';
   } else if (sameRoots != 'yes') {
     // As in Step 1 (Channel: unknown): the session runs one of two different roots (or two that cannot be told apart), and the runtime reads CLAUDE_PLUGIN_ROOT alone.
@@ -725,6 +732,8 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: the plugin cache cannot be read, so no version is compared');
   } else if (claudeVersion === '(unreadable)') {
     console.log('VERSION CHECK SKIPPED: a CLAUDE source cannot be read, so its OMC:VERSION marker is unknown (see OMC version source)');
+  } else if (checkout && sameRoots == 'yes') {
+    console.log('VERSION CHECK SKIPPED: the session runs a plugin-dir checkout (OMC_PLUGIN_ROOT outside the registry), so the plugin cache says nothing about it and no cache is chosen');
   } else if (running.length > 1 && !rootsConflict) {
     console.log('VERSION CHECK SKIPPED: the plugin root the session runs is recorded by more than one marketplace, so it is unknown which cache is the install and no cache is chosen');
   } else if (rootsConflict) {
@@ -1227,7 +1236,13 @@ const cacheRepair = (kind) => {
           if (taken(backup)) throw new Error('the backup destination ' + backup + ' exists already, so nothing was moved to it');
           // Everything is read again just before the move: the backup directory (a change stops the command) and the
           // protection (a version that became protected is skipped).
-          const here = backupPlace(registry);
+          const current = readRegistry();
+          if (current.unreadable) {
+            // The registry turned unreadable: the protection below says so too, and the version stays.
+            skipped++;
+            return;
+          }
+          const here = backupPlace(current);
           if (here.problem || here.place != target.place) throw new Error('the backup directory changed or overlaps a cache tree now, so nothing more was moved: ' + (here.problem || here.place));
           const again = protectionOf(dir, versions);
           if (again.unreadable || again.noIdentity || !again.pinned.length || again.kept.includes(name)) {

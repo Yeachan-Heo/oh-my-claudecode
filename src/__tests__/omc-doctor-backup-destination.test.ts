@@ -358,6 +358,32 @@ fs.renameSync = function (...args) {
     }
   });
 
+  // The registry is read again with every recheck: an install path that another process registers after the destination was
+  // chosen (here the backup directory itself, for another plugin) stops the run before the next version is moved.
+  test('a registry that gains an install path equal to the backup directory after the first move stops the run: the second version stays', () => {
+    const change = `const fs = require('fs'); const real = fs.renameSync; let calls = 0;
+fs.renameSync = function (...args) {
+  const result = real.apply(this, args);
+  calls += 1;
+  if (calls === 1) fs.writeFileSync(process.env.REGISTRY_FILE, process.env.REGISTRY_NEXT);
+  return result;
+};
+`;
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        const preload = path.join(dir, 'change-registry.cjs');
+        writeFileSync(preload, change);
+        const next = JSON.stringify({ version: 2, plugins: { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0', installPath: path.join(cache, '5.8.0') }], 'other-plugin@market': [{ scope: 'user', installPath: backupDir(dir) }] } });
+        const result = runCommand(command, dir, { preloads: [preload], env: { REGISTRY_FILE: path.join(dir, 'plugins', 'installed_plugins.json'), REGISTRY_NEXT: next }, timeout: 20_000 });
+        expect({ command, status: result.status, failed: /Cache move failed \(1 moved before the error\)/.test(result.stdout) }).toEqual({ command, status: 1, failed: true });
+        expect(readdirSync(cache).sort()).toHaveLength(2);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('the shell block of the skill gives the same refusal as the script on the same fixture', () => {
     for (const command of commands) {
       const { dir, cache, inside } = profile();
