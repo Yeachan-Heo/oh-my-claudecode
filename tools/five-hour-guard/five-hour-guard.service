@@ -1,7 +1,7 @@
 # Example systemd USER unit for the five-hour limit guard (Linux only; the guard is an ordinary process and does not need systemd).
 # Template: replace the three @...@ values (see README.md, "Run the guard").
 #   @PYTHON_BIN@   absolute path of the python3 binary
-#   @INSTALL_DIR@  absolute path of the directory the three five-hour-guard*.py scripts were copied to
+#   @INSTALL_DIR@  absolute path of the directory the three five-hour-guard*.py scripts and five_hour_guard_entry.py were copied to
 #   @CONFIG_FILE@  absolute path of the JSON configuration file (pause file, state file, exclude list; see five-hour-guard.py)
 # Install as ~/.config/systemd/user/five-hour-guard.service, then:
 #   systemctl --user daemon-reload && systemctl --user enable --now five-hour-guard.service

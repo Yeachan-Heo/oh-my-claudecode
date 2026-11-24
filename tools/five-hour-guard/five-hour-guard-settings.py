@@ -25,9 +25,9 @@
 # pause_file, hook_log_file. Without a settings path the file is $CLAUDE_CONFIG_DIR/settings.json (surrounding blanks
 # removed, a leading ~ expanded, as the guard and OMC do), else ~/.claude/settings.json.
 # --hook defaults to the hook script next to this script, --python to the interpreter that runs this script.
-import argparse, json, os, re, shlex, subprocess, sys, time
+import argparse, json, os, subprocess, sys, time
 
-MARK = 'five-hour-guard-hook.py'
+MARK = 'five-hour-guard-hook.py'   # also in five_hour_guard_entry.py, which is loaded below
 
 ap = argparse.ArgumentParser()
 ap.add_argument('action', choices=['add', 'remove', 'check'])
@@ -37,11 +37,8 @@ ap.add_argument('--pause-file', default=None)
 ap.add_argument('--hook-log', default=None, help='hook log file (config: hook_log_file); absent: the hook does not log')
 ap.add_argument('--hook', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), MARK))
 ap.add_argument('--python', default=sys.executable, help='interpreter written into the hook command (default: the one running this script)')
-ap.add_argument('--timeout', type=int, default=21600, help='seconds; Claude Code cancels a hook that runs longer (on PreToolUse the tool call then goes on), so keep it above the longest pause (5 h window plus margin)')
+ap.add_argument('--timeout', type=int, default=21600, help='seconds, at least 21600; Claude Code cancels a hook that runs longer (on PreToolUse the tool call then goes on), so it must cover the longest pause (5 h window plus margin)')
 A = ap.parse_args()
-if A.timeout < 1:
-    print(f'five-hour-guard-settings: --timeout must be at least 1 second, not {A.timeout}: Claude Code would cancel the hook at once', file=sys.stderr)
-    sys.exit(2)
 
 
 def fail(msg):
@@ -111,22 +108,36 @@ class Changed(Exception):
     """settings.json is not what this run read."""
 
 
+def load_entry_module():
+    """five_hour_guard_entry.py next to this script: the one definition of the hook entry, shared with the guard."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'five_hour_guard_entry.py')
+    spec = importlib.util.spec_from_file_location('five_hour_guard_entry', path)
+    module = importlib.util.module_from_spec(spec)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True   # no __pycache__ in the install directory
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        fail(f'cannot load {path}: {e!r} (it belongs next to the scripts)')
+    finally:
+        sys.dont_write_bytecode = keep
+    return module
+
+
+ENTRY = load_entry_module()
+if A.timeout < ENTRY.MIN_TIMEOUT_S:
+    fail(f'--timeout must be at least {ENTRY.MIN_TIMEOUT_S} seconds, not {A.timeout}: Claude Code cancels a hook that runs longer and the tool call goes on, so a pause can last longer than the hook would wait')
+
+
 def command():
-    # the shell pre-check keeps the cost outside a pause at ~2 ms per tool call (python alone ~35 ms); a missing hook or
-    # interpreter file is fail-open too (exec of a missing file would exit 127 or 2; 2 is what a PreToolUse hook reports
-    # as a blocking error). Needs a POSIX sh: sh -c on Linux and macOS, Git Bash on Windows.
-    q = shlex.quote
-    cmd = f'[ -f {q(PAUSE_FILE)} ] && [ -f {q(A.hook)} ] && [ -x {q(A.python)} ] || exit 0; exec {q(A.python)} -I {q(A.hook)} --pause-file {q(PAUSE_FILE)}'
-    return cmd + (f' --log {q(HOOK_LOG)}' if HOOK_LOG else '')
-
-
-OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
+    return ENTRY.entry_command(PAUSE_FILE, A.hook, A.python, HOOK_LOG)
 
 
 def probe_hook():
-    """Run the selected hook against a pause that this tool writes in a private directory: a valid pause must make it hold (it logs
-    hold-start and keeps running) and the removal of the file must release it (exit 0). A file that is empty, truncated or another
-    program with the name of the hook would exit at once and protect nothing."""
+    """Run the entry that `add` is about to write, through the shell as Claude Code runs it, against a pause that this tool writes in a
+    private directory: a valid pause must make it hold (the hook logs hold-start and keeps running for a moment) and the removal of
+    the file must release it (exit 0). An empty or truncated hook, another program with the name of the hook, or a command that
+    does not run the hook would exit at once and protect nothing."""
     import tempfile
     env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
                                                            'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')}
@@ -135,11 +146,11 @@ def probe_hook():
         now = time.time()
         with open(pause, 'w') as f:
             json.dump({'v': 2, 'paused': True, 'since': now, 'resume_at': now + 600, 'valid_until': now + 300, 'exclude': [], 'pid': os.getpid()}, f)
+        probe_command = ENTRY.entry_command(pause, A.hook, A.python, log) + ' --poll 0.1'
         try:
-            p = subprocess.Popen([A.python, '-I', A.hook, '--pause-file', pause, '--log', log, '--poll', '0.1'], stdin=subprocess.PIPE,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+            p = subprocess.Popen(['sh', '-c', probe_command], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
         except OSError as e:
-            fail(f'the hook {A.hook!r} cannot be started: {e!r}')
+            fail(f'the hook entry cannot be run through the shell: {e!r}')
         try:
             try:
                 p.stdin.write(b'{"session_id": "probe0001", "tool_name": "Bash"}')
@@ -150,7 +161,7 @@ def probe_hook():
             while time.monotonic() < end and p.poll() is None and not (os.path.exists(log) and 'hold-start' in open(log).read()):
                 time.sleep(0.05)
             if p.poll() is not None or not os.path.exists(log):
-                fail(f'the hook {A.hook!r} does not hold a valid pause (it ended with status {p.poll()} at once): it is not the hook of the guard, so the entry would protect nothing')
+                fail(f'the hook {A.hook!r} does not hold a valid pause (the entry ended with status {p.poll()} at once): it is not the hook of the guard, so the entry would protect nothing')
             time.sleep(1.5)   # a hook that lets go by itself while the pause is in force protects nothing: it must still be holding
             if p.poll() is not None:
                 fail(f'the hook {A.hook!r} ended with status {p.returncode} while the pause was still in force: it does not hold, so the entry would protect nothing')
@@ -167,42 +178,6 @@ def probe_hook():
                 p.wait()
 
 
-def hook_scripts(command):
-    """The hook scripts a command runs: the command word of a simple command, or the first argument after it when the command
-    word is a Python or the command carries --pause-file. A file name that stands as an operand (of -f, -x, --pause-file,
-    --log, or of another program) is data, not our hook (the same rule as the guard). Raises ValueError for a command the shell
-    cannot parse or one with a NUL character."""
-    tokens = shlex.split(command)
-    if any('\0' in t for t in tokens):
-        raise ValueError('NUL character in the command')
-    simple, current = [], []
-    for t in tokens:
-        if t in (';', '&&', '||', '|'):
-            simple.append(current)
-            current = []
-        elif len(t) > 1 and t.endswith(';'):
-            simple.append(current + [t[:-1]])
-            current = []
-        else:
-            current.append(t)
-    simple.append(current)
-    hooks = []
-    for words in simple:
-        operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
-        first = 0
-        while first < len(words) and (words[first] in ('exec', 'env', 'command') or re.match(r'[A-Za-z_]\w*=', words[first])):
-            first += 1
-        if first >= len(words) or first in operands:
-            continue
-        if MARK in os.path.basename(words[first]):
-            hooks.append(words[first])
-        elif re.match(r'(python|pypy|py$)', os.path.basename(words[first]).lower()) or '--pause-file' in words:
-            args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
-            if args and MARK in os.path.basename(words[args[0]]):
-                hooks.append(words[args[0]])
-    return hooks
-
-
 def hook_is_ours(h):
     # a handler of another type (prompt, http) does not run a command: it is not our hook, whatever its command field says; a
     # command that only names the hook file as data (an audit tool's argument) is not our hook either. A command that cannot be
@@ -211,7 +186,7 @@ def hook_is_ours(h):
     if h.get('type') != 'command' or not isinstance(command, str) or MARK not in command:
         return False
     try:
-        return bool(hook_scripts(command))
+        return bool(ENTRY.entry_parts(command)[0])
     except ValueError:
         return True
 
@@ -322,7 +297,8 @@ def run_once():
         if not os.access(A.python, os.X_OK):
             fail(f'the interpreter {A.python!r} is not executable: the shell guard of the command (`[ -x ... ]`) would let every call through')
         distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python), ('configuration file', A.config),
-                    ('settings tool script', os.path.abspath(__file__)), ('guard script', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'five-hour-guard.py'))]
+                    ('settings tool script', os.path.abspath(__file__)), ('guard script', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'five-hour-guard.py')),
+                    ('entry module', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'five_hour_guard_entry.py'))]
         # the files the guard writes or reads under the same configuration: registering must not make one of them settings.json
         bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), MARK)   # the guard refuses any output that is this file, whichever hook is registered
         if not same_file(bundled, A.hook):

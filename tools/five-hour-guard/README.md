@@ -16,13 +16,14 @@ You start the guard yourself and add one hook entry to your own `settings.json` 
 
 ## How it works
 
-Three standalone scripts, Python 3 standard library only:
+Three scripts and one small module they share, Python 3 standard library only:
 
 | Script | Role |
 |---|---|
 | `five-hour-guard.py` | the guard: a process that reads the usage cache and writes or removes the pause file |
 | `five-hour-guard-hook.py` | the `PreToolUse` hook: waits while the pause file says "paused" |
 | `five-hour-guard-settings.py` | `add`, `remove` and `check` the hook entry in `settings.json` |
+| `five_hour_guard_entry.py` | the one definition of the hook entry command and of how a registered command is read; loaded by the guard and the settings tool from their own directory (the hook does not need it) |
 
 1. Every `--interval` seconds (30) the guard reads the usage cache. With a five-hour percentage at or above the
    threshold, from data younger than `--max-age` (180 s), and a reset time in the future, it writes the pause file
@@ -37,7 +38,7 @@ Three standalone scripts, Python 3 standard library only:
    `threshold - 10` percent (the window was reset sooner than the cache said), and it extends the pause while the cache
    still shows the threshold with a later reset time.
 
-The pause is stored in the state file before its pause file is published, so a pause file never exists without a stored pause behind it (a failing state write delays the pause to the next tick that can write). Paths are compared with the case rules of the platform (Windows, macOS), also for files that do not exist yet. The wiring check also warns about a relative path in the entry (it would be resolved in each session's working directory) and about a launcher or interpreter that is not a regular file. `add` refuses a value of the wrong type for the keys `state_file`, `log_file` and `usage_cache` as the guard does, and treats the bundled hook as a protected file even when another hook is registered. The guard and the hook append to their logs without following a symbolic link at the last component and only to a regular file (a link
+The guard never publishes a pause over a file that is not a pause of this guard (one that appeared after the start, for example on a shared or mistyped path): the tick reports it and nothing is stored or published; a first publication is made with a hard link, so a file that appears in that instant is kept too. The pause is stored in the state file before its pause file is published, so a pause file never exists without a stored pause behind it (a failing state write delays the pause to the next tick that can write). Paths are compared with the case rules of the platform (Windows, macOS), also for files that do not exist yet. The wiring check compares the registered entry with the entry the guard generates (the same command `add` writes, built by `five_hour_guard_entry.py` from the pause file of the guard and the hook, interpreter and hook log of the entry): an entry other than the generated one produces a warning with the correct entry to paste (a hand-written entry is never an error). It also warns about a handler that runs in the background (`async`) or has a `timeout` missing or below 21600 s, and when the hook or the interpreter the entry uses is not an absolute path to a regular file (a relative path would be resolved in each session's working directory), and when the interpreter is not named like a Python. `add` refuses a value of the wrong type for the keys `state_file`, `log_file` and `usage_cache` as the guard does, and treats the bundled hook and the entry module as protected files even when another hook is registered. The guard and the hook append to their logs without following a symbolic link at the last component and only to a regular file (a link
 in a shared directory cannot redirect the write). The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit (also when an earlier removal of the file failed and is still
 pending: the stop tries it once more; and also when the unpaused state cannot be written at that moment: the file goes anyway, the stored pause stays and a restart keeps it only while it lasts), so a stop or a restart (also
 `systemctl --user restart`, which a change of `exclude` needs) releases the waiting sessions. The restarted guard brings
@@ -130,7 +131,7 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
 
 1. Get the scripts from a clone of the repository (`git clone https://github.com/Yeachan-Heo/oh-my-claudecode`,
    directory `tools/five-hour-guard/`): `tools/` is not in the npm package (it is not in the `files` list of
-   `package.json`). Copy the three scripts and, if you want the unit, `five-hour-guard.service` to a stable directory,
+   `package.json`). Copy the three scripts, `five_hour_guard_entry.py` and, if you want the unit, `five-hour-guard.service` to a stable directory,
    for example `~/.claude/five-hour-guard/`. Do not point the hook entry into the plugin cache: that path changes with
    each plugin update, and a hook entry that names a missing file lets every call through.
 2. Write the configuration file, for example `~/.claude/five-hour-guard/config.json`. All paths should be absolute.
@@ -170,14 +171,14 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    content is written. The rest of the file is kept as it is; a hook of another tool, also in the same group, stays (in
    a group of its own with its matcher). `add` twice changes nothing. `add` with another hook path replaces the entry in
    place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, an interpreter that is not
-   executable or cannot run the hook (it is tried once: Python 3 with the standard library), a hook that does not hold a pause (`add` runs the selected hook against a pause of its own in a private directory: it must keep holding for a moment, and exit 0 when the pause is removed), two of the pause file, hook log,
+   executable or cannot run the hook (it is tried once: Python 3 with the standard library), a hook that does not hold a pause (`add` runs the entry it is about to write, through the shell, against a pause of its own in a private directory: the hook must keep holding for a moment, and exit 0 when the pause is removed), two of the pause file, hook log,
    `settings.json`, hook, interpreter, configuration file and the two scripts that are one file, and a hook file whose
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The tool counts a command as
    the hook only when that file is its script (the command word, or the argument of a Python, or of a command that has
    `--pause-file`); a command of another tool that merely names the file as data is not ours and is never replaced or
    removed. The usage cache counts as a configured file also when `usage_cache` is left out (OMC's default file and its
    `.lock`). The
-   entry has a `timeout` of 21600 s (`--timeout`, at least 1), longer than any window. A `settings.json` that is a symbolic link is
+   entry has a `timeout` of 21600 s (`--timeout`, at least 21600: a shorter one is refused, since Claude Code would cancel the hook during a long pause and the tool call would go on), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
    another program writes `settings.json` while the tool works (also while the backup is made), the tool reads it again
    once and then gives up (exit 2, nothing written). A write inside the instant between its last comparison and the

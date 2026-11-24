@@ -13,6 +13,7 @@ export const TOOLS = process.env.FIVE_HOUR_GUARD_TOOLS_DIR || join(REPO, 'tools'
 export const GUARD = join(TOOLS, 'five-hour-guard.py');
 export const HOOK = join(TOOLS, 'five-hour-guard-hook.py');
 export const SETTINGS_TOOL = join(TOOLS, 'five-hour-guard-settings.py');
+export const ENTRY_MODULE = join(TOOLS, 'five_hour_guard_entry.py');
 export const UNIT = join(TOOLS, 'five-hour-guard.service');
 
 const probe = spawnSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' });
@@ -196,4 +197,13 @@ export async function hookPasses(f: Fixture, sid: string, opts?: { env?: NodeJS.
   const passed = h.exited && h.code === 0 && h.out === '';
   await h.stop();
   return passed;
+}
+
+/** shlex.quote of Python: what the entry command writes around a path. */
+export const shellQuote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'"'"'`)}'`);
+
+/** The hook entry command as `add` writes it, built here from the inputs (not by the code under test). */
+export function generatedCommand(pause: string, hook: string, python: string, hookLog?: string): string {
+  const q = shellQuote;
+  return `[ -f ${q(pause)} ] && [ -f ${q(hook)} ] && [ -x ${q(python)} ] || exit 0; exec ${q(python)} -I ${q(hook)} --pause-file ${q(pause)}` + (hookLog ? ` --log ${q(hookLog)}` : '');
 }

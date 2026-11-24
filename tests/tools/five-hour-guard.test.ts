@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
-  ENV, CONFIG_DIR, HOME_DIR, GUARD, HOOK, UNIT, PYBIN, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
+  ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
   readJson, readText, runPyCode, runSync, sleep, spawnPy, spawnPyCode, startHook, waitFor, writeCache, writePause, type Fixture, type Proc,
 } from './five-hour-guard-support.js';
 
@@ -566,8 +566,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('the hook entry is checked again while a pause lasts (at most once per --warn-every): a hook removed after the pause began is reported', async () => {
     const f = fixture('wiring-during-pause', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const entry = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } });
-    writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`), 'utf8');
+    const entry = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entry(generatedCommand(f.pause, HOOK, PYBIN)), 'utf8');
     const g = startGuard(f, ['--warn-every', '1']);
     try {
       await waitFor(() => existsSync(f.pause), 20000, 'the pause');
@@ -608,7 +608,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('the hook entry check follows the same file name rule as add: a name that contains five-hour-guard-hook.py is checked', () => {
     const f = fixture('hook-name-rule', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `exec ${PYBIN} -I /nonexistent-dir/five-hour-guard-hook.py.copy --pause-file ${f.pause}` }] }] } }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', timeout: 21600, command: `exec ${PYBIN} -I /nonexistent-dir/five-hour-guard-hook.py.copy --pause-file ${f.pause}` }] }] } }), 'utf8');
     expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): the hook entry in .* names \/nonexistent-dir\/five-hour-guard-hook\.py\.copy, which does not exist/);
   });
 
@@ -666,19 +666,6 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(second.status, `${second.stdout}${second.stderr}`).toBe(2);
       expect(second.stderr).toMatch(/another guard holds .*pause\.json\.lock: one guard per pause file/);
     } finally { await stopGuard(first); }
-  });
-
-  it('the shell check of the hook entry is validated too: a stale file in `[ -f ... ]` would end the entry before Python on every call', () => {
-    const f = fixture('preflight-drift', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const entry = (pauseTest: string, hookTest: string) => `[ -f ${pauseTest} ] && [ -f ${hookTest} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`;
-    const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
-    put(entry(f.pause, HOOK));
-    expect(guardOnce(f).stdout, 'the generated shape is accepted').not.toMatch(/WARNING/);
-    for (const [pauseTest, hookTest] of [['/old/pause.json', HOOK], [f.pause, '/old/five-hour-guard-hook.py']]) {
-      put(entry(pauseTest, hookTest));
-      expect(guardOnce(f).stdout, `${pauseTest} ${hookTest}`).toMatch(/WARNING \(start\): the shell check of the hook entry .* tests the file \/old\//);
-    }
   });
 
   it('a file that appears at pause_file after the start check is never removed as a leftover: exit 2, the file is kept', () => {
@@ -742,24 +729,6 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(f.log)).toMatch(/RESUMED \(guard stopping, state not saved\)/);
   });
 
-  it('the program that launches the hook is validated: it must be a Python that exists and the one the shell check tests', () => {
-    const f = fixture('launcher-drift', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const other = join(f.dir, 'python3-other');
-    writeFileSync(other, '#!/bin/sh\nexit 0\n', 'utf8');
-    chmodSync(other, 0o755);
-    const put = (launcher: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command',
-      command: `[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x ${PYBIN} ] || exit 0; exec ${launcher} -I ${HOOK} --pause-file ${f.pause}` }] }] } }), 'utf8');
-    put(PYBIN);
-    expect(guardOnce(f).stdout, 'the generated shape is accepted').not.toMatch(/WARNING/);
-    put(process.execPath);
-    expect(guardOnce(f).stdout, 'a launcher that is not a Python').toMatch(/WARNING \(start\): .* runs the hook with .*, which is not a Python/);
-    put(join(f.dir, 'python3-missing'));
-    expect(guardOnce(f).stdout, 'a launcher that is not there').toMatch(/runs the hook with .*python3-missing, which does not exist/);
-    put(other);
-    expect(guardOnce(f).stdout, 'a launcher other than the one tested').toMatch(/but its shell check tests .*: the two must be the same interpreter/);
-  });
-
   it('the pause is stored before its file is published: a state write that fails at the first high reading publishes nothing a crash could leave behind', () => {
     const f = fixture('state-first', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     const code = ['import os, runpy, sys', 'real = os.open',
@@ -788,50 +757,12 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const wrapper = join(f.dir, 'python3-wrapper');
     writeFileSync(wrapper, '#!/bin/sh\nexec python3 "$@"\n', 'utf8');
     chmodSync(wrapper, 0o755);
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `exec ${wrapper} -I ${HOOK} --pause-file ${f.pause}` }] }] } }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', timeout: 21600, command: `exec ${wrapper} -I ${HOOK} --pause-file ${f.pause}` }] }] } }), 'utf8');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: wrapper, settings_file: f.settings }), 'utf8');
     const r = runSync(GUARD, ['--config', f.cfg, '--once']);
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
     expect(r.stderr).toMatch(/are the same file/);
     expect(readText(wrapper)).toBe('#!/bin/sh\nexec python3 "$@"\n');
-  });
-
-  it('a hook entry that runs the script directly needs an executable file: a copy of mode 0644 is reported, one of mode 0755 is accepted', () => {
-    const f = fixture('direct-script', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const copy = join(f.dir, 'five-hour-guard-hook.py');
-    copyFileSync(HOOK, copy);
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `[ -f ${f.pause} ] && [ -f ${copy} ] || exit 0; exec ${copy} --pause-file ${f.pause}` }] }] } }), 'utf8');
-    chmodSync(copy, 0o644);
-    expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): .* runs .* directly, but it is not an executable file/);
-    chmodSync(copy, 0o755);
-    expect(guardOnce(f).stdout).not.toMatch(/WARNING/);
-  });
-
-  it('the paths of the hook entry must be absolute: a relative one that happens to resolve from the working directory of the guard is reported', () => {
-    const f = fixture('relative-paths', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const rel = (p: string) => relative(f.dir, p);
-    const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
-    const run = () => runSync(GUARD, guardArgs(f, ['--once']), { cwd: f.dir });
-    put(`[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`);
-    expect(run().stdout, 'the generated shape').not.toMatch(/WARNING/);
-    put(`[ -f ${f.pause} ] && [ -f ${rel(HOOK)} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${rel(HOOK)} --pause-file ${f.pause}`);
-    expect(run().stdout, 'a relative hook').toMatch(/WARNING \(start\): .* uses the relative path /);
-    put(`[ -f ${rel(f.pause)} ] && [ -f ${HOOK} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${rel(f.pause)}`);
-    expect(run().stdout, 'a relative pause file').toMatch(/uses the relative path /);
-  });
-
-  it('a launcher or interpreter that is a directory is not a program: a searchable directory named like a Python is reported, though `[ -x ]` accepts it', () => {
-    const f = fixture('launcher-directory', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const dir = join(f.dir, 'python3-dir');
-    mkdirSync(dir);
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command',
-      command: `[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x ${dir} ] || exit 0; exec ${dir} -I ${HOOK} --pause-file ${f.pause}` }] }] } }), 'utf8');
-    const out = guardOnce(f).stdout;
-    expect(out).toMatch(/runs the hook with .*python3-dir, which does not exist or cannot be run/);
-    expect(out).toMatch(/names the interpreter .*python3-dir, which does not exist or cannot be run/);
   });
 
   it('a stored pause with times outside any window the guard writes is ignored, not a crash at start', () => {
@@ -907,7 +838,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
     writeFileSync(f.settings, bytes);
     expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): cannot read the hook entries of/);
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'exec "unterminated five-hour-guard-hook.py' }] }] } }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', timeout: 21600, command: 'exec "unterminated five-hour-guard-hook.py' }] }] } }), 'utf8');
     expect(guardOnce(f).stdout, 'a command the shell cannot parse').toMatch(/WARNING \(start\): the hook entry command .* cannot be parsed/);
     rmSync(f.state, { force: true });
     writePause(f, { pid: 99999999999999999999 });
@@ -981,7 +912,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const hookLog = join(f.dir, 'five-hour-guard-hook.py.log');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: pause, state_file: f.state, log_file: f.log, settings_file: f.settings, hook_log_file: hookLog }), 'utf8');
     const command = `[ -f ${pause} ] && [ -f ${HOOK} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${pause} --log ${hookLog}`;
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
     const r = guardOnce(f);
     expect(r.stdout, 'no wiring warning: the hook file exists, the pause file need not').not.toMatch(/WARNING/);
   });
@@ -989,12 +920,12 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a handler that is not a command (prompt, http) is not the hook, whatever its old command field says', () => {
     const f = fixture('handler-type', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const command = `[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`;
+    const command = generatedCommand(f.pause, HOOK, PYBIN);
     for (const type of ['prompt', 'http', 'agent', undefined]) {
-      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ ...(type ? { type } : {}), command }] }] } }), 'utf8');
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ ...(type ? { type } : {}), command, timeout: 21600 }] }] } }), 'utf8');
       expect(guardOnce(f).stdout, String(type)).toMatch(/WARNING \(start\): hook five-hour-guard-hook\.py is NOT registered/);
     }
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
     expect(guardOnce(f).stdout).not.toMatch(/WARNING/);
   });
 
@@ -1003,11 +934,11 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const pause = join(f.dir, 'five-hour-guard-hook.py.pause');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
     for (const command of [`exec /bin/true --pause-file ${pause}`, `/x/foreign-audit.py ${HOOK}`, `python3 /x/audit.py --target ${HOOK}`, `grep -c five-hour-guard-hook.py /var/log/audit.log`]) {
-      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
       expect(guardOnce(f).stdout, command).toMatch(/WARNING \(start\): hook five-hour-guard-hook\.py is NOT registered/);
     }
-    const real = `[ -f ${pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${pause}`;
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: real }] }] } }), 'utf8');
+    const real = generatedCommand(pause, HOOK, PYBIN);
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', timeout: 21600, command: real }] }] } }), 'utf8');
     expect(guardOnce(f).stdout, 'the real entry is still found').not.toMatch(/WARNING/);
   });
 
@@ -1016,7 +947,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
     for (const command of [`exec ${PYBIN} -I /opt/five-hour-guard-hook.py\0 --pause-file ${f.pause}`, `[ -x ${PYBIN}\0 ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`,
       `exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause} --log /opt/hook\0.log`]) {
-      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
       const r = runSync(GUARD, guardArgs(f, ['--once']));
       expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
       expect(r.stdout).toMatch(/WARNING \(start\): the hook entry command .* cannot be parsed/);
@@ -1082,7 +1013,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const hookText = readFileSync(hook, 'utf8');
     const oldLog = join(dir, 'old-hook.log');
     const command = `[ -f ${f.pause} ] && [ -f ${hook} ] && [ -x ${py} ] || exit 0; exec ${py} -I ${hook} --pause-file ${f.pause} --log ${oldLog}`;
-    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
     for (const [key, target] of [['state_file', hook], ['log_file', hook], ['state_file', py], ['log_file', py], ['state_file', oldLog], ['log_file', oldLog]] as const) {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: target }), 'utf8');
       const r = runSync(GUARD, ['--config', f.cfg, '--once']);
@@ -1104,11 +1035,115 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(existsSync(`${f.cache}.lock`)).toBe(false);
   });
 
+  it('the hook entry is compared with the generated one: an entry that differs warns once with the entry to paste, the generated entry (with or without a hook log) is silent', () => {
+    const f = fixture('entry-drift', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const base = { usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings };
+    const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+    const rel = (p: string) => relative(f.dir, p);
+    const gen = (o: { pause?: string; hook?: string; python?: string; log?: string } = {}) => generatedCommand(o.pause ?? f.pause, o.hook ?? HOOK, o.python ?? PYBIN, o.log);
+    const missingPy = join(f.dir, 'python3-missing');
+    const dirPy = join(f.dir, 'python3-dir');
+    mkdirSync(dirPy);
+    const copy = join(f.dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, copy);
+    chmodSync(copy, 0o644);
+    const exec644 = `[ -f ${f.pause} ] && [ -f ${copy} ] || exit 0; exec ${copy} --pause-file ${f.pause}`;
+    const cases: Array<{ name: string; command: string; paste: string; also?: RegExp }> = [
+      { name: 'no shell check at all', command: `exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`, paste: gen() },
+      { name: 'no check of the interpreter', command: `[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`, paste: gen() },
+      { name: 'a stale pause file in the shell check', command: gen().replace(`[ -f ${f.pause} ]`, '[ -f /old/pause.json ]'), paste: gen() },
+      { name: 'a stale hook in the shell check', command: gen().replace(`[ -f ${HOOK} ]`, '[ -f /old/five-hour-guard-hook.py ]'), paste: gen() },
+      { name: 'an interpreter in the shell check other than the one that runs', command: gen().replace(`[ -x ${PYBIN} ]`, '[ -x /bin/sh ]'), paste: gen() },
+      { name: 'a launcher that is not a Python, the shell check left as it was', command: gen().replace(`exec ${PYBIN}`, `exec ${process.execPath}`), paste: gen(), also: /runs the hook with .*, which is not a Python/ },
+      { name: 'a launcher that does not exist (also in the shell check)', command: gen({ python: missingPy }), paste: gen(), also: /runs the hook with .*python3-missing, which does not exist or cannot be run/ },
+      { name: 'a launcher that is a directory named like a Python', command: gen({ python: dirPy }), paste: gen(), also: /runs the hook with .*python3-dir, which does not exist or cannot be run/ },
+      { name: 'the script run directly (mode 0644)', command: exec644, paste: gen({ hook: copy }) },
+      { name: 'a pause file other than the guard writes', command: gen({ pause: `${f.dir}/old-pause.json` }), paste: gen() },
+      { name: 'no pause file at all', command: `exec ${PYBIN} -I ${HOOK}`, paste: gen() },
+      { name: '--pause-file without a value', command: `exec ${PYBIN} -I ${HOOK} --pause-file`, paste: gen() },
+      { name: 'a hook log and no pause file', command: `exec ${PYBIN} -I ${HOOK} --log ${f.dir}/hook.log`, paste: gen({ log: `${f.dir}/hook.log` }) },
+      { name: 'a hook that does not exist', command: gen({ hook: '/nonexistent-dir/five-hour-guard-hook.py' }), paste: gen(), also: /names \/nonexistent-dir\/five-hour-guard-hook\.py, which does not exist/ },
+      { name: 'a relative hook that resolves from the working directory of the guard', command: gen({ hook: rel(HOOK) }), paste: gen(), also: /uses the relative path /i },
+      { name: 'a relative pause file', command: gen({ pause: rel(f.pause) }), paste: gen() },
+    ];
+    for (const key of [false, true]) {
+      writeFileSync(f.cfg, JSON.stringify(key ? { ...base, hook_log_file: join(f.dir, 'hook.log') } : base), 'utf8');
+      const run = () => runSync(GUARD, guardArgs(f, ['--once']), { cwd: f.dir }).stdout;
+      put(gen({ log: key ? join(f.dir, 'hook.log') : undefined }));
+      expect(run(), `the generated entry, hook log ${key}`).not.toMatch(/WARNING/);
+      if (key) {
+        put(gen());
+        const drift = run().split('\n').filter((l) => /is not the entry this guard generates/.test(l));
+        expect(drift, 'a configured hook log that the entry does not use: one warning').toHaveLength(1);
+        expect(drift[0].endsWith(`: ${gen({ log: join(f.dir, 'hook.log') })}`), drift[0]).toBe(true);
+        continue;
+      }
+      for (const c of cases) {
+        put(c.command);
+        const out = run();
+        const warnings = out.split('\n').filter((l) => /is not the entry this guard generates/.test(l));
+        expect(warnings, `${c.name}: one drift warning`).toHaveLength(1);
+        expect(warnings[0].endsWith(`: ${c.paste}`), `${c.name}: the entry to paste is ${c.paste}, got ${warnings[0]}`).toBe(true);
+        if (c.also) expect(out, c.name).toMatch(c.also);
+        // what the warning offers is itself silent
+        put(c.paste);
+        expect(run(), `${c.name}: the pasted entry`).not.toMatch(/WARNING/);
+      }
+    }
+  });
+
+  it('a handler that runs in the background or whose timeout does not cover a pause is reported (Claude Code would let the tool call go on); a long enough timeout in the foreground is silent', () => {
+    const f = fixture('handler-attributes', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const command = generatedCommand(f.pause, HOOK, PYBIN);
+    const put = (handler: Record<string, unknown>) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, ...handler }] }] } }), 'utf8');
+    const table: Array<[string, Record<string, unknown>, RegExp | null]> = [
+      ['21600 s in the foreground', { timeout: 21600 }, null],
+      ['a longer timeout', { timeout: 30000 }, null],
+      ['async false', { timeout: 21600, async: false }, null],
+      ['async true', { timeout: 21600, async: true }, /is asynchronous/],
+      ['async as a text', { timeout: 21600, async: 'true' }, /is asynchronous/],
+      ['no timeout', {}, /timeout \(None\) is missing or below 21600/],
+      ['a short timeout', { timeout: 60 }, /timeout \(60\) is missing or below 21600 s/],
+      ['one second short', { timeout: 21599 }, /timeout \(21599\)/],
+      ['a timeout that is a text', { timeout: '21600' }, /timeout \('21600'\)/],
+      ['a timeout that is a boolean', { timeout: true }, /timeout \(True\)/],
+    ];
+    for (const [name, handler, want] of table) {
+      put(handler);
+      const out = guardOnce(f).stdout;
+      if (want) expect(out, name).toMatch(want);
+      else expect(out, name).not.toMatch(/WARNING/);
+    }
+  });
+
+  it('a file that appears at pause_file after the start is never replaced by a pause: the tick reports it and nothing is published or stored, also when it appears in the instant before the file is linked into place', async () => {
+    const f = fixture('foreign-after-start', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeFileSync(f.pause, 'notes of somebody else\n', 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*is not a pause file of this guard/.test(readText(f.log)), 20000, 'the refusal');
+      expect(readText(f.pause), 'the foreign file is intact').toBe('notes of somebody else\n');
+      expect(existsSync(f.state) ? readJson(f.state).paused : false, 'no pause was stored').toBe(false);
+    } finally { await stopGuard(g); }
+    expect(readText(f.pause)).toBe('notes of somebody else\n');
+
+    const race = fixture('foreign-at-link', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const driver = ['import os, runpy, sys', 'real = os.link', 'target = sys.argv[1]',
+      'def late(a, b, *args, **kw):', '    if b == target: open(b, "w").write("late foreign file\\n")', '    return real(a, b, *args, **kw)',
+      'os.link = late', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(driver, [race.pause, GUARD, ...guardArgs(race, ['--once'])]);
+    expect(r.stdout).toMatch(/ERROR: tick failed.*appeared meanwhile/);
+    expect(readText(race.pause), 'the file that appeared in the instant is not replaced').toBe('late foreign file\n');
+  });
+
   it('the hook entry check warns when the group matcher no longer covers every tool (an entry for Bash only), and accepts "*", empty and none', () => {
     const f = fixture('matcher-drift', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const command = `[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`;
-    const group = (matcher?: string) => ({ ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: 'command', command }] });
+    const command = generatedCommand(f.pause, HOOK, PYBIN);
+    const group = (matcher?: string) => ({ ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: 'command', command, timeout: 21600 }] });
     for (const matcher of ['Bash', 'Write|Edit', 'Bash(*)']) {
       writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [group(matcher)] } }), 'utf8');
       expect(guardOnce(f).stdout, matcher).toMatch(/WARNING \(start\): the hook entry in .* has the matcher '.*', which does not cover every tool/);
@@ -1127,6 +1162,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const hook = join(dir, 'five-hour-guard-hook.py');
     copyFileSync(GUARD, guard);
     copyFileSync(HOOK, hook);
+    copyFileSync(ENTRY_MODULE, join(dir, 'five_hour_guard_entry.py'));
     const before = readFileSync(guard, 'utf8');
     for (const [key, target] of [['state_file', guard], ['log_file', guard], ['pause_file', guard], ['state_file', hook], ['log_file', hook]] as const) {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, [key]: target }), 'utf8');
@@ -1219,24 +1255,14 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(r.stdout, 'the restored pause is not observed by any hook: said so').toMatch(/WARNING \(start\): hook five-hour-guard-hook\.py is NOT registered/);
   });
 
-  it('hook entry check: a loud warning when settings.json has no hook entry or the entry names a hook file that does not exist', () => {
+  it('hook entry check: a loud warning when settings.json has no hook entry; the generated entry is silent', () => {
     const f = fixture('hook-check', { config: {}, cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    const entry = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } });
+    const entry = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
     writeFileSync(f.settings, JSON.stringify({ hooks: {} }), 'utf8');
     expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): hook five-hour-guard-hook\.py is NOT registered/);
-    writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`), 'utf8');
+    writeFileSync(f.settings, entry(generatedCommand(f.pause, HOOK, PYBIN)), 'utf8');
     expect(guardOnce(f).stdout, 'an entry whose hook file exists: no warning').not.toMatch(/WARNING/);
-    writeFileSync(f.settings, entry(`exec ${PYBIN} -I /nonexistent-dir/five-hour-guard-hook.py --pause-file ${f.pause}`), 'utf8');
-    expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): the hook entry in .* names \/nonexistent-dir\/five-hour-guard-hook\.py, which does not exist/);
-    writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.dir}/old-pause.json`), 'utf8');
-    expect(guardOnce(f).stdout, 'a hook that reads another pause file than the guard writes').toMatch(/WARNING \(start\): the hook entry in .* reads the pause file .*old-pause\.json, but the guard writes .*pause\.json/);
-    for (const command of [`exec ${PYBIN} -I ${HOOK}`, `exec ${PYBIN} -I ${HOOK} --pause-file`, `exec ${PYBIN} -I ${HOOK} --log ${f.dir}/hook.log`]) {
-      writeFileSync(f.settings, entry(command), 'utf8');
-      expect(guardOnce(f).stdout, command).toMatch(/WARNING \(start\): the hook entry in .* has no value for --pause-file: the hook would start without a pause file and hold nothing/);
-    }
-    writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x /nonexistent-dir/python3 ] || exit 0; exec /nonexistent-dir/python3 -I ${HOOK} --pause-file ${f.pause}`), 'utf8');
-    expect(guardOnce(f).stdout, 'an interpreter that does not exist').toMatch(/WARNING \(start\): the hook entry in .* names the interpreter \/nonexistent-dir\/python3, which does not exist/);
   });
 });
 

@@ -5,8 +5,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, rmSync, readFileSync, linkSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  ENV, CONFIG_DIR, GUARD as GUARD_SCRIPT, HAS_PYTHON3, HOOK, PYBIN, SETTINGS_TOOL, TMP, cleanup, fixture, readJson, readText, runCommand, runPyCode, runSync, sleep,
+  ENV, CONFIG_DIR, ENTRY_MODULE, GUARD as GUARD_SCRIPT, HAS_PYTHON3, HOOK, PYBIN, SETTINGS_TOOL, TMP, cleanup, fixture, readJson, readText, runCommand, runPyCode, runSync, sleep,
   writePause, type Fixture,
 } from './five-hour-guard-support.js';
 
@@ -457,6 +458,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     const guard = join(dir, 'five-hour-guard.py');
     copyFileSync(SETTINGS_TOOL, tool2);
     copyFileSync(GUARD_SCRIPT, guard);
+    copyFileSync(ENTRY_MODULE, join(dir, 'five_hour_guard_entry.py'));
     const hookCopy = join(dir, 'five-hour-guard-hook.py');
     copyFileSync(HOOK, hookCopy);
     const guardText = readText(guard);
@@ -594,16 +596,58 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readText(f.settings)).toBe(original);
   });
 
-  it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
+  it('the registration probe runs the very entry that add writes, through the shell: the command handed to sh is the generated one, with the pause and log of the probe', () => {
+    const f = fixture('settings-probe-shell');
+    writeFileSync(f.settings, JSON.stringify(base(), null, 2) + '\n', 'utf8');
+    const bin = join(f.dir, 'bin');
+    const seen = join(f.dir, 'sh-commands.txt');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'sh'), `#!/bin/sh\nprintf '%s\\n' "$2" >> ${quote(seen)}\nexec /bin/sh "$@"\n`, 'utf8');
+    chmodSync(join(bin, 'sh'), 0o755);
+    const r = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', f.pause, '--hook-log', f.hookLog, '--hook', HOOK, '--python', PYBIN], { env: { ...ENV, PATH: `${bin}:${process.env.PATH}` } });
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    const lines = readText(seen).trim().split('\n');
+    expect(lines, 'the probe went through the shell once').toHaveLength(1);
+    const probed = lines[0].replace(/\S*five-hour-guard-probe-[^/\s]+\/pause\.json/g, '@PAUSE').replace(/\S*five-hour-guard-probe-[^/\s]+\/hook\.log/g, '@LOG');
+    const written = entryCommand(f).split(f.pause).join('@PAUSE').split(f.hookLog).join('@LOG');
+    expect(probed, 'the same command as the one written, but for the paths of the probe and its poll interval').toBe(`${written} --poll 0.1`);
+    expect(readJson(f.settings).hooks.PreToolUse.some((g: { hooks: Array<{ command: string }> }) => g.hooks.some((h) => h.command === entryCommand(f)))).toBe(true);
+  });
+
+  it('what add writes is what the guard accepts: no wiring warning, also for a hook path that needs quoting', () => {
+    const f = fixture('settings-roundtrip-guard', { cache: { pct: 50, resetMs: Date.now() + 3600e3 } });
+    const dir = join(f.dir, "it's here");
+    mkdirSync(dir);
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    writeFileSync(f.settings, JSON.stringify(base(), null, 2) + '\n', 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, hook_log_file: f.hookLog }), 'utf8');
+    const added = runSync(SETTINGS_TOOL, ['add', '--config', f.cfg, '--hook', hook, '--python', PYBIN]);
+    expect(added.status, `${added.stdout}${added.stderr}`).toBe(0);
+    const g = runSync(GUARD_SCRIPT, ['--config', f.cfg, '--once']);
+    expect(g.status, `${g.stdout}${g.stderr}`).toBe(0);
+    expect(g.stdout, 'the entry that add wrote').not.toMatch(/WARNING/);
+  });
+
+  it('add refuses a timeout that does not cover a pause (21600 s): Claude Code cancels the hook when it runs longer and the tool call goes on', () => {
     const f = fixture('settings-timeout');
     const original = JSON.stringify(base(), null, 2) + '\n';
     writeFileSync(f.settings, original, 'utf8');
-    for (const bad of ['0', '-5']) {
+    for (const bad of ['0', '-5', '1', '60', '21599']) {
       const r = tool(f, 'add', ['--timeout', bad]);
       expect(r.status, `${bad}: ${r.stdout}${r.stderr}`).toBe(2);
-      expect(r.stderr).toMatch(/--timeout must be at least 1/);
+      expect(r.stderr, bad).toMatch(/--timeout must be at least 21600/);
+      expect(readText(f.settings), `${bad}: nothing written`).toBe(original);
     }
-    expect(readText(f.settings), 'nothing written').toBe(original);
+    for (const good of ['21600', '30000']) {
+      expect(tool(f, 'add', ['--timeout', good]).status, good).toBe(0);
+      expect(readJson(f.settings).hooks.PreToolUse.find((g: { matcher: string }) => g.matcher === '*').hooks[0].timeout).toBe(Number(good));
+    }
+  });
+
+  it('the root README links the guard, next to the other documentation', () => {
+    const readme = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'README.md'), 'utf8');
+    expect(readme).toMatch(/\]\(tools\/five-hour-guard\/README\.md\)/);
   });
 
   it('add refuses relative or missing paths; a settings file of the wrong shape is an error, not a crash', () => {

@@ -190,7 +190,7 @@ def same_file(a, b):
         return False
 
 
-PROGRAM_FILES = {'guard script', 'hook script', 'settings tool script', 'registered hook', 'registered interpreter'}
+PROGRAM_FILES = {'guard script', 'hook script', 'settings tool script', 'entry module', 'registered hook', 'registered interpreter'}
 
 
 def check_distinct(files):
@@ -208,55 +208,31 @@ def check_distinct(files):
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
+def load_entry_module():
+    """five_hour_guard_entry.py next to this script: the one definition of the hook entry (see there)."""
+    import importlib.util
+    path = os.path.join(HERE, 'five_hour_guard_entry.py')
+    spec = importlib.util.spec_from_file_location('five_hour_guard_entry', path)
+    module = importlib.util.module_from_spec(spec)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True   # no __pycache__ in the install directory
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        fail(f'cannot load {path}: {e!r} (it belongs next to the scripts)')
+    finally:
+        sys.dont_write_bytecode = keep
+    return module
 
 
-def entry_parts(command):
-    """(hook scripts, interpreter files, log files, pause files, preflight files, launchers) that a hook entry command names, by the option or position
-    they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their file names say, and neither is
-    an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file as data). The hook
-    script is the command word of a simple command, or the first argument after it when the command word is a Python or the
-    command carries --pause-file. Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
-    tokens = shlex.split(command)
-    if any('\0' in t for t in tokens):
-        raise ValueError('NUL character in the command')
-    simple, current = [], []
-    for t in tokens:
-        if t in (';', '&&', '||', '|'):
-            simple.append(current)
-            current = []
-        elif len(t) > 1 and t.endswith(';'):
-            simple.append(current + [t[:-1]])
-            current = []
-        else:
-            current.append(t)
-    simple.append(current)
-    hooks, launchers, found = [], [], {o: [] for o in OPERAND_OPTIONS}
-    for words in simple:
-        operands = {i + 1: t for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
-        for i, option in operands.items():
-            found[option].append(words[i])
-        first = 0
-        while first < len(words) and (words[first] in ('exec', 'env', 'command') or re.match(r'[A-Za-z_]\w*=', words[first])):
-            first += 1
-        if first >= len(words) or first in operands:
-            continue
-        if HOOK_NAME in os.path.basename(words[first]):
-            hooks.append(words[first])
-            launchers.append(words[first])   # run directly: the script itself is the program and must be executable
-        elif re.match(r'(python|pypy|py$)', os.path.basename(words[first]).lower()) or '--pause-file' in words:
-            args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
-            if args and HOOK_NAME in os.path.basename(words[args[0]]):
-                hooks.append(words[args[0]])
-                launchers.append(words[first])   # the program that is asked to run the hook
-    return hooks, found['-x'], found['--log'], found['--pause-file'], found['-f'], launchers
+ENTRY = load_entry_module()
+entry_parts = ENTRY.entry_parts
 
 
 def command_hooks(groups):
     """The command handlers of PreToolUse groups that run our hook: [(group, handler command)]. A command that names the hook file
     only as an operand (an option value, an argument of another program) is not ours; one that cannot be parsed is kept, so that
     hook_check can say so."""
-    found = []
+    found = []   # (group, handler)
     for g in groups:
         for h in g.get('hooks', []):
             command = h.get('command')
@@ -267,7 +243,7 @@ def command_hooks(groups):
                     continue
             except ValueError:
                 pass
-            found.append((g, command))
+            found.append((g, h))
     return found
 
 
@@ -278,7 +254,8 @@ def registered_runtime_files():
     try:
         with open(SETTINGS or default_settings()) as f:
             groups = json.load(f).get('hooks', {}).get('PreToolUse', [])
-        for _group, command in command_hooks(groups):
+        for _group, handler in command_hooks(groups):
+            command = handler['command']
             hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
             found += [('registered hook', t) for t in hooks if os.path.isabs(t)]
             found += [('registered interpreter', t) for t in interpreters + launchers if os.path.isabs(t)]
@@ -288,7 +265,7 @@ def registered_runtime_files():
     return found
 
 check_distinct([('configuration file', A.config), ('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
-                ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
+                ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('entry module', os.path.join(HERE, 'five_hour_guard_entry.py')), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
                 ('usage_cache', CACHE), ('usage_cache lock', CACHE + '.lock'), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
                 ('pause_file lock', PAUSE_FILE + '.lock'), *registered_runtime_files(),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
@@ -344,7 +321,9 @@ def log(msg):
             pass
 
 
-def write_json(path, obj):
+def write_json(path, obj, no_clobber=False):
+    """Write atomically. no_clobber: a file that appears at the path meanwhile is kept and the write fails (a hard link is created
+    instead of a rename; where links are not supported the rename is used)."""
     if A.dry_run:
         return
     tmp = f'{path}.{os.getpid()}.tmp'
@@ -357,7 +336,17 @@ def write_json(path, obj):
     try:
         with os.fdopen(fd, 'w') as f:
             json.dump(obj, f)
-        os.replace(tmp, path)
+        if no_clobber:
+            try:
+                os.link(tmp, path)
+            except FileExistsError:
+                raise OSError(f'the file {path} appeared meanwhile and is not replaced')
+            except OSError:
+                os.replace(tmp, path)   # no hard links on this file system
+            else:
+                os.unlink(tmp)
+        else:
+            os.replace(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -434,6 +423,12 @@ def read_cache():
     return pct, reset_ts, age, problem
 
 
+def hook_log_setting():
+    """hook_log_file of the configuration (the log of the hook entry), or None."""
+    v = CFG.get('hook_log_file')
+    return v if isinstance(v, str) and v and '\0' not in v else None
+
+
 LAST_WIRING_CHECK = [None]   # time.monotonic() of the last hook_check
 
 
@@ -447,8 +442,9 @@ def hook_check(where):
             data = json.load(f)
         groups = data.get('hooks', {}).get('PreToolUse', [])
         entries = command_hooks(groups)
-        ours = [c for _g, c in entries]
-        matchers = [g.get('matcher') for g, _c in entries]
+        ours = [h['command'] for _g, h in entries]
+        matchers = [g.get('matcher') for g, _h in entries]
+        handlers = [h for _g, h in entries]
     except Exception as e:
         log(f'WARNING ({where}): cannot read the hook entries of {SETTINGS}: {e!r}')
         return
@@ -456,41 +452,39 @@ def hook_check(where):
         log(f'WARNING ({where}): hook {HOOK_NAME} is NOT registered in {SETTINGS}: a pause would hold no session. Run five-hour-guard-settings.py add')
     if ours and not any(m in (None, '', '*') for m in matchers):
         log(f'WARNING ({where}): the hook entry in {SETTINGS} has the matcher {matchers[0]!r}, which does not cover every tool: calls of other tools would go on during a pause. Run five-hour-guard-settings.py add again')
+    for handler in handlers:
+        for problem in ENTRY.handler_problems(handler):
+            log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
     for command in ours:
         try:
-            hooks, interpreters, logs, pauses, tests, launchers = entry_parts(command)
+            expected = ENTRY.expected_command(command, PAUSE_FILE, hook_log_setting())
+            hooks, _interpreters, _logs, _pauses, _tests, launchers = entry_parts(command)
         except ValueError:
             log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote or NUL character): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
             continue
-        for token in hooks + interpreters + launchers + pauses + tests + logs:   # a hook runs in the working directory of a session: a relative path means another file there
-            if not os.path.isabs(token):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} uses the relative path {token}: it is resolved in the working directory of each session, so a pause would hold no session. Run five-hour-guard-settings.py add again')
+        if command != expected:   # one rule instead of a check per field: whatever differs from the generated entry may let calls through
+            log(f'WARNING ({where}): the hook entry in {SETTINGS} is not the entry this guard generates for its pause file {PAUSE_FILE}; a difference can let every call through during a pause. Replace its command with this one (or run five-hour-guard-settings.py add): {expected}')
+        for path in hooks + [x for x in launchers if x not in hooks]:   # what the entry runs must exist as a regular file, by an absolute path (a hook runs in the working directory of a session)
+            if not os.path.isabs(path):
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} uses the relative path {path}: it is resolved in the working directory of each session, so a pause would hold no session')
         for path in hooks:
             if not os.path.isfile(path):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which does not exist: the shell guard of the entry lets every call through, so a pause would hold no session')
-        if not pauses:
-            log(f'WARNING ({where}): the hook entry in {SETTINGS} has no value for --pause-file: the hook would start without a pause file and hold nothing. Run five-hour-guard-settings.py add again')
-        for read in pauses:
-            if not same_file(read, PAUSE_FILE):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} reads the pause file {read}, but the guard writes {PAUSE_FILE}: a pause would hold no session. Run five-hour-guard-settings.py add again')
-        for test in tests:   # the shell preflight `[ -f X ]` ends the command at once, before Python, when X is not a file: X must be the pause file or the hook
-            if not same_file(test, PAUSE_FILE) and not any(same_file(test, h) for h in hooks):
-                log(f'WARNING ({where}): the shell check of the hook entry in {SETTINGS} tests the file {test}, which is neither the pause file {PAUSE_FILE} nor the hook: the entry would let every call through while it does not exist. Run five-hour-guard-settings.py add again')
-        for launcher in launchers:   # the program that runs the hook must be a Python and the one the preflight `[ -x ... ]` tests
+        for launcher in launchers:
+            if launcher in hooks:
+                continue   # run directly: the drift warning above covers it
             path = launcher if os.path.isabs(launcher) else shutil.which(launcher)
-            if HOOK_NAME in os.path.basename(launcher):
-                if not (path and os.path.isfile(path) and os.access(path, os.X_OK)):   # isfile: a searchable directory passes `[ -x ]` and still cannot be run
-                    log(f'WARNING ({where}): the hook entry in {SETTINGS} runs {launcher} directly, but it is not an executable file (a copied script is mode 0644): the shell would refuse it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
-                continue
             if not re.match(r'(python|pypy|py$)', os.path.basename(launcher).lower()):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which is not a Python: it would not run the hook, so a pause would hold no session. Run five-hour-guard-settings.py add again')
-            elif not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which does not exist or cannot be run: a pause would hold no session. Run five-hour-guard-settings.py add again')
-            elif interpreters and not any(same_file(path, i) for i in interpreters):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, but its shell check tests {interpreters[0]}: the two must be the same interpreter. Run five-hour-guard-settings.py add again')
-        for interpreter in interpreters:
-            if not os.path.isfile(interpreter) or not os.access(interpreter, os.X_OK):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} names the interpreter {interpreter}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which is not a Python: it would not run the hook, so a pause would hold no session')
+            elif not path or not os.path.isfile(path) or not os.access(path, os.X_OK):   # isfile: a searchable directory passes `[ -x ]` and still cannot be run
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
+
+
+def check_pause_path():
+    """Never publish over a file that is not a pause of this guard: something else may have created it after the start check (a shared or
+    mistyped path)."""
+    if os.path.lexists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):
+        raise OSError(f'the file {PAUSE_FILE} is not a pause file of this guard: it is left untouched and no pause is published (check "pause_file")')
 
 
 def publish(state, pct=None, only=None):
@@ -500,7 +494,8 @@ def publish(state, pct=None, only=None):
            'valid_until': now + A.heartbeat, 'exclude': EXCLUDE, 'percent': pct, 'pid': os.getpid()}
     if only:
         doc['only'] = only
-    write_json(PAUSE_FILE, doc)
+    check_pause_path()
+    write_json(PAUSE_FILE, doc, no_clobber=not os.path.lexists(PAUSE_FILE))
 
 
 def unpublish(strict=False):
@@ -535,6 +530,8 @@ def unpublish(strict=False):
 
 
 def enter_pause(state, pct, reset_ts):
+    if not A.dry_run:
+        check_pause_path()   # before anything is stored: a pause that cannot be published must not be remembered
     state.update(paused=True, since=time.time(), resume_at=reset_ts + A.margin)
     log(f'THRESHOLD: 5h {pct} %, reset {ts(reset_ts)}; pause until {ts(state["resume_at"])}')
     hook_check('pause start')
