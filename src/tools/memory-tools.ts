@@ -13,6 +13,7 @@ import {
 import {
   loadProjectMemory,
   saveProjectMemory,
+  withProjectMemoryLock,
   addCustomNote,
   addDirective,
   type ProjectMemory,
@@ -118,25 +119,27 @@ export const projectMemoryWriteTool: ToolDefinition<{
       // Ensure .omc directory exists
       ensureOmcDir('', root);
 
-      let finalMemory: ProjectMemory;
+      await withProjectMemoryLock(root, async () => {
+        let finalMemory: ProjectMemory;
 
-      if (merge) {
-        const existing = await loadProjectMemory(root);
-        if (existing) {
-          finalMemory = mergeProjectMemory(existing, memory as Partial<ProjectMemory>);
+        if (merge) {
+          const existing = await loadProjectMemory(root);
+          if (existing) {
+            finalMemory = mergeProjectMemory(existing, memory as Partial<ProjectMemory>);
+          } else {
+            finalMemory = memory as unknown as ProjectMemory;
+          }
         } else {
           finalMemory = memory as unknown as ProjectMemory;
         }
-      } else {
-        finalMemory = memory as unknown as ProjectMemory;
-      }
 
-      // Ensure required fields
-      if (!finalMemory.version) finalMemory.version = '1.0.0';
-      if (!finalMemory.lastScanned) finalMemory.lastScanned = Date.now();
-      if (!finalMemory.projectRoot) finalMemory.projectRoot = root;
+        // Ensure required fields
+        if (!finalMemory.version) finalMemory.version = '1.0.0';
+        if (!finalMemory.lastScanned) finalMemory.lastScanned = Date.now();
+        if (!finalMemory.projectRoot) finalMemory.projectRoot = root;
 
-      await saveProjectMemory(root, finalMemory);
+        await saveProjectMemory(root, finalMemory);
+      });
 
       return {
         content: [{
@@ -231,34 +234,36 @@ export const projectMemoryAddDirectiveTool: ToolDefinition<{
     try {
       const root = validateWorkingDirectory(workingDirectory);
 
-      // Ensure memory exists
-      const memory = await loadProjectMemory(root);
-      if (!memory) {
+      return await withProjectMemoryLock(root, async () => {
+        // Ensure memory exists
+        const memory = await loadProjectMemory(root);
+        if (!memory) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: 'Project memory does not exist. Run a session first to auto-detect project environment.'
+            }]
+          };
+        }
+
+        const newDirective: UserDirective = {
+          timestamp: Date.now(),
+          directive,
+          context,
+          source: 'explicit',
+          priority,
+        };
+
+        memory.userDirectives = addDirective(memory.userDirectives, newDirective);
+        await saveProjectMemory(root, memory);
+
         return {
           content: [{
             type: 'text' as const,
-            text: 'Project memory does not exist. Run a session first to auto-detect project environment.'
+            text: `Successfully added directive to project memory.\n\n- **Directive:** ${directive}\n- **Priority:** ${priority}\n- **Context:** ${context || '(none)'}`
           }]
         };
-      }
-
-      const newDirective: UserDirective = {
-        timestamp: Date.now(),
-        directive,
-        context,
-        source: 'explicit',
-        priority,
-      };
-
-      memory.userDirectives = addDirective(memory.userDirectives, newDirective);
-      await saveProjectMemory(root, memory);
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Successfully added directive to project memory.\n\n- **Directive:** ${directive}\n- **Priority:** ${priority}\n- **Context:** ${context || '(none)'}`
-        }]
-      };
+      });
     } catch (error) {
       return {
         content: [{

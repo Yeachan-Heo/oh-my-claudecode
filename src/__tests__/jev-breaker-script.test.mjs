@@ -22,6 +22,7 @@ import {
   admitRequest,
   breakerSettings,
   classifyFailure,
+  failureLogFields,
   minuteKey,
   outageMessage,
   readBreaker,
@@ -170,6 +171,50 @@ describe('jev-breaker library', () => {
     expect(classifyFailure({ noResponse: true }, now)).toEqual({ reason: 'no-response', opens: false });
     expect(classifyFailure({}, now)).toBeUndefined();
     expect(classifyFailure(undefined, now)).toBeUndefined();
+  });
+
+  it('describes a failed request for the log: status, kind, block time under the breaker, and under a limit the minute count', () => {
+    const now = Date.parse('2026-11-09T12:00:30Z');
+    const plain = settingsFor(jevEnv({ OMC_JEV_BREAKER: '1' }));
+    expect(failureLogFields(plain, { status: 429, retryAfter: '120' }, now)).toEqual({ error: { status: 429, kind: 'http-429', retry_s: 120 } });
+    expect(failureLogFields(plain, { status: 503 }, now)).toEqual({ error: { status: 503, kind: 'http-503', retry_s: 60 } });
+    expect(failureLogFields(plain, { status: 403 }, now)).toEqual({ error: { status: 403, kind: 'http-403', retry_s: 600 } });
+    expect(failureLogFields(plain, { status: 404 }, now)).toEqual({ error: { status: 404, kind: 'http-404' } });
+    expect(failureLogFields(plain, { noResponse: true }, now)).toEqual({ error: { status: null, kind: 'no-response' } });
+    expect(failureLogFields(plain, {}, now)).toEqual({});
+    expect(failureLogFields(plain, undefined, now)).toEqual({});
+    expect(failureLogFields(plain, { status: 429 }, 3)).not.toHaveProperty('rpm'); // no limit: no count
+
+    // The count is the one admitRequest returned when the request was admitted, not the minute file as it is when the answer arrives.
+    const limited = settingsFor(jevEnv({ OMC_JEV_MAX_RPM: '5' }));
+    expect(admitRequest(plain, 'model-routing', now)).toEqual({});
+    const first = admitRequest(limited, 'model-routing', now);
+    const second = admitRequest(limited, 'model-routing', now);
+    expect(first).toEqual({ granted: 1 });
+    expect(second).toEqual({ granted: 2 });
+    admitRequest(limited, 'model-routing', now); // admitted after the first one: its failure still logs 1
+    // The limit alone holds nothing back, so no block time is given.
+    expect(failureLogFields(limited, { status: 429 }, first.granted)).toEqual({
+      error: { status: 429, kind: 'http-429' },
+      rpm: { count: 1, limit: 5 },
+    });
+    const both = settingsFor(jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_MAX_RPM: '5' }));
+    expect(failureLogFields(both, { status: 429, retryAfter: '30' }, second.granted)).toEqual({
+      error: { status: 429, kind: 'http-429', retry_s: 30 },
+      rpm: { count: 2, limit: 5 },
+    });
+    expect(failureLogFields(both, { status: 429 }, undefined)).toEqual({ error: { status: 429, kind: 'http-429', retry_s: 60 } }); // admission gave no count (state unusable): left out
+  });
+
+  it('logs the pause the breaker was told when given its classification, not one read again at log time', () => {
+    const classifiedAt = Date.parse('2026-11-09T12:00:00Z');
+    const failure = { status: 429, retryAfter: new Date(classifiedAt + 90_000).toUTCString() };
+    const classified = classifyFailure(failure, classifiedAt);
+    const plain = settingsFor(jevEnv({ OMC_JEV_BREAKER: '1' }));
+    expect(classified.seconds).toBe(90);
+    // Without it the date is read against the clock of the log call (here: long past the date, so the minimum).
+    expect(failureLogFields(plain, failure, undefined).error.retry_s).toBe(1);
+    expect(failureLogFields(plain, failure, undefined, classified).error.retry_s).toBe(90);
   });
 
   it('honors Retry-After in seconds or as an HTTP date, capped at 30 minutes', () => {
@@ -370,6 +415,186 @@ describe('jev-breaker library', () => {
     recordFailure(settings, classifyFailure({ status: 429 }), Date.now());
     expect(Date.now() - again).toBeLessThan(45);
   });
+
+  // A child process that opens the breaker with node:fs patched before the library loads (`patch` is the body of a function that gets
+  // `fs`); it prints {opened} as JSON.
+  function openInChild(name, patch, status, extraEnv = {}) {
+    const dir = join(caseDir, 'breaker');
+    const script = join(caseDir, name + '.mjs');
+    writeFileSync(script, [
+      "import fs from 'node:fs';",
+      "import { syncBuiltinESMExports } from 'node:module';",
+      '(' + patch + ')(fs);',
+      'syncBuiltinESMExports();',
+      'const lib = await import(' + JSON.stringify(pathToFileURL(join(root, 'scripts', 'lib', 'jev-breaker.mjs')).href) + ');',
+      // A hook deadline counted from here, after the library has loaded (TEST_DEADLINE_IN_MS).
+      'if (process.env.TEST_DEADLINE_IN_MS) process.env.OMC_JEV_HOOK_DEADLINE = String(Date.now() + Number(process.env.TEST_DEADLINE_IN_MS));',
+      'const settings = lib.breakerSettings({ ...process.env, OMC_JEV_BREAKER: "1", OMC_JEV_BREAKER_DIR: ' + JSON.stringify(dir) + ' }, ' + JSON.stringify(ENDPOINT) + ', "k");',
+      'const opened = lib.recordFailure(settings, lib.classifyFailure({ status: ' + status + ' }));',
+      'console.log(JSON.stringify({ opened: opened ?? null }));',
+    ].join('\n'));
+    return new Promise((resolve, reject) => {
+      const child = spawn(NODE, [script], { env: { ...cleanParentEnv(), ...extraEnv }, windowsHide: true });
+      let stdout = '';
+      child.stdout.on('data', (chunk) => { stdout += chunk; });
+      child.stderr.resume();
+      child.on('error', reject);
+      child.on('close', () => {
+        try {
+          resolve(JSON.parse(stdout.trim().split('\n').pop()));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  it('does not write over a breaker file it cannot read: a shorter breaker never replaces a longer one it could not see', async () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker') }, ENDPOINT, 'k');
+    const now = Date.now();
+    const longer = recordFailure(settings, classifyFailure({ status: 402 }), now);
+    expect(longer).toMatchObject({ reason: 'http-402' });
+    // Every read of breaker.json fails with EPERM (Windows: a rename landing, a scanner holding the file), however often it is retried.
+    const child = await openInChild('unreadable', String((fs) => {
+      const read = fs.readFileSync;
+      fs.readFileSync = function (path, ...rest) {
+        if (String(path).endsWith('breaker.json')) throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+        return read.call(this, path, ...rest);
+      };
+    }), 429);
+    expect(child.opened).toBeNull();
+    expect(JSON.parse(readFileSync(join(settings.dir, 'breaker.json'), 'utf8'))).toEqual(longer);
+  }, 30_000);
+
+  it('treats a breaker file that does not parse as a write in progress for a second, then as corrupt', () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    mkdirSync(settings.dir, { recursive: true });
+    const file = join(settings.dir, 'breaker.json');
+    writeFileSync(file, '');
+    // Fresh: a writer without the lock is replacing it in place; it may hold a longer breaker, so nothing is written over it.
+    expect(recordFailure(settings, classifyFailure({ status: 429 }))).toBeUndefined();
+    expect(readFileSync(file, 'utf8')).toBe('');
+    expect(readBreaker(settings)).toBeUndefined();
+    // A minute old: corrupt, no breaker; it is replaced.
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(file, old, old);
+    expect(recordFailure(settings, classifyFailure({ status: 429 }))).toMatchObject({ reason: 'http-429' });
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ reason: 'http-429' });
+  });
+
+  it('an opener held up between its read and its write does not shorten a breaker opened meanwhile', async () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker') }, ENDPOINT, 'k');
+    const holding = join(caseDir, 'holding');
+    // The other process (429, 60 s) has read the missing file and is held up for 300 ms right before its rename lands.
+    const other = openInChild('held-up', String((fs) => {
+      const rename = fs.renameSync;
+      let held = false;
+      fs.renameSync = function (from, to, ...rest) {
+        if (!held && String(to).endsWith('breaker.json')) {
+          held = true;
+          fs.writeFileSync(process.env.TEST_HOLDING, '');
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+        }
+        return rename.call(this, from, to, ...rest);
+      };
+    }), 429, { TEST_HOLDING: holding });
+    const started = Date.now();
+    while (!existsSync(holding)) {
+      if (Date.now() - started > 20_000) throw new Error('the other opener never got to its write');
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    const opened = recordFailure(settings, classifyFailure({ status: 402 }));
+    const child = await other;
+    expect(opened).toMatchObject({ reason: 'http-402' });
+    // The other opener returns what it read in its second round: ours, or its own when it got the lock back first (then ours replaced it).
+    expect(['http-402', 'http-429']).toContain(child.opened?.reason);
+    expect(JSON.parse(readFileSync(join(settings.dir, 'breaker.json'), 'utf8'))).toMatchObject({ reason: 'http-402', until: opened.until });
+    expect(existsSync(join(settings.dir, 'breaker.json.lock'))).toBe(false);
+  }, 30_000);
+
+  it('waits for the lock only until shortly before the hook kills the resolver; a stale or released lock is taken over and removed', () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
+    mkdirSync(settings.dir, { recursive: true });
+    const lock = join(settings.dir, 'breaker.json.lock');
+    // A live holder: the resolver gives up before the kill (OMC_JEV_HOOK_DEADLINE is the kill less 100 ms) and writes nothing.
+    writeFileSync(lock, JSON.stringify({ token: 'live', ts: Date.now() }));
+    const started = Date.now();
+    const underHook = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir, OMC_JEV_HOOK_DEADLINE: String(started + 200) }, ENDPOINT, 'k');
+    expect(recordFailure(underHook, classifyFailure({ status: 429 }))).toBeUndefined();
+    // Not the full wait of 1.5 s.
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(existsSync(join(settings.dir, 'breaker.json'))).toBe(false);
+    expect(JSON.parse(readFileSync(lock, 'utf8')).token).toBe('live');
+    // The holder died two seconds ago: its lock is taken over, and no lock is left after the write.
+    writeFileSync(lock, JSON.stringify({ token: 'dead', ts: Date.now() - 2000 }));
+    expect(recordFailure(settings, classifyFailure({ status: 429 }))).toMatchObject({ reason: 'http-429' });
+    expect(existsSync(lock)).toBe(false);
+    // The compaction module cannot remove files and marks its lock released: removed as well.
+    writeFileSync(lock, JSON.stringify({ token: 'module', ts: Date.now(), released: true }));
+    expect(recordFailure(settings, classifyFailure({ status: 402 }))).toMatchObject({ reason: 'http-402' });
+    expect(existsSync(lock)).toBe(false);
+    expect(readdirSync(settings.dir).filter((name) => name.includes('.lock'))).toEqual([]);
+  });
+
+  it('removes a stale lock only while it is the lock it judged: a lock another opener created in the meantime stays', async () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker') }, ENDPOINT, 'k');
+    mkdirSync(settings.dir, { recursive: true });
+    const lock = join(settings.dir, 'breaker.json.lock');
+    writeFileSync(lock, JSON.stringify({ token: 'dead', ts: Date.now() - 2000 }));
+    // Between judging the stale lock and moving it away, this process is held up while another opener removes it and takes the lock.
+    const child = await openInChild('aba', String((fs) => {
+      const rename = fs.renameSync;
+      let swapped = false;
+      fs.renameSync = function (from, to, ...rest) {
+        if (!swapped && String(from).endsWith('breaker.json.lock') && String(to).endsWith('.removed')) {
+          swapped = true;
+          fs.rmSync(from);
+          fs.writeFileSync(from, JSON.stringify({ token: 'other', ts: Date.now() }), { flag: 'wx' });
+        }
+        return rename.call(this, from, to, ...rest);
+      };
+      // Under a hook that kills it 0.5 s after the library has loaded, so it gives up before the other opener's lock goes stale.
+    }), 429, { TEST_DEADLINE_IN_MS: '500' });
+    // The other opener's lock is back in place and this opener, which never held the lock, wrote nothing.
+    expect(child.opened).toBeNull();
+    expect(JSON.parse(readFileSync(lock, 'utf8')).token).toBe('other');
+    expect(existsSync(join(settings.dir, 'breaker.json'))).toBe(false);
+  }, 30_000);
+
+  it('puts a displaced newer lock back by a copy when the hard link fails for another reason than EEXIST: the only lock is not lost', async () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker') }, ENDPOINT, 'k');
+    mkdirSync(settings.dir, { recursive: true });
+    const lock = join(settings.dir, 'breaker.json.lock');
+    writeFileSync(lock, JSON.stringify({ token: 'dead', ts: Date.now() - 2000 }));
+    // As above, another opener takes the lock between the judgement and the move; and the file system has no hard links (EPERM).
+    const child = await openInChild('nolink', String((fs) => {
+      const rename = fs.renameSync;
+      let swapped = false;
+      fs.renameSync = function (from, to, ...rest) {
+        if (!swapped && String(from).endsWith('breaker.json.lock') && String(to).endsWith('.removed')) {
+          swapped = true;
+          fs.rmSync(from);
+          fs.writeFileSync(from, JSON.stringify({ token: 'other', ts: Date.now() }), { flag: 'wx' });
+        }
+        return rename.call(this, from, to, ...rest);
+      };
+      fs.linkSync = function () {
+        throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+      };
+    }), 429, { TEST_DEADLINE_IN_MS: '500' });
+    expect(child.opened).toBeNull();
+    expect(JSON.parse(readFileSync(lock, 'utf8')).token).toBe('other');
+    expect(existsSync(join(settings.dir, 'breaker.json'))).toBe(false);
+  }, 30_000);
+
+  it('does not create the lock once the hook deadline has passed: no lock left to hold the others back, nothing written', async () => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker') }, ENDPOINT, 'k');
+    // The deadline of the hook (and its kill margin) is over before the opener starts: a free lock must not be created.
+    const child = await openInChild('late', String(() => {}), 429, { TEST_DEADLINE_IN_MS: '-1000' });
+    expect(child.opened).toBeNull();
+    expect(existsSync(join(settings.dir, 'breaker.json'))).toBe(false);
+    expect(existsSync(join(settings.dir, 'breaker.json.lock'))).toBe(false);
+  }, 30_000);
 
   it('removes temp files of a killed write after five minutes, not earlier', () => {
     const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: caseDir }, ENDPOINT, 'k');
@@ -573,6 +798,45 @@ describe('resolveRequest with the shared breaker and limit', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('a failed request logs why it failed: status, kind and block time; a response that is not an HTTP error or a missing response logs nothing', async () => {
+    const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-a') });
+    await resolveRequest(request(), env, countingFetch(() => errorResponse(429, { 'Retry-After': '120' })).fetchFn);
+    const notFound = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-b'), OMC_JEV_LOG_DIR: join(caseDir, 'log-b') });
+    await resolveRequest(request(), notFound, countingFetch(() => errorResponse(404)).fetchFn);
+    const network = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-c'), OMC_JEV_LOG_DIR: join(caseDir, 'log-c') });
+    await resolveRequest(request(), network, async () => { throw new TypeError('fetch failed'); });
+    const invalid = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_DIR: join(caseDir, 'breaker-d'), OMC_JEV_LOG_DIR: join(caseDir, 'log-d') });
+    await resolveRequest(request(), invalid, async () => ({ ok: true, status: 200, json: async () => ({ nope: true }) }));
+    const [rateLimited] = logRows(env);
+    expect(rateLimited).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429', retry_s: 120 } });
+    expect(rateLimited).not.toHaveProperty('rpm');
+    expect(logRows(notFound)[0]).toMatchObject({ mode: 'degraded', error: { status: 404, kind: 'http-404' } });
+    expect(logRows(notFound)[0].error).not.toHaveProperty('retry_s');
+    expect(logRows(network)[0]).toMatchObject({ mode: 'degraded', error: { status: null, kind: 'no-response' } });
+    expect(logRows(invalid)[0]).toMatchObject({ mode: 'degraded' });
+    expect(logRows(invalid)[0]).not.toHaveProperty('error');
+  });
+
+  it('under OMC_JEV_MAX_RPM a failed request logs the minute count against the limit, and no block time without the breaker', async () => {
+    const { own, foreign } = await inOneMinute(async (dir) => {
+      const own = jevEnv({ OMC_JEV_MAX_RPM: '2', OMC_JEV_BREAKER_DIR: join(dir, 'breaker-own'), OMC_JEV_LOG_DIR: join(dir, 'log-own') });
+      const foreign = jevEnv({ OMC_JEV_MAX_RPM: '100', OMC_JEV_BREAKER_DIR: join(dir, 'breaker-foreign'), OMC_JEV_LOG_DIR: join(dir, 'log-foreign') });
+      for (const env of [own, foreign]) {
+        const { fetchFn } = countingFetch((n) => (n === 1 ? okResponse() : errorResponse(429)));
+        await resolveRequest(request('model-routing'), env, fetchFn);
+        await resolveRequest(request('model-routing'), env, fetchFn);
+      }
+      return { own, foreign };
+    });
+    const [success, failure] = logRows(own);
+    expect(success).toMatchObject({ mode: 'shadow' });
+    expect(success).not.toHaveProperty('error');
+    expect(success).not.toHaveProperty('rpm');
+    expect(failure).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429' }, rpm: { count: 2, limit: 2 } });
+    expect(failure.error).not.toHaveProperty('retry_s');
+    expect(logRows(foreign)[1]).toMatchObject({ mode: 'degraded', error: { status: 429 }, rpm: { count: 2, limit: 100 } });
+  });
+
   it('OMC_JEV_MAX_RPM holds back low-priority points first and logs them as cap', async () => {
     const { env, low, high, calls } = await inOneMinute(async (dir) => {
       const env = jevEnv({ OMC_JEV_MAX_RPM: '10', OMC_JEV_BREAKER_DIR: join(dir, 'breaker'), OMC_JEV_LOG_DIR: join(dir, 'log') });
@@ -692,7 +956,9 @@ describe('shared between processes', () => {
     const before = Date.now();
     const first = await runResolver(request(), env);
     expect(first).toMatchObject({ mode: 'degraded', breaker: { reason: 'http-429' } });
-    expect(Math.round((first.breaker.until - before) / 1000)).toBe(45);
+    // The breaker closes 45 s after the failure, which happened between `before` and now (a loaded machine delays the process start).
+    expect(first.breaker.until).toBeGreaterThanOrEqual(before + 45_000);
+    expect(first.breaker.until).toBeLessThanOrEqual(Date.now() + 45_000);
   }, 60_000);
 
   it('a very large 429 body is read only as far as the first 2000 characters', async () => {
@@ -700,13 +966,16 @@ describe('shared between processes', () => {
     const env = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '10000' });
     const before = Date.now();
     const first = await runResolver(request(), env);
-    expect(Math.round((first.breaker.until - before) / 1000)).toBe(45);
+    expect(first.breaker.until).toBeGreaterThanOrEqual(before + 45_000);
+    expect(first.breaker.until).toBeLessThanOrEqual(Date.now() + 45_000);
     // The phrase beyond the first 2000 characters is not looked at.
     const late = await startStub(() => ({ status: 429, body: 'x'.repeat(2500) + ' retry after ~45s' }));
     const lateEnv = jevEnv({ OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: late.endpoint, OMC_JEV_TIMEOUT_MS: '10000', OMC_JEV_BREAKER_DIR: join(caseDir, 'late') });
+    const lateBefore = Date.now();
     const second = await runResolver(request(), lateEnv);
-    expect(Math.round((second.breaker.until - Date.now()) / 1000)).toBeGreaterThanOrEqual(58);
-    expect(Math.round((second.breaker.until - Date.now()) / 1000)).toBeLessThanOrEqual(60);
+    // The default minute, not the 45 s in the body.
+    expect(second.breaker.until).toBeGreaterThanOrEqual(lateBefore + 60_000);
+    expect(second.breaker.until).toBeLessThanOrEqual(Date.now() + 60_000);
   }, 60_000);
 
   it('a limit of 10 lets exactly 10 of 30 concurrent processes send their request', async () => {

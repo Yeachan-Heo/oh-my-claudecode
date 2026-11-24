@@ -1,0 +1,27 @@
+Welcome to Claude Code v2.1.329
+
+Welcome to Claude Code v2.1.329
+
+ Security notes:
+
+ 1. Claude can make mistakes.
+    You're responsible for Claude's
+    actions and should always
+    review them, especially when
+    running code.
+
+ 2. Due to prompt injection risks, only
+    use it with code you trust
+    Learn more: https://code.claude.com
+    /docs/en/security
+
+ Press Enter to continue
+
+
+
+
+
+
+
+
+

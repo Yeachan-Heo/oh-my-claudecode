@@ -22,6 +22,7 @@ import {
   validateSessionId,
   getOmcRoot,
   findGitMetadataDir,
+  withWorktreePathRenderScope,
   OmcPaths,
 } from '../lib/worktree-paths.js';
 import { resolveSessionId } from '../lib/session-id.js';
@@ -2016,7 +2017,10 @@ export const stateListActiveTool: ToolDefinition<{
     session_id: z.string().optional().describe('Explicit session ID to scope the listing. Overrides OMC_SESSION_ID when provided.'),
     all: z.boolean().optional().describe('When true, list active modes across all sessions (legacy + every session-scoped dir). Overrides the default current-session scope.'),
   },
-  handler: async (args) => {
+  // Aggregate reads resolve a state path per session x mode. getGitTopLevel caches only hits, so a
+  // non-git cwd re-runs `git rev-parse` per resolution. The scope memoizes git probes and project ids
+  // for this call only.
+  handler: (args) => withWorktreePathRenderScope(async () => {
     const { workingDirectory, session_id, all } = args;
 
     try {
@@ -2173,7 +2177,7 @@ export const stateListActiveTool: ToolDefinition<{
         isError: true
       };
     }
-  }
+  })
 };
 
 // ============================================================================
@@ -2193,7 +2197,8 @@ export const stateGetStatusTool: ToolDefinition<{
     workingDirectory: z.string().optional().describe('Working directory (defaults to cwd)'),
     session_id: z.string().optional().describe('Session ID for session-scoped state isolation. When provided, the tool operates only within that session. When omitted, the tool aggregates legacy state plus all session-scoped state (may include other sessions).'),
   },
-  handler: async (args) => {
+  // Same per-call git probe memo as state_list_active.
+  handler: (args) => withWorktreePathRenderScope(async () => {
     const { mode, workingDirectory, session_id } = args;
 
     try {
@@ -2357,7 +2362,7 @@ export const stateGetStatusTool: ToolDefinition<{
         isError: true
       };
     }
-  }
+  })
 };
 
 const stateMigrateNonGitTool: ToolDefinition<any> = {

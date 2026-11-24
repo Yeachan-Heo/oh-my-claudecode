@@ -17,6 +17,7 @@ import type { TeamEventType } from './contracts.js';
 import type { TeamEvent } from './types.js';
 import type { WorkerPaneLiveness } from './tmux-session.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import { parseJsonLines } from '../lib/jsonl.js';
 import { countOutstandingForWorker } from './mailbox-outstanding.js';
 
 /**
@@ -51,12 +52,7 @@ export async function readTeamEvents(
   const p = absPath(cwd, TeamPaths.events(teamName));
   if (!existsSync(p)) return [];
   try {
-    const raw = await readFile(p, 'utf8');
-    return raw
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as TeamEvent);
+    return parseJsonLines<TeamEvent>(await readFile(p, 'utf8'));
   } catch {
     return [];
   }

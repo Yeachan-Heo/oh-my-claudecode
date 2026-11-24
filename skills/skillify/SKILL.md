@@ -18,6 +18,20 @@ Before extracting a skill, all three should be true:
 
 Prefer skills that encode decision-making heuristics, constraints, pitfalls, and verification steps. Avoid generic snippets, boilerplate, or library usage examples that belong in normal documentation.
 
+## Decision ladder
+Before drafting anything, look at the skills that already exist (built-in,
+`omc-learned`, `.omc/skills/`) and choose exactly one outcome:
+1. update: an existing skill already covers this workflow; correct or refresh it.
+2. extend: an existing skill covers most of it; add the missing steps or triggers.
+3. deprecate: an existing skill is wrong or obsolete and this finding replaces
+   it; mark it deprecated and point to the replacement.
+4. split: one existing skill mixes two workflows; separate them.
+5. create: no existing skill fits and the quality gate above passes.
+6. none: the workflow is not repeatable, is generic, or you are not sure.
+
+When in doubt, choose none. Changing an existing skill comes before creating a
+new one.
+
 ## Workflow
 1. Identify the repeatable task the session accomplished.
 2. Extract:
@@ -59,6 +73,7 @@ Prefer skills that encode decision-making heuristics, constraints, pitfalls, and
 - Keep `omc-learned` as the storage directory name for compatibility; do not present it as the public invocation name.
 
 ## Output
+- Decision ladder outcome (update, extend, deprecate, split, create or none) with the reason
 - Proposed skill name
 - Target location
 - Draft workflow structure or complete skill file

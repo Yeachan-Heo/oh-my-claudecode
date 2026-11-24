@@ -399,8 +399,9 @@ export function withProjectIdentifierScope<T>(fn: () => T): T {
  *
  * The memo is intentionally opt-in and is discarded when the render settles.
  * Direct callers that enforce security boundaries continue to receive fresh
- * probes, while each HUD render gets a new scope that observes PATH and .git
- * metadata changes made between renders.
+ * probes, while each HUD render (or one read-only aggregate state-tool call)
+ * gets a new scope that observes PATH and .git metadata changes made between
+ * invocations.
  */
 export function withWorktreePathRenderScope<T>(fn: () => T): T {
   return worktreePathRenderScope.run(
@@ -684,7 +685,8 @@ export function probeGitTopLevel(cwd: string): GitTopLevelProbe {
 
   // Outside an explicit render scope, never cache security decisions: PATH,
   // the git executable, and .git metadata can change between calls in the same
-  // process. A HUD render scope is intentionally limited to one invocation.
+  // process. A render scope (HUD render or aggregate state read) is
+  // intentionally limited to one invocation.
   let result: GitTopLevelProbe;
   try {
     result = classifyGitShowToplevelStdout(runGitShowToplevel(cwd), cwd);

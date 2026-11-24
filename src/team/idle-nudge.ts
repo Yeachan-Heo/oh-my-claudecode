@@ -5,15 +5,20 @@
  * tmux send-keys continuation nudges. Only nudges worker panes (never the
  * leader) in the current team session.
  *
- * Idle = pane shows a prompt (paneLooksReady) AND no active task running
- * (paneHasActiveTask is false).
+ * Idle = classifyPane reads the pane as idle (a prompt is drawn, and no trust
+ * dialog, active task or startup status line is on screen), and the pane also
+ * looks ready the way the checks that send keys read it.
  *
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
  */
 
 import {
-  paneLooksReady,
+  classifyPane,
+  observePane,
   paneHasActiveTask,
+  paneLooksReady,
+} from './pane-readiness.js';
+import {
   captureOwnedTeamPane,
   type WorkerPaneOwnership,
   providerForTeamTarget,
@@ -24,6 +29,7 @@ import {
   type TeamInstanceId,
   type TmuxServerIdentity,
 } from './types.js';
+import type { WorkerProviderLiveness } from './worker-provider-liveness.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -53,6 +59,11 @@ export interface NudgeAuthority {
    */
   getPaneOwnership: (paneId: string) => WorkerPaneOwnership | undefined;
   /**
+   * Provider liveness for one persisted worker pane. A `dead` provider leaves
+   * a shell prompt that reads as idle, so it is never nudged.
+   */
+  getProviderLiveness: (paneId: string) => Promise<WorkerProviderLiveness>;
+  /**
    * Perform final authority validation and transport while holding the
    * original instance lifecycle lock. Returning false means no delivery was
    * proven and must not increment counters.
@@ -80,13 +91,19 @@ export async function capturePane(ownership: WorkerPaneOwnership): Promise<strin
 }
 
 /**
- * A pane is idle when it shows a prompt (ready for input) but has no
- * active task running.
+ * A pane is idle when it shows a prompt and nothing else claims it: no trust
+ * dialog, no active task and no startup status line. A nudge types into the
+ * pane, so it also needs the pane to look ready the way the checks that send
+ * keys have always read it: a draft that mentions "loading" stays untouched.
  */
 export async function isPaneIdle(ownership: WorkerPaneOwnership): Promise<boolean> {
   const captured = await capturePane(ownership);
   if (!captured) return false;
-  return paneLooksReady(captured) && !paneHasActiveTask(captured);
+  return (
+    classifyPane(observePane(captured)).kind === 'idle' &&
+    paneLooksReady(captured) &&
+    !paneHasActiveTask(captured)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +151,7 @@ export class NudgeTracker {
       || sessionName.trim() !== sessionName
       || (authority.provider !== undefined && authority.provider !== provider)
       || typeof authority.getPaneOwnership !== 'function'
+      || typeof authority.getProviderLiveness !== 'function'
       || typeof authority.executeNudge !== 'function'
       || (provider === 'tmux'
         && (!authority.tmuxServerIdentity || !isValidTmuxServerIdentity(authority.tmuxServerIdentity)))
@@ -181,7 +199,8 @@ export class NudgeTracker {
         continue;
       }
 
-      const idle = await isPaneIdle(ownership);
+      const idle = (await authority.getProviderLiveness(paneId)) !== 'dead'
+        && await isPaneIdle(ownership);
 
       if (!idle) {
         // Pane is active — reset idle tracking

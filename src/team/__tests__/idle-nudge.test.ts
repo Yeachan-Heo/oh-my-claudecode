@@ -96,6 +96,7 @@ const TEST_AUTHORITY: NudgeAuthority = {
   getPaneOwnership: (paneId: string) => ['%2', '%3'].includes(paneId)
     ? { ...TEST_OWNERSHIP, paneId }
     : undefined,
+  getProviderLiveness: async () => 'unknown',
   executeNudge: (paneId: string, message: string) =>
     sendToWorker(TEST_AUTHORITY.sessionName, paneId, message, TEST_TMUX_IDENTITY),
 };
@@ -208,6 +209,30 @@ describe('isPaneIdle', () => {
     mockCaptureOutput(EMPTY_PANE_CONTENT);
     expect(await isPaneIdle({ ...TEST_OWNERSHIP, paneId: '%1' })).toBe(false);
   });
+
+  it.each([
+    ['a Claude files dialog', 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed'],
+    ['a directory dialog', 'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit'],
+    ['the Codex hooks review', 'Hooks need review\n› 3. Continue without trusting\nPress enter to confirm or esc to go back'],
+  ])('returns false when the pane is stopped at %s', async (_label, capture) => {
+    vi.useRealTimers();
+    mockCaptureOutput(capture);
+    expect(await isPaneIdle({ ...TEST_OWNERSHIP, paneId: '%1' })).toBe(false);
+  });
+
+  it('does not nudge where the checks that send keys would hold back, as with a draft that mentions loading', async () => {
+    vi.useRealTimers();
+    mockCaptureOutput('› Investigate lazy loading.\ngpt-5.3-codex high · 80% left');
+    expect(await isPaneIdle({ ...TEST_OWNERSHIP, paneId: '%1' })).toBe(false);
+    mockCaptureOutput('⏺ Fixed the lazy loading regression in src/app.ts and reran the tests.\n❯ ');
+    expect(await isPaneIdle({ ...TEST_OWNERSHIP, paneId: '%1' })).toBe(false);
+  });
+
+  it('returns false while a startup status line is drawn above the prompt', async () => {
+    vi.useRealTimers();
+    mockCaptureOutput('⠋ Connecting to MCP servers... (0/3) - Waiting for: playwright, filesystem, github\n│ > Type your message │');
+    expect(await isPaneIdle({ ...TEST_OWNERSHIP, paneId: '%1' })).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -237,6 +262,21 @@ describe('NudgeTracker', () => {
     expect(vi.mocked(sendToWorker)).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['a draft that mentions loading', '› Investigate lazy loading.\ngpt-5.3-codex high · 80% left'],
+    ['a Claude trust dialog', 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed'],
+  ])('sends nothing to a pane showing %s, however long it waits', async (_label, capture) => {
+    mockCaptureOutput(capture);
+    const tracker = new NudgeTracker({ delayMs: 10_000 });
+
+    await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
+    vi.advanceTimersByTime(15_000);
+    const nudged = await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
+
+    expect(nudged).toEqual([]);
+    expect(vi.mocked(sendToWorker)).not.toHaveBeenCalled();
+  });
+
   it('nudges after delay has elapsed', async () => {
     mockCaptureOutput(IDLE_PANE_CONTENT);
     const tracker = new NudgeTracker({ delayMs: 10_000 });
@@ -257,6 +297,23 @@ describe('NudgeTracker', () => {
       TEST_TMUX_IDENTITY,
     );
     expect(tracker.totalNudges).toBe(1);
+  });
+
+  it('does not nudge a shell prompt left behind by an exited provider', async () => {
+    mockCaptureOutput(['$ claude', 'bye', '❯ '].join('\n'));
+    const tracker = new NudgeTracker({ delayMs: 10_000 });
+    const authority: NudgeAuthority = {
+      ...TEST_AUTHORITY,
+      getProviderLiveness: async paneId => (paneId === '%2' ? 'dead' : 'unknown'),
+    };
+
+    await tracker.checkAndNudge(['%2', '%3'], '%1', authority);
+    vi.advanceTimersByTime(15_000);
+    const nudged = await tracker.checkAndNudge(['%2', '%3'], '%1', authority);
+
+    expect(nudged).toEqual(['%3']);
+    expect(vi.mocked(sendToWorker)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%3', DEFAULT_NUDGE_CONFIG.message, TEST_TMUX_IDENTITY);
   });
 
   it('uses custom nudge message', async () => {
@@ -436,6 +493,7 @@ describe('NudgeTracker', () => {
       getPaneOwnership: (paneId: string) => paneId === '%2'
         ? { ...TEST_OWNERSHIP, provider: 'cmux', providerTarget: 'cmux:workspace', tmuxServerIdentity: undefined }
         : undefined,
+      getProviderLiveness: TEST_AUTHORITY.getProviderLiveness,
       executeNudge: (paneId: string, message: string) =>
         sendToWorker('cmux:workspace', paneId, message),
     };
@@ -461,6 +519,7 @@ describe('NudgeTracker', () => {
       getPaneOwnership: (paneId: string) => paneId === '%2'
         ? { ...TEST_OWNERSHIP, provider: 'herdr', providerTarget: 'herdr-workspace', tmuxServerIdentity: undefined }
         : undefined,
+      getProviderLiveness: TEST_AUTHORITY.getProviderLiveness,
       executeNudge: (paneId: string, message: string) =>
         sendToWorker('herdr-workspace', paneId, message),
     };

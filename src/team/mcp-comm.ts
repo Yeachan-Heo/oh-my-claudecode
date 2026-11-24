@@ -6,11 +6,9 @@
  * current strict durable state before any pane effect.
  */
 
-import { realpathSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
-
 import {
   enqueueDispatchRequest,
+  isTeamWideDispatchFailure,
   readDispatchRequest,
   readDispatchRequestStrict,
   transitionDispatchRequest,
@@ -40,6 +38,7 @@ import {
 import { absPath, TeamPaths } from './state-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import { canonicalNotificationLockIdentity, enqueueFailedOutcome, isExactText, notifyExceptionReason } from './mcp-dispatch-helpers.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -148,27 +147,6 @@ function fallbackTransportForPreference(
   if (preference === 'prompt_stdin') return 'prompt_stdin';
   if (preference === 'transport_direct') return 'tmux_send_keys';
   return 'hook';
-}
-
-function notifyExceptionReason(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return `notify_exception:${message}`;
-}
-
-function isExactText(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value === value.trim();
-}
-
-function canonicalNotificationLockIdentity(lockPath: string): string {
-  try {
-    return realpathSync(lockPath);
-  } catch {
-    try {
-      return join(realpathSync(dirname(lockPath)), basename(lockPath));
-    } catch {
-      return lockPath;
-    }
-  }
 }
 
 function managedOutcome(
@@ -471,20 +449,25 @@ export interface QueueInboxParams {
 }
 
 export async function queueInboxInstruction(params: QueueInboxParams): Promise<DispatchOutcome> {
-  const queued = await enqueueDispatchRequest(
-    params.teamName,
-    {
-      kind: 'inbox',
-      to_worker: params.workerName,
-      worker_index: params.workerIndex,
-      pane_id: params.paneId,
-      trigger_message: params.triggerMessage,
-      transport_preference: params.transportPreference,
-      fallback_allowed: params.fallbackAllowed,
-      inbox_correlation_key: params.inboxCorrelationKey,
-    },
-    params.cwd,
-  );
+  let queued: { request: TeamDispatchRequest; deduped: boolean };
+  try {
+    queued = await enqueueDispatchRequest(
+      params.teamName,
+      {
+        kind: 'inbox',
+        to_worker: params.workerName,
+        worker_index: params.workerIndex,
+        pane_id: params.paneId,
+        trigger_message: params.triggerMessage,
+        transport_preference: params.transportPreference,
+        fallback_allowed: params.fallbackAllowed,
+        inbox_correlation_key: params.inboxCorrelationKey,
+      },
+      params.cwd,
+    );
+  } catch (error) {
+    return enqueueFailedOutcome(error);
+  }
 
   if (queued.deduped) {
     return {
@@ -554,20 +537,25 @@ export interface QueueDirectMessageParams {
 
 export async function queueDirectMailboxMessage(params: QueueDirectMessageParams): Promise<DispatchOutcome> {
   const message = await params.deps.sendDirectMessage(params.teamName, params.fromWorker, params.toWorker, params.body, params.cwd);
-  const queued = await enqueueDispatchRequest(
-    params.teamName,
-    {
-      kind: 'mailbox',
-      to_worker: params.toWorker,
-      worker_index: params.toWorkerIndex,
-      pane_id: params.toPaneId,
-      trigger_message: params.triggerMessage,
-      message_id: message.message_id,
-      transport_preference: params.transportPreference,
-      fallback_allowed: params.fallbackAllowed,
-    },
-    params.cwd,
-  );
+  let queued: { request: TeamDispatchRequest; deduped: boolean };
+  try {
+    queued = await enqueueDispatchRequest(
+      params.teamName,
+      {
+        kind: 'mailbox',
+        to_worker: params.toWorker,
+        worker_index: params.toWorkerIndex,
+        pane_id: params.toPaneId,
+        trigger_message: params.triggerMessage,
+        message_id: message.message_id,
+        transport_preference: params.transportPreference,
+        fallback_allowed: params.fallbackAllowed,
+      },
+      params.cwd,
+    );
+  } catch (error) {
+    return { ...enqueueFailedOutcome(error), message_id: message.message_id, to_worker: params.toWorker };
+  }
 
   if (queued.deduped) {
     return {
@@ -677,21 +665,34 @@ export async function queueBroadcastMailboxMessage(params: QueueBroadcastParams)
     persistedRecipients.push({ ...recipient, triggerMessage, message });
   }
 
+  let teamWideFailure: unknown;
   for (const recipient of persistedRecipients) {
-    const queued = await enqueueDispatchRequest(
-      params.teamName,
-      {
-        kind: 'mailbox',
-        to_worker: recipient.workerName,
-        worker_index: recipient.workerIndex,
-        pane_id: recipient.paneId,
-        trigger_message: recipient.triggerMessage,
+    let queued: { request: TeamDispatchRequest; deduped: boolean };
+    try {
+      if (teamWideFailure !== undefined) throw teamWideFailure;
+      queued = await enqueueDispatchRequest(
+        params.teamName,
+        {
+          kind: 'mailbox',
+          to_worker: recipient.workerName,
+          worker_index: recipient.workerIndex,
+          pane_id: recipient.paneId,
+          trigger_message: recipient.triggerMessage,
+          message_id: recipient.message.message_id,
+          transport_preference: params.transportPreference,
+          fallback_allowed: params.fallbackAllowed,
+        },
+        params.cwd,
+      );
+    } catch (error) {
+      if (isTeamWideDispatchFailure(error)) teamWideFailure = error;
+      outcomes[recipient.index] = {
+        ...enqueueFailedOutcome(error),
         message_id: recipient.message.message_id,
-        transport_preference: params.transportPreference,
-        fallback_allowed: params.fallbackAllowed,
-      },
-      params.cwd,
-    );
+        to_worker: recipient.workerName,
+      };
+      continue;
+    }
 
     if (queued.deduped) {
       outcomes[recipient.index] = {

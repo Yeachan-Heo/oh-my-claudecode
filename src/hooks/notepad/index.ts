@@ -417,18 +417,22 @@ export function pruneOldEntries(
         return { pruned: 0, remaining: 0 } as PruneResult;
       }
 
-      // Parse entries
-      const entryRegex =
-        /### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\n([\s\S]*?)(?=### |$)/g;
-      const entries: Array<{ timestamp: string; content: string }> = [];
-      let match: RegExpExecArray | null = entryRegex.exec(workingMemory);
+      // Parse entries. Only a whole `### YYYY-MM-DD HH:MM` line starts an
+      // entry, so `###` subheadings and `###` inside a line stay in their
+      // entry. Text before the first entry is kept.
+      const entryHeading = /^### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})$/;
+      const preamble: string[] = [];
+      const entries: Array<{ timestamp: string; lines: string[] }> = [];
 
-      while (match !== null) {
-        entries.push({
-          timestamp: match[1],
-          content: match[2].trim(),
-        });
-        match = entryRegex.exec(workingMemory);
+      for (const line of workingMemory.split("\n")) {
+        const heading = entryHeading.exec(line);
+        if (heading) {
+          entries.push({ timestamp: heading[1], lines: [] });
+        } else if (entries.length > 0) {
+          entries[entries.length - 1].lines.push(line);
+        } else {
+          preamble.push(line);
+        }
       }
 
       // Calculate cutoff date
@@ -444,8 +448,13 @@ export function pruneOldEntries(
       const pruned = entries.length - kept.length;
 
       // Rebuild Working Memory section
-      const newContent = kept
-        .map((entry) => `### ${entry.timestamp}\n${entry.content}`)
+      const newContent = [
+        preamble.join("\n").trim(),
+        ...kept.map(
+          (entry) => `### ${entry.timestamp}\n${entry.lines.join("\n").trim()}`,
+        ),
+      ]
+        .filter(Boolean)
         .join("\n\n");
 
       notepadContent = replaceSection(

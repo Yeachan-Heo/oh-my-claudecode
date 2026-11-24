@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JevClientError, queryJev } from '../client.js';
 import { resetJevResolverState, resolveJudgment } from '../resolver.js';
 import type { JevQuestions } from '../types.js';
@@ -217,6 +217,80 @@ describe('resolveJudgment with the shared breaker', () => {
     expect(await judge(fetchFn)).toEqual({ answer: TWIN, source: 'twin', mode: 'cap' });
     expect(count()).toBe(1);
     expect(rows().pop()).toMatchObject({ mode: 'cap', reason: 'rpm', priority: 'high', rpm: { count: 1, threshold: 1, limit: 1 } });
+  });
+
+  it('retry_s of a failure with an HTTP-date Retry-After is the pause the breaker was told, not one read again later', async () => {
+    process.env.OMC_JEV_BREAKER = '1';
+    const start = Date.now();
+    const realNow = Date.now;
+    let ticks = 0;
+    // A clock that moves a second on every read: reading the date again at log time gives a shorter pause.
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => start + 1000 * (ticks += 1));
+    try {
+      await judge(counting(() => failed(429, new Date(start + 600_000).toUTCString())).fetchFn);
+    } finally {
+      now.mockRestore();
+    }
+    expect(Date.now).toBe(realNow);
+    const state = JSON.parse(readFileSync(join(dir, 'breaker', readdirSync(join(dir, 'breaker'))[0], 'breaker.json'), 'utf8')) as { since: number; until: number };
+    const row = rows().pop() as { error: { retry_s: number } };
+    expect(row.error.retry_s).toBe((state.until - state.since) / 1000);
+  });
+
+  it('a failed call logs why it failed; under OMC_JEV_MAX_RPM also the minute count against the limit; without the variables nothing is added', async () => {
+    const plain = counting(() => failed(429, '120'));
+    await judge(plain.fetchFn);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded' });
+    expect(rows().pop()).not.toHaveProperty('error');
+    expect(rows().pop()).not.toHaveProperty('rpm');
+
+    process.env.OMC_JEV_BREAKER = '1';
+    await judge(counting(() => failed(500)).fetchFn);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded', error: { status: 500, kind: 'http-500', retry_s: 60 } });
+    expect(rows().pop()).not.toHaveProperty('rpm');
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-2');
+    await judge(counting(() => failed(404)).fetchFn);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded', error: { status: 404, kind: 'http-404' } });
+    expect((rows().pop() as { error: object }).error).not.toHaveProperty('retry_s');
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-3');
+    resetJevResolverState(); // three failures in a row opened the in-process circuit of the point
+    await judge((async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch);
+    expect(rows().pop()).toMatchObject({ mode: 'degraded', error: { status: null, kind: 'no-response' } });
+
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 3000) await new Promise((resolve) => setTimeout(resolve, left + 50));
+    delete process.env.OMC_JEV_BREAKER;
+    resetJevResolverState();
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-4');
+    process.env.OMC_JEV_MAX_RPM = '5';
+    const { fetchFn } = counting((n) => (n === 1 ? ok() : failed(429)));
+    await judge(fetchFn);
+    expect(rows().pop()).not.toHaveProperty('rpm'); // a line of a successful request carries neither field
+    expect(rows().pop()).not.toHaveProperty('error');
+    await judge(fetchFn);
+    const last = rows().pop() as { error: object };
+    expect(last).toMatchObject({ mode: 'degraded', error: { status: 429, kind: 'http-429' }, rpm: { count: 2, limit: 5 } });
+    expect(last.error).not.toHaveProperty('retry_s'); // the limit alone holds nothing back
+  });
+
+  it('the same fields are logged by the non-blocking shadow and active paths; an invalid body adds none', async () => {
+    process.env.OMC_JEV_BREAKER = '1';
+    const waitForRows = async (n: number) => {
+      for (let i = 0; i < 100 && rows().length < n; i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    const args = { point: 'model-routing', state: { task: 'x' }, questions: QUESTIONS, twin: () => TWIN, blocking: false };
+    await resolveJudgment({ ...args, fetchFn: counting(() => failed(503)).fetchFn });
+    await waitForRows(1);
+    expect(rows()[0]).toMatchObject({ mode: 'degraded', error: { status: 503, kind: 'http-503', retry_s: 60 } });
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-active');
+    await resolveJudgment({ ...args, mode: 'active', fetchFn: counting(() => failed(500)).fetchFn });
+    await waitForRows(2);
+    expect(rows()[1]).toMatchObject({ mode: 'degraded', error: { status: 500, kind: 'http-500', retry_s: 60 } });
+    process.env.OMC_JEV_BREAKER_DIR = join(dir, 'breaker-invalid');
+    resetJevResolverState();
+    await judge((async () => ({ ok: true, status: 200, json: async () => ({}) })) as unknown as typeof fetch);
+    expect(rows()[2]).toMatchObject({ mode: 'degraded' });
+    expect(rows()[2]).not.toHaveProperty('error');
   });
 
   it('the in-process circuit still works with the shared breaker on (no-response failures)', async () => {

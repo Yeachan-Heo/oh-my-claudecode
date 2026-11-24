@@ -1,0 +1,41 @@
+/**
+ * OMC HUD - State Readers
+ *
+ * Read ralph and PRD state from existing OMC files.
+ * These are read-only functions that don't modify the state files.
+ */
+import type { RalphStateForHud, PrdStateForHud } from './types.js';
+import type { AutopilotStateForHud } from './elements/autopilot.js';
+/**
+ * Read Ralph Loop state for HUD display.
+ * Returns null if no state file exists or on error.
+ */
+export declare function readRalphStateForHud(directory: string, sessionId?: string): RalphStateForHud | null;
+/**
+ * Read PRD state for HUD display.
+ * Checks both root prd.json and .omc/prd.json.
+ *
+ * Completion is judged with the same predicate Ralph uses (`getPrdStatus`):
+ * a story counts only when its `passes` claim is revision-bound and the
+ * architect has approved it. Otherwise the HUD shows a run as finished while
+ * the loop is still waiting for reviewer sign-off.
+ *
+ * PRDs that do not satisfy the Ralph schema still render through the tolerant
+ * read below, so display-only usage (a hand-written task list) keeps working.
+ */
+export declare function readPrdStateForHud(directory: string): PrdStateForHud | null;
+/**
+ * Read Autopilot state for HUD display.
+ * Returns shape matching AutopilotStateForHud from elements/autopilot.ts.
+ */
+export declare function readAutopilotStateForHud(directory: string, sessionId?: string): AutopilotStateForHud | null;
+/**
+ * Check if any OMC mode is currently active
+ */
+export declare function isAnyModeActive(directory: string, sessionId?: string): boolean;
+/**
+ * Get active skill names for display
+ */
+export declare function getActiveSkills(directory: string, sessionId?: string): string[];
+export type { AutopilotStateForHud } from './elements/autopilot.js';
+//# sourceMappingURL=omc-state.d.ts.map

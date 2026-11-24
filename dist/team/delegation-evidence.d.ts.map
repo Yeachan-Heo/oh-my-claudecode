@@ -1,0 +1,1 @@
+{"version":3,"file":"delegation-evidence.d.ts","sourceRoot":"","sources":["../../src/team/delegation-evidence.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,sBAAsB,EAAE,MAAM,YAAY,CAAC;AAQzD,eAAO,MAAM,0BAA0B,EAAE,sBAKxC,CAAC;AAEF,wBAAgB,mBAAmB,CAAC,IAAI,EAAE,MAAM,GAAG,OAAO,CAYzD;AAED,wBAAgB,8BAA8B,CAAC,IAAI,EAAE,MAAM,GAAG,sBAAsB,GAAG,SAAS,CAE/F"}

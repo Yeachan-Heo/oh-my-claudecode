@@ -19,6 +19,11 @@ const ENV_KEYS = [
   'OMC_JEV_EXCERPT_CHARS_LEARNER_EXTRACTION',
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_ENDPOINT',
+  // The opt-in shared breaker and limit read the machine's real state when these are set in the shell that runs the tests.
+  'OMC_JEV_BREAKER',
+  'OMC_JEV_BREAKER_DIR',
+  'OMC_JEV_MAX_RPM',
+  'OMC_JEV_QUIET',
 ] as const;
 
 const QUESTIONS: JevQuestions = {

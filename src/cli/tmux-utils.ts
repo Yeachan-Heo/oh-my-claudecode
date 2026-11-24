@@ -76,6 +76,15 @@ function assertSafeCmdValue(value: string): void {
   }
 }
 
+// -u keeps -p/-F output locale-independent: a non-UTF-8 tmux client prints tabs as '_'.
+function tmuxGlobalArgs(): string[] {
+  return process.platform === 'win32' ? [] : ['-u'];
+}
+
+function tmuxShellCommand(command: string): string {
+  return ['tmux', ...tmuxGlobalArgs(), command].join(' ');
+}
+
 function resolveTmuxInvocation(args: string[]): TmuxCommandInvocation {
   const resolvedBinary = resolveTmuxBinaryPath();
   if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBinary)) {
@@ -89,7 +98,7 @@ function resolveTmuxInvocation(args: string[]): TmuxCommandInvocation {
 
   return {
     command: resolvedBinary,
-    args,
+    args: [...tmuxGlobalArgs(), ...args],
   };
 }
 
@@ -119,7 +128,7 @@ export function tmuxShell(
   opts?: TmuxExecOptions & Omit<ExecSyncOptionsWithStringEncoding, 'env' | 'encoding'> & { encoding?: BufferEncoding },
 ): string {
   const { stripTmux: _, ...execOpts } = opts ?? {};
-  return execSync(`tmux ${command}`, { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) }) as string;
+  return execSync(tmuxShellCommand(command), { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) }) as string;
 }
 
 export async function tmuxShellAsync(
@@ -127,7 +136,7 @@ export async function tmuxShellAsync(
   opts?: TmuxExecOptions & { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
   const { stripTmux: _, timeout, ...rest } = opts ?? {};
-  return promisify(exec)(`tmux ${command}`, {
+  return promisify(exec)(tmuxShellCommand(command), {
     encoding: 'utf-8', env: resolveEnv(opts),
     ...(timeout !== undefined ? { timeout } : {}), ...rest,
   });

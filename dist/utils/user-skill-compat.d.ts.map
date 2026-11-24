@@ -1,0 +1,1 @@
+{"version":3,"file":"user-skill-compat.d.ts","sourceRoot":"","sources":["../../src/utils/user-skill-compat.ts"],"names":[],"mappings":"AAiBA,MAAM,WAAW,oBAAoB;IACnC,SAAS,EAAE,MAAM,CAAC;IAClB,eAAe,EAAE,MAAM,CAAC;CACzB;AA2BD,wBAAgB,+BAA+B,CAC7C,SAAS,EAAE,MAAM,EACjB,eAAe,EAAE,MAAM,GACtB,OAAO,CAsCT;AAED,wBAAgB,wBAAwB,IAAI,oBAAoB,EAAE,CAgCjE;AAED,wBAAgB,qCAAqC,IAAI,MAAM,EAAE,CAUhE"}

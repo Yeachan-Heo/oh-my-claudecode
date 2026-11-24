@@ -12,6 +12,7 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { JEV_ROW_NO_ANSWER } from '../../scripts/jev-resolve.mjs';
 import { isJevAppliedLogEnabled } from '../../scripts/lib/jev-shadow.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -23,6 +24,8 @@ let endpoint = '';
 let server;
 // The stub's answers for the next requests: question name -> answer.
 let stubAnswers = {};
+// Answers for the next requests one by one (question name -> answer); once used up, stubAnswers answers.
+let stubQueue = [];
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -31,8 +34,9 @@ beforeAll(async () => {
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {
       const answers = {};
+      const source = stubQueue.shift() ?? stubAnswers;
       for (const name of Object.keys(JSON.parse(body).questions ?? {})) {
-        if (stubAnswers[name]) answers[name] = stubAnswers[name];
+        if (source[name]) answers[name] = source[name];
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ answers: Object.keys(answers).length > 0 ? answers : { unknown: { type: 'noul', noul: 0 } } }));
@@ -200,9 +204,47 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     expect(lines[0]).toEqual({
       ts: expect.any(String),
       point: 'model-routing',
-      applied: { subagent_type: 'oh-my-claudecode:executor', model: { from: 'sonnet', to: 'opus' }, effort: { from: null, to: 'xhigh', score: 3 } },
+      applied: { subagent_type: 'oh-my-claudecode:executor', model: { from: 'sonnet', to: 'opus' }, effort: { from: null, to: 'xhigh', score: 3, confidence: null } },
     });
   }, 60_000);
+
+  it('model-routing: the effort answer\'s confidence is logged, null when the answer has none or an invalid one', async () => {
+    stubAnswers = { effort: { type: 'score', score: 3, confidence: 0.8 } };
+    const given = makeContext();
+    await runHook(given, 'pre-tool-enforcer.mjs', TASK_CALL(given.cwd), 'model-routing');
+    expect(readLog(given, 'applied.jsonl')[0].applied.effort).toEqual({ from: null, to: 'xhigh', score: 3, confidence: 0.8 });
+
+    stubAnswers = { effort: { type: 'score', score: 3, confidence: 7 } };
+    const invalid = makeContext();
+    await runHook(invalid, 'pre-tool-enforcer.mjs', TASK_CALL(invalid.cwd), 'model-routing');
+    expect(readLog(invalid, 'applied.jsonl')[0].applied.effort.confidence).toBeNull();
+  }, 90_000);
+
+  it('model-routing: an effort set on a call with a name (a team member) is marked as not known to be delivered', async () => {
+    stubAnswers = { effort: { type: 'score', score: 3, confidence: 0.9 } };
+    const named = makeContext();
+    await runHook(named, 'pre-tool-enforcer.mjs', TASK_CALL(named.cwd, { name: 'reviewer' }), 'model-routing');
+    expect(readLog(named, 'applied.jsonl')[0].applied.effort).toEqual({ from: null, to: 'xhigh', score: 3, confidence: 0.9, delivered: 'unknown-team-member' });
+
+    const unnamed = makeContext();
+    await runHook(unnamed, 'pre-tool-enforcer.mjs', TASK_CALL(unnamed.cwd, { name: '  ' }), 'model-routing');
+    expect(readLog(unnamed, 'applied.jsonl')[0].applied.effort).not.toHaveProperty('delivered');
+  }, 90_000);
+
+  it('model-routing: an answer that changes nothing sends no updatedInput, with or without the applied log', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'sonnet' }, effort: { type: 'score', score: 3 } };
+    for (const overrides of [{}, { OMC_JEV_APPLIED_LOG: undefined }]) {
+      const context = makeContext();
+      const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd, { effort: 'xhigh' }), 'model-routing', overrides);
+      expect(output?.hookSpecificOutput?.updatedInput).toBeUndefined();
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
+      expect(readLog(context, 'shadow.jsonl')).toHaveLength(1);
+    }
+    // The same answers on a call they do change still send the new values.
+    const changed = makeContext();
+    const output = await runHook(changed, 'pre-tool-enforcer.mjs', TASK_CALL(changed.cwd, { effort: 'low' }), 'model-routing');
+    expect(output.hookSpecificOutput.updatedInput).toMatchObject({ model: 'sonnet', effort: 'xhigh' });
+  }, 120_000);
 
   it('model-routing: the line and the shadow line share one request_id with OMC_JEV_LOG_CONTEXT=1', async () => {
     stubAnswers = { 'model-tier': { type: 'choice', choice: 'haiku' } };
@@ -275,7 +317,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const lower = makeContext();
     await runHook(lower, 'pre-tool-enforcer.mjs', TASK_CALL(lower.cwd, { effort: 'xhigh' }), 'model-routing', always);
     expect(readLog(lower, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1, confidence: null } } }),
     ]);
 
     // Without the always-on variable the cap bounds only Jev's own answer: the baseline stays xhigh.
@@ -283,7 +325,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const capOnly = makeContext();
     await runHook(capOnly, 'pre-tool-enforcer.mjs', TASK_CALL(capOnly.cwd, { effort: 'xhigh' }), 'model-routing', { OMC_JEV_MAX_EFFORT: 'high', OMC_JEV_MAX_EFFORT_ALWAYS: undefined });
     expect(readLog(capOnly, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'xhigh', to: 'high', score: 3 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'xhigh', to: 'high', score: 3, confidence: null } } }),
     ]);
   }, 90_000);
 
@@ -364,7 +406,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing', env);
     expect(output.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'medium' });
     expect(readLog(context, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'oh-my-claudecode:executor', effort: { from: 'high', to: 'medium', score: 1, confidence: null } } }),
     ]);
   }, 60_000);
 
@@ -398,7 +440,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     });
     expect(output.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'high' });
     expect(readLog(context, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'low', to: 'high', score: 2 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'low', to: 'high', score: 2, confidence: null } } }),
     ]);
   }, 90_000);
 
@@ -420,7 +462,7 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const lower = await runHook(context, 'pre-tool-enforcer.mjs', input, 'model-routing', env);
     expect(lower.hookSpecificOutput.updatedInput).toMatchObject({ effort: 'low' });
     expect(readLog(context, 'applied.jsonl')).toEqual([
-      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'high', to: 'low', score: 0 } } }),
+      expect.objectContaining({ applied: { subagent_type: 'review-agent', effort: { from: 'high', to: 'low', score: 0, confidence: null } } }),
     ]);
   }, 90_000);
 
@@ -656,6 +698,189 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     }, 60_000);
   });
 
+  function ralphState(context, sessionId) {
+    execFileSync('git', ['init'], { cwd: context.cwd, stdio: 'ignore' });
+    const stateDir = join(context.cwd, '.omc', 'state', 'sessions', sessionId);
+    mkdirSync(stateDir, { recursive: true });
+    const path = join(stateDir, 'ralph-state.json');
+    writeFileSync(path, JSON.stringify({
+      active: true,
+      session_id: sessionId,
+      project_path: context.cwd,
+      iteration: 1,
+      max_iterations: 5,
+      started_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      prompt: 'Complete the bounded task and verify the result.',
+    }));
+    return path;
+  }
+
+  it('loop-continuation: a release with OMC_JEV_LOOP_RELEASE_ONLY writes the stop it let go, not a completion', async () => {
+    stubAnswers = { task_complete: { type: 'noul', noul: 0.9 } };
+    const context = makeContext();
+    const path = ralphState(context, 'jev-session');
+    await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1' });
+    const lines = readLog(context, 'applied.jsonl');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ point: 'loop-continuation', applied: { mode: 'ralph', block: { from: true, to: false }, noul: 0.9 } });
+    expect(lines[0].applied).not.toHaveProperty('completed');
+    expect(JSON.parse(readFileSync(path, 'utf8')).active).toBe(true);
+  }, 60_000);
+
+  it('loop-continuation: a release at the autopilot reinforcement cap writes no row (the fallback already releases)', async () => {
+    stubAnswers = { task_complete: { type: 'noul', noul: 0.9 } };
+    const context = makeContext();
+    execFileSync('git', ['init'], { cwd: context.cwd, stdio: 'ignore' });
+    const stateDir = join(context.cwd, '.omc', 'state', 'sessions', 'jev-session');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, 'autopilot-state.json'), JSON.stringify({
+      active: true,
+      session_id: 'jev-session',
+      project_path: context.cwd,
+      phase: 'execution',
+      reinforcement_count: 20,
+      started_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      prompt: 'Complete the bounded task and verify the result.',
+    }));
+    const output = await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1' });
+    expect(String(output.systemMessage)).toContain('[JEV-COMPLETION]');
+    expect(readLog(context, 'applied.jsonl')).toEqual([]);
+  }, 60_000);
+
+  const COMPLETE = { task_complete: { type: 'noul', noul: 0.9 } };
+  const NOT_COMPLETE = { task_complete: { type: 'noul', noul: 0.1 } };
+
+  /** A child Ralph (optionally at its iteration limit) under an autopilot parent with the given reinforcement count. */
+  async function childRalphUnderAutopilot(ralphAnswers, parentAnswers, { atLimit = false, reinforcementCount = 0, env = {} } = {}) {
+    stubQueue = [ralphAnswers, parentAnswers];
+    const context = makeContext();
+    const ralphPath = ralphState(context, 'jev-session');
+    const ralph = JSON.parse(readFileSync(ralphPath, 'utf8'));
+    if (atLimit) writeFileSync(ralphPath, JSON.stringify({ ...ralph, iteration: ralph.max_iterations }));
+    const stateDir = join(context.cwd, '.omc', 'state', 'sessions', 'jev-session');
+    writeFileSync(join(stateDir, 'autopilot-state.json'), JSON.stringify({
+      active: true,
+      session_id: 'jev-session',
+      project_path: context.cwd,
+      phase: 'execution',
+      reinforcement_count: reinforcementCount,
+      started_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      prompt: 'Complete the bounded task and verify the result.',
+    }));
+    const output = await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1', ...env });
+    stubQueue = [];
+    if (atLimit) expect(JSON.parse(readFileSync(ralphPath, 'utf8')).max_iterations).toBe(ralph.max_iterations + 10);
+    const lines = readLog(context, 'applied.jsonl');
+    return { output, context, lines, modes: lines.map((line) => line.applied.mode) };
+  }
+
+  for (const atLimit of [false, true]) {
+    const child = atLimit ? 'a child Ralph at its iteration limit' : 'a child Ralph';
+
+    it(`loop-continuation: ${child} released by Jev writes no row while its autopilot parent blocks the Stop`, async () => {
+      const { output, modes } = await childRalphUnderAutopilot(COMPLETE, NOT_COMPLETE, { atLimit });
+      expect(output.decision).toBe('block');
+      expect(modes).toEqual([]);
+    }, 60_000);
+
+    it(`loop-continuation: ${child} released by Jev writes its row once its autopilot parent releases the Stop too`, async () => {
+      const { output, modes } = await childRalphUnderAutopilot(COMPLETE, COMPLETE, { atLimit });
+      expect(String(output.systemMessage)).toContain('[JEV-COMPLETION]');
+      expect(modes).toEqual(['autopilot', 'ralph']);
+    }, 60_000);
+
+    it(`loop-continuation: ${child} released by Jev writes its row when its autopilot parent at the reinforcement cap releases the Stop`, async () => {
+      const { output, modes } = await childRalphUnderAutopilot(COMPLETE, COMPLETE, { atLimit, reinforcementCount: 20 });
+      expect(String(output.systemMessage)).toContain('[JEV-COMPLETION]');
+      expect(modes).toEqual(['ralph']);
+    }, 60_000);
+  }
+
+  it('loop-continuation: an uncapped autopilot released by Jev writes its own row', async () => {
+    stubAnswers = COMPLETE;
+    const context = makeContext();
+    execFileSync('git', ['init'], { cwd: context.cwd, stdio: 'ignore' });
+    const stateDir = join(context.cwd, '.omc', 'state', 'sessions', 'jev-session');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, 'autopilot-state.json'), JSON.stringify({
+      active: true,
+      session_id: 'jev-session',
+      project_path: context.cwd,
+      phase: 'execution',
+      reinforcement_count: 0,
+      started_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      prompt: 'Complete the bounded task and verify the result.',
+    }));
+    const output = await runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: 'jev-session', last_assistant_message: 'The task is complete.' }, 'loop-continuation', { OMC_JEV_LOOP_RELEASE_ONLY: '1' });
+    expect(String(output.systemMessage)).toContain('[JEV-COMPLETION]');
+    const lines = readLog(context, 'applied.jsonl');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ point: 'loop-continuation', applied: { mode: 'autopilot', block: { from: true, to: false }, noul: 0.9 } });
+  }, 60_000);
+
+  it('loop-continuation: a child Ralph row carries the Ralph request_id, not the autopilot parent\'s (OMC_JEV_LOG_CONTEXT=1)', async () => {
+    const { lines, context } = await childRalphUnderAutopilot(COMPLETE, COMPLETE, { env: { OMC_JEV_LOG_CONTEXT: '1' } });
+    expect(lines.map((line) => line.applied.mode)).toEqual(['autopilot', 'ralph']);
+    const [autopilotRow, ralphRow] = lines;
+    expect(ralphRow.request_id).toMatch(UUID);
+    expect(autopilotRow.request_id).toMatch(UUID);
+    expect(ralphRow.request_id).not.toBe(autopilotRow.request_id);
+    // The shadow lines in request order: the Ralph request came first, the parent's second.
+    const requestIds = readLog(context, 'shadow.jsonl').map((line) => line.request_id);
+    expect(requestIds.indexOf(ralphRow.request_id)).toBeLessThan(requestIds.indexOf(autopilotRow.request_id));
+    expect(requestIds.indexOf(ralphRow.request_id)).toBeGreaterThanOrEqual(0);
+  }, 60_000);
+
+  it('loop-continuation: a child Ralph released by Jev writes its row when the capped autopilot parent has no valid answer and the Stop is released', async () => {
+    const { output, modes } = await childRalphUnderAutopilot(COMPLETE, {}, { reinforcementCount: 20 });
+    expect(output.decision).toBeUndefined();
+    expect(output.systemMessage).toBeUndefined();
+    expect(modes).toEqual(['ralph']);
+  }, 60_000);
+
+  describe('learner-extraction hint', () => {
+    const MESSAGE = 'The issue was caused by a race condition. I fixed it by adding proper locking.';
+    const stop = (context, sessionId, overrides = {}) => runHook(context, 'persistent-mode.mjs', { cwd: context.cwd, session_id: sessionId, last_assistant_message: MESSAGE }, 'learner-extraction', { OMC_JEV_LEARNER_HINT: '1', ...overrides });
+
+    it('writes one row when the hint reaches the Stop output, and none for the second Stop of the session', async () => {
+      stubAnswers = { extractable_moment: { type: 'noul', noul: 0.9 } };
+      const context = makeContext();
+      const first = await stop(context, 'learner-session');
+      expect(String(first.systemMessage)).toContain('/oh-my-claudecode:remember');
+      expect(readLog(context, 'applied.jsonl')).toHaveLength(1);
+      expect(readLog(context, 'applied.jsonl')[0]).toMatchObject({ point: 'learner-extraction', applied: { action: { from: 'none', to: 'hint', noul: 0.9 } } });
+      const again = await stop(context, 'learner-session');
+      expect(again.systemMessage).toBeUndefined();
+      expect(readLog(context, 'applied.jsonl')).toHaveLength(1);
+    }, 60_000);
+
+    it('writes no row when a blocking mode keeps the Stop from being released', async () => {
+      stubAnswers = { extractable_moment: { type: 'noul', noul: 0.9 } };
+      const context = makeContext();
+      ralphState(context, 'learner-session');
+      const output = await stop(context, 'learner-session');
+      expect(output.decision).toBe('block');
+      expect(output.systemMessage).toBeUndefined();
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
+    }, 60_000);
+
+    it.each([
+      ['below the threshold', 0.5, {}],
+      ['the hint disabled', 0.9, { OMC_JEV_LEARNER_HINT: undefined }],
+      ['shadow mode', 0.9, { OMC_JEV: 'learner-extraction' }],
+    ])('writes no row with %s', async (_label, noul, overrides) => {
+      stubAnswers = { extractable_moment: { type: 'noul', noul } };
+      const context = makeContext();
+      const output = await stop(context, 'learner-session', overrides);
+      expect(output.systemMessage).toBeUndefined();
+      expect(readLog(context, 'applied.jsonl')).toEqual([]);
+    }, 60_000);
+  });
+
   it('loop-continuation: the mode Jev\'s "task complete" ended', async () => {
     stubAnswers = { task_complete: { type: 'noul', noul: 0.9 } };
     const context = makeContext();
@@ -676,5 +901,160 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
     const [line] = readLog(context, 'applied.jsonl');
     expect(line).toMatchObject({ point: 'loop-continuation', applied: { mode: 'ralph', completed: { from: false, to: true } } });
     expect(JSON.parse(readFileSync(join(stateDir, 'ralph-state.json'), 'utf8')).active).toBe(false);
+  }, 60_000);
+});
+
+describe('model-routing applied line with OMC_JEV_ROW_TELEMETRY=1', () => {
+  it('a Jev answer that changed the call carries cause jev', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' }, effort: { type: 'score', score: 3 } };
+    const context = makeContext();
+    await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing', { OMC_JEV_ROW_TELEMETRY: '1' });
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line.applied).toMatchObject({ subagent_type: 'oh-my-claudecode:executor', cause: 'jev' });
+    expect(line).not.toHaveProperty('jev_model');
+  }, 60_000);
+
+  it('without the variable the applied line has no cause', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' }, effort: { type: 'score', score: 3 } };
+    const context = makeContext();
+    await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing');
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line.applied).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('a use marker that changes the call writes cause marker to applied.jsonl; overrides.jsonl keeps its shape', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use sonnet low\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+      OMC_JEV: '',
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_ROW_TELEMETRY: '1',
+    });
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line).toMatchObject({ point: 'model-routing', applied: { subagent_type: 'oh-my-claudecode:executor', cause: 'marker', model: { from: 'haiku', to: 'sonnet' } } });
+    const [row] = readLog(context, 'overrides.jsonl');
+    expect(row).toMatchObject({ point: 'model-routing', subagent_type: 'oh-my-claudecode:executor', override: 'both' });
+    expect(row).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('a resolver that exits before writing leaves the degraded line the hook writes, with the telemetry fields null and no applied line', async () => {
+    const context = makeContext();
+    // Preloaded into every node process of the hook; it stops only the resolver, which the hook runs as jev-resolve.mjs.
+    const preload = join(context.root, 'exit-resolver.cjs');
+    writeFileSync(preload, "if (String(process.argv[1]).endsWith('jev-resolve.mjs')) process.exit(1);\n", 'utf8');
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' } };
+    const output = await runHook(context, 'pre-tool-enforcer.mjs', TASK_CALL(context.cwd), 'model-routing', {
+      OMC_JEV_ROW_TELEMETRY: '1',
+      OMC_JEV_LOG_CONTEXT: '1',
+      NODE_OPTIONS: '--require ' + preload,
+    });
+    expect(output?.hookSpecificOutput?.updatedInput).toBeUndefined();
+    const degraded = readLog(context, 'shadow.jsonl').find((row) => row.point === 'model-routing' && row.mode === 'degraded');
+    expect(degraded).toMatchObject({ reason: 'resolver-exit' });
+    for (const field of Object.keys(JEV_ROW_NO_ANSWER)) expect(degraded[field], field).toBeNull();
+    expect(readLog(context, 'applied.jsonl')).toEqual([]);
+  }, 60_000);
+
+  it('the same marker without the variable writes no cause and no applied line', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use sonnet low\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', { OMC_JEV: '', OMC_JEV_MODEL_ROUTING_MARKER: '1' });
+    expect(readLog(context, 'applied.jsonl')).toHaveLength(0);
+    const [row] = readLog(context, 'overrides.jsonl');
+    expect(row).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('a refused use marker (use max, sets nothing) writes cause marker and override_rejected to applied.jsonl', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use max\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+      OMC_JEV: '',
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_ROW_TELEMETRY: '1',
+    });
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line).toMatchObject({ point: 'model-routing', applied: { subagent_type: 'oh-my-claudecode:executor', cause: 'marker', override_rejected: 'max', marker: 'use max' } });
+    const [row] = readLog(context, 'overrides.jsonl');
+    expect(row).toMatchObject({ rejected: ['max'] });
+    expect(row).not.toHaveProperty('cause');
+  }, 60_000);
+
+  it('a marker line lists the whole decision: override, marker, and each value with its source', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use opus max\n\nFix the regression.', model: 'haiku', effort: 'medium' });
+    const output = await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+      OMC_JEV: '',
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_ROW_TELEMETRY: '1',
+    });
+    expect(output.hookSpecificOutput.updatedInput).toMatchObject({ model: 'opus', prompt: 'Fix the regression.' });
+    const [line] = readLog(context, 'applied.jsonl');
+    expect(line.applied).toEqual({
+      subagent_type: 'oh-my-claudecode:executor',
+      cause: 'marker',
+      override: 'model',
+      marker: 'use opus max',
+      override_rejected: 'max',
+      model: { from: 'haiku', to: 'opus', source: 'marker' },
+      effort: { from: 'medium', to: 'medium', source: 'explicit' },
+    });
+  }, 60_000);
+
+  it('without a Jev log directory the marker lines go to the jev directory of the state directory', async () => {
+    for (const prompt of ['use sonnet low\n\nFix the regression.', 'use max\n\nFix the regression.']) {
+      const context = makeContext();
+      const stateDir = join(context.root, 'state');
+      const call = TASK_CALL(context.cwd, { prompt, model: 'haiku' });
+      await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+        OMC_JEV: '',
+        OMC_JEV_LOG_DIR: undefined,
+        OMC_STATE_DIR: stateDir,
+        OMC_JEV_MODEL_ROUTING_MARKER: '1',
+        OMC_JEV_ROW_TELEMETRY: '1',
+      });
+      const files = readdirSync(stateDir, { recursive: true }).map(String).filter((file) => file.endsWith('applied.jsonl'));
+      expect(files, prompt).toHaveLength(1);
+      const [line] = readFileSync(join(stateDir, files[0]), 'utf8').trim().split('\n').map((row) => JSON.parse(row));
+      expect(line.applied, prompt).toMatchObject({ cause: 'marker', marker: prompt.split('\n')[0] });
+    }
+  }, 60_000);
+
+  it('a refused marker still leaves its line when Jev answered but changed nothing, or gave no usable answer', async () => {
+    stubAnswers = {};
+    for (const omcJev of ['model-routing:active', 'model-routing:shadow']) {
+      const context = makeContext();
+      const call = TASK_CALL(context.cwd, { prompt: 'use max\n\nFix the regression.', model: 'haiku' });
+      const output = await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+        OMC_JEV: omcJev,
+        OMC_JEV_MODEL_ROUTING_MARKER: '1',
+        OMC_JEV_ROW_TELEMETRY: '1',
+      });
+      expect(output?.hookSpecificOutput?.updatedInput).toBeUndefined();
+      const lines = readLog(context, 'applied.jsonl');
+      expect(lines, omcJev).toHaveLength(1);
+      expect(lines[0].applied, omcJev).toEqual({ subagent_type: 'oh-my-claudecode:executor', cause: 'marker', marker: 'use max', override_rejected: 'max' });
+    }
+  }, 60_000);
+
+  it('a refused marker joins the Jev line when Jev changed the call', async () => {
+    stubAnswers = { 'model-tier': { type: 'choice', choice: 'opus' }, effort: { type: 'score', score: 3 } };
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use max\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', {
+      OMC_JEV_MODEL_ROUTING_MARKER: '1',
+      OMC_JEV_ROW_TELEMETRY: '1',
+    });
+    const lines = readLog(context, 'applied.jsonl');
+    expect(lines).toHaveLength(1);
+    expect(lines[0].applied).toMatchObject({ cause: 'jev', marker: 'use max', override_rejected: 'max', model: { from: 'haiku', to: 'opus' } });
+  }, 60_000);
+
+  it('the same refused marker without the variable writes no applied line; overrides.jsonl keeps the rejection', async () => {
+    const context = makeContext();
+    const call = TASK_CALL(context.cwd, { prompt: 'use max\n\nFix the regression.', model: 'haiku' });
+    await runHook(context, 'pre-tool-enforcer.mjs', call, 'model-routing', { OMC_JEV: '', OMC_JEV_MODEL_ROUTING_MARKER: '1' });
+    expect(readLog(context, 'applied.jsonl')).toHaveLength(0);
+    const [row] = readLog(context, 'overrides.jsonl');
+    expect(row).toMatchObject({ rejected: ['max'] });
   }, 60_000);
 });

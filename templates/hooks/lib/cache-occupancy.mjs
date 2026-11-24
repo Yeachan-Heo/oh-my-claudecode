@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, lstatSync, readFileSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
-import { join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
 
@@ -121,6 +121,23 @@ export function publishCacheOccupancy(pluginRoot, configDir, pid = process.ppid,
   } catch { try { unlinkSync(temp); } catch {} return false; }
 }
 
+// readdir reports ENOENT both for a registry that was never created and for a
+// path that runs through a symlink whose target is gone (for example a volume
+// that is temporarily offline). The first means "no records"; the second hides
+// records that may belong to live sessions. Walk the path with lstat, which does
+// not follow links, and report whether any component is such a dangling link.
+function runsThroughDanglingLink(path) {
+  for (let current = path; ; current = dirname(current)) {
+    try {
+      if (lstatSync(current).isSymbolicLink() && !existsSync(current)) return true;
+    } catch (error) {
+      // A component that is simply absent is fine; anything else is uncertain.
+      if (error?.code !== 'ENOENT') return true;
+    }
+    if (dirname(current) === current) return false;
+  }
+}
+
 export function readOccupiedPluginRoots(configDir, options = {}) {
   const probeBudget = Number.isFinite(options.probeTimeoutMs) ? Math.max(0, options.probeTimeoutMs) : undefined;
   const probeDeadline = probeBudget === undefined ? Infinity : Date.now() + probeBudget;
@@ -129,7 +146,7 @@ export function readOccupiedPluginRoots(configDir, options = {}) {
   let names = [];
   let unavailable = false;
   try { names = readdirSync(dir).filter(name => typeof name === 'string' && NAME.test(name)); }
-  catch (error) { if (error?.code !== 'ENOENT') unavailable = true; }
+  catch (error) { if (error?.code !== 'ENOENT' || runsThroughDanglingLink(dir)) unavailable = true; }
   const roots = new Set();
   const records = [];
   for (const name of names) {

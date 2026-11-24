@@ -31,6 +31,7 @@ import {
   teamClaimTask,
   teamTransitionTaskStatus,
   teamReleaseTaskClaim,
+  teamRenewTaskClaim,
   teamReadConfig,
   teamReadManifest,
   teamReadWorkerStatus,
@@ -136,6 +137,7 @@ export const TEAM_API_OPERATIONS = [
   'claim-task',
   'transition-task-status',
   'release-task-claim',
+  'renew-task-claim',
   'read-config',
   'read-manifest',
   'read-worker-status',
@@ -1104,6 +1106,17 @@ export async function executeTeamApiOperation(
           return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name, task_id, claim_token, worker are required' } };
         }
         const result = await teamReleaseTaskClaim(teamName, taskId, claimToken, worker, cwd);
+        return { ok: true, operation, data: result as unknown as Record<string, unknown> };
+      }
+      case 'renew-task-claim': {
+        const teamName = String(args.team_name || '').trim();
+        const taskId = String(args.task_id || '').trim();
+        const claimToken = String(args.claim_token || '').trim();
+        const worker = String(args.worker || '').trim();
+        if (!teamName || !taskId || !claimToken || !worker) {
+          return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name, task_id, claim_token, worker are required' } };
+        }
+        const result = await teamRenewTaskClaim(teamName, taskId, claimToken, worker, cwd);
         return { ok: true, operation, data: result as unknown as Record<string, unknown> };
       }
       case 'read-config': {

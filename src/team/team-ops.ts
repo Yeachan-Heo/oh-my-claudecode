@@ -42,6 +42,7 @@ import type {
   ClaimTaskResult,
   TransitionTaskResult,
   ReleaseTaskClaimResult,
+  RenewTaskClaimResult,
   TaskReadiness,
   TeamSummary,
   TeamSummaryPerformance,
@@ -65,6 +66,7 @@ import {
   requeueRecoveredTask as requeueRecoveredTaskImpl,
   transitionTaskStatus as transitionTaskStatusImpl,
   releaseTaskClaim as releaseTaskClaimImpl,
+  renewTaskClaim as renewTaskClaimImpl,
   listTasks as listTasksImpl,
   createTaskRecord,
   validateTaskDependencies,
@@ -94,6 +96,7 @@ export type {
   ClaimTaskResult,
   TransitionTaskResult,
   ReleaseTaskClaimResult,
+  RenewTaskClaimResult,
   TaskReadiness,
   TeamSummary,
   ShutdownAck,
@@ -506,7 +509,12 @@ export async function teamCreateTask(
   };
   validateTaskDependencies(requestedDependencies, 'invalid_task_dependencies');
   const preflightConfig = await teamReadConfig(teamName, cwd);
-  if (preflightConfig?.next_task_id !== undefined) {
+  if (preflightConfig?.next_task_id !== undefined
+    // When the counter's own file already exists (crash debris), probing
+    // below advances past it, so the counter is not a reliable predictor of
+    // the assigned id and a self-link against it may be a valid dependency
+    // on the orphan. Only preflight self-links the counter can still know.
+    && !existsSync(canonicalTaskFilePath(teamName, String(preflightConfig.next_task_id), cwd))) {
     validateTaskDependencies({
       ...requestedDependencies,
       id: String(preflightConfig.next_task_id),
@@ -525,7 +533,17 @@ export async function teamCreateTask(
         throw new Error('team_mutation_busy');
       }
 
-      const nextId = String(revisioned.config.next_task_id ?? 1);
+      // A crash between publishing the task file and committing the config
+      // can leave next_task_id pointing at an id whose file already exists.
+      // Never overwrite that file: advance past it so the orphaned task
+      // (potentially claimed and in progress) stays intact.
+      let idNumber = revisioned.config.next_task_id ?? 1;
+      let createdTaskPath = canonicalTaskFilePath(teamName, String(idNumber), cwd);
+      while (existsSync(createdTaskPath)) {
+        idNumber += 1;
+        createdTaskPath = canonicalTaskFilePath(teamName, String(idNumber), cwd);
+      }
+      const nextId = String(idNumber);
       validateTaskDependencies({
         id: nextId,
         ...requestedDependencies,
@@ -533,14 +551,13 @@ export async function teamCreateTask(
       const created = createTaskRecord(nextId, task);
       const normalized = normalizeTaskRecord(created);
       const serializedTask = JSON.stringify(normalized, null, 2);
-      const createdTaskPath = canonicalTaskFilePath(teamName, nextId, cwd);
       const taskLock = await withTaskClaimLock(teamName, nextId, cwd, async () => {
         await mkdir(dirname(createdTaskPath), { recursive: true });
         await writeAtomic(createdTaskPath, serializedTask);
 
         const nextConfig: TeamConfig = {
           ...revisioned.config,
-          next_task_id: Number(nextId) + 1,
+          next_task_id: idNumber + 1,
           state_revision: revisioned.stateRevision + 1,
         };
         try {
@@ -734,6 +751,26 @@ export async function teamReleaseTaskClaim(
   cwd: string,
 ): Promise<ReleaseTaskClaimResult> {
   return releaseTaskClaimImpl(taskId, claimToken, workerName, {
+    teamName,
+    cwd,
+    readTask: teamReadTask,
+    readTeamConfig: teamReadConfig as (tn: string, c: string) => Promise<{ workers: Array<{ name: string }> } | null>,
+    withTaskClaimLock,
+    normalizeTask,
+    isTerminalTaskStatus: isTerminalTeamTaskStatus,
+    taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c),
+    writeAtomic,
+  });
+}
+
+export async function teamRenewTaskClaim(
+  teamName: string,
+  taskId: string,
+  claimToken: string,
+  workerName: string,
+  cwd: string,
+): Promise<RenewTaskClaimResult> {
+  return renewTaskClaimImpl(taskId, claimToken, workerName, {
     teamName,
     cwd,
     readTask: teamReadTask,
