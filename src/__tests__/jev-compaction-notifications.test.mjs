@@ -16,7 +16,7 @@ const assistant = (text) => ({ role: 'assistant', text, toolUses: [] });
 const talk = (n) => Array.from({ length: n }, (_, k) => (k % 2 ? assistant(`Answer ${k}.`) : user(`Question ${k}.`)));
 
 // One compaction through register(on) in the active mode; Jev scores every result 0; the bodies of its requests are kept.
-async function compactRun(env, messages, { tokens = 30000, deliver = {} } = {}) {
+async function compactRun(env, messages, { tokens = 30000, deliver = {}, score = 0 } = {}) {
   const store = new Map();
   const bodies = [];
   const e = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u', ...env };
@@ -33,7 +33,7 @@ async function compactRun(env, messages, { tokens = 30000, deliver = {} } = {}) 
     env: { get: async (n) => e[n] },
     settings: { read: async () => undefined },
     fs: { read: async (p) => { if (!store.has(p)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return store.get(p); }, exists: async (p) => store.has(p), stat: async () => ({ kind: 'file', size: 1, mtimeMs: Date.now(), isLink: false }), write: async (p, t) => { store.set(p, t); }, list: async () => [] },
-    http: { fetch: async (url, init) => { const b = JSON.parse(init.body); bodies.push(init.body); return { ok: true, status: 200, headers: {}, text: JSON.stringify({ answers: Object.fromEntries(Object.keys(b.questions).map((q) => [q, { type: 'score', score: 0, confidence: 0.9 }])) }) }; } },
+    http: { fetch: async (url, init) => { const b = JSON.parse(init.body); bodies.push(init.body); return { ok: true, status: 200, headers: {}, text: JSON.stringify({ answers: Object.fromEntries(Object.keys(b.questions).map((q) => [q, { type: 'score', score, confidence: 0.9 }])) }) }; } },
     clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; }, sleep: async () => { throw new Error('sleep'); } },
     session: { id: async () => 'sess-note', usage: async () => ({ context: { tokens, window: 200000 } }), messages: async (o) => (o?.as === 'api' ? api : messages), compact: async () => ({}) },
     ui: { log: () => {}, toast: () => {} },
@@ -234,6 +234,42 @@ describe('a notification that names no output file', () => {
     const open = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('npm test'), launched('Command running in background with ID: bk7x2mq9.'), row(wrap('jev-1', noted('bk7x2mq9', 'PLAINBODY').text)), ...w.slice(3)]);
     expect(open.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
     expect(open.bodies.join('')).toContain('PLAINBODY');
+  });
+});
+
+describe('the envelopes of the deliveries after a notification', () => {
+  const words = Array.from({ length: 40 }, (_, k) => `The coordinator sent a message while you were working:\nd${k}`);
+  const deliver = (i) => ({ [i]: words });
+  const plain = row(note('Status: registry', `Report ${'r'.repeat(30000)}`), { handle: 'n1' });
+  const messages = () => { const w = talk(30); return [...w.slice(0, 3), ...LAUNCH, plain, ...w.slice(3)]; };
+
+  it('are charged only when the notification is rebuilt: one kept whole keeps its row and adds nothing to the prediction', async () => {
+    const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '80', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
+    // Jev scores the notification 3 (needed): it stays whole, and the host gives its deliveries back with its row.
+    const whole = await compactRun(env, messages(), { tokens: 30000, deliver: deliver(5), score: 3 });
+    const none = await compactRun(env, messages(), { tokens: 30000, score: 3 });
+    expect(whole.record).toMatchObject({ result: 'jev', notifications: 1, queued_carried: 0 });
+    expect(whole.out.messages.some((m) => m.handle === 'n1')).toBe(true);
+    for (const key of ['tokens_after_pred', 'tokens_after']) expect(whole.record[key], key).toBe(none.record[key]);
+    // The same notification traced is rebuilt, and its envelopes are in the row: the prediction and the record rise by their tokens.
+    const traced = await compactRun(env, messages(), { tokens: 30000, deliver: deliver(5), score: 0 });
+    const tracedNone = await compactRun(env, messages(), { tokens: 30000, score: 0 });
+    expect(traced.record.queued_carried).toBeGreaterThan(0);
+    for (const key of ['tokens_after_pred', 'tokens_after']) expect(traced.record[key], key).toBeGreaterThan(tracedNone.record[key]);
+  });
+});
+
+describe('a row of marker-only envelopes before a tagged notification', () => {
+  it('is read in linear time: the compaction does not time out', async () => {
+    const w = talk(30);
+    const wrap = (id, body) => `<system-reminder id="jev-${id}">\n${body}\n</system-reminder id="jev-${id}">`;
+    const marker = (k) => `[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\nReport ${k}`;
+    const envelopes = Array.from({ length: 6000 }, (_, k) => wrap(k, marker(k)));
+    const mixed = row(`${envelopes.join('\n')}\n${wrap('t', bare('x'))}`);
+    const started = Date.now();
+    const { record } = await compactRun(NOTE_ENV, [...w.slice(0, 3), mixed, ...w.slice(3)]);
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(record).not.toMatchObject({ reason: 'timeout' });
   });
 });
 

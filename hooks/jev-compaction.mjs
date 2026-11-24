@@ -1441,9 +1441,9 @@ function sourceByTask(text, outputs) {
     NOTE_BLOCK_OPEN.lastIndex = at;
     const open = NOTE_BLOCK_OPEN.exec(text);
     const outside = text.slice(at, open ? open.index : text.length);
-    for (let m = outside.indexOf(NOTE_MARKER); m >= 0; m = outside.indexOf(NOTE_MARKER, m + NOTE_MARKER.length)) {
-      if (!open || !withoutTags(outside.slice(m + NOTE_MARKER.length)).split('\n').every((l) => !l.trim() || NOTE_HOST_LINE.test(l.trim()))) worst = 'unknown';
-    }
+    // Once per stretch between blocks: a second marker there leaves the first without a block (its own line is no host line), so only one marker is looked at.
+    const m = worst === 'unknown' ? -1 : outside.indexOf(NOTE_MARKER);
+    if (m >= 0 && (!open || outside.indexOf(NOTE_MARKER, m + NOTE_MARKER.length) >= 0 || !withoutTags(outside.slice(m + NOTE_MARKER.length)).split('\n').every((l) => !l.trim() || NOTE_HOST_LINE.test(l.trim())))) worst = 'unknown';
     if (!open) break;
     const close = text.indexOf('</task-notification>', open.index);
     const end = close < 0 ? text.length : close + '</task-notification>'.length;
@@ -2356,7 +2356,7 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES)
   const costs = new Map(candidates.map((c) => [c, itemTokens(c, rates)]));
   const saved = (c, keep) => {
     const t = costs.get(c);
-    return keep === 'short' ? t.full - t.short : keep === 'trace' ? t.full - t.trace : keep === 'drop' ? t.full : 0;
+    return keep === 'short' ? t.full - t.short : keep === 'trace' ? t.full - t.trace : keep === 'drop' ? t.full - t.drop : 0;
   };
   let removed = 0;
   const setKeep = (c, keep) => { removed += saved(c, keep) - saved(c, c.keep ?? 'full'); c.keep = keep; };
@@ -2392,7 +2392,7 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES)
 
 // The floor of the cascade: the predicted tokens when every removable result (every candidate but the pinned ones) is gone with its call.
 export function floorPrediction(candidates, tokensBefore, rates = DEFAULT_RATES) {
-  return tokensBefore - candidates.reduce((s, c) => s + (isPinned(c, rates) ? 0 : itemTokens(c, rates).full), 0);
+  return tokensBefore - candidates.reduce((s, c) => s + (isPinned(c, rates) ? 0 : itemTokens(c, rates).full - itemTokens(c, rates).drop), 0);
 }
 
 // A manual compaction at or below the usual target: only the scores decide. Every forced result goes to a trace, and so does every free result
@@ -2563,14 +2563,16 @@ function itemTokens(c, rates = DEFAULT_RATES) {
     // A notification row has no call and its text is of the reminder class; its trace is a row of its own.
     const cost = (text) => RATE_NOTE * text.length + RATE_NON_ASCII * nonAscii(text);
     const full = cost(c.res.text || '');
-    return { full, short: c.resultChars > SHORT_CHARS ? cost(shortText(c)) : full, trace: RATE_TRACE * c.trace.length };
+    // The envelopes build adds come with the replacement: a row that stays whole gets its deliveries back from the host (envelopeChars sets `envelope` on the notes it rebuilds).
+    const drop = RATE_NOTE * (c.envelope || 0);
+    return { full, short: c.resultChars > SHORT_CHARS ? cost(shortText(c)) + drop : full, trace: RATE_TRACE * c.trace.length + drop, drop };
   }
   const json = inputJson(c.use.input);
   const call = RATE_IN * ((c.use.tool || '').length + json.length) + RATE_NON_ASCII * nonAscii(json);
   const cost = (text) => RATE_OUT * text.length + RATE_NON_ASCII * nonAscii(text);
   const full = call + cost(c.res.text || '') + RATE_IMAGE * imagesOf(c.res);
   const short = c.resultChars > SHORT_CHARS ? call + cost(shortText(c)) : full;
-  return { full, short, trace: RATE_TRACE * c.trace.length };
+  return { full, short, trace: RATE_TRACE * c.trace.length, drop: 0 };
 }
 
 // What a compaction could cut, in tokens, for the two gates that decide on characters (the `too_few_results` gate of decide and the preflight of the own
@@ -2618,7 +2620,7 @@ async function tokenAccounting($, e, cfg, messages, api, candidates, installedSt
   let removed = installedStageTokens;
   for (const c of candidates) {
     const t = itemTokens(c, cfg.rates);
-    removed += t.full - (c.keep === 'drop' ? 0 : c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
+    removed += t.full - (c.keep === 'drop' ? t.drop : c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
   }
   const target = Math.floor(cfg.target * tokensBefore);
   const ceiling = tokenCeiling(cfg.maxWindowTokens, cfg.rates);
@@ -3105,16 +3107,21 @@ function noteFailures(failures, now) {
 // or one with a result that may change (a candidate); a row kept by its handle gets its blocks back as they were.
 function envelopeChars(messages, queued, candidates) {
   const changing = new Set(candidates.map((c) => c.resIdx));
-  const noteRows = new Set(candidates.filter((c) => c.note).map((c) => c.resIdx));
+  const noteRows = new Map(candidates.filter((c) => c.note).map((c) => [c.resIdx, c]));
   let envelopes = 0;
   for (const [i, blocks] of queued) {
     const m = messages[i];
     if (!((m.toolResults || []).length || noteRows.has(i)) || !((m.toolResults || []).every(textOnlyResult) || changing.has(i))) continue;
     const c = carriedText(m, blocks);
-    envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
+    const added = c.text.length - (m.text || '').length - rawChars(c.own);
+    envelopes += added;
+    // A notification is rebuilt only when it goes to a trace, a short copy or is dropped: its envelope costs tokens by that decision (itemTokens), not up front.
+    if (noteRows.has(i)) noteRows.get(i).envelope = added;
   }
   return envelopes;
 }
+// What of `envelopes` belongs to the notifications (their envelopes are charged by the keep decision).
+const noteEnvelopeChars = (candidates) => candidates.reduce((s, c) => s + (c.note ? c.envelope || 0 : 0), 0);
 
 // --- pasted text (OMC_JEV_COMPACT_PASTES) ----------------------------------------------------------
 // The rule is in the header: a whole tag moves only when Jev, who read all of it, says that no part of it is the user's own writing.
@@ -4050,7 +4057,7 @@ async function decide($, e, cfg, record, started) {
   // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
   const net = removable - envelopes;
   // The envelopes are text the installed rows hold and the host's count does not: the predictions start from the count plus them.
-  const envelopeTokens = cfg.rates.RATE_NOTE * envelopes;
+  const envelopeTokens = cfg.rates.RATE_NOTE * (envelopes - noteEnvelopeChars(candidates));
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target is the rule's target, a share of the window).
   const stage = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline, takeAgentChecks(record.session_id, cfg));
@@ -4064,7 +4071,7 @@ async function decide($, e, cfg, record, started) {
     // The text the agent stage takes off (the trim, and with the stage active the reports it moves to files) is part of the cut: a session of reports that no
     // result of its own would carry is for the plan below, which counts the stage, and not for the summary.
     const stageTokens = cfg.targetPercent === undefined ? 0 : await agentStageTokens(cfg, stage);
-    const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens);
+    const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes - noteEnvelopeChars(candidates), cfg.rates, stageTokens);
     if (cut) record.max_reduction_tokens = cut.listed ? Math.round((cut.removable / cut.listed) * 1000) / 1000 : 0;
     if (!cut || !worthInTokens(cut)) return { fallback: 'too_few_results' };
   }
@@ -4456,7 +4463,7 @@ async function ownThreshold($, e, next) {
     const stageCounts = cfg.targetPercent !== undefined && cfg.agentTrim;
     // With the token cascade a session that fails the characters is measured in tokens (cutInTokens): an image has no characters and costs thousands of tokens.
     const tooSmall = () => (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window)
-      && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens), OWN_MIN_GAIN * window));
+      && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes - noteEnvelopeChars(candidates), cfg.rates, stageTokens), OWN_MIN_GAIN * window));
     // The delivered messages can only make this worse (they add to `before`, their envelopes come off
     // `removable`), so a transcript that fails here needs no API read, which may hold the turn for HOST_MS. With the agent stage on it is read all the same: the
     // stage is planned from the API form and may carry the cut that the results do not.
