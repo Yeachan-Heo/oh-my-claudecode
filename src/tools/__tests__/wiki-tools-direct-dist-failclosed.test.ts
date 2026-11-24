@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url';
 const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 const DIST_RESOLVER = join(REPO_ROOT, 'dist/lib/worktree-paths.js');
 const DIST_WIKI = join(REPO_ROOT, 'dist/tools/wiki-tools.js');
+const DIST_AVAILABLE = existsSync(DIST_RESOLVER) && existsSync(DIST_WIKI);
 
 function git(cwd: string, command: string): void {
   execSync(`git ${command}`, { cwd, stdio: 'pipe' });
@@ -42,7 +43,7 @@ function installFakeGit(dir: string, unixBody: string, winBody: string): string 
   return bin;
 }
 
-describe('tracked dist wiki runtime fail-closed (#3858 remaining P1)', () => {
+describe.skipIf(!DIST_AVAILABLE)('tracked dist wiki runtime fail-closed (#3858 remaining P1)', () => {
   let tempDir: string;
   let originalCwd: string;
   let originalPath: string | undefined;

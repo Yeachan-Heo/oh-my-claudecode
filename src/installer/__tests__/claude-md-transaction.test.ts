@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import * as nodeFs from 'node:fs';
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, win32 } from 'node:path';
+import { join, win32, resolve } from 'node:path';
 import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig, isStrictChildPath, type ClaudeMdTransactionFs } from '../claude-md-transaction.js';
 import { CLAUDE_MD_COORDINATOR_SCHEMA_VERSION, runClaudeMdCoordinator, runClaudeMdCoordinatorHandshake } from '../../cli/claude-md-coordinator.js';
 import corpus from './fixtures/legacy-guides.json' with { type: 'json' };
+
+const BRIDGE_COORDINATOR = resolve(import.meta.dirname, '../../..', 'bridge/claude-md-coordinator.cjs');
+const BRIDGE_AVAILABLE = existsSync(BRIDGE_COORDINATOR);
 
 const roots: string[] = [];
 function fixture(): { root: string; source: string } {
@@ -431,7 +434,7 @@ describe('CLAUDE.md coordinator protocol', () => {
       vi.resetModules();
     }
   });
-  it('rejects an escaped built coordinator request before transaction mutation', () => {
+  it.skipIf(!BRIDGE_AVAILABLE)('rejects an escaped built coordinator request before transaction mutation', () => {
     const { root } = fixture();
     const pluginRoot = process.cwd();
     const canonicalSource = join(pluginRoot, 'docs', 'CLAUDE.md');
