@@ -10,6 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmuxExec, tmuxSpawn } from '../../cli/tmux-utils.js';
@@ -321,11 +322,37 @@ function onSocket(socket: string | undefined, args: string[]): string[] {
   return socket === undefined ? args : ['-S', socket, ...args];
 }
 
-// A failed call that says there is no server to talk to (not started, exited, socket file left behind): its panes are gone.
+// A failed call that says for certain that there is no server to talk to (not started, exited, socket file left
+// behind): its panes are gone. Any other connection failure (permissions, a timeout) says nothing about the panes.
 function isNoServerError(error: unknown): boolean {
   const failure = error as { message?: unknown; stderr?: unknown } | null;
   const text = `${String(failure?.message ?? '')} ${String(failure?.stderr ?? '')}`;
-  return /no server running|error connecting to|No such file or directory|Connection refused/i.test(text);
+  return /no server running|error connecting to .*\((?:No such file or directory|Connection refused)\)/i.test(text);
+}
+
+// The guard that binds a command to the tmux server that listed a pane: a pane id is reused after a server restart, so the
+// condition is evaluated by the server itself, in the same step as the command, against the pid and start time that the
+// listing returned. When it does not hold, the command is not run and the marker is printed instead. Without a server
+// value (a listing that carries none) the command is not guarded.
+const SERVER_VALUE = /^\d+:\d+$/;
+const PLAIN_TMUX_WORD = /^[A-Za-z0-9_.%:@+=,-]+$/;
+function tmuxWord(word: string): string {
+  return PLAIN_TMUX_WORD.test(word) ? word : `"${word.replace(/[\\"$]/g, '\\$&')}"`;
+}
+
+/**
+ * The tmux arguments for `command`, on the endpoint `socket` and, with `server`, only while that server is the one that
+ * listed the pane (see above). `marker` is what the call prints when the guard does not hold; null when not guarded.
+ * Null when `server` is not a pid and start time.
+ */
+function tmuxCall(socket: string | undefined, server: string | undefined, command: string[]): { args: string[]; marker: string | null } | null {
+  if (server === undefined) return { args: onSocket(socket, command), marker: null };
+  if (!SERVER_VALUE.test(server)) return null;
+  const marker = `OMC_QUOTA_GUARD_FAIL_${randomBytes(6).toString('hex')}`;
+  return {
+    args: onSocket(socket, ['if-shell', '-F', `#{==:#{pid}:#{start_time},${server}}`, command.map(tmuxWord).join(' '), `display-message -p ${marker}`]),
+    marker,
+  };
 }
 
 /**
@@ -471,7 +498,7 @@ export function isPaneAlive(paneId: string): boolean {
  * @param paneId - The tmux pane ID (e.g., "%0")
  * @param lines - Number of lines to capture (default: 15)
  */
-function capturePaneContentStrict(paneId: string, lines: number, socket?: string): string | null {
+function capturePaneContentStrict(paneId: string, lines: number, socket?: string, server?: string): string | null {
   if (!isTmuxAvailable()) {
     return null;
   }
@@ -492,10 +519,14 @@ function capturePaneContentStrict(paneId: string, lines: number, socket?: string
 
   try {
     // Capture the last N lines from the pane
-    const result = tmuxExec(onSocket(socket, ['capture-pane', '-t', paneId, '-p', '-S', `-${safeLines}`]), {
+    const call = tmuxCall(socket, server, ['capture-pane', '-t', paneId, '-p', '-S', `-${safeLines}`]);
+    if (call === null) return null;
+    const result = tmuxExec(call.args, {
       stripTmux: true,
       timeout: 5000,
     });
+    // A server that is not the one that listed the pane has another pane under this id: nothing of it is read.
+    if (call.marker !== null && result.includes(call.marker)) return null;
     return result;
   } catch (error) {
     console.error(`[TmuxDetector] Error capturing pane ${paneId}:`, error);
@@ -729,7 +760,7 @@ function tmuxCallSentNothing(error: unknown): boolean {
  * are two tmux calls, so a failure of the second leaves the text typed in the pane: that is `unconfirmed`, never
  * `not_attempted`.
  */
-export function sendToPaneOutcome(paneId: string, text: string, pressEnter = true, socket?: string): PaneSendOutcome {
+export function sendToPaneOutcome(paneId: string, text: string, pressEnter = true, socket?: string, server?: string): PaneSendOutcome {
   if (!isTmuxAvailable()) {
     return 'not_attempted';
   }
@@ -754,10 +785,14 @@ export function sendToPaneOutcome(paneId: string, text: string, pressEnter = tru
   }
   try {
     // Send text with -l flag (literal) to avoid key interpretation issues in TUI apps
-    tmuxExec(onSocket(socket, ['send-keys', '-t', paneId, '-l', sanitizedText]), {
+    const call = tmuxCall(socket, server, ['send-keys', '-t', paneId, '-l', sanitizedText]);
+    if (call === null) return 'not_attempted';
+    const printed = tmuxExec(call.args, {
       stripTmux: true,
       timeout: 2000,
     });
+    // The guard did not hold: another server run owns this pane id, and nothing was typed.
+    if (call.marker !== null && printed.includes(call.marker)) return 'not_attempted';
   } catch (error) {
     console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
     return tmuxCallSentNothing(error) ? 'not_attempted' : 'unconfirmed';
@@ -765,10 +800,14 @@ export function sendToPaneOutcome(paneId: string, text: string, pressEnter = tru
   // Send Enter as a separate command so it is interpreted as a key press
   if (pressEnter) {
     try {
-      tmuxExec(onSocket(socket, ['send-keys', '-t', paneId, 'Enter']), {
+      const call = tmuxCall(socket, server, ['send-keys', '-t', paneId, 'Enter']);
+      if (call === null) return 'unconfirmed';
+      const printed = tmuxExec(call.args, {
         stripTmux: true,
         timeout: 2000,
       });
+      // The text was typed in the pane of the earlier server run; whether it was submitted is not known.
+      if (call.marker !== null && printed.includes(call.marker)) return 'unconfirmed';
     } catch (error) {
       console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
       return 'unconfirmed';
@@ -970,9 +1009,9 @@ export function formatBlockedPanesSummary(blockedPanes: BlockedPane[]): string {
 export const panelQuotaTmux = {
   // null when the inventory cannot be read (tmux missing, server unreachable, timeout): the pass keeps its saved waits.
   listPanes: (): TmuxPane[] | null => listPanelQuotaPanes(),
-  capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines, pane.socket),
-  sendContinue: (pane: TmuxPane): PaneSendOutcome => sendToPaneOutcome(pane.id, 'continue', true, pane.socket),
-  providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id, pane.socket),
+  capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines, pane.socket, pane.server),
+  sendContinue: (pane: TmuxPane): PaneSendOutcome => sendToPaneOutcome(pane.id, 'continue', true, pane.socket, pane.server),
+  providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id, pane.socket, pane.server),
 };
 
 /**
@@ -985,15 +1024,16 @@ export const panelQuotaTmux = {
  * name alone does not mean the provider is gone: the terminal's foreground process group tells. At the
  * prompt it is the shell's own group; while a wrapper script or the provider runs it is another group.
  */
-function paneProviderRunning(paneId: string, socket?: string): boolean | null {
+function paneProviderRunning(paneId: string, socket?: string, server?: string): boolean | null {
   if (!isTmuxAvailable() || !isValidPaneId(paneId)) {
     return null;
   }
   try {
-    const status = tmuxExec(
-      onSocket(socket, ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_pid} #{pane_current_command}']),
-      { stripTmux: true, stdio: 'pipe', timeout: 3000 },
-    ).trim();
+    const call = tmuxCall(socket, server, ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_pid} #{pane_current_command}']);
+    if (call === null) return null;
+    const status = tmuxExec(call.args, { stripTmux: true, stdio: 'pipe', timeout: 3000 }).trim();
+    // Another server run owns this pane id: nothing can be told about the pane that was listed.
+    if (call.marker !== null && status.includes(call.marker)) return null;
     const [dead, panePid, ...commandParts] = status.split(/\s+/);
     if (dead === '1') {
       return false;

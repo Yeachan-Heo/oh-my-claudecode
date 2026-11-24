@@ -128,6 +128,13 @@ describe('panelQuotaTmux adapter', () => {
       });
     });
 
+    it('a connection failure that does not say there is no server is not an absent server: the inventory is unreadable', () => {
+      vi.mocked(tmuxExec)
+        .mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n')
+        .mockImplementationOnce(() => { throw Object.assign(new Error('error connecting to /tmp/o-1k-lz9x2b-1a2b3c4d.sock (Permission denied)'), { status: 1 }); });
+      expect(panelQuotaTmux.listPanes()).toBeNull();
+    });
+
     it('an endpoint that cannot be read makes the inventory unreadable', () => {
       vi.mocked(tmuxExec)
         .mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n')
@@ -144,6 +151,56 @@ describe('panelQuotaTmux adapter', () => {
       expect(calls).toHaveLength(4);
       for (const args of calls) expect(args.slice(0, 2), `a call went to the default server: ${args.join(' ')}`).toEqual(['-S', SOCKET]);
       expect(calls.map((args) => args[2])).toEqual(['capture-pane', 'display-message', 'send-keys', 'send-keys']);
+    });
+  });
+
+  describe('commands are bound to the server run that listed the pane', () => {
+    const SERVER = '4100:1795000000';
+    const GUARD = `#{==:#{pid}:#{start_time},${SERVER}}`;
+    const listed = { ...PANE, server: SERVER } as TmuxPane;
+    // What a server prints when the guard does not hold: the marker that the call carries as its else branch.
+    const markerOf = (args: string[]): string => String(args[args.length - 1]).replace('display-message -p ', '');
+    const refuse = (args: string[]): string => `${markerOf(args)}\n`;
+
+    beforeEach(() => {
+      vi.mocked(tmuxExec).mockReset();
+    });
+
+    it('capture, the provider check and each key are run under a guard on the listed pid and start time', () => {
+      vi.mocked(tmuxExec).mockReturnValue('0 4242 node\n');
+      panelQuotaTmux.capture(listed, 15);
+      expect(panelQuotaTmux.providerRunning(listed)).toBe(true);
+      expect(panelQuotaTmux.sendContinue(listed)).toBe('delivered');
+      const calls = vi.mocked(tmuxExec).mock.calls.map((call) => call[0]);
+      expect(calls.map((args) => args.slice(0, 3))).toEqual(Array(4).fill(['if-shell', '-F', GUARD]));
+      expect(calls.map((args) => args[3])).toEqual([
+        'capture-pane -t %7 -p -S -15',
+        'display-message -t %7 -p "#{pane_dead} #{pane_pid} #{pane_current_command}"',
+        'send-keys -t %7 -l continue',
+        'send-keys -t %7 Enter',
+      ]);
+    });
+
+    it('a server that is not the listed one: nothing is read, and no key is typed', () => {
+      vi.mocked(tmuxExec).mockImplementation((args) => refuse(args as string[]));
+      expect(panelQuotaTmux.capture(listed, 15)).toBeNull();
+      expect(panelQuotaTmux.providerRunning(listed)).toBeNull();
+      vi.mocked(tmuxExec).mockClear();
+      expect(panelQuotaTmux.sendContinue(listed)).toBe('not_attempted');
+      expect(vi.mocked(tmuxExec).mock.calls, 'the Enter was sent after a refused text').toHaveLength(1);
+    });
+
+    it('a server that changes between the text and the Enter: the text may sit in the old pane, so the outcome is unconfirmed', () => {
+      vi.mocked(tmuxExec).mockReturnValueOnce('').mockImplementationOnce((args) => refuse(args as string[]));
+      expect(panelQuotaTmux.sendContinue(listed)).toBe('unconfirmed');
+    });
+
+    it('a server value that is not a pid and start time is never trusted: nothing is run', () => {
+      const odd = { ...PANE, server: '4100:1795000000;x' } as TmuxPane;
+      expect(panelQuotaTmux.capture(odd, 15)).toBeNull();
+      expect(panelQuotaTmux.providerRunning(odd)).toBeNull();
+      expect(panelQuotaTmux.sendContinue(odd)).toBe('not_attempted');
+      expect(vi.mocked(tmuxExec)).not.toHaveBeenCalled();
     });
   });
 
