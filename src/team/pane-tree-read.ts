@@ -42,3 +42,39 @@ export async function capturePaneProcessTreeOfWorkerPane(
   }
   return ops.capturePaneProcessTree(ownership.tmuxServerIdentity, ownership.paneId);
 }
+
+/** The tree as JSON data (a Map has none), the form in which a fenced capture is persisted with the retirement record of a launch attempt. */
+export function serializePaneTree(tree: PaneProcessTree): { panePid: number; pids: number[]; startIdentities: Array<[number, string | null]> } {
+  return { panePid: tree.panePid, pids: [...tree.pids], startIdentities: [...tree.startIdentities] };
+}
+
+/** The tree a persisted capture holds, or null when the value is not one: a tree that does not validate is never signalled. */
+export function revivePaneTree(value: unknown): PaneProcessTree | null {
+  if (!value || typeof value !== "object") return null;
+  const { panePid, pids, startIdentities } = value as Record<string, unknown>;
+  const isPid = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) > 1;
+  if (!isPid(panePid) || !Array.isArray(pids) || !pids.every(isPid) || !Array.isArray(startIdentities)) return null;
+  const identities = new Map<number, string | null>();
+  for (const entry of startIdentities) {
+    if (!Array.isArray(entry) || entry.length !== 2 || !isPid(entry[0]) || !(entry[1] === null || typeof entry[1] === "string")) return null;
+    identities.set(entry[0], entry[1]);
+  }
+  return { panePid, pids: [...pids], startIdentities: identities };
+}
+
+/**
+ * The read of a cleanup at the launch fence, for `retireAndCleanupCurrentWorkerLaunchAttempt`: `persisted` is the capture an earlier,
+ * interrupted run of the same retirement persisted, which is used as it is (the provider is gone by now, and a read taken after that misses
+ * the descendants that left its process group); without one the pane is read as `capturePaneProcessTreeOfWorkerPane` does. `record` is what
+ * the hook gives back to be persisted: the new capture, or nothing.
+ */
+export async function readFencedPaneTree(
+  ownership: WorkerPaneOwnership | null | undefined,
+  ops: PaneTreeReadOps,
+  persisted?: unknown,
+): Promise<{ tree: PaneProcessTree | null; record: ReturnType<typeof serializePaneTree> | undefined }> {
+  const earlier = revivePaneTree(persisted);
+  if (earlier) return { tree: earlier, record: undefined };
+  const tree = await capturePaneProcessTreeOfWorkerPane(ownership, ops);
+  return { tree, record: tree ? serializePaneTree(tree) : undefined };
+}

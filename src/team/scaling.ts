@@ -69,7 +69,10 @@ import {
   isHerdrSessionTarget,
   providerForTeamTarget,
 } from "./tmux-session.js";
-import { capturePaneProcessTreeOfWorkerPane } from "./pane-tree-read.js";
+import {
+  capturePaneProcessTreeOfWorkerPane,
+  readFencedPaneTree,
+} from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget } from "./herdr-session.js";
 import {
   TeamPaths,
@@ -117,14 +120,26 @@ const CLI_AGENT_TYPES = new Set<CliAgentType>([
 ]);
 
 /** The read of the pane process tree for a cleanup that signals it (see capturePaneProcessTreeOfWorkerPane for what it requires of the pane). */
+const paneTreeReadOps = {
+  verifyTeamTargetOwnership: (target: Parameters<typeof verifyTeamTargetOwnership>[0]) =>
+    verifyTeamTargetOwnership(target),
+  capturePaneProcessTree: (
+    identity: Parameters<typeof capturePaneProcessTree>[0],
+    paneId: string,
+  ) => capturePaneProcessTree(identity, paneId),
+};
 function readWorkerPaneProcessTree(
   ownership: WorkerPaneOwnership | null | undefined,
 ): Promise<PaneProcessTree | null> {
-  return capturePaneProcessTreeOfWorkerPane(ownership, {
-    verifyTeamTargetOwnership: (target) => verifyTeamTargetOwnership(target),
-    capturePaneProcessTree: (identity, paneId) =>
-      capturePaneProcessTree(identity, paneId),
-  });
+  return capturePaneProcessTreeOfWorkerPane(ownership, paneTreeReadOps);
+}
+
+/** The read at the launch fence, the hook of retireAndCleanupCurrentWorkerLaunchAttempt: the capture an interrupted run persisted comes back as `persisted`. */
+function readFencedWorkerPaneTree(
+  ownership: WorkerPaneOwnership | null | undefined,
+  persisted?: unknown,
+) {
+  return readFencedPaneTree(ownership, paneTreeReadOps, persisted);
 }
 
 export function isScalingEnabled(
@@ -885,9 +900,10 @@ export async function scaleUpOwned(
                 launch.attempt,
                 "scale_up_rollback",
                 killPane,
-                async () => {
-                  fencedTree =
-                    await readWorkerPaneProcessTree(ownership);
+                async (persisted) => {
+                  const read = await readFencedWorkerPaneTree(ownership, persisted);
+                  fencedTree = read.tree;
+                  return read.record;
                 },
               ).catch(() => false)
             : await killPane();
@@ -2497,8 +2513,10 @@ export async function scaleDownOwned(
                 return false;
               }
             },
-            async () => {
-              fencedTree = await readWorkerPaneProcessTree(paneOwnership);
+            async (persisted) => {
+              const read = await readFencedWorkerPaneTree(paneOwnership, persisted);
+              fencedTree = read.tree;
+              return read.record;
             },
           );
         } catch {

@@ -527,16 +527,22 @@ function mergeEvents(from, to, livePath, env, adopted) {
   let behind = 0;
   const movedList = join(dirname(from), basename(livePath));
   withFileLock(livePath, (owned) => {
+    // Everything below judges the events against the live record read here, so it holds only while the lock is still this call's: when another
+    // sweep moved the live directory away and a hook made it again (its lock file is another file, with another token), the record is another
+    // one and an older event linked now would be applied last by the next fold. The tree is then kept under its hidden name and the next sweep
+    // merges it against the record it finds.
     if (existsSync(movedList)) {
       mergeListFile(movedList, livePath, env, adopted, owned);
       unlinkSync(movedList);
     }
     const marks = settledMarks(readRecord(livePath).record);
     complete = mergeTree(from, to, env, false, adopted, (name) => {
+      if (!owned()) throw new Error('lock lost'); // before the event is linked or dropped: the entry stays in the moved tree
       const skipped = EVENT_NAME.test(name) && isBehind(marks, name);
       if (skipped) behind += 1;
       return skipped;
     });
+    if (!owned()) complete = false;
     if (complete && !adopted.includes(livePath)) adopted.push(livePath); // the events that arrived are folded into the list file when the merge is done
   }, env, SYNC_STALE_MS);
   if (behind > 0) storeEvent('moved_events_behind_settled', livePath, env, { session: basename(dirname(livePath)), dropped: behind });

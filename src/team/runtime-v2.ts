@@ -137,7 +137,12 @@ import {
   isHerdrSessionTarget,
   providerForTeamTarget,
 } from "./tmux-session.js";
-import { capturePaneProcessTreeOfWorkerPane } from "./pane-tree-read.js";
+import {
+  capturePaneProcessTreeOfWorkerPane,
+  readFencedPaneTree,
+  revivePaneTree,
+  serializePaneTree,
+} from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget, herdrCloseWorkspace, herdrWorkspaceExists } from "./herdr-session.js";
 import { classifyPane, observePane } from "./pane-readiness.js";
 import {
@@ -1180,14 +1185,26 @@ function configuredPaneOwnership(
 }
 
 /** The read of the pane process tree for a cleanup that signals it (see capturePaneProcessTreeOfWorkerPane for what it requires of the pane). */
+const paneTreeReadOps = {
+  verifyTeamTargetOwnership: (target: Parameters<typeof verifyTeamTargetOwnership>[0]) =>
+    verifyTeamTargetOwnership(target),
+  capturePaneProcessTree: (
+    identity: Parameters<typeof capturePaneProcessTree>[0],
+    paneId: string,
+  ) => capturePaneProcessTree(identity, paneId),
+};
 function readWorkerPaneProcessTree(
   ownership: WorkerPaneOwnership | null | undefined,
 ): Promise<PaneProcessTree | null> {
-  return capturePaneProcessTreeOfWorkerPane(ownership, {
-    verifyTeamTargetOwnership: (target) => verifyTeamTargetOwnership(target),
-    capturePaneProcessTree: (identity, paneId) =>
-      capturePaneProcessTree(identity, paneId),
-  });
+  return capturePaneProcessTreeOfWorkerPane(ownership, paneTreeReadOps);
+}
+
+/** The read at the launch fence, the hook of retireAndCleanupCurrentWorkerLaunchAttempt: the capture an interrupted run persisted comes back as `persisted`. */
+function readFencedWorkerPaneTree(
+  ownership: WorkerPaneOwnership | null | undefined,
+  persisted?: unknown,
+) {
+  return readFencedPaneTree(ownership, paneTreeReadOps, persisted);
 }
 
 /**
@@ -1203,18 +1220,27 @@ function paneTreeFence(
   ownership: WorkerPaneOwnership | null | undefined,
   proved?: () => Promise<boolean>,
 ): {
-  read: () => Promise<void>;
+  read: (persisted?: unknown) => Promise<unknown>;
   terminate: () => Promise<void>;
 } {
   let tree: PaneProcessTree | null = null;
   return {
-    read: async () => {
+    read: async (persisted?: unknown) => {
+      // a capture an interrupted run of this retirement persisted is used as it is (the provider is gone, a new read would miss its descendants)
+      const earlier = revivePaneTree(persisted);
+      if (earlier) {
+        tree = earlier;
+        return undefined;
+      }
       if (
         process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
         ownership?.tmuxServerIdentity &&
         (!proved || (await proved()))
-      )
+      ) {
         tree = await readWorkerPaneProcessTree(ownership);
+        return tree ? serializePaneTree(tree) : undefined;
+      }
+      return undefined;
     },
     terminate: async () => {
       if (tree) await terminatePaneProcessTree(tree);
@@ -9432,8 +9458,10 @@ export async function shutdownTeamV2(
             return false;
           }
         },
-        async () => {
-          fencedTree = await readWorkerPaneProcessTree(paneOwnership);
+        async (persisted) => {
+          const read = await readFencedWorkerPaneTree(paneOwnership, persisted);
+          fencedTree = read.tree;
+          return read.record;
         },
       ))
     )

@@ -1216,14 +1216,20 @@ export async function retireWorkerLaunchAttempt(
  * worker's pane at, because a descendant that left the provider's process group is no longer below the pane's root once the provider is
  * gone, and one the worker started while the caller waited for this lock is in no read taken before it. It is awaited, and an error it
  * throws changes nothing: a failed read must not keep the provider alive or fail the retirement.
+ * What it returns (JSON data, undefined or null for nothing) is the capture it took: it is written next to the retirement record before the
+ * provider is terminated, so a leader interrupted after the termination and before `cleanup` has used the capture does not lose it. A retry
+ * of the same attempt passes that capture back to the hook as its argument (the provider is gone by then, so a read taken now would miss
+ * the descendants that left its process group), and the hook gives back nothing new. A capture that cannot be written stops the retirement
+ * before the provider is terminated. The file goes once `cleanup` has succeeded.
  */
 export async function retireAndCleanupCurrentWorkerLaunchAttempt(
   attempt: WorkerLaunchAttempt,
   reason: string,
   cleanup: () => Promise<boolean>,
-  beforeProviderTermination?: () => Promise<void>,
+  beforeProviderTermination?: (persisted?: unknown) => Promise<unknown>,
 ): Promise<boolean> {
   const retiredPath = `${attempt.decisionPath}.retired`;
+  const fencedCapturePath = `${retiredPath}.fenced-capture`;
   const cleanupCompletePath = `${retiredPath}.cleanup-complete`;
   const finalizeCleanupUnlocked = (): Promise<WorkerLaunchRetirementFinalizeState> =>
     finishWorkerLaunchRetirementCleanupUnlocked(attempt);
@@ -1260,10 +1266,27 @@ export async function retireAndCleanupCurrentWorkerLaunchAttempt(
         });
       }
       if (beforeProviderTermination) {
-        try { await beforeProviderTermination(); } catch { /* a failed read does not hold up the termination */ }
+        const earlier = await readJson(fencedCapturePath);
+        const persisted = earlier.kind === 'value'
+          && identityMatches(earlier.value, attempt)
+          && (earlier.value as { kind?: unknown }).kind === 'worker_launch_fenced_capture'
+          ? (earlier.value as { capture?: unknown }).capture
+          : undefined;
+        let capture: unknown;
+        try { capture = await beforeProviderTermination(persisted); } catch { /* a failed read does not hold up the termination */ }
+        if (persisted === undefined && capture !== undefined && capture !== null) {
+          try {
+            await writeExclusiveAtomic(fencedCapturePath, {
+              ...identityOf(attempt), kind: 'worker_launch_fenced_capture', capture, written_at: new Date().toISOString(),
+            });
+          } catch {
+            return false; // a capture that could be lost is not taken into the termination of the provider
+          }
+        }
       }
       if (!await terminateWorkerLaunchProvider(attempt)) return false;
       if (!await cleanup()) return false;
+      await unlink(fencedCapturePath).catch(() => undefined);
       if (!await cleanupWorkerLaunchTransportUnlocked(attempt, reason)) return false;
       const completed = await readJson(cleanupCompletePath);
       if (completed.kind === 'absent') {

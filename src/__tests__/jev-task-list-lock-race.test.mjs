@@ -39,6 +39,8 @@ let counter = 0;
 //                       does not end in ".lock") is created: the fold has made its last check of the lock and the list, and has written nothing
 //   before-list-rename  before a file is renamed to the list PAUSE_MATCH: the temporary file is written and the fold has checked a last time
 //   after-list-publish  right after a file was renamed to the list PAUSE_MATCH: the list is published and the events it folded are not removed yet
+//   before-moved-event-check  before the first read of the token of a ".lock" file (the check that the lock is still the process's own): the merge of a moved
+//                       tree holds the lock of the live list and has read the live record, and has not judged or moved any event yet
 // The process writes PAUSE_MARK and waits until PAUSE_GO exists (with several kinds both names get the suffix ".<kind>").
 const PRELOAD = `
 import fs from 'node:fs';
@@ -122,6 +124,10 @@ if (kinds.includes('before-list-rename') || kinds.includes('after-list-publish')
     if (to === PAUSE_MATCH && kinds.includes('after-list-publish')) hold('after-list-publish');
     return result;
   };
+}
+if (kinds.includes('before-moved-event-check')) {
+  const read = fs.readFileSync;
+  fs.readFileSync = (p, ...rest) => { if (isLock(p)) hold('before-moved-event-check'); return read(p, ...rest); };
 }
 if (kinds.includes('sweep-observed')) {
   const stat = fs.statSync;
@@ -602,6 +608,46 @@ describe('task-list sweep: a hook writes while the sweep judges the session dire
       finish(await run('after-list-publish'));
     }, TOTAL_MS);
   });
+
+  // Two sweeps overlap: one merges a hidden tree into the live directory under the lock of the live list, and the live directory is moved away
+  // meanwhile by the other; a hook makes it again and folds a newer call. The merge judged the events against the record it read before, which is
+  // not the live record any more: an older event linked now would be applied last by the next fold, over the newer list. The merge keeps the tree.
+  it('a merge of a hidden tree whose lock on the live list was lost links no event: the tree stays hidden, and a later sweep merges it against the newer list', async () => {
+    counter += 1;
+    const dir = join(TMP, `sweep-${counter}`);
+    mkdirSync(dir, { recursive: true });
+    const logs = join(dir, 'logs');
+    const env = baseEnv(logs);
+    const lists = join(logs, 'lists');
+    const session = join(lists, 'race-session');
+    const hidden = join(lists, '.race-session.0123456789ab.sweeping');
+    const files = (name) => join(dir, name);
+    const at = Date.now() - 120_000;
+    const name = `${at}-${'7'.padStart(20, '0')}-11-aaaaaaaa.json`;
+    const event = { ts: new Date(at).toISOString(), pid: 11, id: 'aaaaaaaa', session_id: 'race-session', agent_type: null, tool_use_id: null, prompt_id: null, tool_name: 'TodoWrite', tool_input: { todos: [{ content: 'Old list', status: 'pending' }] } };
+    mkdirSync(join(hidden, 'main.events'), { recursive: true });
+    writeFileSync(join(hidden, 'main.events', name), JSON.stringify(event));
+    mkdirSync(join(session, '_task'), { recursive: true }); // the directory a hook made again: not empty, so the hidden tree is merged and not renamed over it
+    writeFileSync(join(session, '_task', '9.json'), JSON.stringify({ agent: 'main' }));
+    rmSync(join(lists, '.sweep'), { force: true }); // the sweep of the child is due
+    const s = startChild(dir, { kind: 'sweep', done: files('s-done') }, { kind: 'before-moved-event-check', mark: files('s-paused'), go: files('s-go') }, env);
+    await waitUntil(files('s-paused')); // the merge holds the lock of the live list and has read the live record (none)
+    rmSync(join(session, 'main.json.lock'), { force: true }); // its lock is gone: the directory it took the lock in was moved away, and this is the directory made again
+    const newer = { session_id: 'race-session', tool_name: 'TodoWrite', tool_input: { todos: [{ content: 'Newer list', status: 'pending' }] }, tool_use_id: 'toolu_n1' };
+    expect(L.recordListCall(newer, env)).not.toBeNull();
+    writeFileSync(files('s-go'), '1');
+    const rs = await s.exited;
+    expect(rs.code, rs.stderr).toBe(0);
+    expect(existsSync(hidden)).toBe(true); // kept: the merge was not complete
+    expect(existsSync(join(hidden, 'main.events', name))).toBe(true); // the event was neither linked nor dropped
+    expect(readdirSync(join(session, 'main.events')).some((n) => n === name)).toBe(false);
+    L.syncList('race-session', 'main', env);
+    expect(L.readList('race-session', 'main', env).items.map((x) => x.content)).toEqual(['Newer list']);
+    rmSync(join(lists, '.sweep'), { force: true });
+    L.sweep(env, Date.now()); // the next sweep merges the tree against the record that is there now: the old call is behind it and is dropped
+    expect(existsSync(hidden)).toBe(false);
+    expect(L.readList('race-session', 'main', env).items.map((x) => x.content)).toEqual(['Newer list']);
+  }, TOTAL_MS);
 
   // The writer made its directory (a no-op for an old session) and is held before its first file; the sweep, run to its end meanwhile, reads
   // the session as idle, moves it away and removes it. The call of the writer is the newest thing the session has: it must be saved.

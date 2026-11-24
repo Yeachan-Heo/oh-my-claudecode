@@ -395,6 +395,32 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     });
   }, 60_000);
 
+  // The tree read at the fence is persisted with the retirement before the provider is terminated. A shutdown that ends after the provider is gone
+  // and before the pane is confirmed gone is retried, and its read at the fence then finds nothing below the pane's root: the descendants that
+  // left the provider's process group are named only by the capture the first run persisted.
+  it('a shutdown retried after the provider was terminated signals the tree the first run read at the fence', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    await withAcceptedProvider('pane-tree-retry-team', async () => {
+      let providerGone = false;
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => (providerGone ? null : FIXTURE_TREE));
+      tmuxSessionMocks.terminatePaneProcessTree.mockImplementation(async () => { providerGone = true; });
+      // the pane stays alive after the kill: the first shutdown ends preserved, with the provider terminated and the tree signalled
+      tmuxSessionMocks.killOwnedWorkerPane.mockImplementation(async () => undefined);
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      await expect(shutdownTeamV2('pane-tree-retry-team', cwd, { timeoutMs: 0, force: true })).resolves.toMatchObject({ outcome: 'preserved' });
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([FIXTURE_TREE, FIXTURE_TREE, FIXTURE_TREE]);
+
+      tmuxSessionMocks.terminatePaneProcessTree.mockClear();
+      tmuxSessionMocks.capturePaneProcessTree.mockClear();
+      tmuxSessionMocks.killOwnedWorkerPane.mockImplementation(async () => { paneState.killed = true; });
+      await shutdownTeamV2('pane-tree-retry-team', cwd, { timeoutMs: 0, force: true });
+
+      // the provider is gone: the reads of the retry find no tree below the pane's root; the one persisted by the first run is signalled
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toContainEqual(FIXTURE_TREE);
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledTimes(2); // the two reads before the fence; none at the fence, the persisted capture is used
+    });
+  }, 60_000);
+
   it('without OMC_TEAM_KILL_PANE_TREE no tree is read, not even the proof of membership that precedes a read, and none is signalled', async () => {
     await withAcceptedProvider('pane-tree-off-team', async () => {
       const { shutdownTeamV2 } = await import('../runtime-v2.js');

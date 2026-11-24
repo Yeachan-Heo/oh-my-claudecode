@@ -885,6 +885,41 @@ describe('worker launch acknowledgement', () => {
     expect(beforeProviderTermination).toHaveBeenCalledTimes(2);
   });
 
+  // The capture the hook takes right before the provider is terminated is persisted before the termination: a leader interrupted between the
+  // termination and the cleanup would otherwise lose it, and a retry (the provider gone) could only read a tree without the descendants that left
+  // its process group.
+  it('persists what the hook returned before the provider is terminated, hands it back to the hook of a retry, and removes it once the cleanup succeeded', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: 999_999, process_start_identity: '1',
+      ...(process.platform !== 'win32' ? { process_group_id: 999_999 } : {}),
+      written_at: new Date().toISOString() }), 'utf8');
+    const captured = { panePid: 4000, pids: [4001], startIdentities: [[4001, 'start-4001']] };
+    const capturePath = `${launchAttempt.decisionPath}.retired.fenced-capture`;
+    const seen: unknown[] = [];
+    const hook = vi.fn(async (persisted?: unknown) => {
+      seen.push(persisted);
+      return persisted === undefined ? captured : undefined;
+    });
+    let onDiskAtCleanup: unknown;
+    let cleanups = 0;
+    const cleanup = vi.fn(async () => {
+      onDiskAtCleanup = existsSync(capturePath) ? (JSON.parse(await readFile(capturePath, 'utf8')) as { capture: unknown }).capture : null;
+      cleanups += 1;
+      return cleanups > 1; // the leader is interrupted after the provider is gone: the first cleanup does not complete
+    });
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'persist_capture', cleanup, hook)).resolves.toBe(false);
+    expect(onDiskAtCleanup).toEqual(captured); // written before the provider was terminated, so it is there when the cleanup runs
+    expect(existsSync(capturePath)).toBe(true);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'persist_capture', cleanup, hook)).resolves.toBe(true);
+    expect(seen).toEqual([undefined, captured]); // the retry gets the capture of the first run back
+    expect(existsSync(capturePath)).toBe(false);
+  });
+
   it('reuses exact durable cleanup-complete evidence without touching a successor or pane again', async () => {
     const launchAttempt = await attempt();
     const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));

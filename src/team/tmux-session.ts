@@ -87,7 +87,7 @@ import {
   type WorkerLaunchContext,
 } from "./worker-launch-ack.js";
 import { resolveRuntimeCliPath } from "./runtime-owner-client.js";
-import { capturePaneProcessTreeOfWorkerPane } from "./pane-tree-read.js";
+import { readFencedPaneTree } from "./pane-tree-read.js";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
@@ -4159,11 +4159,14 @@ export async function spawnOwnedWorkerInPane(
           return false;
         }
       },
-      async () => {
-        fencedTree = await capturePaneProcessTreeOfWorkerPane(ownership, {
-          verifyTeamTargetOwnership,
-          capturePaneProcessTree,
-        });
+      async (persisted) => {
+        const read = await readFencedPaneTree(
+          ownership,
+          { verifyTeamTargetOwnership, capturePaneProcessTree },
+          persisted,
+        );
+        fencedTree = read.tree;
+        return read.record;
       },
     ).catch(() => false);
     if (!cleaned)
