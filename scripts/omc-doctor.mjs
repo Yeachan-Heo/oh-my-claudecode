@@ -248,9 +248,19 @@ const registryMarketplaces = () => {
 // == Step 1: helpers ==
 // The highest version directory name in a cache directory, '' when it holds none (or does not exist), null when it
 // cannot be read.
-const highestCached = (dir) => {
+// complete: only a directory whose package.json names exactly that version counts, as the runtime counts a cached version
+// (getLatestPluginCacheVersion): a half-written directory is no version there.
+const highestCached = (dir, complete = false) => {
   try {
     const names = fs.readdirSync(dir).filter(isVersionDir).sort(compareVersions);
+    if (complete) {
+      for (let i = names.length - 1; i >= 0; i--) {
+        try {
+          if (readJson([dir, names[i], 'package.json'].join(path.sep)).version === names[i]) return names[i];
+        } catch {}
+      }
+      return '';
+    }
     return names.length ? names[names.length - 1] : '';
   } catch (error) {
     return absent(error, dir) ? '' : null;
@@ -666,12 +676,17 @@ const claudeMdVersion = () => {
   // (a link to nothing, a directory, no permission) may hold the marker that would decide, so the version is unreadable;
   // one that is not there is skipped.
   let claudeVersion = '(missing)';
+  let markerExact = true;
   let claudeSource = '(none)';
   let cannotRead = '';
   for (const file of candidates) {
     try {
-      const marker = readFile(file).match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
+      const text = readFile(file);
+      const marker = text.match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
       if (marker) {
+        // The runtime (extractOmcVersion in scripts/session-start.mjs) reads only the exact, case-sensitive, spaced form with a
+        // digit first; any other spelling is a marker it cannot read, which it reports as instruction drift.
+        markerExact = /<!-- OMC:VERSION:\d+\.\d+\.\d+[^\s]*? -->/.test(text);
         claudeVersion = marker[1];
         claudeSource = file;
         break;
@@ -717,7 +732,7 @@ const claudeMdVersion = () => {
   const rootsConflict = sameRoots == 'no';
   let unreadableCache = '';
   const latestIn = (market) => {
-    const latest = highestCached(cacheDirOf(market));
+    const latest = highestCached(cacheDirOf(market), true);
     if (latest === null && !unreadableCache) unreadableCache = cacheDirOf(market);
     return latest;
   };
@@ -769,7 +784,7 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
   } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
     console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
-  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion)) {
+  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion) && markerExact) {
     console.log('VERSION MATCH: CLAUDE and plugin cache are aligned');
   } else {
     console.log('VERSION DRIFT: CLAUDE.md and plugin versions differ');

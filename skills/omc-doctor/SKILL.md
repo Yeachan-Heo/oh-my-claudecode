@@ -144,7 +144,7 @@ node "$S" claude-md-version
 - If `<!-- OMC:START -->` found in a companion file (e.g. `CLAUDE-omc.md`): OK - file-split pattern detected
 - If no OMC markers in CLAUDE.md or any companion file: WARN - outdated CLAUDE.md; `Could not read CLAUDE.md`: WARN, it is there and unreadable
 - If `OMC:VERSION` marker is missing from deterministic CLAUDE source scan (base + referenced companion): WARN - cannot verify CLAUDE.md freshness
-- If `CLAUDE.md OMC version` != `Latest cached plugin version`: WARN - version drift detected (run `omc update` or `omc setup`); a leading `v` on either version is ignored, as in Step 1; no drift is claimed when the command printed `VERSION CHECK SKIPPED` (`(none)`, `(unknown)` and `(unreadable)` are no versions). `(unreadable)` as the CLAUDE.md version or a `Note:` about an unreadable plugin cache or an unusable `installed_plugins.json`: WARN - name the file or directory; it is there, not missing
+- If `CLAUDE.md OMC version` != `Latest cached plugin version`: WARN - version drift detected (run `omc update` or `omc setup`); the verdict line of the command decides: a CLAUDE.md marker the runtime cannot read (written with a leading `v`, without the single spaces, or in another letter case) is `VERSION DRIFT`, a leading `v` on the cached version is ignored, and a half-written cache directory (its `package.json` does not name that version) is no cached version; no drift is claimed when the command printed `VERSION CHECK SKIPPED` (`(none)`, `(unknown)` and `(unreadable)` are no versions). `(unreadable)` as the CLAUDE.md version or a `Note:` about an unreadable plugin cache or an unusable `installed_plugins.json`: WARN - name the file or directory; it is there, not missing
 
 ### Step 5: Check Ralph Runtime Prerequisites
 

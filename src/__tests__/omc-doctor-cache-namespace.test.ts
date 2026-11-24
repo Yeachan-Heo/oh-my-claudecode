@@ -438,6 +438,39 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
+    // The runtime counts a cached version only when package.json names exactly that version (getLatestPluginCacheVersion).
+    test.skipIf(process.platform === 'win32')('a half-written cache directory is no cached version', () => {
+      for (const damage of ['no package.json', 'another version', 'not JSON']) {
+        const dir = fresh();
+        try {
+          const cache = addCache(dir, [OLD, NEW], 'omc');
+          const file = path.join(cache, NEW, 'package.json');
+          if (damage == 'no package.json') rmSync(file);
+          else writeFileSync(file, damage == 'another version' ? JSON.stringify({ version: '5.9.1' }) : '{');
+          writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD }] });
+          expect({ damage, out: claudeMdAt(dir, OLD, 'linux', {}) }).toEqual({ damage, out: [`Latest cached plugin version: ${OLD}`, MATCH] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    // The runtime reads the marker only as `<!-- OMC:VERSION:<digits...> -->` in exactly that case and spacing.
+    test.skipIf(process.platform === 'win32')('a marker the runtime cannot read is drift whatever its version', () => {
+      for (const marker of ['<!--OMC:VERSION:5.9.0-->', '<!-- omc:version:5.9.0 -->', '<!--  OMC:VERSION:5.9.0  -->', '<!-- OMC:VERSION:v5.9.0 -->', '<!-- OMC:VERSION:5.9.0 -->']) {
+        const dir = fresh();
+        try {
+          addCache(dir, [NEW], 'omc');
+          writeRegistry(dir, { [OMC]: [{ scope: 'user', version: NEW }] });
+          writeFileSync(path.join(dir, 'CLAUDE.md'), marker + '\n');
+          const run = runCommand(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
+          expect({ marker, verdict: run.stdout.trim().split('\n').slice(-1)[0] }).toEqual({ marker, verdict: marker == '<!-- OMC:VERSION:5.9.0 -->' ? MATCH : DRIFT });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
     test.skipIf(process.platform === 'win32')('a plugin root variable alone beside an old cache is a checkout: the comparison is skipped', () => {
       const dir = fresh();
       try {

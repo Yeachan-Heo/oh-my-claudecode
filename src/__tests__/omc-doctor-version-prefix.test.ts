@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { ageVersions, CLAUDE_MD_VERSION, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { skillText, ageVersions, CLAUDE_MD_VERSION, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1 } from './helpers/omc-doctor-step1.js';
 
 // The runtime reads a version with an optional leading `v` as the same version (`parseSemver` in scripts/session-start.mjs,
@@ -72,6 +72,12 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
         rmSync(dir, { recursive: true, force: true });
       }
     };
+
+    test('the skill does not tell the doctor to ignore a v on the CLAUDE.md marker, which the command reports as drift', () => {
+      const line = skillText.split('\n').find((l) => l.includes('`CLAUDE.md OMC version` != `Latest cached plugin version`')) ?? '';
+      expect(line).not.toMatch(/leading `v` on either/);
+      expect(line).toMatch(/leading `v`.*is `VERSION DRIFT`|`VERSION DRIFT`.*leading `v`/);
+    });
 
     // The runtime reads a marker only when a digit follows the colon (extractOmcVersion in scripts/session-start.mjs) and reports
     // instruction drift for any other, so a marker written with a v is drift here too; the prefix is dropped only from versions

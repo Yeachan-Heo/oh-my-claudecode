@@ -216,7 +216,11 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     for (const prefix of prefixes) {
       const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-version-'));
       try {
-        for (const version of prefix.versions) mkdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', version), { recursive: true });
+        for (const version of prefix.versions) {
+          mkdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', version), { recursive: true });
+          // The runtime counts a cached directory only when its package.json names that version.
+          writeFileSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', version, 'package.json'), JSON.stringify({ version }));
+        }
         writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '0.0.1' }] }); // a supported ID, so the session root is no plugin-dir checkout
         writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.9.0 -->\n');
         const run = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });

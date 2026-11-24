@@ -449,7 +449,8 @@ fs.readFileSync = function (target, ...rest) {
       writeFileSync(path.join(dir, 'claude-extra.md'), '<!-- omc:version:5.9.0 -->\n');
       const out = run(step4, dir);
       expect(out).toContain('CLAUDE.md OMC version: 5.9.0');
-      expect(out).toContain('VERSION MATCH');
+      // The file is found and its marker read, but the runtime reads only the exact lower-case-free form, so it is drift.
+      expect(out).toContain('VERSION DRIFT');
       const listed = spawnSync('/bin/bash', ['-c', block], { encoding: 'utf8', timeout: 8_000, env: { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir } });
       expect(listed.stdout).toContain('claude-extra.md\n');
     } finally {
