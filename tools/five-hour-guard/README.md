@@ -37,7 +37,8 @@ Three standalone scripts, Python 3 standard library only:
    `threshold - 10` percent (the window was reset sooner than the cache said), and it extends the pause while the cache
    still shows the threshold with a later reset time.
 
-The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit, so a stop or a restart (also
+The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit (also when an earlier removal of the file failed and is still
+pending: the stop tries it once more), so a stop or a restart (also
 `systemctl --user restart`, which a change of `exclude` needs) releases the waiting sessions. The restarted guard brings
 the pause back from its first fresh reading of the cache, within one check; when the cache is stale at that moment the
 sessions run until a fresh reading shows the threshold. After a crash (SIGKILL, an uncaught exception) the state file
@@ -53,7 +54,7 @@ hours): `WARNING (reset-too-far)` and no pause.
 One guard per state file and one per pause file: a second guard with the same `state_file` or the same `pause_file` stops with
 status 2 (it takes an exclusive lock on `<state_file>.lock` and on `<pause_file>.lock`, empty files next to those files; there is no lock where Python has no `fcntl`, that is on
 Windows). At start the guard removes a pause file nobody owns, but refuses to start (status 2) when the existing file is not a pause file of this
-guard (a mistyped `pause_file` must never delete another file), and relies on the lock on `<pause_file>.lock` to tell a running guard from a leftover (a pid in the file proves nothing: it can belong to an unrelated process after a crash; only on a platform without `fcntl` the pid and a current heartbeat decide). Two guards must not share one `pause_file`: with different state files they would overwrite each
+guard (a mistyped `pause_file` must never delete another file; a dangling symbolic link there counts as such a file and is left alone), and relies on the lock on `<pause_file>.lock` to tell a running guard from a leftover (a pid in the file proves nothing: it can belong to an unrelated process after a crash; only on a platform without `fcntl` the pid and a current heartbeat decide). Two guards must not share one `pause_file`: with different state files they would overwrite each
 other's pause (the lock on the pause file stops the second one).
 
 ### The hook never wedges a session (fail-open)
@@ -171,7 +172,11 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, an interpreter that is not
    executable or cannot run the hook (it is tried once: Python 3 with the standard library), two of the pause file, hook log,
    `settings.json`, hook, interpreter, configuration file and the two scripts that are one file, and a hook file whose
-   name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The
+   name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The tool counts a command as
+   the hook only when that file is its script (the command word, or the argument of a Python, or of a command that has
+   `--pause-file`); a command of another tool that merely names the file as data is not ours and is never replaced or
+   removed. The usage cache counts as a configured file also when `usage_cache` is left out (OMC's default file and its
+   `.lock`). The
    entry has a `timeout` of 21600 s (`--timeout`, at least 1), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
    another program writes `settings.json` while the tool works (also while the backup is made), the tool reads it again

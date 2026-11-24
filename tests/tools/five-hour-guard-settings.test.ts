@@ -171,7 +171,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
 
   it('a foreign hook that shares a group with ours survives add and remove', () => {
     const f = fixture('settings-mixed');
-    write(f, { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }, { type: 'command', command: 'x /old/five-hour-guard-hook.py' }] }] } });
+    write(f, { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }, { type: 'command', command: 'exec /usr/bin/python3 -I /old/five-hour-guard-hook.py --pause-file /old/pause.json' }] }] } });
     expect(tool(f, 'add').status).toBe(0);
     const pre = readJson(f.settings).hooks.PreToolUse;
     expect(pre).toHaveLength(2);
@@ -490,6 +490,39 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(pre).toHaveLength(2);
     expect(pre[0].hooks[0].type, 'the other handler stays as it was').toBe('prompt');
     expect(tool(f, 'check').status).toBe(0);
+  });
+
+  it('a command that only names the hook file as data is not our hook: check does not report it, add and remove leave it alone', () => {
+    const f = fixture('settings-foreign-operand');
+    const foreign = [
+      '/x/foreign-audit.py /opt/five-hour-guard-hook.py',
+      'grep -c five-hour-guard-hook.py /var/log/audit.log',
+      'python3 /x/audit.py --target /opt/five-hour-guard-hook.py',
+      'exec /bin/true --pause-file /opt/five-hour-guard-hook.py.pause',
+      '[ -f /opt/five-hour-guard-hook.py ] || exit 0; /x/other.sh',
+    ].map((command) => ({ type: 'command', command }));
+    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+    expect(tool(f, 'check').status, 'none of them is our hook').toBe(1);
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
+    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
+  });
+
+  it('add refuses a pause file that is the default usage cache or its lock when the configuration names no usage_cache', () => {
+    const f = fixture('settings-default-cache');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const cache = join(CONFIG_DIR, 'plugins', 'oh-my-claudecode', '.usage-cache-anthropic.json');
+    for (const pause of [cache, `${cache}.lock`]) {
+      writeFileSync(f.cfg, JSON.stringify({ pause_file: pause, settings_file: f.settings }), 'utf8');
+      const r = runSync(SETTINGS_TOOL, ['add', '--config', f.cfg, '--hook', HOOK, '--python', PYBIN]);
+      expect(r.status, `${pause}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/same file/);
+      expect(readText(f.settings)).toBe(original);
+    }
   });
 
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {

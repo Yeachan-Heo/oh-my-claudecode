@@ -11,7 +11,9 @@
 # after the backup is made and right before the replace the tool compares the file with what it read, reads again once when
 # it differs, and gives up (exit 2, nothing written) when it differs again. The instant between that comparison and the
 # rename remains: a rename has no compare-and-swap, so a write inside it is lost. Run `check` after `add` to see the result.
-# The hook entry is identified by the file name five-hour-guard-hook.py in its command, so `add` twice is a no-op and `add`
+# The hook entry is identified by the file name five-hour-guard-hook.py as the script of its command (the command word, or the argument
+# of a Python, or of a command that carries --pause-file); a command that only names that file as data (an operand of -f, -x,
+# --pause-file or --log, an argument of an audit tool) is not ours and is never changed. So `add` twice is a no-op and `add`
 # with another hook path replaces the entry in place, in one write (there is no moment without a hook entry). Only our hook
 # is touched: when a group of settings.json holds our hook next to another one, the other hook stays (in a group of its
 # own, matcher kept). `add` refuses (exit 2) a hook, interpreter or pause path that is not absolute and a hook or
@@ -23,7 +25,7 @@
 # pause_file, hook_log_file. Without a settings path the file is $CLAUDE_CONFIG_DIR/settings.json (surrounding blanks
 # removed, a leading ~ expanded, as the guard and OMC do), else ~/.claude/settings.json.
 # --hook defaults to the hook script next to this script, --python to the interpreter that runs this script.
-import argparse, json, os, shlex, subprocess, sys, time
+import argparse, json, os, re, shlex, subprocess, sys, time
 
 MARK = 'five-hour-guard-hook.py'
 
@@ -111,9 +113,56 @@ def command():
     return cmd + (f' --log {q(HOOK_LOG)}' if HOOK_LOG else '')
 
 
+OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
+
+
+def hook_scripts(command):
+    """The hook scripts a command runs: the command word of a simple command, or the first argument after it when the command
+    word is a Python or the command carries --pause-file. A file name that stands as an operand (of -f, -x, --pause-file,
+    --log, or of another program) is data, not our hook (the same rule as the guard). Raises ValueError for a command the shell
+    cannot parse or one with a NUL character."""
+    tokens = shlex.split(command)
+    if any('\0' in t for t in tokens):
+        raise ValueError('NUL character in the command')
+    simple, current = [], []
+    for t in tokens:
+        if t in (';', '&&', '||', '|'):
+            simple.append(current)
+            current = []
+        elif len(t) > 1 and t.endswith(';'):
+            simple.append(current + [t[:-1]])
+            current = []
+        else:
+            current.append(t)
+    simple.append(current)
+    hooks = []
+    for words in simple:
+        operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
+        first = 0
+        while first < len(words) and (words[first] in ('exec', 'env', 'command') or re.match(r'[A-Za-z_]\w*=', words[first])):
+            first += 1
+        if first >= len(words) or first in operands:
+            continue
+        if MARK in os.path.basename(words[first]):
+            hooks.append(words[first])
+        elif re.match(r'(python|pypy|py$)', os.path.basename(words[first]).lower()) or '--pause-file' in words:
+            args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
+            if args and MARK in os.path.basename(words[args[0]]):
+                hooks.append(words[args[0]])
+    return hooks
+
+
 def hook_is_ours(h):
-    # a handler of another type (prompt, http) does not run a command: it is not our hook, whatever its command field says
-    return h.get('type') == 'command' and MARK in (h.get('command') or '')
+    # a handler of another type (prompt, http) does not run a command: it is not our hook, whatever its command field says; a
+    # command that only names the hook file as data (an audit tool's argument) is not our hook either. A command that cannot be
+    # parsed and holds the name is ours (the guard warns about it and `add` is the repair it recommends).
+    command = h.get('command')
+    if h.get('type') != 'command' or not isinstance(command, str) or MARK not in command:
+        return False
+    try:
+        return bool(hook_scripts(command))
+    except ValueError:
+        return True
 
 
 def is_ours(group):
@@ -224,11 +273,12 @@ def run_once():
         distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python), ('configuration file', A.config),
                     ('settings tool script', os.path.abspath(__file__)), ('guard script', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'five-hour-guard.py'))]
         # the files the guard writes or reads under the same configuration: registering must not make one of them settings.json
-        for key, label in (('state_file', 'state file'), ('log_file', 'guard log'), ('usage_cache', 'usage cache')):
+        for key, label in (('state_file', 'state file'), ('log_file', 'guard log')):
             if isinstance(CFG.get(key), str) and CFG[key]:
                 distinct.append((label, CFG[key]))
-        if isinstance(CFG.get('usage_cache'), str) and CFG['usage_cache']:
-            distinct.append(('usage cache lock file', CFG['usage_cache'] + '.lock'))
+        # the usage cache is a configured file even when the configuration leaves it out: the guard then reads OMC's default one
+        cache = CFG['usage_cache'] if isinstance(CFG.get('usage_cache'), str) and CFG['usage_cache'] else os.path.join(CONFIG_DIR, 'plugins', 'oh-my-claudecode', '.usage-cache-anthropic.json')
+        distinct += [('usage cache', cache), ('usage cache lock file', cache + '.lock')]
         if isinstance(CFG.get('state_file'), str) and CFG['state_file']:
             distinct.append(('state lock file', CFG['state_file'] + '.lock'))
         if PAUSE_FILE:

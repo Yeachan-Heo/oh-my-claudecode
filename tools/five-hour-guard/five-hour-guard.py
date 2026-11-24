@@ -28,7 +28,7 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, json, math, os, shlex, signal, sys, time
+import argparse, datetime, json, math, os, re, shlex, signal, sys, time
 
 try:
     import fcntl
@@ -196,24 +196,65 @@ def check_distinct(files):
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
+
+
 def entry_parts(command):
     """(hook scripts, interpreter files, log files, pause files) that a hook entry command names, by the option or position
-    they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their file names say.
-    Raises ValueError for a command the shell cannot parse."""
+    they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their file names say, and neither is
+    an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file as data). The hook
+    script is the command word of a simple command, or the first argument after it when the command word is a Python or the
+    command carries --pause-file. Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
     tokens = shlex.split(command)
-    operands = {}
-    for i, t in enumerate(tokens[:-1]):
-        if t in ('-f', '-x', '--pause-file', '--log'):
-            operands[i + 1] = t
-    hooks = [t for i, t in enumerate(tokens) if i not in operands and HOOK_NAME in os.path.basename(t)]
-    return (hooks, [tokens[i] for i, o in operands.items() if o == '-x'], [tokens[i] for i, o in operands.items() if o == '--log'],
-            [tokens[i] for i, o in operands.items() if o == '--pause-file'], tokens)
+    if any('\0' in t for t in tokens):
+        raise ValueError('NUL character in the command')
+    simple, current = [], []
+    for t in tokens:
+        if t in (';', '&&', '||', '|'):
+            simple.append(current)
+            current = []
+        elif len(t) > 1 and t.endswith(';'):
+            simple.append(current + [t[:-1]])
+            current = []
+        else:
+            current.append(t)
+    simple.append(current)
+    hooks, found = [], {o: [] for o in OPERAND_OPTIONS}
+    for words in simple:
+        operands = {i + 1: t for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
+        for i, option in operands.items():
+            found[option].append(words[i])
+        first = 0
+        while first < len(words) and (words[first] in ('exec', 'env', 'command') or re.match(r'[A-Za-z_]\w*=', words[first])):
+            first += 1
+        if first >= len(words) or first in operands:
+            continue
+        if HOOK_NAME in os.path.basename(words[first]):
+            hooks.append(words[first])
+        elif re.match(r'(python|pypy|py$)', os.path.basename(words[first]).lower()) or '--pause-file' in words:
+            args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
+            if args and HOOK_NAME in os.path.basename(words[args[0]]):
+                hooks.append(words[args[0]])
+    return hooks, found['-x'], found['--log'], found['--pause-file']
 
 
 def command_hooks(groups):
-    """The command handlers of PreToolUse groups that run our hook: [(group, handler command)]."""
-    return [(g, h.get('command')) for g in groups for h in g.get('hooks', [])
-            if h.get('type') == 'command' and isinstance(h.get('command'), str) and HOOK_NAME in h['command']]
+    """The command handlers of PreToolUse groups that run our hook: [(group, handler command)]. A command that names the hook file
+    only as an operand (an option value, an argument of another program) is not ours; one that cannot be parsed is kept, so that
+    hook_check can say so."""
+    found = []
+    for g in groups:
+        for h in g.get('hooks', []):
+            command = h.get('command')
+            if h.get('type') != 'command' or not isinstance(command, str) or HOOK_NAME not in command:
+                continue
+            try:
+                if not entry_parts(command)[0]:
+                    continue
+            except ValueError:
+                pass
+            found.append((g, command))
+    return found
 
 
 def registered_runtime_files():
@@ -224,7 +265,7 @@ def registered_runtime_files():
         with open(SETTINGS or default_settings()) as f:
             groups = json.load(f).get('hooks', {}).get('PreToolUse', [])
         for _group, command in command_hooks(groups):
-            hooks, interpreters, logs, _pauses, _tokens = entry_parts(command)
+            hooks, interpreters, logs, _pauses = entry_parts(command)
             found += [('registered hook', t) for t in hooks if os.path.isabs(t)]
             found += [('registered interpreter', t) for t in interpreters if os.path.isabs(t)]
             found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
@@ -393,9 +434,9 @@ def hook_check(where):
         log(f'WARNING ({where}): the hook entry in {SETTINGS} has the matcher {matchers[0]!r}, which does not cover every tool: calls of other tools would go on during a pause. Run five-hour-guard-settings.py add again')
     for command in ours:
         try:
-            hooks, interpreters, _logs, pauses, _tokens = entry_parts(command)
+            hooks, interpreters, _logs, pauses = entry_parts(command)
         except ValueError:
-            log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
+            log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote or NUL character): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
             continue
         for path in hooks:
             if not os.path.isfile(path):
@@ -572,7 +613,7 @@ def on_signal(signum, _frame):
 
 
 def test_pause():
-    if os.path.exists(PAUSE_FILE):
+    if os.path.lexists(PAUSE_FILE):
         fail(f'--test-pause refused: {PAUSE_FILE} exists (a pause is in force or a test is running); the test would overwrite it and remove it at the end')
     now = time.time()
     st = {'since': now, 'resume_at': now + A.test_pause}
@@ -601,7 +642,7 @@ def main():
     signal.signal(signal.SIGINT, on_signal)
     if A.test_pause:
         return test_pause()
-    if os.path.exists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):
+    if os.path.lexists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):   # lexists: a dangling link is somebody's path too
         # the start would remove it as a leftover: never remove a file that is not a pause of this guard (a mistyped path)
         fail(f'the file {PAUSE_FILE} exists and is not a pause file of this guard: it is left untouched; check "pause_file", or remove the file yourself')
     lock_state()   # one guard per pause file: a pid in the file proves nothing (it may be reused after a crash), the lock does
@@ -640,10 +681,13 @@ def main():
             while not STOP and time.monotonic() < end:
                 time.sleep(min(1.0, max(0.0, end - time.monotonic())))
     finally:
-        if not (A.once or A.dry_run) and state.get('paused'):
+        if not (A.once or A.dry_run) and (state.get('paused') or state.get('unlink_pending')):
             # orderly exit never leaves sessions waiting; a restart re-enters the pause from the first fresh reading of the cache
             try:
-                leave_pause(state, 'guard stopping')
+                if state.get('paused'):
+                    leave_pause(state, 'guard stopping')
+                elif unpublish():   # the state is already unpaused and only the removal of the file is pending: one last try
+                    log('RESUMED (guard stopping): pause file removed')
             except Exception as e:
                 log(f'ERROR: cannot clean up on exit: {e!r}')
 

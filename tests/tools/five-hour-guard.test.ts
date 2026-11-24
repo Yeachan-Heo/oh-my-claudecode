@@ -815,6 +815,65 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(guardOnce(f).stdout).not.toMatch(/WARNING/);
   });
 
+  it('a command that names the hook file only as data is not "the registered hook": an operand-only entry and a foreign tool given the file are reported as not registered', () => {
+    const f = fixture('operand-only', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const pause = join(f.dir, 'five-hour-guard-hook.py.pause');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    for (const command of [`exec /bin/true --pause-file ${pause}`, `/x/foreign-audit.py ${HOOK}`, `python3 /x/audit.py --target ${HOOK}`, `grep -c five-hour-guard-hook.py /var/log/audit.log`]) {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      expect(guardOnce(f).stdout, command).toMatch(/WARNING \(start\): hook five-hour-guard-hook\.py is NOT registered/);
+    }
+    const real = `[ -f ${pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${pause}`;
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: real }] }] } }), 'utf8');
+    expect(guardOnce(f).stdout, 'the real entry is still found').not.toMatch(/WARNING/);
+  });
+
+  it('a NUL character in a path of the registered entry is a wiring warning, not a traceback that the unit restarts for ever', () => {
+    const f = fixture('registered-nul', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    for (const command of [`exec ${PYBIN} -I /opt/five-hour-guard-hook.py\0 --pause-file ${f.pause}`, `[ -x ${PYBIN}\0 ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`,
+      `exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause} --log /opt/hook\0.log`]) {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+      expect(r.stdout).toMatch(/WARNING \(start\): the hook entry command .* cannot be parsed/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+  });
+
+  it('a dangling symbolic link at pause_file is somebody else\'s path: refused at start (and by --test-pause), the link is kept', () => {
+    const f = fixture('dangling-pause', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    symlinkSync(join(f.dir, 'nowhere'), f.pause);
+    for (const extra of [['--once'], ['--test-pause', '1']]) {
+      const r = runSync(GUARD, guardArgs(f, extra));
+      expect(r.status, `${extra}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(lstatSync(f.pause).isSymbolicLink(), 'the link is still there').toBe(true);
+    }
+  });
+
+  it('a stop while the removal of the pause file is still pending makes the final removal attempt (the state is already unpaused)', async () => {
+    const f = fixture('stop-with-pending-removal', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const deny = join(f.dir, 'deny-unlink');
+    const code = ['import os, runpy, sys', 'real = os.unlink', 'flag = sys.argv[1]',
+      'def maybe(p, *a, **k):', '    if os.path.exists(flag) and str(p).endswith("pause.json"): raise PermissionError(13, "denied")', '    return real(p, *a, **k)',
+      'os.unlink = maybe', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const g = spawnPyCode(code, [deny, GUARD, ...guardArgs(f, ['--interval', '3', '--heartbeat', '10'])]);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      writeFileSync(deny, '', 'utf8');
+      writeCache(f, { pct: 50, resetMs: Date.now() + HOUR_MS }); // a fresh low reading ends the pause at the next tick, and the removal is denied
+      await waitFor(() => /cannot remove pause file/.test(readText(f.log)), 30000, 'the denied removal');
+      expect(readJson(f.state).paused, 'the unpaused state was written').toBe(false);
+      expect(existsSync(f.pause)).toBe(true);
+      unlinkSync(deny);
+      g.child.kill('SIGTERM'); // before the next tick (3 s away): only the shutdown path can still remove the file
+      await Promise.race([g.done, sleep(20000)]);
+      expect(g.exited && g.code === 0, `exit ${g.code}`).toBe(true);
+    } finally { await g.stop(); }
+    expect(existsSync(f.pause), 'the pause file is removed by the shutdown').toBe(false);
+    expect(readText(f.log)).toMatch(/RESUMED \(guard stopping\)/);
+  });
+
   it('CLAUDE_CONFIG_DIR is resolved as OMC does: ~ and both ~/ and ~\\ forms are expanded, other ~name is left alone', () => {
     const f = fixture('tilde-backslash');
     const home = join(f.dir, 'home');
