@@ -867,6 +867,15 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       ["forceInherit, only OMC_SUBAGENT_MODEL", { ...FORCE, OMC_SUBAGENT_MODEL: BEDROCK_ID }, false],
       ["OMC_MODEL_MEDIUM is not read", { OMC_MODEL_MEDIUM: "deepseek-chat" }, true],
       ["a Foundry flag is not read", { CLAUDE_CODE_USE_FOUNDRY: "1" }, true],
+      // #5131: a flag set to true (any case, padded) names the provider like 1.
+      ["Bedrock flag true", { CLAUDE_CODE_USE_BEDROCK: "true" }, false],
+      ["Bedrock flag padded upper-case TRUE", { CLAUDE_CODE_USE_BEDROCK: " TRUE " }, false],
+      ["Bedrock flag true, native mapping", { CLAUDE_CODE_USE_BEDROCK: "true", ANTHROPIC_DEFAULT_SONNET_MODEL: BEDROCK_ID }, true],
+      ["Vertex flag true", { CLAUDE_CODE_USE_VERTEX: "true" }, false],
+      ["Vertex flag padded upper-case TRUE", { CLAUDE_CODE_USE_VERTEX: " TRUE " }, false],
+      ["Vertex flag true, Bedrock mapping", { CLAUDE_CODE_USE_VERTEX: "true", ANTHROPIC_DEFAULT_SONNET_MODEL: BEDROCK_ID }, false],
+      ["Bedrock flag false is not a flag", { CLAUDE_CODE_USE_BEDROCK: "false" }, true],
+      ["Vertex flag 0 is not a flag", { CLAUDE_CODE_USE_VERTEX: "0" }, true],
     ];
     it.each(GATE_TABLE)("gate table: %s", async (_label, env, replaced) => {
       // The name comes from a definition: a call that names a model of its own is denied under forceInherit by another gate.

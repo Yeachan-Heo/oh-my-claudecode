@@ -93,5 +93,33 @@ describe("SessionStart hooks: provider detection from the session model", () => 
     it("the Bedrock flag announces the override whatever the model is", () => {
       expect(context(entrypoint, { CLAUDE_CODE_USE_BEDROCK: "1", ANTHROPIC_MODEL: "claude-sonnet-4-6" })).toContain("[MODEL ROUTING OVERRIDE");
     }, 20000);
+
+    it("the Bedrock flag with 'true' announces the override (issue #5131)", () => {
+      expect(context(entrypoint, { CLAUDE_CODE_USE_BEDROCK: "true", ANTHROPIC_MODEL: "claude-sonnet-4-6" })).toContain("[MODEL ROUTING OVERRIDE");
+    }, 20000);
+
+    it("the Bedrock flag with 'TRUE' (uppercase) announces the override (issue #5131)", () => {
+      expect(context(entrypoint, { CLAUDE_CODE_USE_BEDROCK: "TRUE", ANTHROPIC_MODEL: "claude-sonnet-4-6" })).toContain("[MODEL ROUTING OVERRIDE");
+    }, 20000);
+
+    it("the Bedrock flag with ' true ' (padded) announces the override (issue #5131)", () => {
+      expect(context(entrypoint, { CLAUDE_CODE_USE_BEDROCK: " true ", ANTHROPIC_MODEL: "claude-sonnet-4-6" })).toContain("[MODEL ROUTING OVERRIDE");
+    }, 20000);
+
+    it("the Vertex flag announces the override whatever the model is", () => {
+      expect(context(entrypoint, { CLAUDE_CODE_USE_VERTEX: "1", ANTHROPIC_MODEL: "claude-sonnet-4-6" })).toContain("[MODEL ROUTING OVERRIDE");
+    }, 20000);
+
+    it("the Vertex flag with 'true' announces the override (issue #5131)", () => {
+      expect(context(entrypoint, { CLAUDE_CODE_USE_VERTEX: "true", ANTHROPIC_MODEL: "claude-sonnet-4-6" })).toContain("[MODEL ROUTING OVERRIDE");
+    }, 20000);
+
+    it("the Vertex flag with 'TRUE' (uppercase) announces the override (issue #5131)", () => {
+      expect(context(entrypoint, { CLAUDE_CODE_USE_VERTEX: "TRUE", ANTHROPIC_MODEL: "claude-sonnet-4-6" })).toContain("[MODEL ROUTING OVERRIDE");
+    }, 20000);
+
+    it("the Vertex flag with ' true ' (padded) announces the override (issue #5131)", () => {
+      expect(context(entrypoint, { CLAUDE_CODE_USE_VERTEX: " true ", ANTHROPIC_MODEL: "claude-sonnet-4-6" })).toContain("[MODEL ROUTING OVERRIDE");
+    }, 20000);
   });
 });
