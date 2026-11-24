@@ -123,12 +123,18 @@ function providerDetectionModelIds() {
     .map((keys) => keys.map((key) => (process.env[key] || '').trim()).find(Boolean))
     .filter(Boolean);
 }
+// Bedrock or Vertex, from a flag or, for the named-model gate, also from a model value that
+// identifies the provider (providerDetectionModelIds), normalized like isNonClaudeModelName.
+function isCloudProviderEnv(forNamedGate = false) {
+  if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
+  return forNamedGate
+    && providerDetectionModelIds().some((value) => isProviderSpecificModelId(value.replace(/\[\d+[mk]\]$/i, '')));
+}
 function acceptsProxyAnthropicDefaultTierValue(key, value, forNamedGate = false) {
   return key.startsWith('ANTHROPIC_DEFAULT_')
     && Boolean(value)
     && isNonClaudeProviderEnv(forNamedGate)
-    && !isBedrockProviderEnv()
-    && !isVertexProviderEnv();
+    && !isCloudProviderEnv(forNamedGate);
 }
 const TIER_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable']);
 function isTierAlias(modelId) {

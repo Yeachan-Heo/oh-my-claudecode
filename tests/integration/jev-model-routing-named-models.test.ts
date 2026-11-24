@@ -754,6 +754,38 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       60000,
     );
 
+    // A provider found from a model value (a tier default, or a padded or suffixed session model) is
+    // Bedrock or Vertex as much as one found from a flag: a plain Anthropic default is then no mapping
+    // for the bare alias, as the proxy mapping rule is for other providers only.
+    const PLAIN_SONNET = { ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5" };
+    it.each([
+      ["a Bedrock ID in CLAUDE_CODE_BEDROCK_OPUS_MODEL", { CLAUDE_CODE_BEDROCK_OPUS_MODEL: "global.anthropic.claude-opus-4-6-v1:0" }],
+      ["a Bedrock ID in ANTHROPIC_DEFAULT_HAIKU_MODEL", { ANTHROPIC_DEFAULT_HAIKU_MODEL: "us.anthropic.claude-haiku-4-5-v1:0" }],
+      ["a padded upper-case Bedrock ID in ANTHROPIC_DEFAULT_FABLE_MODEL", { ANTHROPIC_DEFAULT_FABLE_MODEL: " US.ANTHROPIC.CLAUDE-FABLE-5-V1:0 " }],
+      ["a suffixed Bedrock ID in CLAUDE_CODE_BEDROCK_HAIKU_MODEL", { CLAUDE_CODE_BEDROCK_HAIKU_MODEL: "anthropic.claude-3-haiku-20240307-v1:0[1m]" }],
+      ["a Vertex ID in ANTHROPIC_DEFAULT_OPUS_MODEL", { ANTHROPIC_DEFAULT_OPUS_MODEL: "vertex_ai/claude-opus-4-6" }],
+      ["a Vertex ID in CLAUDE_CODE_BEDROCK_FABLE_MODEL", { CLAUDE_CODE_BEDROCK_FABLE_MODEL: "VERTEX_AI/claude-fable-5" }],
+      ["a padded Bedrock ID as the session model", { ANTHROPIC_MODEL: " global.anthropic.claude-opus-4-6-v1:0 " }],
+      ["a suffixed Bedrock ID as the session model", { CLAUDE_MODEL: "global.anthropic.claude-opus-4-6-v1:0[1m]" }],
+      ["a padded Vertex ID as the session model", { ANTHROPIC_MODEL: " vertex_ai/claude-opus-4-6 " }],
+    ])("%s: a plain sonnet default is no mapping, the name stays and the effort is set", async (_label, env) => {
+      const input = agentInput({ model: "fable" });
+      expect(await routedInput(input, { ...NAMED, ...PLAIN_SONNET, ...env })).toEqual({ ...input.tool_input, effort: "medium" });
+      expect(requests).toHaveLength(1);
+    }, 15000);
+
+    it("the same provider found from a tier default does accept a mapping that is provider-specific", async () => {
+      const input = agentInput({ model: "fable" });
+      const env = { CLAUDE_CODE_BEDROCK_OPUS_MODEL: "global.anthropic.claude-opus-4-6-v1:0", ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect(await routedInput(input, { ...NAMED, ...env })).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
+    }, 15000);
+
+    it("a plain default next to a plain non-Claude default is still a proxy mapping: the alias is set", async () => {
+      const input = agentInput({ model: "fable" });
+      const env = { ANTHROPIC_DEFAULT_OPUS_MODEL: "other-proxy-model", ...PLAIN_SONNET };
+      expect(await routedInput(input, { ...NAMED, ...env })).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
+    }, 15000);
+
     it("a session model that is not a Claude name still keeps the named model", async () => {
       const input = agentInput({ model: "fable" });
       expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: "deepseek-chat" })).toEqual({ ...input.tool_input, effort: "medium" });
