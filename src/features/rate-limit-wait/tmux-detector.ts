@@ -433,23 +433,39 @@ function privateTmuxSockets(): string[] | null {
 }
 
 /**
- * The panes of the default server and of every private endpoint, each private pane carrying its `socket`. A server that
- * is not running adds nothing; a server whose inventory cannot be read makes the whole inventory unreadable, and so does
- * a machine where no server is running at all.
+ * The endpoint of the tmux server that this process was started from: the socket path in `TMUX` (`<socket>,<pid>,<index>`).
+ * `omc team` started inside a tmux server uses that server, whatever its socket is called. Null when there is none or it
+ * is not an absolute path.
+ */
+function ambientTmuxSocket(): string | null {
+  const socket = (process.env.TMUX ?? '').split(',')[0] ?? '';
+  return socket.startsWith('/') && !/[\u0000-\u001f\u007f]/.test(socket) ? socket : null;
+}
+
+/**
+ * The panes of the default server, of the server this process was started from, and of every private endpoint, each
+ * pane of a non-default endpoint carrying its `socket`. A server that is not running adds nothing; a server whose
+ * inventory cannot be read makes the whole inventory unreadable, and so does a machine where no server is running at
+ * all. A server reached by two endpoints (the default one that is also the ambient one) is listed once.
  */
 function listPanelQuotaPanes(): TmuxPane[] | null {
   if (!isTmuxAvailable()) {
     return null;
   }
   const panes: TmuxPane[] = [];
+  const listedServers = new Set<string>();
   let running = 0;
   const privateSockets = privateTmuxSockets();
   if (privateSockets === null) return null;
-  for (const socket of [undefined, ...privateSockets]) {
+  const ambient = ambientTmuxSocket();
+  const sockets = [...new Set([...privateSockets, ...(ambient === null ? [] : [ambient])])];
+  for (const socket of [undefined, ...sockets]) {
     const listed = listPanesAt(socket, true);
     if (listed === null) return null;
     if (listed === 'absent') continue;
     running++;
+    if (listed.length > 0 && listed.every((pane) => pane.server !== undefined && listedServers.has(pane.server))) continue;
+    for (const pane of listed) if (pane.server !== undefined) listedServers.add(pane.server);
     panes.push(...(socket === undefined ? listed : listed.map((pane) => ({ ...pane, socket }))));
   }
   return running > 0 ? panes : null;

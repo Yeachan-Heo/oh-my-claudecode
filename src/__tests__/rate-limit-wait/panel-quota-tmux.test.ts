@@ -2,7 +2,7 @@
  * Tests for the tmux adapter of the panel quota wait (panelQuotaTmux in tmux-detector.ts).
  * tmux is replaced by the mocked tmux-utils wrappers; no tmux server is started.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { panelQuotaTmux, sendToPane, sendToPaneOutcome } from '../../features/rate-limit-wait/tmux-detector.js';
 import type { TmuxPane } from '../../features/rate-limit-wait/types.js';
 
@@ -125,6 +125,56 @@ describe('panelQuotaTmux adapter', () => {
         vi.mocked(readdirSync).mockImplementationOnce(() => { throw failure('ENOENT'); });
         vi.mocked(tmuxExec).mockReturnValueOnce(LIST_A);
         expect(panelQuotaTmux.listPanes()).toEqual([expect.objectContaining({ id: '%7' })]);
+      });
+    });
+
+    describe('the tmux server that the daemon itself was started from', () => {
+      const AMBIENT = '/tmp/ambient/tmux-socket';
+      const LIST_AMBIENT = '4300:1795000002 omc-team-c:0.1 %9 1 team title\n';
+      afterEach(() => { vi.unstubAllEnvs(); });
+
+      it('is listed although its socket does not have the team name pattern, and the pane carries its socket', () => {
+        vi.stubEnv('TMUX', `${AMBIENT},4300,0`);
+        vi.mocked(readdirSync).mockReturnValue([] as never);
+        vi.mocked(tmuxExec)
+          .mockImplementationOnce(() => { throw noServer(); })
+          .mockReturnValueOnce(LIST_AMBIENT);
+        const panes = panelQuotaTmux.listPanes();
+        expect(panes).toEqual([expect.objectContaining({ id: '%9', server: '4300:1795000002', socket: AMBIENT })]);
+        expect(vi.mocked(tmuxExec).mock.calls[1][0].slice(0, 3)).toEqual(['-S', AMBIENT, 'list-panes']);
+      });
+
+      it('is not listed twice when it is the default server or a private endpoint that is listed anyway', () => {
+        vi.stubEnv('TMUX', `${AMBIENT},4100,0`);
+        vi.mocked(readdirSync).mockReturnValue([] as never);
+        vi.mocked(tmuxExec).mockReturnValue('4100:1795000000 omc-team-a:0.1 %7 1 team title\n');
+        const panes = panelQuotaTmux.listPanes();
+        expect(vi.mocked(tmuxExec).mock.calls, 'the ambient endpoint is asked as well').toHaveLength(2);
+        expect(panes?.filter((pane) => pane.id === '%7')).toHaveLength(1);
+        expect(panes?.[0].socket).toBeUndefined();
+      });
+
+      it('that is not running adds nothing, and a value that is not an absolute socket path is ignored', () => {
+        vi.mocked(readdirSync).mockReturnValue([] as never);
+        vi.stubEnv('TMUX', `${AMBIENT},4300,0`);
+        vi.mocked(tmuxExec)
+          .mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n')
+          .mockImplementationOnce(() => { throw Object.assign(new Error(`error connecting to ${AMBIENT} (No such file or directory)`), { status: 1 }); });
+        expect(panelQuotaTmux.listPanes()).toEqual([expect.objectContaining({ id: '%7' })]);
+        vi.mocked(tmuxExec).mockReset();
+        vi.stubEnv('TMUX', 'relative/socket,4300,0');
+        vi.mocked(tmuxExec).mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n');
+        expect(panelQuotaTmux.listPanes()).toEqual([expect.objectContaining({ id: '%7' })]);
+        expect(vi.mocked(tmuxExec).mock.calls).toHaveLength(1);
+      });
+
+      it('that cannot be read makes the inventory unreadable', () => {
+        vi.stubEnv('TMUX', `${AMBIENT},4300,0`);
+        vi.mocked(readdirSync).mockReturnValue([] as never);
+        vi.mocked(tmuxExec)
+          .mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n')
+          .mockImplementationOnce(() => { throw Object.assign(new Error('spawnSync tmux ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+        expect(panelQuotaTmux.listPanes()).toBeNull();
       });
     });
 

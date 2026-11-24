@@ -65,6 +65,9 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { atomicWriteFileSync } from '../../lib/atomic-write.js';
+import { readProviderQuota } from './panel-quota-reading.js';
+
+export { readProviderQuota };
 
 export type PanelEnv = Readonly<Record<string, string | undefined>>;
 
@@ -181,9 +184,7 @@ const DEFAULT_MARGIN_MS = 120_000; // the provider applies the reset before the 
 const QUOTA_WINDOW_MS = 5 * 3600_000;
 const EXHAUSTED_PERCENT = 100;
 const DEFAULT_WEEK_LIMIT_UNIT = 6; // unit code of the weekly limit in the Z.ai reading (the 5 h window is unit 3); a weekly limit never waits
-const READ_TIMEOUT_MS = 10_000;
 const STATE_FILE_NAME = 'provider-quota-panels.json';
-const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '[::1]'];
 const TIME_LIMIT = Symbol('pass time limit');
 
 function enabled(env: PanelEnv): boolean {
@@ -696,55 +697,6 @@ function endQuota(entry: PanelEntry, deps: PanelQuotaDeps, now: number, reason: 
   entry.updatedAt = now;
   deps.log(`pane ${entry.key}: wait ends with class quota, no keys sent (${reason}); reset ${iso(resetMs)}`);
   deps.journal({ ts: new Date(now).toISOString(), point: 'team-panel', pane: entry.key, result: 'end', class: 'quota', reason, reset_ms: resetMs, attempt: entry.waits });
-}
-
-/**
- * Real provider reading for the daemon: GET of OMC_PANEL_QUOTA_READ_URL with the key from OMC_PANEL_QUOTA_KEY_FILE.
- * Returns null (no wait) when the URL, the key file, the response or the HTTP status is unusable. The key
- * stays in the request header only; errors are not logged here.
- */
-export async function readProviderQuota(env: PanelEnv = process.env): Promise<QuotaReading | null> {
-  const url = quotaUrl(env.OMC_PANEL_QUOTA_READ_URL);
-  if (!url || !env.OMC_PANEL_QUOTA_KEY_FILE) return null;
-  const key = readKey(env.OMC_PANEL_QUOTA_KEY_FILE);
-  if (!key) return null;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: { Authorization: `Bearer ${key}`, 'Accept-Language': 'en-US,en' },
-      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
-    });
-  } catch {
-    return null;
-  }
-  if (!response.ok) return null;
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return null;
-  }
-  if ((body as { success?: unknown } | null)?.success === false) return null;
-  return { body };
-}
-
-function quotaUrl(text: string | undefined): URL | null {
-  try {
-    const url = new URL(String(text ?? ''));
-    const loopback = LOOPBACK_HOSTS.includes(url.hostname);
-    return url.protocol === 'https:' || (url.protocol === 'http:' && loopback) ? url : null;
-  } catch {
-    return null;
-  }
-}
-
-function readKey(file: string): string | null {
-  try {
-    const key = readFileSync(file, 'utf8').trim();
-    return key === '' ? null : key;
-  } catch {
-    return null;
-  }
 }
 
 function appendJournal(env: PanelEnv, row: Journal): void {
