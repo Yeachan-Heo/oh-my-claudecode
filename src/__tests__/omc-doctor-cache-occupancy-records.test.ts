@@ -105,6 +105,10 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     for (const posixRoot of ['/mnt/c/Users/u/.claude/plugins/cache/omc/oh-my-claudecode/5.7.0', '/home/u/cache/5.7.0']) {
       expect({ posixRoot, onWindows: asked(posixRoot, true), onPosix: asked(posixRoot, false) }).toEqual({ posixRoot, onWindows: true, onPosix: false });
     }
+    // A current-drive-rooted path (one leading backslash) is local on a Windows host; on a POSIX host it is no Windows path at all
+    // (a relative name, refused as such elsewhere).
+    const driveRooted = '\\Users\\u\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.7.0';
+    expect({ onWindows: asked(driveRooted, true), onPosix: asked(driveRooted, false) }).toEqual({ onWindows: false, onPosix: false });
     for (const windowsRoot of ['C:\\Users\\u\\cache\\5.7.0', 'c:/users/u/cache/5.7.0', '\\\\server\\share\\5.7.0', '//server/share/5.7.0']) {
       expect({ windowsRoot, onWindows: asked(windowsRoot, true), onPosix: asked(windowsRoot, false) }).toEqual({ windowsRoot, onWindows: false, onPosix: true });
     }

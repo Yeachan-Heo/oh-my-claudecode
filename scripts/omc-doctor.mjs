@@ -754,7 +754,13 @@ const claudeMdVersion = () => {
   } else if (external) {
     // The matched root lies outside the managed cache (a registered external install): the runtime reads the package of that root,
     // so its manifest names the version, not the highest cache beside it.
-    pluginVersion = manifestVersion(loadedRoot) || '(unknown)';
+    // The runtime compares the raw version of that package with the marker (getPluginVersion), so it is kept as written.
+    try {
+      const raw = readJson([loadedRoot, 'package.json'].join(path.sep)).version;
+      pluginVersion = typeof raw == 'string' && raw.trim() ? raw : '(unknown)';
+    } catch {
+      pluginVersion = '(unknown)';
+    }
   } else if (running.length) {
     pluginVersion = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '(none)';
   } else {
@@ -784,7 +790,7 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
   } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
     console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
-  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion) && markerExact) {
+  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion) && markerExact && (!external || claudeVersion === pluginVersion)) {
     console.log('VERSION MATCH: CLAUDE and plugin cache are aligned');
   } else {
     console.log('VERSION DRIFT: CLAUDE.md and plugin versions differ');
@@ -848,7 +854,7 @@ const foreignPath = (target) => process.platform != 'win32' && windowsPath(targe
 // resolved here it would name a directory of the current drive.
 const foreignToHost = (target, windowsHost = path.sep == '\\') =>
   windowsHost
-    ? !windowsPath(target) && /^[\\/]/.test(target)
+    ? !windowsPath(target) && target.startsWith('/')
     : windowsPath(target) && !(target.startsWith('//') && isDirectory(target));
 const relativePath = (target) => !path.isAbsolute(target) && !windowsPath(target);
 const readRegistry = () => {

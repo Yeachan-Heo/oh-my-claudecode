@@ -471,6 +471,23 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
+    // The runtime compares the raw package version of an external root with the marker, so a v in that package is drift.
+    test.skipIf(process.platform === 'win32')('an external root whose package version has a v is drift against the marker without one', () => {
+      for (const [pkg, marker, verdict] of [['v5.9.0', '5.9.0', DRIFT], ['5.9.0', '5.9.0', MATCH], ['v5.9.0', 'v5.9.0', DRIFT]] as const) {
+        const dir = fresh();
+        try {
+          addCache(dir, [OLD], 'omc');
+          const root = path.join(dir, 'external');
+          mkdirSync(root);
+          writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claudecode', version: pkg }));
+          writeRegistry(dir, { [OMC]: [{ scope: 'user', version: '5.9.0', installPath: root }] });
+          expect({ pkg, marker, out: claudeMdAt(dir, marker, 'linux', { CLAUDE_PLUGIN_ROOT: root }) }).toEqual({ pkg, marker, out: [`Latest cached plugin version: ${pkg}`, verdict] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
     test.skipIf(process.platform === 'win32')('a plugin root variable alone beside an old cache is a checkout: the comparison is skipped', () => {
       const dir = fresh();
       try {
