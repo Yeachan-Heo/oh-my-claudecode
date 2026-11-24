@@ -46,6 +46,8 @@ def pause_state():
         return None
     now = time.time()
     try:
+        if type(p.get('v')) is not int or p['v'] != 2:
+            return None   # not the document the guard publishes (version 2)
         if p.get('paused') is not True:
             return None   # "false", 1 or "true" are not a pause: only the JSON value true is
         valid_until, resume_at = p['valid_until'], p['resume_at']

@@ -4,7 +4,7 @@
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, linkSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, linkSync, lstatSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, GUARD, HOOK, UNIT, PYBIN, HAS_PYTHON3, cleanup, fixture, hookHeld, hookPasses, now, pauseDoc,
@@ -653,12 +653,95 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a stored pause with times outside any window the guard writes is ignored, not a crash at start', () => {
     const f = fixture('state-bounds', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     for (const bad of [{ since: 1, resume_at: 1e300 }, { since: 1e300, resume_at: now() + 600 }, { since: -1e300, resume_at: now() + 600 }, { since: 1, resume_at: -1e300 },
-      { since: now(), resume_at: now() + 30 * 86400 }]) {
+      { since: now(), resume_at: now() + 30 * 86400 }, { since: now() - 10, resume_at: now() - 100 }, { since: now() + 60, resume_at: now() + 10 }, { since: now() + 7200, resume_at: now() + 7300 }]) {
       writeFileSync(f.state, JSON.stringify({ paused: true, ...bad }), 'utf8');
       const r = guardOnce(f);
       expect(r.stdout, JSON.stringify(bad)).toMatch(/guard start/);
       expect(r.stderr).not.toMatch(/Traceback/);
     }
+  });
+
+  it('the temporary file of a write is created exclusively and never through a link that was put in its place', () => {
+    const f = fixture('tmp-symlink', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const victim = join(f.dir, 'victim.txt');
+    const victimState = join(f.dir, 'victim-state.txt');
+    writeFileSync(victim, 'keep me', 'utf8');
+    writeFileSync(victimState, 'keep me too', 'utf8');
+    symlinkSync(victim, `${f.pause}.4242.tmp`);        // what another account could pre-create in a shared directory
+    symlinkSync(victimState, `${f.state}.4242.tmp`);
+    const code = ['import os, runpy, sys', 'os.getpid = lambda: 4242', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(readText(victim), 'the file behind the link is untouched').toBe('keep me');
+    expect(readText(victimState), 'so is the one behind the state link').toBe('keep me too');
+    expect(readJson(f.pause).paused, 'and the pause was written').toBe(true);
+    expect(lstatSync(f.pause).isSymbolicLink(), 'as a regular file').toBe(false);
+  });
+
+  it('a path with a NUL character in the configuration is a configuration error (exit 2), not a traceback', () => {
+    const f = fixture('nul-path');
+    for (const key of ['pause_file', 'state_file', 'usage_cache', 'log_file', 'settings_file']) {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, [key]: `${f.dir}/a\u0000b` }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${key}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/NUL/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+  });
+
+  it('a configuration file that is empty, not UTF-8, a directory or a list is a configuration error (exit 2), not a traceback', () => {
+    const f = fixture('cfg-forms');
+    const forms: Array<[string, () => string]> = [
+      ['empty', () => { writeFileSync(f.cfg, ''); return f.cfg; }],
+      ['not UTF-8', () => { writeFileSync(f.cfg, Buffer.from([0x7b, 0xff, 0xfe, 0x7d])); return f.cfg; }],
+      ['a list', () => { writeFileSync(f.cfg, '[]'); return f.cfg; }],
+      ['a directory', () => { const d = join(f.dir, 'cfg-dir'); mkdirSync(d, { recursive: true }); return d; }],
+    ];
+    for (const [label, make] of forms) {
+      const r = runSync(GUARD, ['--config', make(), '--once']);
+      expect(r.status, `${label}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, label).not.toMatch(/Traceback/);
+    }
+  });
+
+  it('unreadable forms of the cache, state file and settings file are warnings or a fresh start, never a crash; a huge pid in a pause file is not a crash', () => {
+    const f = fixture('input-forms');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const bytes = Buffer.from([0xff, 0xfe, 0x00, 0x7b]);
+    for (const make of [() => writeFileSync(f.cache, bytes), () => writeFileSync(f.cache, ''), () => { rmSync(f.cache, { force: true }); mkdirSync(f.cache); }]) {
+      rmSync(f.cache, { recursive: true, force: true });
+      make();
+      const r = guardOnce(f);
+      expect(r.stdout).toMatch(/WARNING \(cache-unreadable\)/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+    rmSync(f.cache, { recursive: true, force: true });
+    writeCache(f, { pct: 50, resetMs: Date.now() + HOUR_MS });
+    for (const content of [bytes, Buffer.from('')]) {
+      writeFileSync(f.state, content);
+      expect(guardOnce(f).stdout).toMatch(/guard start/);
+    }
+    writeFileSync(f.settings, bytes);
+    expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): cannot read the hook entries of/);
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'exec "unterminated five-hour-guard-hook.py' }] }] } }), 'utf8');
+    expect(guardOnce(f).stdout, 'a command the shell cannot parse').toMatch(/WARNING \(start\): the hook entry command .* cannot be parsed/);
+    rmSync(f.state, { force: true });
+    writePause(f, { pid: 99999999999999999999 });
+    const huge = guardOnce(f);
+    expect(huge.stderr).not.toMatch(/Traceback/);
+    expect(existsSync(f.pause), 'a pid no process can have: the leftover is removed').toBe(false);
+  });
+
+  it('a stored pause that is over at start is cleared even when the state file cannot be written: an ERROR line, not a traceback', () => {
+    const f = fixture('start-write-fails', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
+    const code = ['import os, runpy, sys', 'real = os.replace',
+      'def fail_on_state(src, dst, *a, **k):', '    if str(dst).endswith("state.json"): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
+      'os.replace = fail_on_state', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout).toMatch(/ERROR: cannot write the state file at start/);
+    expect(r.stderr).not.toMatch(/Traceback/);
   });
 
   it('--max-age must be positive: a negative one makes every entry stale and the guard fail open for ever', () => {
@@ -832,6 +915,23 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard hook', { timeout: 90000 }, () => 
         expect(!h.exited && /hold-start/.test(readText(log)), `${input} is held`).toBe(true);
       } finally { await h.stop(); }
     }
+  });
+
+  it('a pause file without the published version (missing, other, text) is not a pause; unreadable forms of the file pass too', async () => {
+    const f = fixture('hook-version');
+    for (const over of [{ v: undefined }, { v: 1 }, { v: 3 }, { v: '2' }, { v: 2.5 }]) {
+      writePause(f, over);
+      expect(await hookPasses(f, 'other0001'), `${JSON.stringify(over)} passes`).toBe(true);
+    }
+    writePause(f);
+    expect(await hookHeld(f, 'other0001'), 'version 2 holds').toBe(true);
+    writeFileSync(f.pause, Buffer.from([0xff, 0xfe, 0x00, 0x7b]));
+    expect(await hookPasses(f, 'other0001'), 'a file that is not UTF-8 passes').toBe(true);
+    writeFileSync(f.pause, '');
+    expect(await hookPasses(f, 'other0001'), 'an empty file passes').toBe(true);
+    rmSync(f.pause, { force: true });
+    mkdirSync(f.pause);
+    expect(await hookPasses(f, 'other0001'), 'a directory passes').toBe(true);
   });
 
   it('a valid pause holds for as long as it lasts (2.5 s of polling), exit 0 only after the pause file is gone', async () => {

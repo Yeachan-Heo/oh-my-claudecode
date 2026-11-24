@@ -70,6 +70,7 @@ other's pause (the lock on the pause file stops the second one).
 | `resume_at` more than 900 s in the past | the tool call passes |
 | the hook runs longer than its `timeout` in `settings.json` (21600 s, longer than a window plus margin) | Claude Code cancels the hook and, on `PreToolUse`, the tool call goes on, according to its [hooks documentation](https://code.claude.com/docs/en/hooks) ("Timeouts", read on 2026-11-21) |
 | the session id starts with a prefix of `exclude` | the tool call passes |
+| the pause file has no `v` equal to the integer 2 (the version the guard publishes) | the tool call passes |
 | the pause names `only` prefixes and the session id starts with none of them | the tool call passes |
 | `ANTHROPIC_BASE_URL` is set to a host outside `anthropic.com`, or `CLAUDE_CODE_USE_BEDROCK=1`, `CLAUDE_CODE_USE_VERTEX=1` or `CLAUDE_CODE_USE_FOUNDRY=1` is set, or `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is not blank | the tool call passes: that session does not use the Anthropic subscription window. The hook sees only the environment of the session: a session that has `ANTHROPIC_API_KEY` set but runs on the subscription (the key was declined at the prompt) is not held either, so leave the variable unset in subscription sessions you want to protect |
 | any exception inside the hook | exit 0 |

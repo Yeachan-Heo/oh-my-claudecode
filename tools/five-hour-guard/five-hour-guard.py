@@ -119,6 +119,8 @@ def setting(cli, key, required=False):
     v = cli if cli is not None else CFG.get(key)
     if v is not None and not isinstance(v, str):
         fail(f'"{key}" must be a string (a file path), not {v!r}')
+    if v and '\0' in v:
+        fail(f'"{key}" holds a NUL character: not a file path')
     if required and not v:
         fail(f'"{key}" is not set: give it in the configuration file (--config or OMC_FIVE_HOUR_GUARD_CONFIG) or on the command line')
     return v or ''
@@ -177,7 +179,7 @@ def check_distinct(files):
 check_distinct([('configuration file', A.config), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
                 ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
                 ('pause_file lock', PAUSE_FILE + '.lock'),
-                ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) else '')])
+                ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
 if STATE:
     check_writable_dir(STATE, 'state_file')
@@ -224,9 +226,22 @@ def write_json(path, obj):
     if A.dry_run:
         return
     tmp = f'{path}.{os.getpid()}.tmp'
-    with open(tmp, 'w') as f:
-        json.dump(obj, f)
-    os.replace(tmp, path)
+    try:
+        os.unlink(tmp)   # a leftover of a crashed run, or a link somebody put there: the link itself goes, never what it points to
+    except FileNotFoundError:
+        pass
+    # exclusive and without following links: another account that can write to the directory cannot redirect the write
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(obj, f)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def load_state():
@@ -239,7 +254,9 @@ def load_state():
         now = time.time()
         # times the guard could have written: positive, and not further ahead than a pause ever lasts
         if all(type(st.get(k)) in (int, float) and math.isfinite(st[k]) and 0 < st[k] <= now + STATE_MAX_AHEAD_S for k in ('since', 'resume_at')):
-            return st
+            # enter_pause() stamps `since` with the clock of that moment and resume_at lies after it
+            if st['since'] <= now + FUTURE_SKEW_S and st['since'] <= st['resume_at']:
+                return st
     except Exception:
         pass
     return {'paused': False}
@@ -324,6 +341,7 @@ def hook_check(where):
         try:
             tokens = shlex.split(command)
         except ValueError:
+            log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
             continue
         if '--pause-file' not in tokens[:-1]:
             log(f'WARNING ({where}): the hook entry in {SETTINGS} has no value for --pause-file: the hook would start without a pause file and hold nothing. Run five-hour-guard-settings.py add again')
@@ -430,7 +448,7 @@ def pid_alive(pid):
         os.kill(pid, 0)
     except PermissionError:
         return True
-    except OSError:
+    except (OSError, OverflowError, ValueError):   # also a pid no process can have: the pause file is not to be trusted
         return False
     return True
 
@@ -534,7 +552,11 @@ def main():
             log(f'start during a pause, resume at {ts(state["resume_at"])}')
             hook_check('start')   # the restored pause is republished on every tick: say so when no hook would observe it
         else:
-            leave_pause(state, 'stored pause already over at start')
+            try:
+                leave_pause(state, 'stored pause already over at start')
+            except Exception as e:   # the state file cannot be written (read-only disk): the pause file is gone, go on with the state in memory
+                state.update(paused=False, since=None, resume_at=None)
+                log(f'ERROR: cannot write the state file at start, going on without it: {e!r}')
     else:
         log(f'guard start (threshold {A.threshold} %, margin {A.margin:.0f} s, exclude {EXCLUDE})')
         hook_check('start')

@@ -60,6 +60,8 @@ if A.config:
 for _key in ('settings_file', 'pause_file', 'hook_log_file'):
     if CFG.get(_key) is not None and not isinstance(CFG[_key], str):
         fail(f'"{_key}" must be a string (a file path), not {CFG[_key]!r}')
+    if CFG.get(_key) and '\0' in CFG[_key]:
+        fail(f'"{_key}" holds a NUL character: not a file path')
 
 CONFIG_DIR = os.path.expanduser((os.environ.get('CLAUDE_CONFIG_DIR') or '').strip() or '~/.claude')
 SETTINGS = A.settings or CFG.get('settings_file') or os.path.join(CONFIG_DIR, 'settings.json')
@@ -182,7 +184,7 @@ def run_once():
     hooks = data.get('hooks', {})
     pre = hooks.get('PreToolUse', []) if isinstance(hooks, dict) else None
     if not isinstance(pre, list) or not all(isinstance(g, dict) and isinstance(g.get('hooks', []), list)
-                                        and all(isinstance(h, dict) and isinstance(h.get('command') or '', str) for h in g.get('hooks', [])) for g in pre):
+                                        and all(isinstance(h, dict) and ('command' not in h or isinstance(h['command'], str)) for h in g.get('hooks', [])) for g in pre):
         fail(f'{SETTINGS}: "hooks" / "PreToolUse" do not have the shape of a Claude Code settings file (an object holding a list of groups, each with a list of hook objects whose command is text)')
     ours = [g for g in pre if is_ours(g)]
 

@@ -3,7 +3,7 @@
 // command that `add` writes, run through `sh -c` the way Claude Code runs it.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, readFileSync, linkSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, rmSync, readFileSync, linkSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ENV, CONFIG_DIR, HAS_PYTHON3, HOOK, PYBIN, SETTINGS_TOOL, TMP, cleanup, fixture, readJson, readText, runCommand, runPyCode, runSync, sleep,
@@ -419,6 +419,28 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('a path with a NUL character in the configuration is refused with exit 2; a settings file that is not UTF-8, empty or a directory is an error, not a crash', () => {
+    const f = fixture('settings-forms');
+    for (const key of ['pause_file', 'settings_file', 'hook_log_file']) {
+      writeFileSync(f.cfg, JSON.stringify({ pause_file: f.pause, settings_file: f.settings, hook_log_file: f.hookLog, [key]: `${f.dir}/a\u0000b` }), 'utf8');
+      const r = runSync(SETTINGS_TOOL, ['add', '--config', f.cfg, '--hook', HOOK, '--python', PYBIN]);
+      expect(r.status, `${key}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/NUL/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+    const bytes = Buffer.from([0xff, 0xfe, 0x00, 0x7b]);
+    for (const [label, make] of [['not UTF-8', () => writeFileSync(f.settings, bytes)], ['empty', () => writeFileSync(f.settings, '')],
+      ['a directory', () => { rmSync(f.settings, { force: true }); mkdirSync(f.settings, { recursive: true }); }]] as Array<[string, () => void]>) {
+      rmSync(f.settings, { recursive: true, force: true });
+      make();
+      for (const action of ['check', 'add', 'remove']) {
+        const r = tool(f, action);
+        expect(r.status, `${label}, ${action}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${label}, ${action}`).not.toMatch(/Traceback/);
+      }
+    }
+  });
+
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
     const f = fixture('settings-timeout');
     const original = JSON.stringify(base(), null, 2) + '\n';
@@ -448,7 +470,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     const rel = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', 'pause.json', '--hook', HOOK, '--python', PYBIN]);
     expect(rel.status).toBe(2);
     expect(rel.stderr).toMatch(/pause file path 'pause\.json' is not absolute/);
-    for (const [label, doc] of [['hooks null', '{"hooks": null}'], ['PreToolUse not a list', '{"hooks": {"PreToolUse": {}}}'], ['group not an object', '{"hooks": {"PreToolUse": [1]}}'], ['hook not an object', '{"hooks": {"PreToolUse": [{"hooks": [1]}]}}'], ['hook text not an object', '{"hooks": {"PreToolUse": [{"hooks": ["x"]}]}}'], ['command not a string', '{"hooks": {"PreToolUse": [{"hooks": [{"command": 5}]}]}}'], ['top level not an object', '[]']]) {
+    for (const [label, doc] of [['hooks null', '{"hooks": null}'], ['PreToolUse not a list', '{"hooks": {"PreToolUse": {}}}'], ['group not an object', '{"hooks": {"PreToolUse": [1]}}'], ['hook not an object', '{"hooks": {"PreToolUse": [{"hooks": [1]}]}}'], ['hook text not an object', '{"hooks": {"PreToolUse": [{"hooks": ["x"]}]}}'], ['command not a string', '{"hooks": {"PreToolUse": [{"hooks": [{"command": 5}]}]}}'], ['command 0', '{"hooks": {"PreToolUse": [{"hooks": [{"command": 0}]}]}}'], ['command false', '{"hooks": {"PreToolUse": [{"hooks": [{"command": false}]}]}}'], ['command null', '{"hooks": {"PreToolUse": [{"hooks": [{"command": null}]}]}}'], ['top level not an object', '[]']]) {
       writeFileSync(f.settings, doc, 'utf8');
       for (const action of ['check', 'add', 'remove']) {
         const r = tool(f, action);
