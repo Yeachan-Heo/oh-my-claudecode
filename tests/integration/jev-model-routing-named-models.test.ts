@@ -729,6 +729,31 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       expect(routed).toEqual(replaced ? { ...input.tool_input, model: "sonnet", effort: "medium" } : { ...input.tool_input, effort: "medium" });
     }, 15000);
 
+    // A choice that is not a tier name must leave only the model field as it was: the effort score of
+    // the same answer still applies, under every gate that looks the choice up.
+    it.each(["constructor", "__proto__", "CONSTRUCTOR", "hasownproperty", "gpt-5", "", " sonnet", "sonnet "])(
+      "a malformed model choice (%j) leaves the model and still sets the effort, in every provider gate",
+      async (choice) => {
+        answers = { ...ANSWERS, "model-tier": { type: "choice", choice, confidence: 0.9 } };
+        const gates: NodeJS.ProcessEnv[] = [
+          { ANTHROPIC_BASE_URL: "http://proxy.example.invalid/v1" },
+          { OMC_ROUTING_FORCE_INHERIT: "true", CLAUDE_CODE_USE_BEDROCK: "1" },
+          { ANTHROPIC_DEFAULT_OPUS_MODEL: "other-proxy-model" },
+          {},
+        ];
+        // The name comes from a definition: a call of its own model is denied under forceInherit by a gate that is not under test.
+        writeAgent(projectAgents(), "proxy-agent", "model: deepseek-chat\n");
+        for (const gate of gates) {
+          const input = agentInput({ subagent_type: "proxy-agent" });
+          expect(await routedInput(input, { ...NAMED, ...gate }), JSON.stringify(gate)).toEqual({ ...input.tool_input, effort: "medium" });
+        }
+        const unpinned = agentInput();
+        const forceInherit = { OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1", OMC_ROUTING_FORCE_INHERIT: "true", CLAUDE_CODE_USE_BEDROCK: "1" };
+        expect(await routedInput(unpinned, forceInherit)).toEqual({ ...unpinned.tool_input, effort: "medium" });
+      },
+      60000,
+    );
+
     it("a session model that is not a Claude name still keeps the named model", async () => {
       const input = agentInput({ model: "fable" });
       expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: "deepseek-chat" })).toEqual({ ...input.tool_input, effort: "medium" });

@@ -168,7 +168,9 @@ const BUILTIN_TIER_MODEL_DEFAULTS = {
 // the provider serves the alias on a call. forNamedGate judges a plain ANTHROPIC_DEFAULT_* value
 // with the provider detection of the named-model gate, so the gate and its mapping agree.
 function resolveTierAliasToSafeModel(tierAlias, nativeOnly = false, forNamedGate = false) {
-  const keys = TIER_TO_DEFAULT_ENV_KEYS[(tierAlias || '').toLowerCase()];
+  // Own keys only: an answer such as `constructor` or `__proto__` is not a tier.
+  const tier = (tierAlias || '').toLowerCase();
+  const keys = Object.hasOwn(TIER_TO_DEFAULT_ENV_KEYS, tier) ? TIER_TO_DEFAULT_ENV_KEYS[tier] : undefined;
   if (!keys) return '';
   for (const key of keys) {
     if (nativeOnly && key === 'OMC_SUBAGENT_MODEL') continue;
