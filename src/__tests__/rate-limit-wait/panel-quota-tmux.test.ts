@@ -264,6 +264,20 @@ describe('panelQuotaTmux adapter', () => {
       expect(vi.mocked(execFileSync).mock.calls.map((call) => call[1])).toEqual([['-o', 'tpgid=', '-p', '4242'], ['-o', 'lstart=', '-p', '5151']]);
     });
 
+    it('a start time that cannot be read is not an empty start time: a timeout, a missing ps or a signal give null, and a leader that is gone gives the group alone', () => {
+      const ask = (failure: Error): string | null => {
+        vi.mocked(tmuxExec).mockReset();
+        vi.mocked(execFileSync).mockReset();
+        vi.mocked(tmuxExec).mockReturnValueOnce('0 4242\n');
+        vi.mocked(execFileSync).mockReturnValueOnce(' 5151\n').mockImplementationOnce(() => { throw failure; });
+        return panelQuotaTmux.providerIdentity?.(PANE) ?? null;
+      };
+      expect(ask(Object.assign(new Error('spawnSync ps ETIMEDOUT'), { code: 'ETIMEDOUT', status: null, signal: 'SIGTERM' }))).toBeNull();
+      expect(ask(Object.assign(new Error('spawnSync ps ENOENT'), { code: 'ENOENT', status: null }))).toBeNull();
+      expect(ask(Object.assign(new Error('killed'), { status: null, signal: 'SIGKILL' }))).toBeNull();
+      expect(ask(Object.assign(new Error('Command failed: ps'), { status: 1, stdout: '' }))).toBe('5151:');
+    });
+
     it('is null for a dead pane, a terminal without a foreground group, and when ps fails', () => {
       const ask = (status: string, ps: string | Error): string | null => {
         vi.mocked(tmuxExec).mockReset();

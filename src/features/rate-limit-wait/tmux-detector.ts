@@ -1098,8 +1098,12 @@ function paneProviderIdentity(paneId: string, socket?: string, server?: string):
         stdio: ['ignore', 'pipe', 'ignore'],
         timeout: 3000,
       }).trim();
-    } catch {
-      // The group leader may have exited while its group lives on: the group id alone identifies it.
+    } catch (error) {
+      // The group leader may have exited while its group lives on (ps finds no such process and exits with status 1): the
+      // group id alone identifies it. Any other failure (a timeout, a missing ps, a signal) says nothing about the
+      // leader, so the identity cannot be told now and the caller tries again; an empty start time there would look
+      // like a replaced program.
+      if ((error as { status?: unknown })?.status !== 1) return null;
     }
     return `${foreground}:${started}`;
   } catch {
