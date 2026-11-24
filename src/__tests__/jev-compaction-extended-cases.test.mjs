@@ -454,7 +454,12 @@ function mixedResults() {
   return m.map((x, i) => Object.freeze({ ...x, handle: `m${i}` }));
 }
 const resultRow = (list, id) => list.find((m) => (m.toolResults || []).some((x) => x.tool_use_id === id));
-const noteOf = (name, text) => `<system-reminder>\n<tools-used-before-summary>Bash</tools-used-before-summary>\n</system-reminder>\n<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "${name}" finished</summary>\n<result>${text}</result>\n</task-notification>\n</system-reminder>`;
+const noteOf = (name, text) => `<system-reminder>\n<tools-used-before-summary>Bash</tools-used-before-summary>\n</system-reminder>\n<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n<task-notification>\n<task-id>a1b2c3</task-id>\n<status>completed</status>\n<summary>Agent "${name}" finished</summary>\n<result>${text}</result>\n</task-notification>\n</system-reminder>`;
+// The call that started the task of noteOf and its result: a notification whose task is tied to no call in the conversation is held, never scored.
+const launchOf = [
+  { role: 'assistant', text: 'Starting the agent.', toolUses: [{ tool_use_id: 'bgl1', tool: 'Agent', input: { prompt: 'Look at the registry.', run_in_background: true } }] },
+  { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'bgl1', text: 'Async agent launched successfully. agentId: a1b2c3', isError: false }] },
+];
 
 describe('token cascade by target percent: the passes and where the cascade stops', () => {
   it('a message of several results at a 20 % target: the cascade goes to the trace-all pass, not to the short-or-trace pass, and the pairs of calls and results hold', async () => {
@@ -486,18 +491,19 @@ describe('token cascade by target percent: the passes and where the cascade stop
     const p2 = Object.freeze({ role: 'user', text: `[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\nAgent finished ${'q'.repeat(6000)}`, toolUses: [], handle: 'n2' });
     const mixed = Object.freeze({ role: 'user', text: `${noteOf('Other', 'short')}\nThese are my words: keep the report.`, toolUses: [], handle: 'n3' });
     const owner = Object.freeze({ role: 'user', text: 'Please go through all the files carefully.', toolUses: [], handle: 'n4' });
-    const w2 = [...w.slice(0, 3), p1, ...w.slice(3, 7), p2, mixed, owner, ...w.slice(7)];
+    const w2 = [...w.slice(0, 3), ...launchOf, p1, ...w.slice(3, 7), p2, mixed, owner, ...w.slice(7)];
     const env = { OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_NOTIFICATIONS: '1' };
     const r = await compactRun(env, w2, { event: { trigger: 'auto' }, usage: estimateUsage(w2), score: byMarker });
     const po = r.out.messages;
     expect(r.record).toMatchObject({ result: 'jev', notifications: 2 });
-    expect(po.includes(p1) || po.includes(p2)).toBe(false);
+    expect(po.includes(p1)).toBe(false);
     expect(po.includes(mixed) && po.includes(owner) && po.includes(w2[0])).toBe(true);
     const trace1 = po.find((m) => m.role === 'user' && /^\[compacted\] background task notification \(Agent "Status: registry" finished\) - \d+ chars removed$/.test(m.text || ''));
     expect(trace1 && !trace1.handle && trace1.toolResults.length === 0 && trace1.text.includes(`${p1.text.length} chars`)).toBe(true);
     const sent = r.requests.flatMap((b) => Object.values(b.state.results ?? {}));
     const noteResults = sent.filter((x) => x.tool === 'background task notification');
-    expect(noteResults).toHaveLength(2);
+    // p2 holds no notification block, so it names no task: its source is unknown, and it is traced but never sent.
+    expect(noteResults).toHaveLength(1);
     expect(noteResults.every((x) => x.chars >= 6000)).toBe(true);
     for (const m of w2.filter((x) => x.role === 'assistant')) expect(po.some((x) => x.role === 'assistant' && (x.text === m.text || (x.text || '').startsWith(`${m.text}\n[compacted]`))), m.text).toBe(true);
     expect(insidePairing(po)).toBe('');
@@ -513,7 +519,7 @@ describe('token cascade by target percent: the passes and where the cascade stop
     // A needed notification (score 1 of 3) gets a short copy: the description from the summary and 300 characters of the result.
     const important = steps(30, { important: Array.from({ length: 30 }, (_, i) => i + 1) });
     const p3 = Object.freeze({ role: 'user', text: noteOf('Important', `REPORT-TEXT IMPORTANT ${'w'.repeat(9000)}`), toolUses: [], handle: 'n5' });
-    const w3 = [...important.slice(0, 3), p3, ...important.slice(3)];
+    const w3 = [...important.slice(0, 3), ...launchOf, p3, ...important.slice(3)];
     const r3 = await compactRun({ ...env, OMC_JEV_COMPACT_TARGET_PERCENT: '20' }, w3, { event: { trigger: 'auto' }, usage: estimateUsage(w3), score: byMarker });
     const short = r3.out.messages.find((m) => m.role === 'user' && /notification shortened at compaction: kept 300 of \d+ chars/.test(m.text || ''));
     expect(r3.record.result).toBe('jev');
@@ -1073,7 +1079,7 @@ describe('a shortened notification is still a notification at the next compactio
   it('it keeps the marker of the host, so it is no word of the user and a candidate again, and the first task of the user stays in the task sent to Jev', async () => {
     const important = steps(30, { important: Array.from({ length: 30 }, (_, i) => i + 1) });
     const p = Object.freeze({ role: 'user', text: noteOf('Important', `REPORT-TEXT IMPORTANT ${'w'.repeat(9000)}`), toolUses: [], handle: 'n5' });
-    const w = [...important.slice(0, 3), p, ...important.slice(3)];
+    const w = [...important.slice(0, 3), ...launchOf, p, ...important.slice(3)];
     const first = await compactRun(env, w, { event: { trigger: 'auto' }, usage: estimateUsage(w), score: byMarker });
     const short = first.out.messages.find((m) => m.role === 'user' && /notification shortened at compaction/.test(m.text || ''));
     expect(short).toBeTruthy();
@@ -1101,7 +1107,7 @@ describe('a shortened notification stays one opaque block when its result quotes
     it(`${name}: the next compaction still reads one notification and no word of the user, and the quote stays out of the task sent to Jev`, async () => {
       const important = steps(30, { important: Array.from({ length: 30 }, (_, i) => i + 1) });
       const p = Object.freeze({ role: 'user', text: noteOf('Important', `${quote}REPORT-TEXT IMPORTANT ${'w'.repeat(9000)}`), toolUses: [], handle: 'n5' });
-      const w = [...important.slice(0, 3), p, ...important.slice(3)];
+      const w = [...important.slice(0, 3), ...launchOf, p, ...important.slice(3)];
       const first = await compactRun(env, w, { event: { trigger: 'auto' }, usage: estimateUsage(w), score: byMarker });
       const short = first.out.messages.find((m) => m.role === 'user' && /notification shortened at compaction/.test(m.text || ''));
       expect(short).toBeTruthy();

@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { isNotification, register } from '../../hooks/jev-compaction.mjs';
 
-const note = (name, text) => `<system-reminder>\n<tools-used-before-summary>Bash</tools-used-before-summary>\n</system-reminder>\n<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "${name}" finished</summary>\n<result>${text}</result>\n</task-notification>\n</system-reminder>`;
+const note = (name, text) => `<system-reminder>\n<tools-used-before-summary>Bash</tools-used-before-summary>\n</system-reminder>\n<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n<task-notification>\n<task-id>a1b2c3</task-id>\n<status>completed</status>\n<summary>Agent "${name}" finished</summary>\n<result>${text}</result>\n</task-notification>\n</system-reminder>`;
 const bare = (text) => `<task-notification>\n<task-id>b2</task-id>\n<status>completed</status>\n<summary>Agent "bare" finished</summary>\n<result>${text}</result>\n</task-notification>`;
 const row = (text, extra = {}) => ({ role: 'user', text, toolUses: [], ...extra });
 const user = (text) => row(text);
@@ -45,6 +45,11 @@ async function compactRun(env, messages, { tokens = 30000, deliver = {} } = {}) 
   return { out, record, bodies };
 }
 
+// The call that started the task of note() and its result: a notification whose task is tied to no call in the conversation is held, never scored.
+const LAUNCH = [
+  { role: 'assistant', text: 'Starting the agent.', toolUses: [{ tool_use_id: 'bgl1', tool: 'Agent', input: { prompt: 'Look at the registry.', run_in_background: true } }] },
+  { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'bgl1', text: 'Async agent launched successfully. agentId: a1b2c3', isError: false }] },
+];
 const NOTE_ENV = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
 const SHAPE = () => {
   const w = talk(30);
@@ -52,7 +57,7 @@ const SHAPE = () => {
   const p2 = Object.freeze(row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\nAgent finished ${'q'.repeat(6000)}`, { handle: 'n2' }));
   const mixed = Object.freeze(row(`${note('Other', 'short')}\nThese are my words: keep the report.`, { handle: 'n3' }));
   const owner = Object.freeze(row('Please review all the files carefully.', { handle: 'n4' }));
-  return { w, p1, p2, mixed, owner, all: [...w.slice(0, 3), p1, ...w.slice(3, 7), p2, mixed, owner, ...w.slice(7)] };
+  return { w, p1, p2, mixed, owner, all: [...w.slice(0, 3), p1, ...w.slice(3, 7), p2, mixed, owner, ...w.slice(7)], launched: [...w.slice(0, 3), ...LAUNCH, p1, ...w.slice(3, 7), p2, mixed, owner, ...w.slice(7)] };
 };
 
 describe('background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICATIONS)', () => {
@@ -80,7 +85,7 @@ describe('background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICAT
 
   it('traces the notification rows in a user row of their own and leaves mixed rows, the owner\'s words and the assistant\'s text as they are', async () => {
     const s = SHAPE();
-    const { out, record, bodies } = await compactRun(NOTE_ENV, s.all);
+    const { out, record, bodies } = await compactRun(NOTE_ENV, s.launched);
     expect(record).toMatchObject({ result: 'jev', notifications: 2 });
     const after = out.messages;
     expect(after).not.toContain(s.p1);
@@ -182,15 +187,37 @@ describe('a notification that names no output file', () => {
     expect(JSON.stringify(out.messages)).not.toContain('SECRETBODY');
   });
 
-  it('is held too when a call on a secret path lost its id to an earlier compaction, and scored when every such call still has its id', async () => {
+  const read = (id, file, body) => [
+    { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command: `cat ${file}` } }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `${body} ${'f'.repeat(7000)}`, isError: false }] },
+  ];
+
+  it('is held when its task is tied to no call in the conversation: an earlier compaction removed the call of a private path, and in the second pass the report stays out of Jev', async () => {
     const w = talk(30);
-    const traced = launched('[compacted] Bash(command=cat ~/.ssh/id_rsa) - result of 90 chars removed');
-    const held = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('cat ~/.ssh/id_rsa'), traced, noted('zz9y8x7w', 'SECRETBODY'), ...w.slice(3)]);
-    expect(held.record).toMatchObject({ result: 'jev', secret_held: 1 });
-    expect(held.bodies.join('')).not.toContain('SECRETBODY');
+    const secretCall = call('cat ~/.ssh/id_rsa');
+    const secretLaunch = launched('Command running in background with ID: bk7x2mq9. Output is being written to: /tmp/tasks/bk7x2mq9.output');
+    const first = await compactRun(NOTE_ENV, [...w.slice(0, 3), secretCall, secretLaunch, ...[1, 2, 3].flatMap((k) => read(`rd${k}`, 'a.txt', `Filler ${k}`)), ...w.slice(3)]);
+    expect(first.record).toMatchObject({ result: 'jev' });
+    // The first pass took the call away with its result: nothing in the conversation says what the task was.
+    expect(JSON.stringify(first.out.messages)).not.toContain('bk7x2mq9');
+    const second = await compactRun(NOTE_ENV, [...first.out.messages.slice(0, 4), noted('bk7x2mq9', 'SECRETBODY'), ...first.out.messages.slice(4)]);
+    expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 1 });
+    expect(second.bodies.join('')).not.toContain('SECRETBODY');
+    expect(JSON.stringify(second.out.messages)).not.toContain('SECRETBODY');
+  });
+
+  it('is scored when its task is tied to a call that is still there, and a row of several notifications is held when any one of them is of a secret path', async () => {
+    const w = talk(30);
+    const both = (id1, id2) => row(`${noted(id1, 'PLAINBODY').text}\n${noted(id2, 'SECRETBODY').text}`);
+    const second = { role: 'assistant', text: 'Starting.', toolUses: [{ tool_use_id: 'bg2', tool: 'Bash', input: { command: 'cat ~/.ssh/id_rsa', run_in_background: true } }] };
+    const secondLaunch = { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'bg2', text: 'Command running in background with ID: sk5t3n1p.', isError: false }] };
     const open = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('npm test'), launched('Command running in background with ID: bk7x2mq9.'), noted('bk7x2mq9', 'PLAINBODY'), ...w.slice(3)]);
     expect(open.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
     expect(open.bodies.join('')).toContain('PLAINBODY');
+    const mixed = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('npm test'), launched('Command running in background with ID: bk7x2mq9.'), second, secondLaunch, both('bk7x2mq9', 'sk5t3n1p'), ...w.slice(3)]);
+    expect(mixed.record).toMatchObject({ result: 'jev', notifications: 1 });
+    expect(mixed.bodies.join('')).not.toContain('SECRETBODY');
+    expect(mixed.bodies.join('')).not.toContain('PLAINBODY');
   });
 });
 

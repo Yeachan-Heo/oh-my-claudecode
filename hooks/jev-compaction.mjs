@@ -1394,8 +1394,8 @@ function backgroundOutputFiles(messages, privatePaths) {
   const out = { secret: new Set(), held: new Set() };
   const known = new Set(); // the files of every background call whose result is still in the conversation, secret or not
   // The same by the id of the task, which a notification names in <task-id> (a notification need not name a file): the ids of the calls on a secret path (`secret`), of the
-  // prose calls naming one (`held`) and of all (`known`). `unlinked`: a call on a secret path whose result names neither a file nor an id, or is a compaction trace (an earlier compaction cut it).
-  const ids = { secret: new Set(), held: new Set(), known: new Set(), unlinked: false };
+  // prose calls naming one (`held`) and of all (`known`).
+  const ids = { secret: new Set(), held: new Set(), known: new Set() };
   for (const m of messages) {
     if (m.role !== 'assistant') continue;
     for (const u of m.toolUses || []) {
@@ -1404,15 +1404,12 @@ function backgroundOutputFiles(messages, privatePaths) {
       const head = results.get(u.tool_use_id).slice(0, OUTPUT_SCAN_CHARS);
       const named = [...head.matchAll(TASK_ID_IN_RESULT)].map((m) => m[1]);
       for (const id of named) { ids.known.add(id); (list === out.secret ? ids.secret : list === out.held ? ids.held : ids.known).add(id); }
-      let files = 0;
       for (const w of head.split(/[\s"'`|;&<>()[\]{},=]+/)) {
         const file = outputFileOf(w);
         if (!file) continue;
-        files++;
         const name = file.slice(file.lastIndexOf('/') + 1);
         for (const f of name.length >= 6 ? [file, name] : [file]) { known.add(f); list?.add(f); }
       }
-      if (list && !named.length && (!files || head.startsWith('[compacted]'))) ids.unlinked = true;
     }
   }
   return { secret: fileIndex(out.secret), held: fileIndex(out.held), known, ids };
@@ -1430,16 +1427,21 @@ function sourceUnknown(text, outputs) {
   for (const m of text.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)) if (unknownFile(m[1].trim(), outputs.known)) return true;
   return false;
 }
-// What a notification says about its source, by its <task-id>: 'secret' or 'held' when a call on a secret path started that task, 'known' when another call
-// still in the conversation did, and otherwise 'unknown'; a notification without a task id is 'unknown' too. 'unknown' is held when an earlier compaction left
-// a call on a secret path that can no longer be tied to its task (`unlinked`): the notification may be its own.
+// What a notification says about its source, block by block (a row may hold several): 'secret' or 'held' when a call on a secret path started the task of a block
+// (by its <task-id>), 'unknown' when a block's task is tied to no call still in the conversation and its output file is not either (an earlier compaction removed
+// the call, and with it what said whether it was on a secret path), otherwise 'known'. The worst block decides: secret, then held, then unknown.
 function sourceByTask(text, outputs) {
-  const id = /<task-id>\s*([\w-]{1,64})\s*<\/task-id>/.exec(text)?.[1];
-  if (id && outputs.ids.secret.has(id)) return 'secret';
-  if (id && outputs.ids.held.has(id)) return 'held';
-  return id && outputs.ids.known.has(id) ? 'known' : 'unknown';
+  let worst = text.includes('<task-notification') ? 'known' : 'unknown'; // a row that holds no block names no task at all
+  for (const block of text.split(/(?=<task-notification[\s>])/)) {
+    if (!block.startsWith('<task-notification')) continue;
+    const id = /<task-id>\s*([\w-]{1,64})\s*<\/task-id>/.exec(block)?.[1];
+    if (id && outputs.ids.secret.has(id)) return 'secret';
+    if (id && outputs.ids.held.has(id)) worst = 'held';
+    else if (worst === 'known' && !(id && outputs.ids.known.has(id)) && !namesKnownFile(block, outputs.known)) worst = 'unknown';
+  }
+  return worst;
 }
-// Whether a notification names an output file that a call still in the conversation produced: its source is then known, whatever its task id says.
+// Whether a notification block names an output file that a call still in the conversation produced: its source is then known, whatever its task id says.
 const namesKnownFile = (text, known) => [...text.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)].some((m) => { const f = outputFileOf(m[1].trim()); return Boolean(f) && (known.has(f) || known.has(f.slice(f.lastIndexOf('/') + 1))); });
 const unknownFile = (word, known) => {
   const file = outputFileOf(word);
@@ -2267,7 +2269,7 @@ function findCandidates(messages, privatePaths, notifications = false) {
         id: `${NOTE_TOOL}-${i}`, note: true, resIdx: i, useIdx: -1, use: { tool: NOTE_TOOL, input: {} }, res: { text: m.text, isError: false },
         summary: noteSummary(m.text), inputChars: 0, resultChars: m.text.length,
         secret: readsFile(m.text, outputs.secret) || bySource === 'secret',
-        proseSecret: readsFile(m.text, outputs.held) || bySource === 'held' || sourceUnknown(m.text, outputs) || (bySource === 'unknown' && outputs.ids.unlinked && !namesKnownFile(m.text, outputs.known)),
+        proseSecret: readsFile(m.text, outputs.held) || bySource === 'held' || bySource === 'unknown' || sourceUnknown(m.text, outputs),
         taskOutput: false, textOnly: true,
         score: 0, asked: false, answered: false,
       };
