@@ -585,6 +585,35 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       expect(requests).toHaveLength(1);
     }, 15000);
 
+    // With no session model variable, the tier defaults identify the provider, as in
+    // src/config/models.ts: a Bedrock or Vertex ID, or a name that is not Claude's, keeps the
+    // named model unless the tier Jev picked (sonnet) is mapped natively.
+    it.each([
+      ["a Bedrock ID in CLAUDE_CODE_BEDROCK_OPUS_MODEL", { CLAUDE_CODE_BEDROCK_OPUS_MODEL: "global.anthropic.claude-opus-4-6-v1:0" }],
+      ["a Bedrock ID in ANTHROPIC_DEFAULT_HAIKU_MODEL", { ANTHROPIC_DEFAULT_HAIKU_MODEL: "us.anthropic.claude-haiku-4-5-v1:0" }],
+      ["a Vertex ID in ANTHROPIC_DEFAULT_OPUS_MODEL", { ANTHROPIC_DEFAULT_OPUS_MODEL: "vertex_ai/claude-opus-4-6" }],
+      ["a model that is not Claude's in ANTHROPIC_DEFAULT_OPUS_MODEL", { ANTHROPIC_DEFAULT_OPUS_MODEL: "other-proxy-model" }],
+    ])("tier defaults identify a non-Claude provider (%s): the named model stays, the effort is set", async (_label, tierEnv) => {
+      const input = agentInput({ model: "fable" });
+      expect(await routedInput(input, { ...NAMED, ...tierEnv })).toEqual({ ...input.tool_input, effort: "medium" });
+      expect(requests).toHaveLength(1);
+    }, 15000);
+
+    it("tier defaults do not hide the mapping of the tier Jev picked: the alias is set", async () => {
+      const input = agentInput({ model: "fable" });
+      const env = { CLAUDE_CODE_BEDROCK_OPUS_MODEL: "global.anthropic.claude-opus-4-6-v1:0", CLAUDE_CODE_BEDROCK_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" };
+      expect(await routedInput(input, { ...NAMED, ...env })).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
+    }, 15000);
+
+    it.each([
+      ["a direct session model wins over a stale tier default", { ANTHROPIC_MODEL: "claude-sonnet-5", CLAUDE_CODE_BEDROCK_OPUS_MODEL: "global.anthropic.claude-opus-4-6-v1:0" }],
+      ["a Claude model in a tier default is a Claude provider", { ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4-8" }],
+      ["a native alias in a tier default is a Claude provider", { ANTHROPIC_DEFAULT_OPUS_MODEL: "opus" }],
+    ])("%s: Jev's alias replaces the name", async (_label, tierEnv) => {
+      const input = agentInput({ model: "fable" });
+      expect(await routedInput(input, { ...NAMED, ...tierEnv })).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
+    }, 15000);
+
     it("a session model that is not a Claude name still keeps the named model", async () => {
       const input = agentInput({ model: "fable" });
       expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: "deepseek-chat" })).toEqual({ ...input.tool_input, effort: "medium" });

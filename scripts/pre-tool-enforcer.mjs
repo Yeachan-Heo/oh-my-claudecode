@@ -86,17 +86,32 @@ function isAnthropicBaseUrl(baseUrl) {
     return false;
   }
 }
-// aliasIsClaude: a session model that is a native alias (sonnet, opus, haiku, fable, with an
-// optional context suffix such as [1m]) counts as a Claude model, as in src/config/models.ts.
-// Only the named-model gate asks for it; the proxy mapping check keeps the plain rule.
-function isNonClaudeProviderEnv(aliasIsClaude = false) {
+// forNamedGate: provider detection as in src/config/models.ts, which only the named-model gate
+// asks for (the proxy mapping check and the forceInherit gate keep the plain rules):
+// - a session model that is a native alias (sonnet, opus, haiku, fable, with an optional context
+//   suffix such as [1m]) counts as a Claude model;
+// - with no session model variable, the native tier defaults identify the provider: a Bedrock or
+//   Vertex ID, or a name that is not Claude's, in one of them is a non-Claude provider. OMC_MODEL_*
+//   is not read here: Claude Code does not read it.
+function isNonClaudeProviderEnv(forNamedGate = false) {
   if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-  const isNativeAlias = aliasIsClaude && TIER_ALIASES.has(modelId.replace(/\[\d+[mk]\]$/i, '').toLowerCase());
+  const isNativeAlias = forNamedGate && TIER_ALIASES.has(modelId.replace(/\[\d+[mk]\]$/i, '').toLowerCase());
   if (modelId && !isNativeAlias && !modelId.toLowerCase().includes('claude')) return true;
+  if (forNamedGate && !modelId.trim() && nativeTierDefaultIds().some(isProviderSpecificOrNonClaudeId)) return true;
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
   if (baseUrl && !isAnthropicBaseUrl(baseUrl)) return true;
   return isConfigForceInheritProxyEnv();
+}
+// The first native default of each tier (CLAUDE_CODE_BEDROCK_<TIER>_MODEL, then ANTHROPIC_DEFAULT_<TIER>_MODEL).
+function nativeTierDefaultIds() {
+  return Object.values(TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG)
+    .map((keys) => keys.map((key) => (process.env[key] || '').trim()).find(Boolean))
+    .filter(Boolean);
+}
+function isProviderSpecificOrNonClaudeId(modelId) {
+  const lower = modelId.toLowerCase();
+  return isProviderSpecificModelId(modelId) || (!lower.includes('claude') && !TIER_ALIASES.has(lower));
 }
 function acceptsProxyAnthropicDefaultTierValue(key, value) {
   return key.startsWith('ANTHROPIC_DEFAULT_')
