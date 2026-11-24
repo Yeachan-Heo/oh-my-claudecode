@@ -108,6 +108,40 @@ describe('panel quota wait: decision logic', () => {
       expect(w.log.some((text) => /no longer runs there; no keys sent/.test(text))).toBe(true);
     });
 
+    it('an identity that cannot be read when the wait would begin: no wait is started, so no key can follow, and the wait begins once it can be read', async () => {
+      const identity: { value: string | null } = { value: null };
+      const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + 2 * H) });
+      w.deps.providerIdentity = () => identity.value;
+      const state: PanelState = { panes: {} };
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(state.panes[KEY_A]?.state, 'a wait was started without the program it is bound to').toBeUndefined();
+      expect(state.panes[KEY_A]?.providerIdentity).toBeUndefined();
+
+      // The provider exits and an unrelated program takes the pane while the identity still cannot be read.
+      w.clock.now = BASE_MS + 2 * H;
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(w.sent, 'the key went to a program that was never identified').toEqual([]);
+
+      identity.value = '5151:started-at-ten';
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(state.panes[KEY_A].providerIdentity).toBe('5151:started-at-ten');
+    });
+
+    it('a saved wait that has no recorded program gets no key: it is dropped and detected again with the program recorded', async () => {
+      const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + 4 * H) });
+      w.deps.providerIdentity = () => '5151:started-at-ten';
+      const state: PanelState = {
+        panes: { [KEY_A]: { key: KEY_A, pane: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1, waits: 1, state: 'waiting_quota', untilMs: BASE_MS, resetMs: BASE_MS, sig: null } },
+      };
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(w.sent, 'a wait with no recorded program authorized a key').toEqual([]);
+      expect(w.log.some((text) => /no recorded program/.test(text))).toBe(true);
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(state.panes[KEY_A].state).toBe('waiting_quota');
+      expect(state.panes[KEY_A].providerIdentity).toBe('5151:started-at-ten');
+      expect(w.sent).toEqual([]);
+    });
+
     it('an identity that cannot be read at the reset: no key, and the wait is tried again on the next pass', async () => {
       const identity: { value: string | null } = { value: '5151:started-at-ten' };
       const { w, state } = await waitingWorld(identity);

@@ -53,8 +53,9 @@
  *     the old one. Under the lock it decides the run again by the same rules as the scan (a resume that finished
  *     after the scan makes the run fresh again), then moves the run directory under
  *     the runs root (an atomic rename, so no process can resume the run from then on), checks that the moved directory is
- *     the scanned one, renames it to `.deleted-<run id>-<time>-<random>` and deletes it. A directory left behind by an interrupted removal is finished by
- *     the next pass, unless the lock inside it still names a live process.
+ *     the scanned one, renames it to `.deleted-<run id>-<time>-<random>-<dev>-<ino>` (the identity of the checked directory) and deletes it. A directory left behind by an interrupted removal is finished by
+ *     the next pass, unless the lock inside it still names a live process or it is not the directory whose identity its
+ *     name carries (a name without that evidence says nothing about what is under it).
  *   - Under ownership every file of the run is reached through the open run directory, whose identity is the scanned
  *     one (withRunDirectory): the decision reads (the age of the run and its state), the journal and torn copy of a
  *     repair, and the directory sync. The name of the run is checked again before the copy, before the shortened journal is put in place and

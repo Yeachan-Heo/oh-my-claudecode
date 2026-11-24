@@ -526,6 +526,13 @@ export async function runPanelQuotaPass(
       }
       // The error is still on the screen, but the program that was running when the wait began may be gone, with another
       // one in the foreground that would take the key as input.
+      if (deps.providerIdentity && entry.providerIdentity === undefined) {
+        // A wait that was saved without the program it was bound to cannot say that the key goes to the program that
+        // stopped: it is dropped, and the error on the screen is detected again, with the program recorded.
+        delete state.panes[key];
+        deps.log(`pane ${key}: the wait has no recorded program; it is dropped and detected again, no keys sent`);
+        continue;
+      }
       if (entry.providerIdentity !== undefined && deps.providerIdentity) {
         const current = deps.providerIdentity(pane);
         if (current === null) {
@@ -639,6 +646,13 @@ export async function runPanelQuotaPass(
     // The capture of this pane is done, so a pass that has no time left here has worked on the pane: it goes to the end of the
     // next pass, and a pane behind it that comes due is not kept waiting by it again.
     if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
+    // A wait is bound to the program that holds the pane's terminal now. Where that cannot be told, no wait is started:
+    // an unbound wait could not tell, at the reset, that the program was replaced.
+    const identity = deps.providerIdentity?.(pane) ?? null;
+    if (deps.providerIdentity && identity === null) {
+      deps.log(`pane ${key}: cannot tell which program runs in the pane; the wait is not started, retry on next pass`);
+      continue;
+    }
     const reading = await withTimeLimit(deps.readQuota(), timeLeft());
     if (reading === TIME_LIMIT) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
     const plan = planForReading(reading, now, settleMs, weekUnit);
@@ -646,8 +660,7 @@ export async function runPanelQuotaPass(
     if (plan.wait) {
       entry.waits += 1;
       entry.state = 'waiting_quota';
-      const identity = deps.providerIdentity?.(pane);
-      if (identity) entry.providerIdentity = identity;
+      if (identity !== null) entry.providerIdentity = identity;
       else delete entry.providerIdentity;
       entry.untilMs = plan.untilMs;
       entry.resetMs = plan.reset;

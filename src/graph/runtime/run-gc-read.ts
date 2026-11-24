@@ -23,6 +23,21 @@ const SNAPSHOT_FILE_NAME = "projection.json";
 export const JOURNAL_FILE_NAME = "journal.jsonl";
 export const TORN_COPY_PREFIX = `${JOURNAL_FILE_NAME}.torn-`;
 export const QUARANTINE_PREFIX = ".deleted-";
+
+// A quarantine name ends with the identity (device and inode) of the directory that was checked to be the scanned run
+// and moved: `.deleted-<run id>-<time>-<random>-<dev>-<ino>`. The name is the durable evidence that a later pass needs
+// before it deletes a leftover without looking at its content: a directory that took the place of the checked one has
+// another inode, and a name without the evidence says nothing about what is under it.
+export function quarantineNameFor(id: string, nowMs: number, suffix: string, identity: FileIdentity): string {
+  return `${QUARANTINE_PREFIX}${id}-${nowMs}-${suffix}-${identity.dev}-${identity.ino}`;
+}
+
+export function quarantineIdentityOf(name: string): FileIdentity | null {
+  const match = /-(\d+)-(\d+)$/.exec(name);
+  if (!name.startsWith(QUARANTINE_PREFIX) || match === null) return null;
+  const identity = { dev: Number(match[1]), ino: Number(match[2]) };
+  return Number.isSafeInteger(identity.dev) && Number.isSafeInteger(identity.ino) ? identity : null;
+}
 // Where a run directory waits right after the move until it is checked to be the scanned one. A pass lists such a name
 // as not a run id, so it is never deleted as the leftover of an interrupted removal, however the process ended.
 export const STAGING_PREFIX = ".moving-";

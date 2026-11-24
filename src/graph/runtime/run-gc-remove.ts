@@ -14,6 +14,8 @@ import {
   leaseOf,
   measureTree,
   NOFOLLOW,
+  quarantineIdentityOf,
+  quarantineNameFor,
   QUARANTINE_PREFIX,
   STAGING_PREFIX,
   type FileIdentity,
@@ -36,6 +38,8 @@ export interface ScannedRun {
   readonly beforeMove?: () => void;
   /** Test-only interlock: right after the directory was moved, before the moved directory is checked. */
   readonly afterMove?: () => void;
+  /** Test-only interlock: the moved directory is checked, and is about to be renamed to its quarantine name. */
+  readonly beforePromote?: () => void;
   /** Test-only: replaces the directory-relative operations of the platform (see OperationsFor). */
   readonly operationsFor?: OperationsFor;
 }
@@ -192,7 +196,9 @@ export function quarantineRun(
   const operationsFor = scanned?.operationsFor ?? directoryOperationsIfSupported;
   const { fence, epoch } = takeOwnership(runDir, "run is held by a live owner; not removed", scanned?.identity);
   const staging = join(realRoot, `${STAGING_PREFIX}${id}-${nowMs}-${suffix}`);
-  const quarantine = join(realRoot, `${QUARANTINE_PREFIX}${id}-${nowMs}-${suffix}`);
+  // The identity that the quarantine name will carry: the scanned directory, or the one that is there now.
+  const named = lstatSync(runDir);
+  const quarantine = join(realRoot, quarantineNameFor(id, nowMs, suffix, scanned?.identity ?? { dev: named.dev, ino: named.ino }));
   try {
     if (scanned !== undefined) {
       scanned.afterOwnership?.();
@@ -216,6 +222,7 @@ export function quarantineRun(
     scanned?.afterMove?.();
     if (scanned !== undefined) putBackUnlessScanned(runDir, staging, scanned.identity);
     try {
+      scanned?.beforePromote?.();
       renameSync(staging, quarantine);
     } catch (error) {
       // The name is not usable: the run goes back where it was.
@@ -249,7 +256,12 @@ export function removeRun(realRoot: string, id: string, scanned?: ScannedRun): v
     if (!lstatSync(runDir).isDirectory()) throw new Error("run is no longer a plain directory");
     if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
     if (leaseOf(runDir).held) throw new Error("quarantined run is held by a live process; not removed");
-    removeTree(runDir, { operationsFor: scanned?.operationsFor }, scanned?.identity);
+    // The name carries the identity of the directory that was checked before it was moved; anything else under this name
+    // was never checked and is not deleted.
+    const evidence = quarantineIdentityOf(id);
+    if (evidence === null) throw new Error("quarantined run has no identity evidence in its name; not removed");
+    assertIdentity(lstatSync(runDir), evidence, "the quarantined run directory");
+    removeTree(runDir, { operationsFor: scanned?.operationsFor }, scanned?.identity ?? evidence);
     return;
   }
   removeTree(quarantineRun(realRoot, id, undefined, undefined, scanned), { operationsFor: scanned?.operationsFor }, scanned?.identity);

@@ -14,6 +14,7 @@ import {
   leaseOf,
   measureRun,
   QUARANTINE_PREFIX,
+  quarantineIdentityOf,
   type FileIdentity,
 } from "./run-gc-read.js";
 
@@ -143,10 +144,14 @@ export function scanRuns({
         continue;
       }
       const lease = leaseOf(runDir);
+      // Only a directory that is the one the name says was checked and moved is cleaned up; any other was never checked.
+      const evidence = quarantineIdentityOf(id);
+      const verified = evidence !== null && evidence.dev === measured.identity.dev && evidence.ino === measured.identity.ino;
+      const deletable = !lease.held && verified;
       scan.runs.push({
         id,
-        decision: lease.held ? "keep" : "delete",
-        reason: lease.held ? lease.reason : "quarantine-cleanup",
+        decision: deletable ? "delete" : "keep",
+        reason: lease.held ? lease.reason : verified ? "quarantine-cleanup" : "quarantine-identity-unverified",
         state: null,
         bytes: measured.bytes,
         newestMs: measured.newestMs,

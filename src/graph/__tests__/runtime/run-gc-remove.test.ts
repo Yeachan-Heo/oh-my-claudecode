@@ -181,7 +181,8 @@ describe("omc graph gc: removal", () => {
       ageTree(dir, OLD);
       const journalBefore = readFileSync(join(dir, "journal.jsonl"), "utf8");
       // The target name is taken by a directory that is not empty, so the rename is refused.
-      const taken = join(realRoot, `.deleted-run-stays-${NOW}-fixed`);
+      const ran = lstatSync(dir);
+      const taken = join(realRoot, `.deleted-run-stays-${NOW}-fixed-${ran.dev}-${ran.ino}`);
       mkdirSync(taken);
       writeFileSync(join(taken, "occupant"), "x");
 
@@ -374,14 +375,66 @@ describe("omc graph gc: removal", () => {
     withBase((base) => {
       const root = makeRoot(base);
       const realRoot = realpathSync(root);
-      const name = `.deleted-run-left-${NOW}-aaaa`;
-      const leftover = makeRun(root, name);
+      const dir = makeFinishedRun(root, "run-left");
+      ageTree(dir, OLD);
+      const leftover = quarantineRun(realRoot, "run-left", NOW, "aaaa");
+      const name = leftover.slice(realRoot.length + 1);
+      writeFileSync(join(leftover, "owner.lock"), JSON.stringify({ pid: deadPid(), epoch: 2, timestamp: OLD }));
       const scanned = scannedFirst(root);
       renameSync(leftover, join(base, "moved-away"));
       const replacement = makeRun(root, name, { "descriptor.json": "{}\n", "journal.jsonl": "other\n" });
 
       expect(() => removeRun(realRoot, name, scanned)).toThrow(/not the directory that was scanned/);
       expect(readFileSync(join(replacement, "journal.jsonl"), "utf8")).toBe("other\n");
+    });
+  });
+
+  // Class: a quarantine name is the only evidence that a later pass has about what is under it. The name carries the
+  // identity of the directory that was checked and moved; a directory that took its place, or a name without that
+  // evidence, is never deleted by the cleanup of leftovers.
+  it("a directory under a quarantine name that does not carry the identity of the checked run is kept, with a live replacement or not", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const dir = makeRun(root, `.deleted-run-claimed-${NOW}-aaaa`, { "descriptor.json": "{}\n", "journal.jsonl": "other\n" });
+      const wrongEvidence = makeRun(root, `.deleted-run-claimed-${NOW}-bbbb-1-2`, { "descriptor.json": "{}\n", "journal.jsonl": "other\n" });
+
+      const result = gc(root);
+      for (const name of [".deleted-run-claimed-" + NOW + "-aaaa", ".deleted-run-claimed-" + NOW + "-bbbb-1-2"]) {
+        expect(decisionOf(result, name).action, name).toBe("keep");
+        expect(decisionOf(result, name).reason, name).toBe("quarantine-identity-unverified");
+      }
+      expect(existsSync(join(dir, "journal.jsonl")), "a directory without evidence was deleted").toBe(true);
+      expect(existsSync(join(wrongEvidence, "journal.jsonl")), "a directory with the evidence of another one was deleted").toBe(true);
+      expect(() => removeRun(realpathSync(root), `.deleted-run-claimed-${NOW}-aaaa`)).toThrow(/no identity evidence/);
+    });
+  });
+
+  it.runIf(process.platform === "linux")("a replacement that takes the staging name before the promotion keeps the evidence of the checked run, so the next pass does not delete it", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-promoted");
+      ageTree(dir, OLD);
+      let swapped = false;
+      const scanned: ScannedRun = {
+        ...scannedFirst(root),
+        beforePromote: () => {
+          swapped = true;
+          // After the check and before the promotion another process puts a fresh run where the checked one waits.
+          const staged = readdirSync(root).filter((name) => name.startsWith(".moving-"));
+          expect(staged).toHaveLength(1);
+          renameSync(join(root, staged[0]), join(base, "checked-away"));
+          makeScenarioRun(root, staged[0], SCENARIOS.ready);
+        },
+      };
+
+      // The process stops right after the promotion; the next pass finds the leftover with a dead lock.
+      const quarantine = quarantineRun(realRoot, "run-promoted", NOW, "fixed", scanned);
+      expect(swapped, "the interlock did not run").toBe(true);
+      expect(existsSync(join(quarantine, "journal.jsonl"))).toBe(true);
+      const result = gc(root);
+      expect(decisionOf(result, quarantine.slice(realRoot.length + 1)).action).toBe("keep");
+      expect(existsSync(join(quarantine, "journal.jsonl")), "the replacement was deleted on the strength of its name").toBe(true);
     });
   });
 
