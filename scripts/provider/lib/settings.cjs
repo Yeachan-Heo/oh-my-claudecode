@@ -255,7 +255,7 @@ function guardEnv(profile) {
   for (const file of [profile.apiKey && profile.apiKey.file, profile.file]) {
     if (typeof file === 'string' && file) derived.push(`(^|[^A-Za-z0-9_])${escapeRegExp(basename(file))}`);
   }
-  derived.push('worker-settings');
+  derived.push('worker-settings', 'git-baseline'); // the copies of the session settings and the git baselines of the workers (the integrity check reads them)
   return JSON.stringify({
     blockedCommands: profile.guard.blockedCommands,
     allowedCommands: profile.guard.allowedCommands,

@@ -112,7 +112,7 @@ const ADVISOR_CONTROLS = Object.freeze({
   OMC_PROVIDER_ADVISOR_INPUT: isSwitch,
   OMC_PROVIDER_ADVISOR_JOURNAL: isSwitch,
   OMC_PROVIDER_ADVISOR_LIMIT: isSwitch,
-  OMC_PROVIDER_ADVISOR_PROTOCOL: (v) => /^[a-z0-9-]{1,40}$/.test(v),
+  OMC_PROVIDER_ADVISOR_PROTOCOL: (v) => /^[a-z0-9-]{1,40}$/.test(v) && v !== 'final', // the final gate is fail-closed and belongs to the lead's own consultations: a rescue consultation of a worker could never pass it
   OMC_PROVIDER_ADVISOR_EVENT: (v) => Object.values(ADVISOR_EVENTS).includes(v),
   OMC_PROVIDER_ADVISOR_LIMIT_PER_TASK: isPositiveInt,
   OMC_PROVIDER_ADVISOR_LIMIT_PER_GROUP: isPositiveInt,

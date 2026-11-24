@@ -3,7 +3,7 @@
 // keys, fixed model and effort, role recovery from the team state, slots, integrity check and signals.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -662,7 +662,7 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
     it('(15c) the advisor controls of the lead (switches, protocol, event, limits, caps, files) are copied into the settings env after validation, while the child process env stays filtered; invalid values and the test-only variables are not copied', () => {
       const f = fixture();
       const controls = {
-        OMC_PROVIDER_ADVISOR_INPUT: '1', OMC_PROVIDER_ADVISOR_PROTOCOL: 'final', OMC_PROVIDER_ADVISOR_JOURNAL: '1', OMC_PROVIDER_ADVISOR_LIMIT: '1',
+        OMC_PROVIDER_ADVISOR_INPUT: '1', OMC_PROVIDER_ADVISOR_PROTOCOL: 'plan', OMC_PROVIDER_ADVISOR_JOURNAL: '1', OMC_PROVIDER_ADVISOR_LIMIT: '1',
         OMC_PROVIDER_ADVISOR_EVENT: 'final', OMC_PROVIDER_ADVISOR_LIMIT_PER_TASK: '3', OMC_PROVIDER_ADVISOR_LIMIT_PER_GROUP: '5', OMC_PROVIDER_ADVISOR_TOP_SLOTS: '1',
         OMC_PROVIDER_ADVISOR_QUEUE_WAIT_MS: '2500', OMC_PROVIDER_ADVISOR_CAP_ADVICE: '1200', OMC_PROVIDER_ADVISOR_DIFF_BASE: 'main',
         OMC_PROVIDER_ADVISOR_LOG_FILE: join(f.dir, 'advisor-rows.jsonl'), OMC_PROVIDER_ADVISOR_LIMIT_FILE: join(f.dir, 'advisor-limit-state.json'),
@@ -698,6 +698,20 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
       expect(bad.stderr).toMatch(/OMC_PROVIDER_ADVISOR_LOG_FILE/);
       expect(bad.stderr).toMatch(/OMC_PROVIDER_ADVISOR_LIMIT_FILE/);
       expect(bad.stderr).not.toMatch(/secret-name/);
+    });
+
+    it('(15e) the final protocol of the lead is not passed to the worker (the final gate is fail-closed and belongs to the lead consultations): the settings env has no protocol, the name is reported on stderr, the other switches and the plan and rescue protocols are passed', () => {
+      const f = fixture();
+      const r = f.run({ ...TEAM, OMC_PROVIDER_ADVISOR_INPUT: '1', OMC_PROVIDER_ADVISOR_JOURNAL: '1', OMC_PROVIDER_ADVISOR_PROTOCOL: 'final' });
+      expect(r.status, r.stderr).toBe(0);
+      const env = f.settingsOf(r).env;
+      expect(env).not.toHaveProperty('OMC_PROVIDER_ADVISOR_PROTOCOL');
+      expect(env).toMatchObject({ OMC_PROVIDER_ADVISOR_INPUT: '1', OMC_PROVIDER_ADVISOR_JOURNAL: '1' });
+      expect(r.stderr).toMatch(/OMC_PROVIDER_ADVISOR_PROTOCOL/);
+      for (const protocol of ['plan', 'rescue']) {
+        const ok = f.run({ ...TEAM, OMC_PROVIDER_ADVISOR_INPUT: '1', OMC_PROVIDER_ADVISOR_PROTOCOL: protocol });
+        expect(f.settingsOf(ok).env.OMC_PROVIDER_ADVISOR_PROTOCOL, protocol).toBe(protocol);
+      }
     });
 
     it('(14) with rescue off: no rescue hooks; the task id stays; the existing guard hook is untouched', () => {
@@ -982,8 +996,13 @@ describe.skipIf(process.platform === 'win32')('provider worker wrapper', () => {
     spawnSync('git', ['-C', repo, '-c', 'user.name=a', '-c', 'user.email=a@b', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'p'], { encoding: 'utf8' });
     const file = join(f.state, 'git-baseline', 'team-a', 'worker-1.json');
     const env = { ...TEAM, OMC_TEAM_WORKER_CWD: repo };
+    const stale = join(f.state, 'git-baseline', 'team-gone', 'worker-9.json');
+    mkdirSync(join(f.state, 'git-baseline', 'team-gone'), { recursive: true });
+    writeFileSync(stale, '{"checked":false}\n');
+    utimesSync(stale, new Date(Date.now() - 8 * 86400_000), new Date(Date.now() - 8 * 86400_000));
     const clean = f.run(env, ['--dangerously-skip-permissions', '--model', 'sonnet']);
     expect(clean.status, clean.stderr).toBe(0);
+    expect(existsSync(stale), 'a baseline older than 7 days is swept at the start of a worker').toBe(false);
     const written = JSON.parse(readFileSync(file, 'utf8'));
     expect(written.cwd).toBe(repo);
     expect(written.checked).toBe(true);

@@ -678,6 +678,16 @@ function verdictWithoutTask(z, e) {
   return full;
 }
 
+// A task killed after its verdict prints status killed (a human decision wins in the output), with the status of the saved verdict in verdict_status;
+// an integrity rejection stays visible as the printed status: failed, the verdict that a reader must not miss.
+const hasIntegrityError = (verdict) => Array.isArray(verdict && verdict.errors) && verdict.errors.some((m) => typeof m === 'string' && m.startsWith('integrity:'));
+function killedOutput(out, killed, verdict) {
+  if (!killed) return out;
+  out.verdict_status = (verdict && verdict.status) ?? null;
+  if (!hasIntegrityError(verdict)) out.status = 'killed';
+  return out;
+}
+
 // Printing of the saved verdict (the saved one wins: a second result call after a parallel one does not evaluate again).
 // result_raw comes from the OMC task, header from the task journal; killed after the verdict wins in the output.
 function printSavedVerdict(z, id, e) {
@@ -685,18 +695,19 @@ function printSavedVerdict(z, id, e) {
   const { task } = readOmcTask(z, e);
   const header = taskHeader(id, e);
   const out = { id, team: z.team, ...z.verdict, result_raw: (task && task.result) ?? null };
-  if (z.killed) out.status = 'killed';
+  killedOutput(out, z.killed, z.verdict);
   if (header) out.header = header;
   console.log(JSON.stringify(out));
   process.exit(EXIT.OK);
 }
 
 // A saved verdict is final, with one exception: an integrity failure of the worker that became known only after the verdict was written (the worker posts its
-// result before claude exits, and the wrapper checks .git when it exits) turns a verdict that is not failed or killed into failed with a handoff, once. Without
+// result before claude exits, and the wrapper checks .git when it exits) turns a verdict that is not failed or killed into failed with a handoff, once (also when
+// the task was killed after the verdict). Without
 // the journal facts (module missing, no integrity class) the verdict stays as saved.
 function upgradeSavedVerdict(id, z, e) {
   const status = z.verdict && z.verdict.status;
-  if (z.killed || !status || status === STATUSES.FAILED || status === 'killed') return z;
+  if (!status || status === STATUSES.FAILED || status === 'killed') return z; // a task killed after the verdict is corrected too: kill is an ordinary end of a task
   const facts = evaluationFacts(id, e);
   if (!facts || facts.class !== FAILURE_CLASSES.INTEGRITY) return z;
   const next = { ...z.verdict, errors: Array.isArray(z.verdict.errors) ? [...z.verdict.errors] : [] };
@@ -704,7 +715,7 @@ function upgradeSavedVerdict(id, z, e) {
   let reject = null;
   try { if (existsSync(resultModule)) reject = require(resultModule).rejectIntegrity; } catch { reject = null; }
   if (typeof reject === 'function') reject(next);
-  else { next.status = STATUSES.FAILED; next.handoff = true; next.errors.push('integrity: the worker changed the shared part of .git, fail closed, the result is not accepted'); }
+  else { next.status = STATUSES.FAILED; next.handoff = true; next.errors.push('integrity: the shared part of .git (config, hooks, info) changed during the task, fail closed, the result is not accepted'); }
   changeTask(id, e, (d) => (d.verdict && d.verdict.status !== STATUSES.FAILED && d.verdict.status !== 'killed' ? { ...d, verdict: next, verdict_ts: new Date().toISOString() } : null));
   return readTask(id, e) || z;
 }
@@ -780,7 +791,7 @@ function resultCommand(rest) {
   // The write only when a parallel result call has not written a verdict earlier; when overtaken, the saved one is printed (not this one).
   const written = !inProgress ? changeTask(id, env, (d) => (d.verdict ? null : { ...d, verdict: evaluated, verdict_ts: new Date().toISOString() })) : null;
   if (written === null && !inProgress) printSavedVerdict(readTask(id, env), id, env);
-  if (written !== null && written.killed) out.status = 'killed'; // killed after the verdict wins in the output (a fresh object from under the lock)
+  if (written !== null) killedOutput(out, written.killed, evaluated); // killed after the verdict wins in the output (a fresh object from under the lock), see killedOutput
   const header = taskHeader(id, env); // the header AFTER the write (with in_progress without a write the status in the file is still absent: `?`)
   if (header) out.header = header;
   console.log(JSON.stringify(out));

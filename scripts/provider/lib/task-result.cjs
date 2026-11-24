@@ -274,7 +274,7 @@ function evaluateCompleted(evaluation, task, facts, warnings) {
 }
 
 // The integrity rejection of an evaluation (also applied by provider-task to a verdict that was saved before the integrity row existed).
-const INTEGRITY_ERROR = 'integrity: the worker changed the shared part of .git, fail closed, the result is not accepted';
+const INTEGRITY_ERROR = 'integrity: the shared part of .git (config, hooks, info) changed during the task, fail closed, the result is not accepted';
 function rejectIntegrity(evaluation) {
   evaluation.status = vocab.STATUSES.FAILED;
   evaluation.handoff = true;

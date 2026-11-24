@@ -295,4 +295,11 @@ describe.skipIf(process.platform === 'win32')('provider bash guard', () => {
     const read = run({ tool_name: 'Bash', tool_input: { command: `cat ${join(dir, 'b.txt')}` } }, env);
     expect(deniedRun(write) && deniedRun(bash) && read.stdout === '').toBe(true);
   });
+  it('the git baselines of the workers are protected like the settings copies: Bash commands that name the directory are refused (sed, node, python, cat), the same commands without it pass', () => {
+    const dir = `${STATE_DIR}/git-baseline/team-a/worker-1.json`;
+    for (const command of [`sed -i 's/false/true/' ${dir}`, `node -e "require('fs').writeFileSync('${dir}','{}')"`, `python3 -c "open('${dir}','w').write('{}')"`, `cat ${dir}`]) {
+      expect(denied(respond(command)), command).toBe(true);
+    }
+    expect(denied(respond(`sed -i 's/false/true/' ${STATE_DIR}/notes/x.json`))).toBe(false);
+  });
 });

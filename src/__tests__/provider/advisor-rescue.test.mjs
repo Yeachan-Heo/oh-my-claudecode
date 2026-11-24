@@ -13,7 +13,9 @@ import { makeTmp } from './_helpers.mjs';
 // Each case starts several node processes; on a loaded machine that takes longer than the default limit.
 vi.setConfig({ testTimeout: 180000 });
 
-const hook = createRequire(import.meta.url)('../../../scripts/provider/provider-hook-rescue.cjs');
+const require = createRequire(import.meta.url);
+const hook = require('../../../scripts/provider/provider-hook-rescue.cjs');
+const { advisorControls } = require('../../../scripts/provider/lib/env.cjs');
 const js = JSON.stringify;
 const check = (condition, message) => expect(Boolean(condition), typeof message === 'function' ? message() : message).toBe(true);
 
@@ -72,5 +74,26 @@ describe.skipIf(process.platform === 'win32')('advisor model for the rescue cons
         check(end.event === 'test-failure' && end.failure_no === 2, js(end));
       }
     }
+  });
+  it('(14) the lead has OMC_PROVIDER_ADVISOR_PROTOCOL=final (with the input and the journal on): the worker session gets no final protocol, so the consultation of the rescue package is accepted (exit 0, advice delivered, no gate failure)', () => {
+    const lead = { OMC_PROVIDER_ADVISOR_INPUT: '1', OMC_PROVIDER_ADVISOR_JOURNAL: '1', OMC_PROVIDER_ADVISOR_PROTOCOL: 'final' };
+    const session = advisorControls(lead);
+    check(!('OMC_PROVIDER_ADVISOR_PROTOCOL' in session) && session.OMC_PROVIDER_ADVISOR_INPUT === '1' && session.OMC_PROVIDER_ADVISOR_JOURNAL === '1', js(session));
+    const state = { ...hook.initialState(), signature: 'sig0123456789abc', repeats: 2 };
+    const text = hook.rescuePackage('sig0123456789abc', 2, 'FAIL tests/x.mjs: 2 tests failed', state, { limit: 2 }, 'provider-advisor', { ...session, OMC_PROVIDER: 'acme' });
+    const command = /exactly this command \(by its bare name\):\n {2}([\s\S]*?)\nA successful consultation/.exec(text)[1];
+    const r = spawnSync('/bin/sh', ['-c', command.replace(/^provider-advisor/, '"$NODE" "$ADVISOR"')], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: TMP, NODE: process.execPath, ADVISOR, FAKE_OUT: join(TMP, `r${++n}`), OMC_PROVIDER_ADVISOR_CLAUDE_BIN: FAKE, OMC_PROVIDER_ADVISOR_LOG_FILE: JOURNAL, ...session },
+      timeout: 60000,
+    });
+    check(r.status === 0 && !/GATE:/.test(r.stdout), `exit ${r.status}: ${r.stdout.slice(0, 200)} ${r.stderr.slice(0, 200)}`);
+    // With the final protocol in the environment of the consultation (what the copy used to give) the same command fails the gate.
+    const gated = spawnSync('/bin/sh', ['-c', command.replace(/^provider-advisor/, '"$NODE" "$ADVISOR"')], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: TMP, NODE: process.execPath, ADVISOR, FAKE_OUT: join(TMP, `r${++n}`), OMC_PROVIDER_ADVISOR_CLAUDE_BIN: FAKE, OMC_PROVIDER_ADVISOR_LOG_FILE: JOURNAL, ...session, OMC_PROVIDER_ADVISOR_PROTOCOL: 'final' },
+      timeout: 60000,
+    });
+    check(gated.status === 3, `the final gate of the lead protocol refuses the rescue question: exit ${gated.status}`);
   });
 });

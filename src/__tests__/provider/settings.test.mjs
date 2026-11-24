@@ -202,6 +202,7 @@ describe.skipIf(process.platform === 'win32')('provider settings', () => {
     expect(protects('cat /fixture/keys/fake.key')).toBe(true);
     expect(protects('cat ~/.config/claude-omc/providers.jsonc')).toBe(true);
     expect(protects('ls ~/.omc/state/provider/acme/worker-settings')).toBe(true);
+    expect(protects('ls ~/.omc/state/provider/acme/git-baseline/team-a')).toBe(true);
     expect(protects('echo configured-pattern')).toBe(true);
     expect(protects('echo not-a-key-file.txt')).toBe(false);
   });

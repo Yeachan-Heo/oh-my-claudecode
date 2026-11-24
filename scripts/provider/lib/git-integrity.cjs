@@ -6,12 +6,16 @@
 // a git repository or git is unavailable (no check then, nothing is blocked).
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } = require('node:fs');
+const { chmodSync, mkdirSync, readdirSync, readFileSync, rmdirSync, statSync, unlinkSync, writeFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 
 // Only config keys that matter for identity and isolation are hashed, not the whole file: unrelated
 // keys changed during a run (for example an upstream set by another session) do not count as a change.
 const RELEVANT_CONFIG_KEYS = /^(user\.|remote\.|core\.hookspath|core\.sshcommand|alias\.|include|credential\.|url\.)/;
+
+// Files that ordinary housekeeping of the repository writes and that run nothing: `git gc`, `git repack -a -d` and `git maintenance run` rewrite
+// info/refs (update-server-info, a listing for dumb HTTP serving). They are not part of the digest, so cleaning by the lead is not a violation.
+const LEAD_MAINTENANCE = new Set(['info/refs']);
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
@@ -56,7 +60,7 @@ function gitDigest(cwd) {
     list.sort((a, b) => a.name.localeCompare(b.name));
     for (const item of list) {
       if (item.isDirectory()) readDir(join(dir, item.name), `${prefix}${item.name}/`);
-      else entries.push([`${prefix}${item.name}`, markerOf(join(common, dir, item.name))]);
+      else if (!LEAD_MAINTENANCE.has(`${prefix}${item.name}`)) entries.push([`${prefix}${item.name}`, markerOf(join(common, dir, item.name))]);
     }
   };
   readDir('hooks', 'hooks/');
@@ -112,6 +116,26 @@ function markBaselineChecked(file) {
   } catch { /* no baseline: nothing to mark */ }
 }
 
+// Removes baselines older than `days` days (a wrapper that was killed without its own check leaves an unchecked one behind), and the team
+// directories that become empty. Only *.json files directly under <stateDir>/git-baseline/<team>/ are touched.
+function sweepBaselines(stateDir, days = 7) {
+  const root = join(stateDir, 'git-baseline');
+  const limit = Date.now() - days * 86400_000;
+  let teams;
+  try { teams = readdirSync(root, { withFileTypes: true }); } catch { return; } // no baselines yet
+  for (const team of teams) {
+    if (!team.isDirectory()) continue;
+    const dir = join(root, team.name);
+    try {
+      for (const name of readdirSync(dir)) {
+        if (!name.endsWith('.json')) continue;
+        try { if (statSync(join(dir, name)).mtimeMs < limit) unlinkSync(join(dir, name)); } catch { /* raced with another start */ }
+      }
+      if (readdirSync(dir).length === 0) rmdirSync(dir);
+    } catch { /* raced with another start */ }
+  }
+}
+
 // Description of a change of .git since the baselines of a team that its wrappers have not checked yet; null when there is none (also when
 // the working directory is gone or is no repository any more: no data is not a violation).
 function liveChange(stateDir, team) {
@@ -129,4 +153,4 @@ function liveChange(stateDir, team) {
   return null;
 }
 
-module.exports = { gitDigest, compareDigest, RELEVANT_CONFIG_KEYS, baselineFile, writeBaseline, markBaselineChecked, liveChange };
+module.exports = { gitDigest, compareDigest, RELEVANT_CONFIG_KEYS, baselineFile, writeBaseline, markBaselineChecked, sweepBaselines, liveChange };
