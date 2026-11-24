@@ -37,7 +37,7 @@ Three standalone scripts, Python 3 standard library only:
    `threshold - 10` percent (the window was reset sooner than the cache said), and it extends the pause while the cache
    still shows the threshold with a later reset time.
 
-The guard and the hook append to their logs without following a symbolic link at the last component and only to a regular file (a link
+The pause is stored in the state file before its pause file is published, so a pause file never exists without a stored pause behind it (a failing state write delays the pause to the next tick that can write). Paths are compared with the case rules of the platform (Windows, macOS), also for files that do not exist yet. The guard and the hook append to their logs without following a symbolic link at the last component and only to a regular file (a link
 in a shared directory cannot redirect the write). The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit (also when an earlier removal of the file failed and is still
 pending: the stop tries it once more; and also when the unpaused state cannot be written at that moment: the file goes anyway, the stored pause stays and a restart keeps it only while it lasts), so a stop or a restart (also
 `systemctl --user restart`, which a change of `exclude` needs) releases the waiting sessions. The restarted guard brings
@@ -170,7 +170,7 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    content is written. The rest of the file is kept as it is; a hook of another tool, also in the same group, stays (in
    a group of its own with its matcher). `add` twice changes nothing. `add` with another hook path replaces the entry in
    place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, an interpreter that is not
-   executable or cannot run the hook (it is tried once: Python 3 with the standard library), two of the pause file, hook log,
+   executable or cannot run the hook (it is tried once: Python 3 with the standard library), a hook that does not hold a pause (`add` runs the selected hook against a pause of its own in a private directory: it must hold, and exit 0 when the pause is removed), two of the pause file, hook log,
    `settings.json`, hook, interpreter, configuration file and the two scripts that are one file, and a hook file whose
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The tool counts a command as
    the hook only when that file is its script (the command word, or the argument of a Python, or of a command that has
@@ -250,7 +250,7 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 
 A configuration error (a missing required key, a wrong type, a number that is not finite or outside its range, a
 directory of the pause or state file that is missing, a `pause_file` that is not absolute, a `pause_file` or `state_file` that is not a regular file (a directory), two configured files (`pause_file`, `state_file` and its `.lock`, `usage_cache`,
-`log_file`, `settings_file`, the configuration file itself, the scripts of the guard, hook and settings tool, the hook, interpreter and `--log` file named by the registered entry, and the lock files `<state_file>.lock`, `<pause_file>.lock` and `<usage_cache>.lock`) that are one file by path, symbolic link or hard link)
+`log_file`, `settings_file`, the configuration file itself, the scripts of the guard, hook and settings tool, the hook, interpreter or other launching program and `--log` file named by the registered entry, and the lock files `<state_file>.lock`, `<pause_file>.lock` and `<usage_cache>.lock`) that are one file by path, symbolic link or hard link)
 exits with status 2. A state
 file that does not have the shape the guard writes (times that are not positive or are more than 6 hours ahead included) is ignored: the guard starts without a pause. A file at `pause_file` is removed as a leftover only when it has the full shape the guard publishes (`v` 2, `paused` true, `pid`, `since`, `resume_at`, `valid_until`).
 

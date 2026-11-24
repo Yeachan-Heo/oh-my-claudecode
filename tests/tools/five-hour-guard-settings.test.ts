@@ -525,6 +525,35 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('add runs the selected hook against a pause: an empty file, a file that exits at once and a hook that never releases are refused, the real hook is accepted', () => {
+    const f = fixture('settings-probe-hook');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    for (const [name, body, want] of [['empty', '', /does not hold a valid pause/], ['exits', 'import sys\nsys.exit(0)\n', /does not hold a valid pause/],
+      ['no-release', 'import sys, time\nopen(sys.argv[sys.argv.index("--log") + 1], "a").write("hold-start\\n")\ntime.sleep(600)\n', /does not release/]] as const) {
+      const hook = join(f.dir, name, 'five-hour-guard-hook.py');
+      mkdirSync(dirname(hook), { recursive: true });
+      writeFileSync(hook, body, 'utf8');
+      writeFileSync(f.settings, original, 'utf8');
+      const r = tool(f, 'add', ['--hook', hook]);
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, name).toMatch(want);
+      expect(readText(f.settings), `${name}: nothing written`).toBe(original);
+    }
+    expect(tool(f, 'add').status, 'the real hook').toBe(0);
+  });
+
+  it('paths that differ only by case are one file where the platform ignores case, also when neither exists (checked with the case rules of Windows)', () => {
+    const f = fixture('settings-case-alias');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const driver = ['import os, runpy, sys', 'os.path.normcase = lambda p: p.lower()', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const args = [SETTINGS_TOOL, 'add', '--settings', f.settings, '--pause-file', join(f.dir, 'Pause-Case.json'), '--hook-log', join(f.dir, 'pause-case.json'), '--hook', HOOK, '--python', PYBIN];
+    const r = runPyCode(driver, args);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/are the same file/);
+    expect(readText(f.settings)).toBe(original);
+  });
+
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
     const f = fixture('settings-timeout');
     const original = JSON.stringify(base(), null, 2) + '\n';

@@ -760,6 +760,54 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(guardOnce(f).stdout, 'a launcher other than the one tested').toMatch(/but its shell check tests .*: the two must be the same interpreter/);
   });
 
+  it('the pause is stored before its file is published: a state write that fails at the first high reading publishes nothing a crash could leave behind', () => {
+    const f = fixture('state-first', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const code = ['import os, runpy, sys', 'real = os.open',
+      'def maybe(p, *a, **k):', '    if "state.json" in str(p) and str(p).endswith(".tmp"): raise OSError(28, "No space left on device")', '    return real(p, *a, **k)',
+      'os.open = maybe', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout).toMatch(/ERROR: tick failed/);
+    expect(existsSync(f.pause), 'no pause file without a stored pause behind it').toBe(false);
+    expect(guardOnce(f).stdout, 'it starts as soon as the state can be written').toMatch(/THRESHOLD/);
+    expect(readJson(f.state).paused).toBe(true);
+    expect(existsSync(f.pause)).toBe(true);
+  });
+
+  it('paths that differ only by case are one file where the platform ignores case, also when neither exists yet (checked with the case rules of Windows)', () => {
+    const f = fixture('case-alias', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: join(f.dir, 'Pause-Case.json'), state_file: join(f.dir, 'pause-case.json') }), 'utf8');
+    const driver = ['import os, runpy, sys', 'os.path.normcase = lambda p: p.lower()', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(driver, [GUARD, '--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/are the same file/);
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'on a case-sensitive platform they are two files').toBe(0);
+  });
+
+  it('the program that launches the hook is a protected file too, also without a shell check: a state file or log that is it is refused and the program kept', () => {
+    const f = fixture('launcher-protected', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const wrapper = join(f.dir, 'python3-wrapper');
+    writeFileSync(wrapper, '#!/bin/sh\nexec python3 "$@"\n', 'utf8');
+    chmodSync(wrapper, 0o755);
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `exec ${wrapper} -I ${HOOK} --pause-file ${f.pause}` }] }] } }), 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: wrapper, settings_file: f.settings }), 'utf8');
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/are the same file/);
+    expect(readText(wrapper)).toBe('#!/bin/sh\nexec python3 "$@"\n');
+  });
+
+  it('a hook entry that runs the script directly needs an executable file: a copy of mode 0644 is reported, one of mode 0755 is accepted', () => {
+    const f = fixture('direct-script', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const copy = join(f.dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, copy);
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `[ -f ${f.pause} ] && [ -f ${copy} ] || exit 0; exec ${copy} --pause-file ${f.pause}` }] }] } }), 'utf8');
+    chmodSync(copy, 0o644);
+    expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): .* runs .* directly, but it is not an executable file/);
+    chmodSync(copy, 0o755);
+    expect(guardOnce(f).stdout).not.toMatch(/WARNING/);
+  });
+
   it('a stored pause with times outside any window the guard writes is ignored, not a crash at start', () => {
     const f = fixture('state-bounds', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     for (const bad of [{ since: 1, resume_at: 1e300 }, { since: 1e300, resume_at: now() + 600 }, { since: -1e300, resume_at: now() + 600 }, { since: 1, resume_at: -1e300 },

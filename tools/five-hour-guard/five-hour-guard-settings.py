@@ -85,9 +85,16 @@ PAUSE_FILE = A.pause_file or CFG.get('pause_file')
 HOOK_LOG = A.hook_log if A.hook_log is not None else CFG.get('hook_log_file')
 
 
+def path_key(path):
+    """A path once links are resolved, in the case rules of the platform (Windows; macOS volumes are mostly case-insensitive): two
+    paths of files that do not exist yet can differ only by case and still be one file."""
+    key = os.path.normcase(os.path.realpath(path))
+    return key.lower() if sys.platform == 'darwin' else key
+
+
 def same_file(a, b):
     """The same path once links are resolved, or the same existing file (a hard link)."""
-    if os.path.realpath(a) == os.path.realpath(b):
+    if path_key(a) == path_key(b):
         return True
     try:
         return os.path.samefile(a, b)
@@ -114,6 +121,47 @@ def command():
 
 
 OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
+
+
+def probe_hook():
+    """Run the selected hook against a pause that this tool writes in a private directory: a valid pause must make it hold (it logs
+    hold-start and keeps running) and the removal of the file must release it (exit 0). A file that is empty, truncated or another
+    program with the name of the hook would exit at once and protect nothing."""
+    import tempfile
+    env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
+                                                           'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')}
+    with tempfile.TemporaryDirectory(prefix='five-hour-guard-probe-') as d:
+        pause, log = os.path.join(d, 'pause.json'), os.path.join(d, 'hook.log')
+        now = time.time()
+        with open(pause, 'w') as f:
+            json.dump({'v': 2, 'paused': True, 'since': now, 'resume_at': now + 600, 'valid_until': now + 300, 'exclude': [], 'pid': os.getpid()}, f)
+        try:
+            p = subprocess.Popen([A.python, '-I', A.hook, '--pause-file', pause, '--log', log, '--poll', '0.1'], stdin=subprocess.PIPE,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+        except OSError as e:
+            fail(f'the hook {A.hook!r} cannot be started: {e!r}')
+        try:
+            try:
+                p.stdin.write(b'{"session_id": "probe0001", "tool_name": "Bash"}')
+                p.stdin.close()
+            except OSError:
+                pass
+            end = time.monotonic() + 60
+            while time.monotonic() < end and p.poll() is None and not (os.path.exists(log) and 'hold-start' in open(log).read()):
+                time.sleep(0.05)
+            if p.poll() is not None or not os.path.exists(log):
+                fail(f'the hook {A.hook!r} does not hold a valid pause (it ended with status {p.poll()} at once): it is not the hook of the guard, so the entry would protect nothing')
+            os.unlink(pause)
+            try:
+                p.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                fail(f'the hook {A.hook!r} does not release when the pause file is removed')
+            if p.returncode != 0:
+                fail(f'the hook {A.hook!r} ended with status {p.returncode} after the pause was removed (it must exit 0)')
+        finally:
+            if p.poll() is None:
+                p.kill()
+                p.wait()
 
 
 def hook_scripts(command):
@@ -297,6 +345,7 @@ def run_once():
             fail(f'the interpreter {A.python!r} cannot run the hook: {e!r}')
         if probe.returncode != 0 or probe.stdout.strip() != str(nonce * 3 + 1):
             fail(f'the interpreter {A.python!r} cannot run the hook (it must be Python 3 with the standard library): {probe.stderr.strip()[-300:] or "it did not run the check"}')
+        probe_hook()
         if MARK not in os.path.basename(A.hook):
             fail(f'the file name of the hook {A.hook!r} does not contain {MARK}: the entry is recognised by that name, so `check` and `remove` would not find it (copy the hook to another directory, keep its name)')
         entry = {'matcher': '*', 'hooks': [{'type': 'command', 'command': command(), 'timeout': A.timeout}]}
