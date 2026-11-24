@@ -1,3 +1,20 @@
+# oh-my-claudecode v5.8.8: Maintenance release with named-model routing support
+
+## Release Notes
+
+v5.8.8 is a maintenance patch that stabilizes named-model routing support. Key improvements include opt-in Bedrock inference-profile ID recognition and improved SessionStart provider detection.
+
+### Features
+
+- **feat(jev): opt-in named-model routing for Bedrock inference profiles** (#5118) — introduces `OMC_JEV_MODEL_ROUTING_NAMED_MODELS` environment variable to route named models to Bedrock with inference-profile ID support
+- **feat(session-start): improved provider detection with CLAUDE_MODEL/ANTHROPIC_MODEL trimming** (#5118)
+
+### Bug Fixes
+
+- **test(jev): await shadow resolver before context cleanup** (#5126)
+
+---
+
 # oh-my-claudecode v5.8.7: Consolidation release with Jev improvements and team fixes
 
 ## Release Notes
