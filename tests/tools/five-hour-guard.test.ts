@@ -46,6 +46,15 @@ const HOOK_CPU_DRIVER = [
   't = os.times()',
   'print(json.dumps({"cpu": t.children_user + t.children_system, "rc": p.returncode}))',
 ].join('\n');
+// the lookup of a program by name (shutil.which, used by the wiring check for an interpreter given without a path) fails inside the guard
+const WHICH_FAILS_DRIVER = [
+  'import runpy, shutil, sys',
+  'def which(*args, **kwargs):',
+  '    raise RuntimeError("lookup failed")',
+  'shutil.which = which',
+  'sys.argv = sys.argv[1:]',
+  "runpy.run_path(sys.argv[0], run_name='__main__')",
+].join('\n');
 const FAST = ['--interval', '0.2', '--heartbeat', '5', '--margin', '1'];
 const guardArgs = (f: Fixture, extra: string[] = []) => ['--config', f.cfg, ...FAST, ...extra];
 const startGuard = (f: Fixture, extra: string[] = []) => spawnPy(GUARD, guardArgs(f, extra));
@@ -534,6 +543,16 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const r = runSync(GUARD, ['--config', f.cfg, '--once']);
     expect(r.status, r.stderr).toBe(2);
     expect(r.stderr).toMatch(/"pause_file" must be an absolute path/);
+  });
+
+  it('hook_log_file of the configuration must be an absolute path too: the entry the guard offers to paste would carry it into every session', () => {
+    const f = fixture('relative-hook-log-config', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, hook_log_file: 'logs/hook.log' }), 'utf8');
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/"hook_log_file" must be an absolute path/);
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, hook_log_file: f.hookLog }), 'utf8');
+    expect(guardOnce(f).status, 'an absolute hook log is accepted').toBe(0);
   });
 
   it('configured files that are one file (same path, a link, a hard link) are refused before anything is removed or written', () => {
@@ -1360,6 +1379,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       { name: 'a hook that does not exist', command: gen({ hook: '/nonexistent-dir/five-hour-guard-hook.py' }), paste: gen(), also: /names \/nonexistent-dir\/five-hour-guard-hook\.py, which does not exist/ },
       { name: 'a relative hook that resolves from the working directory of the guard', command: gen({ hook: rel(HOOK) }), paste: gen(), also: /uses the relative path /i },
       { name: 'a relative pause file', command: gen({ pause: rel(f.pause) }), paste: gen() },
+      { name: 'a poll interval written by hand', command: `${gen()} --poll 3600`, paste: gen() },
+      // from a session started in the repository it is the hook itself, which would then get the log lines; from the working directory of the guard it is a file that is not there
+      { name: 'a relative hook log that does not resolve from the working directory of the guard', command: gen({ log: 'tools/five-hour-guard/five-hour-guard-hook.py' }), paste: gen(), also: /logs to the relative path tools\/five-hour-guard\/five-hour-guard-hook\.py/ },
     ];
     for (const key of [false, true]) {
       writeFileSync(f.cfg, JSON.stringify(key ? { ...base, hook_log_file: join(f.dir, 'hook.log') } : base), 'utf8');
@@ -1410,6 +1432,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       if (want) expect(out, name).toMatch(want);
       else expect(out, name).not.toMatch(/WARNING/);
     }
+  });
+
+  it('a timeout that is an integer too large for a float (400 digits) is reported like a missing one: the guard starts, warns, and still enters the pause', () => {
+    const f = fixture('handler-huge-timeout', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 'HUGE' }] }] } });
+    writeFileSync(f.settings, entry.replace('"HUGE"', '9'.repeat(400)), 'utf8');
+    const out = guardOnce(f).stdout;   // guardOnce: exit status 0
+    expect(out, 'the start').toMatch(/WARNING \(start\): .*timeout \(9{40}\.\.\.\) is missing, not a finite number or below 21600/);
+    expect(out, 'the pause start').toMatch(/WARNING \(pause start\): .*timeout \(9{40}\.\.\.\) is missing/);
+    expect(readJson(f.pause).paused, 'the pause was entered').toBe(true);
+  });
+
+  it('a failure inside the check of the hook entry is reported and does not stop the guard: it starts and still enters the pause', () => {
+    const f = fixture('wiring-check-fails', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    // an interpreter given by name only is looked up with shutil.which, which fails in this run
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, 'python3'), timeout: 21600 }] }] } }), 'utf8');
+    const r = runPyCode(WHICH_FAILS_DRIVER, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout, 'the start').toMatch(/WARNING \(start\): the check of the hook entry failed .*lookup failed/);
+    expect(r.stdout, 'the pause start').toMatch(/WARNING \(pause start\): the check of the hook entry failed .*lookup failed/);
+    expect(readJson(f.pause).paused, 'the pause was entered').toBe(true);
   });
 
   it('a file that appears at pause_file after the start is never replaced by a pause: the tick reports it and nothing is published or stored, also when it appears in the instant before the file is linked into place', async () => {
@@ -1788,6 +1833,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard hook', { timeout: 90000 }, () => 
       await Promise.race([h.done, sleep(20000)]);
       expect(h.exited && h.code === 0 && h.err === '', `--poll ${poll}: released`).toBe(true);
     }
+  });
+
+  it('a large --poll is capped: a held call is released within seconds of the removal of the pause file and of the lapse of valid_until, not after the hour the option asks for', async () => {
+    const heldBy = async (name: string, poll: string, over: Record<string, unknown> = {}) => {
+      const f = fixture(name);
+      writePause(f, over);
+      const log = join(f.dir, 'hook-poll.log');
+      const h = spawnPy(HOOK, ['--pause-file', f.pause, '--log', log, '--poll', poll], { input: hookInput('other0001') });
+      await waitFor(() => /hold-start/.test(readText(log)) || h.exited, 20000, 'hold-start');
+      expect(h.exited, `--poll ${poll}: held`).toBe(false);
+      return { f, h };
+    };
+    for (const poll of ['3600', '1e300']) {   // a finite hour, and a finite number far beyond any pause
+      const { f, h } = await heldBy(`hook-poll-cap-removed-${poll}`, poll);
+      unlinkSync(f.pause);
+      await Promise.race([h.done, sleep(25000)]);
+      expect(h.exited && h.code === 0, `--poll ${poll}: released within seconds of the removal of the pause file`).toBe(true);
+      await h.stop();
+    }
+    const lapsing = await heldBy('hook-poll-cap-lapsed', '3600', { valid_until: now() + 4 });   // nobody renews it: the guard is dead
+    await Promise.race([lapsing.h.done, sleep(25000)]);
+    expect(lapsing.h.exited && lapsing.h.code === 0, '--poll 3600: released within seconds of the lapse of valid_until').toBe(true);
+    await lapsing.h.stop();
   });
 
   it('--poll 0 does not spin a processor: three seconds of waiting cost a fraction of a second of processor time', () => {

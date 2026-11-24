@@ -598,6 +598,23 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(ok.status, `the real hook without a log: ${ok.stdout}${ok.stderr}`).toBe(0);
   });
 
+  it('the probe runs the installed command without any argument of its own: a hook that lets every call through unless it is given --poll is refused, with and without a hook log', () => {
+    const f = fixture('settings-probe-needs-poll');
+    const hook = join(f.dir, 'needs-poll', 'five-hour-guard-hook.py');
+    mkdirSync(dirname(hook), { recursive: true });
+    // the real hook, behind a line that makes it return at once when no --poll is on its command line
+    writeFileSync(hook, 'import sys\nif "--poll" not in sys.argv:\n    sys.exit(0)\n' + readFileSync(HOOK, 'utf8').replace(/^#!.*\n/, ''), 'utf8');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const withLog = tool(f, 'add', ['--hook', hook]);
+    expect(withLog.status, `with a hook log: ${withLog.stdout}${withLog.stderr}`).toBe(2);
+    expect(withLog.stderr).toMatch(/does not hold a valid pause/);
+    const noLog = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', f.pause, '--hook', hook, '--python', PYBIN]);
+    expect(noLog.status, `without a hook log: ${noLog.stdout}${noLog.stderr}`).toBe(2);
+    expect(noLog.stderr).toMatch(/does not hold a valid pause/);
+    expect(readText(f.settings), 'nothing written').toBe(original);
+  });
+
   it('add keeps the probe pause in place: a hook that holds for a moment and then lets go by itself is refused', () => {
     const f = fixture('settings-probe-early-exit');
     const hook = join(f.dir, 'early', 'five-hour-guard-hook.py');
@@ -625,7 +642,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(lines, 'the probe went through the shell once').toHaveLength(1);
     const probed = lines[0].replace(/\S*five-hour-guard-probe-[^/\s]+\/pause\.json/g, '@PAUSE').replace(/\S*five-hour-guard-probe-[^/\s]+\/hook\.log/g, '@LOG');
     const written = entryCommand(f).split(f.pause).join('@PAUSE').split(f.hookLog).join('@LOG');
-    expect(probed, 'the same command as the one written, but for the paths of the probe and its poll interval').toBe(`${written} --poll 0.1`);
+    expect(probed, 'the same command as the one written, but for the paths of the probe').toBe(written);
     expect(readJson(f.settings).hooks.PreToolUse.some((g: { hooks: Array<{ command: string }> }) => g.hooks.some((h) => h.command === entryCommand(f)))).toBe(true);
   });
 
@@ -658,6 +675,18 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
       expect(tool(f, 'add', ['--timeout', good]).status, good).toBe(0);
       expect(readJson(f.settings).hooks.PreToolUse.find((g: { matcher: string }) => g.matcher === '*').hooks[0].timeout).toBe(Number(good));
     }
+  });
+
+  it('add refuses a timeout that is not a finite number: an integer beyond the range of a float (400 digits) is read as Infinity by JavaScript and would crash a Python that tests it', () => {
+    const f = fixture('settings-timeout-huge');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const r = tool(f, 'add', ['--timeout', '9'.repeat(400)]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/--timeout must be at least 21600 seconds and a finite number, not 9{40}\.\.\./);
+    expect(r.stderr, 'an error message, not a traceback').not.toMatch(/Traceback/);
+    expect(readText(f.settings), 'nothing written').toBe(original);
+    expect(backups(f), 'no backup either').toHaveLength(0);
   });
 
   it('the root README links the guard, next to the other documentation', () => {

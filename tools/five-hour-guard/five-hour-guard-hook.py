@@ -12,13 +12,17 @@
 #
 #   five-hour-guard-hook.py --pause-file <file> [--log <file>] [--poll <seconds>]
 # Both paths come from the hook command that five-hour-guard-settings.py writes into settings.json; the hook reads no
-# configuration file (it runs on every tool call). Without --pause-file there is nothing to wait for: exit 0.
+# configuration file (it runs on every tool call). Without --pause-file there is nothing to wait for: exit 0. --poll is the
+# time between two readings of the pause file while a call waits (2 s unless given); it is kept between MIN_POLL_S and MAX_POLL_S,
+# so that a hand-written value can neither spin a processor nor keep a call long after the pause has ended.
 import json, math, os, stat, sys, time
 from urllib.parse import urlparse
 
 DEADLINE_GRACE_S = 900       # never hold longer than this past the stored resume time
 MAX_VALID_AHEAD_S = 3600     # the guard renews valid_until every tick and sets it at most 1800 s ahead
 MAX_RESUME_AHEAD_S = 21600   # a window is 5 hours; the guard believes no reset time further than 5 h 15 min, plus a margin of at most 30 min
+MIN_POLL_S = 0.1             # --poll 0 would spin a processor for the whole pause
+MAX_POLL_S = 5               # a call is released at most one poll after the pause file is removed or its valid_until has lapsed: --poll 3600 must not keep it for an hour
 
 
 def arg(name, default=None):
@@ -34,7 +38,7 @@ except ValueError:
     POLL_S = 2.0
 if not math.isfinite(POLL_S):
     POLL_S = 2.0
-POLL_S = max(POLL_S, 0.1)   # --poll 0 would spin a processor for the whole pause
+POLL_S = min(max(POLL_S, MIN_POLL_S), MAX_POLL_S)
 
 
 def pause_state():

@@ -172,6 +172,8 @@ def check_writable_dir(path, label):
 
 if not os.path.isabs(PAUSE_FILE):
     fail(f'"pause_file" must be an absolute path, not {PAUSE_FILE!r}: the hook entry accepts only an absolute path and would read another file')
+if isinstance(CFG.get('hook_log_file'), str) and CFG['hook_log_file'] and not os.path.isabs(CFG['hook_log_file']):
+    fail(f'"hook_log_file" must be an absolute path, not {CFG["hook_log_file"]!r}: the hook would append to a file of the working directory of each session (the entry the guard offers to paste would carry the path)')
 
 
 def path_key(path):
@@ -489,7 +491,15 @@ LAST_WIRING_CHECK = [None]   # time.monotonic() of the last hook_check
 
 
 def hook_check(where):
-    """A pause with no registered hook holds nothing: say so loudly (a later settings rewrite could drop the entry)."""
+    """A pause with no registered hook holds nothing: say so loudly (a later settings rewrite could drop the entry). Advice only: a
+    check that fails on an entry it did not expect is reported and never keeps the guard from starting or from entering a pause."""
+    try:
+        check_wiring(where)
+    except Exception as e:
+        log(f'WARNING ({where}): the check of the hook entry failed ({e!r}): the guard goes on, the entry in {SETTINGS or default_settings()} was not checked')
+
+
+def check_wiring(where):
     if not SETTINGS:
         return
     LAST_WIRING_CHECK[0] = time.monotonic()
@@ -539,6 +549,9 @@ def hook_check(where):
         for path in hooks + [x for x in launchers if x not in hooks]:   # what the entry runs must exist as a regular file, by an absolute path (a hook runs in the working directory of a session)
             if not os.path.isabs(path):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} uses the relative path {path}: it is resolved in the working directory of each session, so a pause would hold no session')
+        for path in logs:   # the hook appends to it: from a session in another directory it can be any file there, the hook itself included
+            if not os.path.isabs(path):
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} logs to the relative path {path}: it is resolved in the working directory of each session, where it can be a file of the project or the hook itself, so the hook would append its log lines to it. Run five-hour-guard-settings.py add again')
         for path in hooks:
             if not os.path.isfile(path):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which does not exist: the shell guard of the entry lets every call through, so a pause would hold no session')

@@ -9,6 +9,19 @@ PYTHON_NAME = r'(python|pypy|py$)'
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
 
 
+def timeout_ok(timeout):
+    """True for a hook timeout that covers a pause: a number (not a boolean) of at least MIN_TIMEOUT_S that is finite as a standard JSON
+    reader sees it. An integer too large for a float is no finite number there (JavaScript reads it as Infinity, and math.isfinite raises
+    OverflowError for it here), like the NaN and Infinity that Python alone reads. The one test of the value, for the settings tool
+    (--timeout) and for the entries the guard finds in settings.json."""
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        return False
+    try:
+        return math.isfinite(timeout) and timeout >= MIN_TIMEOUT_S
+    except OverflowError:
+        return False
+
+
 def handler_problems(handler):
     """What is wrong with a registered handler outside its command: it must run in the foreground (an asynchronous hook is fire and
     forget, the tool call goes on) and carry a timeout that covers a pause (Claude Code cancels a hook that runs longer and the tool
@@ -17,8 +30,9 @@ def handler_problems(handler):
     if handler.get('async') not in (None, False):
         found.append('it is asynchronous (async), so the tool call goes on while the hook waits in the background')
     timeout = handler.get('timeout')
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < MIN_TIMEOUT_S:
-        found.append(f'its timeout ({timeout!r}) is missing, not a finite number or below {MIN_TIMEOUT_S} s, so Claude Code would cancel the hook during a long pause and the tool call would go on')
+    if not timeout_ok(timeout):
+        shown = repr(timeout)
+        found.append(f'its timeout ({shown if len(shown) <= 40 else shown[:40] + "..."}) is missing, not a finite number or below {MIN_TIMEOUT_S} s, so Claude Code would cancel the hook during a long pause and the tool call would go on')
     return found
 
 
@@ -81,10 +95,12 @@ def expected_command(command, pause_file, hook_log=None, copy_log=True):
     """The entry the guard would register for a registered command, ready to paste: the pause file of the guard, the hook and the
     interpreter of the command when they are usable (an absolute path of a regular file; the interpreter also executable and named
     like a Python), else the hook next to this module and the interpreter that runs the guard, and, unless the configuration names
-    one and copy_log, the hook log of the command. None when the command names no hook. Raises ValueError as entry_parts does."""
+    one and copy_log, the hook log of the command when it is an absolute path (a relative one is resolved in the working directory of
+    each session, where it can be any file, the hook itself included, so it is never copied). None when the command names no hook.
+    Raises ValueError as entry_parts does."""
     hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
     if not hooks:
         return None
     hook = next((x for x in hooks if os.path.isabs(x) and os.path.isfile(x)), os.path.join(os.path.dirname(os.path.abspath(__file__)), MARK))
     python = next((x for x in [y for y in launchers if y not in hooks] + interpreters if is_python_file(x)), sys.executable)
-    return entry_command(pause_file, hook, python, hook_log or (logs[0] if logs and copy_log else None))
+    return entry_command(pause_file, hook, python, hook_log or (logs[0] if logs and copy_log and os.path.isabs(logs[0]) else None))

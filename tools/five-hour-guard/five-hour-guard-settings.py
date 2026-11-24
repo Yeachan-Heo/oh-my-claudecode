@@ -125,8 +125,9 @@ def load_entry_module():
 
 
 ENTRY = load_entry_module()
-if A.timeout < ENTRY.MIN_TIMEOUT_S:
-    fail(f'--timeout must be at least {ENTRY.MIN_TIMEOUT_S} seconds, not {A.timeout}: Claude Code cancels a hook that runs longer and the tool call goes on, so a pause can last longer than the hook would wait')
+if not ENTRY.timeout_ok(A.timeout):   # the test the guard applies to the entries it finds: below the minimum, or an integer too large to be a finite number
+    shown = str(A.timeout)
+    fail(f'--timeout must be at least {ENTRY.MIN_TIMEOUT_S} seconds and a finite number, not {shown if len(shown) <= 40 else shown[:40] + "..."}: Claude Code cancels a hook that runs longer and the tool call goes on, so a pause can last longer than the hook would wait')
 
 
 def command():
@@ -138,7 +139,8 @@ def probe_hook(with_log=True):
     private directory: a valid pause must make it hold (the hook logs hold-start and keeps running for a moment) and the removal of
     the file must release it (exit 0). An empty or truncated hook, another program with the name of the hook, or a command that
     does not run the hook would exit at once and protect nothing. with_log False: the command without --log (what is installed when no hook
-    log is set), where the hold cannot be seen in a log and the process must simply keep running."""
+    log is set), where the hold cannot be seen in a log and the process must simply keep running. Nothing is added to the command (the
+    hook polls every 2 s, so the release can take that long), and only the paths of the pause and the log are the probe's own."""
     import tempfile
     env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
                                                            'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')}
@@ -147,7 +149,7 @@ def probe_hook(with_log=True):
         now = time.time()
         with open(pause, 'w') as f:
             json.dump({'v': 2, 'paused': True, 'since': now, 'resume_at': now + 600, 'valid_until': now + 300, 'exclude': [], 'pid': os.getpid()}, f)
-        probe_command = ENTRY.entry_command(pause, A.hook, A.python, log if with_log else None) + ' --poll 0.1'
+        probe_command = ENTRY.entry_command(pause, A.hook, A.python, log if with_log else None)   # the installed argument shape, nothing added: a hook may depend on the arguments it is given
         try:
             p = subprocess.Popen(['sh', '-c', probe_command], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
         except OSError as e:
