@@ -366,6 +366,9 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     expect(requests).toHaveLength(0);
 
     const shadowInput = postToolInput("read", 80, "-shadow");
+    // Register the run before the hook starts, so afterEach waits for the
+    // detached resolver even if an assertion below fails first.
+    shadowRuns += 1;
     const shadow = await runScript(
       "post-tool-verifier.mjs",
       shadowInput,
@@ -381,7 +384,6 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     // Shadow mode should still attempt the request, from a detached child that
     // may start late on a busy machine: wait for its shadow row, which is
     // written after the request completes.
-    shadowRuns = 1;
     await waitForShadowRows();
     expect(requests.length).toBeGreaterThanOrEqual(1);
   });
