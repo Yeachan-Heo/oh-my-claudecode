@@ -172,15 +172,39 @@ def check_distinct(files):
     named = [(label, path) for label, path in files if path]
     for i, (la, pa) in enumerate(named):
         for lb, pb in named[i + 1:]:
+            if la.endswith(' script') and lb.endswith(' script') or la.startswith('registered ') and (lb.endswith(' script') or lb.startswith('registered ')) \
+                    or lb.startswith('registered ') and la.endswith(' script'):
+                continue   # the installed scripts and the files the entry names are the program itself, they may coincide
             if same_file(pa, pb):
                 fail(f'"{la}" ({pa}) and "{lb}" ({pb}) are the same file: the guard would remove or overwrite one as the other')
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def registered_runtime_files():
+    """The hook script and the interpreter that the hook entry in settings.json names (they can be anywhere: `add --hook` takes
+    any path). Best effort: an unreadable settings file gives none (hook_check says so later)."""
+    found = []
+    try:
+        with open(SETTINGS or default_settings()) as f:
+            groups = json.load(f).get('hooks', {}).get('PreToolUse', [])
+        for g in groups:
+            for h in g.get('hooks', []):
+                command = h.get('command') or ''
+                if HOOK_NAME not in command:
+                    continue
+                tokens = shlex.split(command)
+                found += [('registered hook', t) for t in tokens if HOOK_NAME in os.path.basename(t) and os.path.isabs(t)]
+                found += [('registered interpreter', tokens[i + 1]) for i, t in enumerate(tokens[:-1]) if t == '-x' and os.path.isabs(tokens[i + 1])]
+    except Exception:
+        pass
+    return found
+
 check_distinct([('configuration file', A.config), ('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
                 ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
-                ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
-                ('pause_file lock', PAUSE_FILE + '.lock'),
+                ('usage_cache', CACHE), ('usage_cache lock', CACHE + '.lock'), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
+                ('pause_file lock', PAUSE_FILE + '.lock'), *registered_runtime_files(),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
 if STATE:
@@ -327,11 +351,14 @@ def hook_check(where):
             data = json.load(f)
         groups = data.get('hooks', {}).get('PreToolUse', [])
         ours = [h.get('command') or '' for g in groups for h in g.get('hooks', []) if HOOK_NAME in (h.get('command') or '')]
+        matchers = [g.get('matcher') for g in groups if any(HOOK_NAME in (h.get('command') or '') for h in g.get('hooks', []))]
     except Exception as e:
         log(f'WARNING ({where}): cannot read the hook entries of {SETTINGS}: {e!r}')
         return
     if not ours:
         log(f'WARNING ({where}): hook {HOOK_NAME} is NOT registered in {SETTINGS}: a pause would hold no session. Run five-hour-guard-settings.py add')
+    if ours and not any(m in (None, '', '*') for m in matchers):
+        log(f'WARNING ({where}): the hook entry in {SETTINGS} has the matcher {matchers[0]!r}, which does not cover every tool: calls of other tools would go on during a pause. Run five-hour-guard-settings.py add again')
     for command in ours:
         try:
             paths = [t for t in shlex.split(command) if HOOK_NAME in os.path.basename(t)]
@@ -395,8 +422,10 @@ def leave_pause(state, why):
     if not unpublish():
         raise OSError(f'the pause file {PAUSE_FILE} could not be removed: the pause stays in the state and is left again at the next tick')
     log(f'RESUMED ({why}): pause file removed, waiting tool calls continue')
+    # persist first: when the write fails the state keeps the pause (in memory too), so the next tick tries again and a restart
+    # cannot bring back a pause that was already left
+    write_json(STATE, {**state, 'paused': False, 'since': None, 'resume_at': None})
     state.update(paused=False, since=None, resume_at=None)
-    write_json(STATE, state)
 
 
 def tick(state):

@@ -16,7 +16,13 @@ afterAll(cleanup);
 const HOUR_MS = 3600e3;
 const MAX_RESET_AHEAD_MS = 5 * HOUR_MS + 900e3; // the guard believes no reset time further ahead than a window plus 15 minutes
 // a pid that belonged to a process that has ended
-const DEAD_PID = Number(spawnSync('sh', ['-c', 'echo $$'], { encoding: 'utf8' }).stdout.trim());
+function deadPid(): number {
+  for (let i = 0; i < 20; i++) {
+    const pid = Number(spawnSync('sh', ['-c', 'echo $$'], { encoding: 'utf8' }).stdout.trim());
+    try { process.kill(pid, 0); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ESRCH') return pid; }
+  }
+  throw new Error('no dead pid found');
+}
 // the wall clock steps back an hour as soon as the flag file exists; the guard runs inside this wrapper
 const CLOCK_STEP_DRIVER = [
   'import os, runpy, sys, time',
@@ -299,7 +305,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(runSync(GUARD, guardArgs(liveHigh, ['--once'])).status).toBe(2);
     expect(readJson(liveHigh.pause).pid, 'the pause of the live guard is not replaced').toBe(process.pid);
     const dead = fixture('leftover-dead', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    writePause(dead, { pid: DEAD_PID });
+    writePause(dead, { pid: deadPid() });
     guardOnce(dead);
     expect(existsSync(dead.pause), 'the pause file of a dead process is removed').toBe(false);
   });
@@ -393,7 +399,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(existsSync(once.pause), '--once leaves the pause it started').toBe(true);
 
     const left = fixture('leftover', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    writePause(left, { pid: DEAD_PID });
+    writePause(left, { pid: deadPid() });
     guardOnce(left);
     expect(existsSync(left.pause), 'leftover pause file without state held nothing but is removed').toBe(false);
   });
@@ -476,7 +482,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('restart during a pause: a stored pause still in force is kept, one already over is released at start', () => {
     const f = fixture('restart-kept', { cache: { pct: 97, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 5, resume_at: now() + 600 }), 'utf8');
-    writePause(f, { pid: 111 });
+    writePause(f, { pid: deadPid() });
     const r = guardOnce(f);
     expect(r.stdout).toMatch(/start during a pause, resume at/);
     expect(readJson(f.pause).paused, 'the pause file stays in force across the restart').toBe(true);
@@ -484,7 +490,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
 
     const g = fixture('restart-over', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(g.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
-    writePause(g, { pid: 111 });
+    writePause(g, { pid: deadPid() });
     const r2 = guardOnce(g);
     expect(r2.stdout).toMatch(/RESUMED \(stored pause already over at start\)/);
     expect(existsSync(g.pause), 'a pause that is already over is not carried into the new run').toBe(false);
@@ -587,7 +593,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.stderr).toMatch(/is not a pause file of this guard/);
       expect(readText(f.pause), 'the file is untouched').toBe(text);
     }
-    writePause(f, { pid: DEAD_PID });
+    writePause(f, { pid: deadPid() });
     expect(runSync(GUARD, guardArgs(f, ['--once'])).status, 'a leftover pause of the guard is still removed').toBe(0);
     expect(existsSync(f.pause)).toBe(false);
   });
@@ -739,9 +745,80 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       'def fail_on_state(src, dst, *a, **k):', '    if str(dst).endswith("state.json"): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
       'os.replace = fail_on_state', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
-    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(1); // the tick tries again, the write fails again
     expect(r.stdout).toMatch(/ERROR: cannot leave the stored pause cleanly at start/);
+    expect(r.stdout).toMatch(/ERROR: tick failed/);
     expect(r.stderr).not.toMatch(/Traceback/);
+    expect(readJson(f.state).paused, 'the disk still says paused: the transition was not forgotten').toBe(true);
+    const again = guardOnce(f);
+    expect(again.stdout).toMatch(/RESUMED/);
+    expect(readJson(f.state).paused, 'and the next run persists it').toBe(false);
+  });
+
+  it('a state write that fails after the pause file is gone is retried at the next tick, not forgotten (the disk would keep paused true)', async () => {
+    const f = fixture('state-write-retry', { cache: { pct: 97, resetMs: Date.now() + 3000 } });
+    const flag = join(f.dir, 'break-state');
+    const code = ['import os, runpy, sys', 'real = os.replace', 'flag = sys.argv[1]',
+      'def maybe_fail(src, dst, *a, **k):', '    if str(dst).endswith("state.json") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
+      'os.replace = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const g = spawnPyCode(code, [flag, GUARD, ...guardArgs(f, ['--margin', '0.5'])]);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'pause file');
+      writeFileSync(flag, '');                                   // the state file cannot be written from now on
+      await waitFor(() => !existsSync(f.pause), 20000, 'the pause ends at the reset time');
+      await waitFor(() => /ERROR: tick failed/.test(readText(f.log)) || /ERROR: tick failed/.test(g.out), 20000, 'the failed state write');
+      expect(readJson(f.state).paused, 'the disk still says paused').toBe(true);
+      const failures = () => (g.out.match(/ERROR: tick failed/g) ?? []).length;
+      const n = failures();
+      await waitFor(() => failures() > n, 20000, 'a later tick tries to persist again');
+      unlinkSync(flag);
+      await waitFor(() => readJson(f.state).paused === false, 20000, 'the state is persisted once the write works');
+    } finally { await stopGuard(g); }
+  });
+
+  it('registered runtime files are protected after the fact: a hook or interpreter named by the settings entry cannot be the state file or log', () => {
+    const f = fixture('alias-registered', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    const py = join(dir, 'my-python');
+    copyFileSync(HOOK, hook);
+    writeFileSync(py, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const hookText = readFileSync(hook, 'utf8');
+    const command = `[ -f ${f.pause} ] && [ -f ${hook} ] && [ -x ${py} ] || exit 0; exec ${py} -I ${hook} --pause-file ${f.pause}`;
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+    for (const [key, target] of [['state_file', hook], ['log_file', hook], ['state_file', py], ['log_file', py]] as const) {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: target }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${key} -> ${target}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+      expect(readFileSync(hook, 'utf8'), 'the registered hook is intact').toBe(hookText);
+      expect(readFileSync(py, 'utf8'), 'the registered interpreter is intact').toBe('#!/bin/sh\nexit 0\n');
+    }
+  });
+
+  it('the lock file of the usage cache (OMC serialises refreshes on <cache>.lock) is a configured file: a pause file that is it is refused', () => {
+    const f = fixture('alias-cache-lock', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: `${f.cache}.lock`, state_file: f.state }), 'utf8');
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/are the same file/);
+    expect(existsSync(`${f.cache}.lock`)).toBe(false);
+  });
+
+  it('the hook entry check warns when the group matcher no longer covers every tool (an entry for Bash only), and accepts "*", empty and none', () => {
+    const f = fixture('matcher-drift', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const command = `[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`;
+    const group = (matcher?: string) => ({ ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: 'command', command }] });
+    for (const matcher of ['Bash', 'Write|Edit', 'Bash(*)']) {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [group(matcher)] } }), 'utf8');
+      expect(guardOnce(f).stdout, matcher).toMatch(/WARNING \(start\): the hook entry in .* has the matcher '.*', which does not cover every tool/);
+    }
+    for (const matcher of ['*', '', undefined]) {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [group(matcher)] } }), 'utf8');
+      expect(guardOnce(f).stdout, String(matcher)).not.toMatch(/WARNING/);
+    }
   });
 
   it('the running scripts are configured files too: a state file or log that is the guard script (or its hook) is refused, the script is kept', () => {
@@ -773,7 +850,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a pause file that cannot be removed keeps the pause in the state: RESUMED is not logged and the next tick tries again', () => {
     const f = fixture('unlink-fails', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
-    writePause(f, { pid: DEAD_PID });
+    writePause(f, { pid: deadPid() });
     const code = ['import os, runpy, sys', 'real = os.unlink',
       'def deny(p, *a, **k):', '    if str(p).endswith("pause.json"): raise PermissionError(13, "denied")', '    return real(p, *a, **k)',
       'os.unlink = deny', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');

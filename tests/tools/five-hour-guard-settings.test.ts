@@ -461,6 +461,18 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('add refuses a pause file that is the lock file of the usage cache of the configuration', () => {
+    const f = fixture('settings-cache-lock');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const cache = join(f.dir, 'usage-cache.json');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: cache, pause_file: `${cache}.lock`, settings_file: f.settings }), 'utf8');
+    const r = runSync(SETTINGS_TOOL, ['add', '--config', f.cfg, '--hook', HOOK, '--python', PYBIN]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/same file/);
+    expect(readText(f.settings)).toBe(original);
+  });
+
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
     const f = fixture('settings-timeout');
     const original = JSON.stringify(base(), null, 2) + '\n';

@@ -212,6 +212,8 @@ def run_once():
         for key, label in (('state_file', 'state file'), ('log_file', 'guard log'), ('usage_cache', 'usage cache')):
             if isinstance(CFG.get(key), str) and CFG[key]:
                 distinct.append((label, CFG[key]))
+        if isinstance(CFG.get('usage_cache'), str) and CFG['usage_cache']:
+            distinct.append(('usage cache lock file', CFG['usage_cache'] + '.lock'))
         if isinstance(CFG.get('state_file'), str) and CFG['state_file']:
             distinct.append(('state lock file', CFG['state_file'] + '.lock'))
         if PAUSE_FILE:

@@ -246,7 +246,7 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 
 A configuration error (a missing required key, a wrong type, a number that is not finite or outside its range, a
 directory of the pause or state file that is missing, a `pause_file` that is not absolute, a `pause_file` or `state_file` that is not a regular file (a directory), two configured files (`pause_file`, `state_file` and its `.lock`, `usage_cache`,
-`log_file`, `settings_file`, the configuration file itself, and the scripts of the guard, hook and settings tool) that are one file by path, symbolic link or hard link)
+`log_file`, `settings_file`, the configuration file itself, the scripts of the guard, hook and settings tool, the hook and interpreter named by the registered entry, and the lock files `<state_file>.lock`, `<pause_file>.lock` and `<usage_cache>.lock`) that are one file by path, symbolic link or hard link)
 exits with status 2. A state
 file that does not have the shape the guard writes (times that are not positive or are more than 6 hours ahead included) is ignored: the guard starts without a pause. A file at `pause_file` is removed as a leftover only when it has the full shape the guard publishes (`v` 2, `paused` true, `pid`, `since`, `resume_at`, `valid_until`).
 
