@@ -255,8 +255,10 @@ def registered_runtime_files():
         with open(SETTINGS or default_settings()) as f:
             groups = json.load(f).get('hooks', {}).get('PreToolUse', [])
         for _group, handler in command_hooks(groups):
-            command = handler['command']
-            hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
+            try:   # one handler that cannot be parsed must not hide the ones after it
+                hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(handler['command'])
+            except Exception:
+                continue
             found += [('registered hook', t) for t in hooks if os.path.isabs(t)]
             found += [('registered interpreter', t) for t in interpreters + launchers if os.path.isabs(t)]
             found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
@@ -264,8 +266,13 @@ def registered_runtime_files():
         pass
     return found
 
-check_distinct([('configuration file', A.config), ('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
-                ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('entry module', os.path.join(HERE, 'five_hour_guard_entry.py')), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
+
+def own_files():
+    """The scripts of the guard itself: what no log, state or pause file may be."""
+    return [('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
+            ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('entry module', os.path.join(HERE, 'five_hour_guard_entry.py'))]
+
+check_distinct([('configuration file', A.config), *own_files(), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
                 ('usage_cache', CACHE), ('usage_cache lock', CACHE + '.lock'), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
                 ('pause_file lock', PAUSE_FILE + '.lock'), *registered_runtime_files(),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
@@ -466,11 +473,12 @@ def hook_check(where):
         for problem in ENTRY.handler_problems(handler):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
     runtime = [('pause_file', PAUSE_FILE), ('state_file', STATE), ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS),
-               ('lock of the pause file', PAUSE_FILE + '.lock'), ('lock of the usage cache', CACHE + '.lock')]
+               ('lock of the pause file', PAUSE_FILE + '.lock'), ('lock of the usage cache', CACHE + '.lock'), ('configuration file', A.config), *own_files()]
     for command in ours:
         try:
-            hooks, _interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
-            aliased = [(log_path, label) for log_path in logs for label, path in runtime if path and same_file(log_path, path)]
+            hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
+            programs = [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters + launchers]
+            aliased = [(log_path, label) for log_path in logs for label, path in runtime + programs if path and same_file(log_path, path)]
             for log_path, label in aliased:
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} logs to {log_path}, which is the {label} of this guard: the hook would append its log lines to it (a pause file would stop being one, so a pause would hold no session). Run five-hour-guard-settings.py add again')
             expected = ENTRY.expected_command(command, PAUSE_FILE, hook_log_setting(), copy_log=not aliased)
@@ -604,6 +612,10 @@ def tick(state):
         if fresh and pct >= A.threshold and reset_ts and reset_ts <= now + MAX_RESET_AHEAD_S and reset_ts + A.margin > now:
             state['resume_at'] = reset_ts + A.margin
             log(f'reset slipped: 5h still {pct} %, new resume time {ts(state["resume_at"])}')
+            if state['resume_at'] - state['since'] > ENTRY.MIN_TIMEOUT_S:
+                # a held call is bounded by the timeout of the hook entry, whatever the guard does: no cap here (it would let the calls that arrive later through)
+                warn_data('pause-beyond-timeout', f'the pause now lasts {state["resume_at"] - state["since"]:.0f} s, longer than the {ENTRY.MIN_TIMEOUT_S} s minimum timeout of the hook entry: '
+                          f'Claude Code releases a call that has been waiting longer than the timeout of the entry, calls that arrive later are still held. Raise the timeout with five-hour-guard-settings.py add --timeout')
         else:
             leave_pause(state, 'reset time reached' + ('' if fresh else ' (cache stale, fail-open)'))
             return

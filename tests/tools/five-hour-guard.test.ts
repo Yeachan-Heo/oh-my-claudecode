@@ -365,6 +365,27 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(g); }
   });
 
+  it('a slip that takes a pause beyond the hook timeout is reported once with what it means, and the pause is still extended (a cap would open a gap for the calls that arrive later)', async () => {
+    const f = fixture('slip-beyond-timeout', { cache: { pct: 97, resetMs: Date.now() + 3000 * 1000 } });
+    writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 21000, resume_at: now() + 2 }), 'utf8');
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /reset slipped/.test(readText(f.log)), 20000, 'slip line');
+      const log = readText(f.log);
+      expect(log).toMatch(/WARNING \(pause-beyond-timeout\): the pause now lasts .* longer than the 21600 s minimum timeout of the hook entry/);
+      expect(existsSync(f.pause), 'the pause goes on').toBe(true);
+      expect(readJson(f.pause).resume_at, 'extended to the reset plus margin').toBeGreaterThan(now() + 2900);
+    } finally { await stopGuard(g); }
+
+    const short = fixture('slip-within-timeout', { cache: { pct: 97, resetMs: Date.now() + 3000 * 1000 } });
+    writeFileSync(short.state, JSON.stringify({ paused: true, since: now() - 1000, resume_at: now() + 2 }), 'utf8');
+    const g2 = startGuard(short);
+    try {
+      await waitFor(() => /reset slipped/.test(readText(short.log)), 20000, 'slip line');
+      expect(readText(short.log), 'a pause that stays within the timeout is not reported').not.toMatch(/minimum timeout/);
+    } finally { await stopGuard(g2); }
+  });
+
   it('resumes early when a fresh cache shows less than threshold - 10 percent', async () => {
     const f = fixture('early', { cache: { pct: 97, resetMs: Date.now() + HOUR_MS } });
     const g = startGuard(f);
@@ -591,6 +612,36 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       const drift = readText(f.log).split('\n').filter((l) => /is not the entry this guard generates/.test(l));
       for (const line of drift) expect(line.endsWith(`: ${generatedCommand(f.pause, HOOK, PYBIN)}`), line).toBe(true);
     } finally { await stopGuard(g); }
+  });
+
+  it('a hook log that is the hook program or its launcher is reported when a settings rewrite after the start put it there, as the start would refuse it', async () => {
+    const dir = join(fixture('wiring-log-program', {}).dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    const py = join(dir, 'my-python');
+    copyFileSync(HOOK, hook);
+    writeFileSync(py, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const cases: Array<[string, string, string, RegExp]> = [
+      ['bundled-hook', HOOK, PYBIN, /logs to .*five-hour-guard-hook\.py, which is the hook script of this guard/],
+      ['registered-hook', hook, PYBIN, /logs to .*custom\/five-hour-guard-hook\.py, which is the registered hook of this guard/],
+      ['registered-launcher', hook, py, /logs to .*my-python, which is the registered interpreter of this guard/],
+    ];
+    for (const [name, entryHook, python, expected] of cases) {
+      const f = fixture(`wiring-log-${name}`, { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const entry = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      writeFileSync(f.settings, entry(generatedCommand(f.pause, entryHook, python)), 'utf8');
+      const hookBefore = readFileSync(entryHook, 'utf8');
+      const g = startGuard(f, ['--warn-every', '1']);
+      try {
+        await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+        const logTarget = name === 'registered-launcher' ? python : entryHook;
+        writeFileSync(f.settings, entry(generatedCommand(f.pause, entryHook, python, logTarget)), 'utf8');
+        writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+        await waitFor(() => expected.test(readText(f.log)), 20000, `the alias warning (${name})`);
+      } finally { await stopGuard(g); }
+      expect(readFileSync(entryHook, 'utf8'), 'the program is intact').toBe(hookBefore);
+    }
   });
 
   it('an existing pause file that is not a guard pause is never removed: refused at start with exit 2, the file is kept', () => {
@@ -1066,6 +1117,26 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, hook_log_file: oldLog }), 'utf8');
     expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'the hook log of the configuration may be the log of the entry').toBe(0);
+  });
+
+  it('a malformed hook entry does not hide the entries after it: a state file that is a valid registered hook later in the list is still refused', () => {
+    const f = fixture('alias-after-malformed', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    const hookText = readFileSync(hook, 'utf8');
+    const malformed = `exec ${PYBIN} -I ${HOOK} --pause-file '${f.pause}`;
+    const valid = generatedCommand(f.pause, hook, PYBIN);
+    for (const commands of [[malformed, valid], [valid, malformed]]) {
+      const handlers = commands.map((command) => ({ type: 'command', command, timeout: 21600 }));
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: handlers }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: hook, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${commands[0] === malformed ? 'malformed first' : 'valid first'}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+      expect(readFileSync(hook, 'utf8'), 'the registered hook is intact').toBe(hookText);
+    }
   });
 
   it('the lock file of the usage cache (OMC serialises refreshes on <cache>.lock) is a configured file: a pause file that is it is refused', () => {
