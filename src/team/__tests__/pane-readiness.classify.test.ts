@@ -610,6 +610,10 @@ describe('the Claude trust dialog captured while it draws', () => {
     ['an answered trust dialog above a boxed input prompt', (): string => `${frame('claude/2.1.330/trust.txt')}\n${frame('claude/2.1.325/idle.txt')}`],
     ['the trust question quoted in a reply above a boxed input prompt', (): string => `⏺ The pane asked: ${QUESTION}\n${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}\n`],
     ['"No, exit" typed into a boxed input prompt below the quoted question', (): string => `⏺ ${QUESTION}\n${'─'.repeat(40)}\n❯ No, exit\n${'─'.repeat(40)}\n`],
+    // Each of the next three differs from a dialog still drawing in one way only.
+    ['"Yes, I tr" typed below the quoted question, with no "No, exit" above it', (): string => `⏺ ${QUESTION}\n❯ Yes, I tr\n`],
+    ['"Yes" typed below a quoted "No, exit", with a rule drawn below it', (): string => `⏺ ${QUESTION}\n  No, exit\n❯ Yes\n${'─'.repeat(40)}\n`],
+    ['the choices quoted below the question, "Yes" then a rule below "❯ No, exit"', (): string => `⏺ ${QUESTION}\n❯ No, exit\n  Yes\n${'─'.repeat(40)}\n`],
   ])('reads %s as it did before', (_, captured) => {
     expect(detectClaudeStartupDialog(captured())).toBeNull();
     expect(paneLooksReady(captured(), 'claude')).toBe(true);
