@@ -2093,12 +2093,13 @@ function traceLine(c) {
 }
 
 // A notification's cut keeps its summary and the first SHORT_CHARS of its <result> body (the part before it is the same fixed text in every
-// notification); without a <result>, the first SHORT_CHARS of the text.
+// notification); without a <result>, the first SHORT_CHARS of the text. The kept text stays inside the notification's own tag, as in the host's row: the tag
+// makes it one quote to every reading of the row (a delivery the result quotes is no delivery), and the row is the notification it was at the next compaction.
 function shortText(c) {
   if (c.note) {
     const body = /<result>([\s\S]*?)(?:<\/result>|$)/.exec(c.res.text);
     const kept = body ? `${c.summary}\n${body[1].slice(0, SHORT_CHARS)}` : c.res.text.slice(0, SHORT_CHARS);
-    return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
+    return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]\n</task-notification>`;
   }
   return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
 }
