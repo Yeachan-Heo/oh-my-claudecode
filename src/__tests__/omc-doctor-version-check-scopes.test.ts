@@ -449,6 +449,18 @@ describe('omc-doctor Step 1 takes the installed version from the manifest of the
       expect(block.Channel).toBe('plugin-dir');
     });
 
+    // A link loop on the way makes the path unresolvable: it names nothing, and its folded text must not equal a real directory.
+    test.skipIf(process.platform === 'win32')('an installPath through a link loop before .. is not the explicit root: the answer is unknown, not the marketplace', () => {
+      const block = step1({
+        plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ installPath: path.join(cache(dir, '5.9.0'), '..', 'loop') + path.sep + '..' + path.sep + '5.8.0' }] }),
+        clone: { omc: '5.9.0' },
+        cache: { omc: ['5.8.0', '5.9.0'] },
+        env: (dir) => ({ OMC_PLUGIN_ROOT: cache(dir, '5.8.0') }),
+        setup: (dir) => symlinkSync('loop', path.join(path.dirname(cache(dir, '5.9.0')), 'loop')),
+      });
+      expect(block.Channel).toMatch(/^unknown/);
+    });
+
     test('with no root variable the entry contradicts itself all the same, in either direction', () => {
       for (const [version, leaf] of [['5.9.0', '5.8.0'], ['5.8.0', '5.9.0']]) {
         const block = step1({ plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ version, installPath: cache(dir, leaf) }] }), clone: { omc: '5.9.0' }, setup: (dir) => write(path.join(cache(dir, leaf), 'README.md'), 'x') });

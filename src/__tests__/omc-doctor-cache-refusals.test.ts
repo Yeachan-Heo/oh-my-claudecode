@@ -173,6 +173,7 @@ describe.skipIf(!posix)('omc-doctor cache commands: an installPath written as a 
       ['a .. after a version', (_d, cache) => path.join(cache, '5.8.0') + path.sep + '..' + path.sep + '5.7.0', 'kept'],
       // Names nothing for the file system, but the text lies inside 5.7.0, and protection errs on keeping.
       ['a .. before a missing component', (_d, cache) => path.join(cache, 'missing') + path.sep + '..' + path.sep + '5.7.0', 'kept'],
+      ['a link loop before ..', (_d, cache) => { symlinkSync('loop', path.join(cache, 'loop')); return path.join(cache, 'loop') + path.sep + '..' + path.sep + '5.7.0'; }, 'refused'],
       ['upper case (the volume tells the names apart)', (_d, cache) => path.join(cache, '5.7.0').replace('oh-my-claudecode', 'OH-MY-CLAUDECODE'), 'moved'],
       ['a Windows drive path', () => 'C:\\cache\\5.7.0', 'refused'],
       ['a forward-slash UNC path', () => '//server/share/5.7.0', 'refused'],

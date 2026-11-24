@@ -423,6 +423,21 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
+    // The runtime classifies and reads CLAUDE_PLUGIN_ROOT alone: an OMC_PLUGIN_ROOT alias outside the cache does not make the install external.
+    test.skipIf(process.platform === 'win32')('the managed or external decision follows CLAUDE_PLUGIN_ROOT, not an OMC_PLUGIN_ROOT alias of it', () => {
+      const dir = fresh();
+      try {
+        const cache = addCache(dir, [OLD, NEW], 'omc');
+        writeFileSync(path.join(cache, OLD, 'package.json'), JSON.stringify({ name: 'oh-my-claudecode', version: OLD }));
+        const alias = path.join(dir, 'alias');
+        symlinkSync(path.join(cache, OLD), alias);
+        writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD, installPath: path.join(cache, OLD) }] });
+        expect(claudeMdAt(dir, OLD, 'linux', { OMC_PLUGIN_ROOT: alias, CLAUDE_PLUGIN_ROOT: path.join(cache, OLD) })).toEqual([`Latest cached plugin version: ${NEW}`, DRIFT]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     test.skipIf(process.platform === 'win32')('a plugin root variable alone beside an old cache is a checkout: the comparison is skipped', () => {
       const dir = fresh();
       try {

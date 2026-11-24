@@ -350,13 +350,18 @@ const folded = (target) => target.normalize('NFC').toLowerCase();
 // folding are two directories (a bind mount or a Windows 8.3 name on a volume without inodes is not seen, as before).
 // The cache commands are stricter on purpose, see protectionOf: moving a version someone runs costs more than a
 // wrong label, so they refuse whenever a path that may protect one has no identity and its spelling does not place it.
+// A path whose link chain cannot be read (a loop, a component that cannot be examined) names nothing the file system can resolve,
+// so no comparison of its folded text may say anything: the answer is unknown.
+const unresolvable = (...targets) => targets.some((target) => linkChain(target).unreadable);
 const askSame = (a, b) => {
+  if (unresolvable(a, b)) return 'unknown';
   const x = realPath(a);
   const y = realPath(b);
   if (x == y || (identity(a) && identity(a) == identity(b))) return 'yes';
   return (blind(a) || blind(b)) && folded(x) == folded(y) ? 'unknown' : 'no';
 };
 const askInside = (target, dir) => {
+  if (unresolvable(target, dir)) return 'unknown';
   const a = realPath(target);
   const b = realPath(dir);
   if (a == b || a.startsWith(b + path.sep)) return 'yes';
@@ -704,7 +709,10 @@ const claudeMdVersion = () => {
     if (inside === '' || (inside && !inside.startsWith('..') && !path.isAbsolute(inside))) return true;
     return /\/plugins\/cache\/omc\/oh-my-claudecode\/\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(text.replace(/\\/g, '/'));
   };
-  const external = running.length == 1 && !lexicallyManaged(roots[0]);
+  // The runtime reads CLAUDE_PLUGIN_ROOT alone, so that root decides (the other one only where it is absent).
+  const claudeRoot = (process.env.CLAUDE_PLUGIN_ROOT || '').trim();
+  const loadedRoot = claudeRoot && isDirectory(claudeRoot) ? claudeRoot : roots[0];
+  const external = running.length == 1 && !lexicallyManaged(loadedRoot);
   const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
   const rootsConflict = sameRoots == 'no';
   let unreadableCache = '';
@@ -731,7 +739,7 @@ const claudeMdVersion = () => {
   } else if (external) {
     // The matched root lies outside the managed cache (a registered external install): the runtime reads the package of that root,
     // so its manifest names the version, not the highest cache beside it.
-    pluginVersion = manifestVersion(roots[0]) || '(unknown)';
+    pluginVersion = manifestVersion(loadedRoot) || '(unknown)';
   } else if (running.length) {
     pluginVersion = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '(none)';
   } else {
