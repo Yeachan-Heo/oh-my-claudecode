@@ -109,7 +109,7 @@
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
  * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added. The check is bounded (maskSecrets
  * is quadratic on one long word): a text beyond SCAN_MAX_CHARS, or beyond the SCAN_BUDGET_CHARS one stage checks in one compaction, counts as unchecked
- * and stays whole the same way. A row that holds tool results or a delivered message's anchor is never rebuilt by the paste stage.
+ * and stays whole the same way; the preflight of the own threshold hands the rows it checked to the compaction it asks for, which does not check them again. A row that holds tool results or a delivered message's anchor is never rebuilt by the paste stage.
  *
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
@@ -673,7 +673,7 @@ function freshState() {
     sharedQueue: Promise.resolve(), compacting: 0, pausedUntil: 0, pauseReason: null, failedInRow: 0, noResponseAt: [], requests: 0,
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
     cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined, skipBase: undefined, ownCompactInFlight: false,
-    batchRefusedUntil: new Map(), pendingAfter: undefined, moduleRev: undefined,
+    batchRefusedUntil: new Map(), pendingAfter: undefined, moduleRev: undefined, agentChecked: undefined,
   };
 }
 let session = freshState();
@@ -3509,7 +3509,7 @@ const movedTokensOf = (st, rates) => rates.RATE_MOVED * st.moved_chars - rates.R
 // them, `trimTokens` what it takes off), the options of the stage (`opts`, none without the API form, in a subagent or with the trim off) and `plan()`,
 // what the stage would move (a plan, no write), asked once. `keepFrom` is the first row that keeps its handle. The compaction and the preflight of the
 // own threshold read the stage through this one function, so that both count the same text.
-function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionId, deadline) {
+function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionId, deadline, checked = new Map()) {
   let trim;
   let stats;
   const skip = cfg.agentTrim && agentId === undefined && api ? nonTextUserRows(messages, api) : undefined;
@@ -3523,9 +3523,20 @@ function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionI
   const trimmed = trim && trim.rows.size ? messages.map((m, i) => trim.rows.get(i) ?? m) : messages;
   const trimTokens = trim ? cfg.rates.RATE_ATT * trim.stats.chars : 0;
   // Agent messages to files: decided on the rows as the trim leaves them, filed as they came (source); the window of rows and the files are the same in the plan and in the run.
-  const opts = skip ? { sessionId, source: messages, skipRows: Object.assign(new Set(skip.rows), { unmatched: skip.unmatched }), keepFrom: from, queuedRows: queued, statePattern: cfg.agentStates, checked: new Map() } : undefined;
+  const opts = skip ? { sessionId, source: messages, skipRows: Object.assign(new Set(skip.rows), { unmatched: skip.unmatched }), keepFrom: from, queuedRows: queued, statePattern: cfg.agentStates, checked } : undefined;
   let planned;
   return { stats, trimmed, trimTokens, opts, plan: () => (planned ??= moveAgentMessages($, cfg, trimmed, { ...opts, write: false, deadline })) };
+}
+
+// The checks for a secret that the preflight of the own threshold made (each scan of a long report is synchronous and quadratic), for the compaction it asks for
+// right after: the rows are the same, and a row whose text changed is checked again (moveAgentMessages compares the text). Taken once, for the session that made
+// them; a check that timed out is not a result and is made again.
+function takeAgentChecks(sessionId) {
+  const kept = session.agentChecked;
+  session.agentChecked = undefined;
+  if (!kept || !sessionId || kept.id !== sessionId) return new Map();
+  for (const [row, c] of kept.checked) if (c.held === 'timed_out') kept.checked.delete(row);
+  return kept.checked;
 }
 
 // What the agent stage takes off, in tokens, before Jev is asked: the trim, and with the stage active the files it plans to write.
@@ -3929,7 +3940,7 @@ async function decide($, e, cfg, record, started) {
   const net = removable - envelopes;
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target is the rule's target, a share of the window).
-  const stage = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline);
+  const stage = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline, takeAgentChecks(record.session_id));
   if (stage.stats) record.agent_trim = stage.stats;
   const { trimmed, trimTokens, opts: agentOpts, plan: planAgents } = stage;
   const movedTokens = (st) => movedTokensOf(st, cfg.rates);
@@ -4342,14 +4353,18 @@ async function ownThreshold($, e, next) {
       envelopes = envelopeChars(messages, delivered.rows, candidates);
       removable -= envelopes;
     }
-    if (stageCounts && api) {
+    // Only a session that the results alone do not carry needs the stage's scans: the compaction it asks for makes them otherwise.
+    if (stageCounts && api && tooSmall()) {
       // The rows that keep their handles, as decide finds them; without the API form that holds their calls there is no stage.
       const keepFrom = openLoopStart(messages, groupsOf(messages, api));
       if (keptCallsIn(messages, keepFrom, api)) {
         try {
           let sessionId;
           try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
-          stageTokens = await agentStageTokens(cfg, agentStageOf($, cfg, undefined, messages, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, Date.now() + TOTAL_MS));
+          const stage = agentStageOf($, cfg, undefined, messages, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, Date.now() + TOTAL_MS);
+          // The checks go to the compaction that follows (takeAgentChecks); one that does not follow leaves them to the next preflight, which replaces them.
+          if (stage.opts && sessionId) session.agentChecked = { id: sessionId, checked: stage.opts.checked };
+          stageTokens = await agentStageTokens(cfg, stage);
         } catch { stageTokens = 0; }
       }
     }

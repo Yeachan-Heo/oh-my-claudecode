@@ -65,7 +65,7 @@ function apiOf(messages) {
 const USAGE = async (o) => ({ context: { window: 200000, tokens: 185000, ...(o?.breakdown ? { breakdown: { rawMaxTokens: 200000, autoCompactThreshold: 167000, categories: [{ name: 'System prompt', kind: 'used', tokens: 10000 }, { name: 'Messages', kind: 'used', tokens: 175000 }] } } : {}) } });
 
 // The compaction through register(on), the files and the record in memory; the scoring request answers 0 for every result.
-async function compactRun(env, messages, { event = {}, patch } = {}) {
+function hostOf(env, messages, patch) {
   const store = new Map();
   const e = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u', ...env };
   const api = apiOf(messages);
@@ -79,6 +79,11 @@ async function compactRun(env, messages, { event = {}, patch } = {}) {
     ui: { log: () => {}, toast: () => {} },
   };
   if (patch) patch($);
+  return { $, store };
+}
+
+async function compactRun(env, messages, { event = {}, patch } = {}) {
+  const { $, store } = hostOf(env, messages, patch);
   const handlers = {};
   register((ev, hook) => { handlers[ev] = hook; });
   const out = await handlers['session.compact']($, Object.freeze({ trigger: 'auto', messages, ...event }), async () => ({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] }));
@@ -126,6 +131,58 @@ describe('the check for a secret in one compaction of agent messages (cascade, t
     const run = await atClock(1050, () => compactRun({ ...STAGES, OMC_JEV: 'compaction:shadow' }, watch(team(), isKey)));
     expect(run.record.agent_messages).toMatchObject({ mode: 'plan', moved: 4, written: 0 });
     expect(scan.calls).toHaveLength(4);
+  });
+});
+
+// The own threshold: a turn ends at 185 000 of 200 000 tokens and the host is asked to compact; it compacts with the trigger `plugin`, as the host does.
+async function ownRun(env, messages) {
+  const { $, store } = hostOf({ OMC_JEV_COMPACT_AT_PERCENT: '60', ...env }, messages);
+  const handlers = {};
+  register((ev, hook) => { handlers[ev] = hook; });
+  const asked = [];
+  $.session.compact = async () => {
+    const out = await handlers['session.compact']($, Object.freeze({ trigger: 'plugin', messages }), async () => ({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] }));
+    asked.push(out);
+    return out;
+  };
+  const t0 = Date.now();
+  await handlers['turn.complete']($, { isAborted: false }, async () => 'ok');
+  return { asked, store, ms: Date.now() - t0 };
+}
+
+/** Like team(), but the results are short: the four large reports are what the agent stage can take off, and no result carries the cut. */
+function reportsOnly() {
+  const m = [user('Task: coordinate the agents.')];
+  for (let k = 1; k <= 4; k++) m.push(user(keyReport(`big-${k}`, 29600)), assistant('Noted.'));
+  for (let k = 1; k <= 5; k++) m.push(...pair(k, 300));
+  for (let k = 1; k <= 6; k++) m.push(user(report(`small-${k}`, `Short report ${k}. ${fill(900)}`)), assistant('Noted.'));
+  for (let k = 0; k < 12; k++) m.push(k % 2 ? assistant(`tail ${k}`) : user(`tail ${k}`));
+  return frozen(m);
+}
+
+describe('the check for a secret on a turn of the own threshold (cascade, trimming active)', () => {
+  it('scans each of four reports of 29 600 characters once in the preflight and the compaction it asks for, and the turn stays within 8 s', async () => {
+    const run = await atClock(1050, () => ownRun(STAGES, watch(reportsOnly(), isKey)));
+    expect(run.asked).toHaveLength(1);
+    expect(run.asked[0]).toHaveProperty('messages');
+    expect(scan.calls).toHaveLength(4);
+    expect(scan.calls.every((c) => c.length === 29600)).toBe(true);
+    expect(run.ms).toBeLessThan(8000);
+  });
+
+  it('a row that changed between the preflight and the compaction is scanned again, the rows that did not are not', async () => {
+    const rows = reportsOnly();
+    const first = rows.findIndex(isKey);
+    const { $, store } = hostOf({ OMC_JEV_COMPACT_AT_PERCENT: '60', ...STAGES }, rows);
+    const handlers = {};
+    register((ev, hook) => { handlers[ev] = hook; });
+    const changed = rows.map((m, i) => (i === first ? Object.freeze({ ...m, text: m.text.replace('KEYKEYKEY', 'KEYKEYKEX') }) : m));
+    scan.watch = new Set([...rows, ...changed].filter(isKey).map((m) => m.text));
+    $.session.compact = async () => handlers['session.compact']($, Object.freeze({ trigger: 'plugin', messages: changed }), async () => ({ messages: [] }));
+    await atClock(0, () => handlers['turn.complete']($, { isAborted: false }, async () => 'ok'));
+    expect(store.size).toBeGreaterThan(0);
+    // Four in the preflight, and the changed one again in the compaction.
+    expect(scan.calls).toHaveLength(5);
   });
 });
 
