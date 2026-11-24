@@ -121,8 +121,8 @@ const INFORMATION_ROWS = [
   ['node --test -h', false], ['node --test --v8-options', false], ['node --test', true], ['node --check -v', false], ['node --check a.js', true],
   ['cargo test -h', false], ['cargo test -- -h', false], ['cargo test', true], ['go test -c', false],
   ['go test -n ./...', false], ['go test ./...', true], ['go test -run -h ./...', true],
-  // a program that is not in the table: the long words of every program and the short help word, not -v and -V
-  ['make test -h', false], ['make test -?', false], ['make test -v', true], ['npm test -- --help', false], ['npm test -- -h', false], ['npm test -V', true],
+  // make has its own line (`-v` is its version, `-?` is no option of it); a package manager is not in the table: the long words of every program and the short help word, not -v and -V
+  ['make test -h', false], ['make test -?', true], ['make test -v', false], ['npm test -- --help', false], ['npm test -- -h', false], ['npm test -V', true],
   ['pytest -- --help', false],
 ];
 
@@ -1040,6 +1040,57 @@ it('a tail that names a file or reads a redirected one can fail, so its failure 
   assert.equal(status('set -o pipefail; node --check a.js | tail -5'), 'failed');
 });
 
+it('make: a dry run, a question and a touch run no recipe, and an option that ignores recipe errors weakens the check', () => {
+  // GNU Make 4.4.1 against a recipe of `false`: -n, -t and -p exit 0 without running it, -q exits 0 or 1 without running it.
+  for (const command of [
+    'make test -n', 'make build --dry-run', 'make test --just-print', 'make test --recon', 'make lint -q', 'make test --question', 'make test -t',
+    'make test --touch', 'make test -p', 'make test --print-data-base', 'make test -ni', 'make test -kn', 'make test -nj4', 'make check -C dir -n',
+    'make test -f Makefile.x --dry-run', 'make test -- -n', 'make test -v',
+  ]) {
+    assert.equal(classifyCommand(command).isCheck, false, `${command}: asks only`);
+    assert.equal(checkResult(command, '', 0).verdict, 'undetermined', `${command}: a zero status proves nothing`);
+  }
+  // The value of an option is no option, and a plain run is still a check.
+  for (const command of ['make test -C n', 'make test -f n', 'make test -j 4', 'make test -j', 'make test -k', 'make test -s', 'make test -B', 'make build -j4 -k']) {
+    assert.equal(classifyCommand(command).isCheck, true, `${command}: a run`);
+    assert.equal(classifyCommand(command).narrowed, command.includes('-k') && !command.includes('build'), `${command}: narrowing as before`);
+  }
+  // Errors that are ignored exit 0 and print `Error 1 (ignored)`: the weakened run proves nothing, for every kind.
+  for (const command of ['make test --ignore-errors', 'make lint -i', 'make build -i', 'make test -ik', 'make test -ki', 'make check -sij4', 'make test -s -i', 'make test -C d -i']) {
+    const got = classifyCommand(command);
+    assert.equal(got.isCheck, true, `${command}: a run`);
+    assert.equal(got.narrowed, true, `${command}: weakened`);
+    assert.equal(checkResult(command, 'make: [Makefile:2: test] Error 1 (ignored)', 0).verdict, 'undetermined', `${command}: ignored errors`);
+  }
+  // `-i` as the value of another option, behind `--` or in a word that is no option, is no ignore flag.
+  for (const command of ['make test -C -i', 'make test -f i', 'make test -- -i', 'make test -I-i x', 'make test i', 'make test -C diri', 'npm test -i']) {
+    assert.equal(classifyCommand(command).narrowed, false, `${command}: not weakened`);
+  }
+  assert.equal(checkResult('make test', '', 0).verdict, 'passed');
+  assert.equal(checkResult('make test', 'boom', 2).verdict, 'failed');
+});
+
+it('an interrupted pytest run holds back the pass of the tests it got to, whatever hides the exit status', () => {
+  const passed = '===== 1 passed in 0.28s =====';
+  for (const banner of [
+    '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+    '!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!',
+    '!!!!!!!!!!!!!!!!!!!!!!!! _pytest.outcomes.Exit: stop here !!!!!!!!!!!!!!!!!!!!!!!!',
+    '!!!!!!!!!!!!!!!!!!!!! Exit: stop here !!!!!!!!!!!!!!!!!!!!!!',
+  ]) {
+    for (const command of ['pytest -p no:cacheprovider | tail -12', 'npm test | tail -12', 'pytest; echo done']) {
+      assert.equal(checkResult(command, `.\n${banner}\n${passed}\n`).verdict, 'undetermined', `${command}: ${banner.replace(/!/g, '')}`);
+      assert.equal(checkResult(command, `${passed}\n${banner}\n`).verdict, 'undetermined', `${command}: the banner behind the summary`);
+    }
+  }
+  assert.equal(checkResult('pytest | tail -12', 'INTERNALERROR> Traceback (most recent call last):\n===== 1 passed in 0.28s =====').verdict, 'undetermined');
+  // A banner is a whole line of exclamation marks around the text: a test that prints the word in a line of its own does not hold anything back.
+  assert.equal(checkResult('pytest | tail -12', `KeyboardInterrupt was handled\n${passed}`).verdict, 'passed');
+  assert.equal(checkResult('pytest | tail -12', `${passed}`).verdict, 'passed');
+  // A visible exit status decides before any summary.
+  assert.equal(checkResult('pytest', `${passed}\n!!! KeyboardInterrupt !!!`, 2).verdict, 'failed');
+});
+
 it('a double-quoted string ends at its first unescaped quote, and an escaped quote outside strings opens none', () => {
   const isCheck = (command: string) => classifyCommand(command).isCheck;
   // Bash prints the text: the `;` and the runner name are inside the string.
@@ -1852,6 +1903,32 @@ it('package selectors and the optional-script flag are read in linear time and k
     `npm test ${'-- '.repeat(15000)}-w`,
   ]);
   assert.deepEqual(got.map((one) => one.narrowed), [false, true, false, false, true, true, true, false, true, false]);
+});
+
+it('make options, the interruption banners of pytest and the exit words are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const flags = (token: string) => `${token} `.repeat(40);
+  const got = classifyInChild<{ isCheck: boolean; narrowed: boolean }>([
+    `make test ${flags('-s')}-i`,
+    `make test ${flags('-C d')}-n`,
+    `make test ${flags('-s')}`,
+    `make test -${'s'.repeat(40000)}i`,
+    `make test -${'s'.repeat(40000)}n`,
+    `make test ${'-C d '.repeat(10000)}-i`,
+    `make test ${'--directory '.repeat(10001)}-i`,
+    long('exit 0; '),
+    `${long('return; ')}npm test`,
+    `make test ${long('-j4 ')}`,
+  ]);
+  assert.deepEqual(got.map((one) => [one.isCheck, one.narrowed]), [
+    [true, true], [false, false], [true, false], [true, true], [false, false], [true, true], [true, false], [false, false], [true, false], [true, false],
+  ]);
+  const banner = `!!! ${'KeyboardInterrupt '.repeat(300)}`;
+  const verdicts = classifyInChild<{ verdict: string }>([
+    'pytest | tail', 'pytest | tail', 'pytest | tail',
+  ], 'classifyCheckResult', `classifyCheckResult({ command, output: ${JSON.stringify(`${banner}\n${long('x ')}\n===== 1 passed in 0.1s =====`)}, isError: false, exitCode: 0 })`);
+  assert.equal(verdicts.length, 3);
+  for (const { verdict } of verdicts) assert.equal(verdict, 'passed', 'a long line that is no whole banner holds nothing back');
 });
 
 it('a redirection with a digit descriptor is no argument, glued to the word or not', () => {

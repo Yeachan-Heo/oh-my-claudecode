@@ -220,7 +220,8 @@ const ASKS_ONLY = /\s--(?:version|help)\b/;
  * of `--help` of pytest 9.0.3, ruff 0.15.12, mypy 2.4.1, black 26.10.1, flake8 7.5.0, pylint 4.1.4, tox 4.67.15, nox 2026.10.20,
  * vitest 4.1.11, eslint 9.39.2, tsc 5.9.3, prettier 3.8.1, jest 30.5.2, mocha 12.0.3, webpack 5.113.0 (webpack-cli 7.3.1), esbuild 0.27.2, vite 8.2.2 and node 20.19.2, and each was run
  * once to see that the program checks nothing with it (and, for each option of `value`, that the program takes `-h` as its value).
- * Not run, taken from the documentation of the program: cargo (`cargo test --help`; the words of the test harness behind `--`) and
+ * make (GNU Make 4.4.1, `make --help`; each of `-n`, `-q`, `-t` and `-p` was run once against a recipe of `false` and exits 0 or, for `-q`, 1
+ * without running it; `-j` and `-l` take an optional value, so they are no `value` options). Not run, taken from the documentation of the program: cargo (`cargo test --help`; the words of the test harness behind `--`) and
  * go (`go help testflag`: `-c`, `-n`; the flag package gives a value to every option that is no boolean). Forms that list or collect
  * the tests without running them (`--collect-only`, `--list`, `--no-run`, `--dry-run`) are options that run no test, so they narrow the
  * run (SUBSET_OPTIONS): a failing exit status of one still decides, a zero one proves nothing.
@@ -267,6 +268,10 @@ webpack value -c --config --mode --env --stats --entry -o --output-path
 esbuild info -h
 node-test info -h -v --v8-options --completion-bash
 node-check info -h -v --v8-options --completion-bash
+make info -h -v -n -q -t -p --help --version --just-print --dry-run --recon --question --touch --print-data-base
+make cluster
+make value -C -f -I -o -W -E --directory --file --makefile --include-dir --old-file --assume-old --what-if --new-file --assume-new --eval
+make after
 cargo info -h
 cargo after
 go info -h -help -c -n
@@ -309,7 +314,7 @@ function asksInformation(piece, { runner, table, length }) {
         if (twice > 1) return true;
       } else if (spec.value.has(word)) {
         i += 1;
-      } else if (spec.cluster && /^-[A-Za-z]{2,}$/.test(word)) {
+      } else if (spec.cluster && /^-[A-Za-z][A-Za-z0-9]+$/.test(word)) {
         for (let at = 1; at < word.length; at += 1) {
           const option = `-${word[at]}`;
           if (spec.info.has(option)) return true;
@@ -714,11 +719,36 @@ function selectsSubset(token, runner) {
 /** A non-flag token naming a file shape (`src/a.test.ts`, `tests/a.py::test_x`) narrows a test run. */
 const FILE_TOKEN = /^\S+\.\w{1,8}(?:::\S*)?$/;
 
+/**
+ * Whether the options of `make` ignore the errors of the recipes (`-i`, `--ignore-errors`, `-ki`): make then exits 0 after a failed
+ * recipe. The options are read before `--`, the short ones as a cluster in which an option with a value (`-C dir`, `-f file`,
+ * `-j4`) ends the cluster.
+ */
+function makeIgnoresErrors(tokens) {
+  const valueLong = /^--(?:directory|file|makefile|include-dir|old-file|assume-old|what-if|new-file|assume-new|eval)$/;
+  for (let at = 1; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    if (token === '--') return false;
+    if (token === '--ignore-errors') return true;
+    if (valueLong.test(token)) at += 1; // the value is the next word
+    else if (/^-[A-Za-z]/.test(token)) {
+      for (let k = 1; k < token.length; k += 1) {
+        if (token[k] === 'i') return true;
+        if ('CfIoWEOjl'.includes(token[k])) {
+          if (k === token.length - 1 && 'CfIoWE'.includes(token[k])) at += 1; // the value is the next word
+          break;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 /** Whether one stripped piece of a `runner` narrows or weakens its check. */
 function pieceNarrows(piece, kind, runner) {
   const tokens = piece.replace(ALL_REDIRECTIONS, ' ').split(/\s+/).filter(Boolean);
   if (tokens.some((t) => WEAKEN.test(t) && !OFF_VALUE.test(t))) return true;
-  if (selectsPackage(tokens)) return true;
+  if (selectsPackage(tokens) || (runner === 'make' && makeIgnoresErrors(tokens))) return true;
   if (kind !== 'test') return false;
   if (optionTokens(tokens, runner).some((t) => selectsSubset(t, runner))) return true;
   if (runner === 'cargo' && cargoNarrows(tokens)) return true;
@@ -856,7 +886,9 @@ function readCommand(command) {
   let check = null;
   let hidden;
   const checks = [];
+  let leaves = false; // an `exit` or `return` stands in front: the shell may end before the check runs (`exit 0; npm test` exits 0)
   for (let i = 0; i < pieces.length; i += 1) {
+    if (/^[({]?\s*(?:exit|return)(?:\s|$)/.test(pieces[i].text)) leaves = true;
     const stripped = stripWrappers(pieces[i].text);
     if (stripped === null) continue;
     if (PRINTS_OR_INSPECTS.test(stripped) || ASKS_ONLY.test(stripped) || NEGATED.test(stripped)) continue;
@@ -865,7 +897,7 @@ function readCommand(command) {
     check = { ...m, index: i };
     checks.push({ runner: m.runner, kind: m.kind, table: m.table, index: i });
     pipefail = pipefailAt(i);
-    hidden = exitHiddenCause(pieces, i, pipefail);
+    hidden = exitHiddenCause(pieces, i, pipefail) ?? (leaves ? 'exit before the check' : undefined);
     // later runner pieces overwrite: the command's status belongs to the last segment
   }
   if (!check) {
@@ -920,7 +952,10 @@ const SUMMARY_RULES = [
         if (/^\d+ [a-z-]+(?: [a-z-]+)*(?:, \d+ [a-z-]+(?: [a-z-]+)*)*$/.test(counts) && /(?:^|, )[1-9]\d* passed(?=,|$)/.test(counts)) passed = true;
         else unclear = true; // a summary that is no pass (nothing passed, a count of a word it does not know) holds the pass back
       }
-      return passed && !unclear ? 'passed' : null;
+      // A run that was interrupted (`KeyboardInterrupt`, `Interrupted: ...`, `pytest.exit()`, an internal error) prints the summary of
+      // the tests it got to, and the exit status 2 or more is hidden behind a pipe: the count is no pass of the suite.
+      const interrupted = /^!{3,} .*(?:KeyboardInterrupt|Interrupted|_pytest\.outcomes\.Exit|Exit:).* !{3,}$/m.test(tail) || /^INTERNALERROR>/m.test(tail);
+      return passed && !unclear && !interrupted ? 'passed' : null;
     },
   },
   // vitest: a test file that failed to load (`Test Files N failed`) fails the run even when the `Tests` line reads as passed, and
