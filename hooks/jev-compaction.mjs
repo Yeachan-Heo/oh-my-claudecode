@@ -1392,21 +1392,42 @@ function backgroundOutputFiles(messages, privatePaths) {
   const results = new Map();
   for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) results.set(r.tool_use_id, r.text || '');
   const out = { secret: new Set(), held: new Set() };
+  const known = new Set(); // the files of every background call whose result is still in the conversation, secret or not
   for (const m of messages) {
     if (m.role !== 'assistant') continue;
     for (const u of m.toolUses || []) {
       if (u.input?.run_in_background !== true || !results.has(u.tool_use_id)) continue;
       const list = touchesSecretPath(u.tool, u.input, privatePaths) ? out.secret : PROSE_TOOLS.has(u.tool) && anySecretPath(u.input, privatePaths) ? out.held : undefined;
-      if (!list) continue;
       for (const w of results.get(u.tool_use_id).slice(0, OUTPUT_SCAN_CHARS).split(/[\s"'`|;&<>()[\]{},=]+/)) {
-        const file = w.replace(/[.:]+$/, '').replace(/[\\/]+/g, '/').toLowerCase();
-        if (file.includes('://') || file.endsWith('/') || (file.match(/\//g) || []).length < 2) continue;
+        const file = outputFileOf(w);
+        if (!file) continue;
         const name = file.slice(file.lastIndexOf('/') + 1);
-        for (const f of name.length >= 6 ? [file, name] : [file]) list.add(f);
+        for (const f of name.length >= 6 ? [file, name] : [file]) { known.add(f); list?.add(f); }
       }
     }
   }
-  return { secret: fileIndex(out.secret), held: fileIndex(out.held) };
+  return { secret: fileIndex(out.secret), held: fileIndex(out.held), known };
+}
+// A word of a result as an output file (runs of slashes joined, lower case), or undefined when it is none.
+function outputFileOf(word) {
+  const file = word.replace(/[.:]+$/, '').replace(/[\\/]+/g, '/').toLowerCase();
+  return file.includes('://') || file.endsWith('/') || (file.match(/\//g) || []).length < 2 ? undefined : file;
+}
+// Whether a notification names an output file that no background call still in the conversation produced (its call was cut or traced by an earlier
+// compaction, which took the file's name with it): whether that call was on a secret path is then unknown, so the notification is held like a secret one.
+function sourceUnknown(text, known) {
+  for (const m of text.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)) if (unknownFile(m[1].trim(), known)) return true;
+  return false;
+}
+const unknownFile = (word, known) => {
+  const file = outputFileOf(word);
+  return Boolean(file) && !known.has(file) && !known.has(file.slice(file.lastIndexOf('/') + 1));
+};
+// The same for a call that reads such a file (a `cat` or `tail` of `.../tasks/<id>.output`): the file of a background call that an earlier compaction cut.
+function readsUnknownOutput(input, known) {
+  // Only the part from `/tasks/` on (the file's own name is what the index holds too), so that the read is linear whatever the input holds.
+  for (const m of inputJson(input).matchAll(/\/tasks\/[\w.-]+\.output\b/g)) if (unknownFile(m[0], known)) return true;
+  return false;
 }
 // Does a string of the input name one of the files as a whole name (not a part of a longer name or path)? The files
 // are kept by the run of name characters they end with; where such a file ends, that run is the whole run of name
@@ -2122,6 +2143,7 @@ function withoutReminderBlocks(text) {
   const kinds = [{ open: '<system-reminder>', close: '</system-reminder>', next: -2, plain: true }, { open: '<task-notification>', close: '</task-notification>', next: -2, plain: false }];
   const plain = [];
   let rest = '';
+  let first = -1; // where the first closed block starts
   let at = 0;
   for (;;) {
     let kind;
@@ -2134,17 +2156,23 @@ function withoutReminderBlocks(text) {
     const end = text.indexOf(kind.close, kind.next + kind.open.length);
     if (end < 0) { kind.next = -1; continue; }
     rest += text.slice(at, kind.next);
+    if (first < 0) first = kind.next;
     if (kind.plain) plain.push(text.slice(kind.next, end + kind.close.length));
     at = end + kind.close.length;
   }
-  return { rest: rest + text.slice(at), plain };
+  return { rest: rest + text.slice(at), plain, first };
 }
 // A <system-reminder> block that holds a message of another sender or the user: its frame (frameOf also takes a block opening with the notification's own
 // <task-notification> for a frame of another kind, which a notification is not).
 const foreignBlock = (block) => frameOf(block) !== undefined && !DELIVERY_NOTES.some((k) => block.replace(DELIVERY_WRAP, '').startsWith(k));
 function isNoteBody(t) {
-  const { rest, plain } = withoutReminderBlocks(t);
-  return (t.startsWith(DELIVERY_NOTES[0]) || rest.trim() === '') && !plain.some(foreignBlock);
+  const { rest, plain, first } = withoutReminderBlocks(t);
+  if (plain.some(foreignBlock)) return false;
+  if (!t.startsWith(DELIVERY_NOTES[0])) return rest.trim() === '';
+  // Opening with the marker is no leave for what stands outside the blocks: the marker line and the host's line before the first block are the notification's
+  // own (a message of another sender among them is not); with a block, nothing but blank space may follow it. Without a block the text after the marker is the body.
+  if (first < 0) return true;
+  return rest.slice(first).trim() === '' && !t.slice(DELIVERY_NOTES[0].length, first).split('\n').some((line) => startsFrame(`${line.trim()}\n`));
 }
 // A row of envelopes and nothing else, each holding a notification: a delivery of another kind (the coordinator, another session, a plugin), also inside a
 // <system-reminder> in the envelope, leaves the row alone.
@@ -2213,7 +2241,7 @@ function findCandidates(messages, privatePaths, notifications = false) {
       const c = {
         id: `${NOTE_TOOL}-${i}`, note: true, resIdx: i, useIdx: -1, use: { tool: NOTE_TOOL, input: {} }, res: { text: m.text, isError: false },
         summary: noteSummary(m.text), inputChars: 0, resultChars: m.text.length,
-        secret: readsFile(m.text, outputs.secret), proseSecret: readsFile(m.text, outputs.held), taskOutput: false, textOnly: true,
+        secret: readsFile(m.text, outputs.secret), proseSecret: readsFile(m.text, outputs.held) || sourceUnknown(m.text, outputs.known), taskOutput: false, textOnly: true,
         score: 0, asked: false, answered: false,
       };
       c.trace = traceLine(c);
@@ -2234,7 +2262,7 @@ function findCandidates(messages, privatePaths, notifications = false) {
         inputChars: (found.u.tool || '').length + inputJson(found.u.input).length,
         resultChars: (r.text || '').length,
         secret: touchesSecretPath(found.u.tool, found.u.input, privatePaths) || readsFile(found.u.input, outputs.secret),
-        proseSecret: (PROSE_TOOLS.has(found.u.tool) && anySecretPath(found.u.input, privatePaths)) || readsFile(found.u.input, outputs.held),
+        proseSecret: (PROSE_TOOLS.has(found.u.tool) && anySecretPath(found.u.input, privatePaths)) || readsFile(found.u.input, outputs.held) || readsUnknownOutput(found.u.input, outputs.known),
         taskOutput: OUTPUT_TOOLS.has(found.u.tool),
         textOnly: textOnlyResult(r),
         score: 0, asked: false, answered: false,

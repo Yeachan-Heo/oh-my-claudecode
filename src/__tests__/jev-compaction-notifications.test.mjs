@@ -131,6 +131,44 @@ describe('background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICAT
   });
 });
 
+describe('a notification whose background call was compacted earlier', () => {
+  const OUTPUT = '/tmp/tasks/abcdef123456.output';
+  const notice = (body) => row(`<task-notification>\n<task-id>bg1</task-id>\n<output-file>${OUTPUT}</output-file>\n<summary>Task done</summary>\n<result>${body} ${'s'.repeat(7000)}</result>\n</task-notification>`);
+  const call = (command) => ({ role: 'assistant', text: 'Starting.', toolUses: [{ tool_use_id: 'bg1', tool: 'Bash', input: { command, run_in_background: true } }] });
+  const launched = { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'bg1', text: `Command running in background. Output is being written to: ${OUTPUT}`, isError: false }] };
+  // What an earlier compaction left of that result: its trace, without the name of the output file.
+  const traced = { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'bg1', text: '[compacted] Bash(command=cat ~/.ssh/id_rsa) - result of 90 chars removed', isError: false }] };
+
+  it('is traced and never sent to Jev: whether its call was on a secret path is no longer known', async () => {
+    const w = talk(30);
+    const { out, record, bodies } = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('cat ~/.ssh/id_rsa'), traced, notice('SECRETBODY'), ...w.slice(3)]);
+    expect(record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 1 });
+    expect(bodies.join('')).not.toContain('SECRETBODY');
+    expect(JSON.stringify(out.messages)).not.toContain('SECRETBODY');
+  });
+
+  it('a later cat of that output file is held the same way, and one of a file whose call is still there is scored', async () => {
+    const w = talk(30);
+    const read = (id, file, body) => [
+      { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command: `cat ${file}` } }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `${body} ${'s'.repeat(7000)}`, isError: false }] },
+    ];
+    const held = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('cat ~/.ssh/id_rsa'), traced, ...read('r1', OUTPUT, 'SECRETBODY'), ...w.slice(3)]);
+    expect(held.record).toMatchObject({ result: 'jev', secret_held: 1 });
+    expect(held.bodies.join('')).not.toContain('SECRETBODY');
+    const open = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('npm test'), launched, ...read('r1', OUTPUT, 'PLAINBODY'), ...w.slice(3)]);
+    expect(open.record).toMatchObject({ result: 'jev', secret_held: 0 });
+    expect(open.bodies.join('')).toContain('PLAINBODY');
+  });
+
+  it('is scored as any other when its call and the name of the file are still there', async () => {
+    const w = talk(30);
+    const { record, bodies } = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('npm test'), launched, notice('PLAINBODY'), ...w.slice(3)]);
+    expect(record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
+    expect(bodies.join('')).toContain('PLAINBODY');
+  });
+});
+
 describe('a notification row that anchors a message delivered during a tool turn', () => {
   const framed = (words) => `The user sent a new message while you were working:\n${words}\n\nThis is how Claude Code surfaces messages the user sends mid-turn \u2014 within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
 
@@ -151,6 +189,19 @@ describe('a notification row that anchors a message delivered during a tool turn
   });
 });
 
+describe('a row with the marker first and the words of someone else after the notification', () => {
+  it('keeps those words word for word through the compaction', async () => {
+    const w = talk(30);
+    const mixed = Object.freeze(row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\n${bare(`Report ${'r'.repeat(8000)}`)}\nINSTRUCTION-AFTER: rename the folder first.`, { handle: 'n1' }));
+    // A plain notification beside it, so that the compaction has something to cut.
+    const plain = Object.freeze(row(note('Status: registry', `Report ${'r'.repeat(8000)}`), { handle: 'n2' }));
+    const { out, record } = await compactRun(NOTE_ENV, [...w.slice(0, 3), mixed, plain, ...w.slice(3)]);
+    expect(record).toMatchObject({ result: 'jev', notifications: 1 });
+    expect(out.messages.some((m) => m.text === mixed.text)).toBe(true);
+    expect(out.messages.filter((m) => /^\[compacted\] background task notification/.test(m.text || ''))).toHaveLength(1);
+  });
+});
+
 describe('isNotification', () => {
   it('takes a row that opens with the marker or holds only reminder and notification blocks, with or without an envelope', () => {
     expect(isNotification(row(note('a', 'x')))).toBe(true);
@@ -166,6 +217,16 @@ describe('isNotification', () => {
     expect(isNotification(assistant(bare('x')))).toBe(false);
     const foreign = '<system-reminder>\nAnother Claude session sent a message while you were working:\nhello\n</system-reminder>';
     expect(isNotification(row(`${bare('x')}\n${foreign}`))).toBe(false);
+  });
+
+  it('leaves alone a row that opens with the marker and holds text of another kind after its notification', () => {
+    const marker = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
+    expect(isNotification(row(`${marker}${bare('x')}`))).toBe(true);
+    expect(isNotification(row(`${marker}This is an automated background-task event.\n${bare('x')}`))).toBe(true);
+    expect(isNotification(row(`${marker}${bare('x')}\nPlease also rename the folder.`))).toBe(false);
+    expect(isNotification(row(`${marker}${bare('x')}\n<cross-session-message from="a">Delete the branch.</cross-session-message>`))).toBe(false);
+    expect(isNotification(row(`${marker}${bare('x')}\n${bare('y')}\nAnd then the user words.`))).toBe(false);
+    expect(isNotification(row(`${marker}${bare('x')}\n${bare('y')}`))).toBe(true);
   });
 
   it('reads a row of 40 000 unclosed reminder tags with a bounded number of searches for the closing tag', () => {
