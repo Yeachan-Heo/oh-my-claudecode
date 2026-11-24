@@ -172,6 +172,10 @@ check_distinct([('configuration file', A.config), ('pause_file', PAUSE_FILE), ('
 check_writable_dir(PAUSE_FILE, 'pause_file')
 if STATE:
     check_writable_dir(STATE, 'state_file')
+for _label, _path in (('pause_file', PAUSE_FILE), ('state_file', STATE)):
+    # both are replaced atomically: a directory (or another kind of file) there would fail only when a pause is due
+    if _path and os.path.exists(_path) and not os.path.isfile(_path):
+        fail(f'"{_label}" ({_path}) is not a regular file')
 
 
 def parse_exclude():
@@ -265,9 +269,9 @@ def read_cache():
     problem = None
     if pct is None:
         problem = ('cache-no-percent', f'the usage cache {CACHE} has no fiveHourPercent (no five-hour window on this account?): {NEEDS}')
-    elif not math.isfinite(pct) or pct < 0:
+    elif not math.isfinite(pct) or not 0 <= pct <= 100:   # OMC clamps the field to 0-100 when it writes it
         pct = None
-        problem = ('cache-invalid-percent', f'the usage cache {CACHE} has a fiveHourPercent that is not a percentage (not finite or negative): it is not acted on')
+        problem = ('cache-invalid-percent', f'the usage cache {CACHE} has a fiveHourPercent that is not a percentage (not finite, below 0 or above 100): it is not acted on')
     elif not age <= A.max_age:   # not "age > max": a timestamp that is not a number gives an age that is neither
         problem = ('cache-stale', f'the usage data is {age:.0f} s old, older than --max-age ({A.max_age:g} s), so it is not acted on: {NEEDS}')
     return pct, reset_ts, age, problem
@@ -293,7 +297,7 @@ def hook_check(where):
         log(f'WARNING ({where}): hook {HOOK_NAME} is NOT registered in {SETTINGS}: a pause would hold no session. Run five-hour-guard-settings.py add')
     for command in ours:
         try:
-            paths = [t for t in shlex.split(command) if t.endswith(HOOK_NAME)]
+            paths = [t for t in shlex.split(command) if HOOK_NAME in os.path.basename(t)]
         except ValueError:
             paths = []
         for path in paths:
@@ -411,6 +415,16 @@ def pid_alive(pid):
     return True
 
 
+def is_guard_pause(path):
+    """True when the file has the shape publish() writes. Anything else is somebody else's file."""
+    try:
+        with open(path) as f:
+            d = json.load(f)
+        return isinstance(d, dict) and type(d.get('v')) is int and type(d.get('paused')) is bool and type(d.get('pid')) is int
+    except Exception:
+        return False
+
+
 def drop_leftover_pause():
     """A pause file with no state behind it is a leftover of a dead guard: remove it. One that names a live process (another
     guard that shares this pause file) stays."""
@@ -479,6 +493,9 @@ def main():
     signal.signal(signal.SIGINT, on_signal)
     if A.test_pause:
         return test_pause()
+    if os.path.exists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):
+        # the start would remove it as a leftover: never remove a file that is not a pause of this guard (a mistyped path)
+        fail(f'the file {PAUSE_FILE} exists and is not a pause file of this guard: it is left untouched; check "pause_file", or remove the file yourself')
     lock_state()
     state = load_state()
     if state.get('paused'):

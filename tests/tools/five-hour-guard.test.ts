@@ -206,8 +206,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     mkdirSync(pauseDir);
     writeFileSync(v.cfg, JSON.stringify({ usage_cache: v.cache, pause_file: join(pauseDir, 'pause.json'), state_file: v.state, log_file: v.log }), 'utf8');
     const blocked = fixture('pause-blocked', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
-    mkdirSync(blocked.pause); // a directory where the pause file belongs: the write fails, and a single check says so by its status
-    const once = runSync(GUARD, guardArgs(blocked, ['--once']));
+    // the replace of the pause file fails (a full disk): the write fails, and a single check says so by its status
+    const once = runPyCode(['import os, runpy, sys', 'def full(*a, **k): raise OSError(28, "No space left on device")', 'os.replace = full',
+      'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n'), [GUARD, ...guardArgs(blocked, ['--once'])]);
     expect(once.status, 'a failed tick under --once is status 1').toBe(1);
     expect(once.stdout).toMatch(/ERROR: tick failed/);
 
@@ -567,6 +568,39 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(g); }
   });
 
+  it('an existing pause file that is not a guard pause is never removed: refused at start with exit 2, the file is kept', () => {
+    const f = fixture('not-a-pause', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    for (const text of ['my notes, not a pause\n', '', '{}', '{"paused": true}', '[1, 2]', '{"v": 2, "paused": "true", "pid": 1}']) {
+      writeFileSync(f.pause, text, 'utf8');
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${JSON.stringify(text)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/is not a pause file of this guard/);
+      expect(readText(f.pause), 'the file is untouched').toBe(text);
+    }
+    writePause(f, { pid: DEAD_PID });
+    expect(runSync(GUARD, guardArgs(f, ['--once'])).status, 'a leftover pause of the guard is still removed').toBe(0);
+    expect(existsSync(f.pause)).toBe(false);
+  });
+
+  it('a pause file or state file that is a directory is refused at start (exit 2)', () => {
+    const f = fixture('dir-targets', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'a-directory');
+    mkdirSync(dir);
+    for (const [key, label] of [['pause_file', 'pause_file'], ['state_file', 'state_file']]) {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, [key]: dir }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${label}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(new RegExp(`"${label}" .* is not a regular file`));
+    }
+  });
+
+  it('the hook entry check follows the same file name rule as add: a name that contains five-hour-guard-hook.py is checked', () => {
+    const f = fixture('hook-name-rule', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `exec ${PYBIN} -I /nonexistent-dir/five-hour-guard-hook.py.copy --pause-file ${f.pause}` }] }] } }), 'utf8');
+    expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): the hook entry in .* names \/nonexistent-dir\/five-hour-guard-hook\.py\.copy, which does not exist/);
+  });
+
   it('--max-age must be positive: a negative one makes every entry stale and the guard fail open for ever', () => {
     const f = fixture('max-age', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
     for (const bad of ['-1', '0']) {
@@ -598,6 +632,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const ts = Date.now();
     const reset = new Date(ts + HOUR_MS).toISOString();
     expect(run('bad-nan', `{"timestamp": ${ts}, "data": {"fiveHourPercent": NaN, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
+    expect(run('bad-101', `{"timestamp": ${ts}, "data": {"fiveHourPercent": 101, "fiveHourResetsAt": "${reset}"}}`), 'above 100: the producer clamps, so it is not believed').toMatch(/WARNING \(cache-invalid-percent\)/);
+    const full = fixture('pct-100', { cache: { pct: 100, resetMs: ts + HOUR_MS } });
+    guardOnce(full);
+    expect(existsSync(full.pause), 'exactly 100 is a valid percentage: the pause starts').toBe(true);
     expect(run('bad-neg', `{"timestamp": ${ts}, "data": {"fiveHourPercent": -3, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
     expect(run('bad-inf', `{"timestamp": ${ts}, "data": {"fiveHourPercent": Infinity, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
     expect(run('bad-ts', `{"timestamp": NaN, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-stale\)/);
