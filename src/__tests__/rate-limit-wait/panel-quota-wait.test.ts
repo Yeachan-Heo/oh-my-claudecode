@@ -573,6 +573,9 @@ describe('panel quota wait: decision logic', () => {
     expect(edge).toEqual({ wait: true, reset: BASE_MS + 5 * H, untilMs: BASE_MS + 5 * H });
     const missing = planQuotaWait({ data: { limits: [{ unit: 3, percentage: 100 }] } }, BASE_MS);
     expect(missing.wait).toBe(false);
+    // One millisecond past the window: no wait, whatever the unit says (a 5 h code with a reset days away).
+    const beyond = planQuotaWait({ data: { limits: [{ unit: 3, percentage: 100, nextResetTime: BASE_MS + 5 * H + 1 }] } }, BASE_MS, 5 * H, 0);
+    expect(beyond).toEqual({ wait: false, reason: 'reset beyond the 5 h window', reset: BASE_MS + 5 * H + 1 });
   });
 
   it('week unit: by default unit 6 is the weekly code, so unit 7 waits; OMC_PANEL_QUOTA_WEEK_UNIT=7 makes unit 7 the weekly code; invalid values fall back to 6', async () => {
