@@ -841,10 +841,17 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', timeout: 21600, command: 'exec "unterminated five-hour-guard-hook.py' }] }] } }), 'utf8');
     expect(guardOnce(f).stdout, 'a command the shell cannot parse').toMatch(/WARNING \(start\): the hook entry command .* cannot be parsed/);
     rmSync(f.state, { force: true });
-    writePause(f, { pid: 99999999999999999999 });
+    writePause(f, { pid: 1e20 });
     const huge = guardOnce(f);
     expect(huge.stderr).not.toMatch(/Traceback/);
     expect(existsSync(f.pause), 'a pid no process can have: the leftover is removed').toBe(false);
+    // where no lock is available the pid of a pause with a current heartbeat is probed: a pid that no process can have is not a crash
+    const noLocks = ['import runpy, sys', 'sys.modules["fcntl"] = None', 'sys.modules["msvcrt"] = None', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    writePause(f, { pid: 1e20 });
+    const unlocked = runPyCode(noLocks, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(unlocked.status, `${unlocked.stdout}${unlocked.stderr}`).toBe(0);
+    expect(unlocked.stderr).not.toMatch(/Traceback/);
+    expect(existsSync(f.pause), 'the pause of a pid no process can have is a leftover also without locks').toBe(false);
   });
 
   it('a stored pause that is over at start is cleared even when the state file cannot be written: an ERROR line, not a traceback', () => {
