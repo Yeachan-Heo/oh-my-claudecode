@@ -281,6 +281,20 @@ describe('the envelopes of the deliveries after a notification: the rows that bu
     expect(delivered.record.kept_full).toBe(none.record.kept_full);
   });
 
+  it('without the token cascade a small notification kept whole gives back the envelopes that cost more than it does: the results are cut as with no delivery', async () => {
+    const small = row(note('Status: registry', `Report ${'r'.repeat(1500)}`), { handle: 'n1' });
+    const many = Array.from({ length: 200 }, (_, k) => `The coordinator sent a message while you were working:\nd${k}`);
+    const messages = () => [...talk(3), ...LAUNCH, ...Array.from({ length: 12 }, (_, k) => result(`q${k}`, `RES${k}`)).flat(), small, ...talk(30)];
+    const at = messages().indexOf(small);
+    const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET: '0.9' };
+    const none = await compactRun(env, messages(), { score: 3 });
+    const delivered = await compactRun(env, messages(), { score: 3, deliver: { [at]: many } });
+    expect(delivered.record).toMatchObject({ result: 'jev', notifications: 1, queued_carried: 0 });
+    expect(delivered.out.messages.some((m) => m.handle === 'n1')).toBe(true);
+    expect(delivered.record.traced).toBe(none.record.traced);
+    expect(delivered.record.kept_full).toBe(none.record.kept_full);
+  });
+
   it('a notification of envelopes only, replaced by a trace, is charged the envelopes that its replacement row holds', async () => {
     const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '80', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
     const only = row(`<system-reminder id="jev-1">\n${note('Status: registry', `Report ${'r'.repeat(30000)}`)}\n</system-reminder id="jev-1">`, { handle: 'n1' });

@@ -1450,10 +1450,11 @@ function sourceByTask(text, outputs) {
     const block = text.slice(open.index, end);
     blocks++;
     at = end;
-    const id = /<task-id>\s*([\w-]{1,64})\s*<\/task-id>/.exec(block)?.[1];
-    if (id && outputs.ids.secret.has(id)) return 'secret';
-    if (id && outputs.ids.held.has(id)) worst = 'held';
-    else if (worst === 'known' && !(id && outputs.ids.known.has(id)) && !namesKnownFile(block, outputs.known)) worst = 'unknown';
+    // A block names one task, a shortened one (its ids are kept) may name several.
+    const taskIds = [...block.matchAll(/<task-id>\s*([\w-]{1,64})\s*<\/task-id>/g)].map((m) => m[1]);
+    if (taskIds.some((id) => outputs.ids.secret.has(id))) return 'secret';
+    if (taskIds.some((id) => outputs.ids.held.has(id))) worst = 'held';
+    else if (worst === 'known' && !(taskIds.length && taskIds.every((id) => outputs.ids.known.has(id))) && !namesKnownFile(block, outputs.known)) worst = 'unknown';
   }
   return blocks ? worst : 'unknown'; // a row that holds no block names no task at all
 }
@@ -2160,7 +2161,9 @@ function shortText(c) {
   if (c.note) {
     const body = /<result>([\s\S]*?)(?:<\/result>|$)/.exec(c.res.text);
     const kept = body ? `${c.summary}\n${body[1].slice(0, SHORT_CHARS)}` : c.res.text.slice(0, SHORT_CHARS);
-    return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]\n</task-notification>`;
+    // The source stays in the copy (the task ids and output files of the notification, the first few): the next compaction ties it to its call by them.
+    const source = [...c.res.text.matchAll(/<(task-id|output-file)>\s*([^<]{1,200}?)\s*<\/\1>/g)].slice(0, 8).map((m) => `<${m[1]}>${m[2]}</${m[1]}>\n`).join('');
+    return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${source}${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]\n</task-notification>`;
   }
   return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
 }
@@ -2427,8 +2430,11 @@ function allocate(candidates, before, target, added = 0) {
     const upFull = c.fullCost - traced(c);
     const upShort = c.shortCost - c.traceCost;
     if (c.secret || !c.textOnly) c.keep = 'trace';
-    else if (upFull <= 0 || c.task) c.keep = 'full';
-    else if (!c.asked) c.keep = 'trace';
+    else if (upFull <= 0 || c.task) {
+      c.keep = 'full';
+      // A notification kept whole writes none of the envelopes that `fixed` counted with its trace: they are given back.
+      if (c.note && upFull < 0) avail -= upFull;
+    } else if (!c.asked) c.keep = 'trace';
     else if (upFull <= avail) { c.keep = 'full'; avail -= upFull; }
     else if (c.score >= SHORT_COPY_MIN_SCORE && c.shortCost < c.fullCost && upShort <= avail) { c.keep = 'short'; avail -= Math.max(0, upShort); }
     else c.keep = 'trace';

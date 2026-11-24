@@ -1083,15 +1083,17 @@ describe('a shortened notification is still a notification at the next compactio
     const first = await compactRun(env, w, { event: { trigger: 'auto' }, usage: estimateUsage(w), score: byMarker });
     const short = first.out.messages.find((m) => m.role === 'user' && /notification shortened at compaction/.test(m.text || ''));
     expect(short).toBeTruthy();
-    // Short: the marker, the summary, 300 characters of the result and the note inside the notification's tag, and nothing else.
-    expect(short.text.startsWith('[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\nAgent "Important" finished\nREPORT-TEXT IMPORTANT ')).toBe(true);
+    // Short: the marker, the source (task id), the summary, 300 characters of the result and the note inside the notification's tag, and nothing else.
+    expect(short.text.startsWith('[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<task-id>a1b2c3</task-id>\nAgent "Important" finished\nREPORT-TEXT IMPORTANT ')).toBe(true);
     expect(short.text.endsWith('\n</task-notification>')).toBe(true);
-    expect(short.text.length).toBeLessThan(500);
+    expect(short.text.length).toBeLessThan(600);
     expect(isNotification(short)).toBe(true);
-    // The next compaction: the shortened row among the rows before the tail.
-    const next = [...steps(30).slice(0, 3), Object.freeze({ ...short, handle: 'n6' }), ...steps(30).slice(3)];
+    // The source of the notification stays in the short copy: its task id, so that the next compaction ties it to its call again.
+    expect(short.text).toContain('<task-id>a1b2c3</task-id>');
+    // The next compaction: the shortened row among the rows before the tail, with the call that started its task still there.
+    const next = [...steps(30).slice(0, 3), ...launchOf, Object.freeze({ ...short, handle: 'n6' }), ...steps(30).slice(3)];
     const second = await compactRun(env, next, { event: { trigger: 'auto' }, usage: estimateUsage(next), score: byMarker });
-    expect(second.record).toMatchObject({ result: 'jev', notifications: 1 });
+    expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
     const task = (second.requests[0]?.state.task || []).join('\n');
     expect(task).not.toContain('REPORT-TEXT IMPORTANT');
     expect(task).toContain('Task: go through the files');
