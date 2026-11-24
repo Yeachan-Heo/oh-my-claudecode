@@ -40,6 +40,8 @@ MAX_RESET_AHEAD_S = 5 * 3600 + 900   # a window is 5 h long: a reset time furthe
 MAX_MARGIN_S = 1800
 MAX_HEARTBEAT_S = 1800               # the hook ignores a valid_until more than 3600 s ahead
 MAX_TEST_PAUSE_S = 1800
+STATE_MAX_AHEAD_S = 21600            # a stored pause (or its start) further ahead than the hook honours is not ours
+FUTURE_SKEW_S = 120                  # a cache timestamp further ahead than this is not believed
 MIN_INTERVAL_S = 0.1
 
 
@@ -122,6 +124,12 @@ def setting(cli, key, required=False):
     return v or ''
 
 
+def default_settings():
+    """The settings.json the settings tool registers the hook in when no path is given (the same rule as the tool)."""
+    base = os.environ.get('CLAUDE_CONFIG_DIR', '').strip() or '~/.claude'
+    return os.path.join(os.path.expanduser(base), 'settings.json')
+
+
 def default_usage_cache():
     """The file OMC's status line and `omc wait` write (src/hud/usage-api.ts); the guard only reads it."""
     base = os.environ.get('CLAUDE_CONFIG_DIR', '').strip() or '~/.claude'
@@ -167,7 +175,8 @@ def check_distinct(files):
 
 
 check_distinct([('configuration file', A.config), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
-                ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS),
+                ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
+                ('pause_file lock', PAUSE_FILE + '.lock'),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
 if STATE:
@@ -194,7 +203,10 @@ STOP = False
 
 
 def ts(t=None):
-    return datetime.datetime.fromtimestamp(t if t is not None else time.time()).strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        return datetime.datetime.fromtimestamp(t if t is not None else time.time()).strftime('%Y-%m-%d %H:%M:%S')
+    except (OverflowError, OSError, ValueError):
+        return f'(time {t!r} out of range)'
 
 
 def log(msg):
@@ -224,7 +236,9 @@ def load_state():
             st = json.load(f)
         if st.get('paused') is not True:
             return {'paused': False}
-        if all(type(st.get(k)) in (int, float) and math.isfinite(st[k]) for k in ('since', 'resume_at')):
+        now = time.time()
+        # times the guard could have written: positive, and not further ahead than a pause ever lasts
+        if all(type(st.get(k)) in (int, float) and math.isfinite(st[k]) and 0 < st[k] <= now + STATE_MAX_AHEAD_S for k in ('since', 'resume_at')):
             return st
     except Exception:
         pass
@@ -256,7 +270,7 @@ def read_cache():
             d = json.load(f)
         copy_of_old_data = bool(d.get('error') or d.get('rateLimited'))
         seen_ms = d.get('lastSuccessAt') if copy_of_old_data else d.get('timestamp')
-        age = time.time() - (seen_ms / 1000 if type(seen_ms) in (int, float) else 0)   # text or a boolean is not a time: the entry is stale
+        age = time.time() - (seen_ms / 1000 if type(seen_ms) in (int, float) and math.isfinite(seen_ms) else 0)   # text, a boolean or infinity is not a time: the entry is stale
         x = d.get('data') or {}
         reset = x.get('fiveHourResetsAt')
         reset_ts = datetime.datetime.fromisoformat(reset.replace('Z', '+00:00')).timestamp() if reset else None
@@ -273,6 +287,9 @@ def read_cache():
     elif not math.isfinite(pct) or not 0 <= pct <= 100:   # OMC clamps the field to 0-100 when it writes it
         pct = None
         problem = ('cache-invalid-percent', f'the usage cache {CACHE} has a fiveHourPercent that is not a percentage (not a number, not finite, below 0 or above 100): it is not acted on')
+    elif age < -FUTURE_SKEW_S:
+        pct = None
+        problem = ('cache-future', f'the usage data is stamped {-age:.0f} s in the future (the clock of the writer is not this one, or the file is not OMC\'s): it is not acted on')
     elif not age <= A.max_age:   # not "age > max": a timestamp that is not a number gives an age that is neither
         problem = ('cache-stale', f'the usage data is {age:.0f} s old, older than --max-age ({A.max_age:g} s), so it is not acted on: {NEEDS}')
     return pct, reset_ts, age, problem
@@ -423,7 +440,8 @@ def is_guard_pause(path):
     try:
         with open(path) as f:
             d = json.load(f)
-        return isinstance(d, dict) and type(d.get('v')) is int and type(d.get('paused')) is bool and type(d.get('pid')) is int
+        return (isinstance(d, dict) and d.get('v') == 2 and type(d.get('v')) is int and d.get('paused') is True and type(d.get('pid')) is int
+                and all(type(d.get(k)) in (int, float) and math.isfinite(d[k]) for k in ('since', 'resume_at', 'valid_until')))
     except Exception:
         return False
 
@@ -434,16 +452,11 @@ def drop_leftover_pause():
     unpublish()
 
 
-LOCK_FD = None
+LOCK_FDS = []
 
 
-def lock_state():
-    """One guard per state file. flock on a sibling file: the state file itself is replaced on every write, so every write
-    would give it a new inode and a new lock."""
-    global LOCK_FD
-    if fcntl is None or A.dry_run or A.test_pause:
-        return
-    path = STATE + '.lock'
+def lock_one(path, what):
+    """Hold an exclusive flock on a sibling file for the whole life of the process."""
     try:
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     except OSError as e:
@@ -452,8 +465,18 @@ def lock_state():
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         os.close(fd)
-        fail(f'another guard holds {path}: one guard per state file')
-    LOCK_FD = fd   # held until the process ends
+        fail(f'another guard holds {path}: one guard per {what}')
+    LOCK_FDS.append(fd)   # held until the process ends
+
+
+def lock_state():
+    """One guard per state file and one per pause file. flock on a sibling file: the state file itself is replaced on every
+    write, so every write would give it a new inode and a new lock; two guards with different state files but one pause
+    file would otherwise overwrite each other's pause and remove it on stop."""
+    if fcntl is None or A.dry_run or A.test_pause:
+        return
+    lock_one(STATE + '.lock', 'state file')
+    lock_one(PAUSE_FILE + '.lock', 'pause file')
 
 
 def on_signal(signum, _frame):

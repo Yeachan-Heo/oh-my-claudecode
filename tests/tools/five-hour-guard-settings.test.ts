@@ -403,6 +403,22 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('add refuses a log, state file or usage cache of the configuration that is the default settings.json (no settings_file in the configuration)', () => {
+    const f = fixture('settings-alias-default');
+    const configDir = join(f.dir, 'claude-config');
+    mkdirSync(configDir, { recursive: true });
+    const settings = join(configDir, 'settings.json');
+    const text = JSON.stringify(base(), null, 2) + '\n';
+    for (const key of ['log_file', 'state_file', 'usage_cache']) {
+      writeFileSync(settings, text, 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ pause_file: f.pause, [key]: settings }), 'utf8');
+      const r = runSync(SETTINGS_TOOL, ['add', '--config', f.cfg, '--hook', HOOK, '--python', PYBIN], { env: { ...ENV, CLAUDE_CONFIG_DIR: configDir } });
+      expect(r.status, `${key}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/same file/);
+      expect(readText(settings), `${key}: settings.json is untouched`).toBe(text);
+    }
+  });
+
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
     const f = fixture('settings-timeout');
     const original = JSON.stringify(base(), null, 2) + '\n';

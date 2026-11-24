@@ -107,6 +107,8 @@ def main():
         ev = json.loads(raw) if raw.strip() else {}
     except Exception:
         ev = {}
+    if not isinstance(ev, dict):
+        ev = {}   # a list or a text on stdin is no event: the call is held like any other
     sid = str(ev.get('session_id') or '')
     if any(sid.startswith(x) for x in p.get('exclude', []) if x):
         return 0

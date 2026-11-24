@@ -205,6 +205,14 @@ def run_once():
         if not os.access(A.python, os.X_OK):
             fail(f'the interpreter {A.python!r} is not executable: the shell guard of the command (`[ -x ... ]`) would let every call through')
         distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python), ('configuration file', A.config)]
+        # the files the guard writes or reads under the same configuration: registering must not make one of them settings.json
+        for key, label in (('state_file', 'state file'), ('log_file', 'guard log'), ('usage_cache', 'usage cache')):
+            if isinstance(CFG.get(key), str) and CFG[key]:
+                distinct.append((label, CFG[key]))
+        if isinstance(CFG.get('state_file'), str) and CFG['state_file']:
+            distinct.append(('state lock file', CFG['state_file'] + '.lock'))
+        if PAUSE_FILE:
+            distinct.append(('pause lock file', PAUSE_FILE + '.lock'))
         for i, (la, pa) in enumerate(distinct):
             for lb, pb in distinct[i + 1:]:
                 if pa and pb and same_file(pa, pb):

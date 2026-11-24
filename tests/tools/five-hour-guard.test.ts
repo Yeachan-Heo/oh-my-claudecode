@@ -312,7 +312,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'start line');
       writeFileSync(flag, '');
       await sleep(600); // the clock is an hour back now; a wait counted by the wall clock would last an hour
-      writeCache(f, { pct: 99, resetMs: Date.now() + HOUR_MS });
+      // the writer of the cache runs on the same machine, so it stamps the entry with the stepped clock: an hour back
+      writeCache(f, { pct: 99, resetMs: Date.now() + HOUR_MS, ageMs: HOUR_MS });
       await waitFor(() => existsSync(f.pause), 20000, 'pause file: the guard still ticks');
     } finally { await stopGuard(g); }
   });
@@ -577,7 +578,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
 
   it('an existing pause file that is not a guard pause is never removed: refused at start with exit 2, the file is kept', () => {
     const f = fixture('not-a-pause', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    for (const text of ['my notes, not a pause\n', '', '{}', '{"paused": true}', '[1, 2]', '{"v": 2, "paused": "true", "pid": 1}']) {
+    for (const text of ['my notes, not a pause\n', '', '{}', '{"paused": true}', '[1, 2]', '{"v": 2, "paused": "true", "pid": 1}',
+      '{"v":0,"paused":false,"pid":999999}', '{"v":2,"paused":false,"pid":999999,"since":1,"resume_at":2,"valid_until":3}', '{"v":2,"paused":true,"pid":999999}',
+      '{"v":1,"paused":true,"pid":999999,"since":1,"resume_at":2,"valid_until":3}']) {
       writeFileSync(f.pause, text, 'utf8');
       const r = runSync(GUARD, guardArgs(f, ['--once']));
       expect(r.status, `${JSON.stringify(text)}: ${r.stdout}${r.stderr}`).toBe(2);
@@ -617,6 +620,47 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(r.stderr).not.toMatch(/Traceback/);
   });
 
+  it('with no settings_file in the configuration the default settings.json counts as a configured file: a log or state file that is it is refused', () => {
+    const f = fixture('alias-default-settings', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const configDir = join(f.dir, 'claude-config');
+    mkdirSync(configDir, { recursive: true });
+    const settings = join(configDir, 'settings.json');
+    const text = JSON.stringify({ env: { KEEP: '1' } });
+    for (const key of ['log_file', 'state_file', 'usage_cache']) {
+      writeFileSync(settings, text, 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, [key]: settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once'], { env: { ...ENV, CLAUDE_CONFIG_DIR: configDir } });
+      expect(r.status, `${key}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+      expect(readText(settings), `${key}: settings.json is untouched`).toBe(text);
+    }
+  });
+
+  it('two guards with one pause_file and different state files: the second one does not start, even when the first has published nothing yet', async () => {
+    const a = fixture('pause-lock-a', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const b = fixture('pause-lock-b', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(b.cfg, JSON.stringify({ usage_cache: b.cache, pause_file: a.pause, state_file: b.state }), 'utf8');
+    const first = startGuard(a);
+    try {
+      await waitFor(() => /guard start/.test(readText(a.log)), 20000, 'first guard');
+      const second = runSync(GUARD, guardArgs(b, ['--once']));
+      expect(second.status, `${second.stdout}${second.stderr}`).toBe(2);
+      expect(second.stderr).toMatch(/another guard holds .*pause\.json\.lock: one guard per pause file/);
+    } finally { await stopGuard(first); }
+    expect(runSync(GUARD, guardArgs(b, ['--once'])).status, 'the lock goes with the first guard').toBe(0);
+  });
+
+  it('a stored pause with times outside any window the guard writes is ignored, not a crash at start', () => {
+    const f = fixture('state-bounds', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    for (const bad of [{ since: 1, resume_at: 1e300 }, { since: 1e300, resume_at: now() + 600 }, { since: -1e300, resume_at: now() + 600 }, { since: 1, resume_at: -1e300 },
+      { since: now(), resume_at: now() + 30 * 86400 }]) {
+      writeFileSync(f.state, JSON.stringify({ paused: true, ...bad }), 'utf8');
+      const r = guardOnce(f);
+      expect(r.stdout, JSON.stringify(bad)).toMatch(/guard start/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+  });
+
   it('--max-age must be positive: a negative one makes every entry stale and the guard fail open for ever', () => {
     const f = fixture('max-age', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
     for (const bad of ['-1', '0']) {
@@ -649,6 +693,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const reset = new Date(ts + HOUR_MS).toISOString();
     expect(run('bad-nan', `{"timestamp": ${ts}, "data": {"fiveHourPercent": NaN, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
     expect(run('bad-101', `{"timestamp": ${ts}, "data": {"fiveHourPercent": 101, "fiveHourResetsAt": "${reset}"}}`), 'above 100: the producer clamps, so it is not believed').toMatch(/WARNING \(cache-invalid-percent\)/);
+    expect(run('bad-ts-inf', `{"timestamp": Infinity, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": "${reset}"}}`), 'an infinite timestamp is not a time').toMatch(/WARNING \(cache-stale\)/);
+    expect(run('bad-lastsuccess-inf', `{"timestamp": ${ts}, "error": "x", "lastSuccessAt": Infinity, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-stale\)/);
+    expect(run('bad-ts-future', `{"timestamp": ${ts + 3600e3}, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": "${reset}"}}`), 'a timestamp an hour ahead is not believed').toMatch(/WARNING \(cache-future\)/);
     const full = fixture('pct-100', { cache: { pct: 100, resetMs: ts + HOUR_MS } });
     guardOnce(full);
     expect(existsSync(full.pause), 'exactly 100 is a valid percentage: the pause starts').toBe(true);
@@ -771,6 +818,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard hook', { timeout: 90000 }, () => 
     }
     writePause(f);
     expect(await hookHeld(f, 'other0001'), 'a well-formed pause holds').toBe(true);
+  });
+
+  it('an event on stdin that is not a JSON object (a list, a text, null) is held like any other call, not passed by an exception', async () => {
+    const f = fixture('hook-event-shape');
+    writePause(f);
+    for (const input of ['[]', '"text"', 'null', '42']) {
+      const log = join(f.dir, `hook-event-${Buffer.from(input).toString('hex')}.log`);
+      const h = spawnPy(HOOK, ['--pause-file', f.pause, '--log', log, '--poll', '0.1'], { env: ENV, input });
+      try {
+        await waitFor(() => /hold-start/.test(readText(log)) || h.exited, 20000, `hold-start for ${input}`);
+        await sleep(300);
+        expect(!h.exited && /hold-start/.test(readText(log)), `${input} is held`).toBe(true);
+      } finally { await h.stop(); }
+    }
   });
 
   it('a valid pause holds for as long as it lasts (2.5 s of polling), exit 0 only after the pause file is gone', async () => {
