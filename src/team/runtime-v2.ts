@@ -9282,17 +9282,18 @@ export async function shutdownTeamV2(
       if (!tree) return;
       const known = earlyPaneTrees.get(worker.name);
       const held = known?.paneId === ownership.ownership.paneId ? known.trees : [];
-      if (uniquePaneTrees([...held, tree]).length === held.length) return; // already held, and already on disk
-      earlyPaneTrees.set(worker.name, {
-        paneId: ownership.ownership.paneId,
-        trees: [...held, tree],
-      });
+      const isNew = uniquePaneTrees([...held, tree]).length !== held.length;
+      // a tree held and on disk is nothing to do; one that could not be written is written again at the next read
+      if (!isNew && !captureUnsaved.includes(worker.name)) return;
+      const trees = isNew ? [...held, tree] : held;
+      if (isNew) earlyPaneTrees.set(worker.name, { paneId: ownership.ownership.paneId, trees });
       // On disk before the request to exit goes out: a worker that follows it exits, and this is then the only copy of what it
       // had started, so a leader interrupted from here on must not lose it (the fence merges it into its own capture). A tree
       // that cannot be saved, for want of a launch attempt to save it with as much as for a failed write, counts as unsaved.
       const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
       const attempt =
-        provider && worker.launch_attempt_id
+        capturedAttempts.get(worker.name) ??
+        (provider && worker.launch_attempt_id
           ? await loadWorkerLaunchAttempt({
               cwd,
               teamName: sanitized,
@@ -9303,16 +9304,14 @@ export async function shutdownTeamV2(
               attemptId: worker.launch_attempt_id,
               runtimeCliPath: resolveRuntimeCliPath(),
             })
-          : null;
+          : null);
       if (attempt) capturedAttempts.set(worker.name, attempt);
-      if (
-        !attempt ||
-        !(await addToWorkerLaunchFencedCapture(attempt, [
-          serializePaneTree(tree),
-        ]).catch(() => false))
-      ) {
-        if (!captureUnsaved.includes(worker.name)) captureUnsaved.push(worker.name);
-      }
+      const saved =
+        !!attempt &&
+        (await addToWorkerLaunchFencedCapture(attempt, trees.map(serializePaneTree)).catch(() => false));
+      const at = captureUnsaved.indexOf(worker.name);
+      if (saved && at >= 0) captureUnsaved.splice(at, 1);
+      else if (!saved && at < 0) captureUnsaved.push(worker.name);
     } catch {
       /* reading a tree must not hold up the shutdown: the read before the launch fence is still taken */
     }
@@ -9408,8 +9407,9 @@ export async function shutdownTeamV2(
     await new Promise((r) => setTimeout(r, 2_000));
   }
 
-  // a tree read while the workers were waited for that could not be saved: the requests are out, the retry goes on from what is on disk
-  if (captureUnsaved.length > 0) return preserveForUnsavedCapture();
+  // A tree read while the workers were waited for that could not be written (and not at a later read either) is not a reason to stop: the
+  // requests are out, and the trees are held here, signalled in step 4 and written with the fence, which stops before it terminates a
+  // provider when it cannot write them.
   config = await revalidateShutdownFence();
   // 4. Force kill remaining tmux panes
   const recordedWorkerPaneIds = config.workers

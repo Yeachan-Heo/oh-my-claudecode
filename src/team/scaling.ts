@@ -2346,18 +2346,23 @@ export async function scaleDownOwned(
           const known = earlyPaneTrees.get(worker.name);
           const held =
             known?.paneId === adopted.ownership.paneId ? known.trees : [];
-          if (uniquePaneTrees([...held, tree]).length === held.length) return; // already held, and already on disk
-          earlyPaneTrees.set(worker.name, {
-            paneId: adopted.ownership.paneId,
-            trees: [...held, tree],
-          });
+          const isNew = uniquePaneTrees([...held, tree]).length !== held.length;
+          // a tree held and on disk is nothing to do; one that could not be written is written again at the next read
+          if (!isNew && !captureUnsaved.includes(worker.name)) return;
+          const trees = isNew ? [...held, tree] : held;
+          if (isNew)
+            earlyPaneTrees.set(worker.name, {
+              paneId: adopted.ownership.paneId,
+              trees,
+            });
           // On disk before the drain request: a worker that finishes exits, and this is then the only copy of what it had started,
           // so a leader interrupted from here on must not lose it (the fence merges it into its own capture). A tree that cannot be
           // saved, for want of a launch attempt to save it with as much as for a failed write, counts as unsaved.
           const provider =
             worker.launch_descriptor?.provider ?? worker.worker_cli;
           const attempt =
-            provider && worker.launch_attempt_id
+            capturedAttempts.get(worker.name) ??
+            (provider && worker.launch_attempt_id
               ? await loadWorkerLaunchAttempt({
                   cwd: leaderCwd,
                   teamName: sanitized,
@@ -2368,17 +2373,17 @@ export async function scaleDownOwned(
                   attemptId: worker.launch_attempt_id,
                   runtimeCliPath: resolveRuntimeCliPath(),
                 })
-              : null;
+              : null);
           if (attempt) capturedAttempts.set(worker.name, attempt);
-          if (
-            !attempt ||
-            !(await addToWorkerLaunchFencedCapture(attempt, [
-              serializePaneTree(tree),
-            ]).catch(() => false))
-          ) {
-            if (!captureUnsaved.includes(worker.name))
-              captureUnsaved.push(worker.name);
-          }
+          const saved =
+            !!attempt &&
+            (await addToWorkerLaunchFencedCapture(
+              attempt,
+              trees.map(serializePaneTree),
+            ).catch(() => false));
+          const at = captureUnsaved.indexOf(worker.name);
+          if (saved && at >= 0) captureUnsaved.splice(at, 1);
+          else if (!saved && at < 0) captureUnsaved.push(worker.name);
         } catch {
           /* reading a tree must not hold up the scale down: the read before the launch fence is still taken */
         }
@@ -2441,12 +2446,9 @@ export async function scaleDownOwned(
           await new Promise((r) => setTimeout(r, 2_000));
         }
       }
-      if (captureUnsaved.length > 0) {
-        // a tree read during the drain wait could not be saved: the drain requests are out, the retry goes on from what is on disk
-        const reason = `pane_tree_capture_unsaved:${captureUnsaved.join(",")}`;
-        await markScaleDownFailed(reason);
-        return { ok: false, error: reason };
-      }
+      // A tree read during the drain wait that could not be written (and not at a later read either) is not a reason to stop: the drain
+      // requests are out, and the trees are held here, signalled in phase 3 and written with the fence, which stops before it terminates
+      // a provider when it cannot write them.
       if (!(await reserveEffects().catch(() => false))) {
         for (const attempt of capturedAttempts.values()) if (attempt) await discardWorkerLaunchFencedCapture(attempt).catch(() => undefined);
         await markScaleDownFailed("scale_down_fence_lost_before_effects");

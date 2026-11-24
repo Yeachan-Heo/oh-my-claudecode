@@ -216,6 +216,10 @@ describe('task_list replies', () => {
       { items: [{ content: 'A', status: 'done' }] },
       { items: [{ content: ' ', status: 'pending' }] },
       { done: [0] },
+      { done: [51] },
+      { done: Array.from({ length: 51 }, () => 1) },
+      { done: Array.from({ length: 200_000 }, () => 1) },
+      { start: 51 },
       { advance: 'yes' },
       { advance: false },
     ];

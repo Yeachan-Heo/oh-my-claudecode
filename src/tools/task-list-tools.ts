@@ -25,9 +25,14 @@ const taskListArray = (value: unknown): unknown[] | null => {
   return null;
 };
 
+// A list has at most TASK_LIST_MAX tasks, so a task number above that, and a list of numbers longer than that, change nothing: they are refused
+// instead of accepted, since the hook would not save the call (an event over the size the reader accepts) and the answer would be a false
+// "accepted", and an argument of any length would be walked.
+const TASK_LIST_MAX = 50;
+
 const taskListPositive = (value: unknown): boolean => {
   const n = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value;
-  return Number.isInteger(n) && Number(value) >= 1;
+  return Number.isInteger(n) && (n as number) >= 1 && (n as number) <= TASK_LIST_MAX;
 };
 
 const taskListSchema = {
@@ -37,8 +42,8 @@ const taskListSchema = {
     note: z.string().optional().describe('Task in progress: 1-2 sentences, what you are doing now and why'),
   })).optional().describe('The whole list in order; replaces the previous one'),
   advance: z.boolean().optional().describe('Complete the task in progress and start the next pending one'),
-  done: z.array(z.number().int()).optional().describe('1-based numbers of tasks to mark completed'),
-  start: z.number().int().optional().describe('1-based number of the task to mark in_progress'),
+  done: z.array(z.number().int().min(1).max(TASK_LIST_MAX)).max(TASK_LIST_MAX).optional().describe('1-based numbers of tasks to mark completed'),
+  start: z.number().int().min(1).max(TASK_LIST_MAX).optional().describe('1-based number of the task to mark in_progress'),
 };
 
 type TaskListItem = { content?: unknown; status?: unknown; note?: unknown };
@@ -65,8 +70,8 @@ export const taskListTool = {
       return fail('items: 1-50 tasks, each with a non-empty content, a status pending, in_progress or completed, and a note that, when present, is a string.');
     }
     const done = input.done === undefined ? undefined : taskListArray(input.done);
-    if (input.done !== undefined && (!done || !done.every(taskListPositive))) return fail('done: a list of 1-based task numbers.');
-    if (input.start !== undefined && !taskListPositive(input.start)) return fail('start: a 1-based task number.');
+    if (input.done !== undefined && (!done || done.length > TASK_LIST_MAX || !done.every(taskListPositive))) return fail('done: a list of at most 50 task numbers, each from 1 to 50.');
+    if (input.start !== undefined && !taskListPositive(input.start)) return fail('start: a task number from 1 to 50.');
     if (input.advance !== undefined && typeof input.advance !== 'boolean') return fail('advance: true or false.');
     if (!items && !done && input.start === undefined && input.advance !== true) return fail('Send items, or advance, done or start.');
     const current = items ? (items as TaskListItem[]).filter((x) => x.status === 'in_progress').map((x) => String(x.content).trim()) : [];

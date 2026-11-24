@@ -1865,10 +1865,9 @@ describe('scaleUp duplicate worker guard', () => {
       await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
         { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
       expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([tree, startedLater]);
-      expect(workerLaunchMocks.addToWorkerLaunchFencedCapture.mock.calls.map((call) => call[1])).toEqual([
-        [{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'linux:1:4001']] }],
-        [{ panePid: 4000, pids: [4001, 4002], startIdentities: [[4001, 'linux:1:4001'], [4002, 'linux:1:4002']] }],
-      ]);
+      const first = { panePid: 4000, pids: [4001], startIdentities: [[4001, 'linux:1:4001']] };
+      const second = { panePid: 4000, pids: [4001, 4002], startIdentities: [[4001, 'linux:1:4001'], [4002, 'linux:1:4002']] };
+      expect(workerLaunchMocks.addToWorkerLaunchFencedCapture.mock.calls.map((call) => call[1])).toEqual([[first], [first, second]]);
     } finally {
       if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
       else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
@@ -1876,6 +1875,65 @@ describe('scaleUp duplicate worker guard', () => {
       tmuxSessionMocks.terminatePaneProcessTree.mockReset();
     }
   });
+
+  // A tree read during the drain wait that cannot be written is not a reason to stop once the drain requests are out: it is held, signalled in
+  // phase 3 and written with the fence (which stops before it terminates a provider when that fails too).
+  it('goes on and signals a descendant read during the drain wait when its write failed, and writes it again at the next read', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    const startedLater = { panePid: 4000, pids: [4001, 4002], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001'], [4002, 'linux:1:4002']]) };
+    let rootGone = false;
+    let reads = 0;
+    let statusReads = 0;
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => (rootGone ? 'dead' : 'alive'));
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+      if (rootGone) return null;
+      return ++reads === 1 ? tree : startedLater;
+    });
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    teamOpsMocks.writeAtomic.mockReset();
+    teamOpsMocks.teamReadWorkerStatus.mockImplementation(async () => {
+      statusReads += 1;
+      if (statusReads === 1) return { state: 'working', updated_at: new Date().toISOString() }; // one more poll: the write is tried again
+      rootGone = true;
+      return { state: 'done', updated_at: new Date().toISOString() };
+    });
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+      attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
+    });
+    workerLaunchMocks.addToWorkerLaunchFencedCapture.mockReset();
+    workerLaunchMocks.addToWorkerLaunchFencedCapture
+      .mockResolvedValueOnce(true) // before the drain request
+      .mockResolvedValueOnce(false) // the descendant read in the first poll
+      .mockResolvedValue(true);
+    try {
+      const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 10_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(result).not.toMatchObject({ ok: false, error: expect.stringContaining('pane_tree_capture_unsaved') });
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toContainEqual(startedLater);
+      expect(workerLaunchMocks.addToWorkerLaunchFencedCapture.mock.calls.length).toBe(3); // the write that failed was tried again at the next read
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      workerLaunchMocks.addToWorkerLaunchFencedCapture.mockReset();
+      workerLaunchMocks.addToWorkerLaunchFencedCapture.mockResolvedValue(true);
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  }, 30_000);
 
   // A live worker whose launch attempt cannot be loaded (missing, of an earlier version, another identity) cannot have its tree saved either.
   it('requests no drain and fails the scale down when the launch attempt of a worker with a read tree cannot be loaded', async () => {

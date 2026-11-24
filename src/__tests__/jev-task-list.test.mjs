@@ -367,6 +367,14 @@ describe('task list: storage library', () => {
     const hide = [
       ['api_key=abcdef123456', 'abcdef123456'],
       [`ghp_${'a1'.repeat(10)}`, 'a1a1a1a1a1a1'],
+      // the other canonical token shapes of the Jev masker, assembled at run time so no literal token sits in the source
+      [`${'gho'}_${'b2'.repeat(10)}`, 'b2b2b2b2b2b2'],
+      [`${'glpat'}-${'c3'.repeat(10)}`, 'c3c3c3c3c3c3'],
+      [`${'xoxb'}-${'d4'.repeat(10)}`, 'd4d4d4d4d4d4'],
+      [`${'sk'}_${'live'}_${'e5'.repeat(10)}`, 'e5e5e5e5e5e5'],
+      [`${'hf'}_${'f6'.repeat(10)}`, 'f6f6f6f6f6f6'],
+      [`${'npm'}_${'a7'.repeat(10)}`, 'a7a7a7a7a7a7'],
+      [`${'eyJ'}${'h1'.repeat(6)}.${'p2'.repeat(6)}.${'s3'.repeat(6)}`, 'p2p2p2p2p2p2'],
       ['Bearer abcdefgh12345678', 'abcdefgh12345678'],
       ['AUTH_TOKEN: "xyz-secret-1"', 'xyz-secret-1'],
       ['db.password=Pass123', 'Pass123'],
@@ -1653,6 +1661,16 @@ describe('task list: the hook accepts what the task_list tool accepts', () => {
       expect(tool.isError, JSON.stringify(item)).toBe(true);
       expect(L.updateShape({ items: [item] }, 'note').ok, JSON.stringify(item)).toBe(false);
     }
+  });
+
+  it('done and start beyond what a list can hold (50 tasks) are refused by both, so an accepted call is a saved call', async () => {
+    const many = Array.from({ length: 51 }, () => 1);
+    for (const args of [{ done: [51] }, { done: many }, { start: 51 }, { done: [1, 2, 50] }, { start: 50 }]) {
+      const tool = await taskListTool.handler(args);
+      expect(L.updateShape(args, 'note').ok, JSON.stringify(args).slice(0, 40)).toBe(tool.isError !== true);
+    }
+    expect((await taskListTool.handler({ done: [51] })).isError).toBe(true);
+    expect((await taskListTool.handler({ done: [50] })).isError).toBeUndefined();
   });
 
   it('a call with a note of another type changes nothing in the hook, and update_plan keeps its own rules', () => {

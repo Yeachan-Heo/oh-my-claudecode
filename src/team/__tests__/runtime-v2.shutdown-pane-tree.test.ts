@@ -569,4 +569,61 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
       expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0]).filter(Boolean)).toEqual([]);
     });
   }, 60_000);
+
+  // A tree read while the workers are waited for may fail to be written (the capture file is in the way, say). The requests are out by then:
+  // the tree is written again at the next read, and when the worker acknowledges and exits before that, it is carried to the fence in memory,
+  // signalled, and written with the fence's own capture, not dropped by a rollback.
+  it('writes a tree read during the wait again at the next read when the first write failed', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const startedLater = { panePid: 4_000_000, pids: [4_000_001, 4_000_002], startIdentities: new Map([[4_000_001, 'start-4000001'], [4_000_002, 'start-4000002']]) };
+    await withAcceptedProvider('pane-tree-rewrite-team', async (teamRoot, _provider, attempt) => {
+      const workerDir = join(teamRoot, 'workers', 'worker-1');
+      const captureFile = `${attempt.decisionPath}.retired.fenced-capture`;
+      let reads = 0;
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+        reads += 1;
+        if (reads === 1) return FIXTURE_TREE; // before the requests
+        if (reads === 2) { // the first read of the wait: the capture file is in the way when it is written
+          await rm(captureFile, { force: true });
+          await mkdir(join(captureFile, 'occupied'), { recursive: true });
+        }
+        if (reads === 3) await rm(captureFile, { recursive: true, force: true }); // the way is clear again at the next read
+        return startedLater;
+      });
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      const shutdown = shutdownTeamV2('pane-tree-rewrite-team', cwd, { timeoutMs: 30_000 });
+      await vi.waitFor(async () => {
+        const saved = JSON.parse(await readFile(captureFile, 'utf8')) as { capture: unknown[] };
+        expect(saved.capture).toHaveLength(2);
+      }, { timeout: 15_000, interval: 20 });
+      await writeJson(cwd, join(workerDir, 'shutdown-ack.json'), { status: 'accept', reason: 'ok', updated_at: new Date().toISOString() });
+      await shutdown;
+    });
+  }, 60_000);
+
+  it('carries a tree read during the wait whose write failed to the fence when the worker exits first, and signals it', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const startedLater = { panePid: 4_000_000, pids: [4_000_001, 4_000_002], startIdentities: new Map([[4_000_001, 'start-4000001'], [4_000_002, 'start-4000002']]) };
+    await withAcceptedProvider('pane-tree-carry-team', async (teamRoot, _provider, attempt) => {
+      const workerDir = join(teamRoot, 'workers', 'worker-1');
+      const captureFile = `${attempt.decisionPath}.retired.fenced-capture`;
+      let reads = 0;
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+        reads += 1;
+        if (reads === 1) return FIXTURE_TREE;
+        if (reads === 2) { // the read of the wait: its write fails, the worker acknowledges and its pane is gone at the next reads
+          await rm(captureFile, { force: true });
+          await mkdir(join(captureFile, 'occupied'), { recursive: true });
+          await writeJson(cwd, join(workerDir, 'shutdown-ack.json'), { status: 'accept', reason: 'ok', updated_at: new Date().toISOString() });
+          return startedLater;
+        }
+        if (reads === 3) await rm(captureFile, { recursive: true, force: true }); // before the fence: the fence writes its own capture
+        return null;
+      });
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      const result = await shutdownTeamV2('pane-tree-carry-team', cwd, { timeoutMs: 30_000 });
+      expect(result).not.toMatchObject({ outcome: 'preserved', reason: 'provider_cleanup_unverified' });
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toContainEqual(startedLater);
+    });
+  }, 60_000);
 });

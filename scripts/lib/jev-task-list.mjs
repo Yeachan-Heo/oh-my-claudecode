@@ -233,9 +233,12 @@ function publishJson(path, value, stillCurrent, env = process.env) {
 const LIST_SECRET_RULES = [
   [/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***'],
   [/\b(sk-(?:ant-)?)[A-Za-z0-9_-]{8,}/g, '$1***'],
-  [/\b(ghp_)[A-Za-z0-9]{8,}/g, '$1***'],
+  [/\b(gh[pousr]_)[A-Za-z0-9_]{8,}/g, '$1***'],
+  [/\b(glpat-)[A-Za-z0-9_-]{8,}/g, '$1***'],
+  [/\b((?:sk|rk|pk)_(?:live|test)_|hf_|npm_)[A-Za-z0-9]{16,}/g, '$1***'],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, 'eyJ***'],
   [/\b(github_pat_)[A-Za-z0-9_]{8,}/g, '$1***'],
-  [/\b(xox[a-z]-)[A-Za-z0-9-]{8,}/g, '$1***'],
+  [/\b(xox[a-z]-)[A-Za-z0-9-]{8,}/g, '$1***'], // also xoxe- and the other letters
   [/\b(AKIA)[0-9A-Z]{12,}/g, '$1***'],
   [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***'],
 ];
@@ -313,8 +316,9 @@ export function updateShape(input, noteField = null) {
   const typed = (x) => !noteField || (typeof x.content === 'string' && (x[noteField] === undefined || typeof x[noteField] === 'string'));
   if (input?.items !== undefined && (!items || items.length === 0 || items.length > ITEMS_MAX || items.some((x) => !itemOf(x, null) || !STATUSES.has(x.status) || !typed(x)))) return { ok: false, why: 'items' };
   const done = input?.done === undefined ? undefined : arrayOf(input.done);
-  if (input?.done !== undefined && (!done || done.some((n) => intOf(n) === null))) return { ok: false, why: 'done' };
-  if (input?.start !== undefined && intOf(input.start) === null) return { ok: false, why: 'start' };
+  // a list has at most ITEMS_MAX tasks: more numbers than that, or a number above it, change nothing and would only make the event large
+  if (input?.done !== undefined && (!done || done.length > ITEMS_MAX || done.some((n) => intOf(n) === null || intOf(n) > ITEMS_MAX))) return { ok: false, why: 'done' };
+  if (input?.start !== undefined && (intOf(input.start) === null || intOf(input.start) > ITEMS_MAX)) return { ok: false, why: 'start' };
   if (input?.advance !== undefined && typeof input.advance !== 'boolean') return { ok: false, why: 'advance' };
   if (!items && !done && input?.start === undefined && input?.advance !== true) return { ok: false, why: 'empty' };
   return { ok: true, items, done: done?.map(intOf), start: input?.start === undefined ? undefined : intOf(input.start), advance: input?.advance === true };
