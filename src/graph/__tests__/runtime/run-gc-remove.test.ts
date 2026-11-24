@@ -128,6 +128,30 @@ describe("omc graph gc: removal", () => {
     });
   });
 
+  it("a leftover quarantined directory whose lock turned live after the scan is kept", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-leftover");
+      ageTree(dir, OLD);
+      const quarantine = quarantineRun(realRoot, "run-leftover", NOW);
+      const name = quarantine.slice(realRoot.length + 1);
+      // The scan sees a dead owner, so the leftover is a cleanup candidate.
+      writeFileSync(join(quarantine, "owner.lock"), JSON.stringify({ pid: deadPid(), epoch: 2, timestamp: OLD }));
+      const remove = (realRootArg: string, id: string) => {
+        // Between the scan and the removal a live process now holds the lock inside the leftover.
+        writeFileSync(join(realRootArg, id, "owner.lock"), JSON.stringify({ pid: process.pid, epoch: 3, timestamp: NOW }));
+        removeRun(realRootArg, id);
+      };
+
+      const result = gc(root, { remove });
+      const run = decisionOf(result, name);
+      expect(run.action).toBe("failed");
+      expect(run.error).toMatch(/quarantined run is held by a live process/);
+      expect(existsSync(join(quarantine, "journal.jsonl")), "a leftover held by a live process was deleted").toBe(true);
+    });
+  });
+
   it("after the move a contender with the old directory handle cannot lock the moved run, and a new resume starts a fresh directory", async () => {
     await withBaseAsync(async (base) => {
       const root = makeRoot(base);
