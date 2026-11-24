@@ -393,9 +393,14 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     }
   })();
 
-  // Under the shared breaker or limit a failed call logs why it failed.
+  // Under the shared breaker or limit a failed call logs why it failed. Without them a failed call adds no field, except an
+  // HTTP 402 (payment): the account probe reads it from the log (mirror of scripts/jev-resolve.mjs).
   const failureFields = (failure: JevClientError | undefined, failureClass: JevBreaker.FailureClass | undefined) =>
-    shared && failure ? shared.breaker.failureLogFields(shared.settings, failure, granted, failureClass) : {};
+    shared && failure
+      ? shared.breaker.failureLogFields(shared.settings, failure, granted, failureClass)
+      : failure?.status === 402
+        ? { error: { status: failure.status, kind: `http-${failure.status}` } }
+        : {};
 
   // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
   if (mode === 'shadow' && args.blocking === false) {

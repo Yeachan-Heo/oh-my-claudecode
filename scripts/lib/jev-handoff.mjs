@@ -17,7 +17,7 @@ import { createHash } from 'crypto';
 import { existsSync, lstatSync, openSync, readFileSync, readSync, closeSync, statSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
 import { acquireStateFileLockAtPathSync, atomicWriteFileSync, releaseStateFileLockSync } from './atomic-write.mjs';
-import { jevLogFiles } from '../jev-resolve.mjs';
+import { jevLogFiles, resolveJevTimeoutMs } from '../jev-resolve.mjs';
 import { denialLogDir, writeDenialRow } from './jev-denial-counter.mjs';
 import { maskSecrets } from './jev-mask.mjs';
 import { parseUseMarker, USE_MARKER_EFFORTS } from './jev-routing.mjs';
@@ -31,7 +31,13 @@ export const DEFAULT_HANDOFF_FILE = 'HANDOFF.md';
 export const DEFAULT_TAKEOVER_MARKER = 'TAKEN OVER:';
 export const DEFAULT_LAUNCHER_COMMAND = 'jev-session';
 export const LAUNCHER_ATTEMPT_LIMIT = 3; // launcher calls per handoff that did not start a session
-export const LAUNCHER_IN_FLIGHT_MS = 150_000; // a launcher call without a journal row may still run: two starts of 120 s at most
+// A launcher call (scripts/jev-session.mjs) writes its journal row only after its last start attempt has ended, so a call without a row
+// may still run for: the session counter (10 s), the query of Jev (OMC_JEV_TIMEOUT_MS, the resolver gets 10 s more to start and
+// finish), the start (120 s) and the repeat of it without the flags of Jev's choice (120 s), and a margin of 10 s.
+const LAUNCHER_STARTS_MS = 2 * 120_000;
+const LAUNCHER_FIXED_MS = 10_000 + 10_000 + 10_000;
+export const launcherInFlightMs = (env = process.env) => LAUNCHER_STARTS_MS + LAUNCHER_FIXED_MS + resolveJevTimeoutMs(env);
+export const LAUNCHER_IN_FLIGHT_MS = launcherInFlightMs({}); // with the default query timeout
 
 function positiveMib(env, name, fallback) {
   const raw = String(env?.[name] ?? '').trim();
@@ -108,7 +114,7 @@ function predictedContentAfterWrite(toolName, toolInput, path) {
       try { content = readFileSync(path, 'utf8'); } catch { content = ''; }
       const oldString = String(toolInput?.old_string ?? '');
       const newString = String(toolInput?.new_string ?? '');
-      return toolInput?.replace_all === true ? content.split(oldString).join(newString) : content.replace(oldString, newString);
+      return toolInput?.replace_all === true ? content.split(oldString).join(newString) : content.replace(oldString, () => newString); // a function: new_string is written as it is, `$&` and `$$` are no patterns
     }
     return null;
   } catch { return null; }
@@ -182,17 +188,17 @@ function launcherOutcome({ state, logDir }) {
 }
 
 // Whether the launcher may run now: { allow, status } with status 'first' (no call yet), 'retry' (the last call did not start a session:
-// a failure row in the journal, or no row and the call is older than LAUNCHER_IN_FLIGHT_MS), 'started' (a start is confirmed: once per
-// handoff), 'in-flight' (the last call has no row yet and is younger than LAUNCHER_IN_FLIGHT_MS) or 'exhausted' (LAUNCHER_ATTEMPT_LIMIT
+// a failure row in the journal, or no row and the call is older than launcherInFlightMs), 'started' (a start is confirmed: once per
+// handoff), 'in-flight' (the last call has no row yet and is younger than launcherInFlightMs) or 'exhausted' (LAUNCHER_ATTEMPT_LIMIT
 // calls without a start). The state keeps launcher_attempts and launcher_attempt_ts (set when a launcher call is let through) and
 // successor_started once a start was seen.
-export function launcherGate({ state, logDir, now = Date.now() }) {
+export function launcherGate({ state, logDir, now = Date.now(), env = process.env }) {
   if (state?.successor_started === true) return { allow: false, status: 'started' };
   const attempts = Number(state?.launcher_attempts) || 0;
   if (!attempts) return { allow: true, status: 'first' };
   const outcome = launcherOutcome({ state, logDir });
   if (outcome === 'started') return { allow: false, status: 'started' };
-  if (outcome === 'pending' && now - (Number(state?.launcher_attempt_ts) || 0) < LAUNCHER_IN_FLIGHT_MS) return { allow: false, status: 'in-flight' };
+  if (outcome === 'pending' && now - (Number(state?.launcher_attempt_ts) || 0) < launcherInFlightMs(env)) return { allow: false, status: 'in-flight' };
   if (attempts >= LAUNCHER_ATTEMPT_LIMIT) return { allow: false, status: 'exhausted' };
   return { allow: true, status: 'retry' };
 }
@@ -224,7 +230,7 @@ export function handoffModeTools(toolName, toolInput, { cwd = '', sessionStateDi
     const brief = argumentValue(input.command ?? '', 'brief');
     if (!handoffState?.handoff_path || !brief) return false;
     if (resolve(brief) !== resolve(String(handoffState.handoff_path))) return false;
-    return launcherGate({ state: handoffState, logDir, now }).allow;
+    return launcherGate({ state: handoffState, logDir, now, env }).allow;
   }
   return false;
 }
@@ -487,7 +493,7 @@ export function overrideUltragoalDenial({ stateDir, handoffFile, sessionId, data
     // The context of the restrictions on Write/Edit and Bash in handoff mode.
     const logDir = denialLogDir(stateDir, env);
     const context = { cwd: String(data.cwd ?? ''), sessionStateDir: dirname(handoffFile), state, logDir, env };
-    const gate = launcherGate({ state, logDir });
+    const gate = launcherGate({ state, logDir, env });
     if (gate.status === 'started' && state.successor_started !== true) {
       state = { ...state, successor_started: true }; // a start seen in the launcher's journal is kept in the state
       writeHandoffState(handoffFile, sessionId, state);

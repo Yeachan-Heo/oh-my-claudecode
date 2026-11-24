@@ -32,6 +32,7 @@ import {
   retryAfterSeconds,
   thresholdFor,
 } from '../../scripts/lib/jev-breaker.mjs';
+import { probe } from '../../scripts/jev-account-probe.mjs';
 import { resolveRequest, resolveRequestTimeoutMs } from '../../scripts/jev-resolve.mjs';
 import { JUDGMENT_POINTS } from '../hooks/jev/points.ts';
 import { resetJevResolverState, resolveJudgment } from '../hooks/jev/resolver.ts';
@@ -880,6 +881,40 @@ describe('resolveRequest with the shared breaker and limit', () => {
       const scriptCalls = countingFetch(() => okResponse());
       expect((await resolveRequest(request(), { ...env, TYPESAFE_API_KEY: 'second-key' }, scriptCalls.fetchFn)).mode).toBe('circuit-open');
       expect(scriptCalls.calls).toHaveLength(0);
+    } finally {
+      for (const name of names) {
+        if (saved[name] === undefined) delete process.env[name];
+        else process.env[name] = saved[name];
+      }
+      resetJevResolverState();
+    }
+  });
+
+  it('without OMC_JEV_BREAKER and OMC_JEV_MAX_RPM an HTTP 402 is still logged with its status, so the account probe sees it; other statuses add no field', async () => {
+    const names = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_BREAKER_DIR', 'OMC_JEV_ENDPOINT', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM'];
+    const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    const probeOf = (env) => probe(['--state-dir', env.OMC_JEV_BREAKER_DIR, '--log-dir', env.OMC_JEV_LOG_DIR], env);
+    try {
+      // the script channel
+      const script = jevEnv();
+      const first = await resolveRequest(request(), script, async () => errorResponse(402));
+      expect(first.mode).toBe('degraded');
+      expect(logRows(script)[0].error).toEqual({ status: 402, kind: 'http-402' });
+      expect(probeOf(script)).toMatchObject({ alarm: true, rule: 'A', logReadable: true });
+      await resolveRequest(request(), script, async () => okResponse());
+      expect(probeOf(script).alarm).toBe(false);
+      // another status keeps the row as it was
+      const other = jevEnv({ OMC_JEV_LOG_DIR: join(caseDir, 'log-other') });
+      await resolveRequest(request(), other, async () => errorResponse(429));
+      expect(Object.hasOwn(logRows(other)[0], 'error')).toBe(false);
+      // the TS channel
+      const ts = jevEnv({ OMC_JEV_LOG_DIR: join(caseDir, 'log-ts') });
+      for (const name of names) delete process.env[name];
+      for (const name of Object.keys(ts)) process.env[name] = ts[name];
+      resetJevResolverState();
+      await resolveJudgment({ point: 'model-routing', state: { task: 'x' }, questions: QUESTIONS, twin: () => false, fetchFn: async () => errorResponse(402) });
+      expect(logRows(ts)[0].error).toEqual({ status: 402, kind: 'http-402' });
+      expect(probeOf(ts)).toMatchObject({ alarm: true, rule: 'A', logReadable: true });
     } finally {
       for (const name of names) {
         if (saved[name] === undefined) delete process.env[name];

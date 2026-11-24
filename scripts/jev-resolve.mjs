@@ -52,6 +52,8 @@ const DEFAULT_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_EXCERPT_CHARS = 200;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+// The HTTP status of an unpaid account: logged with its status even when the shared breaker is off (see scripts/jev-account-probe.mjs).
+const ACCOUNT_PAYMENT_STATUS = 402;
 const JEV_MODEL = "jev-latest";
 
 function positiveInt(raw, fallback, max = Number.MAX_SAFE_INTEGER) {
@@ -727,6 +729,10 @@ export async function resolveRequest(
     ]);
     responded = true;
     if (!response.ok) {
+      if (!guard && response.status === ACCOUNT_PAYMENT_STATUS) {
+        failure = { status: response.status }; // no breaker to tell, but the account probe needs the 402 in the log
+        dropBody(response);
+      }
       if (guard) {
         const retryAfter = response.headers?.get?.("retry-after") ?? undefined;
         failure = { status: response.status, retryAfter };
@@ -806,6 +812,8 @@ export async function resolveRequest(
         : {}),
       // Under the shared breaker or limit a failed request says why it failed (and the minute's count against the limit).
       ...(guard && failure ? guard.breaker.failureLogFields(guard.settings, failure, granted, failureClass) : {}),
+      // Without the shared breaker a failed request adds no field, except an HTTP 402 (payment): the account probe reads it from the log.
+      ...(!guard && failure?.status === ACCOUNT_PAYMENT_STATUS ? { error: { status: failure.status, kind: "http-" + failure.status } } : {}),
       ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
     },
     await logDirFor(env),

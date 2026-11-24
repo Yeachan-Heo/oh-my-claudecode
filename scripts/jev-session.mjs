@@ -203,7 +203,7 @@ function poolGate(env, logDir, held) {
   const counted = countSessions({ env });
   if (counted.error) return { refuse: false, pool: { sessions: null, error: counted.error }, sessions: null, limit };
   let reservation = { ok: true, file: null, inFlight: 0 };
-  try { reservation = reserveSession({ dir: logDir, counted: counted.sessions, limit }); } catch { /* the reservation is advisory: a file error admits the launch */ }
+  try { reservation = reserveSession({ dir: logDir, counted: counted.sessions, limit, env }); } catch { /* the reservation is advisory: a file error admits the launch */ }
   if (reservation.ok && reservation.file) held.push(() => releaseSession(logDir, reservation.file));
   const sessions = counted.sessions + reservation.inFlight;
   return { refuse: !reservation.ok, pool: { sessions: counted.sessions, ...(reservation.inFlight ? { starting: reservation.inFlight } : {}), limit }, sessions, limit };

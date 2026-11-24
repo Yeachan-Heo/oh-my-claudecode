@@ -180,6 +180,17 @@ describe('session reservation', () => {
   });
 });
 
+describe('session reservation lifetime', () => {
+  it('lasts as long as a launch can: two starts of 120 s plus the Jev query, so a longer OMC_JEV_TIMEOUT_MS keeps the reservation counted', () => {
+    const dir = tempDir();
+    const env = { OMC_JEV_TIMEOUT_MS: '120000' };
+    expect(reserveSession({ dir, counted: 0, limit: 1, env }).ok).toBe(true);
+    const aged = Date.now() + 6 * 60_000; // beyond the 5 minutes of a default launch, within 2 * 120 s + 120 s
+    expect(reserveSession({ dir, counted: 0, limit: 1, env, now: aged })).toMatchObject({ ok: false, inFlight: 1 });
+    expect(reserveSession({ dir, counted: 0, limit: 1, env, now: Date.now() + 2 * 120_000 + 120_000 + 60_000 })).toMatchObject({ ok: true, inFlight: 0 });
+  });
+});
+
 describe('which reservation a start and a stop take', () => {
   it('commits the reservation of the type that started, and the start of the other type finds its own', () => {
     const dir = tempDir();

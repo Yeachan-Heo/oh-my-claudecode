@@ -213,6 +213,15 @@ describe('session counter', () => {
     const env2 = { ...process.env, ...counter(twoPositions) };
     expect(countSessions({ env: env2, readCmdline: (path) => twoCmdlines[/\/proc\/(\d+)\//.exec(path)[1]] })).toEqual({ sessions: 2 });
   });
+
+  it('applies the headless exclusion to the agents and sessions objects as to a top-level array', () => {
+    const positions = [{ pid: 700 }, { pid: 701 }, { pid: 702 }];
+    const cmdlines = { 700: ['claude', '--bg', '--name', 'a'].join('\0'), 701: ['claude', '-p', 'do something'].join('\0'), 702: ['claude', '--print', 'do something'].join('\0') };
+    const readCmdline = (path) => cmdlines[/\/proc\/(\d+)\//.exec(path)[1]];
+    expect(countSessions({ env: { ...process.env, ...counter(positions) }, readCmdline })).toEqual({ sessions: 1 });
+    expect(countSessions({ env: { ...process.env, ...counter({ agents: positions }) }, readCmdline })).toEqual({ sessions: 1 });
+    expect(countSessions({ env: { ...process.env, ...counter({ sessions: positions }) }, readCmdline })).toEqual({ sessions: 1 });
+  });
 });
 
 /** Runs one of the hook scripts with the given stdin and environment; the cwd is a temp project. */

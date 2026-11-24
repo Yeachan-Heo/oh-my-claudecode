@@ -48,7 +48,7 @@
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { resolveJevLogMaxBytes, rotateJevLog } from '../jev-resolve.mjs';
+import { resolveJevLogMaxBytes, resolveJevTimeoutMs, rotateJevLog } from '../jev-resolve.mjs';
 import { resolveOmcStateRoot } from './state-root.mjs';
 import { withStateFileLockAtPathSync } from './atomic-write.mjs';
 
@@ -61,6 +61,8 @@ export const PENDING_TTL_MS = 2 * 60_000;
 export const ALIVE_TTL_MS = 24 * 3_600_000;
 // A session launch lasts up to the two start attempts of the launcher (120 s each) plus the Jev query; a reservation of a launcher that died expires after this.
 export const SESSION_PENDING_TTL_MS = 5 * 60_000;
+// A launch with a longer Jev query timeout (OMC_JEV_TIMEOUT_MS) lasts longer: the two starts, the query with the 10 s the resolver gets to start and finish, and a margin of 30 s.
+export const sessionPendingTtlMs = (env = process.env) => Math.max(SESSION_PENDING_TTL_MS, 2 * 120_000 + resolveJevTimeoutMs(env, 10_000) + 30_000);
 // Wait budget of the pool lock (ms). The lock wait is synchronous: it must end well inside the 1 s cap of the hook step and the 3 s hook timeout.
 // A caller can pass a longer budget (options.lockBudgetMs) where no hook timeout applies, as the tests of many concurrent callers do.
 const LOCK_BUSY_MS = 300;
@@ -279,14 +281,15 @@ export function releaseAgentByToolUseId(dir, toolUseId, now = Date.now(), option
 /**
  * The session launcher's reservation (scripts/jev-session.mjs): a launch in flight takes a slot of its own, so that two
  * launchers that both counted the sessions before either has started do not both pass the ceiling. Under the pool
- * lock it counts the launches in flight (reservations younger than SESSION_PENDING_TTL_MS) and refuses at
+ * lock it counts the launches in flight (reservations younger than sessionPendingTtlMs) and refuses at
  * `counted + inFlight >= limit`; otherwise it creates the reservation. `counted` is the number of running sessions the
  * caller read from the session counter (before the lock, the counter command is slow). A limit of 0 reserves
  * nothing. Returns {ok: false, inFlight} on a refusal and {ok: true, file, inFlight} on a reservation (file is null with
  * no limit, and with the lock not obtained in time: fail-open). Throws on a file error (the caller fails open).
  */
-export function reserveSession({ dir, counted, limit, sessionId, now = Date.now(), lockBudgetMs }) {
+export function reserveSession({ dir, counted, limit, sessionId, now = Date.now(), env = process.env, lockBudgetMs }) {
   if (!(limit > 0)) return { ok: true, file: null, inFlight: 0 };
+  const ttlMs = sessionPendingTtlMs(env);
   let result = null;
   const ran = underPoolLock(dir, () => {
     const folder = join(dir, SESSION_RESERVATION_DIR);
@@ -298,7 +301,7 @@ export function reserveSession({ dir, counted, limit, sessionId, now = Date.now(
       const path = join(folder, name);
       let ts = 0;
       try { ts = JSON.parse(readFileSync(path, 'utf8'))?.ts; } catch { try { ts = statSync(path).mtimeMs; } catch { continue; } }
-      if (!Number.isFinite(ts) || ts < now - SESSION_PENDING_TTL_MS) { try { rmSync(path, { force: true }); } catch { /* swept later */ } continue; }
+      if (!Number.isFinite(ts) || ts < now - ttlMs) { try { rmSync(path, { force: true }); } catch { /* swept later */ } continue; }
       inFlight += 1;
     }
     if (counted + inFlight >= limit) {
@@ -367,9 +370,11 @@ export function countSessions({ env = process.env, readCmdline = readFileSync } 
   if (result.status !== 0) return { error: `exit ${result.status}` };
   try {
     const data = JSON.parse(result.stdout);
-    if (Array.isArray(data)) {
+    // The three supported shapes: a top-level array, or an object with an `agents` or a `sessions` array; one counting rule for all.
+    const positions = Array.isArray(data) ? data : data && typeof data === 'object' ? [data.agents, data.sessions].find(Array.isArray) : undefined;
+    if (positions) {
       let sessions = 0;
-      for (const item of data) {
+      for (const item of positions) {
         const pid = item && typeof item === 'object' ? item.pid : undefined;
         if (!(typeof pid === 'number' && Number.isInteger(pid) && pid > 0)) { sessions += 1; continue; } // no pid: counts
         let cmdline;
@@ -379,9 +384,6 @@ export function countSessions({ env = process.env, readCmdline = readFileSync } 
         sessions += 1;
       }
       return { sessions };
-    }
-    if (data && typeof data === 'object') {
-      for (const key of ['agents', 'sessions']) if (Array.isArray(data[key])) return { sessions: data[key].length };
     }
     return { error: 'unknown output format' };
   } catch {

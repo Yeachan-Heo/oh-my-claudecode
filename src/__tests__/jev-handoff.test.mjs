@@ -225,6 +225,20 @@ describe('handoff module', () => {
     assert.equal(handoffModeTools('Bash', { command: `jev-session --role worker --brief ${brief}` }, { ...context, logDir: tempDir(), now: t0 + LAUNCHER_IN_FLIGHT_MS + 1 }), true);
   });
 
+  it('launcherGate: a call without a journal row stays in flight for the two starts of the launcher (120 s each) plus its query and the session counter', () => {
+    const logDir = tempDir();
+    const t0 = Date.parse('2026-11-15T10:00:00Z');
+    const state = { handoff_path: join(logDir, 'HANDOFF.md'), launcher_attempts: 1, launcher_attempt_ts: t0 };
+    const twoStarts = 2 * 120_000;
+    // the launcher writes its row only after the fallback start has ended
+    assert.deepEqual(launcherGate({ state, logDir, now: t0 + twoStarts, env: {} }), { allow: false, status: 'in-flight' });
+    assert.deepEqual(launcherGate({ state, logDir, now: t0 + twoStarts + 10_000, env: {} }), { allow: false, status: 'in-flight' });
+    // a longer query timeout (OMC_JEV_TIMEOUT_MS) lengthens the window by as much
+    const slow = { OMC_JEV_TIMEOUT_MS: '60000' };
+    assert.deepEqual(launcherGate({ state, logDir, now: t0 + twoStarts + 60_000, env: slow }), { allow: false, status: 'in-flight' });
+    assert.deepEqual(launcherGate({ state, logDir, now: t0 + LAUNCHER_IN_FLIGHT_MS + 1, env: {} }), { allow: true, status: 'retry' });
+  });
+
   it('launcherGate: a rotation in the same second as the call keeps the start row (the archive stamp has whole seconds, the call time milliseconds)', () => {
     const logDir = tempDir();
     const brief = join(tempDir(), 'HANDOFF.md');
@@ -655,6 +669,25 @@ describe('handoff hook (OMC_JEV_HANDOFF=1)', () => {
     assert.equal(denied(runHook(world, 'Read', { file_path: '/etc/hosts' }).output), false, 'a failed first write leaves the old line where it was');
     appendFileSync(world.handoff, 'TAKEN OVER: track-9 2026-11-15T02:00:00Z\n');
     assert.equal(denied(runHook(world, 'Read', { file_path: '/etc/hosts' }).output, 'The session was handed over'), true);
+  });
+
+  it('an Edit whose new_string holds $& or $$ is predicted literally: the session\'s own takeover line in the edited file does not close the session', () => {
+    const world = newWorld();
+    sparseTranscript(world.transcript, 25 * MIB + 1);
+    activeUltragoal(world);
+    sessionsLog(world, { session_id: SID, started_with: { model: 'opus', effort: 'high' } });
+    const own = 'use opus high\nbrief\nTAKEN OVER: mistake-session 2026-11-15T01:00:00Z\n';
+    assert.equal(denied(runHook(world, 'Write', { file_path: world.handoff, content: own }).output), false);
+    writeFileSync(world.handoff, own); // the Write landed
+    const newString = "cost $& and $$ and $' and $` and $1";
+    assert.equal(denied(runHook(world, 'Edit', { file_path: world.handoff, old_string: 'brief', new_string: newString }).output), false);
+    // the Edit tool writes new_string as it is
+    writeFileSync(world.handoff, own.split('brief').join(newString));
+    for (const [tool, input] of [['Read', { file_path: '/etc/hosts' }], ['SendMessage', { to: 'x', message: 'y' }]]) {
+      const run = runHook(world, tool, input);
+      assert.equal(denied(run.output), false, `${tool} after a literal Edit must pass: ${JSON.stringify(run.output)}`);
+    }
+    assert.equal(handoffRows(world).filter((row) => row.action === 'handed-over-refused').length, 0);
   });
 
   it('the warning counts as given only when it is attached: a call that a later guard refuses keeps it for the next call', () => {
