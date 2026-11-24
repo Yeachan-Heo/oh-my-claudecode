@@ -3306,6 +3306,12 @@ export function replyTrace(chars, text, path) {
   return `${REPLY_TRACE_PREFIX}${chars} chars, full text in ${path}; start: ${quoted(text.slice(0, REPLY_TRACE_HEAD))}; end: ${quoted(text.slice(-REPLY_TRACE_TAIL))}]`;
 }
 
+// A line that starts a trace of this module or of the compaction (a removed call, pasted text, a moved reply).
+const isTraceLine = (line) => line.startsWith('[compacted] ') || line.startsWith(PASTE_TRACE_PREFIX) || line.startsWith(REPLY_TRACE_PREFIX);
+
+// Whether a text holds nothing but such traces and blank lines: the row a tool-only assistant message becomes once its calls are removed.
+const onlyTraceLines = (text) => text.split('\n').every((line) => !line.trim() || isTraceLine(line));
+
 /**
  * Runs of text between trace lines (a line that starts a trace of this module or of the compaction), from a non-empty line to a
  * non-empty line, of at least `minChars` characters: [{start, end}].
@@ -3319,7 +3325,7 @@ export function replyRuns(text, minChars = REPLY_MIN_CHARS) {
     const nl = text.indexOf('\n', i);
     const lineEnd = nl === -1 ? text.length : nl;
     const line = text.slice(i, lineEnd);
-    if (line.startsWith('[compacted] ') || line.startsWith(PASTE_TRACE_PREFIX) || line.startsWith(REPLY_TRACE_PREFIX)) close();
+    if (isTraceLine(line)) close();
     else if (line.trim()) { if (start < 0) start = i; end = lineEnd; }
     i = lineEnd + 1;
   }
@@ -3378,6 +3384,7 @@ export function withoutPasteMarks(text) {
  * holds words of its own (not only the traces of pasted text), the first row with text and the last one before the next user message.
  * `delivered`: rows that a message the user typed during a tool turn is anchored to (it stands after the row, in the API form only); each
  * is a user message of its own that holds words by definition, so the replies after it are direct replies too.
+ * A row that holds only traces (a tool-only message after an earlier compaction) is no reply and is passed over.
  * The interval runs to the next user message, so a notification in the middle does not end it. Over-protection costs tokens, never text.
  * Only the structure decides; whether the reply confirms or corrects what the user said is not for the code to read.
  */
@@ -3392,7 +3399,7 @@ export function directReplyRows(messages, users, delivered = []) {
     let last = -1;
     for (let j = row + 1; j < stop; j++) {
       const m = messages[j];
-      if (m.role === 'assistant' && typeof m.text === 'string' && m.text.trim()) { if (first < 0) first = j; last = j; }
+      if (m.role === 'assistant' && typeof m.text === 'string' && m.text.trim() && !onlyTraceLines(m.text)) { if (first < 0) first = j; last = j; }
     }
     if (first >= 0) { rows.add(first); rows.add(last); }
   });
@@ -4290,11 +4297,12 @@ async function ownThreshold($, e, next) {
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
+    // Only with the token cascade, which is where decide answers a request with that skip: without it nothing can follow, and the character gate is the only veto.
     // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores. The floor counts
     // results only, so with a stage on that takes text off as well (agent trim, long replies, pasted text) it is no proof: decide holds the request to the same
     // bound with the text of those stages in its plan, and answers it with a skip.
     const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active';
-    if (cfg.ownSkip && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
+    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     let removable = removableChars(candidates);
     let envelopes = 0;
     let api;

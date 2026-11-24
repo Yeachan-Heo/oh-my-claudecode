@@ -4241,6 +4241,13 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
       expect([...directReplyRows(rows, [0, 6])].sort((a, b) => a - b)).toEqual([1, 5, 7, 10]);
     });
 
+    it('directReplyRows leaves out a row that holds only traces of the module or of the compaction, so the first and the last reply stay the answers', () => {
+      const cut = (tool) => `[compacted] ${tool}(x) - result of 4000 chars removed`;
+      const moved = '[reply moved at compaction: 3000 chars, full text in /p; start: "a"; end: "b"]';
+      const rows = [U('first'), A(cut('Bash')), A('answer'), A(`${cut('Read')}\n${cut('Grep')}`), A('final'), A(cut('Bash')), A(moved), U('second'), A(`${cut('Bash')}\nReal words after a trace.`), A(cut('Read'))];
+      expect([...directReplyRows(rows, [0, 7])].sort((a, b) => a - b)).toEqual([2, 4, 8]);
+    });
+
     it('directReplyRows treats a bracketed instruction after a paste trace on the same line as words of the user, whatever brackets the excerpts hold', () => {
       const trace = '[pasted text moved at compaction: 2038 chars, full text in /p; start: "[a] b]"; end: "c [d]"]';
       const row = (text) => [U('first'), A('one'), U(text), A('answer'), A('last')];

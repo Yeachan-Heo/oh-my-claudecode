@@ -462,6 +462,23 @@ describe('own threshold skip (OMC_JEV_COMPACT_OWN_THRESHOLD)', () => {
     expect(asks).toBe(2);
   });
 
+  it('without the token cascade the switch changes nothing: the preflight keeps no floor veto and the own request is compacted as without it', async () => {
+    // 30 results of 3 300 characters cut about 45 000 tokens of 165 000, under the 30 % the floor veto asks for; no skip can follow without the cascade.
+    const bare = { ...OWN };
+    delete bare.OMC_JEV_COMPACT_TARGET_PERCENT;
+    const usage = () => ({ context: { tokens: 165000, window: 200000 } });
+    const messages = conversation(30, 3300);
+    const off = await ownRun(bare, { messages, usage });
+    expect(off.answers).toHaveLength(1);
+    const on = await ownRun({ ...bare, OMC_JEV_COMPACT_OWN_THRESHOLD: '1' }, { messages, usage });
+    expect(on.answers).toHaveLength(1);
+    expect(on.answers[0]).toHaveProperty('messages');
+    expect(on.answers[0]).not.toHaveProperty('skip');
+    // With the cascade the same session is vetoed before any request.
+    const cascade = await ownRun({ ...OWN, OMC_JEV_COMPACT_OWN_THRESHOLD: '1' }, { messages, usage });
+    expect(cascade.answers).toHaveLength(0);
+  });
+
   it('a compaction of another trigger is not skipped by the switch', async () => {
     const env = { ...OWN, OMC_JEV_COMPACT_OWN_THRESHOLD: '1' };
     const fake = fakeDollar({ env });
