@@ -690,8 +690,8 @@ function exitHiddenCause(pieces, index, pipefail) {
   if (own.sep === '&') return 'backgrounded (&)';
   if (own.sep === '|') {
     const next = pieces[index + 1];
-    const intoTail = pipefail && next !== undefined && /^tail(\s|$)/.test(next.text);
-    if (!intoTail) return 'pipe without pipefail into tail';
+    const intoTail = pipefail && next !== undefined && tailReadsInput(next.text);
+    if (!intoTail) return 'pipe without pipefail into a tail that reads its input';
   }
   for (let at = index - 1; at >= 0 && ['&&', '||', '|'].includes(pieces[at].sep); at -= 1) {
     if (pieces[at].sep === '||') return 'alternation (||)';
@@ -704,8 +704,42 @@ function exitHiddenCause(pieces, index, pipefail) {
   return undefined;
 }
 
+/** Options of `tail` whose value is the next word when it is not glued to the option (`-n 5`, `-qn 5`, `--lines 5`). */
+const TAIL_VALUE_SHORT = new Set(['n', 'c', 's']);
+const TAIL_VALUE_LONG = new Set(['--lines', '--bytes', '--pid', '--sleep-interval', '--max-unchanged-stats']);
+
+/**
+ * Whether a `tail` piece reads its input only (a pipe or the terminal): no file operand (`tail missing.txt` exits 1), no input
+ * redirection (`tail < missing.txt`) and no output redirection that can fail (one to a descriptor or to `/dev/null` cannot). Such a
+ * tail ends 0 in practice, so its status is no second source of a status. One pass over the words, the option values skipped.
+ */
+function tailReadsInput(text) {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words[0] !== 'tail') return false;
+  let options = true;
+  for (let i = 1; i < words.length; i += 1) {
+    const word = words[i];
+    if (word.includes('<')) return false;
+    if (word.includes('>')) {
+      if (/^\d*>&\d+$/.test(word) || /^\d*>>?\/dev\/null$/.test(word)) continue;
+      if (/^\d*>>?$/.test(word) && words[i + 1] === '/dev/null') i += 1;
+      else return false;
+    } else if (options && word === '--') options = false;
+    else if (word === '-') continue; // standard input
+    else if (!options || !word.startsWith('-')) return false; // a file operand
+    else if (word.startsWith('--')) {
+      if (TAIL_VALUE_LONG.has(word)) i += 1;
+    } else {
+      const at = [...word].findIndex((char, k) => k > 0 && TAIL_VALUE_SHORT.has(char));
+      if (at === word.length - 1) i += 1; // the value is the next word; a glued value (`-n5`) ends the cluster
+    }
+  }
+  return true;
+}
+
 /** Statements that cannot fail in practice: they never make a chain exit nonzero on their own. */
-const NEVER_FAILS = /^(?:(?:set|export|unset|true|tail)(?:\s|$)|:(?:\s|$)|(?:echo|printf)(?:\s[^>]*)?$)/;
+const NEVER_FAILS = /^(?:(?:set|export|unset|true)(?:\s|$)|:(?:\s|$)|(?:echo|printf)(?:\s[^>]*)?$)/;
+const neverFails = (text) => NEVER_FAILS.test(text) || tailReadsInput(text);
 
 /**
  * Whether a visible nonzero exit status may come from another command than the check: one joined to it by
@@ -719,7 +753,7 @@ function sharesExitStatus(pieces, index, pipefail) {
   while (to < pieces.length - 1 && (pieces[to].sep === '&&' || pieces[to].sep === '|')) to += 1;
   for (let at = from; at <= to; at += 1) {
     const piece = pieces[at];
-    if (at === index || piece.text === '' || NEVER_FAILS.test(piece.text)) continue;
+    if (at === index || piece.text === '' || neverFails(piece.text)) continue;
     if (at < index && piece.sep === '|' && !pipefail) continue;
     return true;
   }
@@ -731,7 +765,7 @@ function sharesExitStatusBefore(pieces, index) {
   let first = index;
   while (first > 0 && pieces[first - 1].sep === '|') first -= 1;
   for (let at = first - 1; at >= 0 && pieces[at].sep === '&&'; at -= 1) {
-    if (pieces[at].text !== '' && !NEVER_FAILS.test(pieces[at].text)) return true;
+    if (pieces[at].text !== '' && !neverFails(pieces[at].text)) return true;
   }
   return false;
 }
@@ -755,10 +789,22 @@ function readCommand(command) {
   // A here-document body is input, not shell (it is cut out before the lines are joined, as isMutation reads it).
   const bare = executedText(joinContinuations(withoutHeredocBodies(command)));
   const pieces = shellPieces(bare);
-  // Only a `set` statement changes the option; the last one wins. A statement starts the text or follows `;`, `&`, `&&` or a newline
-  // (an escaped separator is no separator: `echo \; set -o pipefail` prints).
-  const setPipefail = pieces.map((piece, i) => (i === 0 || [';', '&', '&&', '\n'].includes(pieces[i - 1].sep) ? /^set\s+([+-])\w*o\s+pipefail\b/.exec(piece.text)?.[1] : undefined));
-  const pipefail = setPipefail.filter((sign) => sign !== undefined).at(-1) === '-';
+  // Only a `set` statement changes the option, and it counts for the pipelines behind it: the setting of a check is the last `set`
+  // before its pipeline (`set -o pipefail` after the pipeline cannot change a status that is already printed). A statement starts
+  // the text or follows `;`, `&`, `&&` or a newline (an escaped separator is no separator: `echo \; set -o pipefail` prints).
+  // One pass: the setting before each piece and the first piece of its pipeline.
+  const pipefailBefore = [];
+  const pipelineStart = [];
+  let setting = false;
+  for (let i = 0; i < pieces.length; i += 1) {
+    pipelineStart.push(i > 0 && pieces[i - 1].sep === '|' ? pipelineStart[i - 1] : i);
+    pipefailBefore.push(setting);
+    const statement = i === 0 || [';', '&', '&&', '\n'].includes(pieces[i - 1].sep);
+    const sign = statement ? /^set\s+([+-])\w*o\s+pipefail\b/.exec(pieces[i].text)?.[1] : undefined;
+    if (sign !== undefined) setting = sign === '-';
+  }
+  const pipefailAt = (index) => pipefailBefore[pipelineStart[index]];
+  let pipefail = setting; // the setting at the end, for a command with no check
   let check = null;
   let hidden;
   const checks = [];
@@ -769,7 +815,8 @@ function readCommand(command) {
     const m = runnerMatch(stripped);
     if (!m || asksInformation(stripped, m)) continue;
     check = { ...m, index: i };
-    checks.push({ runner: m.runner, kind: m.kind, index: i });
+    checks.push({ runner: m.runner, kind: m.kind, table: m.table, index: i });
+    pipefail = pipefailAt(i);
     hidden = exitHiddenCause(pieces, i, pipefail);
     // later runner pieces overwrite: the command's status belongs to the last segment
   }
@@ -1099,9 +1146,16 @@ export function classifyCheckResult({ command, output, isError, exitCode }) {
     const unseen = read.checks.some((check) => check !== last && check.index <= cut && !hasSummaryRule(check));
     if (!unseen) {
       const lastReaders = readersFor(last);
-      for (const entry of SUMMARY_RULES.filter((rule) => lastReaders.has(rule.runner))) {
+      // A rule that an earlier invocation is read by too has summaries of more than one run, and the one in view may be of the earlier
+      // run (`node --test; node --test | tail -5` shows the summary of the first when the last one printed none): no pass is read then.
+      // `ruff format --check` prints no `All checks passed!`: that line is of `ruff check`, and the format check has a pass line of its own.
+      const isFormat = (check) => check.table === 'ruff-format';
+      const ofEarlierRun = (entry) => read.checks.some((check) => check !== last && readersFor(check).has(entry.runner)
+        && !(entry.runner === 'ruff' && isFormat(check) !== isFormat(last)));
+      const ownPass = (entry) => !(entry.runner === 'ruff' && isFormat(last)) || /^\d+ files? already formatted\b/m.test(tail);
+      for (const entry of SUMMARY_RULES.filter((rule) => lastReaders.has(rule.runner) && !ofEarlierRun(rule))) {
         const verdict = entry.apply(tail);
-        if (verdict === 'passed') {
+        if (verdict === 'passed' && ownPass(entry)) {
           return pass(`runner summary pass (${entry.rule})`, entry.rule);
         }
       }

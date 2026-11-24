@@ -959,6 +959,79 @@ it('here-documents: the body is input, so a runner name or a summary line in it 
   assert.equal(checkResult('npm test <<EOF\nx\nEOF', ' Tests  3 passed (3)\n', 0).verdict, 'passed');
 });
 
+it('a pass summary is read only when it can belong to the last invocation of the runner, not to an earlier one', () => {
+  const green = 'ℹ tests 3\nℹ pass 3\nℹ fail 0\nℹ duration_ms 12\n';
+  const redFrames = '    at async Promise.all (index 0)\n    at process.processTicksAndRejections (node:internal)\n';
+  // The first run printed a passing summary, the last one failed and shows only the end of its output.
+  for (const command of [
+    'cd green; node --test; cd ../red; node --test | tail -5',
+    'node --test; node --test | tail -5',
+    'node --test && node --test | tail -5',
+    'vitest run; vitest run | tail -5',
+    'npm run test:unit; npm run test:e2e | tail -5',
+  ]) {
+    const output = command.startsWith('vitest') || command.startsWith('npm') ? ' Tests  3 passed (3)\n    at x (y.js:1)\n' : green + redFrames;
+    assert.equal(checkResult(command, output, 0).verdict, 'undetermined', command);
+  }
+  // A single invocation, and invocations of runners that no rule shares, are still read.
+  assert.equal(checkResult('node --test | tail -5', green, 0).verdict, 'passed', 'one invocation');
+  assert.equal(checkResult('ruff check . && vitest run | tail -5', 'All checks passed!\nTest Files  1 passed (1)\n     Tests  2 passed (2)\n', 0).verdict, 'passed', 'two runners with their own rules');
+  // The format check has a pass line of its own: the `All checks passed!` of the lint check before it is not its summary.
+  assert.equal(checkResult('ruff check . ; ruff format --check . | tail -3', 'All checks passed!\n', 0).verdict, 'undetermined');
+  assert.equal(checkResult('ruff check . ; ruff format --check . | tail -3', 'All checks passed!\n3 files already formatted\n', 0).verdict, 'passed');
+  assert.equal(checkResult('ruff format --check . ; ruff check . | tail -3', 'All checks passed!\n', 0).verdict, 'passed');
+  // A failure summary of any invocation still decides.
+  assert.equal(checkResult('node --test; node --test | tail -5', 'ℹ fail 2\n', 0).verdict, 'failed');
+});
+
+it('pipefail is the setting at the pipeline of the check: a later set neither turns it on nor off for it', () => {
+  const pipefailOf = (command: string) => classifyCommand(command).pipefail;
+  assert.equal(pipefailOf('set +o pipefail; node --check broken.js | tail -1; echo "EXIT=$?"; set -o pipefail'), false);
+  assert.equal(pipefailOf('set -o pipefail; node --check broken.js | tail -1; echo "EXIT=$?"; set +o pipefail'), true);
+  assert.equal(pipefailOf('node --check a.js | tail -1; set -o pipefail'), false, 'set only after the pipeline');
+  assert.equal(pipefailOf('set -o pipefail; node --check a.js | tail -1; set +o pipefail; node --check b.js | tail -1'), false, 'the last check sets the reading');
+  assert.equal(pipefailOf('set -o pipefail && npm test | tail -5'), true);
+  // The printed zero is the status of tail, because pipefail was off when the pipeline ran.
+  const late = 'set +o pipefail; node --check broken.js | tail -1; echo "EXIT=$?"; set -o pipefail';
+  assert.equal(checkResult(late, 'EXIT=0\n', 0).verdict, 'undetermined');
+  assert.equal(checkResult(late, 'EXIT=1\n', 0).verdict, 'undetermined', 'a printed one is tail\'s status too');
+  // With pipefail on at the pipeline, the status is the check's, whatever is set afterwards.
+  const early = 'set -o pipefail; node --check broken.js | tail -1; echo "EXIT=$?"; set +o pipefail';
+  assert.equal(checkResult(early, 'EXIT=1\n', 0).verdict, 'failed');
+  assert.equal(checkResult(early, 'EXIT=0\n', 0).verdict, 'passed');
+});
+
+it('a tail that names a file or reads a redirected one can fail, so its failure is not the check\'s', () => {
+  const status = (command: string, code = 1) => checkResult(command, '', code).verdict;
+  for (const command of [
+    'node --check valid.js && tail missing.txt',
+    'tail missing.txt && node --check valid.js',
+    'node --check valid.js && tail -n 5 missing.txt',
+    'node --check valid.js && tail -qn5 a.txt b.txt',
+    'node --check valid.js && tail -5 < missing.txt',
+    'node --check valid.js && tail -- -n',
+    'node --check valid.js && tail +5',
+    'node --check valid.js && tail --retry --lines 5 missing.txt',
+    'node --check valid.js && tail -5 > /nonexistent/out',
+  ]) {
+    assert.equal(status(command), 'undetermined', command);
+  }
+  // A tail that reads its input (a pipe or the terminal) is no second source of the status.
+  for (const command of [
+    'node --check valid.js && tail -5',
+    'node --check valid.js && tail -n 5',
+    'node --check valid.js && tail -c +10 2>&1',
+    'node --check valid.js && tail --lines=5 -',
+    'node --check valid.js && tail -qn 5 2>/dev/null',
+    'node --check valid.js && tail -n 5 > /dev/null',
+  ]) {
+    assert.equal(status(command), 'failed', command);
+  }
+  // Under pipefail a failing tail that names a file may be the one that failed.
+  assert.equal(status('set -o pipefail; node --check a.js | tail missing.txt'), 'undetermined');
+  assert.equal(status('set -o pipefail; node --check a.js | tail -5'), 'failed');
+});
+
 it('an escaped operator is a character of its word: it splits no command and ends no check', () => {
   const isCheck = (command: string) => classifyCommand(command).isCheck;
   // Bash passes the escaped character on to echo, so `npm test` is printed text and nothing ran.
@@ -1658,6 +1731,30 @@ it('the text that holds a ">" without a redirection, and the printed status, are
   ], 'classifyCheckResult', "classifyCheckResult({ command, output: 'EXIT=0\\n', isError: false, exitCode: 0 })");
   assert.equal(verdicts.length, 4);
   for (const { verdict } of verdicts) assert.equal(typeof verdict, 'string');
+});
+
+it('the setting of pipefail, the tail that reads its input and the runs of one runner are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const verdicts = classifyInChild<{ verdict: string }>([
+    long('set -o pipefail; set +o pipefail; '),
+    `${long('npm test | tail -5; set -o pipefail; ')}node --test`,
+    `npm test && tail ${long('-q ')}`,
+    `npm test && tail ${long('-n 5 ')}`,
+    `npm test && tail ${long('-qn5 ')}`,
+    `npm test | ${long('cat | ')}tail -5`,
+    long('node --test; '),
+    `${long('node --test; ')}node --test | tail -5`,
+    `npm test && tail -${'q'.repeat(40000)}n 5`,
+  ], 'classifyCheckResult', "classifyCheckResult({ command, output: 'ℹ fail 0\\n', isError: false, exitCode: 0 })");
+  assert.equal(verdicts.length, 9);
+  for (const { verdict } of verdicts) assert.equal(typeof verdict, 'string');
+  // 40 flags in a row of the tail, and 40000 characters of one word, keep their reading.
+  const flags = classifyInChild<{ verdict: string }>([
+    `node --check a.js && tail ${'-q '.repeat(40)}missing.txt`,
+    `node --check a.js && tail ${'-q '.repeat(40)}-n 5`,
+    `node --check a.js && tail -${'q'.repeat(40000)} missing.txt`,
+  ], 'classifyCheckResult', "classifyCheckResult({ command, output: '', isError: true, exitCode: 1 })");
+  assert.deepEqual(flags.map((one) => one.verdict), ['undetermined', 'failed', 'undetermined']);
 });
 
 it('a redirection with a digit descriptor is no argument, glued to the word or not', () => {
