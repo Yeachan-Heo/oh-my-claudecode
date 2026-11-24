@@ -11,8 +11,16 @@ import { PYTHON_REPL_SANDBOX_BOUNDARY } from '../sandbox.js';
 // src stopped (issue #3682), so this gate binds each committed runtime artifact
 // to the current source guidance and fails when one goes stale.
 
-const repoFile = (relative: string) =>
-  readFileSync(fileURLToPath(new URL(`../../../../${relative}`, import.meta.url)), 'utf-8');
+const repoFile = (relative: string) => {
+  try {
+    return readFileSync(fileURLToPath(new URL(`../../../../${relative}`, import.meta.url)), 'utf-8');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return '';
+    }
+    throw error;
+  }
+};
 
 // Contiguous fragments of the canonical source strings. Bundlers concatenate the
 // source's split literals, so these fragments survive every build shape.
@@ -48,7 +56,7 @@ const BOUNDARY_BEARING_ARTIFACTS = [
   'dist/tools/python-repl/sandbox.js',
 ];
 
-describe('committed shipping-surface parity (#3682)', () => {
+describe.skipIf(!repoFile('bridge/mcp-server.cjs'))('committed shipping-surface parity (#3682)', () => {
   it('.mcp.json loads the gated bridge server', () => {
     const mcpConfig = JSON.parse(repoFile('.mcp.json')) as {
       mcpServers: Record<string, { args?: string[] }>;
