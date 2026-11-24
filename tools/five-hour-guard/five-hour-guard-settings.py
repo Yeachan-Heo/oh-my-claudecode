@@ -206,7 +206,8 @@ def run_once():
                 fail(f'the {label} {path!r} does not exist: the entry would be written but the shell guard of the command would let every call through')
         if not os.access(A.python, os.X_OK):
             fail(f'the interpreter {A.python!r} is not executable: the shell guard of the command (`[ -x ... ]`) would let every call through')
-        distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python), ('configuration file', A.config)]
+        distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python), ('configuration file', A.config),
+                    ('settings tool script', os.path.abspath(__file__)), ('guard script', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'five-hour-guard.py'))]
         # the files the guard writes or reads under the same configuration: registering must not make one of them settings.json
         for key, label in (('state_file', 'state file'), ('log_file', 'guard log'), ('usage_cache', 'usage cache')):
             if isinstance(CFG.get(key), str) and CFG[key]:

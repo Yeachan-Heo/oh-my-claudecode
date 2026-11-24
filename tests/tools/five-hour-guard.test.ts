@@ -4,7 +4,7 @@
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, linkSync, lstatSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, linkSync, lstatSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, GUARD, HOOK, UNIT, PYBIN, HAS_PYTHON3, cleanup, fixture, hookHeld, hookPasses, now, pauseDoc,
@@ -740,8 +740,51 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       'os.replace = fail_on_state', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
-    expect(r.stdout).toMatch(/ERROR: cannot write the state file at start/);
+    expect(r.stdout).toMatch(/ERROR: cannot leave the stored pause cleanly at start/);
     expect(r.stderr).not.toMatch(/Traceback/);
+  });
+
+  it('the running scripts are configured files too: a state file or log that is the guard script (or its hook) is refused, the script is kept', () => {
+    const f = fixture('alias-script', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'installed');
+    mkdirSync(dir, { recursive: true });
+    const guard = join(dir, 'five-hour-guard.py');
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(GUARD, guard);
+    copyFileSync(HOOK, hook);
+    const before = readFileSync(guard, 'utf8');
+    for (const [key, target] of [['state_file', guard], ['log_file', guard], ['pause_file', guard], ['state_file', hook], ['log_file', hook]] as const) {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, [key]: target }), 'utf8');
+      const r = runSync(guard, ['--config', f.cfg, '--once']);
+      expect(r.status, `${key} -> ${target}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+      expect(readFileSync(guard, 'utf8'), 'the installed script is intact').toBe(before);
+    }
+  });
+
+  it('a pause file whose pid is a live process but whose heartbeat has lapsed is a leftover (a recycled pid does not block the start)', () => {
+    const f = fixture('recycled-pid', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writePause(f, { pid: process.pid, valid_until: now() - 600, resume_at: now() - 300 });
+    const r = runSync(GUARD, guardArgs(f, ['--once']));
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(existsSync(f.pause), 'the lapsed pause is removed').toBe(false);
+  });
+
+  it('a pause file that cannot be removed keeps the pause in the state: RESUMED is not logged and the next tick tries again', () => {
+    const f = fixture('unlink-fails', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
+    writePause(f, { pid: DEAD_PID });
+    const code = ['import os, runpy, sys', 'real = os.unlink',
+      'def deny(p, *a, **k):', '    if str(p).endswith("pause.json"): raise PermissionError(13, "denied")', '    return real(p, *a, **k)',
+      'os.unlink = deny', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout).not.toMatch(/RESUMED/);
+    expect(r.stdout).toMatch(/ERROR/);
+    expect(readJson(f.state).paused, 'the state still says paused: the removal is retried').toBe(true);
+    expect(existsSync(f.pause)).toBe(true);
+    const again = guardOnce(f);
+    expect(again.stdout).toMatch(/RESUMED/);
+    expect(existsSync(f.pause), 'removed once the file can be removed').toBe(false);
   });
 
   it('--max-age must be positive: a negative one makes every entry stale and the guard fail open for ever', () => {

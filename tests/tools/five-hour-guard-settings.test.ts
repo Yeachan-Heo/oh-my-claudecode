@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, rmSync, readFileSync, linkSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
-  ENV, CONFIG_DIR, HAS_PYTHON3, HOOK, PYBIN, SETTINGS_TOOL, TMP, cleanup, fixture, readJson, readText, runCommand, runPyCode, runSync, sleep,
+  ENV, CONFIG_DIR, GUARD as GUARD_SCRIPT, HAS_PYTHON3, HOOK, PYBIN, SETTINGS_TOOL, TMP, cleanup, fixture, readJson, readText, runCommand, runPyCode, runSync, sleep,
   writePause, type Fixture,
 } from './five-hour-guard-support.js';
 
@@ -438,6 +438,26 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
         expect(r.status, `${label}, ${action}: ${r.stdout}${r.stderr}`).toBe(2);
         expect(r.stderr, `${label}, ${action}`).not.toMatch(/Traceback/);
       }
+    }
+  });
+
+  it('add refuses a state file, log or usage cache of the configuration that is a script of the guard or of this tool', () => {
+    const f = fixture('settings-alias-scripts');
+    const dir = join(f.dir, 'installed');
+    mkdirSync(dir, { recursive: true });
+    const tool2 = join(dir, 'five-hour-guard-settings.py');
+    const guard = join(dir, 'five-hour-guard.py');
+    copyFileSync(SETTINGS_TOOL, tool2);
+    copyFileSync(GUARD_SCRIPT, guard);
+    const hookCopy = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hookCopy);
+    const guardText = readText(guard);
+    for (const [key, target] of [['state_file', guard], ['log_file', guard], ['usage_cache', tool2]] as const) {
+      writeFileSync(f.cfg, JSON.stringify({ pause_file: f.pause, settings_file: f.settings, [key]: target }), 'utf8');
+      const r = runSync(tool2, ['add', '--config', f.cfg, '--hook', hookCopy, '--python', PYBIN]);
+      expect(r.status, `${key}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/same file/);
+      expect(readText(guard), 'the script is intact').toBe(guardText);
     }
   });
 

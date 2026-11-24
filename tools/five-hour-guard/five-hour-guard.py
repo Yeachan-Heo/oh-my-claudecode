@@ -176,7 +176,9 @@ def check_distinct(files):
                 fail(f'"{la}" ({pa}) and "{lb}" ({pb}) are the same file: the guard would remove or overwrite one as the other')
 
 
-check_distinct([('configuration file', A.config), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
+HERE = os.path.dirname(os.path.abspath(__file__))
+check_distinct([('configuration file', A.config), ('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
+                ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
                 ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
                 ('pause_file lock', PAUSE_FILE + '.lock'),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
@@ -366,14 +368,17 @@ def publish(state, pct=None, only=None):
 
 
 def unpublish():
+    """Remove the pause file. False when it could not be removed (logged), so that a caller can keep its state and try again."""
     if A.dry_run:
-        return
+        return True
     try:
         os.unlink(PAUSE_FILE)
     except FileNotFoundError:
         pass
     except Exception as e:
         log(f'cannot remove pause file: {e!r}')
+        return False
+    return True
 
 
 def enter_pause(state, pct, reset_ts):
@@ -387,7 +392,8 @@ def enter_pause(state, pct, reset_ts):
 
 
 def leave_pause(state, why):
-    unpublish()
+    if not unpublish():
+        raise OSError(f'the pause file {PAUSE_FILE} could not be removed: the pause stays in the state and is left again at the next tick')
     log(f'RESUMED ({why}): pause file removed, waiting tool calls continue')
     state.update(paused=False, since=None, resume_at=None)
     write_json(STATE, state)
@@ -535,15 +541,17 @@ def main():
     if os.path.exists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):
         # the start would remove it as a leftover: never remove a file that is not a pause of this guard (a mistyped path)
         fail(f'the file {PAUSE_FILE} exists and is not a pause file of this guard: it is left untouched; check "pause_file", or remove the file yourself')
-    owner = None
+    owner, valid_until = None, 0
     try:
         with open(PAUSE_FILE) as f:
-            owner = json.load(f).get('pid')
+            doc = json.load(f)
+        owner, valid_until = doc.get('pid'), doc.get('valid_until') or 0
     except Exception:
         pass
-    if owner is not None and owner != os.getpid() and pid_alive(owner):
-        # another guard that shares this pause file (with a different state file, so the lock does not stop it) would replace
-        # its pause on the first tick and the two would remove each other's: refuse to start
+    if owner is not None and owner != os.getpid() and valid_until > time.time() and pid_alive(owner):
+        # a guard that is alive renews valid_until every tick: a pause whose heartbeat has lapsed is a leftover, and its pid may
+        # belong to an unrelated process by now. Another guard (an older one that takes no lock on the pause file) with a
+        # current heartbeat would replace the pause on the first tick and the two would remove each other's: refuse to start
         fail(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: another guard uses it; two guards must not share one pause_file')
     lock_state()
     state = load_state()
@@ -554,9 +562,8 @@ def main():
         else:
             try:
                 leave_pause(state, 'stored pause already over at start')
-            except Exception as e:   # the state file cannot be written (read-only disk): the pause file is gone, go on with the state in memory
-                state.update(paused=False, since=None, resume_at=None)
-                log(f'ERROR: cannot write the state file at start, going on without it: {e!r}')
+            except Exception as e:   # the pause file stays (the state keeps the pause, the next tick tries again) or the state file cannot be written
+                log(f'ERROR: cannot leave the stored pause cleanly at start, the next tick tries again: {e!r}')
     else:
         log(f'guard start (threshold {A.threshold} %, margin {A.margin:.0f} s, exclude {EXCLUDE})')
         hook_check('start')

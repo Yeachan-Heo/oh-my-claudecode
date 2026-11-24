@@ -54,7 +54,7 @@ One guard per state file and one per pause file: a second guard with the same `s
 status 2 (it takes an exclusive lock on `<state_file>.lock` and on `<pause_file>.lock`, empty files next to those files; there is no lock where Python has no `fcntl`, that is on
 Windows). At start the guard removes a pause file nobody owns, but refuses to start (status 2) when the existing file is not a pause file of this
 guard (a mistyped `pause_file` must never delete another file), and refuses to start (status 2) when the `pid` of the file is a
-live process of another guard (it would replace that guard's pause on its first tick). Two guards must not share one `pause_file`: with different state files they would overwrite each
+live process and its heartbeat (`valid_until`) has not lapsed (it would replace that guard's pause on its first tick; a lapsed pause whose pid was reused by another process is a leftover). Two guards must not share one `pause_file`: with different state files they would overwrite each
 other's pause (the lock on the pause file stops the second one).
 
 ### The hook never wedges a session (fail-open)
@@ -171,7 +171,7 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    a group of its own with its matcher). `add` twice changes nothing. `add` with another hook path replaces the entry in
    place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, an interpreter that is not
    executable or cannot run the hook (it is tried once: Python 3 with the standard library), two of the pause file, hook log,
-   `settings.json`, hook, interpreter and configuration file that are one file, and a hook file whose
+   `settings.json`, hook, interpreter, configuration file and the two scripts that are one file, and a hook file whose
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The
    entry has a `timeout` of 21600 s (`--timeout`, at least 1), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
@@ -246,7 +246,7 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 
 A configuration error (a missing required key, a wrong type, a number that is not finite or outside its range, a
 directory of the pause or state file that is missing, a `pause_file` that is not absolute, a `pause_file` or `state_file` that is not a regular file (a directory), two configured files (`pause_file`, `state_file` and its `.lock`, `usage_cache`,
-`log_file`, `settings_file`, and the configuration file itself) that are one file by path, symbolic link or hard link)
+`log_file`, `settings_file`, the configuration file itself, and the scripts of the guard, hook and settings tool) that are one file by path, symbolic link or hard link)
 exits with status 2. A state
 file that does not have the shape the guard writes (times that are not positive or are more than 6 hours ahead included) is ignored: the guard starts without a pause. A file at `pause_file` is removed as a leftover only when it has the full shape the guard publishes (`v` 2, `paused` true, `pid`, `since`, `resume_at`, `valid_until`).
 
