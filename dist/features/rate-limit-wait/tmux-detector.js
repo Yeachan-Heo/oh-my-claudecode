@@ -10,6 +10,8 @@
  */
 import { tmuxExec, tmuxSpawn } from '../../cli/tmux-utils.js';
 import { getNewPaneTail } from './pane-fresh-capture.js';
+import { captureHerdrWorkerPane, herdrSendKey, listHerdrAgents, herdrWorkspaceIdFromPaneId, } from '../../team/herdr-session.js';
+import { isHerdrPaneId, resolveTeamMultiplexer } from '../../team/tmux-session.js';
 /**
  * Validate tmux pane ID format to prevent command injection
  * Valid formats: %0, %1, %123, etc.
@@ -313,6 +315,10 @@ function capturePaneContentStrict(paneId, lines) {
     if (!isTmuxAvailable()) {
         return null;
     }
+    // Herdr panes (wN:pM) belong to the herdr arm below, not to tmux.
+    if (isHerdrPaneId(paneId)) {
+        return null;
+    }
     // Validate pane ID to prevent command injection
     if (!isValidPaneId(paneId)) {
         console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
@@ -494,6 +500,10 @@ export function sendResumeSequence(paneId) {
     if (!isTmuxAvailable()) {
         return false;
     }
+    // Herdr panes (wN:pM) are resumed through sendHerdrResumeSequence.
+    if (isHerdrPaneId(paneId)) {
+        return false;
+    }
     // Validate pane ID to prevent command injection
     if (!isValidPaneId(paneId)) {
         console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
@@ -521,6 +531,10 @@ export function sendToPane(paneId, text, pressEnter = true) {
     if (!isTmuxAvailable()) {
         return false;
     }
+    // Herdr panes (wN:pM) are addressed through the herdr agent surface.
+    if (isHerdrPaneId(paneId)) {
+        return false;
+    }
     // Validate pane ID to prevent command injection
     if (!isValidPaneId(paneId)) {
         console.error(`[TmuxDetector] Invalid pane ID format: ${paneId}`);
@@ -544,6 +558,148 @@ export function sendToPane(paneId, text, pressEnter = true) {
     }
     catch (error) {
         console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);
+        return false;
+    }
+}
+// ---------------------------------------------------------------------------
+// Herdr arm
+// ---------------------------------------------------------------------------
+/**
+ * Whether the herdr panes should be scanned. Conservative gate: only when the
+ * multiplexer setting elects herdr (env OMC_TEAM_MULTIPLEXER or
+ * team.ops.multiplexer). Ambient scanning is not enabled for herdr because a
+ * scan implies the headless Herdr server (spawned on demand); default tmux
+ * behavior is unchanged.
+ */
+export function isHerdrDetectorEnabled(env = process.env) {
+    return resolveTeamMultiplexer(undefined, env) === 'herdr';
+}
+/** BlockedPane view of a live herdr agent pane. Pane ids are stable and never
+ * reused, so the id (not window/pane indexes) is the identity that matters. */
+function herdrBlockedPane(agent, analysis) {
+    const paneId = agent.pane_id;
+    let session = paneId;
+    try {
+        session = herdrWorkspaceIdFromPaneId(paneId);
+    }
+    catch {
+        // keep the pane id as the session label if the grammar surprises us
+    }
+    return {
+        id: paneId,
+        session,
+        windowIndex: 0,
+        windowName: agent.name ?? agent.agent ?? '',
+        paneIndex: 0,
+        isActive: true,
+        analysis,
+        firstDetectedAt: new Date(),
+        resumeAttempted: false,
+    };
+}
+/**
+ * Scan live herdr agent panes for blocked Claude Code sessions. Only panes
+ * hosting a recognized agent are considered (the live-agent inventory is the
+ * liveness proof; plain shell tabs are not agents). Returns [] when the
+ * inventory cannot be read.
+ */
+export async function scanForBlockedHerdrPanes(lines = 15) {
+    let agents;
+    try {
+        agents = await listHerdrAgents();
+    }
+    catch {
+        return [];
+    }
+    const blocked = [];
+    for (const agent of agents) {
+        const paneId = agent.pane_id;
+        let content;
+        try {
+            content = await captureHerdrWorkerPane(paneId, Math.max(1, Math.min(100, Math.floor(lines))));
+        }
+        catch {
+            continue;
+        }
+        const analysis = analyzePaneContent(content);
+        if (analysis.isBlocked) {
+            blocked.push(herdrBlockedPane(agent, analysis));
+        }
+    }
+    return blocked;
+}
+/**
+ * Revalidate persisted herdr pane candidates before sending resume keys.
+ * Mirrors revalidateBlockedPanes: null means "inconclusive" (the inventory
+ * could not be read — callers retain state and retry), otherwise only panes
+ * whose live agent still shows a rate-limit screen with a live resume menu
+ * are returned.
+ */
+export async function revalidateBlockedHerdrPanes(trackedPanes, lines = 15) {
+    if (trackedPanes.length === 0)
+        return [];
+    let agents;
+    try {
+        agents = await listHerdrAgents();
+    }
+    catch {
+        return null;
+    }
+    const liveIds = new Set(agents.map((agent) => agent.pane_id));
+    const resumable = [];
+    for (const tracked of trackedPanes) {
+        if (!isHerdrPaneId(tracked.id))
+            continue;
+        if (!liveIds.has(tracked.id))
+            continue;
+        let content;
+        try {
+            content = await captureHerdrWorkerPane(tracked.id, lines);
+        }
+        catch {
+            return null;
+        }
+        const analysis = analyzePaneContent(content);
+        const recentLines = content
+            .split(/\r?\n/)
+            .filter((line) => line.trim() &&
+            !OMC_HUD_STATUS_LINE_PATTERN.test(line) &&
+            !OMC_HUD_MODE_LINE_PATTERN.test(line))
+            .join('\n');
+        const recentLineList = recentLines.split('\n');
+        const hasLivePrompt = hasLiveResumeMenuPrompt(recentLineList) ||
+            hasLiveWaitAndContinuePrompt(recentLineList);
+        if (!analysis.isBlocked ||
+            !LIVE_RESUME_OPTION_PATTERN.test(recentLines) ||
+            !hasLivePrompt)
+            continue;
+        resumable.push({
+            ...tracked,
+            analysis,
+        });
+    }
+    return resumable;
+}
+/**
+ * Send the resume confirmation to a herdr agent pane.
+ *
+ * tmux sends "1" + Enter to pick the first menu option. The herdr agent
+ * surface types only semantic keys, so this confirms with Enter alone: the
+ * live-menu revalidation above requires option 1 ("continue"/"wait") to be
+ * the first resume option, and Claude's limit screen preselects it, making
+ * Enter the equivalent of "1" + Enter.
+ */
+export async function sendHerdrResumeSequence(paneId) {
+    if (!isHerdrPaneId(paneId)) {
+        console.error(`[TmuxDetector] Not a herdr pane ID: ${paneId}`);
+        return false;
+    }
+    try {
+        await herdrSendKey(paneId, 'enter');
+        return true;
+    }
+    catch (error) {
+        console.error(`[TmuxDetector] Error sending herdr resume to pane ${paneId}:`, error);
         return false;
     }
 }

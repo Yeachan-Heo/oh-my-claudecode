@@ -5,13 +5,15 @@
  * tmux send-keys continuation nudges. Only nudges worker panes (never the
  * leader) in the current team session.
  *
- * Idle = pane shows a prompt (paneLooksReady) AND no active task running
- * (paneHasActiveTask is false).
+ * Idle = classifyPane reads the pane as idle (a prompt is drawn, and no trust
+ * dialog, active task or startup status line is on screen), and the pane also
+ * looks ready the way the checks that send keys read it.
  *
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
  */
 import { type WorkerPaneOwnership } from './tmux-session.js';
 import { type TeamInstanceId, type TmuxServerIdentity } from './types.js';
+import type { WorkerProviderLiveness } from './worker-provider-liveness.js';
 export interface NudgeConfig {
     /** Milliseconds a pane must be idle before the first nudge (default: 30000) */
     delayMs: number;
@@ -28,12 +30,17 @@ export interface NudgeAuthority {
     /** Tmux server incarnation captured when the team was created. */
     tmuxServerIdentity?: TmuxServerIdentity;
     /** Provider inferred from the persisted target when omitted. */
-    provider?: 'tmux' | 'cmux';
+    provider?: 'tmux' | 'cmux' | 'herdr';
     /**
      * Return the exact provider ownership for one persisted worker pane.
      * Missing ownership is never replaced with ambient pane capture.
      */
     getPaneOwnership: (paneId: string) => WorkerPaneOwnership | undefined;
+    /**
+     * Provider liveness for one persisted worker pane. A `dead` provider leaves
+     * a shell prompt that reads as idle, so it is never nudged.
+     */
+    getProviderLiveness: (paneId: string) => Promise<WorkerProviderLiveness>;
     /**
      * Perform final authority validation and transport while holding the
      * original instance lifecycle lock. Returning false means no delivery was
@@ -45,8 +52,10 @@ export declare const DEFAULT_NUDGE_CONFIG: NudgeConfig;
 /** Capture the last 80 lines of a team pane. Returns '' on error. */
 export declare function capturePane(ownership: WorkerPaneOwnership): Promise<string>;
 /**
- * A pane is idle when it shows a prompt (ready for input) but has no
- * active task running.
+ * A pane is idle when it shows a prompt and nothing else claims it: no trust
+ * dialog, no active task and no startup status line. A nudge types into the
+ * pane, so it also needs the pane to look ready the way the checks that send
+ * keys have always read it: a draft that mentions "loading" stays untouched.
  */
 export declare function isPaneIdle(ownership: WorkerPaneOwnership): Promise<boolean>;
 export declare class NudgeTracker {

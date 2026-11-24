@@ -19,6 +19,8 @@ import { sanitizeOutput } from "./sanitize.js";
 import { estimatePayloadFromTranscriptPath } from "./payload-estimate.js";
 import { getRuntimePackageVersion } from "../lib/version.js";
 import { compareVersions } from "../features/auto-update.js";
+import { resolveOmcUpdateState } from "./elements/update-hint.js";
+import { OMC_HUD_UNBUILT_VERSION_ENV } from "../lib/env-vars.js";
 import { resolveToWorktreeRoot, resolveTranscriptPath, withWorktreePathRenderScope, } from "../lib/worktree-paths.js";
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "fs";
 import { access, readFile } from "fs/promises";
@@ -312,6 +314,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
         // Read OMC version and update check cache
         let omcVersion = null;
         let updateAvailable = null;
+        let omcUnbuiltVersion = null;
         let omcUpdateSource = null;
         const claudeCodeVersion = stdin.version ?? null;
         let claudeCodeUpdateAvailable = null;
@@ -326,17 +329,14 @@ async function mainImpl(watchMode = false, skipInit = false) {
                 console.error("[HUD] Version detection error:", error instanceof Error ? error.message : error);
             }
         }
+        let cachedLatestVersion = null;
         // Async file read to avoid blocking event loop (Issue #1273)
         try {
             const updateCacheFile = getUpdateCheckCachePath();
             await access(updateCacheFile);
             const content = await readFile(updateCacheFile, "utf-8");
             const cached = JSON.parse(content);
-            if (cached?.latestVersion &&
-                omcVersion &&
-                compareVersions(omcVersion, cached.latestVersion) < 0) {
-                updateAvailable = cached.latestVersion;
-            }
+            cachedLatestVersion = cached?.latestVersion;
             if (cached?.source === "npm" || cached?.source === "marketplace") {
                 omcUpdateSource = cached.source;
             }
@@ -354,6 +354,9 @@ async function mainImpl(watchMode = false, skipInit = false) {
                 console.error("[HUD] Update cache read error:", error instanceof Error ? error.message : error);
             }
         }
+        // After the read, so an unbuilt version is still reported when the cache is unreadable.
+        ({ updateAvailable, unbuiltVersion: omcUnbuiltVersion } =
+            resolveOmcUpdateState(omcVersion, cachedLatestVersion, process.env[OMC_HUD_UNBUILT_VERSION_ENV]));
         // Session summary: read cached state and trigger background regeneration if needed
         let sessionSummary = null;
         const sessionSummaryEnabled = config.elements.sessionSummary ?? false;
@@ -411,6 +414,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
             sessionTotalTokens: transcriptData.sessionTotalTokens ?? null,
             omcVersion,
             updateAvailable,
+            omcUnbuiltVersion,
             omcUpdateSource,
             claudeCodeVersion,
             claudeCodeUpdateAvailable,

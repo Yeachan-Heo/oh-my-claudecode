@@ -17,13 +17,14 @@ export declare function validateInteropRuntimeFlags(flags: InteropRuntimeFlags):
     reason?: string;
 };
 /**
- * Launch interop session with split tmux panes
+ * Launch interop session with split tmux panes (or a Herdr side-by-side tab
+ * when running inside Herdr / the herdr backend is elected)
  */
-export declare function launchInteropSession(cwd?: string): void;
+export declare function launchInteropSession(cwd?: string): Promise<void>;
 /**
  * CLI entry point for interop command
  */
 export declare function interopCommand(options?: {
     cwd?: string;
-}): void;
+}): Promise<void>;
 //# sourceMappingURL=interop.d.ts.map

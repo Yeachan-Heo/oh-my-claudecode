@@ -9,8 +9,12 @@
  * Risk classes reuse the canonical taxonomy from src/workflow/registry.ts.
  */
 import type { HookEvent, HookRegistryEntry, HooksJson } from './types.js';
-/** Parse an installed command into entrypoint basename + trailing args. */
-export declare function parseEntrypointCommand(command: string): {
+/**
+ * Parse an installed hook into entrypoint basename + trailing args.
+ * Accepts the exec form (`command: node` plus `args`) and the older shell
+ * string, so a cache that has not been rewritten still registers.
+ */
+export declare function parseEntrypointCommand(command: string, args?: readonly string[]): {
     entrypoint: string;
     args: string[];
 } | null;

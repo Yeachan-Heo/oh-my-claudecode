@@ -13,7 +13,7 @@
  * The point declaration (questions, blocking flag) lives in the jev registry
  * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
-import { recordJudgment } from '../jev/index.js';
+import { noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 /**
  * Record the shadow comparison for one completion-claim verdict and return
  * the result (twin verdict in shadow/off mode, Jev-mapped in active mode).
@@ -33,8 +33,8 @@ export async function applyRalphVerdictShadow(args) {
         twin: () => verdict,
         mapHeuristic: (result, questionSet) => result,
         mapAnswer: (answer) => {
-            // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
-            return answer.noul === true;
+            // Jev Noul answer: noul is the probability of "yes" (0-1)
+            return noulAnswerIsYes(answer);
         },
         fetchFn: args.fetchFn,
     });
