@@ -282,6 +282,17 @@ export function paneKey(pane: PanePoint): string {
   return pane.socket === undefined ? pane.id : `${pane.socket}|${pane.id}`;
 }
 
+// The identity of a program is its foreground process group and the start time of that group's leader (see
+// paneProviderIdentity). A group id is not reused while any member lives, so the same group id with a start time that
+// is gone now (the leader exited, the group lives on) is still the program the wait was bound to. A start time that
+// appears where there was none, or differs, is another leader under that id; another group id is another program.
+function sameProgram(saved: string, current: string): boolean {
+  if (saved === current) return true;
+  const group = (identity: string): string => identity.slice(0, identity.indexOf(':'));
+  const started = (identity: string): string => identity.slice(identity.indexOf(':') + 1);
+  return group(saved) === group(current) && started(saved) !== '' && started(current) === '';
+}
+
 function screenSignature(content: string): string {
   return createHash('sha256').update(String(content)).digest('hex').slice(0, 16);
 }
@@ -543,7 +554,7 @@ export async function runPanelQuotaPass(
           deps.log(`pane ${key}: cannot tell which program runs in the pane; retry on next pass`);
           continue;
         }
-        if (current !== entry.providerIdentity) {
+        if (!sameProgram(entry.providerIdentity, current)) {
           entry.state = 'resumed';
           entry.sig = screenSignature(fresh);
           entry.resumedAt = now;

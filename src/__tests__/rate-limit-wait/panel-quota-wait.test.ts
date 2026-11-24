@@ -97,6 +97,36 @@ describe('panel quota wait: decision logic', () => {
       expect(w.sent).toEqual(['%7']);
     });
 
+    it('the leader of the foreground group exited and its group lives on (the start time is gone, the group id is the same): the key is sent', async () => {
+      const identity = { value: '5151:started-at-ten' };
+      const { w, state } = await waitingWorld(identity);
+      identity.value = '5151:';
+      w.clock.now = BASE_MS + 2 * H;
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(w.sent, 'a surviving provider got no key after only its group leader exited').toEqual(['%7']);
+    });
+
+    it('a group id that is the same but a leader with another start time, or another group without a start time: no key', async () => {
+      for (const changed of ['5151:started-at-eleven', '6262:']) {
+        const identity = { value: '5151:started-at-ten' };
+        const { w, state } = await waitingWorld(identity);
+        identity.value = changed;
+        w.clock.now = BASE_MS + 2 * H;
+        await runPanelQuotaPass(state, w.deps, ON);
+        expect(w.sent, `a key went to ${changed}`).toEqual([]);
+        expect(state.panes[KEY_A].state).toBe('resumed');
+      }
+    });
+
+    it('a wait begun when the leader was already gone keeps the group id alone, and a leader that appears under it is another program: no key', async () => {
+      const identity = { value: '5151:' };
+      const { w, state } = await waitingWorld(identity);
+      identity.value = '5151:started-at-ten';
+      w.clock.now = BASE_MS + 2 * H;
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(w.sent).toEqual([]);
+    });
+
     it('another program in the foreground that is not a shell: no key, and the wait is closed', async () => {
       const identity = { value: '5151:started-at-ten' };
       const { w, state } = await waitingWorld(identity);
