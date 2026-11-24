@@ -273,6 +273,7 @@ export function buildStartupInboxTrigger(
   return `Read workers/${workerName}/inbox.md under the OMC_TEAM_STATE_ROOT environment variable; execute now, report concrete progress.${suffix}`;
 }
 import {
+  checkOwnerFence,
   currentProcessStartIdentity,
   isProcessIdentityDead,
   publishOwnerEpoch,
@@ -295,6 +296,7 @@ import {
 import {
   isWorkerLaunchAttemptCurrent,
   isWorkerLaunchAttemptAccepted,
+  isValidCurrentWorkerLaunchRecord,
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
@@ -2477,6 +2479,62 @@ function validateRecoveryAttemptSecret(
 
 const pendingRecoveryPanes = new Map<string, PendingRecoveryPane>();
 
+/**
+ * Written before a recovery splits a pane, removed once that pane is dead or
+ * carried by the worker row. Until then the pane may be alive and tracked
+ * nowhere else, so the owner deadline keeps the recovery active.
+ */
+export async function recordRecoveryPaneSplit(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+  paneAttemptId: string,
+): Promise<void> {
+  await writeAtomic(
+    recoveryPaneSplitPath(input, recoveryId, paneAttemptId),
+    JSON.stringify({
+      schema_version: 1,
+      request_id: input.requestId,
+      recovery_id: recoveryId,
+      worker_name: input.workerName,
+      pane_attempt_id: paneAttemptId,
+      recorded_at: new Date().toISOString(),
+    }),
+  );
+}
+
+// A record left behind only keeps the deadline from ending the recovery, so
+// an unsafe id or a failed removal leaves it in place.
+export async function clearRecoveryPaneSplit(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+  paneAttemptId: string,
+): Promise<void> {
+  try {
+    await rm(recoveryPaneSplitPath(input, recoveryId, paneAttemptId), {
+      force: true,
+    });
+  } catch {
+    // Left in place.
+  }
+}
+
+// A pane attempt id restored from a launch record is only known to be text.
+function recoveryPaneSplitPath(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+  paneAttemptId: string,
+): string {
+  if (
+    !isSafeRecoveryRequestId(recoveryId) ||
+    !isSafeRecoveryRequestId(paneAttemptId)
+  )
+    throw new Error("invalid_recovery_pane_split_id");
+  return absPath(
+    input.cwd,
+    TeamPaths.recoveryPaneSplit(input.teamName, recoveryId, paneAttemptId),
+  );
+}
+
 async function recordRecoveryPaneRollbackFailure(
   input: RecoverDeadWorkerOwnerInput,
   recoveryId: string,
@@ -2635,6 +2693,7 @@ async function cleanupRecoveryPaneAttempt(
     );
     if (liveness === "dead" && providerStopped) {
       pendingRecoveryPanes.delete(recoveryId);
+      await clearRecoveryPaneSplit(input, recoveryId, pending.paneAttemptId);
       return true;
     }
   }
@@ -2943,6 +3002,10 @@ export async function finalizeRecoveryOwnerResult(
       last_recovery: {
         ...active,
         phase,
+        ...(result.outcome === "failed" &&
+        result.error === "recovery_request_timeout"
+          ? { failure_reason: result.error }
+          : {}),
         state_revision: finalRevision,
         updated_at: new Date().toISOString(),
       },
@@ -3060,6 +3123,214 @@ async function finalizeBoundRecoveryOwnerTerminal(
     ),
     outcome: "commit_unknown",
   };
+}
+
+/** The longest recover-worker client wait, counted from the persisted intent. */
+const RECOVERY_OWNER_RETRY_DEADLINE_MS = 300_000;
+
+function recoveryTimeoutError(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+): RecoverDeadWorkerV2Failure {
+  return recoveryError(
+    input,
+    recoveryId,
+    "recovery_request_timeout",
+    `Recovery owner deadline exceeded: no attempt finished within ${RECOVERY_OWNER_RETRY_DEADLINE_MS} ms of admission.`,
+  );
+}
+
+/**
+ * Publishes the final of a deadline timeout whose owner saved it to config
+ * but died before publishing it. The fenced owner already made the decision,
+ * so no election is needed. Returns null when there is no such timeout.
+ */
+async function publishSavedRecoveryTimeout(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+): Promise<RecoverDeadWorkerV2Result | null> {
+  const savedTimeout = async (): Promise<boolean> => {
+    const config = (await readRevisionedTeamConfig(input.teamName, input.cwd))
+      ?.config;
+    const last = config?.last_recovery;
+    return (
+      config?.active_recovery?.recovery_id !== recoveryId &&
+      last?.recovery_id === recoveryId &&
+      last.request_id === input.requestId &&
+      last.worker_name === input.workerName &&
+      last.phase === "failed" &&
+      last.failure_reason === "recovery_request_timeout"
+    );
+  };
+  if (!(await savedTimeout())) return null;
+  return withTeamConfigMutationLock(input.teamName, input.cwd, async () =>
+    (await savedTimeout())
+      ? persistRecoveryFinal(
+          input,
+          recoveryId,
+          recoveryTimeoutError(input, recoveryId),
+        )
+      : null,
+  );
+}
+
+/**
+ * last_recovery is the only record of a saved timeout until its final is
+ * published, so publish it before anything replaces or deletes the slot.
+ * Returns the recovery id whose final is still unpublished, or null.
+ */
+async function publishPendingRecoveryTimeout(
+  teamName: string,
+  cwd: string,
+  instanceId: string,
+): Promise<string | null> {
+  const saved = (await readRevisionedTeamConfig(teamName, cwd))?.config
+    .last_recovery;
+  if (
+    saved?.failure_reason !== "recovery_request_timeout" ||
+    readRecoveryFinalState(cwd, saved.request_id).kind === "valid"
+  )
+    return null;
+  await publishSavedRecoveryTimeout(
+    {
+      teamName,
+      cwd,
+      workerName: saved.worker_name,
+      requestId: saved.request_id,
+      instanceId,
+    },
+    saved.recovery_id,
+  ).catch(() => null);
+  return readRecoveryFinalState(cwd, saved.request_id).kind === "valid"
+    ? null
+    : saved.recovery_id;
+}
+
+/**
+ * Past the deadline, the fenced owner fails a recovery that has nothing to
+ * hand over instead of running another attempt. Returns null to keep today's
+ * retry: before the deadline, without the fence, or once a task reservation,
+ * a committed replacement, or an uncommitted pane exists.
+ */
+async function finalizeRecoveryPastDeadline(
+  input: RecoverDeadWorkerOwnerInput,
+  recoveryId: string,
+  fence: OwnerFence,
+  instance: TeamInstanceBinding,
+): Promise<RecoverDeadWorkerV2Result | null> {
+  let admittedAt: number;
+  try {
+    const intent = parseRecoveryIntent(
+      await readFile(
+        absPath(input.cwd, TeamPaths.recoveryIntent(input.teamName, recoveryId)),
+        "utf8",
+      ),
+    );
+    if (intent.request_id !== input.requestId) return null;
+    admittedAt = Date.parse(intent.created_at);
+  } catch {
+    return null;
+  }
+  if (Date.now() < admittedAt + RECOVERY_OWNER_RETRY_DEADLINE_MS) return null;
+  const expired = recoveryTimeoutError(input, recoveryId);
+  return withTeamInstanceLifecycleLock(
+    instance.cwd,
+    instance.team_name,
+    async () => {
+      await assertTeamInstanceUnderLock(instance);
+      if (!checkOwnerFence(input.cwd, input.teamName, fence).ok) return null;
+      const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
+      if (
+        !current ||
+        current.config.runtime_owner_epoch?.epoch !== fence.epoch ||
+        current.config.runtime_owner_epoch.nonce !== fence.nonce ||
+        current.config.workers.some(
+          (worker) => worker.recovery_id === recoveryId,
+        )
+      )
+        return null;
+      // A launch persisted by a predecessor owner outlives its in-memory
+      // pending pane. Only its resume path can settle it.
+      const persistedLaunch = await readFile(
+        absPath(
+          input.cwd,
+          TeamPaths.workerLaunchCurrent(input.teamName, input.workerName),
+        ),
+        "utf8",
+      ).then(
+        (text) => {
+          const record: unknown = JSON.parse(text);
+          // A record the launch loader rejects cannot rule out the pane.
+          if (!isValidCurrentWorkerLaunchRecord(record)) return true;
+          return (
+            record.context?.kind === "recovery" &&
+            record.context.recovery_id === recoveryId
+          );
+        },
+        (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
+      ).catch(() => true);
+      if (persistedLaunch) return null;
+      // A split pane that nothing above tracks may still be alive, and
+      // shutdown cannot find it, so the recovery must stay active.
+      const untrackedSplit = await readdir(
+        absPath(
+          input.cwd,
+          TeamPaths.recoveryPaneSplits(input.teamName, recoveryId),
+        ),
+      ).then(
+        (entries) => entries.length > 0,
+        (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
+      );
+      if (untrackedSplit) return null;
+      // An owner from a build without split records left only this evidence
+      // for a split pane it could not prove.
+      const rollbackEvidence = await readdir(
+        absPath(
+          input.cwd,
+          TeamPaths.recoveryPaneRollbackFailures(input.teamName, recoveryId),
+        ),
+      ).then(
+        (entries) => entries.length > 0,
+        (error: NodeJS.ErrnoException) => error.code !== "ENOENT",
+      );
+      if (rollbackEvidence) return null;
+      const progress = readRecoveryOutcome(input.cwd, input.requestId);
+      if (
+        progress?.kind === "final" ||
+        (progress?.recovery_id === recoveryId &&
+          (progress.continuation === "reserved" ||
+            progress.continuation === "adopted"))
+      )
+        return null;
+      // Reservations are written before the phase records them. Tasks that
+      // cannot be read leave the decision to the executor.
+      const tasks = await teamListTasks(input.teamName, input.cwd).catch(
+        () => null,
+      );
+      if (
+        !tasks ||
+        tasks.some(
+          (task) =>
+            task.recovery_reservation?.recovery_id === recoveryId ||
+            task.recovery_adoption?.recovery_id === recoveryId,
+        )
+      )
+        return null;
+      const active = current.config.active_recovery;
+      if (active?.recovery_id === recoveryId) {
+        return active.request_id === input.requestId &&
+          active.worker_name === input.workerName &&
+          active.owner_epoch === fence.epoch &&
+          active.owner_nonce === fence.nonce
+          ? finalizeRecoveryOwnerResult(input, recoveryId, expired)
+          : null;
+      }
+      // Never elected: another recovery holds the slot, so nothing ran.
+      if (!active || current.config.last_recovery?.recovery_id === recoveryId)
+        return null;
+      return persistRecoveryFinal(input, recoveryId, expired);
+    },
+  );
 }
 
 export function selectRecoveryReplayTasks(
@@ -3717,6 +3988,9 @@ async function ensureRecoveryOwner(
   if (!current) current = await migrateTeamConfigRevision(teamName, cwd);
   if (!current) throw new Error("invalid_persisted_state");
   await assertTeamInstanceUnderLock(instance);
+  // An election replaces last_recovery when its recovery ends.
+  if (await publishPendingRecoveryTimeout(teamName, cwd, instance.instance_id))
+    throw new Error("recovery_final_unpublished");
 
   const processStartedAt = currentProcessStartIdentity();
   if (!processStartedAt) throw new Error("process_start_identity_unavailable");
@@ -3962,6 +4236,7 @@ export async function prepareRecoveryOwnerBootstrap(
   if (!bootstrap) throw new Error("runtime_owner_bootstrap_fence_lost");
   if (!isValidTeamInstanceId(input.instanceId))
     throw new Error("team_instance_identity_missing");
+  if (await publishSavedRecoveryTimeout(input, bootstrap.recoveryId)) return;
   const expectedInstanceId = input.instanceId;
   const initial = await readRevisionedTeamConfig(input.teamName, input.cwd);
   if (!initial?.config.instance_id)
@@ -4009,8 +4284,44 @@ export async function prepareRecoveryOwnerBootstrap(
   }
 }
 
-/** Private runtime-owner executor. It never calls the public recovery facade. */
+const recoveryOwnerAttempts = new Map<string, Promise<unknown>>();
+
+/**
+ * Private runtime-owner executor. It never calls the public recovery facade.
+ * Attempts of one recovery in this process run one at a time, so no attempt
+ * judges state another attempt is still writing.
+ */
 export async function executeRecoverDeadWorkerV2Owner(
+  input: RecoverDeadWorkerOwnerInput,
+): Promise<RecoverDeadWorkerV2Result> {
+  const key = JSON.stringify([
+    input.cwd,
+    input.teamName,
+    readRecoveryRequestReservation(input.cwd, input.requestId)?.recovery_id ??
+      input.requestId,
+  ]);
+  const previous = recoveryOwnerAttempts.get(key);
+  const attempt = (previous ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => {
+      // An attempt that waited returns the final the one before it published.
+      const settled = previous
+        ? readRecoveryFinalState(input.cwd, input.requestId)
+        : null;
+      return settled?.kind === "valid"
+        ? settled.final.result
+        : runRecoverDeadWorkerV2OwnerAttempt(input);
+    });
+  recoveryOwnerAttempts.set(key, attempt);
+  try {
+    return await attempt;
+  } finally {
+    if (recoveryOwnerAttempts.get(key) === attempt)
+      recoveryOwnerAttempts.delete(key);
+  }
+}
+
+async function runRecoverDeadWorkerV2OwnerAttempt(
   input: RecoverDeadWorkerOwnerInput,
 ): Promise<RecoverDeadWorkerV2Result> {
   const reservation = readRecoveryRequestReservation(
@@ -4042,6 +4353,8 @@ export async function executeRecoverDeadWorkerV2Owner(
         "recovery_instance_mismatch",
       );
     }
+    const savedTimeout = await publishSavedRecoveryTimeout(input, recoveryId);
+    if (savedTimeout) return savedTimeout;
     const expectedInstanceId = input.instanceId;
     const beforeOwner = await readRevisionedTeamConfig(
       input.teamName,
@@ -4129,6 +4442,13 @@ export async function executeRecoverDeadWorkerV2Owner(
       },
     );
     ownerBound = true;
+    const expired = await finalizeRecoveryPastDeadline(
+      input,
+      recoveryId,
+      owner.fence,
+      instance,
+    );
+    if (expired) return expired;
     if (
       existingAttempt &&
       (existingAttempt.request_id !== input.requestId ||
@@ -4924,6 +5244,15 @@ export async function executeRecoverDeadWorkerV2Owner(
           }))
         )
           return { ok: false, error: "worker_activation_failed" };
+        try {
+          await recordRecoveryPaneSplit(
+            input,
+            sagaInput.recoveryId,
+            paneAttemptId,
+          );
+        } catch {
+          return { ok: false, error: "runtime_owner_unavailable" };
+        }
         const split = await splitTeamWorkerPaneWithEvidence(
           splitTarget,
           splitDirection,
@@ -4981,14 +5310,17 @@ export async function executeRecoverDeadWorkerV2Owner(
               sagaInput.workerName,
             );
           } catch (error) {
-            return {
-              ok: false,
-              error:
-                error instanceof Error &&
-                error.message.startsWith("worker_layout_cleanup_unverified:")
-                  ? "worker_cleanup_incomplete"
-                  : "spawn_failed",
-            };
+            if (
+              error instanceof Error &&
+              error.message.startsWith("worker_layout_cleanup_unverified:")
+            )
+              return { ok: false, error: "worker_cleanup_incomplete" };
+            await clearRecoveryPaneSplit(
+              input,
+              sagaInput.recoveryId,
+              paneAttemptId,
+            );
+            return { ok: false, error: "spawn_failed" };
           }
         }
         let pending: PendingRecoveryPane;
@@ -5144,6 +5476,11 @@ export async function executeRecoverDeadWorkerV2Owner(
         );
         if (!persisted.ok) throw new Error("worker_activation_failed");
         if (!persisted.value) throw new Error("stale_state_revision");
+        await clearRecoveryPaneSplit(
+          input,
+          sagaInput.recoveryId,
+          pending.paneAttemptId,
+        );
         const manifestSync = await resolveCommittedRecoveryManifestSync(
           () => readTeamManifest(input.teamName, input.cwd),
           {
@@ -9532,6 +9869,18 @@ export async function shutdownTeamV2(
     async () => {
       await assertTeamInstanceUnderLock(shutdownInstance);
       await commitStoppedFenceUnderLock();
+      // Disposal deletes last_recovery.
+      const unpublished = await publishPendingRecoveryTimeout(
+        sanitized,
+        cwd,
+        shutdownInstance.instance_id,
+      );
+      if (unpublished)
+        return {
+          outcome: "failed",
+          reason: "state_cleanup_failed",
+          detail: `recovery_final_unpublished:${unpublished}`,
+        };
       let worktreeCleanupFailure: string | null = null;
       let preservedWorktrees = 0;
       try {

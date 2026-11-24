@@ -41,11 +41,19 @@ function runTeamApi(command) {
 }
 
 const stdin = createInterface({ input: process.stdin });
+// Real claude has been seen to outlive its killed launch wrapper as an
+// orphan. This knob keeps the fake alive the same way.
+const OUTLIVE_TERMINAL = process.env.OMC_FAKE_OUTLIVE_TERMINAL === '1';
+if (OUTLIVE_TERMINAL) {
+  process.on('SIGHUP', () => trace('sighup-ignored'));
+  process.stdout.on('error', () => undefined);
+}
 // The bootstrap starts providers in their own session, so a closed pane
 // delivers EOF rather than SIGHUP. Exit like a CLI that lost its terminal.
 stdin.on('close', () => {
   trace('stdin-closed');
-  process.exit(129);
+  if (OUTLIVE_TERMINAL) void sleep(2_147_483_647);
+  else process.exit(129);
 });
 const stdinLines = stdin[Symbol.asyncIterator]();
 
@@ -72,7 +80,10 @@ function pause(name, ms) {
 
 async function nextLine(eofError) {
   const { value, done } = await stdinLines.next();
-  if (done) throw new Error(eofError);
+  if (done) {
+    if (OUTLIVE_TERMINAL) return new Promise(() => undefined);
+    throw new Error(eofError);
+  }
   return value;
 }
 
