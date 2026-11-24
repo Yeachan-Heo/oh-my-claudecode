@@ -170,6 +170,34 @@ describe('the check for a secret on a turn of the own threshold (cascade, trimmi
     expect(run.ms).toBeLessThan(8000);
   });
 
+  it('checks kept by a preflight whose request never ran are not used under other private paths: every report is scanned again', async () => {
+    const rows = reportsOnly();
+    watch(rows, isKey);
+    const first = hostOf({ OMC_JEV_COMPACT_AT_PERCENT: '60', ...STAGES }, rows);
+    const handlers = {};
+    register((ev, hook) => { handlers[ev] = hook; });
+    // The host does not run the compaction the preflight asks for, so its checks stay behind.
+    first.$.session.compact = async () => ({});
+    await atClock(0, () => handlers['turn.complete'](first.$, { isAborted: false }, async () => 'ok'));
+    expect(scan.calls).toHaveLength(4);
+    const other = hostOf({ ...STAGES, OMC_JEV_COMPACT_PRIVATE_PATHS: '/secret/area' }, rows);
+    await atClock(0, () => handlers['session.compact'](other.$, Object.freeze({ trigger: 'auto', messages: rows }), async () => ({ messages: [] })));
+    // (atClock counts from zero: the four of this compaction alone.)
+    expect(scan.calls).toHaveLength(4);
+  });
+
+  it('the compaction the preflight asked for, run under other private paths than the preflight used, scans every report again', async () => {
+    const rows = reportsOnly();
+    watch(rows, isKey);
+    const first = hostOf({ OMC_JEV_COMPACT_AT_PERCENT: '60', ...STAGES }, rows);
+    const other = hostOf({ ...STAGES, OMC_JEV_COMPACT_PRIVATE_PATHS: '/secret/area' }, rows);
+    const handlers = {};
+    register((ev, hook) => { handlers[ev] = hook; });
+    first.$.session.compact = async () => handlers['session.compact'](other.$, Object.freeze({ trigger: 'plugin', messages: rows }), async () => ({ messages: [] }));
+    await atClock(0, () => handlers['turn.complete'](first.$, { isAborted: false }, async () => 'ok'));
+    expect(scan.calls).toHaveLength(8);
+  });
+
   it('a row that changed between the preflight and the compaction is scanned again, the rows that did not are not', async () => {
     const rows = reportsOnly();
     const first = rows.findIndex(isKey);
