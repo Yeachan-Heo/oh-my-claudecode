@@ -123,10 +123,10 @@ function providerDetectionModelIds() {
     .map((keys) => keys.map((key) => (process.env[key] || '').trim()).find(Boolean))
     .filter(Boolean);
 }
-function acceptsProxyAnthropicDefaultTierValue(key, value) {
+function acceptsProxyAnthropicDefaultTierValue(key, value, forNamedGate = false) {
   return key.startsWith('ANTHROPIC_DEFAULT_')
     && Boolean(value)
-    && isNonClaudeProviderEnv()
+    && isNonClaudeProviderEnv(forNamedGate)
     && !isBedrockProviderEnv()
     && !isVertexProviderEnv();
 }
@@ -165,8 +165,9 @@ const BUILTIN_TIER_MODEL_DEFAULTS = {
   fable:  'claude-fable-5',
 };
 // nativeOnly skips OMC_SUBAGENT_MODEL: Claude Code does not read it, so it is no proof that
-// the provider serves the alias on a call.
-function resolveTierAliasToSafeModel(tierAlias, nativeOnly = false) {
+// the provider serves the alias on a call. forNamedGate judges a plain ANTHROPIC_DEFAULT_* value
+// with the provider detection of the named-model gate, so the gate and its mapping agree.
+function resolveTierAliasToSafeModel(tierAlias, nativeOnly = false, forNamedGate = false) {
   const keys = TIER_TO_DEFAULT_ENV_KEYS[(tierAlias || '').toLowerCase()];
   if (!keys) return '';
   for (const key of keys) {
@@ -179,7 +180,7 @@ function resolveTierAliasToSafeModel(tierAlias, nativeOnly = false) {
     const isAnthropicDefaultTierVar = key.startsWith('ANTHROPIC_DEFAULT_');
     const isNativeCcVar = isAnthropicDefaultTierVar || key.startsWith('CLAUDE_CODE_BEDROCK_');
     const validator = isNativeCcVar ? isProviderSpecificModelId : isSubagentSafeModelId;
-    if (value && (validator(value) || acceptsProxyAnthropicDefaultTierValue(key, value))) return value;
+    if (value && (validator(value) || acceptsProxyAnthropicDefaultTierValue(key, value, forNamedGate))) return value;
   }
   return '';
 }
@@ -1218,8 +1219,9 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   const jevOptedIn = isJevShadowOptedIn('model-routing', process.env, permissionMode);
   if (!jevOptedIn && !marker) return;
 
-  // Jev judges the task without the marker line.
-  const originalInput = boundModelRoutingInput(markerApplies ? { ...toolInput, prompt: marker.prompt } : toolInput);
+  // Jev judges the task without the marker line, also when the marker's model was refused and
+  // still pins the call (the prompt of the call itself keeps the line then).
+  const originalInput = boundModelRoutingInput(markerApplies || markerHadModel ? { ...toolInput, prompt: marker.prompt } : toolInput);
   const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
   // A model from the marker counts as the call's model: Jev is asked the open questions
   // about a call whose model is known, whether the call or the marker named it.
@@ -1307,7 +1309,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // Claude or forceInherit is on and does not resolve the alias, and where a marker model that
     // forceInherit refused still pins the call.
     const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice, true);
-    const keepsNamedModel = named && (markerHadModel || ((isNonClaudeProviderEnv(true) || isForceInheritEnabled()) && !resolveTierAliasToSafeModel(jevChoice, true)));
+    const keepsNamedModel = named && (markerHadModel || ((isNonClaudeProviderEnv(true) || isForceInheritEnabled()) && !resolveTierAliasToSafeModel(jevChoice, true, true)));
     const allowedJevChoices = ['haiku', 'sonnet', 'opus'];
     if (isModelRoutingFableOptinEnabled()) {
       allowedJevChoices.push('fable');

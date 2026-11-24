@@ -444,6 +444,16 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       expect(requests).toHaveLength(2);
     }, 30000);
 
+    it("a marker model that forceInherit refuses is not shown to Jev as part of the task, and stays in the prompt of the call", async () => {
+      writeAgent(projectAgents(), "proxy-agent", "model: deepseek-chat\n");
+      const input = agentInput({ subagent_type: "proxy-agent" }, `use fable\n${TASK}`);
+      const bedrock = { OMC_JEV_MODEL_ROUTING_MARKER: "1", OMC_ROUTING_FORCE_INHERIT: "true", CLAUDE_CODE_USE_BEDROCK: "1" };
+      const routed = await routedInput(input, { ...NAMED, ...bedrock });
+      expect(requests).toHaveLength(1);
+      expect(requests[0].state.task).toBe(TASK);
+      expect(routed.prompt).toBe(`use fable\n${TASK}`);
+    }, 15000);
+
     it("`use <effort>` on a call that names a model leaves the model question to Jev", async () => {
       const routed = await routedInput(agentInput({ model: "fable" }, `use high\n${TASK}`), MARKER);
       expect(requests).toHaveLength(1);
@@ -700,6 +710,24 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       expect(await aliasReplaces({ ANTHROPIC_MODEL: "opus[1m]", CLAUDE_CODE_BEDROCK_OPUS_MODEL: "global.anthropic.claude-opus-4-6-v1:0" })).toBe(true);
       expect(await aliasReplaces({ ANTHROPIC_MODEL: "deepseek-chat", ANTHROPIC_DEFAULT_OPUS_MODEL: "opus" })).toBe(false);
     }, 30000);
+
+    // The mapping of the tier Jev picked (sonnet) is judged with the same provider context as the
+    // gate: a tier default alone that makes the provider non-Claude is also a valid mapping.
+    it.each([
+      ["a plain name in ANTHROPIC_DEFAULT_SONNET_MODEL alone", { ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
+      ["a suffixed plain name in ANTHROPIC_DEFAULT_SONNET_MODEL alone", { ANTHROPIC_DEFAULT_SONNET_MODEL: " other-proxy-model[1m] " }, true],
+      ["a plain name in CLAUDE_CODE_BEDROCK_SONNET_MODEL alone (not a provider ID)", { CLAUDE_CODE_BEDROCK_SONNET_MODEL: "other-proxy-model" }, false],
+      ["a plain name in the default of another tier only", { ANTHROPIC_DEFAULT_OPUS_MODEL: "other-proxy-model" }, false],
+      ["a blank sonnet default and a plain name for opus", { ANTHROPIC_DEFAULT_SONNET_MODEL: " ", ANTHROPIC_DEFAULT_OPUS_MODEL: "other-proxy-model" }, false],
+      ["a Claude name in ANTHROPIC_DEFAULT_SONNET_MODEL alone (Claude provider)", { ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-4-5" }, true],
+      ["a plain sonnet default next to a session alias (Claude provider)", { ANTHROPIC_MODEL: "sonnet", ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
+      ["a plain sonnet default next to a non-Claude session model", { ANTHROPIC_MODEL: "deepseek-chat", ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
+      ["OMC_SUBAGENT_MODEL next to a plain sonnet default", { OMC_SUBAGENT_MODEL: "global.anthropic.claude-sonnet-4-6", ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
+    ])("mapping judged in the gate's context: %s", async (_label, env, replaced) => {
+      const input = agentInput({ model: "fable" });
+      const routed = await routedInput(input, { ...NAMED, ...env });
+      expect(routed).toEqual(replaced ? { ...input.tool_input, model: "sonnet", effort: "medium" } : { ...input.tool_input, effort: "medium" });
+    }, 15000);
 
     it("a session model that is not a Claude name still keeps the named model", async () => {
       const input = agentInput({ model: "fable" });
