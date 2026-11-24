@@ -223,12 +223,15 @@ def run_once():
                 if pa and pb and same_file(pa, pb):
                     fail(f'the {la} ({pa}) and the {lb} ({pb}) are the same file: the hook or the guard would overwrite one as the other')
         try:
-            probe = subprocess.run([A.python, '-I', '-c', 'import json, math, os, sys, time, urllib.parse; compile(open(sys.argv[1]).read(), sys.argv[1], "exec")', A.hook],
+            # the answer is computed from a random number that only a Python that runs the code can know: a wrapper that ignores its
+            # arguments and exits 0 is not an interpreter
+            nonce = int.from_bytes(os.urandom(4), 'big')
+            probe = subprocess.run([A.python, '-I', '-c', 'import json, math, os, sys, time, urllib.parse; compile(open(sys.argv[1]).read(), sys.argv[1], "exec"); print(int(sys.argv[2]) * 3 + 1)', A.hook, str(nonce)],
                                    capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired) as e:
             fail(f'the interpreter {A.python!r} cannot run the hook: {e!r}')
-        if probe.returncode != 0:
-            fail(f'the interpreter {A.python!r} cannot run the hook (it must be Python 3 with the standard library): {probe.stderr.strip()[-300:]}')
+        if probe.returncode != 0 or probe.stdout.strip() != str(nonce * 3 + 1):
+            fail(f'the interpreter {A.python!r} cannot run the hook (it must be Python 3 with the standard library): {probe.stderr.strip()[-300:] or "it did not run the check"}')
         if MARK not in os.path.basename(A.hook):
             fail(f'the file name of the hook {A.hook!r} does not contain {MARK}: the entry is recognised by that name, so `check` and `remove` would not find it (copy the hook to another directory, keep its name)')
         entry = {'matcher': '*', 'hooks': [{'type': 'command', 'command': command(), 'timeout': A.timeout}]}

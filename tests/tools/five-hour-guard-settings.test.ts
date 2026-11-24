@@ -364,6 +364,12 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     const broken = join(f.dir, 'python-broken');
     writeFileSync(broken, '#!/bin/sh\necho "boom: this is not python" >&2\nexit 1\n', { mode: 0o755 });
     chmodSync(broken, 0o755);
+    const ignores = join(f.dir, 'python-ignores-args');
+    writeFileSync(ignores, '#!/bin/sh\nexit 0\n', { mode: 0o755 });  // executable and successful, but it never runs Python
+    chmodSync(ignores, 0o755);
+    const r0 = tool(f, 'add', ['--python', ignores]);
+    expect(r0.status, `${r0.stdout}${r0.stderr}`).toBe(2);
+    expect(r0.stderr).toMatch(/interpreter .* cannot run the hook/);
     const r1 = tool(f, 'add', ['--python', noExec]);
     expect(r1.status, `${r1.stdout}${r1.stderr}`).toBe(2);
     expect(r1.stderr).toMatch(/interpreter .* is not executable/);

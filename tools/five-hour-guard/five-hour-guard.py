@@ -166,15 +166,17 @@ def same_file(a, b):
         return False
 
 
+PROGRAM_FILES = {'guard script', 'hook script', 'settings tool script', 'registered hook', 'registered interpreter'}
+
+
 def check_distinct(files):
     """Two configured files that are one file would be read as each other's content: a pause file that is settings.json
     would be removed as a leftover pause at start. Refuse before anything is touched."""
     named = [(label, path) for label, path in files if path]
     for i, (la, pa) in enumerate(named):
         for lb, pb in named[i + 1:]:
-            if la.endswith(' script') and lb.endswith(' script') or la.startswith('registered ') and (lb.endswith(' script') or lb.startswith('registered ')) \
-                    or lb.startswith('registered ') and la.endswith(' script'):
-                continue   # the installed scripts and the files the entry names are the program itself, they may coincide
+            if (la in PROGRAM_FILES and lb in PROGRAM_FILES) or {la, lb} == {'hook_log_file', 'registered hook log'}:
+                continue   # the installed scripts and the files of the entry are the program itself; the hook log of the configuration is the log of the entry
             if same_file(pa, pb):
                 fail(f'"{la}" ({pa}) and "{lb}" ({pb}) are the same file: the guard would remove or overwrite one as the other')
 
@@ -197,6 +199,7 @@ def registered_runtime_files():
                 tokens = shlex.split(command)
                 found += [('registered hook', t) for t in tokens if HOOK_NAME in os.path.basename(t) and os.path.isabs(t)]
                 found += [('registered interpreter', tokens[i + 1]) for i, t in enumerate(tokens[:-1]) if t == '-x' and os.path.isabs(tokens[i + 1])]
+                found += [('registered hook log', tokens[i + 1]) for i, t in enumerate(tokens[:-1]) if t == '--log' and os.path.isabs(tokens[i + 1])]
     except Exception:
         pass
     return found
@@ -421,10 +424,13 @@ def enter_pause(state, pct, reset_ts):
 def leave_pause(state, why):
     if not unpublish():
         raise OSError(f'the pause file {PAUSE_FILE} could not be removed: the pause stays in the state and is left again at the next tick')
-    log(f'RESUMED ({why}): pause file removed, waiting tool calls continue')
-    # persist first: when the write fails the state keeps the pause (in memory too), so the next tick tries again and a restart
-    # cannot bring back a pause that was already left
-    write_json(STATE, {**state, 'paused': False, 'since': None, 'resume_at': None})
+    if not state.get('leave_pending'):
+        log(f'RESUMED ({why}): pause file removed, waiting tool calls continue')
+    # persist first: when the write fails the state keeps the pause (in memory too) and remembers that the pause was already
+    # left, so the next tick finishes it whatever the cache shows by then; a pause is never published again after it was left
+    state['leave_pending'] = why
+    write_json(STATE, {**{k: v for k, v in state.items() if k != 'leave_pending'}, 'paused': False, 'since': None, 'resume_at': None})
+    state.pop('leave_pending', None)
     state.update(paused=False, since=None, resume_at=None)
 
 
@@ -449,6 +455,9 @@ def tick(state):
             log(f'[dry run] 5h {pct} %, cache age {age:.0f} s: no action')
         return
     # paused: the hook, its interpreter or the settings entry can be removed while a pause lasts for hours
+    if state.get('leave_pending'):
+        leave_pause(state, state['leave_pending'])   # the pause file is gone, only the state write is left to do
+        return
     if LAST_WIRING_CHECK[0] is None or time.monotonic() - LAST_WIRING_CHECK[0] >= A.warn_every:
         hook_check('pause')
     if fresh and pct < RESUME_BELOW:
@@ -501,8 +510,8 @@ def is_guard_pause(path):
 
 def drop_leftover_pause():
     """A pause file with no state behind it is a leftover of a dead guard: remove it (main has checked that it is a pause file
-    of this guard and that no live process owns it)."""
-    unpublish()
+    of this guard and that no live process owns it). False when it could not be removed."""
+    return unpublish()
 
 
 LOCK_FDS = []
@@ -596,7 +605,9 @@ def main():
     else:
         log(f'guard start (threshold {A.threshold} %, margin {A.margin:.0f} s, exclude {EXCLUDE})')
         hook_check('start')
-        drop_leftover_pause()  # a leftover pause file without state must not hold anything
+        if not drop_leftover_pause():   # a leftover pause file without state must not hold anything
+            log(f'ERROR: cannot remove the leftover pause file {PAUSE_FILE}: stopping, the service manager starts the guard again')
+            return 1
     try:
         while not STOP:
             ok = safe_tick(state)

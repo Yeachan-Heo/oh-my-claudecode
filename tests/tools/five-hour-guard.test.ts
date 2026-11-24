@@ -776,6 +776,43 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(g); }
   });
 
+  it('an early resume whose state write fails stays pending even when the cache turns stale: the pause is not published again', async () => {
+    const f = fixture('early-resume-retry', { cache: { pct: 97, resetMs: Date.now() + HOUR_MS } });
+    const flag = join(f.dir, 'break-state');
+    const code = ['import os, runpy, sys', 'real = os.replace', 'flag = sys.argv[1]',
+      'def maybe_fail(src, dst, *a, **k):', '    if str(dst).endswith("state.json") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
+      'os.replace = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const g = spawnPyCode(code, [flag, GUARD, ...guardArgs(f, ['--max-age', '3'])]);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'pause file');
+      writeFileSync(flag, '');                                              // the state file cannot be written from now on
+      writeCache(f, { pct: 50, resetMs: Date.now() + HOUR_MS, ageMs: 2000 }); // a reading that shows the early resume, stale about a second later
+      await waitFor(() => !existsSync(f.pause), 20000, 'the early resume removes the pause file');
+      await sleep(2500);                                                    // the reading is stale by now
+      expect(existsSync(f.pause), 'the pause is not brought back by a stale cache').toBe(false);
+      expect(readJson(f.state).paused, 'the disk still says paused while the write fails').toBe(true);
+      unlinkSync(flag);
+      await waitFor(() => readJson(f.state).paused === false, 20000, 'the state is persisted once the write works');
+      await sleep(600);
+      expect(existsSync(f.pause), 'and the pause stays gone').toBe(false);
+    } finally { await stopGuard(g); }
+  });
+
+  it('a leftover pause file that cannot be removed at start stops the start (status 1: the unit tries again) instead of running with sessions held', () => {
+    const f = fixture('leftover-unlink-fails', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writePause(f, { pid: deadPid() });
+    const code = ['import os, runpy, sys', 'real = os.unlink',
+      'def deny(p, *a, **k):', '    if str(p).endswith("pause.json"): raise PermissionError(13, "denied")', '    return real(p, *a, **k)',
+      'os.unlink = deny', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(1);
+    expect(r.stdout).toMatch(/ERROR: cannot remove the leftover pause file/);
+    expect(existsSync(f.pause)).toBe(true);
+    const again = guardOnce(f);
+    expect(again.stdout).toMatch(/guard start/);
+    expect(existsSync(f.pause), 'removed once it can be').toBe(false);
+  });
+
   it('registered runtime files are protected after the fact: a hook or interpreter named by the settings entry cannot be the state file or log', () => {
     const f = fixture('alias-registered', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
     const dir = join(f.dir, 'custom');
@@ -785,9 +822,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     copyFileSync(HOOK, hook);
     writeFileSync(py, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const hookText = readFileSync(hook, 'utf8');
-    const command = `[ -f ${f.pause} ] && [ -f ${hook} ] && [ -x ${py} ] || exit 0; exec ${py} -I ${hook} --pause-file ${f.pause}`;
+    const oldLog = join(dir, 'old-hook.log');
+    const command = `[ -f ${f.pause} ] && [ -f ${hook} ] && [ -x ${py} ] || exit 0; exec ${py} -I ${hook} --pause-file ${f.pause} --log ${oldLog}`;
     writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } }), 'utf8');
-    for (const [key, target] of [['state_file', hook], ['log_file', hook], ['state_file', py], ['log_file', py]] as const) {
+    for (const [key, target] of [['state_file', hook], ['log_file', hook], ['state_file', py], ['log_file', py], ['state_file', oldLog], ['log_file', oldLog]] as const) {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: target }), 'utf8');
       const r = runSync(GUARD, ['--config', f.cfg, '--once']);
       expect(r.status, `${key} -> ${target}: ${r.stdout}${r.stderr}`).toBe(2);
@@ -795,6 +833,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(readFileSync(hook, 'utf8'), 'the registered hook is intact').toBe(hookText);
       expect(readFileSync(py, 'utf8'), 'the registered interpreter is intact').toBe('#!/bin/sh\nexit 0\n');
     }
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, hook_log_file: oldLog }), 'utf8');
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'the hook log of the configuration may be the log of the entry').toBe(0);
   });
 
   it('the lock file of the usage cache (OMC serialises refreshes on <cache>.lock) is a configured file: a pause file that is it is refused', () => {
