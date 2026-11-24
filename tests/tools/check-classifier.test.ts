@@ -1040,6 +1040,61 @@ it('a tail that names a file or reads a redirected one can fail, so its failure 
   assert.equal(status('set -o pipefail; node --check a.js | tail -5'), 'failed');
 });
 
+it('a runner word is complete: an option or a program that only starts like it is no check', () => {
+  const isCheck = (command: string) => classifyCommand(command).isCheck;
+  // `node --test-reporter` and the like only start with `--test`: node evaluates the script and exits 0.
+  for (const command of [
+    'node --test-reporter=tap -e "x"', 'node --test-timeout=5 -e x', 'node --test-name-pattern x a.js', 'node --test-only a.js', 'node --check-syntax a.js',
+    'node --check-x a.js', 'pytest-watch', 'tsc-watch', 'vitest-x run', 'jest-cli', 'eslint-x src', 'cargo test-foo', 'cargo check-x', 'go test-x ./...',
+    'ruff check-x .', 'ruff format --check-x .', 'black --check-x .', 'prettier --check-x .', 'mocha-x', 'ava-x', 'tox-x', 'nox-x', 'ctest-x',
+    'dotnet test-x', 'mix test-x', 'swift test-x', 'xcodebuild test-x', 'vite build-x', 'next build-x', 'biome check-x', 'deno test-x', 'rspec-x', 'phpunit-x',
+    'flake8-x', 'pylint-x', 'mypy-x', 'pyright-x', 'tsc-x', 'unittest-x', 'webpack-x', 'esbuild-x', 'shellcheck-x', 'golangci-lint-x',
+  ]) {
+    assert.equal(isCheck(command), false, command);
+    assert.equal(checkResult(command, '', 0).verdict, 'undetermined', `${command}: a zero status proves nothing`);
+  }
+  // The whole words, and a script name or a make target that starts with the word, are checks as before.
+  for (const command of ['node --test', 'node --test a.js', 'node --check a.js', 'pytest', 'cargo test', 'cargo check', 'go test ./...', 'ruff format --check .',
+    'black --check .', 'prettier --check .', 'npm run test-all', 'npm test:unit', 'make test-all', 'pytest -q', 'tsc --noEmit']) {
+    assert.equal(isCheck(command), true, command);
+  }
+});
+
+it('a line break behind `&&`, `||` or `|` continues the expression and keeps the operator', () => {
+  const read = (command: string) => classifyCommand(command);
+  // Bash runs `true ||` + newline + `node --test` as one list: node does not run and the status is 0.
+  for (const command of ['true ||\nnode --test', 'true ||\n\nnode --test', 'true || \nnode --test', 'true ||\r\nnode --test', 'false || true ||\nnode --test']) {
+    assert.equal(read(command).exitHidden, true, JSON.stringify(command));
+    assert.equal(checkResult(command, '', 0).verdict, 'undetermined', JSON.stringify(command));
+  }
+  // `&&` and `|` keep their meaning across the line break.
+  assert.equal(read('false &&\nnpm test').chained, true);
+  assert.equal(checkResult('false &&\nnpm test', '', 1).verdict, 'undetermined');
+  assert.equal(read('npm test |\ntail -5').exitHidden, true);
+  assert.equal(read('true |\nnpm test').exitHidden, false);
+  assert.equal(read('npm test &&\n\n echo done').chained, false, 'what follows a passing check does not share its status for the check itself');
+  // A line break behind `;` or a plain command still ends the command.
+  assert.equal(read('true;\nnpm test').exitHidden, false);
+  assert.equal(read('true\nnpm test').exitHidden, false);
+  assert.equal(read('npm test\ntrue').exitHidden, true);
+  assert.equal(checkResult('true\nnpm test', '', 0).verdict, 'passed');
+});
+
+it('a `!` at the start of a pipeline inverts the whole pipeline: no stage of it is a check', () => {
+  const isCheck = (command: string) => classifyCommand(command).isCheck;
+  for (const command of [
+    '! printf x | node --check a.js', '! true | node --check a.js', '! echo | npm test', '! echo x | node --check a.js | tail', 'true; ! false | node --check a.js',
+    'true && ! false | pytest', 'false || ! cat x | vitest run', '! time cat x | npm test', 'time ! cat x | npm test', '! node --check a.js', 'true && ! npm test',
+  ]) {
+    assert.equal(isCheck(command), false, command);
+    assert.equal(checkResult(command, '', 0).verdict, 'undetermined', `${command}: the status is inverted`);
+  }
+  // A `!` that is not at the start of the pipeline is an argument or belongs to another pipeline.
+  for (const command of ['echo ! | npm test', 'printf "!" | node --check a.js', 'true ! | npm test', 'false; echo x | npm test', 'echo a && echo ! b | npm test']) {
+    assert.equal(isCheck(command), true, command);
+  }
+});
+
 it('make: a dry run, a question and a touch run no recipe, and an option that ignores recipe errors weakens the check', () => {
   // GNU Make 4.4.1 against a recipe of `false`: -n, -t and -p exit 0 without running it, -q exits 0 or 1 without running it.
   for (const command of [
@@ -1929,6 +1984,29 @@ it('make options, the interruption banners of pytest and the exit words are read
   ], 'classifyCheckResult', `classifyCheckResult({ command, output: ${JSON.stringify(`${banner}\n${long('x ')}\n===== 1 passed in 0.1s =====`)}, isError: false, exitCode: 0 })`);
   assert.equal(verdicts.length, 3);
   for (const { verdict } of verdicts) assert.equal(verdict, 'passed', 'a long line that is no whole banner holds nothing back');
+});
+
+it('continued lines, long pipelines with a negation and runner words are read in linear time', () => {
+  const long = (piece: string) => piece.repeat(Math.ceil(40000 / piece.length));
+  const got = classifyInChild<{ isCheck: boolean; exitHidden: boolean }>([
+    `${long('true ||\n')}npm test`,
+    `true ||${'\n'.repeat(40000)}npm test`,
+    `true &&${long('\n \n')}npm test`,
+    `! ${long('npm test | ')}cat`,
+    `${long('npm test | ')}cat`,
+    long('node --test-reporter=a '),
+    `node --test${'-'.repeat(40000)}`,
+    `pytest${'-x'.repeat(20000)}`,
+  ]);
+  assert.equal(got.length, 8);
+  assert.equal(got[0].exitHidden, true);
+  assert.equal(got[1].exitHidden, true);
+  assert.equal(got[2].exitHidden, false);
+  assert.equal(got[3].isCheck, false);
+  assert.equal(got[4].isCheck, true);
+  assert.equal(got[5].isCheck, false);
+  assert.equal(got[6].isCheck, false);
+  assert.equal(got[7].isCheck, false);
 });
 
 it('a redirection with a digit descriptor is no argument, glued to the word or not', () => {

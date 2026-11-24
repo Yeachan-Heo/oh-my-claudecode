@@ -189,7 +189,10 @@ function shellPieces(command) {
     else if (ch === '&' && previous !== '<' && previous !== '>' && next !== '>') length = 1;
     else if (ch === '|' && previous !== '>') length = 1;
     if (length > 0) {
-      list.push({ text: command.slice(start, i).trim(), sep: command.slice(i, i + length) });
+      // A line break behind `&&`, `||` or `|` continues the expression (`true ||` and a line break and `npm test` is one list), so it
+      // splits nothing and the operator stays the separator of its piece.
+      const continued = ch === '\n' && ['&&', '||', '|'].includes(list.at(-1)?.sep ?? '') && command.slice(start, i).trim() === '';
+      if (!continued) list.push({ text: command.slice(start, i).trim(), sep: command.slice(i, i + length) });
       start = i + length;
     }
     previous = command[i + Math.max(length, 1) - 1];
@@ -517,57 +520,60 @@ const PM = String.raw`(?:npm|pnpm|yarn|bun)`;
  * on purpose: their lifecycle goals can also publish, so the exit code proves less there.
  */
 const RUNNER_RULES = [
+  // A word ends at a character that is neither a letter, a digit, `_` nor `-` (`(?![\w-])`): `\b` also matches before a hyphen, which
+  // reads `node --test-reporter` as `node --test` and `pytest-watch` as `pytest`. The package managers read the script name as
+  // `test\b\S*` and make reads a target that starts with the word (`make test-all`).
   { kind: 'test', runner: 'npm', re: new RegExp(`^${PM}${PM_FLAGS}(?:run\\s+)?test\\b\\S*`) },
   { kind: 'typecheck', runner: 'npm', re: new RegExp(`^${PM}${PM_FLAGS}(?:run\\s+)?typecheck\\b\\S*`) },
   { kind: 'lint', runner: 'npm', re: new RegExp(`^${PM}${PM_FLAGS}(?:run\\s+)?lint\\b\\S*`) },
   { kind: 'build', runner: 'npm', re: new RegExp(`^${PM}${PM_FLAGS}(?:run\\s+)?build\\b\\S*`) },
-  { kind: 'test', runner: 'vitest', re: /^vitest\b/ },
-  { kind: 'test', runner: 'jest', re: /^jest\b/ },
-  { kind: 'test', runner: 'mocha', re: /^mocha\b/ },
-  { kind: 'test', runner: 'ava', re: /^ava\b/ },
-  { kind: 'test', runner: 'pytest', re: /^pytest\b/ },
-  { kind: 'test', runner: 'node-test', re: /^node\s+--test\b/ },
-  { kind: 'typecheck', runner: 'node-check', re: /^node\s+--check\b/ },
-  { kind: 'test', runner: 'unittest', re: /^unittest\b/ },
-  { kind: 'typecheck', runner: 'py-compile', re: /^py_compile\b/ },
-  { kind: 'test', runner: 'cargo', re: /^cargo\s+(?:test|nextest)\b/ },
-  { kind: 'build', runner: 'cargo', re: /^cargo\s+(?:build|check)\b/ },
-  { kind: 'lint', runner: 'cargo', re: /^cargo\s+clippy\b/ },
-  { kind: 'test', runner: 'go', re: /^go\s+test\b/ },
-  { kind: 'build', runner: 'go', re: /^go\s+(?:build|vet)\b/ },
-  { kind: 'test', runner: 'dotnet', re: /^dotnet\s+test\b/ },
-  { kind: 'build', runner: 'dotnet', re: /^dotnet\s+build\b/ },
+  { kind: 'test', runner: 'vitest', re: /^vitest(?![\w-])/ },
+  { kind: 'test', runner: 'jest', re: /^jest(?![\w-])/ },
+  { kind: 'test', runner: 'mocha', re: /^mocha(?![\w-])/ },
+  { kind: 'test', runner: 'ava', re: /^ava(?![\w-])/ },
+  { kind: 'test', runner: 'pytest', re: /^pytest(?![\w-])/ },
+  { kind: 'test', runner: 'node-test', re: /^node\s+--test(?![\w-])/ },
+  { kind: 'typecheck', runner: 'node-check', re: /^node\s+--check(?![\w-])/ },
+  { kind: 'test', runner: 'unittest', re: /^unittest(?![\w-])/ },
+  { kind: 'typecheck', runner: 'py-compile', re: /^py_compile(?![\w-])/ },
+  { kind: 'test', runner: 'cargo', re: /^cargo\s+(?:test|nextest)(?![\w-])/ },
+  { kind: 'build', runner: 'cargo', re: /^cargo\s+(?:build|check)(?![\w-])/ },
+  { kind: 'lint', runner: 'cargo', re: /^cargo\s+clippy(?![\w-])/ },
+  { kind: 'test', runner: 'go', re: /^go\s+test(?![\w-])/ },
+  { kind: 'build', runner: 'go', re: /^go\s+(?:build|vet)(?![\w-])/ },
+  { kind: 'test', runner: 'dotnet', re: /^dotnet\s+test(?![\w-])/ },
+  { kind: 'build', runner: 'dotnet', re: /^dotnet\s+build(?![\w-])/ },
   { kind: 'test', runner: 'make', re: /^make\s+(?:test|check)\b/ },
   { kind: 'lint', runner: 'make', re: /^make\s+lint\b/ },
   { kind: 'build', runner: 'make', re: /^make\s+build\b/ },
-  { kind: 'test', runner: 'rspec', re: /^rspec\b/ },
-  { kind: 'test', runner: 'mix', re: /^mix\s+test\b/ },
-  { kind: 'test', runner: 'phpunit', re: /^phpunit\b/ },
-  { kind: 'test', runner: 'deno', re: /^deno\s+(?:test)\b/ },
-  { kind: 'lint', runner: 'deno', re: /^deno\s+(?:check|lint)\b/ },
-  { kind: 'typecheck', runner: 'tsc', re: /^tsc\b/ },
-  { kind: 'typecheck', runner: 'mypy', re: /^mypy\b/ },
-  { kind: 'typecheck', runner: 'pyright', re: /^pyright\b/ },
-  { kind: 'lint', runner: 'eslint', re: /^eslint\b/ },
-  { kind: 'lint', runner: 'biome', re: /^biome\s+check\b/ },
-  { kind: 'lint', runner: 'ruff', re: /^ruff\s+check\b/ },
-  { kind: 'lint', runner: 'ruff', table: 'ruff-format', re: /^ruff\s+format\s+--check\b/ },
-  { kind: 'lint', runner: 'flake8', re: /^flake8\b/ },
-  { kind: 'lint', runner: 'pylint', re: /^pylint\b/ },
-  { kind: 'lint', runner: 'black', re: /^black\s+--check\b/ },
-  { kind: 'lint', runner: 'prettier', re: /^prettier\s+--check\b/ },
-  { kind: 'lint', runner: 'shellcheck', re: /^shellcheck\b/ },
-  { kind: 'lint', runner: 'golangci-lint', re: /^golangci-lint\b/ },
-  { kind: 'test', runner: 'tox', re: /^tox\b/ },
-  { kind: 'test', runner: 'nox', re: /^nox\b/ },
-  { kind: 'test', runner: 'ctest', re: /^ctest\b/ },
-  { kind: 'test', runner: 'xcodebuild', re: /^xcodebuild\s+test\b/ },
-  { kind: 'test', runner: 'swift', re: /^swift\s+test\b/ },
-  { kind: 'build', runner: 'vite', re: /^vite\s+build\b/ },
-  { kind: 'build', runner: 'next', re: /^next\s+build\b/ },
-  { kind: 'build', runner: 'esbuild', re: /^esbuild\b/ },
-  { kind: 'build', runner: 'webpack', re: /^webpack\b/ },
-  { kind: 'test', runner: 'bun', re: /^bun\s+test\b/ },
+  { kind: 'test', runner: 'rspec', re: /^rspec(?![\w-])/ },
+  { kind: 'test', runner: 'mix', re: /^mix\s+test(?![\w-])/ },
+  { kind: 'test', runner: 'phpunit', re: /^phpunit(?![\w-])/ },
+  { kind: 'test', runner: 'deno', re: /^deno\s+(?:test)(?![\w-])/ },
+  { kind: 'lint', runner: 'deno', re: /^deno\s+(?:check|lint)(?![\w-])/ },
+  { kind: 'typecheck', runner: 'tsc', re: /^tsc(?![\w-])/ },
+  { kind: 'typecheck', runner: 'mypy', re: /^mypy(?![\w-])/ },
+  { kind: 'typecheck', runner: 'pyright', re: /^pyright(?![\w-])/ },
+  { kind: 'lint', runner: 'eslint', re: /^eslint(?![\w-])/ },
+  { kind: 'lint', runner: 'biome', re: /^biome\s+check(?![\w-])/ },
+  { kind: 'lint', runner: 'ruff', re: /^ruff\s+check(?![\w-])/ },
+  { kind: 'lint', runner: 'ruff', table: 'ruff-format', re: /^ruff\s+format\s+--check(?![\w-])/ },
+  { kind: 'lint', runner: 'flake8', re: /^flake8(?![\w-])/ },
+  { kind: 'lint', runner: 'pylint', re: /^pylint(?![\w-])/ },
+  { kind: 'lint', runner: 'black', re: /^black\s+--check(?![\w-])/ },
+  { kind: 'lint', runner: 'prettier', re: /^prettier\s+--check(?![\w-])/ },
+  { kind: 'lint', runner: 'shellcheck', re: /^shellcheck(?![\w-])/ },
+  { kind: 'lint', runner: 'golangci-lint', re: /^golangci-lint(?![\w-])/ },
+  { kind: 'test', runner: 'tox', re: /^tox(?![\w-])/ },
+  { kind: 'test', runner: 'nox', re: /^nox(?![\w-])/ },
+  { kind: 'test', runner: 'ctest', re: /^ctest(?![\w-])/ },
+  { kind: 'test', runner: 'xcodebuild', re: /^xcodebuild\s+test(?![\w-])/ },
+  { kind: 'test', runner: 'swift', re: /^swift\s+test(?![\w-])/ },
+  { kind: 'build', runner: 'vite', re: /^vite\s+build(?![\w-])/ },
+  { kind: 'build', runner: 'next', re: /^next\s+build(?![\w-])/ },
+  { kind: 'build', runner: 'esbuild', re: /^esbuild(?![\w-])/ },
+  { kind: 'build', runner: 'webpack', re: /^webpack(?![\w-])/ },
+  { kind: 'test', runner: 'bun', re: /^bun\s+test(?![\w-])/ },
 ];
 
 /** Match a runner rule at the start of a (wrapper-stripped) piece. */
@@ -892,6 +898,10 @@ function readCommand(command) {
     const stripped = stripWrappers(pieces[i].text);
     if (stripped === null) continue;
     if (PRINTS_OR_INSPECTS.test(stripped) || ASKS_ONLY.test(stripped) || NEGATED.test(stripped)) continue;
+    // A `!` at the start of the pipeline inverts the status of the whole pipeline (`! printf x | node --check` exits 0 on a syntax error).
+    let first = i;
+    while (first > 0 && pieces[first - 1].sep === '|') first -= 1;
+    if (first !== i && NEGATED.test(stripWrappers(pieces[first].text) ?? '')) continue;
     const m = runnerMatch(stripped);
     if (!m || asksInformation(stripped, m)) continue;
     check = { ...m, index: i };
