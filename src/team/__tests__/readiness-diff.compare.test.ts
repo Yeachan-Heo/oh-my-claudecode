@@ -4,7 +4,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 type TraceCase = {
   case: string;
+  fixture?: string;
   eventState?: string | null;
+  reference_case?: string;
+  keys_on_partial?: number;
+  partial_captures?: number;
   env: Record<string, string | null>;
   control: boolean;
   keys: Array<{ fn: string; pane: string; guarded: boolean; keys: string[]; at_ms: number }>;
@@ -13,7 +17,7 @@ type TraceCase = {
   unknown_commands: string[];
 };
 type Trace = { set: string; loaded_modules: string[]; cases: TraceCase[] };
-type Summarize = (input: { set: string; baseSha: string; headSha: string; base: Trace; head: Trace }) => string;
+type Summarize = (input: { set: string; baseSha: string; headSha: string; base: Trace; head: Trace; expect?: string }) => string;
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'scripts', 'dev', 'readiness-diff.mjs');
 const { summarize } = await import(pathToFileURL(SCRIPT).href) as { summarize: Summarize };
@@ -148,5 +152,113 @@ describe('readiness-diff set trust', () => {
   it('fails when a mode has no case', () => {
     const only = (trace: Trace) => ({ ...trace, cases: trace.cases.slice(0, 1) });
     expect(runTrust(only(goodHead()), only(base()))).toContain('failure: no batched case');
+  });
+});
+
+describe('readiness-diff set r5 on a frozen trust dialog still drawing', () => {
+  const frozen = (file: string, side: 'base' | 'head'): TraceCase => ({
+    ...traceCase(null, side === 'base' ? 220 : 30_000),
+    case: `${file} OMC_TEAM_READY_TIMEOUT_MS=<unset>`,
+    control: false,
+    fixture: file,
+    ...(side === 'head' ? { keys: [], result: { ok: false, reason: 'readiness_timeout' } } : {}),
+  });
+  const run = (file: string, head: TraceCase = frozen(file, 'head')) => summarize({
+    set: 'r5', baseSha: 'base', headSha: 'head',
+    base: trace([traceCase(null, 1_000), frozen(file, 'base')]),
+    head: trace([traceCase(null, 1_000), head]),
+  });
+
+  it.each(['claude/2.1.330/trust-no-choice-partial.txt', 'claude/2.1.330/trust-yes-choice-partial.txt'])(
+    'passes %s when head sends no key and times out where base typed into it',
+    (file) => {
+      expect(run(file)).toMatch(/RESULT PASS$/);
+    },
+  );
+
+  it('fails when head gives up before its readiness timeout', () => {
+    const file = 'claude/2.1.330/trust-no-choice-partial.txt';
+    const head = frozen(file, 'head');
+    head.wait_ms = 250;
+    expect(run(file, head)).toContain('head gave up after 250ms, before its 30000ms timeout');
+  });
+
+  it('fails the same difference on any other fixture', () => {
+    expect(run('claude/2.1.330/trust-body-partial.txt')).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when head still sends a key into the frozen frame', () => {
+    const file = 'claude/2.1.330/trust-no-choice-partial.txt';
+    const head = frozen(file, 'head');
+    head.keys = [send(['Enter'])];
+    expect(run(file, head)).toContain('head sent 1 key(s) into a trust dialog still drawing');
+  });
+});
+
+describe('readiness-diff --expect identical', () => {
+  it('passes only when every case matches base in keys, result and wait', () => {
+    const base = trace([traceCase(null, 1_000), traceCase('60000', 1_000)]);
+    const same = summarize({ set: 'r5', baseSha: 'base', headSha: 'head', base, head: base, expect: 'identical' });
+    expect(same).toMatch(/RESULT PASS$/);
+    const slower = summarize({ set: 'r5', baseSha: 'base', headSha: 'head', base, head: trace([traceCase(null, 1_000), traceCase('60000', 40_000)]), expect: 'identical' });
+    expect(slower).toContain('failure: claude/2.1.325/idle.txt OMC_TEAM_READY_TIMEOUT_MS=60000 differs from base');
+  });
+});
+
+describe('readiness-diff set trust-partial', () => {
+  const ok = { ok: true, kind: 'attempted_unconfirmed' };
+  const persistent = { ok: false, reason: 'selector_persistent' };
+  const delivered = [['Down'], ['Enter'], ['-l', 'Read inbox.md'], ['Enter'], ['Enter']];
+  const partialCase = (id: string, state: string, keys: string[][], result: unknown, waitMs: number, onPartial: number): TraceCase => ({
+    case: id,
+    eventState: state,
+    ...(state === 'reference' || state === 'pre-typing-partial' ? {} : { reference_case: 'reference claude/2.1.330/trust.txt' }),
+    env: { OMC_TEAM_READY_TIMEOUT_MS: null },
+    control: state === 'reference',
+    keys: keys.map(send),
+    result,
+    wait_ms: waitMs,
+    unknown_commands: [],
+    keys_on_partial: onPartial,
+    partial_captures: state === 'reference' ? 0 : 1,
+  });
+  const base = (): Trace => ({ set: 'trust-partial', loaded_modules: [], cases: [
+    partialCase('reference claude/2.1.330/trust.txt', 'reference', delivered, ok, 720, 0),
+    partialCase('initial', 'initial-partial', [], persistent, 0, 0),
+    partialCase('post-down', 'post-down-partial', [['Down']], persistent, 250, 0),
+    partialCase('pre-typing', 'pre-typing-partial', [['-l', 'Read inbox.md']], persistent, 100, 1),
+  ] });
+  const goodHead = (): Trace => ({ set: 'trust-partial', loaded_modules: [], cases: [
+    partialCase('reference claude/2.1.330/trust.txt', 'reference', delivered, ok, 720, 0),
+    partialCase('initial', 'initial-partial', delivered, ok, 970, 0),
+    partialCase('post-down', 'post-down-partial', delivered, ok, 970, 0),
+    partialCase('pre-typing', 'pre-typing-partial', delivered, ok, 720, 0),
+  ] });
+  const runPartial = (head: Trace) => summarize({ set: 'trust-partial', baseSha: 'base', headSha: 'head', base: base(), head });
+
+  it('passes the fixed behavior', () => {
+    expect(runPartial(goodHead())).toMatch(/RESULT PASS$/);
+  });
+
+  it('fails when head behaves like base', () => {
+    expect(runPartial(base())).toMatch(/RESULT FAIL$/);
+  });
+
+  it('fails when head sends a key on a partial frame, even one that succeeds', () => {
+    const head = goodHead();
+    head.cases[1]!.keys_on_partial = 1;
+    expect(runPartial(head)).toContain('failure: initial head sent 1 key(s) on a partial frame');
+  });
+
+  it.each([1_220, 720])('fails when head waits %ims, not one poll per partial capture past the reference', (waitMs) => {
+    const head = goodHead();
+    head.cases[2]!.wait_ms = waitMs;
+    expect(runPartial(head)).toContain(`failure: post-down head waited ${waitMs}ms, not 970ms`);
+  });
+
+  it('fails when the pre-typing case types another trigger than the reference', () => {
+    const head = goodHead();
+    head.cases[3]!.keys[2] = send(['-l', '']);
+    expect(runPartial(head)).toContain('failure: pre-typing head keys differ from reference claude/2.1.330/trust.txt on base');
   });
 });
