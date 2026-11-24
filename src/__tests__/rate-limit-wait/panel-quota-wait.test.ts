@@ -377,6 +377,20 @@ describe('panel quota wait: decision logic', () => {
     expect(w.journal.some((r) => r.result === 'end' && r.class === 'quota')).toBe(true);
   });
 
+  it('a code that turned non-resumable at the reset is the baseline of the event: an unchanged screen is not ended again, and the old resumable screen is a new event', async () => {
+    const { w, state } = await waitingAtReset();
+    w.screens['%7'] = screen(ERR_1310);
+    await runPanelQuotaPass(state, w.deps, ON);
+    const ends = (): number => w.journal.filter((r) => r.result === 'end').length;
+    expect(ends()).toBe(1);
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(ends(), 'the same end screen on the next poll adds no second end').toBe(1);
+    const rows = w.journal.length;
+    w.screens['%7'] = screen(ERR_1308);
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.journal.length, 'the resumable screen after an end is a new event, not the suppressed old one').toBeGreaterThan(rows);
+  });
+
   it('an older resumable error and a newer non-resumable one in the same tail: the newer decides, no wait and no key', async () => {
     const both = [ERR_1308, 'retrying...', 'API Error: 429 {"error":{"code":1310,"message":"quota exceeded"}}'].join('\n');
     const w = world({ panes: [PANE_A], screens: { '%7': both }, readingValue: exhausted5h(BASE_MS + H) });

@@ -31,7 +31,7 @@ import { computeJournalFingerprint } from "../../runtime/journal.js";
 import { writeRealRun } from "./real-run-fixtures.js";
 import { CommandNodeExecutor } from "../../runtime/executors/command.js";
 import { runGraph } from "../../runtime/runner.js";
-import type { NodeExecutor } from "../../runtime/types.js";
+import type { NodeExecutionOutput, NodeExecutor } from "../../runtime/types.js";
 import { graphCommand } from "../../../cli/graph.js";
 import { readRunStatus } from "../../runtime/run-status.js";
 import { directoryOperations, type DirectoryOperations } from "../../runtime/contained-fd.js";
@@ -151,6 +151,26 @@ function editEnvelope(runsRoot: string, runId: string, edit: (envelope: Record<s
 /** Rewrites the projection inside projection.json of a run through `edit`, keeping every other field. */
 function editProjection(runsRoot: string, runId: string, edit: (projection: Record<string, any>) => void): void {
   editEnvelope(runsRoot, runId, (envelope) => edit(envelope.projection));
+}
+
+/** Runs the bounded back-edge loop of the fixture: `work` runs once per entry of `works`, each answering with its route. */
+async function runLoop(runsRoot: string, runId: string, works: readonly ("retry" | "success" | "fail")[]): Promise<void> {
+  const input = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "back-edge-graph.json"), "utf8"),
+  ) as Record<string, unknown>;
+  const sealed = sealGraphDescriptor({ ...input, run_id: runId, revision_id: `rev-${runId}` } as never);
+  let workRuns = 0;
+  const executor: NodeExecutor = {
+    kinds: ["agent", "command"],
+    execute: async (context): Promise<NodeExecutionOutput> => {
+      const base = { evidence_refs: [{ kind: "command" as const, ref: `cmd:${context.node.id}` }] };
+      if (context.node.id !== "work") return { ...base, outcome: "succeeded", output_summary: `ok:${context.node.id}` };
+      const answer = works[workRuns++] ?? "success";
+      if (answer === "fail") return { ...base, outcome: "failed", output_summary: `boom:work:${workRuns}` };
+      return { ...base, outcome: "succeeded", output_summary: `ok:work:${workRuns}`, route: answer };
+    },
+  };
+  await runGraph(sealed, { runsRoot, executors: [executor], prompter: { prompt: async () => "approved" } });
 }
 
 interface StatusNode {
@@ -324,6 +344,24 @@ describe.runIf(process.platform !== "win32")("omc graph status", () => {
     const approved = await statusCli(["st-approved", "--runs-root", runs]);
     expect(approved.code, JSON.stringify(approved.json)).toBe(0);
     expect(approved.json?.state).toBe("succeeded");
+  });
+
+  it("lists every activation of a node that a back edge ran again, each with its own state and error", async () => {
+    const runs = makeRunsRoot();
+    await runLoop(runs, "st-loop", ["retry", "retry", "success"]);
+    const report = (await statusCli(["st-loop", "--runs-root", runs])).json as Record<string, any>;
+    expect(report.state).toBe("succeeded");
+    const rows = (report.nodes as { id: string; activation_id: string; state: string }[]).filter((row) => row.id === "work");
+    expect(rows, "one row for each of the three activations of work").toHaveLength(3);
+    expect(new Set(rows.map((row) => row.activation_id)).size).toBe(3);
+    expect(rows.map((row) => row.state)).toEqual(["succeeded", "succeeded", "succeeded"]);
+    expect(report.nodes, "the other nodes run once each").toHaveLength(5);
+
+    await runLoop(runs, "st-loop-fail", ["retry", "fail", "fail", "fail"]);
+    const failedRun = (await statusCli(["st-loop-fail", "--runs-root", runs])).json as Record<string, any>;
+    expect(failedRun.state).toBe("failed");
+    const failedRows = (failedRun.nodes as { id: string; state: string; last_error: string | null }[]).filter((row) => row.id === "work");
+    expect(failedRows.map((row) => [row.state, row.last_error])).toEqual([["succeeded", null], ["failed", "boom:work:4"]]);
   });
 
   it("a run stopped between two steps is in_progress with the second step ready, from the journal alone", async () => {

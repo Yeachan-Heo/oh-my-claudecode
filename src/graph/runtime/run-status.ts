@@ -81,6 +81,7 @@ interface Activation {
 }
 
 interface Transition {
+  readonly activation_id?: string;
   readonly node_id?: string;
   readonly outcome: string;
   readonly output_summary?: string;
@@ -210,19 +211,16 @@ function summarize(runId: string, files: RunFiles, runsRoot: string): Record<str
   const committed = verdict.projection.committed_transitions as unknown as Record<string, Transition | undefined>;
   const transitions = verdict.records.map((record) => record.transition as unknown as Transition);
 
-  const lastActivationByNode = new Map<string, Activation>();
-  for (const activation of Object.values(verdict.projection.activations) as unknown as Activation[]) {
-    lastActivationByNode.set(activation.node_id, activation);
-  }
-
-  const nodes = [...lastActivationByNode.entries()].map(([nodeId, activation]) => {
+  // One row for each activation, in the order the projection holds them: a node that a back edge ran again has a row
+  // for every run, with the failures of that activation only.
+  const nodes = (Object.values(verdict.projection.activations) as unknown as Activation[]).map((activation) => {
     const state = nodeStateOf(activation, committed);
     const failures = transitions.filter(
-      (t) => t.node_id === nodeId && (t.outcome === "failed" || t.outcome === "denied"),
+      (t) => t.activation_id === activation.activation_id && (t.outcome === "failed" || t.outcome === "denied"),
     );
     const lastFailure = failures.length > 0 ? failures[failures.length - 1] : null;
     return {
-      id: nodeId,
+      id: activation.node_id,
       activation_id: activation.activation_id,
       state,
       attempts: activation.attempt_no,

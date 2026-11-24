@@ -506,6 +506,9 @@ export async function runPanelQuotaPass(
       }
       // The error code may have turned non-resumable since the wait began (for example after a retry by the user).
       if (codes.end.includes(freshErr.code)) {
+        // The end screen is the baseline of this event: it is not decided again on the next poll, and a redraw back to the
+        // old resumable screen is a new event, not the suppressed old one.
+        entry.sig = screenSignature(fresh);
         endQuota(entry, deps, now, `quota error ${freshErr.code} is non-resumable: no resume`, entry.resetMs ?? null);
         continue;
       }
