@@ -123,12 +123,15 @@ describe.skipIf(!posix)('omc-doctor cache commands: an installPath written as a 
   test('a plugin root variable written as a Windows path or as a relative path moves nothing and ends with exit code 1', () => {
     for (const command of commands) {
       for (const variable of ['OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT']) {
-        for (const root of ['C:\\Users\\u\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.7.0', '\\\\server\\share\\5.7.0', '//server/share/5.7.0', 'plugins/cache/omc/oh-my-claudecode/5.7.0']) {
+        // Whether such a path can be read depends on the system the command really runs on, not on the platform it reports.
+        for (const reported of ['linux', 'win32']) for (const root of ['C:\\Users\\u\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.7.0', '\\\\server\\share\\5.7.0', '//server/share/5.7.0', 'plugins/cache/omc/oh-my-claudecode/5.7.0']) {
           const { dir, cache } = makeCache(['5.7.0', '5.8.0', '5.9.0']);
           try {
             writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
-            const result = runCommand(command, dir, { timeout: 20_000, env: { [variable]: root } });
-            expect({ variable, root, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ variable, root, status: 1, versions: '5.7.0,5.8.0,5.9.0', moved: 0 });
+            const preload = path.join(dir, `platform-${reported}.cjs`);
+            writeFileSync(preload, `Object.defineProperty(process, 'platform', { value: '${reported}' });\n`);
+            const result = runCommand(command, dir, { timeout: 20_000, env: { [variable]: root }, preloads: [preload] });
+            expect({ variable, reported, root, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ variable, reported, root, status: 1, versions: '5.7.0,5.8.0,5.9.0', moved: 0 });
             expect(result.stdout).toContain('Nothing moved');
           } finally {
             rmSync(dir, { recursive: true, force: true });

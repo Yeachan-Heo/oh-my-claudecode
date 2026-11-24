@@ -69,15 +69,18 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
       ['a tick-count start identity under a POSIX path', path.join(cache, '5.9.0'), { processStartIdentity: 'ticks:638000000000000000' }],
     ] as const;
     for (const command of commands) {
-      for (const [label, root, overrides] of roots('')) {
+      // Whether a record can be judged depends on the system the command really runs on, not on the platform it reports.
+      for (const reported of ['linux', 'win32']) for (const [label, root, overrides] of roots('')) {
         const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] });
           const target = label.startsWith('a tick') ? path.join(cache, '5.9.0') : root;
           const file = writeRecord(dir, target, overrides);
           expect(existsSync(file)).toBe(true);
-          const result = runCommand(command, dir);
-          expect({ label, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ label, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
+          const preload = path.join(dir, `platform-${reported}.cjs`);
+          writeFileSync(preload, `Object.defineProperty(process, 'platform', { value: '${reported}' });\n`);
+          const result = runCommand(command, dir, { preloads: [preload] });
+          expect({ label, reported, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ label, reported, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0 });
           expect(result.stdout).toContain('Nothing moved');
           expect({ label, record: existsSync(file) }).toEqual({ label, record: true });
         } finally {

@@ -786,6 +786,10 @@ const refuse = (text) => {
 // A UNC path may be written with forward slashes (//server/share); where that names an existing directory it is a POSIX path.
 const windowsPath = (target) => /^(?:[A-Za-z]:[/\\]|\\\\|\/\/(?!\/))/.test(target);
 const foreignPath = (target) => process.platform != 'win32' && windowsPath(target) && !(target.startsWith('//') && isDirectory(target));
+// The same question for a path of an occupancy record or of a plugin root variable, answered by the system the command really
+// runs on (the path module is the real one; process.platform may be reported otherwise, and a real Windows path is no foreign
+// path on a real Windows host whatever platform is reported).
+const foreignToHost = (target) => path.sep != '\\' && windowsPath(target) && !(target.startsWith('//') && isDirectory(target));
 const relativePath = (target) => !path.isAbsolute(target) && !windowsPath(target);
 const readRegistry = () => {
   let unreadable = false;
@@ -951,7 +955,7 @@ const protectionOf = (dir, versions) => {
   }
   // A plugin root variable written as a Windows path cannot be read here, and a relative one names another directory for each
   // directory the command runs in (as a relative installPath does): neither can protect a version reliably.
-  if (rootVars.some((root) => foreignPath(root) || relativePath(root))) unreadable = true;
+  if (rootVars.some((root) => foreignToHost(root) || relativePath(root))) unreadable = true;
   const registry = readRegistry();
   unreadable = unreadable || registry.unreadable;
   let names = [];
@@ -971,7 +975,7 @@ const protectionOf = (dir, versions) => {
         const record = readJson(file);
         // A record of a Windows session (a Windows or a relative plugin root, a tick-count start identity) cannot be judged here: neither
         // "owner gone" nor the root can be read, so the command stops instead of treating the record as gone or as relative.
-        if ((typeof record.pluginRoot == 'string' && record.pluginRoot.trim() && (foreignPath(record.pluginRoot.trim()) || relativePath(record.pluginRoot.trim()))) || (process.platform != 'win32' && typeof record.processStartIdentity == 'string' && record.processStartIdentity.startsWith('ticks:'))) {
+        if ((typeof record.pluginRoot == 'string' && record.pluginRoot.trim() && (foreignToHost(record.pluginRoot.trim()) || relativePath(record.pluginRoot.trim()))) || (path.sep != '\\' && typeof record.processStartIdentity == 'string' && record.processStartIdentity.startsWith('ticks:'))) {
           unreadable = true;
           continue;
         }
