@@ -3819,7 +3819,7 @@ const agentSecret = (text, privatePaths) => namesSecretPath(text, privatePaths) 
 // of the stats. Never rejects.
 export async function moveAgentMessages($, cfg, messages, opts = {}) {
   const write = opts.write !== false;
-  const stats = { mode: write ? 'active' : 'plan', agent_rows: 0, limit_row: 0, kept_last: 0, considered: 0, skipped_blocks: 0, owner_words: 0, lead: 0, queued_anchor: 0, pending_json: 0, secret: 0, unchecked: 0, too_short: 0, too_short_chars: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0 };
+  const stats = { mode: write ? 'active' : 'plan', agent_rows: 0, limit_row: 0, kept_last: 0, considered: 0, skipped_blocks: 0, owner_words: 0, lead: 0, queued_anchor: 0, pending_json: 0, secret: 0, unchecked: 0, too_short: 0, too_short_chars: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, moved: 0, moved_chars: 0, trace_chars: 0, ...(write ? { installed: false } : {}) };
   const rows = new Map();
   try {
     if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return { rows, stats }; }
@@ -4119,7 +4119,7 @@ async function decide($, e, cfg, record, started) {
   if (agentsRun) {
     const run = await agentsRun;
     record.agent_messages = run.stats;
-    if (cfg.mode === 'active' && run.rows.size) { agentMoved = run.rows; agentTokens = movedTokens(run.stats); run.stats.installed = true; }
+    if (cfg.mode === 'active' && run.rows.size) { agentMoved = run.rows; agentTokens = movedTokens(run.stats); }
   }
   record.mentioned = markMentioned(candidates, user);
   let replyEdits;
@@ -4164,9 +4164,13 @@ async function decide($, e, cfg, record, started) {
   }
   const stats = {};
   let rows = agentMoved.size ? trimmed.map((m, i) => agentMoved.get(i) ?? m) : trimmed;
+  // What the text stages moved is marked installed (`installed` of their stats) only once the result is certain, at the end: a fallback after the files were
+  // written (the cascade's checks above, a build that fails) returns the host's summary, which holds none of it.
+  let pastesInstalled = false;
+  let repliesInstalled = false;
   if (pasted) {
     const swaps = pasteSwaps ?? (await movePastes($, pasted.stats.mode, pasted.jobs, messages, pasted.stats, deadline).catch(() => { pasted.stats.error = 1; return new Map(); }));
-    if (swaps.size) { rows = rows.map((m, i) => (swaps.has(messages[i]) ? swaps.get(messages[i]) : m)); pasted.stats.installed = true; }
+    if (swaps.size) { rows = rows.map((m, i) => (swaps.has(messages[i]) ? swaps.get(messages[i]) : m)); pastesInstalled = true; }
   }
   let built = build(rows, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
@@ -4174,7 +4178,7 @@ async function decide($, e, cfg, record, started) {
     const edited = replyEdits ?? (await moveReplies($, cfg, record, messages, api, keepFrom, deadline, queued));
     if (edited.size) {
       built = build(rows.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
-      record.replies.installed = true;
+      repliesInstalled = true;
     }
   }
   const after = built.reduce((s, m) => s + messageChars(m), stats.queuedKeptChars);
@@ -4197,8 +4201,11 @@ async function decide($, e, cfg, record, started) {
     unanswered: asked.length - answered,
   });
   // What the installed text stages took off, with or without the cascade: a stage that moved nothing (shadow, writes that failed, or a fallback) counts for nothing.
-  const installedTokens = trimTokens + agentTokens + (record.replies?.installed ? movedTokens(record.replies) : 0) + (pasted?.stats.installed ? movedTokens(pasted.stats) : 0);
+  const installedTokens = trimTokens + agentTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0);
   if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known));
+  if (agentMoved.size) record.agent_messages.installed = true;
+  if (pastesInstalled) pasted.stats.installed = true;
+  if (repliesInstalled) record.replies.installed = true;
   return { messages: built, before, after, predicted: record.tokens_after_pred, tokensBefore: tokens?.tokens, tokensAfter: record.tokens_after_pred };
 }
 

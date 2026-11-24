@@ -399,6 +399,17 @@ describe('agent messages to files in the compaction', () => {
     expect(spilled(store)).toHaveLength(0);
   });
 
+  it('a compaction that the cascade then rejects (host handoff, the cut under the host minimum) leaves the files written but does not say the stage is installed', async () => {
+    const env = { OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_AGENT_TRIM: '1', OMC_JEV_COMPACT_HOST_HANDOFF: '1' };
+    const { out, record, store } = await compactRun(env, messages());
+    expect(record).toMatchObject({ result: 'fallback', reason: 'cut_below_host_min', agent_messages: { moved: 2, written: 2, installed: false } });
+    expect(spilled(store)).toHaveLength(2);
+    expect(JSON.stringify(out.messages)).not.toContain('[agent message moved at compaction');
+    // The same session without the handoff veto is installed, and says so.
+    const accepted = await compactRun({ ...env, OMC_JEV_COMPACT_HOST_HANDOFF: '' }, messages());
+    expect(accepted.record).toMatchObject({ result: 'jev', agent_messages: { installed: true } });
+  });
+
   // Many long reports and results that each cut little: the results alone give back under the bound of the too-few-results gate, the reports moved to files do the rest.
   const reportHeavy = () => {
     const m = [user('Task: coordinate the agents.')];
