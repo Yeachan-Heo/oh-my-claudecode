@@ -74,6 +74,18 @@ function isConfigForceInheritProxyEnv() {
   const config = loadOmcConfig();
   return config.routing?.forceInherit === true && !hasNormalClaudeActiveModel();
 }
+// A base URL is Anthropic's when its host is anthropic.com or ends in .anthropic.com: the host
+// is parsed (scheme optional, port and credentials ignored) and compared without case, never
+// matched as a substring of the URL. A URL that does not parse is not Anthropic's.
+function isAnthropicBaseUrl(baseUrl) {
+  const text = String(baseUrl).trim();
+  try {
+    const host = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`).hostname.toLowerCase().replace(/\.$/, '');
+    return host === 'anthropic.com' || host.endsWith('.anthropic.com');
+  } catch {
+    return false;
+  }
+}
 // aliasIsClaude: a session model that is a native alias (sonnet, opus, haiku, fable, with an
 // optional context suffix such as [1m]) counts as a Claude model, as in src/config/models.ts.
 // Only the named-model gate asks for it; the proxy mapping check keeps the plain rule.
@@ -83,7 +95,7 @@ function isNonClaudeProviderEnv(aliasIsClaude = false) {
   const isNativeAlias = aliasIsClaude && TIER_ALIASES.has(modelId.replace(/\[\d+[mk]\]$/i, '').toLowerCase());
   if (modelId && !isNativeAlias && !modelId.toLowerCase().includes('claude')) return true;
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
-  if (baseUrl && !baseUrl.includes('anthropic.com')) return true;
+  if (baseUrl && !isAnthropicBaseUrl(baseUrl)) return true;
   return isConfigForceInheritProxyEnv();
 }
 function acceptsProxyAnthropicDefaultTierValue(key, value) {

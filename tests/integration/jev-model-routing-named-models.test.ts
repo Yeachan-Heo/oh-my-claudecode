@@ -552,6 +552,39 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       expect(requests).toHaveLength(0);
     }, 15000);
 
+    // The host decides, not a substring of the URL: case-insensitive, any scheme or none, port and
+    // credentials ignored; the host is anthropic.com or ends in .anthropic.com.
+    it.each([
+      "https://API.ANTHROPIC.COM",
+      "https://api.anthropic.com:443/v1",
+      "api.anthropic.com",
+      "api.anthropic.com:443/v1",
+      "https://user:secret@api.anthropic.com/",
+      "https://anthropic.com",
+      "https://api.anthropic.com./",
+      "",
+    ])("an Anthropic base URL (%j) is a Claude provider: Jev's alias replaces the name", async (baseUrl) => {
+      const input = agentInput({ model: "fable" });
+      const routed = await routedInput(input, { ...NAMED, ANTHROPIC_BASE_URL: baseUrl });
+      expect(routed).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
+      expect(requests).toHaveLength(1);
+    }, 15000);
+
+    it.each([
+      "https://anthropic.com.proxy.invalid",
+      "https://fakeanthropic.com",
+      "https://anthropic.com@proxy.invalid/",
+      "https://proxy.invalid/anthropic.com",
+      "https://proxy.invalid/?upstream=anthropic.com",
+      "proxy.invalid:8080/anthropic.com",
+      "not a url anthropic.com",
+    ])("a base URL that only mentions anthropic.com (%j) is a proxy: the name stays, the effort is set", async (baseUrl) => {
+      const input = agentInput({ model: "fable" });
+      const routed = await routedInput(input, { ...NAMED, ANTHROPIC_BASE_URL: baseUrl });
+      expect(routed).toEqual({ ...input.tool_input, effort: "medium" });
+      expect(requests).toHaveLength(1);
+    }, 15000);
+
     it("a session model that is not a Claude name still keeps the named model", async () => {
       const input = agentInput({ model: "fable" });
       expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: "deepseek-chat" })).toEqual({ ...input.tool_input, effort: "medium" });
