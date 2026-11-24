@@ -169,7 +169,7 @@ describe('agent trim: the whole conversation', () => {
 });
 
 // The compaction through register(on): the active mode with a conversation of agent rows; the record says whether the trim ran.
-async function compactRun(env, messages, event = {}) {
+function hostOf(env, messages) {
   const store = new Map();
   const e = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u', ...env };
   const api = [];
@@ -188,11 +188,31 @@ async function compactRun(env, messages, event = {}) {
     session: { id: async () => 'sess-trim', usage: async () => ({ context: { tokens: 130000, window: 200000 } }), messages: async (o) => (o?.as === 'api' ? api : messages), compact: async () => ({}) },
     ui: { log: () => {}, toast: () => {} },
   };
+  return { $, store };
+}
+
+async function compactRun(env, messages, event = {}) {
+  const { $, store } = hostOf(env, messages);
   const handlers = {};
   register((event, hook) => { handlers[event] = hook; });
   const out = await handlers['session.compact']($, Object.freeze({ trigger: 'manual', messages, ...event }), async () => ({ messages: [] }));
   const record = [...store.entries()].filter(([p]) => p.includes('compaction-spool')).map(([, t]) => JSON.parse(t)).find((r) => r.event === 'compact');
   return { out, record, store };
+}
+
+// The own threshold: a turn ends at 130 000 of 200 000 tokens; the host compacts with the trigger `plugin` when it is asked. Returns what the host was asked.
+async function ownRun(env, messages) {
+  const { $, store } = hostOf({ OMC_JEV_COMPACT_AT_PERCENT: '60', ...env }, messages);
+  const handlers = {};
+  register((event, hook) => { handlers[event] = hook; });
+  const asked = [];
+  $.session.compact = async () => {
+    const out = await handlers['session.compact']($, Object.freeze({ trigger: 'plugin', messages }), async () => ({ messages: [] }));
+    asked.push(out);
+    return out;
+  };
+  await handlers['turn.complete']($, { isAborted: false }, async () => 'ok');
+  return { asked, store };
 }
 
 describe('agent trim in the compaction', () => {
@@ -404,6 +424,18 @@ describe('agent messages to files in the compaction', () => {
     expect(on.record.agent_messages.moved).toBeGreaterThan(0);
     expect(on.record.max_reduction_tokens).toBeGreaterThanOrEqual(0.3);
     expect(spilled(on.store).length).toBe(on.record.agent_messages.moved);
+  });
+
+  it('the own threshold counts the agent stage too: a session of reports that no result carries is still asked to compact, and one the stage cannot help is not', async () => {
+    const env = { OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
+    // The results alone are too little (the same session as the gate above), so without the stage the request is not made.
+    expect((await ownRun(env, reportHeavy())).asked).toHaveLength(0);
+    const on = await ownRun({ ...env, OMC_JEV_COMPACT_AGENT_TRIM: '1' }, reportHeavy());
+    expect(on.asked).toHaveLength(1);
+    expect(on.asked[0]).toHaveProperty('messages');
+    expect(spilled(on.store).length).toBeGreaterThan(0);
+    // A stage in shadow mode moves nothing, so it carries nothing.
+    expect((await ownRun({ ...env, OMC_JEV: 'compaction:shadow', OMC_JEV_COMPACT_AGENT_TRIM: '1' }, reportHeavy())).asked).toHaveLength(0);
   });
 
   it('a stage in shadow mode saves nothing, so the gate still hands a session of short results to the summary', async () => {

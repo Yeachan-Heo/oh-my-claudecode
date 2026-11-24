@@ -145,7 +145,7 @@
  * any other case, before Jev is asked, the floor (every removable result gone) is predicted: above the threshold less FLOOR_MARGIN of the window
  * the host's summary runs (floor_above_threshold; no_window when the window is unknown). The gates on characters (too_few_results of decide, the preflight of the own
  * threshold) are also measured in tokens (cutInTokens): an image has no characters and costs RATE_IMAGE, so a session that fails them on characters goes on when its
- * tokens reach the same bounds (the agent stage's trim and, with the stage active, the reports it plans to move to files count in decide's gate), and the record has max_reduction_tokens. The compaction record gains cut, cascade_pass,
+ * tokens reach the same bounds (the agent stage's trim and, with the stage active, the reports it plans to move to files count in decide's gate and in the preflight of the own threshold), and the record has max_reduction_tokens. The compaction record gains cut, cascade_pass,
  * cascade_target_tokens, cascade_predicted_tokens, cascade_tokens_source, cascade_dropped, floor_pred and tokens_after_pred. Host handoff
  * (OMC_JEV_COMPACT_HOST_HANDOFF=1, opt-in with caution: the host's contract is not documented in this repository): the result also carries
  * tokensBefore and tokensAfter, and a manual or automatic cut under HOST_MIN_CUT goes to the host's summary (cut_below_host_min). Question naming
@@ -3502,6 +3502,37 @@ async function moveReplies($, cfg, record, messages, api, keepFrom, deadline, qu
   return edited;
 }
 
+// The tokens that the agent stage's text moved to files comes off: the file's text at RATE_MOVED less its trace at RATE_TRACE.
+const movedTokensOf = (st, rates) => rates.RATE_MOVED * st.moved_chars - rates.RATE_TRACE * st.trace_chars;
+
+// The agent stage of one compaction before its text is moved: the trim of the rows before the tail (`stats` for the record, `trimmed` the rows as it leaves
+// them, `trimTokens` what it takes off), the options of the stage (`opts`, none without the API form, in a subagent or with the trim off) and `plan()`,
+// what the stage would move (a plan, no write), asked once. `keepFrom` is the first row that keeps its handle. The compaction and the preflight of the
+// own threshold read the stage through this one function, so that both count the same text.
+function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionId, deadline) {
+  let trim;
+  let stats;
+  const skip = cfg.agentTrim && agentId === undefined && api ? nonTextUserRows(messages, api) : undefined;
+  const from = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
+  if (skip && !skip.unmatched) {
+    try {
+      trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates });
+      stats = trim.stats;
+    } catch (error) { trim = undefined; stats = { error: clip(oneLine(String(error?.message ?? error)), 200) }; }
+  }
+  const trimmed = trim && trim.rows.size ? messages.map((m, i) => trim.rows.get(i) ?? m) : messages;
+  const trimTokens = trim ? cfg.rates.RATE_ATT * trim.stats.chars : 0;
+  // Agent messages to files: decided on the rows as the trim leaves them, filed as they came (source); the window of rows and the files are the same in the plan and in the run.
+  const opts = skip ? { sessionId, source: messages, skipRows: Object.assign(new Set(skip.rows), { unmatched: skip.unmatched }), keepFrom: from, queuedRows: queued, statePattern: cfg.agentStates, checked: new Map() } : undefined;
+  let planned;
+  return { stats, trimmed, trimTokens, opts, plan: () => (planned ??= moveAgentMessages($, cfg, trimmed, { ...opts, write: false, deadline })) };
+}
+
+// What the agent stage takes off, in tokens, before Jev is asked: the trim, and with the stage active the files it plans to write.
+async function agentStageTokens(cfg, stage) {
+  return stage.trimTokens + (stage.opts && cfg.mode === 'active' ? movedTokensOf((await stage.plan()).stats, cfg.rates) : 0);
+}
+
 // Decides one compaction: {messages} to install or {fallback: reason}. Fills `record`; never calls next.
 // --- agent trim (OMC_JEV_COMPACT_AGENT_TRIM) ---------------------------------------------------------------------------------------------
 // In a coordinator's session the reports of team agents arrive as whole user rows: "Another Claude session sent a message:", one or more closed
@@ -3898,35 +3929,17 @@ async function decide($, e, cfg, record, started) {
   const net = removable - envelopes;
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target is the rule's target, a share of the window).
-  let trim;
-  const agentSkip = cfg.agentTrim && e.agentId === undefined && api ? nonTextUserRows(messages, api) : undefined;
-  if (agentSkip) {
-    if (!agentSkip.unmatched) {
-      try {
-        trim = trimAgentRows(messages, { keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skipRows: agentSkip.rows, queuedRows: queued, statePattern: cfg.agentStates });
-        record.agent_trim = trim.stats;
-      } catch (error) { trim = undefined; record.agent_trim = { error: clip(oneLine(String(error?.message ?? error)), 200) }; }
-    }
-  }
-  const trimmed = trim && trim.rows.size ? messages.map((m, i) => trim.rows.get(i) ?? m) : messages;
-  const trimTokens = trim ? cfg.rates.RATE_ATT * trim.stats.chars : 0;
-  // Agent messages to files: decided on the rows as the trim leaves them, filed as they came (source); the window of rows and the files are the same in the plan and in the run.
-  const agentOpts = agentSkip ? { sessionId: record.session_id, source: messages, skipRows: Object.assign(new Set(agentSkip.rows), { unmatched: agentSkip.unmatched }), keepFrom: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), queuedRows: queued, statePattern: cfg.agentStates, checked: new Map() } : undefined;
-  const movedTokens = (st) => cfg.rates.RATE_MOVED * st.moved_chars - cfg.rates.RATE_TRACE * st.trace_chars;
-  // What the stage plans to move (a plan, no write): asked once, by the gate below or by the floor, whichever comes first.
-  let agentPlan;
-  const planAgents = () => (agentPlan ??= moveAgentMessages($, cfg, trimmed, { ...agentOpts, write: false, deadline }));
+  const stage = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline);
+  if (stage.stats) record.agent_trim = stage.stats;
+  const { trimmed, trimTokens, opts: agentOpts, plan: planAgents } = stage;
+  const movedTokens = (st) => movedTokensOf(st, cfg.rates);
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) {
     // The characters leave out what costs tokens without being text (an image). With the token cascade a session that fails them goes on when its tokens
     // reach the same bound (the floor below is the check that follows the tokens); without it the gate is the characters alone.
     // The text the agent stage takes off (the trim, and with the stage active the reports it moves to files) is part of the cut: a session of reports that no
     // result of its own would carry is for the plan below, which counts the stage, and not for the summary.
-    let stageTokens = 0;
-    if (cfg.targetPercent !== undefined) {
-      stageTokens = trimTokens;
-      if (agentOpts && cfg.mode === 'active') stageTokens += movedTokens((await planAgents()).stats);
-    }
+    const stageTokens = cfg.targetPercent === undefined ? 0 : await agentStageTokens(cfg, stage);
     const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens);
     if (cut) record.max_reduction_tokens = cut.listed ? Math.round((cut.removable / cut.listed) * 1000) / 1000 : 0;
     if (!cut || !worthInTokens(cut)) return { fallback: 'too_few_results' };
@@ -4306,12 +4319,16 @@ async function ownThreshold($, e, next) {
     let removable = removableChars(candidates);
     let envelopes = 0;
     let api;
+    // What the agent stage takes off counts as a cut too, as in decide (the cascade only: the stage's plan is part of the cascade's prediction).
+    let stageTokens = 0;
+    const stageCounts = cfg.targetPercent !== undefined && cfg.agentTrim;
     // With the token cascade a session that fails the characters is measured in tokens (cutInTokens): an image has no characters and costs thousands of tokens.
     const tooSmall = () => (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window)
-      && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes, cfg.rates), OWN_MIN_GAIN * window));
+      && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens), OWN_MIN_GAIN * window));
     // The delivered messages can only make this worse (they add to `before`, their envelopes come off
-    // `removable`), so a transcript that fails here needs no API read, which may hold the turn for HOST_MS.
-    if (tooSmall()) return result;
+    // `removable`), so a transcript that fails here needs no API read, which may hold the turn for HOST_MS. With the agent stage on it is read all the same: the
+    // stage is planned from the API form and may carry the cut that the results do not.
+    if (tooSmall() && !stageCounts) return result;
     // Messages delivered during a tool turn are in the API form only; decide counts them, so the
     // preflight does too (else it could ask for a compaction that decide hands back to the summary).
     const apiRead = await withDeadline($, Promise.resolve().then(() => $.session.messages({ as: 'api' })), HOST_MS);
@@ -4324,6 +4341,17 @@ async function ownThreshold($, e, next) {
       for (const blocks of delivered.rows.values()) before += rawChars(blocks);
       envelopes = envelopeChars(messages, delivered.rows, candidates);
       removable -= envelopes;
+    }
+    if (stageCounts && api) {
+      // The rows that keep their handles, as decide finds them; without the API form that holds their calls there is no stage.
+      const keepFrom = openLoopStart(messages, groupsOf(messages, api));
+      if (keptCallsIn(messages, keepFrom, api)) {
+        try {
+          let sessionId;
+          try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
+          stageTokens = await agentStageTokens(cfg, agentStageOf($, cfg, undefined, messages, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, Date.now() + TOTAL_MS));
+        } catch { stageTokens = 0; }
+      }
     }
     if (tooSmall()) return result;
     let reason;
