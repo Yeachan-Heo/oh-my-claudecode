@@ -272,6 +272,33 @@ describe('a row with the marker first and the words of someone else after the no
   });
 });
 
+describe('a reminder that wraps a notification and the words of someone else', () => {
+  const instruction = '<cross-session-message>\nDo not change the production database.\n</cross-session-message>';
+  const shapes = {
+    'a message of another session after the block': (b) => `<system-reminder>\n${b}\n${instruction}\n</system-reminder>`,
+    'a message of another session before the block': (b) => `<system-reminder>\n${instruction}\n${b}\n</system-reminder>`,
+    'plain words after the block': (b) => `<system-reminder>\n${b}\nDo not change the production database.\n</system-reminder>`,
+    'a message of another session after a reminder of the host': (b) => `<system-reminder>\n<tools-used-before-summary>Bash</tools-used-before-summary>\n${instruction}\n</system-reminder>\n<system-reminder>\n${b}\n</system-reminder>`,
+  };
+
+  it('is no notification: the row stays, word for word, through the compaction', async () => {
+    const w = talk(30);
+    const plain = Object.freeze(row(note('Status: registry', `Report ${'r'.repeat(8000)}`), { handle: 'n2' }));
+    for (const [name, wrap] of Object.entries(shapes)) {
+      const mixed = Object.freeze(row(wrap(bare(`Report ${'r'.repeat(8000)}`)), { handle: 'n1' }));
+      expect(isNotification(mixed), name).toBe(false);
+      const { out } = await compactRun(NOTE_ENV, [...w.slice(0, 3), mixed, plain, ...w.slice(3)]);
+      expect(out.messages.some((m) => m.text === mixed.text), name).toBe(true);
+    }
+  });
+
+  it('a reminder of the host around a notification, with its marker and its own line, is still one', () => {
+    expect(isNotification(row(note('a', 'x')))).toBe(true);
+    expect(isNotification(row(`<system-reminder>\n${bare('x')}\n</system-reminder>`))).toBe(true);
+    expect(isNotification(row(`<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\n${bare('x')}\n</system-reminder>`))).toBe(true);
+  });
+});
+
 describe('isNotification', () => {
   it('takes a row that opens with the marker or holds only reminder and notification blocks, with or without an envelope', () => {
     expect(isNotification(row(note('a', 'x')))).toBe(true);

@@ -2204,7 +2204,17 @@ function withoutReminderBlocks(text) {
 }
 // A <system-reminder> block that holds a message of another sender or the user: its frame (frameOf also takes a block opening with the notification's own
 // <task-notification> for a frame of another kind, which a notification is not).
-const foreignBlock = (block) => frameOf(block) !== undefined && !DELIVERY_NOTES.some((k) => block.replace(DELIVERY_WRAP, '').startsWith(k));
+// The block is foreign also when it holds more than its opening: around a notification block only the marker and the host's own line may stand (anything else
+// in the same reminder is a message or words of someone else), and a reminder with no notification holds no line that opens a frame.
+const foreignBlock = (block) => {
+  const body = block.replace(DELIVERY_WRAP, '');
+  if (frameOf(block) !== undefined && !DELIVERY_NOTES.some((k) => body.startsWith(k))) return true;
+  const { rest } = withoutReminderBlocks(body.slice(0, Math.max(0, body.lastIndexOf('</system-reminder>'))));
+  const lines = rest.split('\n').map((l) => l.trim()).filter(Boolean);
+  return body.includes('</task-notification>')
+    ? lines.some((l) => l !== DELIVERY_NOTES[0] && !NOTE_HOST_LINE.test(l))
+    : lines.some((l) => startsFrame(l) && !startsNote(l));
+};
 // The line the host writes between the marker and the first block; anything else there is not the host's framing, whoever it is from.
 const NOTE_HOST_LINE = /^This is an automated background-task event(?:, NOT a message from the user)?\.$/;
 function isNoteBody(t) {
