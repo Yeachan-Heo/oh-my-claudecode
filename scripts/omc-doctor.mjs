@@ -707,6 +707,8 @@ const claudeMdVersion = () => {
   const states = registry.supported.map(([id, entries]) => [marketplaceOf(id), activeEntries(id, entries, roots)]);
   const running = [...new Set(states.filter(([, state]) => state.active.length).map(([market]) => market))];
   let pluginVersion = '(none)';
+  // The version of a package the runtime compares with the marker as written, not by its bare form.
+  let literal = false;
   // A registry that cannot be used (as in Step 1) leaves open which marketplace the session runs, and a cache that cannot be
   // read may hold the newest version, so no version is named while either is unreadable.
   const registryUnusable = registry.unreadable || (registry.supported.length > 0 ? registry.malformed : registry.ambiguous);
@@ -762,7 +764,21 @@ const claudeMdVersion = () => {
       pluginVersion = '(unknown)';
     }
   } else if (running.length) {
-    pluginVersion = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '(none)';
+    const latest = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '';
+    // The runtime (getPluginVersion) keeps the raw package version of the root it loaded unless a complete cached version is
+    // newer: a managed root refreshed in place may hold a package version other than its directory name, and that root is no
+    // cached version by its name.
+    let loaded = '';
+    try {
+      const raw = readJson([loadedRoot, 'package.json'].join(path.sep)).version;
+      if (typeof raw == 'string' && raw.trim()) loaded = raw;
+    } catch {}
+    if (loaded && !(latest && semver(loaded) && !sameVersion(latest, loaded) && compareVersions(latest, loaded) > 0)) {
+      pluginVersion = loaded;
+      literal = true;
+    } else {
+      pluginVersion = latest || '(none)';
+    }
   } else {
     for (const market of markets) pluginVersion = latestIn(market) || pluginVersion;
   }
@@ -790,7 +806,7 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
   } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
     console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
-  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion) && markerExact && (!external || claudeVersion === pluginVersion)) {
+  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion) && markerExact && (!(external || literal) || claudeVersion === pluginVersion)) {
     console.log('VERSION MATCH: CLAUDE and plugin cache are aligned');
   } else {
     console.log('VERSION DRIFT: CLAUDE.md and plugin versions differ');
@@ -1063,14 +1079,19 @@ const protectionOf = (dir, versions) => {
   }
   // The paths that pin: the directory of every pinned version (as written and without a leading v) that exists or
   // may exist, and every installPath of a pin.
+  // A version-only pin is read in the cache of every marketplace, not only in the one being cleaned: its directory there may be a
+  // link into this one (or a link into another), and the target stays in place only when the link is followed.
+  const spaces = [...new Set([dir, ...[...registry.ids.map(marketplaceOf), 'omc'].map(cacheDirOf)])];
   const pinPaths = [];
   for (const pin of registry.pins) {
     const version = pin.version?.trim();
     for (const name of version ? [...new Set([version, dropV(version)])] : []) {
-      const listed = versions.find((x) => x === name);
-      const written = dir + path.sep + name;
-      if (listed) pinPaths.push(path.join(dir, listed));
-      else if (identityOf(written) || lacksIdentity(written)) pinPaths.push(written);
+      for (const space of spaces) {
+        const listed = space == dir && versions.find((x) => x === name);
+        const written = space + path.sep + name;
+        if (listed) pinPaths.push(path.join(dir, listed));
+        else if (identityOf(written) || lacksIdentity(written)) pinPaths.push(written);
+      }
     }
     if (pin.installPath != undefined) pinPaths.push(...bothForms(pin.installPath.trim()));
   }

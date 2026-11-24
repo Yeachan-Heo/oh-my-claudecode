@@ -452,6 +452,29 @@ for (const name of ['statSync', 'readdirSync']) {
       }
     });
 
+    // An entry that names only a version pins that directory in every namespace of the cache, not only in the one its ID names: a
+    // pinned directory that is a link into another namespace keeps its target in place, in either order of the two cleanups.
+    test('a version-only pin whose directory is a link into the cache of another marketplace keeps the target in place', () => {
+      const OMC = 'oh-my-claudecode@omc';
+      const OWN = 'oh-my-claudecode@oh-my-claudecode';
+      for (const command of commands) {
+        for (const [aliasMarket, targetMarket, aliasId, targetId] of [['omc', 'oh-my-claudecode', OMC, OWN], ['oh-my-claudecode', 'omc', OWN, OMC]] as const) {
+          const { dir, cache: target } = makeCache(['5.6.0', '5.8.0', '5.9.0'], targetMarket);
+          const aliasCache = path.join(dir, 'plugins', 'cache', aliasMarket, 'oh-my-claudecode');
+          mkdirSync(aliasCache, { recursive: true });
+          symlinkSync(path.join(target, '5.8.0'), path.join(aliasCache, '5.7.0'));
+          try {
+            writeRegistry(dir, { [aliasId]: [{ scope: 'user', version: '5.7.0' }], [targetId]: [{ scope: 'user', version: '5.9.0' }] });
+            const result = runCommand(command, dir);
+            expect({ command, aliasMarket, status: result.status, target: digitVersions(target), aliasResolves: existsSync(path.join(aliasCache, '5.7.0', 'package.json')), moved: movedAside(dir) })
+              .toEqual({ command, aliasMarket, status: 0, target: '5.8.0,5.9.0', aliasResolves: true, moved: 1 });
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+    });
+
     test('a cache that exists only in a namespace no registry entry names is not touched, and the default namespace is omc', () => {
       for (const command of commands) {
         const stray = makeCache(['5.7.0', '5.8.0'], 'oh-my-claudecode');

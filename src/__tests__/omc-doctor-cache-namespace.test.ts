@@ -455,6 +455,32 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
+    // getPluginVersion (scripts/session-start.mjs) keeps the package version of the managed root the session loaded unless a complete
+    // cached version is newer: a root refreshed in place (directory 5.8.0, package 5.9.0) is not a cached version by its name, but its
+    // package still counts.
+    test.skipIf(process.platform === 'win32')('the managed root the session loaded keeps its package version beside the complete cached versions', () => {
+      const cases: Array<{ label: string; siblings: string[]; rootPackage: string | null; marker: string; latest: string; verdict: string }> = [
+        { label: 'a refreshed root beside an older sibling', siblings: ['5.7.0'], rootPackage: NEW, marker: '5.7.0', latest: NEW, verdict: DRIFT },
+        { label: 'the same, marker at the package version', siblings: ['5.7.0'], rootPackage: NEW, marker: NEW, latest: NEW, verdict: MATCH },
+        { label: 'a newer complete sibling wins', siblings: ['6.0.0'], rootPackage: NEW, marker: '6.0.0', latest: '6.0.0', verdict: MATCH },
+        { label: 'no complete sibling at all', siblings: [], rootPackage: NEW, marker: NEW, latest: NEW, verdict: MATCH },
+        { label: 'a root without a package keeps the cache', siblings: ['5.7.0'], rootPackage: null, marker: '5.7.0', latest: '5.7.0', verdict: MATCH },
+      ];
+      for (const { label, siblings, rootPackage, marker, latest, verdict } of cases) {
+        const dir = fresh();
+        try {
+          const root = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', OLD);
+          mkdirSync(root, { recursive: true });
+          addCache(dir, siblings, 'omc');
+          if (rootPackage) writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claudecode', version: rootPackage }));
+          writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD, installPath: root }] });
+          expect({ label, out: claudeMdAt(dir, marker, 'linux', { CLAUDE_PLUGIN_ROOT: root }) }).toEqual({ label, out: [`Latest cached plugin version: ${latest}`, verdict] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
     // The runtime reads the marker only as `<!-- OMC:VERSION:<digits...> -->` in exactly that case and spacing.
     test.skipIf(process.platform === 'win32')('a marker the runtime cannot read is drift whatever its version', () => {
       for (const marker of ['<!--OMC:VERSION:5.9.0-->', '<!-- omc:version:5.9.0 -->', '<!--  OMC:VERSION:5.9.0  -->', '<!-- OMC:VERSION:v5.9.0 -->', '<!-- OMC:VERSION:5.9.0 -->']) {
