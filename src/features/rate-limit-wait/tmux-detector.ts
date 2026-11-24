@@ -1093,10 +1093,14 @@ function paneProviderIdentity(paneId: string, socket?: string, server?: string):
     if (!/^\d+$/.test(foreground) || Number(foreground) <= 0) return null;
     let started = '';
     try {
+      // The start time is wall-clock text in the timezone and locale of the caller, and a wait outlives the process that
+      // recorded it (a daemon restarted detached drops TZ): the same live process must read the same text, so the lookup
+      // runs under a fixed timezone and locale.
       started = execFileSync('ps', ['-o', 'lstart=', '-p', foreground], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
         timeout: 3000,
+        env: { ...process.env, TZ: 'UTC', LC_ALL: 'C', LANG: 'C' },
       }).trim();
     } catch (error) {
       // The group leader may have exited while its group lives on (ps finds no such process and exits with status 1): the

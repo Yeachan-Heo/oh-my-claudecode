@@ -264,6 +264,27 @@ describe('panelQuotaTmux adapter', () => {
       expect(vi.mocked(execFileSync).mock.calls.map((call) => call[1])).toEqual([['-o', 'tpgid=', '-p', '4242'], ['-o', 'lstart=', '-p', '5151']]);
     });
 
+    it('the start time is read with a fixed timezone and locale, so a daemon restarted under another environment reads the same text', () => {
+      vi.mocked(tmuxExec).mockReset();
+      vi.mocked(execFileSync).mockReset();
+      vi.mocked(tmuxExec).mockReturnValueOnce('0 4242\n');
+      vi.mocked(execFileSync).mockReturnValueOnce(' 5151\n').mockReturnValueOnce('Tue Nov 24 10:00:00 2026\n');
+      vi.stubEnv('TZ', 'Pacific/Honolulu');
+      vi.stubEnv('LANG', 'pl_PL.UTF-8');
+      vi.stubEnv('LC_ALL', 'pl_PL.UTF-8');
+      try {
+        panelQuotaTmux.providerIdentity?.(PANE);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      const lstart = vi.mocked(execFileSync).mock.calls.find((call) => (call[1] as string[]).includes('lstart='));
+      const env = (lstart?.[2] as { env?: Record<string, string | undefined> } | undefined)?.env;
+      expect(env, 'the lookup runs with its own environment').toBeDefined();
+      expect(env?.TZ).toBe('UTC');
+      expect(env?.LC_ALL).toBe('C');
+      expect(env?.LANG).toBe('C');
+    });
+
     it('a start time that cannot be read is not an empty start time: a timeout, a missing ps or a signal give null, and a leader that is gone gives the group alone', () => {
       const ask = (failure: Error): string | null => {
         vi.mocked(tmuxExec).mockReset();
