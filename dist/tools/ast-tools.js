@@ -424,6 +424,10 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
                 };
             }
             const lang = toLangEnum(sg, language);
+            // getMultipleMatches() also returns no nodes for a name that the pattern
+            // does not capture with $$$; such a $$$NAME keeps the getMatch() lookup.
+            // A meta-variable is a whole node, so the $$$USD in price$$$USD is not one.
+            const multiCaptureNames = new Set(Array.from(pattern.matchAll(/(?<![\w$])\$\$\$([A-Z_][A-Z0-9_]*)(?![\w$])/g), (m) => m[1]));
             const changes = [];
             let totalReplacements = 0;
             for (const filePath of files) {
@@ -441,24 +445,24 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
                         const endOffset = range.end.index;
                         // Build replacement by substituting meta-variables
                         let finalReplacement = replacement;
-                        // Get all captured meta-variables
-                        // ast-grep captures are accessed via match.getMatch() or by variable name
-                        // For simplicity, we'll use a basic approach here
                         const matchedText = match.text();
-                        // Try to get named captures
                         try {
-                            // Replace meta-variables in the replacement string
-                            const metaVars = replacement.match(/\$\$?\$?[A-Z_][A-Z0-9_]*/g) || [];
-                            for (const metaVar of metaVars) {
-                                const varName = metaVar.replace(/^\$+/, "");
-                                const captured = match.getMatch(varName);
-                                if (captured) {
-                                    // Escape $ in captured text to prevent JS replacement patterns
-                                    // ($&, $', $`, $$) from being interpreted by replaceAll
-                                    const safeText = captured.text().replace(/\$/g, "$$$$");
-                                    finalReplacement = finalReplacement.replaceAll(metaVar, safeText);
+                            // One pass with a function replacer: captured code is inserted
+                            // as written ($&, $' and the like), is not scanned again, and
+                            // $A does not replace the start of $AB. A capture of the pattern
+                            // is inserted wherever the replacement names it, also next to
+                            // another one ($$$THEN$$$ELSE).
+                            finalReplacement = replacement.replace(/\$\$\$([A-Z_][A-Z0-9_]*)|\$\$?([A-Z_][A-Z0-9_]*)/g, (metaVar, multiName, singleName) => {
+                                if (multiName !== undefined && multiCaptureNames.has(multiName)) {
+                                    // getMatch() returns null for a $$$ capture: insert the
+                                    // source from its first node to its last, or nothing.
+                                    const nodes = match.getMultipleMatches(multiName);
+                                    if (nodes.length === 0)
+                                        return "";
+                                    return content.slice(nodes[0].range().start.index, nodes[nodes.length - 1].range().end.index);
                                 }
-                            }
+                                return match.getMatch(multiName ?? singleName)?.text() ?? metaVar;
+                            });
                         }
                         catch {
                             // If meta-variable extraction fails, use pattern as-is
@@ -471,10 +475,23 @@ IMPORTANT: dryRun=true (default) only previews changes. Set dryRun=false to appl
                             before: matchedText,
                         });
                     }
-                    // Sort edits in reverse order to apply from end to start
-                    edits.sort((a, b) => b.start - a.start);
+                    // findAll() also returns the matches inside a match (foo(1) in
+                    // foo(foo(1))), and their edits would change code that the outer
+                    // edit replaces. Keep the outer one, as ast-grep's rewrite does: an
+                    // edit that starts inside a kept edit is dropped. findAll() lists an
+                    // outer match first and the sort is stable, so in a + b + c the
+                    // outer sum is kept although a + b starts at the same place.
+                    edits.sort((a, b) => a.start - b.start);
+                    let keptEnd = 0;
+                    const keptEdits = edits.filter((edit) => {
+                        if (edit.start < keptEnd)
+                            return false;
+                        keptEnd = edit.end;
+                        return true;
+                    });
+                    // Apply the kept edits from end to start
                     let newContent = content;
-                    for (const edit of edits) {
+                    for (const edit of keptEdits.reverse()) {
                         const before = newContent.slice(edit.start, edit.end);
                         newContent =
                             newContent.slice(0, edit.start) +

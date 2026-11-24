@@ -9,8 +9,9 @@
  * pass their already-computed warning decision as the twin.
  *
  * Advisory point, shadow-only: the twin always decides; Jev's Noul answer is
- * recorded only. The point declaration lives in the jev registry
- * (hooks/jev/points.ts).
+ * recorded only. If the point is activated anyway, the returned answer is
+ * Jev's, read with noulAnswerIsYes(). The point declaration lives in the jev
+ * registry (hooks/jev/points.ts).
  */
 import type { ResolveResult } from '../hooks/jev/index.js';
 export interface SlopWarningShadowArgs {

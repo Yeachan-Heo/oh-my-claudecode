@@ -8,6 +8,21 @@ const boundary = vi.hoisted(() => ({
     scan: vi.fn(),
     revalidate: vi.fn(),
 }));
+// The real /usr/bin/security exists only on macOS, so a test that needs an
+// unavailable Keychain must not depend on the host: fail the lookup on request.
+const keychain = vi.hoisted(() => ({ unavailable: false }));
+vi.mock('child_process', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        execFileSync: ((file, ...rest) => {
+            if (keychain.unavailable && file === '/usr/bin/security') {
+                throw new Error('mock: Keychain unavailable');
+            }
+            return actual.execFileSync(file, ...rest);
+        }),
+    };
+});
 vi.mock('../../features/rate-limit-wait/rate-limit-monitor.js', async (importOriginal) => ({
     ...await importOriginal(),
     checkRateLimitStatus: boundary.check,
@@ -340,10 +355,12 @@ describe('confirmed quota transitions in the actual daemon polling loop', () => 
         delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
         const originalPlatform = process.platform;
         Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+        keychain.unavailable = true;
         try {
             await start(status(false));
         }
         finally {
+            keychain.unavailable = false;
             Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
         }
         expect(boundary.check).not.toHaveBeenCalled();

@@ -19,7 +19,8 @@ import { spawn } from 'child_process';
 import { resolveDaemonModulePath } from '../../utils/daemon-module-path.js';
 import { getGlobalOmcStatePath } from '../../utils/paths.js';
 import { checkRateLimitStatus, formatRateLimitStatus, isRateLimitStatusDegraded, shouldMonitorBlockedPanes, } from './rate-limit-monitor.js';
-import { isTmuxAvailable, scanForBlockedPanes, revalidateBlockedPanes, sendResumeSequence, formatBlockedPanesSummary, } from './tmux-detector.js';
+import { isTmuxAvailable, scanForBlockedPanes, revalidateBlockedPanes, sendResumeSequence, formatBlockedPanesSummary, isHerdrDetectorEnabled, scanForBlockedHerdrPanes, revalidateBlockedHerdrPanes, sendHerdrResumeSequence, } from './tmux-detector.js';
+import { isHerdrPaneId } from '../../team/tmux-session.js';
 import { isProcessAlive } from '../../platform/index.js';
 import { createInitialState, getUsageProfileHash, scopeStateToCurrentUsageProfile, shouldResumeBlockedPanesOnStatusChange, } from './daemon-state.js';
 // ESM compatibility: __filename is not available in ES modules
@@ -52,6 +53,8 @@ const DAEMON_ENV_ALLOWLIST = [
     'LANG', 'LC_ALL', 'LC_CTYPE',
     // Terminal/tmux (required for tmux integration)
     'TERM', 'TMUX', 'TMUX_PANE',
+    // Multiplexer election + herdr binary pin (non-secret paths/values)
+    'OMC_TEAM_MULTIPLEXER', 'HERDR_BIN_PATH',
     // Temp directories
     'TMPDIR', 'TMP', 'TEMP',
     // XDG directories (Linux)
@@ -357,10 +360,43 @@ async function pollLoop(config) {
                 // Keep prior candidates across limited polls: the stateDir scan only
                 // returns panes with new output. Fresh pane capture authorizes resumes.
             }
+            // Herdr panes are only scanned when the multiplexer elects herdr; the
+            // tmux scan above is untouched on the default backend.
+            if (isNowLimited && isHerdrDetectorEnabled()) {
+                log('Rate limited - scanning for blocked herdr panes', config);
+                const blockedHerdrPanes = await scanForBlockedHerdrPanes(config.paneLinesToCapture);
+                for (const pane of blockedHerdrPanes) {
+                    const existing = state.blockedPanes.find((p) => p.id === pane.id);
+                    if (!existing) {
+                        state.blockedPanes.push(pane);
+                        log(`Detected blocked herdr pane: ${pane.id} in ${pane.session}`, config);
+                    }
+                }
+            }
             // If rate limit just cleared (was limited, now not), attempt resume
             if (shouldResumeBlockedPanes && state.blockedPanes.length > 0) {
                 log('Rate limit cleared! Attempting to resume blocked panes', config);
-                const currentlyBlockedPanes = revalidateBlockedPanes(state.blockedPanes, config.paneLinesToCapture);
+                // Provider-aware revalidation: tmux panes keep the strict
+                // session/window/pane identity match; herdr pane ids are stable and
+                // never reused, so id membership in the live-agent inventory suffices.
+                const tmuxTracked = state.blockedPanes.filter((pane) => !isHerdrPaneId(pane.id));
+                const herdrTracked = state.blockedPanes.filter((pane) => isHerdrPaneId(pane.id));
+                const [tmuxRevalidated, herdrRevalidated] = await Promise.all([
+                    tmuxTracked.length > 0
+                        ? revalidateBlockedPanes(tmuxTracked, config.paneLinesToCapture)
+                        : Promise.resolve([]),
+                    herdrTracked.length > 0
+                        ? revalidateBlockedHerdrPanes(herdrTracked, config.paneLinesToCapture)
+                        : Promise.resolve([]),
+                ]);
+                // Process conclusive provider results independently; retain only inconclusive panes
+                const conclusiveTmuxPanes = tmuxRevalidated ?? [];
+                const conclusiveHerdrPanes = herdrRevalidated ?? [];
+                const hasInconclusiveTmux = tmuxTracked.length > 0 && tmuxRevalidated === null;
+                const hasInconclusiveHerdr = herdrTracked.length > 0 && herdrRevalidated === null;
+                const currentlyBlockedPanes = hasInconclusiveTmux || hasInconclusiveHerdr
+                    ? null
+                    : [...conclusiveTmuxPanes, ...conclusiveHerdrPanes];
                 if (currentlyBlockedPanes === null) {
                     state.resumePending = true;
                     log('Pane revalidation was inconclusive; retaining blocked panes for retry', config);
@@ -371,17 +407,21 @@ async function pollLoop(config) {
                             log(`Skipping already resumed pane: ${pane.id}`, config);
                             continue;
                         }
-                        const currentPane = currentlyBlockedPanes.find((current) => current.id === pane.id &&
-                            current.session === pane.session &&
-                            current.windowIndex === pane.windowIndex &&
-                            current.paneIndex === pane.paneIndex);
+                        const currentPane = isHerdrPaneId(pane.id)
+                            ? currentlyBlockedPanes.find((current) => current.id === pane.id)
+                            : currentlyBlockedPanes.find((current) => current.id === pane.id &&
+                                current.session === pane.session &&
+                                current.windowIndex === pane.windowIndex &&
+                                current.paneIndex === pane.paneIndex);
                         if (!currentPane) {
                             log(`Skipping pane no longer blocked at its saved location: ${pane.id}`, config);
                             continue;
                         }
                         state.totalResumeAttempts++;
                         log(`Attempting resume for pane: ${pane.id}`, config);
-                        const success = sendResumeSequence(pane.id);
+                        const success = isHerdrPaneId(pane.id)
+                            ? await sendHerdrResumeSequence(pane.id)
+                            : sendResumeSequence(pane.id);
                         pane.resumeAttempted = true;
                         pane.resumeSuccessful = success;
                         if (success) {
@@ -601,14 +641,20 @@ export function getDaemonStatus(config) {
  */
 export async function detectBlockedPanes(config) {
     const cfg = getConfig(config);
-    if (!isTmuxAvailable()) {
+    const herdrEnabled = isHerdrDetectorEnabled();
+    if (!isTmuxAvailable() && !herdrEnabled) {
         return {
             success: false,
             message: 'tmux is not available',
         };
     }
     const rateLimitStatus = await checkRateLimitStatus();
-    const blockedPanes = scanForBlockedPanes(cfg.paneLinesToCapture, dirname(cfg.stateFilePath));
+    const blockedPanes = [
+        ...(isTmuxAvailable()
+            ? scanForBlockedPanes(cfg.paneLinesToCapture, dirname(cfg.stateFilePath))
+            : []),
+        ...(herdrEnabled ? await scanForBlockedHerdrPanes(cfg.paneLinesToCapture) : []),
+    ];
     return {
         success: true,
         message: formatBlockedPanesSummary(blockedPanes),

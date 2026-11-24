@@ -71,21 +71,21 @@ function collectHooksFromSettings(settingsPath) {
     return conflicts;
 }
 /**
- * Check for hook conflicts in both profile-level (~/.claude/settings.json)
- * and project-level (./.claude/settings.json).
- *
- * Claude Code settings precedence: project > profile > defaults.
- * We check both levels so the diagnostic is complete.
+ * Check for hook conflicts in profile settings (~/.claude/settings.json),
+ * project settings (./.claude/settings.json), and project-local settings
+ * (./.claude/settings.local.json).
  */
 export function checkHookConflicts() {
     const profileSettingsPath = join(getClaudeConfigDir(), 'settings.json');
     const projectSettingsPath = join(process.cwd(), '.claude', 'settings.json');
+    const localSettingsPath = join(process.cwd(), '.claude', 'settings.local.json');
     const profileHooks = collectHooksFromSettings(profileSettingsPath);
     const projectHooks = collectHooksFromSettings(projectSettingsPath);
-    // Deduplicate by event+command (same hook in both levels should appear once)
+    const localHooks = collectHooksFromSettings(localSettingsPath);
+    // Deduplicate by event+command (same hook in multiple files should appear once)
     const seen = new Set();
     const merged = [];
-    for (const hook of [...projectHooks, ...profileHooks]) {
+    for (const hook of [...localHooks, ...projectHooks, ...profileHooks]) {
         const key = `${hook.event}::${hook.command}`;
         if (!seen.has(key)) {
             seen.add(key);
@@ -126,8 +126,12 @@ export function checkWindowsUnsafePluginHooks() {
                     for (const hook of group.hooks ?? []) {
                         if (hook.type !== 'command' || typeof hook.command !== 'string')
                             continue;
-                        if (isWindowsUnsafePluginHookCommand(hook.command)) {
-                            unsafe.push({ pluginRoot, event, command: hook.command });
+                        const argText = Array.isArray(hook.args)
+                            ? hook.args.filter((item) => typeof item === 'string').join(' ')
+                            : '';
+                        const invocation = `${hook.command} ${argText}`.trim();
+                        if (isWindowsUnsafePluginHookCommand(invocation)) {
+                            unsafe.push({ pluginRoot, event, command: invocation });
                         }
                     }
                 }

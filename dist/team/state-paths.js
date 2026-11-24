@@ -118,6 +118,10 @@ export const TeamPaths = {
     mailbox: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/${workerName}.json`,
     mailboxLockDir: (teamName, workerName) => `.omc/state/team/${teamName}/mailbox/.lock-${workerName}`,
     dispatchRequests: (teamName) => `.omc/state/team/${teamName}/dispatch/requests.json`,
+    // Not `.lock`: that name holds pre-identity-lock mkdir directories, which the file lock cannot read or reclaim.
+    dispatchLock: (teamName) => `.omc/state/team/${teamName}/dispatch/requests.lock`,
+    dispatchLegacyLockDir: (teamName) => `.omc/state/team/${teamName}/dispatch/.lock`,
+    /** @deprecated Use `dispatchLegacyLockDir` instead. Kept for public API compatibility. */
     dispatchLockDir: (teamName) => `.omc/state/team/${teamName}/dispatch/.lock`,
     mailboxNotificationLock: (teamName, requestId) => `.omc/state/team/${teamName}/dispatch/.mailbox-notification-${createHash('sha256').update(requestId).digest('hex')}.lock`,
     workerStatus: (teamName, workerName) => `.omc/state/team/${teamName}/workers/${workerName}/status.json`,
@@ -182,6 +186,9 @@ export const TeamPaths = {
     recoveryResultByTeam: (workspaceHash, teamName, recoveryId) => `.omc/state/team-recovery/by-team/${workspaceHash}/${teamName}/${recoveryId}.json`,
     recoveryFinalIndexLock: (workspaceHash, teamName, recoveryId) => `.omc/state/team-recovery/index-locks/${workspaceHash}/${teamName}/${recoveryId}.lock`,
     scalingRollbackFailure: (teamName, recordedAt) => `.omc/state/team/${teamName}/scaling-rollback/${recordedAt}.json`,
+    recoveryPaneRollbackFailures: (teamName, recoveryId) => `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}`,
+    recoveryPaneSplits: (teamName, recoveryId) => `.omc/state/team/${teamName}/recovery/pane-splits/${recoveryId}`,
+    recoveryPaneSplit: (teamName, recoveryId, paneAttemptId) => `.omc/state/team/${teamName}/recovery/pane-splits/${recoveryId}/${paneAttemptId}.json`,
     recoveryPaneRollbackFailure: (teamName, recoveryId, paneAttemptId, recordedAt) => `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}/${paneAttemptId}-${recordedAt}.json`,
     recoveryAuditIndex: () => '.omc/state/team-recovery/audit.jsonl',
 };

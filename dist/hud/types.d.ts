@@ -351,6 +351,8 @@ export interface HudRenderContext {
     omcVersion: string | null;
     /** Latest available version from npm registry (null if up to date or unknown) */
     updateAvailable: string | null;
+    /** Newer installed OMC version that has no built HUD, so this older HUD is rendering (null if none) */
+    omcUnbuiltVersion?: string | null;
     /** Update channel the cached OMC update belongs to (null if unknown) */
     omcUpdateSource?: 'npm' | 'marketplace' | null;
     /** Installed Claude Code version reported by the statusline stdin payload */

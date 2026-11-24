@@ -1,11 +1,11 @@
 /**
  * Dispatch Queue - Low-level file-based dispatch request operations.
  *
- * Manages dispatch/requests.json with atomic read/write, dedup, and
- * directory-based locking (O_EXCL mkdir) with stale lock detection.
+ * Manages dispatch/requests.json with atomic read/write, dedup, and a
+ * process-identity file lock that is reclaimed only from a dead holder.
  *
  * State file: .omc/state/team/{name}/dispatch/requests.json
- * Lock path:  .omc/state/team/{name}/dispatch/.lock/
+ * Lock paths: .omc/state/team/{name}/dispatch/requests.lock, then dispatch/.lock/
  *
  * Mirrors OMX src/team/state/dispatch.ts behavior exactly.
  */
@@ -16,14 +16,39 @@ import { dirname, join } from 'path';
 import { TeamPaths, absPath } from './state-paths.js';
 import { atomicWriteJson, ensureDirWithMode } from './fs-utils.js';
 import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
+import { withProcessIdentityFileLock } from './process-identity-lock.js';
+import { currentProcessStartIdentity, isProcessIdentityDead } from './team-owner-epoch.js';
+/** Thrown by writers instead of replacing a requests.json they could not parse. */
+export class DispatchStoreInvalidError extends Error {
+    path;
+    reason;
+    constructor(path, reason) {
+        super(`Refusing to overwrite invalid dispatch store ${path} (${reason})`);
+        this.path = path;
+        this.reason = reason;
+        this.name = 'DispatchStoreInvalidError';
+    }
+}
+/** Thrown when the team's dispatch lock stays held past the acquisition deadline. */
+export class DispatchLockTimeoutError extends Error {
+    constructor(teamName, timeoutMs) {
+        super(`Timed out acquiring dispatch lock for ${teamName} after ${timeoutMs}ms. ` +
+            `Set ${OMC_DISPATCH_LOCK_TIMEOUT_ENV} to increase (current: ${timeoutMs}ms, max: ${MAX_DISPATCH_LOCK_TIMEOUT_MS}ms).`);
+        this.name = 'DispatchLockTimeoutError';
+    }
+}
+/** Failures of the team's shared lock or store, which every other enqueue for the team would hit as well. */
+export function isTeamWideDispatchFailure(error) {
+    return error instanceof DispatchLockTimeoutError || error instanceof DispatchStoreInvalidError;
+}
 // ── Lock constants ─────────────────────────────────────────────────────────
 const OMC_DISPATCH_LOCK_TIMEOUT_ENV = 'OMC_TEAM_DISPATCH_LOCK_TIMEOUT_MS';
 const DEFAULT_DISPATCH_LOCK_TIMEOUT_MS = 15_000;
 const MIN_DISPATCH_LOCK_TIMEOUT_MS = 1_000;
 const MAX_DISPATCH_LOCK_TIMEOUT_MS = 120_000;
-const DISPATCH_LOCK_INITIAL_POLL_MS = 25;
-const DISPATCH_LOCK_MAX_POLL_MS = 500;
-const LOCK_STALE_MS = 5 * 60 * 1000;
+const LEGACY_LOCK_STALE_MS = 5 * 60 * 1000;
+const LEGACY_LOCK_INITIAL_POLL_MS = 25;
+const LEGACY_LOCK_MAX_POLL_MS = 500;
 // ── Validation ─────────────────────────────────────────────────────────────
 function validateWorkerName(name) {
     if (!WORKER_NAME_SAFE_PATTERN.test(name)) {
@@ -66,86 +91,121 @@ async function withDispatchLock(teamName, cwd, fn) {
     const root = absPath(cwd, TeamPaths.root(teamName));
     if (!existsSync(root))
         throw new Error(`Team ${teamName} not found`);
-    const lockDir = absPath(cwd, TeamPaths.dispatchLockDir(teamName));
-    const ownerPath = join(lockDir, 'owner');
-    const ownerToken = `${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}`;
     const timeoutMs = resolveDispatchLockTimeoutMs(process.env);
     const deadline = Date.now() + timeoutMs;
-    let pollMs = DISPATCH_LOCK_INITIAL_POLL_MS;
-    await mkdir(dirname(lockDir), { recursive: true });
+    const timedOut = () => new DispatchLockTimeoutError(teamName, timeoutMs);
+    try {
+        return await withProcessIdentityFileLock(absPath(cwd, TeamPaths.dispatchLock(teamName)), () => withLegacyDispatchLockDir(absPath(cwd, TeamPaths.dispatchLegacyLockDir(teamName)), deadline, timedOut, fn), timeoutMs);
+    }
+    catch (error) {
+        if (error instanceof Error && error.message === 'process_identity_lock_timeout')
+            throw timedOut();
+        throw error;
+    }
+}
+async function isLegacyDispatchLockReclaimable(lockDir) {
+    try {
+        const owner = JSON.parse(await readFile(join(lockDir, 'owner'), 'utf8'));
+        if (isProcessIdentityDead(owner))
+            return true;
+    }
+    catch {
+        // Older versions write a non-JSON token; only age can retire their directory.
+    }
+    try {
+        return Date.now() - (await stat(lockDir)).mtimeMs > LEGACY_LOCK_STALE_MS;
+    }
+    catch {
+        return false;
+    }
+}
+// Migration shim: OMC versions without requests.lock still serialize on this mkdir lock; delete once none can be running.
+async function withLegacyDispatchLockDir(lockDir, deadline, timedOut, fn) {
+    const ownerPath = join(lockDir, 'owner');
+    const owner = JSON.stringify({ pid: process.pid, process_started_at: currentProcessStartIdentity(), nonce: randomUUID() });
+    let pollMs = LEGACY_LOCK_INITIAL_POLL_MS;
     while (true) {
         try {
-            await mkdir(lockDir, { recursive: false });
-            try {
-                await writeFile(ownerPath, ownerToken, 'utf8');
-            }
-            catch (error) {
-                await rm(lockDir, { recursive: true, force: true });
-                throw error;
-            }
+            await mkdir(lockDir);
             break;
         }
         catch (error) {
-            const err = error;
-            if (err.code !== 'EEXIST')
+            if (error.code !== 'EEXIST')
                 throw error;
-            try {
-                const info = await stat(lockDir);
-                if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
-                    await rm(lockDir, { recursive: true, force: true });
-                    continue;
-                }
-            }
-            catch {
-                // best effort
-            }
-            if (Date.now() > deadline) {
-                throw new Error(`Timed out acquiring dispatch lock for ${teamName} after ${timeoutMs}ms. ` +
-                    `Set ${OMC_DISPATCH_LOCK_TIMEOUT_ENV} to increase (current: ${timeoutMs}ms, max: ${MAX_DISPATCH_LOCK_TIMEOUT_MS}ms).`);
-            }
-            const jitter = 0.5 + Math.random() * 0.5;
-            await new Promise((resolve) => setTimeout(resolve, Math.floor(pollMs * jitter)));
-            pollMs = Math.min(pollMs * 2, DISPATCH_LOCK_MAX_POLL_MS);
         }
+        if (await isLegacyDispatchLockReclaimable(lockDir)) {
+            await rm(lockDir, { recursive: true, force: true });
+            continue;
+        }
+        if (Date.now() >= deadline)
+            throw timedOut();
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+        pollMs = Math.min(pollMs * 2, LEGACY_LOCK_MAX_POLL_MS);
+    }
+    try {
+        await writeFile(ownerPath, owner, 'utf8');
+    }
+    catch (error) {
+        await rm(lockDir, { recursive: true, force: true });
+        throw error;
     }
     try {
         return await fn();
     }
     finally {
-        try {
-            const currentOwner = await readFile(ownerPath, 'utf8');
-            if (currentOwner.trim() === ownerToken) {
-                await rm(lockDir, { recursive: true, force: true });
-            }
-        }
-        catch {
-            // best effort
+        // Release is best effort: fn() may already have committed, and a failed rm must not report it as failed.
+        if (await readFile(ownerPath, 'utf8').catch(() => null) === owner) {
+            await rm(lockDir, { recursive: true, force: true }).catch(() => undefined);
         }
     }
 }
 // ── IO ─────────────────────────────────────────────────────────────────────
-async function readDispatchRequestsFromFile(teamName, cwd) {
+async function readDispatchStore(teamName, cwd) {
     const path = absPath(cwd, TeamPaths.dispatchRequests(teamName));
+    let text;
     try {
-        if (!existsSync(path))
-            return [];
-        const raw = await readFile(path, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed))
-            return [];
-        return parsed
-            .map((entry) => normalizeDispatchRequest(teamName, entry))
-            .filter((req) => req !== null);
+        text = await readFile(path, 'utf8');
+    }
+    catch (error) {
+        return error.code === 'ENOENT'
+            ? { kind: 'ok', entries: [] }
+            : { kind: 'invalid', reason: 'unreadable' };
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(text);
     }
     catch {
-        return [];
+        return { kind: 'invalid', reason: 'json' };
     }
+    if (!Array.isArray(parsed))
+        return { kind: 'invalid', reason: 'non_array' };
+    return {
+        kind: 'ok',
+        entries: parsed.map((raw) => {
+            const request = isPlainRecord(raw) ? normalizeDispatchRequest(teamName, raw) : null;
+            return request ? { kind: 'request', request } : { kind: 'unrecognized', raw };
+        }),
+    };
 }
-async function writeDispatchRequestsToFile(teamName, requests, cwd) {
+function requestsOf(entries) {
+    return entries.flatMap((entry) => (entry.kind === 'request' ? [entry.request] : []));
+}
+async function readDispatchRequestsFromFile(teamName, cwd) {
+    const store = await readDispatchStore(teamName, cwd);
+    return store.kind === 'ok' ? requestsOf(store.entries) : [];
+}
+async function readDispatchStoreForWrite(teamName, cwd) {
+    const store = await readDispatchStore(teamName, cwd);
+    if (store.kind === 'invalid') {
+        throw new DispatchStoreInvalidError(absPath(cwd, TeamPaths.dispatchRequests(teamName)), store.reason);
+    }
+    return store.entries;
+}
+async function writeDispatchStore(teamName, entries, cwd) {
     const path = absPath(cwd, TeamPaths.dispatchRequests(teamName));
-    const dir = dirname(path);
-    ensureDirWithMode(dir);
-    atomicWriteJson(path, requests);
+    ensureDirWithMode(dirname(path));
+    atomicWriteJson(path, entries.map((entry) => (entry.kind === 'request' ? entry.request : entry.raw)));
 }
 // ── Normalization ──────────────────────────────────────────────────────────
 export function normalizeDispatchRequest(teamName, raw, nowIso = new Date().toISOString()) {
@@ -407,8 +467,8 @@ export async function enqueueDispatchRequest(teamName, requestInput, cwd) {
     }
     validateWorkerName(requestInput.to_worker);
     return await withDispatchLock(teamName, cwd, async () => {
-        const requests = await readDispatchRequestsFromFile(teamName, cwd);
-        const existing = requests.find((req) => equivalentPendingDispatch(req, requestInput));
+        const entries = await readDispatchStoreForWrite(teamName, cwd);
+        const existing = requestsOf(entries).find((req) => equivalentPendingDispatch(req, requestInput));
         if (existing)
             return { request: existing, deduped: true };
         const nowIso = new Date().toISOString();
@@ -422,8 +482,8 @@ export async function enqueueDispatchRequest(teamName, requestInput, cwd) {
         }, nowIso);
         if (!request)
             throw new Error('failed_to_normalize_dispatch_request');
-        requests.push(request);
-        await writeDispatchRequestsToFile(teamName, requests, cwd);
+        entries.push({ kind: 'request', request });
+        await writeDispatchStore(teamName, entries, cwd);
         return { request, deduped: false };
     });
 }
@@ -446,11 +506,12 @@ export async function readDispatchRequest(teamName, requestId, cwd) {
 }
 export async function transitionDispatchRequest(teamName, requestId, from, to, patch = {}, cwd) {
     return await withDispatchLock(teamName, cwd, async () => {
-        const requests = await readDispatchRequestsFromFile(teamName, cwd);
-        const index = requests.findIndex((req) => req.request_id === requestId);
-        if (index < 0)
+        const entries = await readDispatchStoreForWrite(teamName, cwd);
+        const index = entries.findIndex((entry) => entry.kind === 'request' && entry.request.request_id === requestId);
+        const entry = entries[index];
+        if (entry?.kind !== 'request')
             return null;
-        const existing = requests[index];
+        const existing = entry.request;
         if (existing.status !== from && existing.status !== to)
             return null;
         if (!canTransitionDispatchStatus(existing.status, to))
@@ -472,8 +533,8 @@ export async function transitionDispatchRequest(teamName, requestId, from, to, p
             next.delivered_at = patch.delivered_at ?? nowIso;
         if (to === 'failed')
             next.failed_at = patch.failed_at ?? nowIso;
-        requests[index] = next;
-        await writeDispatchRequestsToFile(teamName, requests, cwd);
+        entries[index] = { kind: 'request', request: next };
+        await writeDispatchStore(teamName, entries, cwd);
         return next;
     });
 }

@@ -13,7 +13,7 @@
  * state shape.
  */
 import { isAlreadyTriggered, isCodeSimplifierEnabled, } from './index.js';
-import { recordJudgment } from '../jev/index.js';
+import { isJevStateOmitIdsEnabled, noulAnswerIsYes, recordJudgment } from '../jev/index.js';
 /**
  * The fire-once heuristic, computed side-effect-free (no marker write).
  * Mirrors processCodeSimplifier's early-return logic.
@@ -35,16 +35,18 @@ export function computeSimplifierTriggerTwin(stateDir, files) {
 export function recordSimplifierTriggerShadow(args) {
     return recordJudgment('simplifier-trigger', {
         state: {
-            cwd: args.cwd,
+            // The working directory names the machine, not the change: left out with OMC_JEV_STATE_OMIT_IDS=1.
+            ...(isJevStateOmitIdsEnabled() ? {} : { cwd: args.cwd }),
             files: args.files,
             source: 'code-simplifier-stop',
         },
         twin: () => computeSimplifierTriggerTwin(args.stateDir, args.files),
         mapHeuristic: (result, questionSet) => result,
         mapAnswer: (answer) => {
-            // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
-            return answer.noul === true;
+            // Jev Noul answer: noul is the probability of "yes" (0-1)
+            return noulAnswerIsYes(answer);
         },
+        logContext: { cwd: args.cwd },
         fetchFn: args.fetchFn,
     });
 }

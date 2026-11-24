@@ -63,6 +63,49 @@ export declare function parseDisallowedTools(agentName: string): string[] | unde
  */
 export declare function extractDisallowedTools(content: string): string[] | undefined;
 /**
+ * Environment variable that adds tools to every agent's disallowedTools list.
+ * Comma-separated tool names or patterns; unset or empty changes nothing.
+ */
+export declare const EXTRA_DISALLOWED_TOOLS_ENV = "OMC_AGENT_EXTRA_DISALLOWED_TOOLS";
+/**
+ * Tool names and patterns the `desktop` preset expands to: the desktop app's
+ * artifact tools and its turn, session, visualize and browser tool families.
+ */
+export declare const DESKTOP_APP_DISALLOWED_TOOLS: readonly string[];
+/**
+ * Read the extra disallowed tools from OMC_AGENT_EXTRA_DISALLOWED_TOOLS.
+ * Tokens are trimmed, empty tokens and tokens containing a line break are
+ * ignored, `desktop` (any case) expands to DESKTOP_APP_DISALLOWED_TOOLS, and
+ * duplicates are removed keeping the first occurrence.
+ */
+export declare function getExtraDisallowedTools(env?: NodeJS.ProcessEnv): string[];
+/**
+ * Append extra tools to an agent's own disallowedTools list. Entries of the
+ * agent's list are never removed or reordered. With no extra tools the
+ * original value is returned unchanged (including `undefined`).
+ */
+export declare function mergeDisallowedTools(base: string[] | undefined, extra: readonly string[]): string[] | undefined;
+/**
+ * Whether a token can be written into a frontmatter line as a plain YAML
+ * text value. Rejected: line breaks (including U+0085, U+2028 and U+2029), a
+ * colon followed by whitespace or ending the token, a `#` preceded by
+ * whitespace, a leading character that YAML gives a meaning (`-`, `?`, `:`,
+ * `#`, `&`, `*`, `!`, `|`, `>`, quotes, `%`, `@`, a backtick, `[`, `{`, `]`, `}`), and
+ * words YAML reads as null, boolean or number instead of text. A `*` inside
+ * a pattern such as `mcp__server__*` is accepted.
+ */
+export declare function isPlainYamlToken(token: string): boolean;
+/**
+ * Apply extra disallowed tools to agent markdown: append them to the
+ * `disallowedTools:` frontmatter line, or add that line when the agent has
+ * none. Tokens that are not plain YAML text (see isPlainYamlToken) are
+ * skipped. Returns the content unchanged when no usable extra tool remains,
+ * there is no frontmatter, or the existing `disallowedTools:` entry is
+ * written in a form this does not rewrite (empty value, block list, flow
+ * list, trailing comment).
+ */
+export declare function applyExtraDisallowedToolsToMarkdown(content: string, extra: readonly string[]): string;
+/**
  * Standard path for open questions file
  */
 export declare const OPEN_QUESTIONS_PATH = ".omc/plans/open-questions.md";

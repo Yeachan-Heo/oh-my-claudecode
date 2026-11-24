@@ -266,6 +266,124 @@ export function extractDisallowedTools(content) {
     return value.split(',').map(t => t.trim()).filter(Boolean);
 }
 /**
+ * Environment variable that adds tools to every agent's disallowedTools list.
+ * Comma-separated tool names or patterns; unset or empty changes nothing.
+ */
+export const EXTRA_DISALLOWED_TOOLS_ENV = 'OMC_AGENT_EXTRA_DISALLOWED_TOOLS';
+/**
+ * Tool names and patterns the `desktop` preset expands to: the desktop app's
+ * artifact tools and its turn, session, visualize and browser tool families.
+ */
+export const DESKTOP_APP_DISALLOWED_TOOLS = [
+    'Artifact',
+    'ArtifactComments',
+    'ArtifactData',
+    'ArtifactCheck',
+    'mcp__ccd_turn__*',
+    'mcp__ccd_session__*',
+    'mcp__visualize__*',
+    'mcp__Claude_Browser__*',
+];
+/**
+ * Read the extra disallowed tools from OMC_AGENT_EXTRA_DISALLOWED_TOOLS.
+ * Tokens are trimmed, empty tokens and tokens containing a line break are
+ * ignored, `desktop` (any case) expands to DESKTOP_APP_DISALLOWED_TOOLS, and
+ * duplicates are removed keeping the first occurrence.
+ */
+export function getExtraDisallowedTools(env = process.env) {
+    const raw = env[EXTRA_DISALLOWED_TOOLS_ENV];
+    if (!raw)
+        return [];
+    const tokens = [];
+    for (const part of raw.split(',')) {
+        const token = part.trim();
+        if (!token || /[\r\n]/.test(token))
+            continue;
+        if (token.toLowerCase() === 'desktop') {
+            tokens.push(...DESKTOP_APP_DISALLOWED_TOOLS);
+        }
+        else {
+            tokens.push(token);
+        }
+    }
+    return [...new Set(tokens)];
+}
+/**
+ * Append extra tools to an agent's own disallowedTools list. Entries of the
+ * agent's list are never removed or reordered. With no extra tools the
+ * original value is returned unchanged (including `undefined`).
+ */
+export function mergeDisallowedTools(base, extra) {
+    if (extra.length === 0)
+        return base;
+    const merged = [...(base ?? [])];
+    for (const tool of extra) {
+        if (!merged.includes(tool))
+            merged.push(tool);
+    }
+    return merged;
+}
+/**
+ * Whether a token can be written into a frontmatter line as a plain YAML
+ * text value. Rejected: line breaks (including U+0085, U+2028 and U+2029), a
+ * colon followed by whitespace or ending the token, a `#` preceded by
+ * whitespace, a leading character that YAML gives a meaning (`-`, `?`, `:`,
+ * `#`, `&`, `*`, `!`, `|`, `>`, quotes, `%`, `@`, a backtick, `[`, `{`, `]`, `}`), and
+ * words YAML reads as null, boolean or number instead of text. A `*` inside
+ * a pattern such as `mcp__server__*` is accepted.
+ */
+export function isPlainYamlToken(token) {
+    if (/[\r\n\u0085\u2028\u2029]/.test(token))
+        return false;
+    if (/^[-?:#&*!|>'"%@`[{\}\]]/.test(token))
+        return false;
+    if (/:(\s|$)/.test(token) || /\s#/.test(token))
+        return false;
+    if (/^(?:~|null|true|false|\.inf|\.nan|0x[0-9a-f]+|0o[0-7]+|\+?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)$/i.test(token)) {
+        return false;
+    }
+    return true;
+}
+/**
+ * Apply extra disallowed tools to agent markdown: append them to the
+ * `disallowedTools:` frontmatter line, or add that line when the agent has
+ * none. Tokens that are not plain YAML text (see isPlainYamlToken) are
+ * skipped. Returns the content unchanged when no usable extra tool remains,
+ * there is no frontmatter, or the existing `disallowedTools:` entry is
+ * written in a form this does not rewrite (empty value, block list, flow
+ * list, trailing comment).
+ */
+export function applyExtraDisallowedToolsToMarkdown(content, extra) {
+    const usable = extra.filter(isPlainYamlToken);
+    if (usable.length === 0)
+        return content;
+    const match = content.match(/^(\uFEFF?---)(\r?\n)([\s\S]*?)(\r?\n---)(?=\r?\n|$)/);
+    if (!match)
+        return content;
+    const [head, open, newline, yaml, close] = match;
+    const base = extractDisallowedTools(content);
+    const existing = /^disallowedTools:(.*)$/m;
+    const existingMatch = yaml.match(existing);
+    const line = `disallowedTools: ${(mergeDisallowedTools(base, usable) ?? []).join(', ')}`;
+    let nextYaml;
+    if (base === undefined) {
+        // A key that exists but yields no list (empty value, block list) is left alone.
+        if (existingMatch !== null)
+            return content;
+        nextYaml = `${yaml}${newline}${line}`;
+    }
+    else {
+        if (existingMatch === null)
+            return content;
+        const value = existingMatch[1].trim();
+        if (value.startsWith('[') || /\s#/.test(value))
+            return content;
+        // A replacer function keeps `$` sequences in the tokens literal.
+        nextYaml = yaml.replace(existing, () => line);
+    }
+    return `${open}${newline}${nextYaml}${close}${content.slice(head.length)}`;
+}
+/**
  * Standard path for open questions file
  */
 export const OPEN_QUESTIONS_PATH = '.omc/plans/open-questions.md';

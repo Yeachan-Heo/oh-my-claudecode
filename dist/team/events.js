@@ -13,6 +13,7 @@ import { mkdir, readFile, appendFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { TeamPaths, absPath } from './state-paths.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import { parseJsonLines } from '../lib/jsonl.js';
 import { countOutstandingForWorker } from './mailbox-outstanding.js';
 /**
  * Append a team event to the JSONL event log.
@@ -39,12 +40,7 @@ export async function readTeamEvents(teamName, cwd) {
     if (!existsSync(p))
         return [];
     try {
-        const raw = await readFile(p, 'utf8');
-        return raw
-            .trim()
-            .split('\n')
-            .filter(Boolean)
-            .map((line) => JSON.parse(line));
+        return parseJsonLines(await readFile(p, 'utf8'));
     }
     catch {
         return [];

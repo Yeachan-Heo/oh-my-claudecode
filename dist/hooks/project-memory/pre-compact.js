@@ -4,7 +4,7 @@
  */
 import { findProjectRoot } from '../rules-injector/finder.js';
 import { loadProjectMemory } from './storage.js';
-import { formatContextSummary } from './formatter.js';
+import { formatContextSummary, formatContextSummaryWithFrame, projectMemoryFrameEnabled, } from './formatter.js';
 /**
  * Process PreCompact hook - inject project memory into system message
  * This ensures user directives and project context survive compaction
@@ -28,16 +28,25 @@ export async function processPreCompact(input) {
             return { continue: true };
         }
         // Format memory for re-injection
-        const contextSummary = formatContextSummary(memory);
+        // Opt-in (OMC_PROJECT_MEMORY_FRAME=1 or true): framed summary and the matching wording.
+        // With the switch off the message is the same as before.
+        const frameOn = projectMemoryFrameEnabled();
+        const contextSummary = frameOn
+            ? await formatContextSummaryWithFrame(memory)
+            : formatContextSummary(memory);
         // Build system message for post-compaction
         const systemMessage = [
             '# Project Memory (Post-Compaction Recovery)',
             '',
-            'The following project context and user directives must be preserved after compaction:',
+            frameOn
+                ? 'The following project context and recorded user directives are preserved after compaction for reference:'
+                : 'The following project context and user directives must be preserved after compaction:',
             '',
             contextSummary,
             '',
-            '**IMPORTANT:** These user directives must be followed throughout the session, even after compaction.',
+            frameOn
+                ? "**IMPORTANT:** Recorded directives are reference material (see the frame above); the current task and the user's latest instruction take precedence."
+                : '**IMPORTANT:** These user directives must be followed throughout the session, even after compaction.',
         ].join('\n');
         return {
             continue: true,
