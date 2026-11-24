@@ -580,10 +580,27 @@ function runnerMatch(piece) {
  * less. The subset options are listed per runner (SUBSET_OPTIONS); a token names one when it equals the
  * option or starts with `option=` or `option:` (`-run=X`, `-only-testing:Suite`).
  */
-const WEAKEN = /^(?:--passWithNoTests|--pass-on-no-patterns|--exclude|--testPathIgnorePatterns|--exit-zero|--noCheck)(?:=|$)/;
+const WEAKEN = /^(?:--passWithNoTests|--pass-on-no-patterns|--exclude|--testPathIgnorePatterns|--exit-zero|--noCheck|--if-present)(?:=|$)/;
 
-/** The two boolean options of WEAKEN that take `=false` (eslint, vitest): the run is then the plain check. */
-const OFF_VALUE = /^--(?:passWithNoTests|pass-on-no-patterns)=false$/;
+/** The boolean options of WEAKEN that take `=false` (eslint, vitest, npm): the run is then the plain check. */
+const OFF_VALUE = /^--(?:passWithNoTests|pass-on-no-patterns|if-present)=false$/;
+
+/**
+ * The options of a package manager that select one package of a workspace: `-w`/`--workspace` of npm, `-F`/`--filter`/`--filter-prod`
+ * of pnpm and `-F`/`--filter` of bun (`pnpm -w` is the workspace root, `npm --workspaces` all packages: no selection). They are
+ * read before `--` only, since the words behind it go to the script.
+ */
+const WORKSPACE_SELECTORS = {
+  npm: /^(?:-w|--workspace)(?:=|$)/,
+  pnpm: /^(?:-F|--filter|--filter-prod)(?:=|$)/,
+  bun: /^(?:-F|--filter)(?:=|$)/,
+};
+function selectsPackage(tokens) {
+  const selector = WORKSPACE_SELECTORS[baseName(tokens[0] ?? '')];
+  if (selector === undefined) return false;
+  const end = tokens.indexOf('--');
+  return (end === -1 ? tokens : tokens.slice(0, end)).some((token) => selector.test(token));
+}
 
 /** go flags take one or two dashes and an optional `test.` prefix: `-run`, `--run`, `-test.run`. */
 const goOptions = (names) => names.flatMap((name) => [`-${name}`, `--${name}`, `-test.${name}`, `--test.${name}`]);
@@ -701,6 +718,7 @@ const FILE_TOKEN = /^\S+\.\w{1,8}(?:::\S*)?$/;
 function pieceNarrows(piece, kind, runner) {
   const tokens = piece.replace(ALL_REDIRECTIONS, ' ').split(/\s+/).filter(Boolean);
   if (tokens.some((t) => WEAKEN.test(t) && !OFF_VALUE.test(t))) return true;
+  if (selectsPackage(tokens)) return true;
   if (kind !== 'test') return false;
   if (optionTokens(tokens, runner).some((t) => selectsSubset(t, runner))) return true;
   if (runner === 'cargo' && cargoNarrows(tokens)) return true;

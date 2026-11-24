@@ -285,6 +285,11 @@ it('options that run a subset of the tests, or none, narrow a test run of every 
     'make test -k a', 'cargo nextest run -E "test(foo)"', 'cargo nextest run --filter-expr "test(foo)"', 'cargo nextest run --partition count:1/2',
     'cargo nextest run --run-ignored ignored-only', 'npm test -- --dir x', 'pnpm --dir pkg test --dir x', 'npm test -- -t name', 'rspec -t focus', 'jest -t name',
     'dotnet test -t', 'nox -t tag', 'npm test -- --passWithNoTests', 'pnpm test --passWithNoTests',
+    // an optional script is a no-op when the package has none (exit 0, nothing ran), and a workspace selector runs one package
+    'npm run test --if-present', 'npm test --if-present', 'pnpm run test --if-present', 'yarn run test --if-present', 'bun run test --if-present',
+    'npm run build --if-present', 'npm run lint --if-present=true', 'npm --workspace green test', 'npm -w green test', 'npm test -w green',
+    'npm test --workspace=green', 'npm test --workspace green --workspace blue', 'npm run test:unit -w a --workspaces', 'pnpm -F x test', 'pnpm test -F x',
+    'pnpm --filter-prod x test', 'pnpm --filter=x test', 'bun -F x test', 'sudo npm -w a test',
   ];
   for (const cmd of narrowing) {
     const got = classifyCommand(cmd);
@@ -303,6 +308,9 @@ it('options that run a subset of the tests, or none, narrow a test run of every 
     'cargo test --target-dir out', 'cargo test --color always', 'dotnet test', 'dotnet test --no-build', 'rspec', 'mix test', 'phpunit', 'deno test',
     'ctest', 'ctest -j 4', 'make test', 'make check', 'npm test', 'npm test --silent', 'npm run test -- --reporter dot', 'pnpm -r test', 'yarn test --ci',
     'npm install --ignore-scripts && npm test',
+    // all workspaces, the workspace root, a negated option and a flag behind `--` for the script are no selection of a package
+    'npm test --workspaces', 'npm test --workspaces --include-workspace-root', 'npm run test --if-present=false', 'npm run test --no-if-present',
+    'pnpm -w test', 'pnpm --workspace-root test', 'npm test -- -w', 'npm test -- --workspace x', 'pnpm -r test --parallel', 'npm test --workspaces=true',
     // `--run` ends the watch mode of vitest behind a script; `--watch=false` and `--bail` select nothing either
     'npm test -- --run', 'npm test --run', 'pnpm test --run', 'yarn test --run', 'npm run test -- --run', 'bun run test -- --run', 'npm run test -- --watch=false',
     'npm test -- --bail', 'pnpm --dir pkg test', 'pnpm --dir=pkg test', 'pnpm -C pkg test', 'npm --prefix pkg test', 'vitest --run',
@@ -1826,6 +1834,24 @@ it('quoted strings and here-document delimiter words are read in linear time', (
   assert.equal(got[0].isCheck, true, 'the semicolon behind a long string splits');
   assert.equal(got[6].isCheck, true, 'the line after a delimiter of 40000 characters is a command');
   assert.equal(got[7].isCheck, false, 'a body behind a delimiter of 40000 characters is cut');
+});
+
+it('package selectors and the optional-script flag are read in linear time and keep their result', () => {
+  const flags = (token: string) => `${token} `.repeat(40);
+  const word = 'a'.repeat(40000);
+  const got = classifyInChild<{ isCheck: boolean; narrowed: boolean }>([
+    `npm ${flags('--silent')}test`,
+    `npm ${flags('-w')}test`,
+    `npm ${flags('--workspaces')}test`,
+    `npm test ${flags('--if-present=false')}`,
+    `npm test ${flags('--if-present=false')}--if-present`,
+    `pnpm ${flags('-F x')}test -- ${flags('-w')}`,
+    `npm test -w ${word}`,
+    `npm test ${word} -- -w x`,
+    `npm test ${'-w '.repeat(15000)}`,
+    `npm test ${'-- '.repeat(15000)}-w`,
+  ]);
+  assert.deepEqual(got.map((one) => one.narrowed), [false, true, false, false, true, true, true, false, true, false]);
 });
 
 it('a redirection with a digit descriptor is no argument, glued to the word or not', () => {
