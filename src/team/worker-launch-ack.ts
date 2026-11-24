@@ -652,6 +652,16 @@ export async function addToWorkerLaunchFencedCapture(attempt: WorkerLaunchAttemp
   return added.length === 0 || await persistWorkerLaunchFencedCapture(attempt, [...held, ...added]);
 }
 
+/**
+ * Removes the capture a caller persisted for an attempt that was not retired: the operation that wrote it ended without the provider being
+ * terminated (a rejected shutdown, a scale down that stopped before its effects), so a later run must not signal what it names. Once the
+ * attempt is retired the capture is what a retry needs and stays.
+ */
+export async function discardWorkerLaunchFencedCapture(attempt: WorkerLaunchAttempt): Promise<void> {
+  if (existsSync(`${attempt.decisionPath}.retired`)) return;
+  await unlink(`${attempt.decisionPath}.retired.fenced-capture`).catch(() => undefined);
+}
+
 const DECIMAL_INTEGER_TEXT = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
 
 function parseExactInteger(raw: string): number | null {

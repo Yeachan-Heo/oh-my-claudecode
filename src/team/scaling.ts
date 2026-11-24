@@ -100,6 +100,7 @@ import {
 import { resolveRuntimeCliPath } from "./runtime-owner-client.js";
 import {
   addToWorkerLaunchFencedCapture,
+  discardWorkerLaunchFencedCapture,
   loadWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
 } from "./worker-launch-ack.js";
@@ -2319,6 +2320,8 @@ export async function scaleDownOwned(
         { paneId: string; trees: PaneProcessTree[] }
       >();
       const captureUnsaved: string[] = [];
+      // the launch attempts a capture was written for: removed again when the scale down stops before it terminates any provider
+      const capturedAttempts = new Map<string, Awaited<ReturnType<typeof loadWorkerLaunchAttempt>>>();
       const captureEarlyPaneTree = async (
         worker: (typeof targetWorkers)[number],
       ): Promise<void> => {
@@ -2366,6 +2369,7 @@ export async function scaleDownOwned(
                   runtimeCliPath: resolveRuntimeCliPath(),
                 })
               : null;
+          if (attempt) capturedAttempts.set(worker.name, attempt);
           if (
             !attempt ||
             !(await addToWorkerLaunchFencedCapture(attempt, [
@@ -2444,6 +2448,7 @@ export async function scaleDownOwned(
         return { ok: false, error: reason };
       }
       if (!(await reserveEffects().catch(() => false))) {
+        for (const attempt of capturedAttempts.values()) if (attempt) await discardWorkerLaunchFencedCapture(attempt).catch(() => undefined);
         await markScaleDownFailed("scale_down_fence_lost_before_effects");
         return { ok: false, error: "team_mutation_busy" };
       }

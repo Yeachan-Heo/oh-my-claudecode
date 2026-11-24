@@ -25,6 +25,7 @@ import {
   readAndConsumeWorkerLaunchDescriptor,
   retireWorkerLaunchAttempt,
   addToWorkerLaunchFencedCapture,
+  discardWorkerLaunchFencedCapture,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   terminateWorkerLaunchProvider,
   revokeWorkerLaunchAttempt,
@@ -939,6 +940,19 @@ describe('worker launch acknowledgement', () => {
     await expect(readFile(capturePath, 'utf8')).resolves.toContain('"capture":{');
     await writeFile(capturePath, '{not json', 'utf8');
     await expect(addToWorkerLaunchFencedCapture(launchAttempt, [second])).resolves.toBe(false);
+  });
+
+  it('discards a persisted capture of an attempt that was not retired, and keeps it once the attempt is retired', async () => {
+    const launchAttempt = await attempt();
+    const capturePath = `${launchAttempt.decisionPath}.retired.fenced-capture`;
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'start-4001']] }])).resolves.toBe(true);
+    await discardWorkerLaunchFencedCapture(launchAttempt);
+    expect(existsSync(capturePath)).toBe(false);
+    await discardWorkerLaunchFencedCapture(launchAttempt); // nothing there: no error
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'start-4001']] }])).resolves.toBe(true);
+    await writeFile(`${launchAttempt.decisionPath}.retired`, '{}', 'utf8'); // the provider is being terminated: a retry needs the capture
+    await discardWorkerLaunchFencedCapture(launchAttempt);
+    expect(existsSync(capturePath)).toBe(true);
   });
 
   it('replaces the persisted capture with what the hook returns, and does not terminate the provider when that cannot be written', async () => {

@@ -7,7 +7,9 @@ import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { resolveRuntimeCliPath } from '../runtime-owner-client.js';
 import { reserveTeamInstance } from '../team-instance.js';
 import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
+import { serializePaneTree } from '../pane-tree-read.js';
 import {
+  addToWorkerLaunchFencedCapture,
   awaitWorkerLaunchAcknowledgement,
   awaitWorkerLaunchProviderStarted,
   buildWorkerLaunchBootstrapSpec,
@@ -537,6 +539,34 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
       expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
       expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
       await terminateWorkerLaunchProvider(attempt, 2_000); // the shutdown left the provider running; the helper waits for it to end
+    });
+  }, 60_000);
+
+  // A shutdown that a worker rejects ends with the workers running and no provider terminated: what was saved for the cleanup that did not
+  // happen is removed, and a later shutdown with the switch off signals nothing, whatever an earlier run saved.
+  it('removes the saved pane trees when a worker rejects the shutdown', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    await withAcceptedProvider('pane-tree-rejected-team', async (teamRoot, _provider, attempt) => {
+      const workerDir = join(teamRoot, 'workers', 'worker-1');
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => FIXTURE_TREE);
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      const shutdown = shutdownTeamV2('pane-tree-rejected-team', cwd, { timeoutMs: 8_000 });
+      const captureFile = `${attempt.decisionPath}.retired.fenced-capture`;
+      await vi.waitFor(async () => expect(await exists(captureFile)).toBe(true), { timeout: 8_000, interval: 10 });
+      await writeJson(cwd, join(workerDir, 'shutdown-ack.json'), { status: 'reject', reason: 'still working', updated_at: new Date().toISOString() });
+      await expect(shutdown).rejects.toThrow(/shutdown_rejected/);
+      expect(await exists(captureFile)).toBe(false);
+      await terminateWorkerLaunchProvider(attempt, 2_000);
+    });
+  }, 60_000);
+
+  it('signals no saved tree when the switch is off, and the saved capture is not used', async () => {
+    await withAcceptedProvider('pane-tree-switch-off-team', async (_teamRoot, _provider, attempt) => {
+      await expect(addToWorkerLaunchFencedCapture(attempt, [serializePaneTree(FIXTURE_TREE)])).resolves.toBe(true); // left by an earlier run with the switch on
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      await shutdownTeamV2('pane-tree-switch-off-team', cwd, { timeoutMs: 0, force: true });
+      expect(tmuxSessionMocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0]).filter(Boolean)).toEqual([]);
     });
   }, 60_000);
 });

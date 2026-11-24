@@ -956,7 +956,7 @@ describe('task list: session retention sweep', () => {
       expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(false);
     });
 
-    it('a live list that has settled calls of its own keeps its base: the list of the moved tree is kept next to it, and a row says so', () => {
+    it('a live list that has settled calls of its own by task id is put over the list of the moved tree: the tasks only the moved list holds are not lost', () => {
       fresh();
       const now = Date.now();
       const sid = session();
@@ -965,10 +965,25 @@ describe('task list: session retention sweep', () => {
         create(sid, 2, 'Settled in the new directory', now - 50_000);
         create(sid, 3, 'In the window', now);
       });
-      expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(true);
-      expect(JSON.parse(readFileSync(join(root(), sid, 'main.json.moved'), 'utf8')).items.map((x) => x.content)).toEqual(['From the moved tree']);
-      expect(L.readList(sid, 'main', envFor()).items.map((x) => x.content)).toEqual(['Settled in the new directory', 'In the window']);
-      expect(logRows('task-list.jsonl').some((x) => x.event === 'moved_list_set_aside')).toBe(true);
+      expect(L.readList(sid, 'main', envFor()).items.map((x) => `${x.id} ${x.content}`)).toEqual(['1 From the moved tree', '2 Settled in the new directory', '3 In the window']);
+      const file = JSON.parse(readFileSync(join(root(), sid, 'main.json'), 'utf8'));
+      expect(file.items.map((x) => x.id)).toEqual(['1', '2', '3']); // the file shows what the events give, as soon as the merge is done
+      expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(false);
+      expect(logRows('task-list.jsonl').some((x) => x.event === 'moved_list_set_aside' && String(x.file).startsWith(sid))).toBe(false);
+    });
+
+    it('a recent call of the moved tree on a historical task is not lost when the new directory has settled calls of its own', () => {
+      fresh();
+      const now = Date.now();
+      const sid = session();
+      create(sid, 1, 'Historical task', now - 120_000); // settled long ago: in the base of the moved list, in no event
+      L.recordListCall(postToolUse(sid, 'TaskUpdate', { taskId: '1', status: 'completed' }), envFor(), now - 100_000); // only this call is still an event
+      moveAndSweep(sid, () => {
+        create(sid, 2, 'Settled in the new directory', now - 30_000);
+        create(sid, 3, 'In the window', now);
+      });
+      expect(L.readList(sid, 'main', envFor()).items.map((x) => `${x.id} ${x.content}:${x.status}`)).toEqual(['1 Historical task:completed', '2 Settled in the new directory:pending', '3 In the window:pending']);
+      expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(false);
     });
 
     // The sweep was stopped right after it moved the directory (a hook is stopped by the host after 3 s), so the tree stayed hidden while the

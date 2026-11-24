@@ -565,7 +565,11 @@ function adoptMovedBase(moved, live, env, held = null) {
     const m = readRecord(moved).record;
     const read = readRecord(live);
     const l = read.record;
-    if (!Array.isArray(m?.items) || !Array.isArray(l?.items) || l.base_name || (Array.isArray(l.folded) && l.folded.length > 0)) return;
+    if (!Array.isArray(m?.items) || !Array.isArray(l?.items)) return;
+    if (l.base_name || (Array.isArray(l.folded) && l.folded.length > 0)) {
+      adopted = rebaseOnMoved(m, l, live, read, owned, env);
+      return;
+    }
     const legacy = !('base' in m);
     const base = legacy ? m : m.base;
     adopted = publishJson(live, {
@@ -580,6 +584,30 @@ function adoptMovedBase(moved, live, env, held = null) {
   if (held) adopt(held);
   else withFileLock(live, adopt, env, SYNC_STALE_MS);
   return adopted;
+}
+
+// The live list has settled calls of its own, and its events are gone: they cannot be replayed on the moved base. When every task of the live
+// base has an id, those calls were made by id (TaskCreate, TaskUpdate of its own tasks): none of them replaced the list, so the tasks the moved
+// list holds are still there, and the live tasks are put over them by id, the later calls on top (a TaskCreate of a known id moves the task to the
+// end, as nextList does). The moved list is taken as it is shown, with the events of its window applied: they are older than the settled live
+// calls, so they would be dropped as behind (see mergeEvents) and the effect must already be in the base. The marks, the clock and the names
+// of the live record stay, and the events of its window are replayed on the new base by the next fold. A live base without tasks or with a
+// task without an id (a call that replaced the list settled there) leaves the moved list set aside: it is the older list. Same lock and
+// generation checks as adoptMovedBase; the caller holds the lock.
+function rebaseOnMoved(m, l, live, read, owned, env) {
+  const liveBase = 'base' in l ? l.base : l;
+  const liveTasks = Array.isArray(liveBase?.items) ? liveBase.items : [];
+  if (!liveTasks.length || !liveTasks.every((x) => typeof x?.id === 'string')) return false;
+  const ids = new Set(liveTasks.map((x) => x.id));
+  const settledOver = (items) => [...items.filter((x) => !ids.has(x?.id)), ...liveTasks].slice(-ITEMS_MAX);
+  const liveIds = new Set(l.items.filter((x) => typeof x?.id === 'string').map((x) => x.id));
+  return publishJson(live, {
+    ...l,
+    base: { ...listFields(liveBase), items: settledOver(m.items) },
+    base_name: settledMarks(l).settledName,
+    items: [...m.items.filter((x) => !liveIds.has(x?.id)), ...l.items].slice(-ITEMS_MAX),
+    rev: revOf(l) + 1,
+  }, () => owned() && generationOf(readRecord(live)) === generationOf(read), env);
 }
 
 // Is a tree of the session under its hidden name (see removeIfIdle), left there by a sweep that was stopped before it put the tree back.

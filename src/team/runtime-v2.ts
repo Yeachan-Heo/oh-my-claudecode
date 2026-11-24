@@ -304,12 +304,14 @@ import {
 } from "./worker-activation-gate.js";
 import {
   addToWorkerLaunchFencedCapture,
+  discardWorkerLaunchFencedCapture,
   isWorkerLaunchAttemptCurrent,
   isWorkerLaunchAttemptAccepted,
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   withWorkerLaunchAttemptFence,
+  type WorkerLaunchAttempt,
 } from "./worker-launch-ack.js";
 import { getWorkerProviderLiveness } from "./worker-provider-liveness.js";
 import { isProcessIdentityLive } from "../platform/process-utils.js";
@@ -1231,7 +1233,8 @@ function paneTreeFence(
     read: async (persisted?: unknown) => {
       // what an earlier run (or the caller, before the requests to exit) persisted is kept: the provider may be gone. The pane is read again
       // all the same: the provider may still be live (its termination failed) and have started descendants since.
-      const kept = revivePaneTrees(persisted);
+      // (a capture left by a run with the switch on is not used with it off: nothing is signalled then)
+      const kept = process.env.OMC_TEAM_KILL_PANE_TREE === "1" ? revivePaneTrees(persisted) : [];
       let fresh: PaneProcessTree | null = null;
       if (
         process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
@@ -9260,6 +9263,8 @@ export async function shutdownTeamV2(
   const earlyPaneTrees = new Map<string, { paneId: string; trees: PaneProcessTree[] }>();
   // workers whose tree was read but could not be written to disk: no request to exit goes out while one is listed (see below)
   const captureUnsaved: string[] = [];
+  // the launch attempts a capture was written for: removed again when the shutdown is rolled back before any provider was terminated
+  const capturedAttempts = new Map<string, WorkerLaunchAttempt>();
   const captureEarlyPaneTree = async (worker: (typeof startConfig.workers)[number]): Promise<void> => {
     try {
       const initialOwnership = configuredPaneOwnership(startConfig, worker);
@@ -9299,6 +9304,7 @@ export async function shutdownTeamV2(
               runtimeCliPath: resolveRuntimeCliPath(),
             })
           : null;
+      if (attempt) capturedAttempts.set(worker.name, attempt);
       if (
         !attempt ||
         !(await addToWorkerLaunchFencedCapture(attempt, [
@@ -9387,6 +9393,8 @@ export async function shutdownTeamV2(
 
     if (rejected.length > 0 && !force) {
       const detail = rejected.map((r) => `${r.worker}:${r.reason}`).join(",");
+      // the workers go on and no provider was terminated: what was saved for the cleanup that does not happen is removed
+      for (const attempt of capturedAttempts.values()) await discardWorkerLaunchFencedCapture(attempt).catch(() => undefined);
       if (!(await rollbackRejectedShutdownFence(config))) {
         throw new Error(`shutdown_rejected_fence_lost:${detail}`);
       }

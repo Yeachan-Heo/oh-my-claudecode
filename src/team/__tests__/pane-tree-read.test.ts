@@ -65,6 +65,13 @@ describe('the pane tree persisted with a launch retirement', () => {
     expect(read.record).toBeUndefined();
   });
 
+  it('does not use a persisted capture when the switch is off: nothing is signalled', async () => {
+    const ops = { verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'owned' })), capturePaneProcessTree: vi.fn(async () => TREE) };
+    const read = await readFencedPaneTree(ownership(), ops, JSON.parse(JSON.stringify([serializePaneTree(TREE)])));
+    expect(read.trees).toEqual([]);
+    expect(ops.capturePaneProcessTree).not.toHaveBeenCalled();
+  });
+
   it('without a persisted capture reads the pane and gives the capture back to be persisted; a capture that does not validate is read anew', async () => {
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     const ops = { verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'owned' })), capturePaneProcessTree: vi.fn(async () => TREE) };

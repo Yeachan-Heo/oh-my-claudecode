@@ -95,7 +95,8 @@ export async function readFencedPaneTree(
   persisted?: unknown,
   earlier: ReadonlyArray<PaneProcessTree | null | undefined> = [],
 ): Promise<{ trees: PaneProcessTree[]; record: ReturnType<typeof serializePaneTree>[] | undefined }> {
-  const kept = revivePaneTrees(persisted);
+  // a capture left by a run with the switch on is not used with it off: nothing is signalled then
+  const kept = process.env.OMC_TEAM_KILL_PANE_TREE === "1" ? revivePaneTrees(persisted) : [];
   const fresh = await capturePaneProcessTreeOfWorkerPane(ownership, ops);
   const all = uniquePaneTrees([...kept, ...earlier, fresh]);
   const signalledByCaller = new Set(uniquePaneTrees(earlier).map((tree) => JSON.stringify(serializePaneTree(tree))));
