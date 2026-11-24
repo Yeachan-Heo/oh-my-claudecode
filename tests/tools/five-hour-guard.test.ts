@@ -254,11 +254,11 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('options outside their range are a configuration error (status 2); the ends of the ranges are accepted', async () => {
     const f = fixture('ranges', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const once = (args: string[]) => runSync(GUARD, ['--config', f.cfg, '--once', ...args]);
-    const accepted = [['--margin', '1800'], ['--margin', '0'], ['--heartbeat', '1800'], ['--heartbeat', '0.4', '--interval', '0.2'],
-      ['--interval', '0.1', '--heartbeat', '0.2'], ['--interval', '900', '--heartbeat', '1800'], ['--warn-every', '0'], ['--warn-every', '86400']];
+    const accepted = [['--margin', '1800'], ['--margin', '0'], ['--heartbeat', '1800'], ['--heartbeat', '1.4', '--interval', '0.2'],
+      ['--interval', '0.1', '--heartbeat', '1.2'], ['--interval', '899', '--heartbeat', '1800'], ['--warn-every', '0'], ['--warn-every', '86400']];
     for (const args of accepted) expect(once(args).status, args.join(' ')).toBe(0);
-    const refused = [['--margin', '1801'], ['--margin', '-1'], ['--heartbeat', '1801'], ['--heartbeat', '0.3', '--interval', '0.2'],
-      ['--interval', '0.05'], ['--interval', '901', '--heartbeat', '1800'], ['--warn-every', '-1'], ['--warn-every', '86401'], ['--test-pause', '1801'], ['--test-pause', '-5']];
+    const refused = [['--margin', '1801'], ['--margin', '-1'], ['--heartbeat', '1801'], ['--heartbeat', '0.3', '--interval', '0.2'], ['--heartbeat', '0.4', '--interval', '0.2'], ['--heartbeat', '1.39', '--interval', '0.2'],
+      ['--interval', '0.05'], ['--interval', '900', '--heartbeat', '1800'], ['--interval', '901', '--heartbeat', '1800'], ['--warn-every', '-1'], ['--warn-every', '86401'], ['--test-pause', '1801'], ['--test-pause', '-5']];
     for (const args of refused) {
       const r = once(args);
       expect(r.status, args.join(' ')).toBe(2);
@@ -821,6 +821,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(f.log)).toMatch(/RESUMED \(guard stopping, state not saved\)/);
   });
 
+  it('the hook takes as a pause only what the guard would own: a regular file with v 2, paused true, numeric since, resume_at and valid_until and an integer pid', async () => {
+    const f = fixture('hook-signature', {});
+    const doc = () => pauseDoc({ pid: process.pid });
+    const bad: Array<[string, Record<string, unknown>]> = [
+      ['no since', { since: undefined }], ['since as text', { since: 'now' }], ['no pid', { pid: undefined }], ['pid as text', { pid: '1' }], ['pid as a boolean', { pid: true }], ['pid as a fraction', { pid: 1.5 }],
+    ];
+    for (const [name, over] of bad) {
+      writeFileSync(f.pause, JSON.stringify({ ...doc(), ...over }), 'utf8');
+      expect(await hookPasses(f, `sig-${name.replace(/\W/g, '')}`), `${name}: not a pause of the guard, the call passes`).toBe(true);
+    }
+    writeFileSync(f.pause, JSON.stringify(doc()), 'utf8');
+    expect(await hookHeld(f, 'sig-complete'), 'the complete document holds').toBe(true);
+  });
+
   it('a usage cache that names another provider as its source is not acted on, one that names Anthropic (or, as OMC always writes it, nothing else) is', () => {
     const other = fixture('cache-source-other', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS, extra: { source: 'zai' } } });
     const r = runSync(GUARD, guardArgs(other, ['--once']));
@@ -829,6 +843,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const own = fixture('cache-source-own', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
     runSync(GUARD, guardArgs(own, ['--once']));
     expect(existsSync(own.pause), 'the Anthropic cache pauses').toBe(true);
+  });
+
+  it('a hook log that is the lock of the state file is reported after a settings rewrite, as the start refuses it', async () => {
+    const f = fixture('wiring-log-state-lock', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entry(generatedCommand(f.pause, HOOK, PYBIN)), 'utf8');
+    const g = startGuard(f, ['--warn-every', '1']);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeFileSync(f.settings, entry(generatedCommand(f.pause, HOOK, PYBIN, `${f.state}.lock`)), 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /logs to .*state\.json\.lock, which is the state_file lock of this guard/.test(readText(f.log)), 20000, 'the alias warning');
+    } finally { await stopGuard(g); }
   });
 
   it('a link at pause_file is no pause for the hook, whatever its target holds: the call is not held', async () => {
@@ -1216,6 +1244,24 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a registered hook that became a link to another program of the guard is refused at the start, while the bundled hook as the registered one is not', () => {
+    const f = fixture('alias-cross-program', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entryFor = (hook: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, hook, PYBIN), timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entryFor(HOOK), 'utf8');
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'the bundled hook is the registered one').toBe(0);
+    for (const [name, program] of [['entry module', ENTRY_MODULE], ['guard script', GUARD]] as const) {
+      const dir = join(f.dir, `as-${name.replace(' ', '-')}`);
+      mkdirSync(dir, { recursive: true });
+      const hook = join(dir, 'five-hour-guard-hook.py');
+      symlinkSync(program, hook);
+      writeFileSync(f.settings, entryFor(hook), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+    }
+  });
+
   it('the lock file of the usage cache (OMC serialises refreshes on <cache>.lock) is a configured file: a pause file that is it is refused', () => {
     const f = fixture('alias-cache-lock', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: `${f.cache}.lock`, state_file: f.state }), 'utf8');
@@ -1293,8 +1339,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       ['async false', { timeout: 21600, async: false }, null],
       ['async true', { timeout: 21600, async: true }, /is asynchronous/],
       ['async as a text', { timeout: 21600, async: 'true' }, /is asynchronous/],
-      ['no timeout', {}, /timeout \(None\) is missing or below 21600/],
-      ['a short timeout', { timeout: 60 }, /timeout \(60\) is missing or below 21600 s/],
+      ['no timeout', {}, /timeout \(None\) is missing, not a finite number or below 21600/],
+      ['a short timeout', { timeout: 60 }, /timeout \(60\) is missing, not a finite number or below 21600 s/],
       ['one second short', { timeout: 21599 }, /timeout \(21599\)/],
       ['a timeout that is a text', { timeout: '21600' }, /timeout \('21600'\)/],
       ['a timeout that is a boolean', { timeout: true }, /timeout \(True\)/],
@@ -1404,6 +1450,17 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       await waitFor(() => /logs to .*five-hour-guard-hook\.py, which is the registered hook of this guard/.test(readText(f.log)), 20000, 'the cross-entry alias warning');
     } finally { await stopGuard(g); }
     expect(readFileSync(hook, 'utf8')).toBe(hookBefore);
+  });
+
+  it('a timeout that is NaN or Infinity (raw tokens that Python reads and standard JSON does not) is a wiring problem, like a missing one', () => {
+    const f = fixture('wiring-timeout-nonfinite', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const command = generatedCommand(f.pause, HOOK, PYBIN);
+    for (const token of ['NaN', 'Infinity', '-Infinity']) {
+      writeFileSync(f.settings, `{"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": ${JSON.stringify(command)}, "timeout": ${token}}]}]}}`, 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.stdout, token).toMatch(/WARNING \(start\): the hook entry in .*: its timeout \(.*\) is missing, not a finite number or below 21600 s/);
+    }
   });
 
   it('the hook entry check warns when the group matcher no longer covers every tool (an entry for Bash only), and accepts "*", empty and none', () => {

@@ -67,7 +67,7 @@ other's pause (the lock on the pause file stops the second one).
 |---|---|
 | no pause file | the shell guard of the hook command exits 0 without starting Python (2 to 4 ms per tool call, measured on a loaded machine) |
 | `python3` or the hook file named in the entry is missing | the same shell guard exits 0 |
-| pause file is a symbolic link (whatever it points to: it could be the live pause of another guard), unreadable, not JSON, not an object, or `paused` is not the JSON value `true` (`"false"`, `1` and `"true"` are not) | the tool call passes |
+| pause file is a symbolic link (whatever it points to: it could be the live pause of another guard), unreadable, not JSON, not an object, lacks a numeric `since` or an integer `pid` (the guard would not own it), or `paused` is not the JSON value `true` (`"false"`, `1` and `"true"` are not) | the tool call passes |
 | `valid_until` or `resume_at` missing, not a JSON number (a string or a boolean is not one), NaN or infinite; `exclude` or `only` present and not a list of strings | the tool call passes |
 | `valid_until` in the past (the guard is dead: it renews the file every tick) | the tool call passes |
 | `valid_until` more than 3600 s ahead, or `resume_at` more than 21600 s ahead (the guard writes `valid_until` at most 1800 s ahead and believes no reset time further than 5 h 15 min, plus a margin of at most 1800 s) | the tool call passes |
@@ -246,7 +246,7 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 | `--max-age <seconds>` | 180 | data older than this is not acted on; at least 1 |
 | `--margin <seconds>` | 150 | resume this long after the reset time; 0 to 1800 |
 | `--interval <seconds>` | 30 | seconds between checks; at least 0.1 |
-| `--heartbeat <seconds>` | 300 | validity of the pause file after each check, which is how long a dead guard keeps sessions waiting; from twice `--interval` (one missed check must not release the sessions) up to 1800 |
+| `--heartbeat <seconds>` | 300 | validity of the pause file after each check, which is how long a dead guard keeps sessions waiting; from twice `--interval` plus 1 s (one missed check must not release the sessions, and a failed check takes time before the retry) up to 1800, so `--interval` is at most 899; the next check is scheduled from the start of the previous one |
 | `--warn-every <seconds>` | 600 | at most one `WARNING` about the usage data per this many seconds and kind; 0 for every check, up to 86400 |
 | `--test-pause <seconds>` | off | hold sessions for a while, then release; up to 1800 |
 | `--test-only <prefixes>` | all | with `--test-pause`: only sessions with these id prefixes |

@@ -53,6 +53,8 @@ def pause_state():
         if p.get('paused') is not True:
             return None   # "false", 1 or "true" are not a pause: only the JSON value true is
         valid_until, resume_at = p['valid_until'], p['resume_at']
+        if type(p.get('pid')) is not int or type(p.get('since')) not in (int, float) or not math.isfinite(p['since']):
+            return None   # not the whole document the guard writes (the guard itself would not own such a file)
         if not all(type(x) in (int, float) and math.isfinite(x) for x in (valid_until, resume_at)):
             return None   # a string, a boolean, NaN or infinity: NaN and infinity would compare false and hold for ever
         for key in ('exclude', 'only'):

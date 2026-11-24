@@ -1,7 +1,7 @@
 """The hook entry of the five-hour limit guard: the one definition of the command that is registered in settings.json and of how a
 registered command is read. Loaded by five-hour-guard.py (drift check) and five-hour-guard-settings.py (add, check, remove, probe)
 from the directory the scripts are in; it is not run by itself and the hook script does not need it."""
-import os, re, shlex, sys
+import math, os, re, shlex, sys
 
 MARK = 'five-hour-guard-hook.py'
 OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
@@ -17,8 +17,8 @@ def handler_problems(handler):
     if handler.get('async') not in (None, False):
         found.append('it is asynchronous (async), so the tool call goes on while the hook waits in the background')
     timeout = handler.get('timeout')
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < MIN_TIMEOUT_S:
-        found.append(f'its timeout ({timeout!r}) is missing or below {MIN_TIMEOUT_S} s, so Claude Code would cancel the hook during a long pause and the tool call would go on')
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < MIN_TIMEOUT_S:
+        found.append(f'its timeout ({timeout!r}) is missing, not a finite number or below {MIN_TIMEOUT_S} s, so Claude Code would cancel the hook during a long pause and the tool call would go on')
     return found
 
 

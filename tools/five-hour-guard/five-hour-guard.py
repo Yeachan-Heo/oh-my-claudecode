@@ -45,6 +45,7 @@ MAX_RESET_AHEAD_S = 5 * 3600 + 900   # a window is 5 h long: a reset time furthe
 MAX_MARGIN_S = 1800
 MAX_HEARTBEAT_S = 1800               # the hook ignores a valid_until more than 3600 s ahead
 MAX_TEST_PAUSE_S = 1800
+HEARTBEAT_SLACK_S = 1                 # --heartbeat must exceed two intervals by this much: a failed tick takes time and the retry is a whole interval later
 STATE_MAX_AHEAD_S = 21600            # a stored pause (or its start) further ahead than the hook honours is not ours
 FUTURE_SKEW_S = 120                  # a cache timestamp further ahead than this is not believed
 MIN_INTERVAL_S = 0.1
@@ -70,7 +71,7 @@ ap.add_argument('--resume-below', type=finite_float, default=None, help='early r
 ap.add_argument('--max-age', type=finite_float, default=180, help='data older than this many seconds is not acted on (keep it above the status line usage poll interval, 90 s by default)')
 ap.add_argument('--margin', type=finite_float, default=150, help=f'resume this many seconds after the reset time (0 to {MAX_MARGIN_S})')
 ap.add_argument('--interval', type=finite_float, default=30, help=f'seconds between ticks (at least {MIN_INTERVAL_S:g})')
-ap.add_argument('--heartbeat', type=finite_float, default=300, help=f'pause file validity after each tick; the hook lets sessions go when it lapses (guard dead); from twice --interval to {MAX_HEARTBEAT_S}')
+ap.add_argument('--heartbeat', type=finite_float, default=300, help=f'pause file validity after each tick; the hook lets sessions go when it lapses (guard dead); from twice --interval plus {HEARTBEAT_SLACK_S} s to {MAX_HEARTBEAT_S}')
 ap.add_argument('--warn-every', type=finite_float, default=600, help='at most one WARNING about the usage data (missing, stale, no percentage, implausible reset time) per this many seconds and kind')
 ap.add_argument('--test-pause', type=finite_float, default=0, metavar='SECONDS', help=f'install check: hold sessions for this many seconds (up to {MAX_TEST_PAUSE_S}), then release; touches no state')
 ap.add_argument('--test-only', default='', metavar='PREFIXES', help='with --test-pause: comma separated session id prefixes; only those sessions are held')
@@ -93,7 +94,7 @@ def check_range(name, value, low, high=None):
 check_range('--margin', A.margin, 0, MAX_MARGIN_S)
 check_range('--max-age', A.max_age, 1)   # a negative or zero age makes every entry stale: the guard would fail open for ever
 check_range('--interval', A.interval, MIN_INTERVAL_S)
-check_range('--heartbeat', A.heartbeat, 2 * A.interval, MAX_HEARTBEAT_S)   # a pause must outlive one missed tick
+check_range('--heartbeat', A.heartbeat, 2 * A.interval + HEARTBEAT_SLACK_S, MAX_HEARTBEAT_S)   # a pause must outlive one missed tick, with room for the time that tick took
 check_range('--warn-every', A.warn_every, 0, 86400)
 check_range('--test-pause', A.test_pause, 0, MAX_TEST_PAUSE_S)
 if not 0 < A.threshold <= 100:
@@ -190,7 +191,7 @@ def same_file(a, b):
         return False
 
 
-PROGRAM_FILES = {'guard script', 'hook script', 'settings tool script', 'entry module', 'registered hook', 'registered interpreter'}
+HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}   # may be one file: the bundled hook is the registered one, and a hook that is run directly is its own launcher
 
 
 def check_distinct(files):
@@ -199,8 +200,8 @@ def check_distinct(files):
     named = [(label, path) for label, path in files if path]
     for i, (la, pa) in enumerate(named):
         for lb, pb in named[i + 1:]:
-            if (la in PROGRAM_FILES and lb in PROGRAM_FILES) or {la, lb} == {'hook_log_file', 'registered hook log'}:
-                continue   # the installed scripts and the files of the entry are the program itself; the hook log of the configuration is the log of the entry
+            if (la in HOOK_PROGRAMS and lb in HOOK_PROGRAMS) or {la, lb} == {'hook_log_file', 'registered hook log'}:
+                continue   # the hook as the bundled and as the registered one, and as its own launcher; the hook log of the configuration is the log of the entry. Any other pair of program files (a hook that became a link to the entry module) is a collision
             if same_file(pa, pb):
                 fail(f'"{la}" ({pa}) and "{lb}" ({pb}) are the same file: the guard would remove or overwrite one as the other')
 
@@ -271,6 +272,13 @@ def registered_runtime_files():
     return found
 
 
+def configured_files():
+    """Every file the guard reads, writes or runs by its own configuration: the one list for the start check and for the wiring check."""
+    return [('configuration file', A.config), *own_files(), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
+            ('usage_cache', CACHE), ('usage_cache lock', CACHE + '.lock'), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
+            ('pause_file lock', PAUSE_FILE + '.lock')]
+
+
 def program_collisions():
     """[(label of the program, path, file of the guard)]: a hook, interpreter or launcher that the registered entries name and that is
     a file the guard writes (a settings rewrite after the start can put it there). A write would replace the program."""
@@ -285,9 +293,7 @@ def own_files():
     return [('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
             ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('entry module', os.path.join(HERE, 'five_hour_guard_entry.py'))]
 
-check_distinct([('configuration file', A.config), *own_files(), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
-                ('usage_cache', CACHE), ('usage_cache lock', CACHE + '.lock'), ('log_file', LOG), ('settings_file', SETTINGS or default_settings()),
-                ('pause_file lock', PAUSE_FILE + '.lock'), *registered_runtime_files(),
+check_distinct([*configured_files(), *registered_runtime_files(),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
 if STATE:
@@ -488,8 +494,7 @@ def hook_check(where):
     for handler in handlers:
         for problem in ENTRY.handler_problems(handler):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
-    runtime = [('pause_file', PAUSE_FILE), ('state_file', STATE), ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS),
-               ('lock of the pause file', PAUSE_FILE + '.lock'), ('lock of the usage cache', CACHE + '.lock'), ('configuration file', A.config), *own_files()]
+    runtime = configured_files()
     for label, path, out_label in program_collisions():
         log(f'WARNING ({where}): the {label} {path} is the {out_label} of this guard: a write of the guard would replace the program, so a pause would hold no session. Run five-hour-guard-settings.py add again')
     programs = []   # the programs of every recognised entry: a log of one entry can be the program of another
@@ -790,10 +795,11 @@ def main():
             return 1
     try:
         while not STOP:
+            started = time.monotonic()
             ok = safe_tick(state)
             if A.once or A.dry_run:
                 return 0 if ok else 1
-            end = time.monotonic() + A.interval   # monotonic: a step of the wall clock must not stretch or cut the wait
+            end = started + A.interval   # monotonic: a step of the wall clock must not stretch or cut the wait
             while not STOP and time.monotonic() < end:
                 time.sleep(min(1.0, max(0.0, end - time.monotonic())))
     finally:
