@@ -202,6 +202,24 @@ describe.skipIf(!posix)('omc-doctor cache commands: an installPath written as a 
     }
   });
 
+  // Another plugin's install path is a cache protection like any other, so a Windows path of another plugin that names an OMC or a
+  // plugin cache tree cannot be judged here either; one that names something unrelated (below) stays no refusal.
+  test('a Windows installPath of another plugin that names a plugin cache tree moves nothing', () => {
+    for (const command of commands) {
+      for (const foreign of ['C:\\Users\\u\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.7.0', '//server/share/oh-my-claudecode/5.7.0']) {
+        const { dir, cache } = makeCache(['5.7.0', '5.8.0', '5.9.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }], 'other-plugin@market': [{ scope: 'user', installPath: foreign }] });
+          const { status, out } = run(command, dir);
+          expect({ foreign, status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ foreign, status: 1, versions: '5.7.0,5.8.0,5.9.0', moved: 0 });
+          expect(out).toContain('Nothing moved');
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   test('paths that only look similar, and the Windows path of another plugin, are no refusal', () => {
     for (const command of commands) {
       const { dir, cache } = makeCache(['5.7.0', '5.8.1', '5.9.0']);

@@ -696,7 +696,15 @@ const claudeMdVersion = () => {
   // reads its package, so no cache beside it is a reference.
   const claudeOnly = !registry.supported.length && !explicitRoot && roots.length > 0;
   const checkout = claudeOnly || (!!explicitRoot && isDirectory(explicitRoot) && !registry.supported.some(([id, entries]) => entries.some((entry) => entryInstallPaths(marketplaceOf(id), entry).some((target) => askSame(target, explicitRoot) != 'no'))));
-  const external = running.length == 1 && askInside(roots[0], cacheDirOf(running[0])) != 'yes';
+  // The runtime (isManagedPluginCacheRoot in scripts/session-start.mjs) classifies a root by its text, never through a link, and
+  // only the omc cache counts as managed: any other root is read through its own package.
+  const lexicallyManaged = (root) => {
+    const text = root.replace(/[\\/]+$/, '');
+    const inside = path.relative(path.resolve(cacheDirOf('omc')), path.resolve(text));
+    if (inside === '' || (inside && !inside.startsWith('..') && !path.isAbsolute(inside))) return true;
+    return /\/plugins\/cache\/omc\/oh-my-claudecode\/\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(text.replace(/\\/g, '/'));
+  };
+  const external = running.length == 1 && !lexicallyManaged(roots[0]);
   const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
   const rootsConflict = sameRoots == 'no';
   let unreadableCache = '';
@@ -753,7 +761,7 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
   } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
     console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
-  } else if (dropV(claudeVersion) === dropV(pluginVersion)) {
+  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion)) {
     console.log('VERSION MATCH: CLAUDE and plugin cache are aligned');
   } else {
     console.log('VERSION DRIFT: CLAUDE.md and plugin versions differ');
@@ -857,6 +865,10 @@ const readRegistry = () => {
         }
         if (isSupported && typeof entry.installPath == 'string' && path.sep == '\\' && foreignToHost(entry.installPath.trim())) {
           reason = 'an entry of ' + key + ' has the POSIX path ' + JSON.stringify(entry.installPath) + ' as installPath, which this system cannot read';
+          throw 0;
+        }
+        if (!isSupported && typeof entry.installPath == 'string' && (foreignPath(entry.installPath.trim()) || (path.sep == '\\' && foreignToHost(entry.installPath.trim()))) && /oh-my-claudecode|[/\\]plugins[/\\]cache[/\\]/i.test(entry.installPath)) {
+          reason = 'an entry of ' + key + ' has the foreign path ' + JSON.stringify(entry.installPath) + ' as installPath, which names an OMC or plugin cache tree this system cannot read';
           throw 0;
         }
         if (typeof entry.installPath == 'string' && relativePath(entry.installPath.trim())) {

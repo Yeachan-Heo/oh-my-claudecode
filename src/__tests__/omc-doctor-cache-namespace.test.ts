@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { addCache, backupDir, CACHE_VERSIONS, CLAUDE_MD_VERSION, codeOf, commands, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
@@ -407,6 +407,22 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
     // OMC_PLUGIN_ROOT on a checkout outside the registry is the install the session runs (Step 1: Channel: plugin-dir) and the
     // runtime reads that checkout, so a stale cache beside it says nothing about the marker.
     // A CLAUDE_PLUGIN_ROOT alone, with no supported ID in the registry, is the plugin-dir checkout of Step 1 (a claude --plugin-dir session).
+    // The runtime tells a managed root by its text, not through a link: an install path outside the cache that is a link to a cache
+    // version is an external root there, and its own package (5.8.0) is the version loaded, not the highest sibling.
+    test.skipIf(process.platform === 'win32')('a registered install path that is a link into the cache is judged by its own package, as at runtime', () => {
+      const dir = fresh();
+      try {
+        const cache = addCache(dir, [OLD, NEW], 'omc');
+        writeFileSync(path.join(cache, OLD, 'package.json'), JSON.stringify({ name: 'oh-my-claudecode', version: OLD }));
+        const alias = path.join(dir, 'alias');
+        symlinkSync(path.join(cache, OLD), alias);
+        writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD, installPath: alias }] });
+        expect(claudeMdAt(dir, OLD, 'linux', { CLAUDE_PLUGIN_ROOT: alias })).toEqual([`Latest cached plugin version: ${OLD}`, MATCH]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     test.skipIf(process.platform === 'win32')('a plugin root variable alone beside an old cache is a checkout: the comparison is skipped', () => {
       const dir = fresh();
       try {

@@ -73,8 +73,11 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
       }
     };
 
-    test.skipIf(process.platform === 'win32')('v5.9.0 and 5.9.0 are aligned, another version is drift', () => {
-      expect(verdict('v5.9.0')).toBe('VERSION MATCH: CLAUDE and plugin cache are aligned');
+    // The runtime reads a marker only when a digit follows the colon (extractOmcVersion in scripts/session-start.mjs) and reports
+    // instruction drift for any other, so a marker written with a v is drift here too; the prefix is dropped only from versions
+    // that are compared (the cache side).
+    test.skipIf(process.platform === 'win32')('a marker with a v is drift as at runtime, 5.9.0 is aligned, another version is drift', () => {
+      expect(verdict('v5.9.0')).toBe('VERSION DRIFT: CLAUDE.md and plugin versions differ');
       expect(verdict('5.9.0')).toBe('VERSION MATCH: CLAUDE and plugin cache are aligned');
       expect(verdict('v5.8.0')).toBe('VERSION DRIFT: CLAUDE.md and plugin versions differ');
     });
