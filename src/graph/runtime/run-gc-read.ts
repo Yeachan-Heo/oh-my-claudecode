@@ -23,9 +23,9 @@ const SNAPSHOT_FILE_NAME = "projection.json";
 export const JOURNAL_FILE_NAME = "journal.jsonl";
 export const TORN_COPY_PREFIX = `${JOURNAL_FILE_NAME}.torn-`;
 export const QUARANTINE_PREFIX = ".deleted-";
-// A moved directory that was not the scanned run and could not be put back. A later pass lists it as not a run id, so it
-// is never deleted as the leftover of an interrupted removal.
-export const KEPT_PREFIX = ".kept-";
+// Where a run directory waits right after the move until it is checked to be the scanned one. A pass lists such a name
+// as not a run id, so it is never deleted as the leftover of an interrupted removal, however the process ended.
+export const STAGING_PREFIX = ".moving-";
 const MAX_LOCK_BYTES = 4096;
 export const NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 export const NONBLOCK = fsConstants.O_NONBLOCK ?? 0;

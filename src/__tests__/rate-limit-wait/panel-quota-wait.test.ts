@@ -31,6 +31,19 @@ describe('panel quota wait: decision logic', () => {
     expect(w.sent).toHaveLength(1);
   });
 
+  it('the same pane id on the default server and on a private endpoint is two panes: each waits and resumes once', async () => {
+    const privatePane = { ...PANE_A, socket: '/tmp/o-1k-lz9x2b-1a2b3c4d.sock' };
+    const w = world({ panes: [PANE_A, privatePane], screens: { '%7': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + 2 * H) });
+    const state: PanelState = { panes: {} };
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(Object.keys(state.panes).sort()).toEqual([paneKey(privatePane), paneKey(PANE_A)].sort());
+    expect(Object.values(state.panes).map((entry) => entry.state)).toEqual(['waiting_quota', 'waiting_quota']);
+
+    w.clock.now = BASE_MS + 2 * H;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent, 'one key for each of the two panes').toEqual(['%7', '%7']);
+  });
+
   it('week reset: no resume, the wait ends with class quota and the reset date', async () => {
     const reset = BASE_MS + 3 * 24 * H;
     const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhaustedWeek(reset) });

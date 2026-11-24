@@ -312,8 +312,9 @@ describe.runIf(process.platform === "linux")("decisions and removal under owners
   });
 });
 
-// A directory that was moved under a name it did not belong to and could not be put back is not the scanned run and
-// was never validated: the next pass must not treat it as the leftover of an interrupted removal.
+// A directory that was moved under a name it did not belong to is not the scanned run and was never validated: the
+// next pass must not treat it as the leftover of an interrupted removal, whether the put-back failed or the process
+// ended right after the move.
 describe.runIf(process.platform === "linux")("a failed put-back of a moved directory", () => {
   it("keeps the moved directory out of the namespace that a later pass deletes", () => {
     withBase((base) => {
@@ -338,7 +339,7 @@ describe.runIf(process.platform === "linux")("a failed put-back of a moved direc
         },
       };
 
-      expect(() => removeRun(realRoot, "run-rollback", scanned)).toThrow(/replaced while it was moved; the moved directory could not be put back and was kept as \.kept-run-rollback-/);
+      expect(() => removeRun(realRoot, "run-rollback", scanned)).toThrow(/replaced while it was moved; the moved directory could not be put back and stays as \.moving-run-rollback-/);
       expect(readdirSync(root).filter((name) => name.startsWith(".deleted-")), "the moved directory is still in the deletable namespace").toEqual([]);
 
       gc(root);
@@ -390,6 +391,78 @@ describe.runIf(process.platform === "linux")("removal of a nested directory on a
       writeFileSync(join(flat, "a.txt"), "a\n");
       removeTree(flat, { operationsFor: macLike });
       expect(existsSync(flat)).toBe(false);
+    });
+  });
+});
+
+describe.runIf(process.platform === "linux")("a process that ends right after the move of a run", () => {
+  it("leaves a replacement that took the name for the operator: the next pass does not delete it", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-ended");
+      ageTree(dir, OLD);
+      let replacementJournal = "";
+      const scanned: ScannedRun = {
+        ...scannedFirst(root),
+        beforeMove: () => {
+          // A new run takes the name after its last check, so the move takes that one.
+          renameSync(dir, join(base, "moved-away"));
+          makeScenarioRun(root, "run-ended", SCENARIOS.ready);
+          replacementJournal = readFileSync(join(dir, "journal.jsonl"), "utf8");
+        },
+        afterMove: () => {
+          throw new Error("simulated end of the process");
+        },
+      };
+
+      expect(() => removeRun(realRoot, "run-ended", scanned)).toThrow(/simulated end of the process/);
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-")), "the unchecked directory is in the deletable namespace").toEqual([]);
+
+      gc(root);
+      const left = readdirSync(root).filter((name) => existsSync(join(root, name, "journal.jsonl")));
+      expect(left, "a later pass deleted the replacement that was never checked").toHaveLength(1);
+      expect(readFileSync(join(root, left[0], "journal.jsonl"), "utf8")).toBe(replacementJournal);
+    });
+  });
+});
+
+// The top directory is opened and removed relative to its parent: a parent component swapped for a link while the tree is
+// walked must not redirect the final rmdir to a directory of the same name outside the runs root.
+describe.runIf(process.platform === "linux")("removal of the top directory when its parent is swapped for a link", () => {
+  function setUp(base: string): { tree: string; outsideTree: string; swap: () => void } {
+    const parent = join(base, ".omc", "graph-runs");
+    const tree = join(parent, ".deleted-run-x");
+    mkdirSync(join(tree, "sub"), { recursive: true });
+    const outside = join(base, "outside");
+    mkdirSync(join(outside, ".deleted-run-x"), { recursive: true });
+    return {
+      tree,
+      outsideTree: join(outside, ".deleted-run-x"),
+      swap: () => {
+        renameSync(parent, join(base, ".omc", "parked"));
+        symlinkSync(outside, parent);
+      },
+    };
+  }
+
+  it("removes the directory it walked, not one of the same name behind the link", () => {
+    withBase((base) => {
+      const { tree, outsideTree, swap } = setUp(base);
+      let swapped = false;
+      removeTree(tree, { afterLstat: () => { if (!swapped) { swapped = true; swap(); } } });
+      expect(swapped, "the interlock did not run").toBe(true);
+      expect(existsSync(outsideTree), "a directory outside the runs root was removed through the swapped parent").toBe(true);
+      expect(existsSync(join(base, ".omc", "parked", ".deleted-run-x")), "the walked directory was left behind").toBe(false);
+    });
+  });
+
+  it("a platform whose operations have no rmdir refuses when the parent is no longer the one that was held", () => {
+    withBase((base) => {
+      const { tree, outsideTree, swap } = setUp(base);
+      rmSync(join(tree, "sub"), { recursive: true });
+      expect(() => removeTree(tree, { operationsFor: macLike, beforeFinalRmdir: swap })).toThrow();
+      expect(existsSync(outsideTree), "a directory outside the runs root was removed through the swapped parent").toBe(true);
     });
   });
 });

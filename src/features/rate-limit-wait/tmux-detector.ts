@@ -10,6 +10,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { lstatSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmuxExec, tmuxSpawn } from '../../cli/tmux-utils.js';
 import { getNewPaneTail } from './pane-fresh-capture.js';
 import type { TmuxPane, PaneAnalysisResult, BlockedPane } from './types.js';
@@ -20,7 +22,7 @@ import {
   herdrWorkspaceIdFromPaneId,
   type HerdrAgentLikeInfo,
 } from '../../team/herdr-session.js';
-import { isHerdrPaneId, paneCurrentCommandLooksReady, resolveTeamMultiplexer } from '../../team/tmux-session.js';
+import { isHerdrPaneId, paneCurrentCommandLooksReady, privateTmuxSocketDirectory, resolveTeamMultiplexer } from '../../team/tmux-session.js';
 
 /**
  * Validate tmux pane ID format to prevent command injection
@@ -314,21 +316,28 @@ function parseTmuxPanes(result: string): TmuxPane[] {
   return panes;
 }
 
-/**
- * With `withServer`, every line also carries the server's pid and start time, and each pane gets them as `server`: a
- * pane id is unique only within one run of the tmux server. A listing whose lines do not all carry that value is
- * reported as unreadable (null), because the caller asked for a binding it could then not make.
- */
-export function listTmuxPanesStrict(withServer = false): TmuxPane[] | null {
-  if (!isTmuxAvailable()) {
-    return null;
-  }
+// A tmux call on a private endpoint (`-S <socket>`), or on the default server when no socket is given.
+function onSocket(socket: string | undefined, args: string[]): string[] {
+  return socket === undefined ? args : ['-S', socket, ...args];
+}
 
+// A failed call that says there is no server to talk to (not started, exited, socket file left behind): its panes are gone.
+function isNoServerError(error: unknown): boolean {
+  const failure = error as { message?: unknown; stderr?: unknown } | null;
+  const text = `${String(failure?.message ?? '')} ${String(failure?.stderr ?? '')}`;
+  return /no server running|error connecting to|No such file or directory|Connection refused/i.test(text);
+}
+
+/**
+ * Lists the panes of one tmux server: the default one, or the private endpoint `socket`. Returns 'absent' when that
+ * server is not running, and null when its inventory cannot be read.
+ */
+function listPanesAt(socket: string | undefined, withServer: boolean): TmuxPane[] | 'absent' | null {
   try {
     // Format: [pid:start_time ]session_name:window_index.pane_index pane_id pane_active window_name pane_title
     const format = (withServer ? '#{pid}:#{start_time} ' : '')
       + '#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} #{window_name} #{pane_title}';
-    const result = tmuxExec(['list-panes', '-a', '-F', format], {
+    const result = tmuxExec(onSocket(socket, ['list-panes', '-a', '-F', format]), {
       stripTmux: true,
       timeout: 5000,
     });
@@ -346,9 +355,67 @@ export function listTmuxPanesStrict(withServer = false): TmuxPane[] | null {
     }
     return parseTmuxPanes(result);
   } catch (error) {
+    if (isNoServerError(error)) return 'absent';
     console.error('[TmuxDetector] Error listing panes:', error);
     return null;
   }
+}
+
+/**
+ * With `withServer`, every line also carries the server's pid and start time, and each pane gets them as `server`: a
+ * pane id is unique only within one run of the tmux server. A listing whose lines do not all carry that value is
+ * reported as unreadable (null), because the caller asked for a binding it could then not make.
+ */
+export function listTmuxPanesStrict(withServer = false): TmuxPane[] | null {
+  if (!isTmuxAvailable()) {
+    return null;
+  }
+  const panes = listPanesAt(undefined, withServer);
+  return panes === 'absent' ? null : panes;
+}
+
+const PRIVATE_SOCKET_NAME = /^o-[0-9a-z]+-[0-9a-z]+-[0-9a-f]{8}\.sock$/;
+
+/**
+ * The private tmux endpoints that `omc team` creates when it starts without a default server (see
+ * buildPrivateTmuxSocketPath): sockets of this user in the private socket directory.
+ */
+function privateTmuxSockets(): string[] {
+  if (process.platform === 'win32') return [];
+  const directory = privateTmuxSocketDirectory();
+  const sockets: string[] = [];
+  try {
+    for (const name of readdirSync(directory)) {
+      if (!PRIVATE_SOCKET_NAME.test(name)) continue;
+      const path = join(directory, name);
+      const stat = lstatSync(path);
+      if (stat.isSocket() && stat.uid === process.getuid?.()) sockets.push(path);
+    }
+  } catch {
+    // An unreadable directory has no endpoints to add.
+  }
+  return sockets;
+}
+
+/**
+ * The panes of the default server and of every private endpoint, each private pane carrying its `socket`. A server that
+ * is not running adds nothing; a server whose inventory cannot be read makes the whole inventory unreadable, and so does
+ * a machine where no server is running at all.
+ */
+function listPanelQuotaPanes(): TmuxPane[] | null {
+  if (!isTmuxAvailable()) {
+    return null;
+  }
+  const panes: TmuxPane[] = [];
+  let running = 0;
+  for (const socket of [undefined, ...privateTmuxSockets()]) {
+    const listed = listPanesAt(socket, true);
+    if (listed === null) return null;
+    if (listed === 'absent') continue;
+    running++;
+    panes.push(...(socket === undefined ? listed : listed.map((pane) => ({ ...pane, socket }))));
+  }
+  return running > 0 ? panes : null;
 }
 
 /**
@@ -394,7 +461,7 @@ export function isPaneAlive(paneId: string): boolean {
  * @param paneId - The tmux pane ID (e.g., "%0")
  * @param lines - Number of lines to capture (default: 15)
  */
-function capturePaneContentStrict(paneId: string, lines: number): string | null {
+function capturePaneContentStrict(paneId: string, lines: number, socket?: string): string | null {
   if (!isTmuxAvailable()) {
     return null;
   }
@@ -415,7 +482,7 @@ function capturePaneContentStrict(paneId: string, lines: number): string | null 
 
   try {
     // Capture the last N lines from the pane
-    const result = tmuxExec(['capture-pane', '-t', paneId, '-p', '-S', `-${safeLines}`], {
+    const result = tmuxExec(onSocket(socket, ['capture-pane', '-t', paneId, '-p', '-S', `-${safeLines}`]), {
       stripTmux: true,
       timeout: 5000,
     });
@@ -652,7 +719,7 @@ function tmuxCallSentNothing(error: unknown): boolean {
  * are two tmux calls, so a failure of the second leaves the text typed in the pane: that is `unconfirmed`, never
  * `not_attempted`.
  */
-export function sendToPaneOutcome(paneId: string, text: string, pressEnter = true): PaneSendOutcome {
+export function sendToPaneOutcome(paneId: string, text: string, pressEnter = true, socket?: string): PaneSendOutcome {
   if (!isTmuxAvailable()) {
     return 'not_attempted';
   }
@@ -677,7 +744,7 @@ export function sendToPaneOutcome(paneId: string, text: string, pressEnter = tru
   }
   try {
     // Send text with -l flag (literal) to avoid key interpretation issues in TUI apps
-    tmuxExec(['send-keys', '-t', paneId, '-l', sanitizedText], {
+    tmuxExec(onSocket(socket, ['send-keys', '-t', paneId, '-l', sanitizedText]), {
       stripTmux: true,
       timeout: 2000,
     });
@@ -688,7 +755,7 @@ export function sendToPaneOutcome(paneId: string, text: string, pressEnter = tru
   // Send Enter as a separate command so it is interpreted as a key press
   if (pressEnter) {
     try {
-      tmuxExec(['send-keys', '-t', paneId, 'Enter'], {
+      tmuxExec(onSocket(socket, ['send-keys', '-t', paneId, 'Enter']), {
         stripTmux: true,
         timeout: 2000,
       });
@@ -892,10 +959,10 @@ export function formatBlockedPanesSummary(blockedPanes: BlockedPane[]): string {
  */
 export const panelQuotaTmux = {
   // null when the inventory cannot be read (tmux missing, server unreachable, timeout): the pass keeps its saved waits.
-  listPanes: (): TmuxPane[] | null => listTmuxPanesStrict(true),
-  capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines),
-  sendContinue: (pane: TmuxPane): PaneSendOutcome => sendToPaneOutcome(pane.id, 'continue', true),
-  providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id),
+  listPanes: (): TmuxPane[] | null => listPanelQuotaPanes(),
+  capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines, pane.socket),
+  sendContinue: (pane: TmuxPane): PaneSendOutcome => sendToPaneOutcome(pane.id, 'continue', true, pane.socket),
+  providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id, pane.socket),
 };
 
 /**
@@ -908,13 +975,13 @@ export const panelQuotaTmux = {
  * name alone does not mean the provider is gone: the terminal's foreground process group tells. At the
  * prompt it is the shell's own group; while a wrapper script or the provider runs it is another group.
  */
-function paneProviderRunning(paneId: string): boolean | null {
+function paneProviderRunning(paneId: string, socket?: string): boolean | null {
   if (!isTmuxAvailable() || !isValidPaneId(paneId)) {
     return null;
   }
   try {
     const status = tmuxExec(
-      ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_pid} #{pane_current_command}'],
+      onSocket(socket, ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_pid} #{pane_current_command}']),
       { stripTmux: true, stdio: 'pipe', timeout: 3000 },
     ).trim();
     const [dead, panePid, ...commandParts] = status.split(/\s+/);

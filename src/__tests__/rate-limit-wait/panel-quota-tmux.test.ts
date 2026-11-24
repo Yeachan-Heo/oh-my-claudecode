@@ -10,12 +10,17 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../cli/tmux-utils.js')>();
   return { ...actual, tmuxExec: vi.fn(), tmuxSpawn: vi.fn() };
 });
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, readdirSync: vi.fn(() => []), lstatSync: vi.fn() };
+});
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return { ...actual, execFileSync: vi.fn() };
 });
 
 import { execFileSync } from 'node:child_process';
+import { lstatSync, readdirSync } from 'node:fs';
 import { tmuxExec, tmuxSpawn } from '../../cli/tmux-utils.js';
 
 const PANE = { id: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1 } as TmuxPane;
@@ -45,6 +50,64 @@ describe('panelQuotaTmux adapter', () => {
     expect(panelQuotaTmux.listPanes()).toBeNull();
     vi.mocked(tmuxSpawn).mockReturnValue({ status: 1 } as never);
     expect(panelQuotaTmux.listPanes()).toBeNull();
+  });
+
+  describe('private tmux endpoints of detached teams', () => {
+    const SOCKET = '/tmp/o-1k-lz9x2b-1a2b3c4d.sock';
+    const ownSocket = { isSocket: () => true, uid: process.getuid?.() } as never;
+    const noServer = (): Error => Object.assign(new Error('no server running on /tmp/tmux-0/default'), { status: 1 });
+    const onPrivate = { ...PANE, socket: SOCKET } as TmuxPane;
+
+    beforeEach(() => {
+      vi.mocked(readdirSync).mockReset();
+      vi.mocked(lstatSync).mockReset();
+      vi.mocked(readdirSync).mockReturnValue(['o-1k-lz9x2b-1a2b3c4d.sock', 'o-not-a-socket-name', 'unrelated.sock'] as never);
+      vi.mocked(lstatSync).mockReturnValue(ownSocket);
+    });
+
+    it('listPanes lists a private endpoint when there is no default server, and the pane carries its socket', () => {
+      vi.mocked(tmuxExec)
+        .mockImplementationOnce(() => { throw noServer(); })
+        .mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n');
+      const panes = panelQuotaTmux.listPanes();
+      expect(panes).toEqual([expect.objectContaining({ id: '%7', server: '4100:1795000000', socket: SOCKET })]);
+      expect(vi.mocked(tmuxExec).mock.calls[1][0].slice(0, 3)).toEqual(['-S', SOCKET, 'list-panes']);
+      expect(vi.mocked(tmuxExec).mock.calls, 'only the endpoint with the team name pattern is asked').toHaveLength(2);
+    });
+
+    it('a socket that is not the own user\'s or not a socket is not asked', () => {
+      vi.mocked(lstatSync).mockReturnValue({ isSocket: () => true, uid: (process.getuid?.() ?? 0) + 1 } as never);
+      vi.mocked(tmuxExec).mockImplementationOnce(() => { throw noServer(); });
+      expect(panelQuotaTmux.listPanes()).toBeNull();
+      expect(vi.mocked(tmuxExec).mock.calls).toHaveLength(1);
+    });
+
+    it('a socket file left behind by an exited server adds nothing and does not make the inventory unreadable', () => {
+      vi.mocked(tmuxExec)
+        .mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n')
+        .mockImplementationOnce(() => { throw Object.assign(new Error('error connecting to /tmp/o-1k-lz9x2b-1a2b3c4d.sock (Connection refused)'), { status: 1 }); });
+      const panes = panelQuotaTmux.listPanes();
+      expect(panes).toEqual([expect.objectContaining({ id: '%7' })]);
+      expect(panes?.[0].socket).toBeUndefined();
+    });
+
+    it('an endpoint that cannot be read makes the inventory unreadable', () => {
+      vi.mocked(tmuxExec)
+        .mockReturnValueOnce('4100:1795000000 omc-team-a:0.1 %7 1 team title\n')
+        .mockImplementationOnce(() => { throw Object.assign(new Error('spawnSync tmux ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+      expect(panelQuotaTmux.listPanes()).toBeNull();
+    });
+
+    it('capture, the provider check and the keys go to the endpoint of the pane', () => {
+      vi.mocked(tmuxExec).mockReturnValue('0 4242 node\n');
+      panelQuotaTmux.capture(onPrivate, 15);
+      expect(panelQuotaTmux.providerRunning(onPrivate)).toBe(true);
+      expect(panelQuotaTmux.sendContinue(onPrivate)).toBe('delivered');
+      const calls = vi.mocked(tmuxExec).mock.calls.map((call) => call[0]);
+      expect(calls).toHaveLength(4);
+      for (const args of calls) expect(args.slice(0, 2), `a call went to the default server: ${args.join(' ')}`).toEqual(['-S', SOCKET]);
+      expect(calls.map((args) => args[2])).toEqual(['capture-pane', 'display-message', 'send-keys', 'send-keys']);
+    });
   });
 
   it('providerRunning is false for a dead pane, true for a foreground command that is not a shell, null when unknown', () => {

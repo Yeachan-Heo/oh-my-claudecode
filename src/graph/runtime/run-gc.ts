@@ -50,18 +50,19 @@
  *     every run directory. Removal opens the directory without following a link and refuses it when it is not the
  *     scanned one, so a run replaced by a new run with the same id after the scan is never deleted on the verdict of
  *     the old one. Under the lock it decides the run again by the same rules as the scan (a resume that finished
- *     after the scan makes the run fresh again), then moves the run directory to
- *     `.deleted-<run id>-<time>-<random>` under the runs root (an atomic rename, so no process can resume the run
- *     from then on) and deletes the moved directory. A directory left behind by an interrupted removal is finished by
+ *     after the scan makes the run fresh again), then moves the run directory under
+ *     the runs root (an atomic rename, so no process can resume the run from then on), checks that the moved directory is
+ *     the scanned one, renames it to `.deleted-<run id>-<time>-<random>` and deletes it. A directory left behind by an interrupted removal is finished by
  *     the next pass, unless the lock inside it still names a live process.
  *   - Under ownership every file of the run is reached through the open run directory, whose identity is the scanned
  *     one (withRunDirectory): the decision reads (the age of the run and its state), the journal and torn copy of a
  *     repair, and the directory sync. The name of the run is checked again before the copy, before the truncation and
  *     after the decision reads; a name that was swapped refuses the step. A directory can only be renamed by name, so
  *     the name is checked right before the move and the moved directory right after it, and a directory that is not
- *     the scanned one is put back; when the name is taken again and it cannot be put back, it is renamed to
- *     `.kept-<run id>-<time>-<random>`, outside the quarantine namespace, so that no later pass deletes what was never
- *     validated.
+ *     the scanned one is put back; when the name is taken again and it cannot be put back, it stays under
+ *     its staging name `.moving-<run id>-<time>-<random>`. The moved directory waits under the staging name, which no
+ *     pass deletes, until it is known to be the scanned one; only then is it renamed to `.deleted-...`, so a process
+ *     that ends after the move leaves nothing that the next pass would delete unchecked.
  *   - The platform is never told by its name: every platform that has directory-relative operations (the runtime's
  *     contained filesystem layer: Linux, and macOS with the native module) makes all of those decisions and the
  *     removal through them. A platform that has none cannot take ownership (the fence needs the same operations), and
@@ -70,11 +71,12 @@
  *     scan, which runs before ownership, reads by name; its verdict is only a hint and is decided again under the lock.
  *   - Removal never follows a symbolic link: a link is unlinked, its target is left alone. Every directory is opened
  *     without following links, checked to be the one that was seen, and its entries are removed relative to that open
- *     directory, so a directory swapped for a link while the tree is walked cannot redirect the removal. One step is by
- *     name, because the operations have no form relative to a directory: the final rmdir of the top directory. A
- *     directory swapped in at that moment is removed only if it is empty, and rmdir never follows a link. Where the
- *     platform's operations have no `rmdir` (macOS), a tree that has a subdirectory is refused before anything is
- *     removed, because removing the emptied subdirectory by its path would follow a swapped ancestor.
+ *     directory, so a directory swapped for a link while the tree is walked cannot redirect the removal. The top directory is
+ *     opened and finally removed relative to its parent, which is held open. Where the platform's operations have no
+ *     `rmdir` (macOS), a tree that has a subdirectory is refused before anything is removed, because removing the
+ *     emptied subdirectory by its path would follow a swapped ancestor, and the final rmdir of the top directory is by
+ *     name after the held parent is checked; a directory swapped in at that moment is removed only if it is empty, and
+ *     rmdir never follows a link.
  *   - An invalid retention value stops the command before anything is touched.
  */
 

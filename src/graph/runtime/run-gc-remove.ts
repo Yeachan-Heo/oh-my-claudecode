@@ -14,8 +14,8 @@ import {
   leaseOf,
   measureTree,
   NOFOLLOW,
-  KEPT_PREFIX,
   QUARANTINE_PREFIX,
+  STAGING_PREFIX,
   type FileIdentity,
   type OperationsFor,
 } from "./run-gc-read.js";
@@ -41,32 +41,53 @@ export interface ScannedRun {
 }
 
 // Removes the directory at `path` and everything below it, never following a symbolic link: a link is unlinked
-// itself. With `expected` the directory must be the one with that identity, or nothing is removed. `afterLstat` is a
-// test-only interlock that runs between the check of an entry and its use. An entry that is already gone (another
-// pass removed it) is not an error.
+// itself. With `expected` the directory must be the one with that identity, or nothing is removed. `afterLstat` and
+// `beforeFinalRmdir` are test-only interlocks: the first runs between the check of an entry and its use, the second
+// right before the top directory is removed. An entry that is already gone (another pass removed it) is not an error.
 //
-// Every directory is opened without following a link (O_NOFOLLOW), checked to be the one that was just seen, and its
-// entries are removed relative to the open directory (`unlink`, and `rmdir` of an emptied subdirectory), so a directory
-// swapped for a link while the tree is walked cannot redirect the removal. The same code serves every platform that has
-// directory-relative operations; where there are none nothing is removed. One step is by name, because the operations
-// have no form that is relative to a directory: the final rmdir of the top directory. A platform whose operations have no
-// `rmdir` (macOS) removes only a tree without subdirectories and refuses any other before anything is removed, because the
-// rmdir of an emptied subdirectory by its path would follow an ancestor that was swapped for a link. A directory swapped in
-// at the final step is removed only if it is empty, and a link is never followed by rmdir.
+// The parent directory is opened first, without following a link, and the directory is opened and finally removed
+// relative to it, so a parent component swapped for a link while the tree is walked cannot redirect any step. Every
+// directory is opened without following a link (O_NOFOLLOW), checked to be the one that was just seen, and its entries
+// are removed relative to the open directory (`unlink`, and `rmdir` of an emptied subdirectory). The same code serves
+// every platform that has directory-relative operations; where there are none nothing is removed. A platform whose
+// operations have no `rmdir` (macOS) removes only a tree without subdirectories and refuses any other before anything is
+// removed, because the rmdir of an emptied subdirectory by its path would follow an ancestor that was swapped for a link;
+// its final rmdir of the top directory is by name, after the parent is checked to be the directory that is held open (a
+// swap in the instants between that check and the rmdir is the one step left open there). A directory swapped in at the
+// final step is removed only if it is empty, and a link is never followed by rmdir.
 export function removeTree(
   path: string,
-  interlock: { afterLstat?: (path: string) => void; operationsFor?: OperationsFor } = {},
+  interlock: { afterLstat?: (path: string) => void; beforeFinalRmdir?: () => void; operationsFor?: OperationsFor } = {},
   expected?: FileIdentity,
 ): void {
   const operationsFor = interlock.operationsFor ?? directoryOperationsIfSupported;
-  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+  const parentPath = dirname(path);
+  const name = basename(path);
+  const parentFd = openSync(parentPath, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
   try {
-    assertIdentity(fstatSync(fd), expected, "the directory to remove");
-    removeEntriesOf(fd, path, interlock, operationsFor);
+    const parent = operationsFor(parentFd);
+    if (parent === null) throw new Error("this platform has no directory-relative file operations; nothing was removed");
+    const fd = parent.open(name, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0));
+    try {
+      assertIdentity(fstatSync(fd), expected, "the directory to remove");
+      removeEntriesOf(fd, path, interlock, operationsFor);
+    } finally {
+      closeSync(fd);
+    }
+    interlock.beforeFinalRmdir?.();
+    if (parent.rmdir !== undefined) {
+      ignoreMissing(() => parent.rmdir?.(name));
+      return;
+    }
+    assertIdentity(lstatSync(parentPath), fileIdentity(fstatSync(parentFd)), "the parent of the directory to remove");
+    ignoreMissing(() => rmdirSync(path));
   } finally {
-    closeSync(fd);
+    closeSync(parentFd);
   }
-  ignoreMissing(() => rmdirSync(path));
+}
+
+function fileIdentity(stat: { dev: number; ino: number }): FileIdentity {
+  return { dev: stat.dev, ino: stat.ino };
 }
 
 function ignoreMissing(action: () => void): void {
@@ -133,15 +154,15 @@ function removeEntriesOf(
 }
 
 // A directory cannot be renamed through its open descriptor, so the move is by name: the name is checked right before
-// it, and the moved directory is checked right after. When the name was swapped in between, the directory that was
-// moved is not the scanned one: it is put back, and nothing is deleted. When the name is taken again and it cannot be
-// put back, it is renamed out of the quarantine namespace, because it was never validated and a later pass deletes what
-// is left under a quarantine name.
+// it, and the moved directory is checked right after. The directory waits under a staging name, outside the namespace
+// that a later pass deletes from, until it is known to be the scanned one: a process that ends between the move and the
+// check leaves a directory that nothing deletes. When the name was swapped in between, the directory that was moved is
+// not the scanned one: it is put back, and nothing is deleted. When the name is taken again and it cannot be put back,
+// it stays under its staging name.
 function putBackUnlessScanned(runDir: string, moved: string, scanned: FileIdentity): void {
   let identity: FileIdentity | null = null;
   try {
-    const stat = lstatSync(moved);
-    identity = { dev: stat.dev, ino: stat.ino };
+    identity = fileIdentity(lstatSync(moved));
   } catch {
     // Nothing is at the new name; the check below refuses.
   }
@@ -149,13 +170,7 @@ function putBackUnlessScanned(runDir: string, moved: string, scanned: FileIdenti
   try {
     renameSync(moved, runDir);
   } catch {
-    const kept = join(dirname(moved), `${KEPT_PREFIX}${basename(moved).slice(QUARANTINE_PREFIX.length)}`);
-    try {
-      renameSync(moved, kept);
-    } catch {
-      throw new Error("the run directory was replaced while it was moved; the moved directory could not be put back and stays under its quarantine name");
-    }
-    throw new Error(`the run directory was replaced while it was moved; the moved directory could not be put back and was kept as ${basename(kept)}`);
+    throw new Error(`the run directory was replaced while it was moved; the moved directory could not be put back and stays as ${basename(moved)}`);
   }
   throw new Error("the run directory was replaced while it was moved; the moved directory was put back");
 }
@@ -176,6 +191,7 @@ export function quarantineRun(
   if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
   const operationsFor = scanned?.operationsFor ?? directoryOperationsIfSupported;
   const { fence, epoch } = takeOwnership(runDir, "run is held by a live owner; not removed", scanned?.identity);
+  const staging = join(realRoot, `${STAGING_PREFIX}${id}-${nowMs}-${suffix}`);
   const quarantine = join(realRoot, `${QUARANTINE_PREFIX}${id}-${nowMs}-${suffix}`);
   try {
     if (scanned !== undefined) {
@@ -196,9 +212,20 @@ export function quarantineRun(
       assertIdentity(lstatSync(runDir), scanned.identity, "the run directory");
       scanned.beforeMove?.();
     }
-    renameSync(runDir, quarantine);
+    renameSync(runDir, staging);
     scanned?.afterMove?.();
-    if (scanned !== undefined) putBackUnlessScanned(runDir, quarantine, scanned.identity);
+    if (scanned !== undefined) putBackUnlessScanned(runDir, staging, scanned.identity);
+    try {
+      renameSync(staging, quarantine);
+    } catch (error) {
+      // The name is not usable: the run goes back where it was.
+      try {
+        renameSync(staging, runDir);
+      } catch {
+        // It stays under its staging name, which no pass deletes.
+      }
+      throw error;
+    }
   } catch (error) {
     // The run stays where it was, so the lock this process took must not stay with it.
     try {

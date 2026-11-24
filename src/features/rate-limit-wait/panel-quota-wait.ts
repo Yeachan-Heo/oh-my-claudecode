@@ -78,6 +78,8 @@ export interface PanePoint {
    * server restart the same id can name an unrelated worker. Undefined when the listing carries no such value.
    */
   server?: string;
+  /** Private tmux endpoint (`-S` path) of the server the pane belongs to; undefined for the default server. */
+  socket?: string;
 }
 
 /** Provider reading: the raw JSON body with `data.limits` (or a bare array of limits). */
@@ -266,7 +268,8 @@ export function wrapperOwnsPane(content: string, pattern: RegExp): boolean {
 // its index or when its session is renamed. Session, window index and pane index are refreshed on the entry at
 // every pass, not part of the key.
 export function paneKey(pane: PanePoint): string {
-  return pane.id;
+  // A pane id is unique only within one tmux server: panes of a private endpoint carry its socket in the key.
+  return pane.socket === undefined ? pane.id : `${pane.socket}|${pane.id}`;
 }
 
 function screenSignature(content: string): string {

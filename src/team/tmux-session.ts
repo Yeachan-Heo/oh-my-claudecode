@@ -135,6 +135,13 @@ export function buildDetachedTmuxServerKeepaliveArgs(
   ];
 }
 
+/** Where private tmux endpoints are created. */
+export function privateTmuxSocketDirectory(): string {
+  return process.platform === "darwin" || process.platform === "linux"
+    ? "/tmp"
+    : tmpdir();
+}
+
 /**
  * Keep private tmux endpoint names below Darwin's Unix-domain socket limit.
  * `/tmp` is deliberately used on Darwin/Linux instead of potentially long
@@ -142,10 +149,7 @@ export function buildDetachedTmuxServerKeepaliveArgs(
  * mistaken for this invocation.
  */
 export function buildPrivateTmuxSocketPath(): string {
-  const socketDirectory =
-    process.platform === "darwin" || process.platform === "linux"
-      ? "/tmp"
-      : tmpdir();
+  const socketDirectory = privateTmuxSocketDirectory();
   const socketPath = join(
     socketDirectory,
     `o-${process.pid.toString(36)}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}.sock`,
