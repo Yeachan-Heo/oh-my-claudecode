@@ -40,6 +40,8 @@ POLL_S = max(POLL_S, 0.1)   # --poll 0 would spin a processor for the whole paus
 def pause_state():
     """Return the pause dict when a pause is in force, else None (fail-open)."""
     try:
+        if not stat.S_ISREG(os.lstat(PAUSE_FILE).st_mode):
+            return None   # a link is not the file the guard writes (it can lead to the pause of another guard); the guard never owns one
         with open(PAUSE_FILE) as f:
             p = json.load(f)
     except Exception:

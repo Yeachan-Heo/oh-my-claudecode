@@ -271,6 +271,15 @@ def registered_runtime_files():
     return found
 
 
+def program_collisions():
+    """[(label of the program, path, file of the guard)]: a hook, interpreter or launcher that the registered entries name and that is
+    a file the guard writes (a settings rewrite after the start can put it there). A write would replace the program."""
+    outputs = [('pause_file', PAUSE_FILE), ('state_file', STATE), ('log_file', LOG), ('lock of the pause file', PAUSE_FILE + '.lock'),
+               ('lock of the state file', STATE + '.lock' if STATE else '')]
+    return [(label, path, out_label) for label, path in registered_runtime_files() if label in ('registered hook', 'registered interpreter')
+            for out_label, out in outputs if out and same_file(path, out)]
+
+
 def own_files():
     """The scripts of the guard itself: what no log, state or pause file may be."""
     return [('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
@@ -431,6 +440,9 @@ def read_cache():
     except Exception as e:
         return None, None, 1e9, ('cache-unreadable', f'cannot read the usage cache {CACHE}: {e!r}')
     problem = None
+    source = d.get('source')
+    if source is not None and source != 'anthropic':   # OMC writes the provider next to the data: another provider's cache is not this account's window
+        return None, None, age, ('cache-source', f'the usage cache {CACHE} has the source {source!r}, not "anthropic" (a cache of another provider?): it is not acted on, check "usage_cache"')
     if pct is None:
         problem = ('cache-no-percent', f'the usage cache {CACHE} has no fiveHourPercent (no five-hour window on this account?): {NEEDS}')
     elif not math.isfinite(pct) or not 0 <= pct <= 100:   # OMC clamps the field to 0-100 when it writes it
@@ -478,6 +490,8 @@ def hook_check(where):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
     runtime = [('pause_file', PAUSE_FILE), ('state_file', STATE), ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS),
                ('lock of the pause file', PAUSE_FILE + '.lock'), ('lock of the usage cache', CACHE + '.lock'), ('configuration file', A.config), *own_files()]
+    for label, path, out_label in program_collisions():
+        log(f'WARNING ({where}): the {label} {path} is the {out_label} of this guard: a write of the guard would replace the program, so a pause would hold no session. Run five-hour-guard-settings.py add again')
     programs = []   # the programs of every recognised entry: a log of one entry can be the program of another
     for command in ours:
         try:
@@ -565,6 +579,8 @@ def unpublish(strict=False):
 def enter_pause(state, pct, reset_ts):
     if not A.dry_run:
         check_pause_path()   # before anything is stored: a pause that cannot be published must not be remembered
+        for label, path, out_label in program_collisions():
+            raise OSError(f'the {label} {path} is the {out_label} of this guard: a pause would replace the program, so none is stored (run five-hour-guard-settings.py add again)')
     state.update(paused=True, since=time.time(), resume_at=reset_ts + A.margin)
     log(f'THRESHOLD: 5h {pct} %, reset {ts(reset_ts)}; pause until {ts(state["resume_at"])}')
     hook_check('pause start')

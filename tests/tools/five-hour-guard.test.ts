@@ -821,6 +821,58 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(f.log)).toMatch(/RESUMED \(guard stopping, state not saved\)/);
   });
 
+  it('a usage cache that names another provider as its source is not acted on, one that names Anthropic (or, as OMC always writes it, nothing else) is', () => {
+    const other = fixture('cache-source-other', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS, extra: { source: 'zai' } } });
+    const r = runSync(GUARD, guardArgs(other, ['--once']));
+    expect(r.stdout).toMatch(/WARNING \(cache-source\): .*source 'zai'/);
+    expect(existsSync(other.pause), 'no pause on the data of another provider').toBe(false);
+    const own = fixture('cache-source-own', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    runSync(GUARD, guardArgs(own, ['--once']));
+    expect(existsSync(own.pause), 'the Anthropic cache pauses').toBe(true);
+  });
+
+  it('a link at pause_file is no pause for the hook, whatever its target holds: the call is not held', async () => {
+    const f = fixture('hook-link', {});
+    const target = join(f.dir, 'foreign-pause.json');
+    writeFileSync(target, JSON.stringify({ v: 2, paused: true, since: now(), resume_at: now() + 600, valid_until: now() + 60, exclude: [], percent: 97, pid: process.pid }), 'utf8');
+    symlinkSync(target, f.pause);
+    expect(await hookPasses(f, 'link0001'), 'a link to a live pause of another guard holds nobody').toBe(true);
+    unlinkSync(f.pause);
+    writePause(f, { pid: process.pid });
+    expect(await hookHeld(f, 'link0002'), 'the same document as a regular file holds').toBe(true);
+  });
+
+  it('a registered hook or launcher that a settings rewrite made the state file is reported at every wiring pass, and the pause that would replace it is refused', async () => {
+    const rewrite = (f: Fixture, program: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, program, PYBIN), timeout: 21600 }] }] } }), 'utf8');
+    const config = (f: Fixture, state: string) => writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');
+
+    const paused = fixture('program-is-state-paused', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const stateA = join(paused.dir, 'five-hour-guard-hook.py.state');
+    config(paused, stateA);
+    writeFileSync(paused.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(paused.pause, HOOK, PYBIN), timeout: 21600 }] }] } }), 'utf8');
+    const g = startGuard(paused, ['--warn-every', '1']);
+    try {
+      await waitFor(() => existsSync(paused.pause), 20000, 'the pause');
+      rewrite(paused, stateA);
+      await waitFor(() => /WARNING \(pause\): the registered hook .*five-hour-guard-hook\.py\.state is the state_file of this guard/.test(readText(paused.log)), 20000, 'the collision warning');
+    } finally { await stopGuard(g); }
+
+    const idle = fixture('program-is-state-idle', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const stateB = join(idle.dir, 'five-hour-guard-hook.py.state');
+    config(idle, stateB);
+    writeFileSync(idle.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(idle.pause, HOOK, PYBIN), timeout: 21600 }] }] } }), 'utf8');
+    const g2 = startGuard(idle);
+    try {
+      await waitFor(() => /guard start/.test(readText(idle.log)), 20000, 'the start');
+      writeFileSync(stateB, 'the program\n', 'utf8');
+      rewrite(idle, stateB);
+      writeCache(idle, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*is the state_file of this guard/.test(readText(idle.log)), 20000, 'the refusal');
+    } finally { await stopGuard(g2); }
+    expect(readText(stateB), 'the program is intact').toBe('the program\n');
+    expect(existsSync(idle.pause), 'no pause was published').toBe(false);
+  });
+
   it('a stop whose first removal of the pause file fails tries once more: the state is already unpaused and the sessions are not left waiting for the heartbeat', async () => {
     const f = fixture('stop-unlink-fails', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     const flag = join(f.dir, 'deny-unlink');

@@ -133,11 +133,12 @@ def command():
     return ENTRY.entry_command(PAUSE_FILE, A.hook, A.python, HOOK_LOG)
 
 
-def probe_hook():
+def probe_hook(with_log=True):
     """Run the entry that `add` is about to write, through the shell as Claude Code runs it, against a pause that this tool writes in a
     private directory: a valid pause must make it hold (the hook logs hold-start and keeps running for a moment) and the removal of
     the file must release it (exit 0). An empty or truncated hook, another program with the name of the hook, or a command that
-    does not run the hook would exit at once and protect nothing."""
+    does not run the hook would exit at once and protect nothing. with_log False: the command without --log (what is installed when no hook
+    log is set), where the hold cannot be seen in a log and the process must simply keep running."""
     import tempfile
     env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
                                                            'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')}
@@ -146,7 +147,7 @@ def probe_hook():
         now = time.time()
         with open(pause, 'w') as f:
             json.dump({'v': 2, 'paused': True, 'since': now, 'resume_at': now + 600, 'valid_until': now + 300, 'exclude': [], 'pid': os.getpid()}, f)
-        probe_command = ENTRY.entry_command(pause, A.hook, A.python, log) + ' --poll 0.1'
+        probe_command = ENTRY.entry_command(pause, A.hook, A.python, log if with_log else None) + ' --poll 0.1'
         try:
             p = subprocess.Popen(['sh', '-c', probe_command], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
         except OSError as e:
@@ -158,9 +159,13 @@ def probe_hook():
             except OSError:
                 pass
             end = time.monotonic() + 60
-            while time.monotonic() < end and p.poll() is None and not (os.path.exists(log) and 'hold-start' in open(log).read()):
+            while with_log and time.monotonic() < end and p.poll() is None and not (os.path.exists(log) and 'hold-start' in open(log).read()):
                 time.sleep(0.05)
-            if p.poll() is not None or not os.path.exists(log):
+            if not with_log:
+                time.sleep(0.5)
+                if p.poll() is not None:
+                    fail(f'the hook {A.hook!r} does not hold a valid pause when it is run without --log, as the entry that add installs runs it while no hook log is set (the entry ended with status {p.poll()} at once): the entry would protect nothing')
+            elif p.poll() is not None or not os.path.exists(log):
                 fail(f'the hook {A.hook!r} does not hold a valid pause (the entry ended with status {p.poll()} at once): it is not the hook of the guard, so the entry would protect nothing')
             time.sleep(1.5)   # a hook that lets go by itself while the pause is in force protects nothing: it must still be holding
             if p.poll() is not None:
@@ -328,6 +333,8 @@ def run_once():
         if probe.returncode != 0 or probe.stdout.strip() != str(nonce * 3 + 1):
             fail(f'the interpreter {A.python!r} cannot run the hook (it must be Python 3 with the standard library): {probe.stderr.strip()[-300:] or "it did not run the check"}')
         probe_hook()
+        if not HOOK_LOG:
+            probe_hook(with_log=False)   # the entry that is installed has no --log: probe that shape too
         if MARK not in os.path.basename(A.hook):
             fail(f'the file name of the hook {A.hook!r} does not contain {MARK}: the entry is recognised by that name, so `check` and `remove` would not find it (copy the hook to another directory, keep its name)')
         entry = {'matcher': '*', 'hooks': [{'type': 'command', 'command': command(), 'timeout': A.timeout}]}

@@ -583,6 +583,21 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readText(f.settings)).toBe(original);
   });
 
+  it('when no hook log is set the no-log command that add installs is probed too: a hook that holds only when it is given --log is refused', () => {
+    const f = fixture('settings-probe-no-log');
+    const hook = join(f.dir, 'needs-log', 'five-hour-guard-hook.py');
+    mkdirSync(dirname(hook), { recursive: true });
+    writeFileSync(hook, 'import os, sys, time\nif "--log" not in sys.argv:\n    sys.exit(0)\nopen(sys.argv[sys.argv.index("--log") + 1], "a").write("hold-start\\n")\nwhile os.path.exists(sys.argv[sys.argv.index("--pause-file") + 1]):\n    time.sleep(0.1)\n', 'utf8');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const r = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', f.pause, '--hook', hook, '--python', PYBIN]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/without --log|no hook log/);
+    expect(readText(f.settings), 'nothing written').toBe(original);
+    const ok = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', f.pause, '--hook', HOOK, '--python', PYBIN]);
+    expect(ok.status, `the real hook without a log: ${ok.stdout}${ok.stderr}`).toBe(0);
+  });
+
   it('add keeps the probe pause in place: a hook that holds for a moment and then lets go by itself is refused', () => {
     const f = fixture('settings-probe-early-exit');
     const hook = join(f.dir, 'early', 'five-hour-guard-hook.py');
