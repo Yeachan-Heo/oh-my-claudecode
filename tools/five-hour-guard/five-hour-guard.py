@@ -273,7 +273,10 @@ def command_hooks(groups):
 
 def registered_runtime_files():
     """The hook script and the interpreter that the hook entry in settings.json names (they can be anywhere: `add --hook` takes
-    any path). Best effort: an unreadable settings file gives none (hook_check says so later)."""
+    any path). A relative hook, or an interpreter given with a directory part, is taken as the file it names from the working
+    directory of the guard: a session resolves it from its own directory, which cannot be known here, so this is the conservative
+    reading for the collision checks (an interpreter given by its bare name is looked up on PATH and names no file). Best effort: an
+    unreadable settings file gives none (hook_check says so later)."""
     found = []
     try:
         with open(SETTINGS or default_settings()) as f:
@@ -283,8 +286,8 @@ def registered_runtime_files():
                 hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(handler['command'])
             except Exception:
                 continue
-            found += [('registered hook', t) for t in hooks if os.path.isabs(t)]
-            found += [('registered interpreter', t) for t in interpreters + launchers if os.path.isabs(t)]
+            found += [('registered hook', t) for t in hooks]
+            found += [('registered interpreter', t) for t in interpreters + launchers if os.path.dirname(t)]
             found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
     except Exception:
         pass
@@ -366,11 +369,20 @@ def log(msg):
             pass
 
 
+def refuse_program_overwrite(path):
+    """A hook, interpreter or launcher that a registered entry names is never replaced by a write of the guard: settings.json can be
+    rewritten at any moment, so this is looked at at every write (the entry into a pause, each renewal, the end of a pause)."""
+    for label, program in registered_runtime_files():
+        if label in ('registered hook', 'registered interpreter') and same_file(program, path):
+            raise OSError(f'the {label} {program} is {path}, a file this guard writes: it is not replaced (run five-hour-guard-settings.py add again)')
+
+
 def write_json(path, obj, no_clobber=False):
     """Write atomically. no_clobber: a file that appears at the path meanwhile is kept and the write fails (a hard link is created
     instead of a rename; where links are not supported the destination is reserved exclusively first)."""
     if A.dry_run:
         return
+    refuse_program_overwrite(path)
     tmp = f'{path}.{os.getpid()}.tmp'
     try:
         os.unlink(tmp)   # a leftover of a crashed run, or a link somebody put there: the link itself goes, never what it points to
@@ -567,9 +579,12 @@ def check_wiring(where):
 
 def check_pause_path():
     """Never publish over a file that is not a pause of this guard: something else may have created it after the start check (a shared or
-    mistyped path)."""
-    if os.path.lexists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):
+    mistyped path). Returns whether the file exists: the caller acts on this one look (a second look could find a file that appeared in
+    between and take it for the pause it may replace)."""
+    exists = os.path.lexists(PAUSE_FILE)
+    if exists and not is_guard_pause(PAUSE_FILE):
         raise OSError(f'the file {PAUSE_FILE} is not a pause file of this guard: it is left untouched and no pause is published (check "pause_file")')
+    return exists
 
 
 def publish(state, pct=None, only=None):
@@ -579,8 +594,7 @@ def publish(state, pct=None, only=None):
            'valid_until': now + A.heartbeat, 'exclude': EXCLUDE, 'percent': pct, 'pid': os.getpid()}
     if only:
         doc['only'] = only
-    check_pause_path()
-    write_json(PAUSE_FILE, doc, no_clobber=not os.path.lexists(PAUSE_FILE))
+    write_json(PAUSE_FILE, doc, no_clobber=not check_pause_path())
 
 
 def unpublish(strict=False):
@@ -711,11 +725,16 @@ def pid_alive(pid):
 
 
 def is_guard_pause(path):
-    """True when the file is a regular file (not a link, whatever it points to) with the shape publish() writes. Anything else is somebody else's file."""
+    """True when the file is a regular file (not a link, whatever it points to) with the shape publish() writes. Anything else is somebody else's file.
+    The file is opened without following a link and the opened descriptor is checked, so a regular file that is swapped for a link
+    after the first look is not read through the link."""
     try:
         if not stat.S_ISREG(os.lstat(path).st_mode):
             return False
-        with open(path) as f:
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+        with os.fdopen(fd) as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return False
             d = json.load(f)
         return (isinstance(d, dict) and d.get('v') == 2 and type(d.get('v')) is int and d.get('paused') is True and type(d.get('pid')) is int
                 and all(type(d.get(k)) in (int, float) and math.isfinite(d[k]) for k in ('since', 'resume_at', 'valid_until')))

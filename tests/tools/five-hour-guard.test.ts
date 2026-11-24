@@ -55,6 +55,8 @@ const WHICH_FAILS_DRIVER = [
   'sys.argv = sys.argv[1:]',
   "runpy.run_path(sys.argv[0], run_name='__main__')",
 ].join('\n');
+// the guard runs in another working directory (a relative path of a settings entry is read from it)
+const CHDIR_DRIVER = ['import os, runpy, sys', 'os.chdir(sys.argv[1])', 'sys.argv = sys.argv[2:]', "runpy.run_path(sys.argv[0], run_name='__main__')"].join('\n');
 const FAST = ['--interval', '0.2', '--heartbeat', '5', '--margin', '1'];
 const guardArgs = (f: Fixture, extra: string[] = []) => ['--config', f.cfg, ...FAST, ...extra];
 const startGuard = (f: Fixture, extra: string[] = []) => spawnPy(GUARD, guardArgs(f, extra));
@@ -383,7 +385,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       const log = readText(f.log);
       expect(log).toMatch(/WARNING \(pause-beyond-timeout\): the pause now lasts .* longer than the 21600 s minimum timeout of the hook entry/);
       expect(existsSync(f.pause), 'the pause goes on').toBe(true);
-      expect(readJson(f.pause).resume_at, 'extended to the reset plus margin').toBeGreaterThan(now() + 2900);
+      // the slip is logged before the pause file is rewritten: wait for the write (under load a read right after the line sees the old file)
+      await waitFor(() => existsSync(f.pause) && readJson(f.pause).resume_at > now() + 2900, 20000, 'the pause file extended to the reset plus margin');
     } finally { await stopGuard(g); }
 
     const short = fixture('slip-within-timeout', { cache: { pct: 97, resetMs: Date.now() + 3000 * 1000 } });
@@ -906,6 +909,67 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     unlinkSync(f.pause);
     writePause(f, { pid: process.pid });
     expect(await hookHeld(f, 'link0002'), 'the same document as a regular file holds').toBe(true);
+  });
+
+  it('a regular pause file that is swapped for a link between the hook\'s first look and its read is not read through the link: the call is not held', async () => {
+    const f = fixture('hook-swap-to-link', {});
+    const other = join(f.dir, 'other-guard-pause.json');
+    writeFileSync(other, JSON.stringify(pauseDoc({ pid: process.pid })), 'utf8');
+    writePause(f, { valid_until: now() - 5 });   // a regular file that is no valid pause
+    const driver = ['import os, runpy, sys', 'real = os.lstat', 'pause, other = sys.argv[1], sys.argv[2]', 'done = []',
+      'def swap(path, *args, **kw):', '    found = real(path, *args, **kw)',
+      '    if str(path) == pause and not done:', '        done.append(1)', '        os.unlink(pause)', '        os.symlink(other, pause)',
+      '    return found',
+      'os.lstat = swap', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const h = spawnPyCode(driver, [f.pause, other, HOOK, '--pause-file', f.pause, '--log', f.hookLog, '--poll', '0.1']);
+    await Promise.race([h.done, sleep(20000)]);
+    await h.stop();
+    expect(h.exited && h.code === 0, 'the call passed').toBe(true);
+    expect(lstatSync(f.pause).isSymbolicLink(), 'the swap happened').toBe(true);
+    expect(readText(f.hookLog), 'the pause behind the link held nobody').not.toMatch(/hold-start/);
+  });
+
+  it('a hook that a settings rewrite during an active pause made the state file is not replaced by a renewal: every write of the state and of the pause file refuses a registered program', async () => {
+    const f = fixture('program-is-state-renewal', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const state = join(f.dir, 'five-hour-guard-hook.py.state');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (hook: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, hook, PYBIN), timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entry(HOOK), 'utf8');
+    const hookText = readFileSync(HOOK, 'utf8');
+    const g = startGuard(f, ['--warn-every', '1']);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      writeFileSync(f.settings, entry(state), 'utf8');   // the registered hook is now the state path
+      writeFileSync(state, hookText, 'utf8');            // and a real hook is installed there
+      await waitFor(() => /ERROR: tick failed.*the registered hook .*five-hour-guard-hook\.py\.state is .*five-hour-guard-hook\.py\.state, a file this guard writes/.test(readText(f.log)) || readText(state) !== hookText, 20000, 'the refusal');
+      await sleep(600);   // a few more renewals
+    } finally { await stopGuard(g); }
+    expect(readText(f.log), 'the renewal was refused').toMatch(/ERROR: tick failed.*a file this guard writes/);
+    expect(readText(state), 'the hook is intact').toBe(hookText);
+  });
+
+  it('a relative hook that a settings rewrite after the start makes the state file, read from the working directory of the guard, is not replaced: the pause is refused, and the start refuses it too', async () => {
+    const f = fixture('relative-program-is-state', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const state = join(f.dir, 'five-hour-guard-hook.py');   // the guard runs in f.dir
+    writeFileSync(state, 'the program\n', 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (hook: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, hook, PYBIN), timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entry(HOOK), 'utf8');
+    const g = spawnPyCode(CHDIR_DRIVER, [f.dir, GUARD, ...guardArgs(f)]);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeFileSync(f.settings, entry('five-hour-guard-hook.py'), 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*registered hook five-hour-guard-hook\.py is the state_file of this guard/.test(readText(f.log)) || readText(state) !== 'the program\n', 20000, 'the refusal');
+      await sleep(600);
+    } finally { await stopGuard(g); }
+    expect(readText(f.log), 'the pause was refused').toMatch(/ERROR: tick failed.*registered hook five-hour-guard-hook\.py is the state_file of this guard/);
+    expect(readText(state), 'the program is intact').toBe('the program\n');
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+    const again = runSync(GUARD, ['--config', f.cfg, '--once'], { cwd: f.dir });   // the same settings at the start
+    expect(again.status, `${again.stdout}${again.stderr}`).toBe(2);
+    expect(again.stderr).toMatch(/are the same file/);
+    expect(readText(state), 'still intact').toBe('the program\n');
   });
 
   it('a registered hook or launcher that a settings rewrite made the state file is reported at every wiring pass, and the pause that would replace it is refused', async () => {
@@ -1479,6 +1543,19 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(race.pause), 'the file that appeared in the instant is not replaced').toBe('late foreign file\n');
   });
 
+  it('a file that appears at pause_file in the instant between the ownership check and the choice of the exclusive write is not replaced either', () => {
+    // the file is created right after the check of a publication has found no file: a second look at the path would find it and allow the replacing write
+    const driver = ['import os, runpy, sys', 'real = os.path.lexists', 'target = sys.argv[1]',
+      'def late(path, *args):', '    found = real(path, *args)',
+      '    if str(path) == target and not found and sys._getframe(2).f_code.co_name == "publish": open(target, "w").write("late foreign file\\n")',
+      '    return found',
+      'os.path.lexists = late', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('foreign-at-existence-check', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*appeared meanwhile/);
+    expect(readText(f.pause), 'the file that appeared is not replaced').toBe('late foreign file\n');
+  });
+
   it('where hard links are not supported a file that appears at pause_file is still never replaced, and without one the pause is published with nothing left behind', () => {
     const driver = ['import errno, os, runpy, sys', 'target = sys.argv[1]', 'foreign = sys.argv[2] == "1"',
       'def nolink(a, b, *args, **kw):', '    if foreign and b == target: open(b, "w").write("late foreign file\\n")', '    raise OSError(errno.EPERM, "Operation not permitted")',
@@ -1510,6 +1587,26 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(lstatSync(f.pause).isSymbolicLink(), 'the link is still there').toBe(true);
     expect(readText(target), 'the target is intact').toBe(before);
     expect(existsSync(f.state) ? readJson(f.state).paused : false, 'no pause was stored').toBe(false);
+  });
+
+  it('a regular pause file that is swapped for a link between the first look and the read is not read through the link, by the guard either', () => {
+    const f = fixture('guard-swap-to-link', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const target = join(f.dir, 'foreign-pause.json');
+    writeFileSync(target, JSON.stringify(pauseDoc({ pid: process.pid })), 'utf8');
+    const before = readText(target);
+    writePause(f, { pid: process.pid });
+    // the first look at the file inside is_guard_pause() is followed by the swap
+    const driver = ['import os, runpy, sys', 'real = os.lstat', 'pause, target = sys.argv[1], sys.argv[2]', 'done = []',
+      'def swap(path, *args, **kw):', '    found = real(path, *args, **kw)',
+      '    if str(path) == pause and not done and sys._getframe(1).f_code.co_name == "is_guard_pause":',
+      '        done.append(1)', '        os.unlink(pause)', '        os.symlink(target, pause)',
+      '    return found',
+      'os.lstat = swap', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(driver, [f.pause, target, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr, 'refused at the first look: the file is not a pause file of this guard').toMatch(/exists and is not a pause file of this guard/);
+    expect(lstatSync(f.pause).isSymbolicLink(), 'the link is still there').toBe(true);
+    expect(readText(target), 'the target is intact').toBe(before);
   });
 
   it('an entry that is not an object, or a group that is not, does not hide the entries after it from the start check', () => {

@@ -46,7 +46,12 @@ def pause_state():
     try:
         if not stat.S_ISREG(os.lstat(PAUSE_FILE).st_mode):
             return None   # a link is not the file the guard writes (it can lead to the pause of another guard); the guard never owns one
-        with open(PAUSE_FILE) as f:
+        # opened without following a link, and the opened descriptor is checked: a regular file swapped for a link after the look above
+        # is refused by the open (a FIFO is not waited for either: O_NONBLOCK), so the content read is that of a regular file
+        fd = os.open(PAUSE_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+        with os.fdopen(fd) as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return None
             p = json.load(f)
     except Exception:
         return None
