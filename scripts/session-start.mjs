@@ -945,7 +945,7 @@ function isBedrockSession() {
   const modelId = getSessionModelId();
   return Boolean(
     modelId && (
-      /^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId) ||
+      /^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId) ||
       (
         /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId) &&
         /:(inference-profile|application-inference-profile)\//i.test(modelId) &&

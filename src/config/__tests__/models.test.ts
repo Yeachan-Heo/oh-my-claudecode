@@ -82,6 +82,11 @@ describe('isBedrock()', () => {
     expect(isBedrock()).toBe(true);
   });
 
+  it('detects apac. region prefix', () => {
+    process.env.ANTHROPIC_MODEL = 'apac.anthropic.claude-sonnet-4-6-v1:0';
+    expect(isBedrock()).toBe(true);
+  });
+
   it('detects bare anthropic.claude prefix (legacy Bedrock IDs)', () => {
     process.env.ANTHROPIC_MODEL = 'anthropic.claude-3-haiku-20240307-v1:0';
     expect(isBedrock()).toBe(true);
@@ -294,6 +299,8 @@ describe('isProviderSpecificModelId()', () => {
     expect(isProviderSpecificModelId('global.anthropic.claude-opus-4-6-v1:0')).toBe(true);
     expect(isProviderSpecificModelId('eu.anthropic.claude-haiku-4-5-v1:0')).toBe(true);
     expect(isProviderSpecificModelId('ap.anthropic.claude-sonnet-4-6-v1:0')).toBe(true);
+    expect(isProviderSpecificModelId('apac.anthropic.claude-sonnet-4-6-v1:0')).toBe(true);
+    expect(isProviderSpecificModelId('APAC.ANTHROPIC.CLAUDE-SONNET-4-6-V1:0')).toBe(true);
   });
 
   it('detects Bedrock bare anthropic.claude prefix (legacy)', () => {

@@ -666,3 +666,18 @@ Optional environment variables to customize heavy-mode suppression in active tas
 - Script: `scripts/keyword-detector.mjs`
 - Config keys read: `taskSizeDetection.enabled`, `taskSizeDetection.suppressHeavyModesForSmallTasks`, `taskSizeDetection.smallWordLimit`, `taskSizeDetection.largeWordLimit`
 - See `HOOKS.md` [Task size: heavy-mode suppression](HOOKS.md#task-size-heavy-mode-suppression) for full behavior documentation
+
+## Jev Model Routing: Named Models
+
+Optional switch for the active `model-routing` point (`OMC_JEV=model-routing:active`). By default Jev is asked only about Task/Agent calls whose model is `haiku`, `sonnet` or `opus`.
+
+### Variables
+
+| Variable | Default | Behavior |
+|----------|---------|----------|
+| `OMC_JEV_MODEL_ROUTING_NAMED_MODELS` | unset | Set to `1` or `true` to ask about calls whose model (the call's own, an `agents.<name>.model` override, or the `model:` of a plugin, project or user agent definition) is none of `haiku`, `sonnet` or `opus`, such as `fable` or a model of another provider. Where the provider is not Claude, or `forceInherit` is on, the named model stays unless the provider maps the tier Jev picks natively; only the effort is set then. |
+
+### Implementation
+
+- Script: `scripts/pre-tool-enforcer.mjs` (`recordModelRoutingShadow`)
+- See `HOOKS.md` [Model routing: what Jev sees and which calls are asked](HOOKS.md#model-routing-what-jev-sees-and-which-calls-are-asked) for the full behavior and the provider check

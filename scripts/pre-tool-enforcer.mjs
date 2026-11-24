@@ -31,7 +31,7 @@ import { loadContextText } from './lib/context-text-loader.mjs';
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
 function isProviderSpecificModelId(modelId) {
-  if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
+  if (/^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
   if (/^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)) return true;
   if (modelId.toLowerCase().startsWith('vertex_ai/')) return true;
   return false;
@@ -45,7 +45,7 @@ function isSubagentSafeModelId(modelId) {
 function isBedrockProviderEnv() {
   if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-  if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
+  if (/^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
   if (
     /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)
     && /:(inference-profile|application-inference-profile)\//i.test(modelId)
