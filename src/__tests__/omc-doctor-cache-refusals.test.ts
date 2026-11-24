@@ -118,6 +118,26 @@ describe.skipIf(!posix)('omc-doctor cache commands: an installPath written as a 
     }
   });
 
+  // The plugin root variables are read as paths like an installPath: a Windows path in one of them cannot be read here, and
+  // resolved against the working directory it protects nothing, so the cache version it names would be moved.
+  test('a plugin root variable written as a Windows path or as a relative path moves nothing and ends with exit code 1', () => {
+    for (const command of commands) {
+      for (const variable of ['OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT']) {
+        for (const root of ['C:\\Users\\u\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\5.7.0', '\\\\server\\share\\5.7.0', '//server/share/5.7.0', 'plugins/cache/omc/oh-my-claudecode/5.7.0']) {
+          const { dir, cache } = makeCache(['5.7.0', '5.8.0', '5.9.0']);
+          try {
+            writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
+            const result = runCommand(command, dir, { timeout: 20_000, env: { [variable]: root } });
+            expect({ variable, root, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ variable, root, status: 1, versions: '5.7.0,5.8.0,5.9.0', moved: 0 });
+            expect(result.stdout).toContain('Nothing moved');
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+  });
+
   test('paths that only look similar, and the Windows path of another plugin, are no refusal', () => {
     for (const command of commands) {
       const { dir, cache } = makeCache(['5.7.0', '5.8.1', '5.9.0']);

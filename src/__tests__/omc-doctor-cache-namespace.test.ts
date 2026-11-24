@@ -358,6 +358,24 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
+    test('one root that the entries of two marketplaces both record is ambiguous: the check is skipped instead of taking the highest cache', () => {
+      for (const order of ORDERS) {
+        const dir = fresh();
+        try {
+          const root = path.join(dir, 'shared-root');
+          mkdirSync(root);
+          addCache(dir, [OLD], 'omc');
+          addCache(dir, [NEW], 'oh-my-claudecode');
+          const entries = { [OMC]: [{ scope: 'user', version: OLD, installPath: root }], [OWN]: [{ scope: 'user', version: NEW, installPath: root }] };
+          writeRegistry(dir, Object.fromEntries(order.map((id) => [id, entries[id as keyof typeof entries]])));
+          const out = claudeMdAt(dir, OLD, 'linux', { CLAUDE_PLUGIN_ROOT: root });
+          expect({ order, out }).toEqual({ order, out: ['Latest cached plugin version: (unknown)', expect.stringMatching(/^VERSION CHECK SKIPPED: .*more than one marketplace/)] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
     test('with no root that an entry holds the last supported ID whose cache has a version names it: no root, a checkout outside the registry, a root that does not exist', () => {
       for (const platform of PLATFORMS) {
         if (hostCannot(platform)) continue;

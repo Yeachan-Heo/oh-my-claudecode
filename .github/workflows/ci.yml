@@ -144,6 +144,7 @@ jobs:
           src/__tests__/omc-doctor-shared-sections.test.ts
           src/__tests__/omc-doctor-step4-special-files.test.ts
           src/__tests__/omc-doctor-cache-links-occupancy.test.ts
+          src/__tests__/omc-doctor-cache-occupancy-records.test.ts
           src/__tests__/omc-doctor-explicit-root.test.ts
           src/__tests__/omc-doctor-case-sensitive-volume.test.ts
           src/__tests__/omc-doctor-cache-registry-order.test.ts

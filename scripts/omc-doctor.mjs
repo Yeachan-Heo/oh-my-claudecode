@@ -701,6 +701,9 @@ const claudeMdVersion = () => {
   } else if (rootsConflict) {
     // As in Step 1 (Channel: unknown): the session runs one of two different roots, and the runtime reads CLAUDE_PLUGIN_ROOT alone.
     pluginVersion = '(unknown)';
+  } else if (running.length > 1) {
+    // Entries of several marketplaces hold the same root: which of their caches the session runs is not told by the root.
+    pluginVersion = '(unknown)';
   } else if (running.length) {
     pluginVersion = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '(none)';
   } else {
@@ -718,6 +721,8 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: the plugin cache cannot be read, so no version is compared');
   } else if (claudeVersion === '(unreadable)') {
     console.log('VERSION CHECK SKIPPED: a CLAUDE source cannot be read, so its OMC:VERSION marker is unknown (see OMC version source)');
+  } else if (running.length > 1 && !rootsConflict) {
+    console.log('VERSION CHECK SKIPPED: the plugin root the session runs is recorded by more than one marketplace, so it is unknown which cache is the install and no cache is chosen');
   } else if (rootsConflict) {
     console.log('VERSION CHECK SKIPPED: OMC_PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT name different directories, so it is unknown which plugin install the session runs and no cache is chosen');
   } else if (pluginVersion === '(unknown)') {
@@ -944,6 +949,9 @@ const protectionOf = (dir, versions) => {
     const second = chainOf(rootVars[1]).pop();
     if (askSame(first, second) != 'yes') unreadable = true;
   }
+  // A plugin root variable written as a Windows path cannot be read here, and a relative one names another directory for each
+  // directory the command runs in (as a relative installPath does): neither can protect a version reliably.
+  if (rootVars.some((root) => foreignPath(root) || relativePath(root))) unreadable = true;
   const registry = readRegistry();
   unreadable = unreadable || registry.unreadable;
   let names = [];
