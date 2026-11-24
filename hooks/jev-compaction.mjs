@@ -1393,21 +1393,32 @@ function backgroundOutputFiles(messages, privatePaths) {
   for (const m of messages) if (m.role === 'user') for (const r of m.toolResults || []) results.set(r.tool_use_id, r.text || '');
   const out = { secret: new Set(), held: new Set() };
   const known = new Set(); // the files of every background call whose result is still in the conversation, secret or not
+  // The same by the id of the task, which a notification names in <task-id> (a notification need not name a file): the ids of the calls on a secret path (`secret`), of the
+  // prose calls naming one (`held`) and of all (`known`). `unlinked`: a call on a secret path whose result names neither a file nor an id, or is a compaction trace (an earlier compaction cut it).
+  const ids = { secret: new Set(), held: new Set(), known: new Set(), unlinked: false };
   for (const m of messages) {
     if (m.role !== 'assistant') continue;
     for (const u of m.toolUses || []) {
       if (u.input?.run_in_background !== true || !results.has(u.tool_use_id)) continue;
       const list = touchesSecretPath(u.tool, u.input, privatePaths) ? out.secret : PROSE_TOOLS.has(u.tool) && anySecretPath(u.input, privatePaths) ? out.held : undefined;
-      for (const w of results.get(u.tool_use_id).slice(0, OUTPUT_SCAN_CHARS).split(/[\s"'`|;&<>()[\]{},=]+/)) {
+      const head = results.get(u.tool_use_id).slice(0, OUTPUT_SCAN_CHARS);
+      const named = [...head.matchAll(TASK_ID_IN_RESULT)].map((m) => m[1]);
+      for (const id of named) { ids.known.add(id); (list === out.secret ? ids.secret : list === out.held ? ids.held : ids.known).add(id); }
+      let files = 0;
+      for (const w of head.split(/[\s"'`|;&<>()[\]{},=]+/)) {
         const file = outputFileOf(w);
         if (!file) continue;
+        files++;
         const name = file.slice(file.lastIndexOf('/') + 1);
         for (const f of name.length >= 6 ? [file, name] : [file]) { known.add(f); list?.add(f); }
       }
+      if (list && !named.length && (!files || head.startsWith('[compacted]'))) ids.unlinked = true;
     }
   }
-  return { secret: fileIndex(out.secret), held: fileIndex(out.held), known };
+  return { secret: fileIndex(out.secret), held: fileIndex(out.held), known, ids };
 }
+// The id of a background task in the result of the call that started it ("with ID: bkxqmzpw", "agentId: a1b2c3").
+const TASK_ID_IN_RESULT = /\b(?:agentId|task_id|taskId|ID|id)\s*[:=]\s*["']?([\w-]{4,64})/g;
 // A word of a result as an output file (runs of slashes joined, lower case), or undefined when it is none.
 function outputFileOf(word) {
   const file = word.replace(/[.:]+$/, '').replace(/[\\/]+/g, '/').toLowerCase();
@@ -1415,10 +1426,21 @@ function outputFileOf(word) {
 }
 // Whether a notification names an output file that no background call still in the conversation produced (its call was cut or traced by an earlier
 // compaction, which took the file's name with it): whether that call was on a secret path is then unknown, so the notification is held like a secret one.
-function sourceUnknown(text, known) {
-  for (const m of text.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)) if (unknownFile(m[1].trim(), known)) return true;
+function sourceUnknown(text, outputs) {
+  for (const m of text.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)) if (unknownFile(m[1].trim(), outputs.known)) return true;
   return false;
 }
+// What a notification says about its source, by its <task-id>: 'secret' or 'held' when a call on a secret path started that task, 'known' when another call
+// still in the conversation did, and otherwise 'unknown'; a notification without a task id is 'unknown' too. 'unknown' is held when an earlier compaction left
+// a call on a secret path that can no longer be tied to its task (`unlinked`): the notification may be its own.
+function sourceByTask(text, outputs) {
+  const id = /<task-id>\s*([\w-]{1,64})\s*<\/task-id>/.exec(text)?.[1];
+  if (id && outputs.ids.secret.has(id)) return 'secret';
+  if (id && outputs.ids.held.has(id)) return 'held';
+  return id && outputs.ids.known.has(id) ? 'known' : 'unknown';
+}
+// Whether a notification names an output file that a call still in the conversation produced: its source is then known, whatever its task id says.
+const namesKnownFile = (text, known) => [...text.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)].some((m) => { const f = outputFileOf(m[1].trim()); return Boolean(f) && (known.has(f) || known.has(f.slice(f.lastIndexOf('/') + 1))); });
 const unknownFile = (word, known) => {
   const file = outputFileOf(word);
   return Boolean(file) && !known.has(file) && !known.has(file.slice(file.lastIndexOf('/') + 1));
@@ -2240,10 +2262,13 @@ function findCandidates(messages, privatePaths, notifications = false) {
     const m = messages[i];
     if (notifications && isNotification(m)) {
       // A notification that names the output file of a call on a secret path takes on the secrecy of that call (a trace, never sent to Jev).
+      const bySource = sourceByTask(m.text, outputs);
       const c = {
         id: `${NOTE_TOOL}-${i}`, note: true, resIdx: i, useIdx: -1, use: { tool: NOTE_TOOL, input: {} }, res: { text: m.text, isError: false },
         summary: noteSummary(m.text), inputChars: 0, resultChars: m.text.length,
-        secret: readsFile(m.text, outputs.secret), proseSecret: readsFile(m.text, outputs.held) || sourceUnknown(m.text, outputs.known), taskOutput: false, textOnly: true,
+        secret: readsFile(m.text, outputs.secret) || bySource === 'secret',
+        proseSecret: readsFile(m.text, outputs.held) || bySource === 'held' || sourceUnknown(m.text, outputs) || (bySource === 'unknown' && outputs.ids.unlinked && !namesKnownFile(m.text, outputs.known)),
+        taskOutput: false, textOnly: true,
         score: 0, asked: false, answered: false,
       };
       c.trace = traceLine(c);
@@ -3828,7 +3853,8 @@ export function agentSenders(text, statePattern = agentStatePattern('')) {
   const out = [];
   for (const b of agentBlocks(text).blocks) {
     const at = {};
-    for (const a of b.attrs.matchAll(/([\w-]+)="([^"]*)"/g)) at[a[1]] = a[2];
+    // A name starts where no name character precedes it, so a long run of them is tried once, not from every character.
+    for (const a of b.attrs.matchAll(/(?<![\w-])([\w-]+)="([^"]*)"/g)) at[a[1]] = a[2];
     let who = at.teammate_id || at['from-name'] || at.from || at.name || '';
     let when = at.timestamp || '';
     let what = at.summary || '';
@@ -3995,6 +4021,8 @@ async function decide($, e, cfg, record, started) {
   const removable = removableChars(candidates);
   // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
   const net = removable - envelopes;
+  // The envelopes are text the installed rows hold and the host's count does not: the predictions start from the count plus them.
+  const envelopeTokens = cfg.rates.RATE_NOTE * envelopes;
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target is the rule's target, a share of the window).
   const stage = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline, takeAgentChecks(record.session_id, cfg));
@@ -4054,7 +4082,7 @@ async function decide($, e, cfg, record, started) {
         agentsFloor = Math.max(0, movedTokens(planned.stats));
         record.floor_agents_tokens = Math.round(agentsFloor);
       }
-      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor, cfg.rates);
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor + envelopeTokens, cfg.rates);
       record.floor_pred = Math.max(0, Math.round(floor));
       if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
@@ -4185,8 +4213,8 @@ async function decide($, e, cfg, record, started) {
   let stageTokens = 0;
   if (cfg.targetPercent === undefined) allocate(candidates, before, cfg.target, envelopes);
   else {
-    // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT): the target and the prediction are in tokens; the envelopes and delivered text that build
-    // adds are not part of the prediction.
+    // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT): the target and the prediction are in tokens; they start from the host's count,
+    // and the envelopes that build adds to the rows it rebuilds come on top of it (envelopeTokens); the delivered text is in the count already.
     // A manual compaction: the scores decide; a prediction still above the target (the cascade's own target) goes on to the cascade, as the rule does.
     // The target is the rule's target for every trigger. A manual compaction is decided by the scores against it; a prediction still above it goes on
     // to the cascade, which then stops at the same target.
@@ -4202,7 +4230,7 @@ async function decide($, e, cfg, record, started) {
       pasteSwaps = await movePastes($, pasted.stats.mode, pasted.jobs, messages, pasted.stats, deadline).catch(() => { pasted.stats.error = 1; return new Map(); });
       if (pasteSwaps.size) stageTokens += movedTokens(pasted.stats);
     }
-    const base = tokens.tokens - trimTokens - agentTokens - stageTokens;
+    const base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens;
     let plan;
     if (manual) {
       plan = manualPlan(candidates, base, cfg.rates);
@@ -4259,7 +4287,7 @@ async function decide($, e, cfg, record, started) {
     unanswered: asked.length - answered,
   });
   // What the installed text stages took off, with or without the cascade: a stage that moved nothing (shadow, writes that failed, or a fallback) counts for nothing.
-  const installedTokens = trimTokens + agentTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0);
+  const installedTokens = trimTokens + agentTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0);
   if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known));
   if (agentMoved.size) record.agent_messages.installed = true;
   if (pastesInstalled) pasted.stats.installed = true;

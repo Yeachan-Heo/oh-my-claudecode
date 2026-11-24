@@ -173,6 +173,30 @@ describe('a session of screenshots in the compaction (the character gate in toke
   });
 });
 
+describe('the prediction counts the envelopes build adds to the rows it rebuilds', () => {
+  // One message that came during the tool turn, after the result of step 10 (a screenshot that goes to its trace): build carries it into that row in an envelope
+  // of the host's reminder class, and the host's count does not hold the envelope.
+  const DELIVERED = 'The coordinator sent a message while you were working:\nd1';
+
+  it('the floor and the tokens after rise by the tokens of the envelope that is installed, and by nothing else', async () => {
+    const env = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
+    const plain = await compactRun(env, session(80));
+    const run = await compactRun(env, session(80), { after: { t10: [DELIVERED] } });
+    expect(run.record).toMatchObject({ result: 'jev', queued_other: 1 });
+    // What the installed row holds besides the delivery: the envelope (its tags, by the text of the row itself).
+    const row = run.out.messages.find((m) => (m.text || '').includes(DELIVERED));
+    expect(row).toBeTruthy();
+    const wrapper = row.text.length - DELIVERED.length - row.text.slice(0, row.text.indexOf('<system-reminder')).length;
+    expect(wrapper).toBeGreaterThan(20);
+    const extra = 0.363 * wrapper;
+    for (const key of ['floor_pred', 'tokens_after_pred', 'tokens_after']) {
+      const grew = run.record[key] - plain.record[key];
+      expect(grew, key).toBeGreaterThan(extra - 2);
+      expect(grew, key).toBeLessThan(extra + 8);
+    }
+  });
+});
+
 describe('a session of screenshots and the own threshold (OMC_JEV_COMPACT_AT_PERCENT)', () => {
   const OWN = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60' };
 

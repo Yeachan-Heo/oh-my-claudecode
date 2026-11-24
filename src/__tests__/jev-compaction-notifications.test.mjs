@@ -169,6 +169,31 @@ describe('a notification whose background call was compacted earlier', () => {
   });
 });
 
+describe('a notification that names no output file', () => {
+  const noted = (id, body) => row(`<task-notification>\n<task-id>${id}</task-id>\n<summary>Task done</summary>\n<result>${body} ${'s'.repeat(7000)}</result>\n</task-notification>`);
+  const call = (command) => ({ role: 'assistant', text: 'Starting.', toolUses: [{ tool_use_id: 'bg1', tool: 'Bash', input: { command, run_in_background: true } }] });
+  const launched = (text) => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'bg1', text, isError: false }] });
+
+  it('is traced and never sent to Jev when the call that started its task, by the id, was on a secret path', async () => {
+    const w = talk(30);
+    const { out, record, bodies } = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('cat ~/.ssh/id_rsa'), launched('Command running in background with ID: bk7x2mq9. Output is being written to: /tmp/tasks/bk7x2mq9.output'), noted('bk7x2mq9', 'SECRETBODY'), ...w.slice(3)]);
+    expect(record).toMatchObject({ result: 'jev', notifications: 1 });
+    expect(bodies.join('')).not.toContain('SECRETBODY');
+    expect(JSON.stringify(out.messages)).not.toContain('SECRETBODY');
+  });
+
+  it('is held too when a call on a secret path lost its id to an earlier compaction, and scored when every such call still has its id', async () => {
+    const w = talk(30);
+    const traced = launched('[compacted] Bash(command=cat ~/.ssh/id_rsa) - result of 90 chars removed');
+    const held = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('cat ~/.ssh/id_rsa'), traced, noted('zz9y8x7w', 'SECRETBODY'), ...w.slice(3)]);
+    expect(held.record).toMatchObject({ result: 'jev', secret_held: 1 });
+    expect(held.bodies.join('')).not.toContain('SECRETBODY');
+    const open = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('npm test'), launched('Command running in background with ID: bk7x2mq9.'), noted('bk7x2mq9', 'PLAINBODY'), ...w.slice(3)]);
+    expect(open.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
+    expect(open.bodies.join('')).toContain('PLAINBODY');
+  });
+});
+
 describe('a notification row that anchors a message delivered during a tool turn', () => {
   const framed = (words) => `The user sent a new message while you were working:\n${words}\n\nThis is how Claude Code surfaces messages the user sends mid-turn \u2014 within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
 

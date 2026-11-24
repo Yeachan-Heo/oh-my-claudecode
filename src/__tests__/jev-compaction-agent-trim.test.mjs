@@ -105,6 +105,19 @@ describe('agent trim (OMC_JEV_COMPACT_AGENT_TRIM)', () => {
   });
 });
 
+describe('agent senders: the attributes of a block are read in linear time', () => {
+  it('reads a header of 58 000 characters of one name run, with and without a value after it, in well under a second', () => {
+    for (const header of ['a'.repeat(58000), `${'a-'.repeat(29000)} teammate_id="a1"`]) {
+      const row = `<teammate-message ${header}>\nBody.\n</teammate-message>`;
+      const started = Date.now();
+      const senders = agentSenders(row);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(senders).toHaveLength(1);
+    }
+    expect(agentSenders('<teammate-message teammate_id="a1" summary="done">x</teammate-message>')[0]).toMatchObject({ who: 'a1' });
+  });
+});
+
 describe('agent trim: the search of an agent\'s earlier messages is bounded', () => {
   // Fifteen reports of 58 000 characters of one letter, then many short idle notifications whose result is nearly that text but never inside it:
   // each one is searched for in everything the agent has said (about 870 000 characters).
