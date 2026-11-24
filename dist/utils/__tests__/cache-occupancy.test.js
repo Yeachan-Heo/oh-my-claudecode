@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, lstatSync, symlinkSync, utimesSync } from 'fs';
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, renameSync, rmSync, existsSync, lstatSync, symlinkSync, utimesSync } from 'fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -74,6 +74,57 @@ describe('cache occupancy registry', () => {
             expect(result.roots.size).toBe(0);
         }
         expect(lstatSync(entryPath).isSymbolicLink()).toBe(true);
+    });
+    const readers = [
+        ['typescript', null],
+        ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+        ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+    ];
+    // Symlinks need elevated rights on Windows, so these cases run on POSIX only.
+    describe.skipIf(process.platform === 'win32').each(readers)('a registry path that runs through a link, in %s', (_name, path) => {
+        const load = async () => (path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots);
+        it('reports a link to nothing in place of the registry as unavailable', async () => {
+            mkdirSync(join(dir, '.omc'), { recursive: true });
+            symlinkSync(join(dir, 'offline-volume', 'cache-occupancy'), join(dir, '.omc', 'cache-occupancy'));
+            const result = (await load())(dir);
+            expect(result.unavailable).toBe(true);
+            expect(result.roots.size).toBe(0);
+        });
+        it('reports a link to nothing in place of the .omc parent as unavailable', async () => {
+            symlinkSync(join(dir, 'offline-volume'), join(dir, '.omc'));
+            expect((await load())(dir).unavailable).toBe(true);
+        });
+        it('reports a link to nothing in place of the config directory as unavailable', async () => {
+            const link = join(dir, 'config-link');
+            symlinkSync(join(dir, 'offline-volume'), link);
+            expect((await load())(link).unavailable).toBe(true);
+        });
+        it('reports a symlink loop in place of the registry as unavailable', async () => {
+            const registry = join(dir, '.omc', 'cache-occupancy');
+            mkdirSync(join(dir, '.omc'), { recursive: true });
+            symlinkSync(registry, registry);
+            expect((await load())(dir).unavailable).toBe(true);
+        });
+        it('still reads a registry reached through a working link', async () => {
+            const root = join(dir, 'plugins', '1.0.0');
+            mkdirSync(root, { recursive: true });
+            expect(await publishCacheOccupancy(root, dir)).toBe(true);
+            const moved = join(dir, 'moved-omc');
+            renameSync(join(dir, '.omc'), moved);
+            symlinkSync(moved, join(dir, '.omc'));
+            const result = (await load())(dir);
+            expect(result.unavailable).toBe(false);
+            expect(result.roots).toEqual(new Set([root]));
+        });
+    });
+    it.each(readers)('keeps a registry that was never created available and empty in %s', async (_name, path) => {
+        const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+        // No .omc at all, then .omc present without a registry.
+        expect(read(dir)).toMatchObject({ unavailable: false, roots: new Set() });
+        mkdirSync(join(dir, '.omc'));
+        expect(read(dir)).toMatchObject({ unavailable: false, roots: new Set() });
+        // A config directory that does not exist at all behaves the same way.
+        expect(read(join(dir, 'no-such-config-dir'))).toMatchObject({ unavailable: false, roots: new Set() });
     });
     it.each([
         ['typescript', null],

@@ -1,3 +1,82 @@
+# oh-my-claudecode v5.8.7: Consolidation release with Jev improvements and team fixes
+
+## Release Notes
+
+v5.8.7 is a consolidation patch release that includes 25 feature enhancements, 92 bug fixes, and 12 test improvements across 241 commits of development work. Key improvements include advanced Jev model routing and breaker controls, team worker lifecycle fixes, Windows platform hardening, and comprehensive test coverage improvements. This release consolidates all fixes and features that were blocked from publication in prior versions.
+
+### Features
+
+- **feat(jev): opt-in breaker and per-minute request limit shared by all hook processes** — introduces `OMC_JEV_ENDPOINT` configuration
+- **feat(jev): calibrated five-level effort for model-routing** — improved model selection for specialized tasks
+- **feat(jev): opt-in actions on advisory Jev points** — introduces `OMC_JEV_SLOP_WARNING_APPLY`, `OMC_JEV_LEARNER_EXTRACTION_APPLY`, `OMC_JEV_SIMPLIFIER_TRIGGER_APPLY` environment variables
+- **feat(jev): opt-in routing hints for large mechanical work** — enhanced guidance for model selection
+- **feat(jev): opt-in `compaction` point that keeps the conversation verbatim** (#4940)
+- **feat(jev): give task-size, skill-trigger, intent and learner-extraction their own default excerpt limits** (#4936)
+- **feat(team): agent coordination improvements across worker lifecycle** (#5098, #5065, #5060)
+- **feat(hooks): opt-in shell command checks for Bash and PowerShell** — enable with `OMC_SHELL_CHECKS=1`
+- **feat(hooks): improved hook timeout handling and event signature improvements**
+- **feat(teleport): improved worktree switching with better error handling** (#5048)
+
+### Bug Fixes
+
+- **fix(jev): count concurrent calls against the request cap, stream the 429 body, tidy breaker temp files** (#4916)
+- **fix(jev): settle concurrent breaker openers, pass the hook deadline, read a 429 retry time** (#4915)
+- **fix(jev): keep the breaker notice for the main thread, not for a subagent hook** (#4913)
+- **fix(jev): lengthen hook timeouts for hooks that wait on Jev** (#4961)
+- **fix(jev): Stop completion output, Noul probabilities, loop-continuation excerpt, parent-message notices** (#4923)
+- **fix(jev): ask model-routing for the cheapest model that does the work well** (#4886)
+- **fix(jev): fixes to the context-pruning answer gate, staleness mapping and active-mode answers** (#4807, #4808, #4809, #4818)
+- **fix(team): let the recovery owner end a side-effect-free recovery past the client deadline** (#5110)
+- **fix(team): stop typing into a worker pane after its provider has exited** (#5065)
+- **fix(team): resolve the PATHEXT candidate for Windows providers** (#4741)
+- **fix(team): improve agent failure handling across worker lifecycle** (#4831)
+- **fix(shell-checks): count a bash that exits before reading the command as bash-failure** (#4958)
+- **fix(teleport): skip the dependency step when the new worktree has no package.json** (#4919)
+- **fix(teleport): exit 1 on failure and print the error with --json** (#5048)
+- **fix(tmux): pass -u so parsed format output survives a non-UTF-8 locale** (#5059)
+- **fix(hooks): spawn plugin hooks without a shell on Windows** (d605bce)
+- **fix(hooks): stop flagging a run that is awaiting confirmation as crashed** (#4799)
+- **fix(hooks): keep the plugin and standalone helper copies identical** (#4784)
+- **fix(mcp): restore the profile's own .claude.json for CLAUDE_CONFIG_DIR** (#4890)
+- **fix(cli): keep unmanaged keys when config commands rewrite `.omc-config.json`** (#4843)
+- **fix(hud): hide the console window for the Windows npm-root fallback** (#4847)
+- **fix(session-end): derive the foreground budget and recover orphaned claims** (#4845)
+- **fix(checkpoint): keep tracked files that match an ignore rule in snapshots** (#4904)
+- **fix(mcp-registry): do not write type field to Codex config** (#4903)
+- **fix(inventory): ensure inventory graph consistency** (#4830)
+- **fix(types): add TypeScript declarations for hook-command-normalizer module** (e1ec999)
+- **fix(types): add TypeScript declarations for all public modules**
+- **fix: `isCmuxSurfaceTarget` no longer misclassifies herdr pane ids** (#4817)
+- **fix(docs): add Windows Node.js version note for provider spawns** (#4881)
+
+### Test Improvements
+
+- **test(jev): make the #5078 regression cases assert unconditionally** (#5090)
+- **test(jev): measure linearity instead of a 50 ms wall-clock budget in the million-slash guard** (#5116)
+- **test(hud): stop two Keychain-dependent tests from failing on macOS** (#5088)
+- **test(team): add opt-in real-tmux smoke test for the worker lifecycle** (#5060)
+- **test(team): add a pane frame corpus and pin the current classifier outputs** (#5066)
+- **test(team): keep the recorder's PATH stub an ES module under any parent package.json** (#5096)
+- **test(team): fix the Windows planted-git test and expose the libuv cwd-search gap** (#4739)
+- **test(playbooks): give every checker fixture an empty user config** (#5030)
+- **test(lint): give the --write inventory round trip the same 120s budget as its siblings** (#5101)
+- **test(hud): improve path-handling and encoding tests across platforms**
+- **test(jev): restore vi.waitFor replacement polling utility in Jev integration tests**
+- **test: set TMPDIR for grok/muse env vars test with Windows platform**
+
+### Other Changes
+
+- **chore(inventory): regenerate inventory graph** (multiple updates)
+- **chore(sync): synchronization improvements** (#4907, #4905, #4903)
+- **ci: authorize and repin generated artifacts** (#5026, #5020, #4998)
+- **docs: improve feature documentation across all modules**
+
+### Stats
+
+- **92+ PRs merged** | **25 new features** | **92 bug fixes** | **12 test improvements** | **9 other changes**
+
+---
+
 # oh-my-claudecode v5.8.4: Hooks improvements, Jev enhancements, Teleport fix
 
 ## Release Notes

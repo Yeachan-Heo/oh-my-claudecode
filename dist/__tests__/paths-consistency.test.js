@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OMC_PLUGIN_MARKETPLACE_SLUG, OMC_PLUGIN_PACKAGE_NAME, OMC_HUD_DIST_REL, } from '../lib/paths.js';
-import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
+import { OMC_HUD_UNBUILT_VERSION_ENV, OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
 const TEMPLATE_TXT = join(REPO_ROOT, 'scripts', 'lib', 'hud-wrapper-template.txt');
@@ -26,6 +26,9 @@ describe('paths consistency — TS constants vs. non-TS template files', () => {
         const template = existsSync(TEMPLATE_TXT) ? readFileSync(TEMPLATE_TXT, 'utf8') : '';
         it(`contains OMC_PLUGIN_ROOT_ENV ("${OMC_PLUGIN_ROOT_ENV}")`, () => {
             expect(template).toContain(OMC_PLUGIN_ROOT_ENV);
+        });
+        it(`contains OMC_HUD_UNBUILT_VERSION_ENV ("${OMC_HUD_UNBUILT_VERSION_ENV}")`, () => {
+            expect(template).toContain(`process.env.${OMC_HUD_UNBUILT_VERSION_ENV}`);
         });
         it(`contains OMC_PLUGIN_MARKETPLACE_SLUG ("${OMC_PLUGIN_MARKETPLACE_SLUG}") and OMC_PLUGIN_PACKAGE_NAME ("${OMC_PLUGIN_PACKAGE_NAME}")`, () => {
             // These appear as path fragments in the template's path.join(...) calls.

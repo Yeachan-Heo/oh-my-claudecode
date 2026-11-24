@@ -5,8 +5,32 @@
  * in the same detail-line style as the context limit warning.
  */
 import { RESET } from '../colors.js';
+import { compareVersions } from '../../utils/semver-compare.js';
 const YELLOW = '\x1b[33m';
 const BOLD = '\x1b[1m';
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
+/**
+ * Decide what the HUD says about newer OMC versions.
+ *
+ * The HUD wrapper keeps rendering the previous built version while a newer
+ * cached version has no dist/hud/index.js, and reports that version through
+ * OMC_HUD_UNBUILT_VERSION. That version is already installed, so the update
+ * command cannot deliver it: it is reported as unbuilt rather than as an
+ * update. A latest version above the unbuilt one is still a real update.
+ */
+export function resolveOmcUpdateState(omcVersion, latestVersion, unbuiltVersionEnv) {
+    if (!omcVersion)
+        return { updateAvailable: null, unbuiltVersion: null };
+    const unbuiltVersion = unbuiltVersionEnv && SEMVER_RE.test(unbuiltVersionEnv) && compareVersions(omcVersion, unbuiltVersionEnv) < 0
+        ? unbuiltVersionEnv
+        : null;
+    if (typeof latestVersion === 'string' && latestVersion && compareVersions(omcVersion, latestVersion) < 0) {
+        if (!unbuiltVersion || compareVersions(unbuiltVersion, latestVersion) < 0) {
+            return { updateAvailable: latestVersion, unbuiltVersion: null };
+        }
+    }
+    return { updateAvailable: null, unbuiltVersion };
+}
 /**
  * Render update hint detail lines (one per product, empty when up to date).
  *
@@ -20,6 +44,10 @@ export function renderUpdateHints(input) {
             ? 'claude plugin marketplace update omc && claude plugin update oh-my-claudecode@omc'
             : 'npm i -g oh-my-claude-sisyphus@latest';
         lines.push(`${YELLOW}${BOLD}[!] omc ${input.omcUpdateAvailable} - paste: ! ${command}${RESET}`);
+    }
+    else if (input.omcUnbuiltVersion) {
+        const running = input.omcVersion ? ` - HUD is running ${input.omcVersion}` : '';
+        lines.push(`${YELLOW}${BOLD}[!] omc ${input.omcUnbuiltVersion} is installed but not built${running}${RESET}`);
     }
     if (input.claudeCodeUpdateAvailable) {
         lines.push(`${YELLOW}${BOLD}[!] claude ${input.claudeCodeUpdateAvailable} - paste: ! claude update${RESET}`);

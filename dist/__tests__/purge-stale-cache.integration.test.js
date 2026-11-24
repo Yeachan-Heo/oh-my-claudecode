@@ -430,6 +430,22 @@ describe('purgeStalePluginCacheVersions on a real filesystem', () => {
         expect(existsSync(orphan)).toBe(true);
         expect(result.skippedPaths).toContain(orphan);
     });
+    // Symlinks need elevated rights on Windows, so this case runs on POSIX only.
+    it.skipIf(process.platform === 'win32')('does not delete a stale no-sibling root when the occupancy registry is a link to nothing', () => {
+        const orphanPlugin = join(configDir, 'plugins', 'cache', 'omc', 'occupied-plugin');
+        const orphan = join(orphanPlugin, '1.0.0');
+        mkdirSync(orphan, { recursive: true });
+        writeFileSync(join(orphan, 'marker'), 'x');
+        makeStale(orphan);
+        // The registry (and any record of a live session in it) sits behind a link
+        // whose target is offline, so occupancy cannot be established.
+        mkdirSync(join(configDir, '.omc'), { recursive: true });
+        symlinkSync(join(configDir, 'offline-volume'), join(configDir, '.omc', 'cache-occupancy'));
+        const result = purgeStalePluginCacheVersions();
+        expect(existsSync(join(orphan, 'marker'))).toBe(true);
+        expect(result.removed).toBe(0);
+        expect(result.skippedPaths).toContain(orphan);
+    });
 });
 describe('invariant across every cache shape', () => {
     // Enumerating the state space rather than picking cases by hand: this is what

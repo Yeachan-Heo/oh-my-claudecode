@@ -46,6 +46,13 @@ function assertSafeCmdValue(value) {
         throw new Error('Native Windows tmux command values cannot contain NUL, CR, or LF characters');
     }
 }
+// -u keeps -p/-F output locale-independent: a non-UTF-8 tmux client prints tabs as '_'.
+function tmuxGlobalArgs() {
+    return process.platform === 'win32' ? [] : ['-u'];
+}
+function tmuxShellCommand(command) {
+    return ['tmux', ...tmuxGlobalArgs(), command].join(' ');
+}
 function resolveTmuxInvocation(args) {
     const resolvedBinary = resolveTmuxBinaryPath();
     if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedBinary)) {
@@ -58,7 +65,7 @@ function resolveTmuxInvocation(args) {
     }
     return {
         command: resolvedBinary,
-        args,
+        args: [...tmuxGlobalArgs(), ...args],
     };
 }
 export function tmuxExec(args, opts) {
@@ -76,11 +83,11 @@ export async function tmuxExecAsync(args, opts) {
 }
 export function tmuxShell(command, opts) {
     const { stripTmux: _, ...execOpts } = opts ?? {};
-    return execSync(`tmux ${command}`, { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) });
+    return execSync(tmuxShellCommand(command), { encoding: 'utf-8', ...execOpts, env: resolveEnv(opts) });
 }
 export async function tmuxShellAsync(command, opts) {
     const { stripTmux: _, timeout, ...rest } = opts ?? {};
-    return promisify(exec)(`tmux ${command}`, {
+    return promisify(exec)(tmuxShellCommand(command), {
         encoding: 'utf-8', env: resolveEnv(opts),
         ...(timeout !== undefined ? { timeout } : {}), ...rest,
     });

@@ -1,8 +1,8 @@
-import { readdirSync, lstatSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync, readdirSync, lstatSync, readFileSync, unlinkSync } from 'fs';
 import { mkdir, writeFile, rename, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'node:child_process';
-import { join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 import { getClaudeConfigDir } from './config-dir.js';
 const REGISTRY_VERSION = 1;
 const RECORD_PATTERN = /^[a-f0-9]{64}\.json$/;
@@ -125,6 +125,28 @@ function validRecord(value) {
         && typeof record.pluginRoot === 'string' && record.pluginRoot.length > 0
         && typeof record.updatedAt === 'string' && Number.isFinite(Date.parse(record.updatedAt));
 }
+/**
+ * readdir reports ENOENT both for a registry that was never created and for a
+ * path that runs through a symlink whose target is gone (for example a volume
+ * that is temporarily offline). The first means "no records"; the second hides
+ * records that may belong to live sessions. Walk the path with lstat, which does
+ * not follow links, and report whether any component is such a dangling link.
+ */
+function runsThroughDanglingLink(path) {
+    for (let current = path;; current = dirname(current)) {
+        try {
+            if (lstatSync(current).isSymbolicLink() && !existsSync(current))
+                return true;
+        }
+        catch (error) {
+            // A component that is simply absent is fine; anything else is uncertain.
+            if (error.code !== 'ENOENT')
+                return true;
+        }
+        if (dirname(current) === current)
+            return false;
+    }
+}
 export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), options = {}) {
     const directory = getCacheOccupancyDir(configDir);
     let names;
@@ -132,7 +154,8 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), option
         names = readdirSync(directory).filter(name => RECORD_PATTERN.test(name));
     }
     catch (error) {
-        return { roots: new Set(), unavailable: error.code !== 'ENOENT', identities: new Map() };
+        const code = error.code;
+        return { roots: new Set(), unavailable: code !== 'ENOENT' || runsThroughDanglingLink(directory), identities: new Map() };
     }
     const roots = new Set();
     const records = [];

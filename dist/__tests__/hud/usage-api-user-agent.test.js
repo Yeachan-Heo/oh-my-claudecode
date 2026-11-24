@@ -47,11 +47,15 @@ vi.mock('fs', async (importOriginal) => {
         unlinkSync: vi.fn(),
     };
 });
-// Keychain lookups must fail so the credential read falls through to the file
-// path, which is the one branch that behaves identically on macOS and Linux CI.
+// Keychain lookups must report a missing item so the credential read falls
+// through to the file path, the branch Linux CI always takes because it never
+// consults the Keychain. Any other Keychain error means "unavailable" on macOS,
+// and the file fallback is then skipped on purpose.
 vi.mock('child_process', () => ({
     execSync: vi.fn().mockImplementation(() => { throw new Error('mock: no keychain'); }),
-    execFileSync: vi.fn().mockImplementation(() => { throw new Error('mock: no keychain'); }),
+    execFileSync: vi.fn().mockImplementation(() => {
+        throw new Error('The specified item could not be found in the keychain.');
+    }),
 }));
 vi.mock('https', () => ({
     default: {

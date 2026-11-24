@@ -297,16 +297,23 @@ export function pruneOldEntries(directory, daysOld = DEFAULT_CONFIG.workingMemor
             if (!workingMemory) {
                 return { pruned: 0, remaining: 0 };
             }
-            // Parse entries
-            const entryRegex = /### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\n([\s\S]*?)(?=### |$)/g;
+            // Parse entries. Only a whole `### YYYY-MM-DD HH:MM` line starts an
+            // entry, so `###` subheadings and `###` inside a line stay in their
+            // entry. Text before the first entry is kept.
+            const entryHeading = /^### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})$/;
+            const preamble = [];
             const entries = [];
-            let match = entryRegex.exec(workingMemory);
-            while (match !== null) {
-                entries.push({
-                    timestamp: match[1],
-                    content: match[2].trim(),
-                });
-                match = entryRegex.exec(workingMemory);
+            for (const line of workingMemory.split("\n")) {
+                const heading = entryHeading.exec(line);
+                if (heading) {
+                    entries.push({ timestamp: heading[1], lines: [] });
+                }
+                else if (entries.length > 0) {
+                    entries[entries.length - 1].lines.push(line);
+                }
+                else {
+                    preamble.push(line);
+                }
             }
             // Calculate cutoff date
             const cutoff = new Date();
@@ -318,8 +325,11 @@ export function pruneOldEntries(directory, daysOld = DEFAULT_CONFIG.workingMemor
             });
             const pruned = entries.length - kept.length;
             // Rebuild Working Memory section
-            const newContent = kept
-                .map((entry) => `### ${entry.timestamp}\n${entry.content}`)
+            const newContent = [
+                preamble.join("\n").trim(),
+                ...kept.map((entry) => `### ${entry.timestamp}\n${entry.lines.join("\n").trim()}`),
+            ]
+                .filter(Boolean)
                 .join("\n\n");
             notepadContent = replaceSection(notepadContent, WORKING_MEMORY_HEADER, newContent);
             atomicWriteFileSync(notepadPath, notepadContent);

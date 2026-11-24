@@ -130,6 +130,22 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
         const target = readlinkSync(join(fakeCacheBase, '4.4.1'));
         expect(target).toBe('4.4.3');
     });
+    // Symlinks need elevated rights on Windows, so this case runs on POSIX only.
+    it.skipIf(process.platform === 'win32')('keeps old versions as real directories when the occupancy registry is a link to nothing', () => {
+        createFakeVersion('4.4.1');
+        createFakeVersion('4.4.2');
+        createFakeVersion('4.4.3');
+        // The registry may hold the record of a live session pinned to 4.4.1, but it
+        // sits behind a link whose target is offline, so occupancy is unknown.
+        const omcDir = join(fakeHome, '.claude', '.omc');
+        mkdirSync(omcDir, { recursive: true });
+        symlinkSync(join(tmpDir, 'offline-volume'), join(omcDir, 'cache-occupancy'));
+        runSessionStart();
+        const v1Stat = lstatSync(join(fakeCacheBase, '4.4.1'));
+        expect(v1Stat.isSymbolicLink()).toBe(false);
+        expect(v1Stat.isDirectory()).toBe(true);
+        expect(existsSync(join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs'))).toBe(true);
+    });
     it('with only 2 versions, no symlinks are created', () => {
         createFakeVersion('4.4.2');
         createFakeVersion('4.4.3');
