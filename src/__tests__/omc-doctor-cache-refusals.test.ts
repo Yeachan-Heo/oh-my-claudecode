@@ -141,6 +141,24 @@ describe.skipIf(!posix)('omc-doctor cache commands: an installPath written as a 
     }
   });
 
+  // A path that goes through a directory before a .. (<cache>/5.7.0/../5.8.0) needs that directory to exist: moving it would
+  // break the path, so the directory is protected too, whether the path is an installPath or a root variable.
+  test.skipIf(!posix)('a version that a protecting path only passes through before a .. stays where it is', () => {
+    for (const command of commands) {
+      for (const via of ['installPath', 'OMC_PLUGIN_ROOT', 'CLAUDE_PLUGIN_ROOT']) {
+        const { dir, cache } = makeCache(['5.7.0', '5.8.0', '5.9.0']);
+        try {
+          const through = path.join(cache, '5.7.0') + path.sep + '..' + path.sep + '5.8.0';
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0', ...(via == 'installPath' ? { installPath: through } : {}) }] });
+          const result = runCommand(command, dir, { timeout: 20_000, env: via == 'installPath' ? {} : { [via]: through } });
+          expect({ via, status: result.status, versions: digitVersions(cache) }).toEqual({ via, status: 0, versions: '5.7.0,5.8.0' });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   test('paths that only look similar, and the Windows path of another plugin, are no refusal', () => {
     for (const command of commands) {
       const { dir, cache } = makeCache(['5.7.0', '5.8.1', '5.9.0']);

@@ -145,7 +145,7 @@ const resolveFrom = (...parts) => {
   return (lastAbsolute < 0 ? [process.cwd(), ...parts] : parts.slice(lastAbsolute)).join(path.sep);
 };
 // linkChain(start) reads a path one component at a time, as the file system does, and returns every path it goes
-// through: each link on the way and the end of the chain. A .. after a link names the parent of the link target,
+// through: each link on the way, each directory a .. leaves, and the end of the chain. A .. after a link names the parent of the link target,
 // a .. inside a link target is read the same way. unreadable is true when a component cannot be examined or when
 // more than 40 links are followed (a loop). A component that does not exist ends the chain without being unreadable.
 const linkChain = (start) => {
@@ -159,6 +159,8 @@ const linkChain = (start) => {
     let next = null;
     for (let i = 0; i < parts.length && !next; i++) {
       if (parts[i] == '..') {
+        // The directory left here has to exist for the path to resolve, so it is on the way like a link is.
+        if (at != root) paths.push(at);
         at = path.dirname(at);
         continue;
       }
