@@ -77,14 +77,14 @@ def is_python_file(path):
     return os.path.isabs(path) and re.match(PYTHON_NAME, os.path.basename(path).lower()) is not None and os.path.isfile(path) and os.access(path, os.X_OK)
 
 
-def expected_command(command, pause_file, hook_log=None):
+def expected_command(command, pause_file, hook_log=None, copy_log=True):
     """The entry the guard would register for a registered command, ready to paste: the pause file of the guard, the hook and the
     interpreter of the command when they are usable (an absolute path of a regular file; the interpreter also executable and named
     like a Python), else the hook next to this module and the interpreter that runs the guard, and, unless the configuration names
-    one, the hook log of the command. None when the command names no hook. Raises ValueError as entry_parts does."""
+    one and copy_log, the hook log of the command. None when the command names no hook. Raises ValueError as entry_parts does."""
     hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
     if not hooks:
         return None
     hook = next((x for x in hooks if os.path.isabs(x) and os.path.isfile(x)), os.path.join(os.path.dirname(os.path.abspath(__file__)), MARK))
     python = next((x for x in [y for y in launchers if y not in hooks] + interpreters if is_python_file(x)), sys.executable)
-    return entry_command(pause_file, hook, python, hook_log or (logs[0] if logs else None))
+    return entry_command(pause_file, hook, python, hook_log or (logs[0] if logs and copy_log else None))

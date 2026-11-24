@@ -4,7 +4,7 @@
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
@@ -577,6 +577,22 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(g); }
   });
 
+  it('a hook log that is a runtime file of the guard is reported at every wiring check, also when a settings rewrite after the start put it there: the entry to paste does not copy it', async () => {
+    const f = fixture('wiring-log-alias', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entry(generatedCommand(f.pause, HOOK, PYBIN)), 'utf8');
+    const g = startGuard(f, ['--warn-every', '1']);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      expect(readText(f.log), 'a wired hook: no warning').not.toMatch(/WARNING/);
+      writeFileSync(f.settings, entry(generatedCommand(f.pause, HOOK, PYBIN, f.pause)), 'utf8');
+      await waitFor(() => /WARNING \(pause\): the hook entry in .* logs to .*pause\.json, which is the pause_file of this guard/.test(readText(f.log)), 20000, 'the alias warning');
+      const drift = readText(f.log).split('\n').filter((l) => /is not the entry this guard generates/.test(l));
+      for (const line of drift) expect(line.endsWith(`: ${generatedCommand(f.pause, HOOK, PYBIN)}`), line).toBe(true);
+    } finally { await stopGuard(g); }
+  });
+
   it('an existing pause file that is not a guard pause is never removed: refused at start with exit 2, the file is kept', () => {
     const f = fixture('not-a-pause', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     for (const text of ['my notes, not a pause\n', '', '{}', '{"paused": true}', '[1, 2]', '{"v": 2, "paused": "true", "pid": 1}',
@@ -727,6 +743,25 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await g.stop(); }
     expect(existsSync(f.pause), 'the pause file is removed although the state could not be written').toBe(false);
     expect(readText(f.log)).toMatch(/RESUMED \(guard stopping, state not saved\)/);
+  });
+
+  it('a stop whose first removal of the pause file fails tries once more: the state is already unpaused and the sessions are not left waiting for the heartbeat', async () => {
+    const f = fixture('stop-unlink-fails', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const flag = join(f.dir, 'deny-unlink');
+    const code = ['import os, runpy, sys', 'real = os.unlink', 'flag = sys.argv[1]', 'target = sys.argv[2]',
+      'def maybe(p, *a, **k):', '    if str(p) == target and os.path.exists(flag):', '        os.unlink(flag)', '        raise OSError(1, "Operation not permitted")', '    return real(p, *a, **k)',
+      'os.unlink = maybe', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const g = spawnPyCode(code, [flag, f.pause, GUARD, ...guardArgs(f, ['--interval', '3', '--heartbeat', '600'])]);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      writeFileSync(flag, '', 'utf8');
+      g.child.kill('SIGTERM');
+      await Promise.race([g.done, sleep(20000)]);
+      expect(g.exited && g.code === 0, `exit ${g.code}`).toBe(true);
+    } finally { await g.stop(); }
+    expect(existsSync(flag), 'the first removal was refused').toBe(false);
+    expect(existsSync(f.pause), 'the pause file is removed by the second try').toBe(false);
+    expect(readJson(f.state).paused).toBe(false);
   });
 
   it('the pause is stored before its file is published: a state write that fails at the first high reading publishes nothing a crash could leave behind', () => {
@@ -1144,6 +1179,22 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const r = runPyCode(driver, [race.pause, GUARD, ...guardArgs(race, ['--once'])]);
     expect(r.stdout).toMatch(/ERROR: tick failed.*appeared meanwhile/);
     expect(readText(race.pause), 'the file that appeared in the instant is not replaced').toBe('late foreign file\n');
+  });
+
+  it('where hard links are not supported a file that appears at pause_file is still never replaced, and without one the pause is published with nothing left behind', () => {
+    const driver = ['import errno, os, runpy, sys', 'target = sys.argv[1]', 'foreign = sys.argv[2] == "1"',
+      'def nolink(a, b, *args, **kw):', '    if foreign and b == target: open(b, "w").write("late foreign file\\n")', '    raise OSError(errno.EPERM, "Operation not permitted")',
+      'os.link = nolink', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const race = fixture('foreign-no-link', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const r = runPyCode(driver, [race.pause, '1', GUARD, ...guardArgs(race, ['--once'])]);
+    expect(r.stdout).toMatch(/ERROR: tick failed.*appeared meanwhile/);
+    expect(readText(race.pause), 'the file that appeared is not replaced').toBe('late foreign file\n');
+
+    const clean = fixture('no-link', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const ok = runPyCode(driver, [clean.pause, '0', GUARD, ...guardArgs(clean, ['--once'])]);
+    expect(ok.status, `${ok.stdout}${ok.stderr}`).toBe(0);
+    expect(readJson(clean.pause).paused, 'the pause is published').toBe(true);
+    expect(readdirSync(clean.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
   });
 
   it('the hook entry check warns when the group matcher no longer covers every tool (an entry for Bash only), and accepts "*", empty and none', () => {

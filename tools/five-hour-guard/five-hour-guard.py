@@ -323,7 +323,7 @@ def log(msg):
 
 def write_json(path, obj, no_clobber=False):
     """Write atomically. no_clobber: a file that appears at the path meanwhile is kept and the write fails (a hard link is created
-    instead of a rename; where links are not supported the rename is used)."""
+    instead of a rename; where links are not supported the destination is reserved exclusively first)."""
     if A.dry_run:
         return
     tmp = f'{path}.{os.getpid()}.tmp'
@@ -342,7 +342,17 @@ def write_json(path, obj, no_clobber=False):
             except FileExistsError:
                 raise OSError(f'the file {path} appeared meanwhile and is not replaced')
             except OSError:
-                os.replace(tmp, path)   # no hard links on this file system
+                # no hard links on this file system: the destination is reserved exclusively (a file that is there is kept and the write
+                # fails) and the rename goes over the reservation
+                try:
+                    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644))
+                except FileExistsError:
+                    raise OSError(f'the file {path} appeared meanwhile and is not replaced')
+                try:
+                    os.replace(tmp, path)
+                except BaseException:
+                    os.unlink(path)   # the reservation is ours
+                    raise
             else:
                 os.unlink(tmp)
         else:
@@ -455,10 +465,15 @@ def hook_check(where):
     for handler in handlers:
         for problem in ENTRY.handler_problems(handler):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
+    runtime = [('pause_file', PAUSE_FILE), ('state_file', STATE), ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS),
+               ('lock of the pause file', PAUSE_FILE + '.lock'), ('lock of the usage cache', CACHE + '.lock')]
     for command in ours:
         try:
-            expected = ENTRY.expected_command(command, PAUSE_FILE, hook_log_setting())
-            hooks, _interpreters, _logs, _pauses, _tests, launchers = entry_parts(command)
+            hooks, _interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
+            aliased = [(log_path, label) for log_path in logs for label, path in runtime if path and same_file(log_path, path)]
+            for log_path, label in aliased:
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} logs to {log_path}, which is the {label} of this guard: the hook would append its log lines to it (a pause file would stop being one, so a pause would hold no session). Run five-hour-guard-settings.py add again')
+            expected = ENTRY.expected_command(command, PAUSE_FILE, hook_log_setting(), copy_log=not aliased)
         except ValueError:
             log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote or NUL character): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
             continue
@@ -748,13 +763,14 @@ def main():
                 if state.get('paused'):
                     leave_pause(state, 'guard stopping')
                 elif unpublish():   # the state is already unpaused and only the removal of the file is pending: one last try
+                    state.pop('unlink_pending', None)
                     log('RESUMED (guard stopping): pause file removed')
             except Exception as e:
                 log(f'ERROR: cannot clean up on exit: {e!r}')
-            if state.get('paused') and unpublish():
-                # the unpaused state could not be written: the sessions are still released (a restart reads the stored pause and
-                # keeps it only while it lasts)
-                log('RESUMED (guard stopping, state not saved): pause file removed')
+            if (state.get('paused') or state.get('unlink_pending')) and unpublish():
+                # the unpaused state could not be written, or the first removal failed: the sessions are still released (a restart
+                # reads a stored pause and keeps it only while it lasts)
+                log('RESUMED (guard stopping, state not saved): pause file removed' if state.get('paused') else 'RESUMED (guard stopping, second try): pause file removed')
 
 
 if __name__ == '__main__':
