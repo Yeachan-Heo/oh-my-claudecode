@@ -2165,14 +2165,16 @@ function withoutReminderBlocks(text) {
 // A <system-reminder> block that holds a message of another sender or the user: its frame (frameOf also takes a block opening with the notification's own
 // <task-notification> for a frame of another kind, which a notification is not).
 const foreignBlock = (block) => frameOf(block) !== undefined && !DELIVERY_NOTES.some((k) => block.replace(DELIVERY_WRAP, '').startsWith(k));
+// The line the host writes between the marker and the first block; anything else there is not the host's framing, whoever it is from.
+const NOTE_HOST_LINE = /^This is an automated background-task event(?:, NOT a message from the user)?\.$/;
 function isNoteBody(t) {
   const { rest, plain, first } = withoutReminderBlocks(t);
   if (plain.some(foreignBlock)) return false;
   if (!t.startsWith(DELIVERY_NOTES[0])) return rest.trim() === '';
-  // Opening with the marker is no leave for what stands outside the blocks: the marker line and the host's line before the first block are the notification's
-  // own (a message of another sender among them is not); with a block, nothing but blank space may follow it. Without a block the text after the marker is the body.
+  // Opening with the marker is no leave for what stands outside the blocks: the marker line and the host's line before the first block (NOTE_HOST_LINE,
+  // nothing else) are the notification's own; with a block, nothing but blank space may follow it. Without a block the text after the marker is the body.
   if (first < 0) return true;
-  return rest.slice(first).trim() === '' && !t.slice(DELIVERY_NOTES[0].length, first).split('\n').some((line) => startsFrame(`${line.trim()}\n`));
+  return rest.slice(first).trim() === '' && t.slice(DELIVERY_NOTES[0].length, first).split('\n').every((line) => !line.trim() || NOTE_HOST_LINE.test(line.trim()));
 }
 // A row of envelopes and nothing else, each holding a notification: a delivery of another kind (the coordinator, another session, a plugin), also inside a
 // <system-reminder> in the envelope, leaves the row alone.
@@ -3803,6 +3805,21 @@ const AGENT_LEAD = 'team-lead'; // the teammate_id of a team's lead in its membe
 const utf8Bytes = (text) => new TextEncoder().encode(text).length;
 // A row is read as one of blocks only when every tag in it has its partner: with a stray tag the pairing of the rest is a guess (a quoted opener would take the
 // closing tag of the real block, and the sender would be the quoted one), so such a row is no agent row for the trim and the move.
+// Whether what stands outside the blocks of a row is the host's framing only: its opening line before a block and its note after one (the two the trim cuts), and
+// blank space. Words of anyone else there (an instruction typed after the report) make the row a mixed one: it is no agent message to move whole.
+function framingOnly(text) {
+  const { blocks } = agentBlocks(text);
+  let at = 0;
+  for (let k = 0; k <= blocks.length; k++) {
+    let gap = text.slice(at, k < blocks.length ? blocks[k].at : text.length);
+    if (k > 0) gap = gap.replace(TRIM_NOTE, '');
+    const head = gap.indexOf(TRIM_HEAD);
+    if (head >= 0) gap = gap.slice(0, head) + gap.slice(head + TRIM_HEAD.length);
+    if (gap.trim()) return false;
+    if (k < blocks.length) at = blocks[k].end;
+  }
+  return true;
+}
 const wholeBlocks = (text) => { const { blocks, loose } = agentBlocks(text); return blocks.length > 0 && !loose; };
 const isAgentRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS && AGENT_OPENERS.some((p) => m.text.trimStart().startsWith(p)) && wholeBlocks(m.text);
 const agentWord = (v, max) => Array.from(oneLine(typeof v === 'string' ? v : '').replace(/[<>[\]"]/g, '')).slice(0, max).join(''); // by code point: never half a surrogate pair
@@ -3889,7 +3906,7 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
       if (i === 0 || i >= tail) continue;
       const m = messages[i];
       if (skip.has(i)) { stats.skipped_blocks++; continue; }
-      if (userWords(m, STAGE_NOT_USER).length || m.text.includes(QUEUED_PREFIX) || AGENT_BARE.test(m.text)) { stats.owner_words++; continue; }
+      if (userWords(m, STAGE_NOT_USER).length || m.text.includes(QUEUED_PREFIX) || AGENT_BARE.test(m.text) || !framingOnly(m.text)) { stats.owner_words++; continue; }
       if (queued.has(i)) { stats.queued_anchor++; continue; }
       if (senders.get(i).some((x) => x.json && !x.idle)) { stats.pending_json++; continue; }
       if (i >= limit) continue;

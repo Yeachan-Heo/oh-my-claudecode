@@ -402,6 +402,18 @@ describe('agent messages to files in the compaction', () => {
     expect(text).toContain('Report 7:');
   });
 
+  it('a row with words of someone else after its closing tag stays whole in the conversation: it is no agent row to move, and the instruction is not lost', async () => {
+    const instruction = 'Do not change the production database.';
+    const rows = [`${longReport(0)}\n${instruction}`, ...agentRows.slice(1)];
+    const m = talk(rows);
+    m.splice(1, 0, { role: 'assistant', text: 'Read.', toolUses: [{ tool_use_id: 't1', tool: 'Bash', input: { command: 'cat a.txt' } }] }, { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 't1', text: `RESULT ${'x'.repeat(30000)}`, isError: false }] });
+    const { out, record, store } = await compactRun({ OMC_JEV_COMPACT_AGENT_TRIM: '1' }, m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` })));
+    expect(record.agent_messages).toMatchObject({ moved: 1, owner_words: 1 });
+    expect(spilled(store)).toHaveLength(1);
+    expect(JSON.stringify(out.messages)).toContain(instruction);
+    expect(JSON.stringify(out.messages)).toContain('Report 0:');
+  });
+
   it('through the token cascade the floor counts the files and their saving comes off the prediction', async () => {
     const env = { OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
     const off = await compactRun(env, messages());

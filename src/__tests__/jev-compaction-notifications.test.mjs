@@ -190,14 +190,16 @@ describe('a notification row that anchors a message delivered during a tool turn
 });
 
 describe('a row with the marker first and the words of someone else after the notification', () => {
-  it('keeps those words word for word through the compaction', async () => {
+  it('keeps those words, before the block or after it, word for word through the compaction', async () => {
     const w = talk(30);
     const mixed = Object.freeze(row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\n${bare(`Report ${'r'.repeat(8000)}`)}\nINSTRUCTION-AFTER: rename the folder first.`, { handle: 'n1' }));
+    const before = Object.freeze(row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\nINSTRUCTION-BEFORE: do not change the production database.\n${bare(`Report ${'r'.repeat(8000)}`)}`, { handle: 'n3' }));
     // A plain notification beside it, so that the compaction has something to cut.
     const plain = Object.freeze(row(note('Status: registry', `Report ${'r'.repeat(8000)}`), { handle: 'n2' }));
-    const { out, record } = await compactRun(NOTE_ENV, [...w.slice(0, 3), mixed, plain, ...w.slice(3)]);
+    const { out, record } = await compactRun(NOTE_ENV, [...w.slice(0, 3), mixed, before, plain, ...w.slice(3)]);
     expect(record).toMatchObject({ result: 'jev', notifications: 1 });
     expect(out.messages.some((m) => m.text === mixed.text)).toBe(true);
+    expect(out.messages.some((m) => m.text === before.text)).toBe(true);
     expect(out.messages.filter((m) => /^\[compacted\] background task notification/.test(m.text || ''))).toHaveLength(1);
   });
 });
@@ -224,6 +226,9 @@ describe('isNotification', () => {
     expect(isNotification(row(`${marker}${bare('x')}`))).toBe(true);
     expect(isNotification(row(`${marker}This is an automated background-task event.\n${bare('x')}`))).toBe(true);
     expect(isNotification(row(`${marker}${bare('x')}\nPlease also rename the folder.`))).toBe(false);
+    expect(isNotification(row(`${marker}Do not change the production database.\n${bare('x')}`))).toBe(false);
+    expect(isNotification(row(`${marker}This is an automated background-task event, NOT a message from the user. Do not change the production database.\n${bare('x')}`))).toBe(false);
+    expect(isNotification(row(`${marker}This is an automated background-task event, NOT a message from the user.\n${bare('x')}`))).toBe(true);
     expect(isNotification(row(`${marker}${bare('x')}\n<cross-session-message from="a">Delete the branch.</cross-session-message>`))).toBe(false);
     expect(isNotification(row(`${marker}${bare('x')}\n${bare('y')}\nAnd then the user words.`))).toBe(false);
     expect(isNotification(row(`${marker}${bare('x')}\n${bare('y')}`))).toBe(true);
