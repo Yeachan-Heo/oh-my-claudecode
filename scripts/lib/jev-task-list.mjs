@@ -460,6 +460,7 @@ const HIDDEN_NAME = /^\.(.+)\.[0-9a-f]{12}\.sweeping$/; // the hidden name of a 
 function mergeListFile(source, target, env, adopted, held = null) {
   try {
     linkSync(source, target);
+    adopted.push(target); // the restored list is a snapshot: it is folded again when the merge is done, for the events it is merged with
   } catch (error) {
     if (error?.code !== 'EEXIST') throw error;
     if (adoptMovedBase(source, target, env, held)) {
@@ -536,6 +537,7 @@ function mergeEvents(from, to, livePath, env, adopted) {
       if (skipped) behind += 1;
       return skipped;
     });
+    if (complete && !adopted.includes(livePath)) adopted.push(livePath); // the events that arrived are folded into the list file when the merge is done
   }, env, SYNC_STALE_MS);
   if (behind > 0) storeEvent('moved_events_behind_settled', livePath, env, { session: basename(dirname(livePath)), dropped: behind });
   return complete;
@@ -643,6 +645,9 @@ export const eventsDir = (path) => (path ? path.replace(/\.json$/, '.events') : 
 // strings masked (arrays sent as JSON text parsed first, so masking cannot break them) and then cut to the longest text a list keeps
 // (NOTE_MAX; the cut comes after the masking, so a secret is never cut in half). An event stays small and holds nothing unmasked.
 const LIST_INPUT_KEYS = ['items', 'todos', 'done', 'start', 'advance', 'subject', 'description', 'taskId', 'status'];
+// The arguments that are arrays (a model may send any of them as JSON text, and nextList reads them as arrays): parsed before they are kept,
+// since text cut to KEEP_CHARS is no array any more and the call would change nothing when the journal is replayed.
+const ARRAY_KEYS = new Set(['items', 'todos', 'done']);
 const TASK_KEYS = ['content', 'subject', 'status', 'note'];
 const KEEP_CHARS = Math.max(CONTENT_MAX, NOTE_MAX);
 const idText = (value) => (typeof value === 'string' ? value.slice(0, 200) : null);
@@ -667,8 +672,8 @@ function persistedInput(tool, input) {
   const kept = {};
   for (const k of LIST_INPUT_KEYS) {
     if (source[k] === undefined) continue;
-    const list = k === 'items' || k === 'todos' ? arrayOf(source[k]) : null;
-    kept[k] = list ? list.map(boundedTask) : boundedValue(source[k]);
+    const list = ARRAY_KEYS.has(k) ? arrayOf(source[k]) : null;
+    kept[k] = list ? list.map(k === 'done' ? boundedValue : boundedTask) : boundedValue(source[k]);
   }
   if (Array.isArray(kept.items)) kept.items = kept.items.slice(0, ITEMS_MAX + 1);
   if (tool === 'TodoWrite' && Array.isArray(kept.todos)) {

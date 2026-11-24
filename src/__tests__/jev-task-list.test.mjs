@@ -536,6 +536,28 @@ describe('task list: storage library', () => {
     expect(L.readList(sid, 'o5', envFor()).items[0].content).toContain('api_key=***');
   });
 
+  // An array argument sent as JSON text is parsed before the event keeps it: kept as text it would be cut to the longest text a list keeps, and
+  // the cut text is no array, so the call the tool accepted would change nothing. Each row sends the argument pretty printed, longer than that cut.
+  it.each([
+    ['done', (n) => ({ done: JSON.stringify(Array.from({ length: n }, (_, i) => i + 1), null, 10) })],
+    ['items', (n) => ({ items: JSON.stringify(Array.from({ length: n }, (_, i) => ({ content: `Task ${i + 1}`, status: 'pending' })), null, 10) })],
+  ])('a long %s argument sent as JSON text still changes the list as the call asked', async (_what, input) => {
+    const sid = session();
+    const a = { agent_id: 'j1' };
+    const tasks = Array.from({ length: 50 }, (_, i) => ({ content: `Task ${i + 1}`, status: 'pending' }));
+    await stan(sid, LIST_TOOL, { items: tasks }, a);
+    const sent = input(50);
+    expect(Object.values(sent)[0].length).toBeGreaterThan(600);
+    const s = await stan(sid, LIST_TOOL, sent, a);
+    expect(s.code).toBe(0);
+    const statuses = L.readList(sid, 'j1', envFor()).items.map((x) => x.status);
+    expect(statuses).toHaveLength(50);
+    expect(statuses.every((x) => (Object.keys(sent)[0] === 'done' ? x === 'completed' : x === 'pending'))).toBe(true);
+    // and the event on disk holds the array itself, not text
+    const kept = eventFiles(sid, 'j1').map((f) => JSON.parse(readFileSync(join(LOGS, 'lists', sid, 'j1.events', f), 'utf8')).tool_input);
+    expect(kept.some((x) => Array.isArray(x.done) && x.done.length === 50)).toBe(Object.keys(sent)[0] === 'done');
+  }, TOTAL_MS);
+
   it('a reader folding before a locked write sees the same list as the file after it', async () => {
     const sid = session();
     const a = { agent_id: 'o2' };
@@ -1109,6 +1131,19 @@ describe('task list: session retention sweep', () => {
           expect(shown(sid)).toEqual(['Old task:completed']);
           L.syncList(sid, 'main', envFor()); // the tree is merged: the calls are settled with the marks of the list like any other
           expect(leftNames(sid)).toEqual([String(now + 20_000)]);
+          expect(readListFile(sid, 'main').items.map((x) => `${x.id} ${x.content}:${x.status}`)).toEqual(['1 Old task:completed']);
+        });
+
+        // The merge restores the list of the moved tree (a list file the live tree has none of) or only its events: the list file is folded when the
+        // merge is done, so the readers of the file, which do not fold, see what the events give and not the restored snapshot.
+        it.each([['with the list of the moved tree', true], ['with its events only', false]])('shows in the list file, at the end of the merge, the task the call completed (%s)', (_what, withList) => {
+          fresh();
+          const now = Date.now();
+          const sid = session();
+          oldTask(sid, now, withList);
+          stopAfterMove(sid);
+          noop(sid, now - 5000);
+          sweepAgain();
           expect(readListFile(sid, 'main').items.map((x) => `${x.id} ${x.content}:${x.status}`)).toEqual(['1 Old task:completed']);
         });
 
