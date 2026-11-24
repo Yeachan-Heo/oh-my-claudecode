@@ -1184,7 +1184,8 @@ describe('recovery pane rollback evidence', () => {
     });
   }
 
-  it('keeps the recovery active past the deadline when the evidence for an unproven split pane cannot be written', async () => {
+  // chmod cannot deny writes on Windows or to root.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('keeps the recovery active past the deadline when the evidence for an unproven split pane cannot be written', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-evidence-unwritable-'));
     const teamName = 'evidence-unwritable-team';
     const requestId = 'evidence-unwritable-request';
@@ -1220,7 +1221,8 @@ describe('recovery pane rollback evidence', () => {
     await expectStillActivePastDeadline(teamName, requestId, recoveryId, execute);
   });
 
-  it('does not split a recovery pane when the split cannot be recorded first', async () => {
+  // chmod cannot deny writes on Windows or to root.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('does not split a recovery pane when the split cannot be recorded first', async () => {
     cwd = mkdtempSync(join(tmpdir(), 'recovery-pane-split-unrecordable-'));
     const teamName = 'split-unrecordable-team';
     const requestId = 'split-unrecordable-request';
