@@ -27,7 +27,7 @@ describe('omc-doctor: numeric parts of a version are ordered as digit strings of
       expect(orderSection).not.toMatch(/Number|parseInt|parseFloat|BigInt|\+x|\+y|x - y/);
       // Step 1 (the highest of the cache and of the entries) and Step 4 (the newest cached version) both order with it.
       expect(scriptText.split('.sort(compareVersions)').length - 1).toBeGreaterThanOrEqual(3);
-      expect(scriptText).toContain('.filter(isVersionDir).sort(compareVersions);');
+      expect(scriptText).toContain('versionDirs(dir).sort(compareVersions);');
       // The only number conversions in the whole script are the process id checks of the two registry commands.
       const conversions = [...scriptText.matchAll(/\b(?:Number|parseInt|parseFloat|BigInt)\b[.(]?\w*/g)].map((m) => m[0]).filter((c) => c !== 'Number.isSafeInteger');
       expect(conversions).toEqual([]);

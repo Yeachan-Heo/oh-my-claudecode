@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { backupDir, CACHE_VERSIONS, CLAUDE_MD_VERSION, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { step1 } from './helpers/omc-doctor-step1.js';
@@ -25,6 +26,41 @@ describe('omc-doctor: a cache directory that is no semantic version takes no par
       }
     }
     expect(step1({ cache: { omc: ['1e3', '4.15.7L'] } })).toEqual({ Channel: 'npm', Installed: '(none)', Updater: 'omc update' });
+  });
+
+  // A regular file or a FIFO named like a version is no installed version. An entry that cannot be resolved (a link to nothing, a loop)
+  // stays a version entry, judged by the protection rules as before (see omc-doctor-dangling-links and omc-doctor-cache-links-occupancy).
+  describe.skipIf(process.platform === 'win32')('a version-shaped entry that is no directory', () => {
+    const fifo = (file: string) => expect(spawnSync('mkfifo', [file]).status).toBe(0);
+    const NOT_DIRECTORIES: Array<[string, (file: string) => void]> = [
+      ['a regular file', (file) => writeFileSync(file, 'x')],
+      ['a FIFO', fifo],
+      ['a link to a regular file', (file) => { writeFileSync(file + '.target', 'x'); symlinkSync(file + '.target', file); }],
+    ];
+
+    test('Step 1 on the npm channel finds nothing installed', () => {
+      for (const [label, make] of NOT_DIRECTORIES) {
+        const out = step1({ setup: (dir) => { const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode'); mkdirSync(cache, { recursive: true }); make(path.join(cache, '5.9.0')); } });
+        expect({ label, out }).toEqual({ label, out: { Channel: 'npm', Installed: '(none)', Updater: 'omc update' } });
+      }
+    });
+
+    test('Step 6 does not count it and the cache commands do not move it', () => {
+      for (const [label, make] of NOT_DIRECTORIES) {
+        for (const command of commands) {
+          const { dir, cache } = makeCache(['5.7.0', '5.8.0']);
+          try {
+            make(path.join(cache, '5.9.0'));
+            writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
+            expect({ label, count: runCommand(CACHE_VERSIONS, dir).stdout.trim() }).toEqual({ label, count: '2 version(s): 5.7.0, 5.8.0' });
+            const result = runCommand(command, dir, { timeout: 20_000 });
+            expect({ label, command, status: result.status, left: readdirSync(cache).filter((name) => !name.endsWith('.target')).sort(), moved: movedAside(dir) }).toEqual({ label, command, status: 0, left: ['5.8.0', '5.9.0'], moved: 1 });
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+    });
   });
 
   test('Step 1 for a registry entry that names only an installPath: the marketplace cache is read the same way', () => {

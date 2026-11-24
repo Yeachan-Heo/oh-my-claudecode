@@ -63,8 +63,9 @@ describe('omc-doctor: the script holds one definition of a version name and of t
     const definitions = scriptText.split('\n').filter((line) => line.startsWith('const isVersionDir'));
     expect(definitions).toEqual([String.raw`const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);`]);
     // Step 1 (highestCached, which the npm channel and Step 4 use), Step 6 and the function both cache commands share
-    // list version directories through it, and nothing else lists them.
-    expect(scriptText.split('.filter(isVersionDir)').length - 1).toBe(3);
+    // list version directories through versionDirs, the one place that applies it (and requires a directory), and nothing else lists them.
+    expect(scriptText.split('.filter(isVersionDir)').length - 1).toBe(1);
+    expect(scriptText.split('versionDirs(').length - 1).toBe(3);
   });
 
   test('no command filters a cache listing by its own copy of the digit test', () => {
@@ -491,6 +492,32 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
           writeFileSync(path.join(dir, 'CLAUDE.md'), marker + '\n');
           const run = runCommand(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
           expect({ marker, verdict: run.stdout.trim().split('\n').slice(-1)[0] }).toEqual({ marker, verdict: marker == '<!-- OMC:VERSION:5.9.0 -->' ? MATCH : DRIFT });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    // extractOmcVersion takes the first marker in the exact form wherever a variant spelling stands; the version shown and its exactness
+    // belong to one match, so a variant that equals the cache cannot hide that the marker the runtime reads is another one.
+    test.skipIf(process.platform === 'win32')('with several markers in one file the exact one decides, as in the runtime, wherever a variant stands', () => {
+      const variant = (version: string) => `<!--OMC:VERSION:${version}-->`;
+      const exact = (version: string) => `<!-- OMC:VERSION:${version} -->`;
+      const cases: Array<[string, string[], string, string]> = [
+        ['a variant before the exact one', [variant(NEW), exact(OLD)], OLD, DRIFT],
+        ['the exact one before a variant', [exact(NEW), variant(OLD)], NEW, MATCH],
+        ['a variant after the exact one that differs', [exact(OLD), variant(NEW)], OLD, DRIFT],
+        ['the variant alone', [variant(NEW)], NEW, DRIFT],
+      ];
+      for (const [label, lines, shown, verdict] of cases) {
+        const dir = fresh();
+        try {
+          addCache(dir, [OLD, NEW], 'omc');
+          writeRegistry(dir, { [OMC]: [{ scope: 'user', version: NEW }] });
+          writeFileSync(path.join(dir, 'CLAUDE.md'), lines.join('\n') + '\n');
+          const run = runCommand(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
+          const out = run.stdout.trim().split('\n');
+          expect({ label, shown: out[0], verdict: out[out.length - 1] }).toEqual({ label, shown: `CLAUDE.md OMC version: ${shown}`, verdict });
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

@@ -449,6 +449,19 @@ describe('omc-doctor Step 1 takes the installed version from the manifest of the
       expect(block.Channel).toBe('plugin-dir');
     });
 
+    // A regular file cannot be left by a ..: the file system answers ENOTDIR for <cache>/blocker/../5.8.0, so that spelling names nothing
+    // either, and a root on the real 5.8.0 is not the install it records.
+    test.skipIf(process.platform === 'win32')('an installPath through a regular file before .. names nothing, so the explicit root is a checkout', () => {
+      const block = step1({
+        plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ installPath: path.join(cache(dir, '5.9.0'), '..', 'blocker') + path.sep + '..' + path.sep + '5.8.0' }] }),
+        clone: { omc: '5.9.0' },
+        cache: { omc: ['5.8.0', '5.9.0'] },
+        env: (dir) => ({ OMC_PLUGIN_ROOT: cache(dir, '5.8.0') }),
+        setup: (dir) => write(path.join(path.dirname(cache(dir, '5.9.0')), 'blocker'), 'x'),
+      });
+      expect(block.Channel).toBe('plugin-dir');
+    });
+
     // A link loop on the way makes the path unresolvable: it names nothing, and its folded text must not equal a real directory.
     test.skipIf(process.platform === 'win32')('an installPath through a link loop before .. is not the explicit root: the answer is unknown, not the marketplace', () => {
       const block = step1({

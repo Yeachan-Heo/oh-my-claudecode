@@ -67,6 +67,18 @@ const semver = (text) => {
 // spaces) and is not a leftover of an interrupted cache relink, which is named <version>.omc-stale-<pid>. A name that
 // is no version (1e3, 4.15.7L, v5.7.0) takes no part in the order and is never moved as a version.
 const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);
+// The version directories of a cache directory: the entries whose name is a version, except those that certainly are no directory
+// (a regular file or a FIFO named like a version, as a link to one is also, is no installed version). An entry that cannot be
+// resolved (a link to nothing, a loop, no permission) stays listed: it may be an installation that is broken, so the cache commands
+// keep it when something protects it and refuse when it cannot be judged, as for any other version.
+const versionDirs = (dir) =>
+  fs.readdirSync(dir).filter(isVersionDir).filter((name) => {
+    try {
+      return fs.statSync(dir + path.sep + name).isDirectory();
+    } catch {
+      return true;
+    }
+  });
 
 // == version order ==
 // Semantic version precedence as a comparison function. Numeric parts compare as digit strings (leading zeros
@@ -156,15 +168,25 @@ const linkChain = (start) => {
     const root = path.parse(current).root;
     const parts = current.slice(root.length).split(path.sep).filter((part) => part && part != '.');
     let at = root;
+    // Whether the component read last is a directory (the root and a parent of one are).
+    let atIsDirectory = true;
     let next = null;
     for (let i = 0; i < parts.length && !next; i++) {
       if (parts[i] == '..') {
-        // The directory left here has to exist for the path to resolve, so it is on the way like a link is.
+        // The directory left here has to exist for the path to resolve, so it is on the way like a link is. A component that is no
+        // directory (a regular file) cannot be left: the file system answers ENOTDIR for <file>/../x, so the spelling names nothing and
+        // what follows is kept as written, like what follows a missing component.
         if (at != root) paths.push(at);
+        if (!atIsDirectory) {
+          paths.push([at, ...parts.slice(i)].join(path.sep));
+          return { paths, unreadable };
+        }
         at = path.dirname(at);
+        atIsDirectory = true;
         continue;
       }
       at = path.join(at, parts[i]);
+      atIsDirectory = false;
       let info;
       try {
         info = fs.lstatSync(at);
@@ -176,6 +198,7 @@ const linkChain = (start) => {
         paths.push(after.includes('..') ? [at, ...after].join(path.sep) : path.resolve(at, ...after));
         return { paths, unreadable };
       }
+      atIsDirectory = info.isDirectory();
       if (info.isSymbolicLink()) {
         const rest = parts.slice(i + 1);
         const dots = rest.indexOf('..');
@@ -252,7 +275,7 @@ const registryMarketplaces = () => {
 // (getLatestPluginCacheVersion): a half-written directory is no version there.
 const highestCached = (dir, complete = false) => {
   try {
-    const names = fs.readdirSync(dir).filter(isVersionDir).sort(compareVersions);
+    const names = versionDirs(dir).sort(compareVersions);
     if (complete) {
       for (let i = names.length - 1; i >= 0; i--) {
         try {
@@ -682,11 +705,13 @@ const claudeMdVersion = () => {
   for (const file of candidates) {
     try {
       const text = readFile(file);
-      const marker = text.match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
+      // The runtime (extractOmcVersion in scripts/session-start.mjs) reads only the exact, case-sensitive, spaced form with a
+      // digit first, and the first such marker decides, wherever a variant spelling stands; the marker chosen and its exactness are
+      // one match. Where no exact marker exists, any other spelling is a marker it cannot read, which it reports as instruction drift.
+      const exact = text.match(/<!-- OMC:VERSION:(\d+\.\d+\.\d+[^\s]*?) -->/);
+      const marker = exact || text.match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
       if (marker) {
-        // The runtime (extractOmcVersion in scripts/session-start.mjs) reads only the exact, case-sensitive, spaced form with a
-        // digit first; any other spelling is a marker it cannot read, which it reports as instruction drift.
-        markerExact = /<!-- OMC:VERSION:\d+\.\d+\.\d+[^\s]*? -->/.test(text);
+        markerExact = !!exact;
         claudeVersion = marker[1];
         claudeSource = file;
         break;
@@ -820,7 +845,7 @@ const cacheVersions = () => {
   for (const market of markets) {
     const lead = markets.length > 1 ? market + ': ' : '';
     try {
-      const names = fs.readdirSync(cacheDirOf(market)).filter(isVersionDir);
+      const names = versionDirs(cacheDirOf(market));
       console.log(lead + names.length + ' version(s):', names.join(', '));
     } catch (error) {
       const dir = cacheDirOf(market);
@@ -1249,7 +1274,7 @@ const cacheRepair = (kind) => {
     let future = 0;
     let unjudged = 0;
     try {
-      const versions = fs.readdirSync(dir).filter(isVersionDir);
+      const versions = versionDirs(dir);
       const state = protectionOf(dir, versions);
       if (state.unreadable) {
         refuse(stopUnreadable(state.reason));
