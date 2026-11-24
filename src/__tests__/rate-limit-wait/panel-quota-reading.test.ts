@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { readProviderQuota } from '../../features/rate-limit-wait/panel-quota-reading.js';
+import { planQuotaWait } from '../../features/rate-limit-wait/panel-quota-wait.js';
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -71,5 +72,62 @@ describe('panel quota wait: provider reading', () => {
   it('a body that is not JSON is no reading', async () => {
     const s = await stub(200, 'not json');
     expect(await readProviderQuota({ OMC_PANEL_QUOTA_READ_URL: s.url, OMC_PANEL_QUOTA_KEY_FILE: keyFile('k') })).toBeNull();
+  });
+});
+
+describe('panel quota wait: the reading is validated before it can authorize a resume', () => {
+  const NOW = 1_700_000_000_000;
+  const SOON = NOW + 2 * 3600_000;
+
+  // The decision a reading leads to: the real reader against the stub, then the plan on what the reader returned.
+  async function decision(limits: unknown): Promise<boolean> {
+    const s = await stub(200, JSON.stringify({ success: true, data: { limits } }));
+    const reading = await readProviderQuota({ OMC_PANEL_QUOTA_READ_URL: s.url, OMC_PANEL_QUOTA_KEY_FILE: keyFile('k') });
+    return reading !== null && planQuotaWait(reading.body, NOW).wait;
+  }
+
+  it('an exhausted weekly limit never waits, whether its unit is a number or the text of a number', async () => {
+    expect(await decision([{ unit: 6, percentage: 100, nextResetTime: SOON }])).toBe(false);
+    expect(await decision([{ unit: '6', percentage: 100, nextResetTime: SOON }])).toBe(false);
+  });
+
+  it('a 5 h limit with well-typed fields waits, also with fields the plan does not use', async () => {
+    expect(await decision([{ type: 'TOKENS', unit: 3, number: 5, percentage: 100, nextResetTime: SOON }])).toBe(true);
+  });
+
+  it.each([
+    ['a weekly limit whose unit is text', [{ unit: 3, percentage: 100, nextResetTime: SOON }, { unit: '6', percentage: 100, nextResetTime: SOON }]],
+    ['a weekly limit whose unit is a one-element array', [{ unit: 3, percentage: 100, nextResetTime: SOON }, { unit: [6], percentage: 100, nextResetTime: SOON }]],
+    ['a weekly limit whose percentage is text', [{ unit: 3, percentage: 100, nextResetTime: SOON }, { unit: 6, percentage: '100', nextResetTime: SOON }]],
+    ['a limit whose unit is fractional', [{ unit: 3.5, percentage: 100, nextResetTime: SOON }]],
+    ['a limit whose percentage is text', [{ unit: 3, percentage: '100', nextResetTime: SOON }]],
+    ['a limit whose reset time is text', [{ unit: 3, percentage: 100, nextResetTime: String(SOON) }]],
+    ['a limit that is not an object', [{ unit: 3, percentage: 100, nextResetTime: SOON }, 'weekly']],
+    ['a limit that is null', [{ unit: 3, percentage: 100, nextResetTime: SOON }, null]],
+  ])('%s refuses the whole reading', async (_name, limits) => {
+    expect(await decision(limits)).toBe(false);
+  });
+
+  it.each([['the text "false"', 'false'], ['the text "true"', 'true'], ['the number 1', 1], ['null', null]])(
+    'a success flag that is %s is no reading, even with good limits',
+    async (_name, flag) => {
+      const s = await stub(200, JSON.stringify({ success: flag, data: { limits: [{ unit: 3, percentage: 100, nextResetTime: SOON }] } }));
+      expect(await readProviderQuota({ OMC_PANEL_QUOTA_READ_URL: s.url, OMC_PANEL_QUOTA_KEY_FILE: keyFile('k') })).toBeNull();
+    },
+  );
+
+  it('a reading without a success flag is accepted, and a bare array of limits too', async () => {
+    const limits = [{ unit: 3, percentage: 100, nextResetTime: SOON }];
+    const bare = await stub(200, JSON.stringify(limits));
+    expect(await readProviderQuota({ OMC_PANEL_QUOTA_READ_URL: bare.url, OMC_PANEL_QUOTA_KEY_FILE: keyFile('k') })).toEqual({ body: limits });
+    const noFlag = await stub(200, JSON.stringify({ data: { limits } }));
+    expect(await readProviderQuota({ OMC_PANEL_QUOTA_READ_URL: noFlag.url, OMC_PANEL_QUOTA_KEY_FILE: keyFile('k') })).toEqual({ body: { data: { limits } } });
+  });
+
+  it('the plan itself refuses a body whose fields are mistyped, whatever reader produced it', () => {
+    const body = { data: { limits: [{ unit: '6', percentage: 100, nextResetTime: SOON }] } };
+    expect(planQuotaWait(body, NOW).wait).toBe(false);
+    expect(planQuotaWait([{ unit: 3, percentage: '100', nextResetTime: SOON }], NOW).wait).toBe(false);
+    expect(planQuotaWait([{ unit: 3, percentage: 100, nextResetTime: SOON }], NOW).wait).toBe(true);
   });
 });

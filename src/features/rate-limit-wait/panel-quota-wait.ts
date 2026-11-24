@@ -65,6 +65,7 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { atomicWriteFileSync } from '../../lib/atomic-write.js';
+import { parseQuotaLimits } from './panel-quota-limits.js';
 import { readProviderQuota } from './panel-quota-reading.js';
 
 export { readProviderQuota };
@@ -168,12 +169,6 @@ export interface PanelQuotaDeps {
   journal(row: Journal): void;
   /** Saves the state durably. Called before an effect that cannot be undone; a throw stops that effect. */
   persist?(state: PanelState): void;
-}
-
-interface QuotaLimit {
-  unit?: number;
-  percentage?: number;
-  nextResetTime?: number;
 }
 
 const TAIL_LINES = 15;
@@ -361,7 +356,7 @@ export function planQuotaWait(
   marginValueMs: number = DEFAULT_MARGIN_MS,
   weekUnit: number = DEFAULT_WEEK_LIMIT_UNIT,
 ): WaitPlan {
-  const limits = limitsOf(body);
+  const limits = parseQuotaLimits(body);
   if (!limits) return { wait: false, reason: 'no quota reading' };
   const exhausted = limits.filter((limit) => Number(limit?.percentage) >= EXHAUSTED_PERCENT);
   if (exhausted.length === 0) return { wait: false, reason: 'no exhausted limit' };
@@ -374,12 +369,6 @@ export function planQuotaWait(
     return { wait: false, reason: 'weekly or monthly limit exhausted', reset };
   }
   return { wait: true, reset, untilMs: reset + marginValueMs };
-}
-
-function limitsOf(body: unknown): QuotaLimit[] | null {
-  const limits = (body as { data?: { limits?: unknown } } | null)?.data?.limits;
-  if (Array.isArray(limits)) return limits as QuotaLimit[];
-  return Array.isArray(body) ? (body as QuotaLimit[]) : null;
 }
 
 function planForReading(reading: QuotaReading | null, now: number, marginValueMs: number, weekUnit: number): WaitPlan {
