@@ -25,6 +25,7 @@ import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
 import { pointerSecretPath } from './lib/jev-pointer-secret-path.mjs';
+import { isTruthyProviderFlag } from './lib/provider-env-helpers.mjs';
 import { isJevLogContextEnabled, isJevRowTelemetryEnabled, JEV_ROW_NO_ANSWER, jevLogContextOf, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
 import { loadContextText } from './lib/context-text-loader.mjs';
 
@@ -43,7 +44,7 @@ function isSubagentSafeModelId(modelId) {
   return isProviderSpecificModelId(modelId) && !hasExtendedContextSuffix(modelId);
 }
 function isBedrockProviderEnv() {
-  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') return true;
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
   if (/^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
   if (
@@ -56,7 +57,7 @@ function isBedrockProviderEnv() {
   return false;
 }
 function isVertexProviderEnv() {
-  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') return true;
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
   return !!modelId && modelId.toLowerCase().startsWith('vertex_ai/');
 }
