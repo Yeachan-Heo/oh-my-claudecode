@@ -4146,13 +4146,13 @@ export async function spawnOwnedWorkerInPane(
     // descendant that left the provider's process group is no longer below the pane's root once the provider is gone, and the kill of the
     // pane reads the tree after that (OMC_TEAM_KILL_PANE_TREE). Not read of a pane that the kill of the pane refuses (the pane of the leader,
     // a reserved one, one that no longer shows to be a pane of the team).
-    let fencedTree: PaneProcessTree | null = null;
+    let fencedTrees: PaneProcessTree[] = [];
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
       attempt,
       "launch_failed",
       async () => {
         try {
-          if (fencedTree) await terminatePaneProcessTree(fencedTree);
+          for (const tree of fencedTrees) await terminatePaneProcessTree(tree);
           await killOwnedWorkerPane(ownership);
           return (await getOwnedWorkerLiveness(ownership)) === "dead";
         } catch {
@@ -4165,7 +4165,7 @@ export async function spawnOwnedWorkerInPane(
           { verifyTeamTargetOwnership, capturePaneProcessTree },
           persisted,
         );
-        fencedTree = read.tree;
+        fencedTrees = read.trees;
         return read.record;
       },
     ).catch(() => false);

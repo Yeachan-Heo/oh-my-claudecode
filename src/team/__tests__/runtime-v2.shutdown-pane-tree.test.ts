@@ -421,6 +421,27 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     });
   }, 60_000);
 
+  // The pane's root exits during the wait, so the read at the fence finds nothing and the trees read before it are the only identity sets there are. They
+  // are persisted with the retirement: a shutdown retried after the provider was terminated cannot read them again from a dead pane.
+  it('a shutdown retried after the provider was terminated signals the trees read before the fence when the fence read found nothing', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    await withAcceptedProvider('pane-tree-early-retry-team', async () => {
+      let reads = 0;
+      let retry = false;
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => (retry || ++reads > 2 ? null : FIXTURE_TREE)); // the two reads before the fence see it; the fence does not
+      tmuxSessionMocks.killOwnedWorkerPane.mockImplementation(async () => undefined);
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      await expect(shutdownTeamV2('pane-tree-early-retry-team', cwd, { timeoutMs: 0, force: true })).resolves.toMatchObject({ outcome: 'preserved' });
+
+      retry = true;
+      tmuxSessionMocks.terminatePaneProcessTree.mockClear();
+      tmuxSessionMocks.killOwnedWorkerPane.mockImplementation(async () => { paneState.killed = true; });
+      await shutdownTeamV2('pane-tree-early-retry-team', cwd, { timeoutMs: 0, force: true });
+
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toContainEqual(FIXTURE_TREE);
+    });
+  }, 60_000);
+
   it('without OMC_TEAM_KILL_PANE_TREE no tree is read, not even the proof of membership that precedes a read, and none is signalled', async () => {
     await withAcceptedProvider('pane-tree-off-team', async () => {
       const { shutdownTeamV2 } = await import('../runtime-v2.js');

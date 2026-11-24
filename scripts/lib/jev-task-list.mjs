@@ -532,6 +532,9 @@ function mergeEvents(from, to, livePath, env, adopted) {
     // one and an older event linked now would be applied last by the next fold. The tree is then kept under its hidden name and the next sweep
     // merges it against the record it finds.
     if (existsSync(movedList)) {
+      // the snapshot is the only copy of what the moved tree settled: it is linked or parked, and removed from the moved tree, only under a lock
+      // that is still this call's (else the tree is kept as it is, snapshot included)
+      if (!owned()) return;
       mergeListFile(movedList, livePath, env, adopted, owned);
       unlinkSync(movedList);
     }

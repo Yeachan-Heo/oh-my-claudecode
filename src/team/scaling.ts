@@ -138,8 +138,9 @@ function readWorkerPaneProcessTree(
 function readFencedWorkerPaneTree(
   ownership: WorkerPaneOwnership | null | undefined,
   persisted?: unknown,
+  earlier: ReadonlyArray<PaneProcessTree | null | undefined> = [],
 ) {
-  return readFencedPaneTree(ownership, paneTreeReadOps, persisted);
+  return readFencedPaneTree(ownership, paneTreeReadOps, persisted, earlier);
 }
 
 export function isScalingEnabled(
@@ -873,9 +874,9 @@ export async function scaleUpOwned(
           // first here: a descendant that left the provider's process group is no longer below the pane's root once the provider is gone, and
           // the kill of the pane reads the tree after that (OMC_TEAM_KILL_PANE_TREE). Not read of the pane of the leader or a reserved one, which
           // the kill of the pane refuses.
-          let fencedTree: PaneProcessTree | null = null;
+          let fencedTrees: PaneProcessTree[] = [];
           const killPane = async (): Promise<boolean> => {
-            if (fencedTree) await terminatePaneProcessTree(fencedTree);
+            for (const tree of fencedTrees) await terminatePaneProcessTree(tree);
             if (
               ownership &&
               (await getOwnedWorkerLiveness(ownership).catch(
@@ -902,7 +903,7 @@ export async function scaleUpOwned(
                 killPane,
                 async (persisted) => {
                   const read = await readFencedWorkerPaneTree(ownership, persisted);
-                  fencedTree = read.tree;
+                  fencedTrees = read.trees;
                   return read.record;
                 },
               ).catch(() => false)
@@ -2457,7 +2458,7 @@ export async function scaleDownOwned(
         let cleaned = false;
         // The read at the fence (see retireAndCleanupCurrentWorkerLaunchAttempt): the last one, right before the provider is terminated, for
         // a descendant the worker started after the read above (while the lock of the launch attempt was awaited, say).
-        let fencedTree: PaneProcessTree | null = null;
+        let fencedTrees: PaneProcessTree[] = [];
         try {
           cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
             attempt,
@@ -2468,7 +2469,7 @@ export async function scaleDownOwned(
                 // descendants they name still run.
                 if (earlyTree) await terminatePaneProcessTree(earlyTree);
                 if (paneTree) await terminatePaneProcessTree(paneTree);
-                if (fencedTree) await terminatePaneProcessTree(fencedTree);
+                for (const tree of fencedTrees) await terminatePaneProcessTree(tree);
                 // Verify pane-workspace membership independently of agent liveness.
                 // Even if the agent dies before cleanup, we must verify the pane
                 // is actually removed from the provider target.
@@ -2514,8 +2515,9 @@ export async function scaleDownOwned(
               }
             },
             async (persisted) => {
-              const read = await readFencedWorkerPaneTree(paneOwnership, persisted);
-              fencedTree = read.tree;
+              // a worker that exited during the drain leaves no pane to read here: the earlier reads are persisted with this one, so a retry has them
+              const read = await readFencedWorkerPaneTree(paneOwnership, persisted, [earlyTree, paneTree]);
+              fencedTrees = read.trees;
               return read.record;
             },
           );

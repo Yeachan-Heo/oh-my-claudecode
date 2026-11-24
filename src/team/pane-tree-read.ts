@@ -62,19 +62,29 @@ export function revivePaneTree(value: unknown): PaneProcessTree | null {
   return { panePid, pids: [...pids], startIdentities: identities };
 }
 
+/** The trees a persisted capture holds: the ones that validate (a tree that does not is never signalled), none for anything that is not a list. */
+export function revivePaneTrees(value: unknown): PaneProcessTree[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(revivePaneTree).filter((tree): tree is PaneProcessTree => tree !== null);
+}
+
 /**
- * The read of a cleanup at the launch fence, for `retireAndCleanupCurrentWorkerLaunchAttempt`: `persisted` is the capture an earlier,
+ * The read of a cleanup at the launch fence, for `retireAndCleanupCurrentWorkerLaunchAttempt`. `persisted` is the capture an earlier,
  * interrupted run of the same retirement persisted, which is used as it is (the provider is gone by now, and a read taken after that misses
- * the descendants that left its process group); without one the pane is read as `capturePaneProcessTreeOfWorkerPane` does. `record` is what
- * the hook gives back to be persisted: the new capture, or nothing.
+ * the descendants that left its process group). Without one the pane is read as `capturePaneProcessTreeOfWorkerPane` does, and `record` is
+ * what the hook gives back to be persisted: the new read together with `earlier`, the trees the caller read before the fence and signals
+ * itself on this run (a worker that exited since then leaves them as the only identities there are, and a retry cannot read them again).
+ * `trees` are the ones to signal at the fence: the persisted ones, or the new read.
  */
 export async function readFencedPaneTree(
   ownership: WorkerPaneOwnership | null | undefined,
   ops: PaneTreeReadOps,
   persisted?: unknown,
-): Promise<{ tree: PaneProcessTree | null; record: ReturnType<typeof serializePaneTree> | undefined }> {
-  const earlier = revivePaneTree(persisted);
-  if (earlier) return { tree: earlier, record: undefined };
-  const tree = await capturePaneProcessTreeOfWorkerPane(ownership, ops);
-  return { tree, record: tree ? serializePaneTree(tree) : undefined };
+  earlier: ReadonlyArray<PaneProcessTree | null | undefined> = [],
+): Promise<{ trees: PaneProcessTree[]; record: ReturnType<typeof serializePaneTree>[] | undefined }> {
+  const again = revivePaneTrees(persisted);
+  if (again.length > 0) return { trees: again, record: undefined };
+  const fresh = await capturePaneProcessTreeOfWorkerPane(ownership, ops);
+  const all = [...earlier, fresh].filter((tree): tree is PaneProcessTree => Boolean(tree));
+  return { trees: fresh ? [fresh] : [], record: all.length > 0 ? all.map(serializePaneTree) : undefined };
 }

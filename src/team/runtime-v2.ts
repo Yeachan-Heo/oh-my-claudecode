@@ -140,7 +140,7 @@ import {
 import {
   capturePaneProcessTreeOfWorkerPane,
   readFencedPaneTree,
-  revivePaneTree,
+  revivePaneTrees,
   serializePaneTree,
 } from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget, herdrCloseWorkspace, herdrWorkspaceExists } from "./herdr-session.js";
@@ -1203,8 +1203,9 @@ function readWorkerPaneProcessTree(
 function readFencedWorkerPaneTree(
   ownership: WorkerPaneOwnership | null | undefined,
   persisted?: unknown,
+  earlier: ReadonlyArray<PaneProcessTree | null | undefined> = [],
 ) {
-  return readFencedPaneTree(ownership, paneTreeReadOps, persisted);
+  return readFencedPaneTree(ownership, paneTreeReadOps, persisted, earlier);
 }
 
 /**
@@ -1223,13 +1224,13 @@ function paneTreeFence(
   read: (persisted?: unknown) => Promise<unknown>;
   terminate: () => Promise<void>;
 } {
-  let tree: PaneProcessTree | null = null;
+  let trees: PaneProcessTree[] = [];
   return {
     read: async (persisted?: unknown) => {
       // a capture an interrupted run of this retirement persisted is used as it is (the provider is gone, a new read would miss its descendants)
-      const earlier = revivePaneTree(persisted);
-      if (earlier) {
-        tree = earlier;
+      const earlier = revivePaneTrees(persisted);
+      if (earlier.length > 0) {
+        trees = earlier;
         return undefined;
       }
       if (
@@ -1237,13 +1238,14 @@ function paneTreeFence(
         ownership?.tmuxServerIdentity &&
         (!proved || (await proved()))
       ) {
-        tree = await readWorkerPaneProcessTree(ownership);
-        return tree ? serializePaneTree(tree) : undefined;
+        const tree = await readWorkerPaneProcessTree(ownership);
+        trees = tree ? [tree] : [];
+        return tree ? [serializePaneTree(tree)] : undefined;
       }
       return undefined;
     },
     terminate: async () => {
-      if (tree) await terminatePaneProcessTree(tree);
+      for (const tree of trees) await terminatePaneProcessTree(tree);
     },
   };
 }
@@ -9425,7 +9427,7 @@ export async function shutdownTeamV2(
     // The read at the fence (see retireAndCleanupCurrentWorkerLaunchAttempt): the last one, taken once the launch attempt is current and
     // accepted and right before the provider is terminated. The worker runs until then, and a descendant it started after the read above
     // (while the lock of the attempt was awaited, say) is below the pane's root now and is in no earlier read.
-    let fencedTree: PaneProcessTree | null = null;
+    let fencedTrees: PaneProcessTree[] = [];
     if (
       !attempt ||
       !(await retireAndCleanupCurrentWorkerLaunchAttempt(
@@ -9436,7 +9438,7 @@ export async function shutdownTeamV2(
             // The trees read before the requests and before the fence first: the pane may be gone by now, and the descendants they name still run.
             await terminatePaneProcessTree(earlyTree);
             await terminatePaneProcessTree(paneTree);
-            if (fencedTree) await terminatePaneProcessTree(fencedTree);
+            for (const tree of fencedTrees) await terminatePaneProcessTree(tree);
             let lastLiveness: WorkerPaneLiveness = paneOwnership
               ? await getOwnedWorkerLiveness(paneOwnership)
               : initialPaneLiveness;
@@ -9459,8 +9461,9 @@ export async function shutdownTeamV2(
           }
         },
         async (persisted) => {
-          const read = await readFencedWorkerPaneTree(paneOwnership, persisted);
-          fencedTree = read.tree;
+          // what a worker that exits meanwhile leaves of its pane: the earlier reads are persisted with the one at the fence
+          const read = await readFencedWorkerPaneTree(paneOwnership, persisted, [earlyTree, paneTree]);
+          fencedTrees = read.trees;
           return read.record;
         },
       ))

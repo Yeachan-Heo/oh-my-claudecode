@@ -10,6 +10,7 @@
 5. [Agent Templates](#agent-templates)
 6. [Autopilot](#autopilot)
 7. [lookout](#lookout)
+8. [Task List](#task-list)
 
 ---
 
@@ -666,3 +667,27 @@ Optional environment variables to customize heavy-mode suppression in active tas
 - Script: `scripts/keyword-detector.mjs`
 - Config keys read: `taskSizeDetection.enabled`, `taskSizeDetection.suppressHeavyModesForSmallTasks`, `taskSizeDetection.smallWordLimit`, `taskSizeDetection.largeWordLimit`
 - See `HOOKS.md` [Task size: heavy-mode suppression](HOOKS.md#task-size-heavy-mode-suppression) for full behavior documentation
+
+---
+
+## Task List
+
+Opt-in task lists of agents: an MCP tool the agent sends its list to, and a `PostToolUse` hook that saves the list of every agent. Off unless `OMC_TASK_LIST=1`; without it the tool does not exist and the hook writes nothing.
+
+### API
+
+- Tool: `taskListTool` (`task_list`, `src/tools/task-list-tools.ts`). Arguments: `items` (the whole list: `content`, `status` of `pending`, `in_progress` or `completed`, optional `note`), or `advance`, `done` (1-based numbers) or `start` (a 1-based number), as in `update_plan`. The tool checks the shape of the call and confirms it; it stores nothing itself.
+- Registered, when `OMC_TASK_LIST=1` is set as the module or the server loads, in the standalone MCP server, in the in-process server (`omcToolsServer`, `createOmcSession()`) and in the `allCustomTools` aggregate that `omc capabilities` reports. `OMC_DISABLE_TOOLS=task-list` hides it again in the two MCP servers.
+- Storage and hook: `scripts/lib/jev-task-list.mjs` (`recordListCall`, `readList`, `syncList`, `sweep`, `nextList`, `updateShape`, `listPath`), entry point `scripts/jev-task-list-state.mjs` (and `scripts/jev-task-list-batch.mjs`, which logs one row per batch). The hooks are not registered in `hooks/hooks.json`; register them yourself (see HOOKS.md).
+
+### Storage model
+
+- One file per agent and session: `<log dir>/lists/<session id>/<agent id or main>.json`. `<log dir>` is `OMC_TASK_LIST_LOG_DIR` or `<home>/.omc/state/task-list`.
+- Every list call is first written as one event file in `<key>.events/` (no lock), then folded into the list file under a lock; the list is what the events give when they are replayed in the order of their calls, so a hook that was held up cannot put an older list over a newer one. Task ownership of the built-in `Task*` tools is kept in `_task/<id>.json`.
+- A list keeps its newest 50 tasks; every text is masked and cut. Session directories idle for 7 days are removed by an hourly sweep that moves a directory aside before it judges it and merges it back when it is in use.
+- Every function fails open: it returns `null` or `false` and never breaks the hook.
+
+### Rules
+
+- The list is what the agent itself sent to a list tool; nothing here judges the work.
+- Details, the event journal, retention and the log files: [HOOKS.md](./HOOKS.md#task-list-scriptslibjev-task-listmjs). Tool and enablement: [REFERENCE.md](./REFERENCE.md).
