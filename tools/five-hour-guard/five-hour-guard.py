@@ -166,7 +166,7 @@ def check_distinct(files):
                 fail(f'"{la}" ({pa}) and "{lb}" ({pb}) are the same file: the guard would remove or overwrite one as the other')
 
 
-check_distinct([('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
+check_distinct([('configuration file', A.config), ('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
                 ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
@@ -273,10 +273,14 @@ def read_cache():
     return pct, reset_ts, age, problem
 
 
+LAST_WIRING_CHECK = [None]   # time.monotonic() of the last hook_check
+
+
 def hook_check(where):
     """A pause with no registered hook holds nothing: say so loudly (a later settings rewrite could drop the entry)."""
     if not SETTINGS:
         return
+    LAST_WIRING_CHECK[0] = time.monotonic()
     try:
         with open(SETTINGS) as f:
             data = json.load(f)
@@ -367,7 +371,9 @@ def tick(state):
         if A.dry_run:
             log(f'[dry run] 5h {pct} %, cache age {age:.0f} s: no action')
         return
-    # paused
+    # paused: the hook, its interpreter or the settings entry can be removed while a pause lasts for hours
+    if LAST_WIRING_CHECK[0] is None or time.monotonic() - LAST_WIRING_CHECK[0] >= A.warn_every:
+        hook_check('pause')
     if fresh and pct < RESUME_BELOW:
         leave_pause(state, f'window reset seen early: 5h {pct} %')
         return

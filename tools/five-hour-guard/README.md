@@ -41,7 +41,8 @@ The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit
 `systemctl --user restart`, which a change of `exclude` needs) releases the waiting sessions. The restarted guard brings
 the pause back from its first fresh reading of the cache, within one check; when the cache is stale at that moment the
 sessions run until a fresh reading shows the threshold. After a crash (SIGKILL, an uncaught exception) the state file
-keeps the pause: the restarted guard resumes it (and checks the hook entry first, as at any start), and when it does not come back the pause file lapses within
+keeps the pause: the restarted guard resumes it (and checks the hook entry first, as at any start; while a pause lasts the entry is checked again, at most once per
+`--warn-every` seconds, so a hook removed meanwhile is reported), and when it does not come back the pause file lapses within
 `--heartbeat` seconds.
 
 At start the guard checks that the directories of `pause_file` and `state_file` exist and can be written to (status 2
@@ -168,7 +169,7 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    a group of its own with its matcher). `add` twice changes nothing. `add` with another hook path replaces the entry in
    place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, an interpreter that is not
    executable or cannot run the hook (it is tried once: Python 3 with the standard library), two of the pause file, hook log,
-   `settings.json`, hook and interpreter that are one file, and a hook file whose
+   `settings.json`, hook, interpreter and configuration file that are one file, and a hook file whose
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The
    entry has a `timeout` of 21600 s (`--timeout`, at least 1), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
@@ -243,7 +244,8 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 
 A configuration error (a missing required key, a wrong type, a number that is not finite or outside its range, a
 directory of the pause or state file that is missing, a `pause_file` that is not absolute, two configured files (`pause_file`, `state_file` and its `.lock`, `usage_cache`,
-`log_file`, `settings_file`) that are one file by path, symbolic link or hard link) exits with status 2. A state
+`log_file`, `settings_file`, and the configuration file itself) that are one file by path, symbolic link or hard link)
+exits with status 2. A state
 file that does not have the shape the guard writes is ignored: the guard starts without a pause.
 
 ## Which sessions load the hook

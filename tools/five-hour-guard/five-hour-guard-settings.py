@@ -67,6 +67,21 @@ PAUSE_FILE = A.pause_file or CFG.get('pause_file')
 HOOK_LOG = A.hook_log if A.hook_log is not None else CFG.get('hook_log_file')
 
 
+def same_file(a, b):
+    """The same path once links are resolved, or the same existing file (a hard link)."""
+    if os.path.realpath(a) == os.path.realpath(b):
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+# every action may replace settings.json, `add` may name a pause file and a hook log: none of them may be the configuration file
+if A.config and SETTINGS and same_file(A.config, SETTINGS):
+    fail(f'the configuration file ({A.config}) and the settings file ({SETTINGS}) are the same file: the tool would overwrite the configuration')
+
+
 class Changed(Exception):
     """settings.json is not what this run read."""
 
@@ -166,8 +181,9 @@ def run_once():
         fail(f'{SETTINGS} does not hold a JSON object')
     hooks = data.get('hooks', {})
     pre = hooks.get('PreToolUse', []) if isinstance(hooks, dict) else None
-    if not isinstance(pre, list) or not all(isinstance(g, dict) and isinstance(g.get('hooks', []), list) for g in pre):
-        fail(f'{SETTINGS}: "hooks" / "PreToolUse" do not have the shape of a Claude Code settings file (an object holding a list of groups)')
+    if not isinstance(pre, list) or not all(isinstance(g, dict) and isinstance(g.get('hooks', []), list)
+                                        and all(isinstance(h, dict) and isinstance(h.get('command') or '', str) for h in g.get('hooks', [])) for g in pre):
+        fail(f'{SETTINGS}: "hooks" / "PreToolUse" do not have the shape of a Claude Code settings file (an object holding a list of groups, each with a list of hook objects whose command is text)')
     ours = [g for g in pre if is_ours(g)]
 
     if A.action == 'check':
@@ -188,10 +204,10 @@ def run_once():
                 fail(f'the {label} {path!r} does not exist: the entry would be written but the shell guard of the command would let every call through')
         if not os.access(A.python, os.X_OK):
             fail(f'the interpreter {A.python!r} is not executable: the shell guard of the command (`[ -x ... ]`) would let every call through')
-        distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python)]
+        distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python), ('configuration file', A.config)]
         for i, (la, pa) in enumerate(distinct):
             for lb, pb in distinct[i + 1:]:
-                if pa and pb and (os.path.realpath(pa) == os.path.realpath(pb) or (os.path.exists(pa) and os.path.exists(pb) and os.path.samefile(pa, pb))):
+                if pa and pb and same_file(pa, pb):
                     fail(f'the {la} ({pa}) and the {lb} ({pb}) are the same file: the hook or the guard would overwrite one as the other')
         try:
             probe = subprocess.run([A.python, '-I', '-c', 'import json, math, os, sys, time, urllib.parse; compile(open(sys.argv[1]).read(), sys.argv[1], "exec")', A.hook],

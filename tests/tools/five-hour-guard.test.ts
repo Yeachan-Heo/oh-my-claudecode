@@ -537,6 +537,36 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'distinct files start').toBe(0);
   });
 
+  it('the configuration file itself is one of the files that must be distinct: an output path that names it is refused, the file is kept', () => {
+    const f = fixture('alias-config', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    for (const key of ['pause_file', 'state_file', 'log_file', 'settings_file', 'usage_cache']) {
+      const text = JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, [key]: f.cfg });
+      writeFileSync(f.cfg, text, 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${key}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+      expect(readText(f.cfg), `${key}: the configuration file is untouched`).toBe(text);
+    }
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state }), 'utf8');
+    const cli = runSync(GUARD, ['--config', f.cfg, '--once', '--pause-file', f.cfg]);
+    expect(cli.status, 'an option names it too').toBe(2);
+    expect(existsSync(f.cfg)).toBe(true);
+  });
+
+  it('the hook entry is checked again while a pause lasts (at most once per --warn-every): a hook removed after the pause began is reported', async () => {
+    const f = fixture('wiring-during-pause', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command }] }] } });
+    writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`), 'utf8');
+    const g = startGuard(f, ['--warn-every', '1']);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      expect(readText(f.log), 'a wired hook: no warning').not.toMatch(/WARNING/);
+      writeFileSync(f.settings, JSON.stringify({ hooks: {} }), 'utf8');
+      await waitFor(() => /WARNING \(pause\): hook five-hour-guard-hook\.py is NOT registered/.test(readText(f.log)), 20000, 'the wiring warning during the pause');
+    } finally { await stopGuard(g); }
+  });
+
   it('--max-age must be positive: a negative one makes every entry stale and the guard fail open for ever', () => {
     const f = fixture('max-age', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
     for (const bad of ['-1', '0']) {

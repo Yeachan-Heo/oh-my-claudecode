@@ -389,6 +389,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(tool(f, 'add').status, 'distinct files are fine').toBe(0);
   });
 
+  it('the configuration file is not overwritten by the tool: settings_file or pause_file naming it is refused and the file is kept', () => {
+    const f = fixture('settings-alias-config');
+    for (const key of ['settings_file', 'pause_file', 'hook_log_file']) {
+      const text = JSON.stringify({ pause_file: f.pause, settings_file: f.settings, hook_log_file: f.hookLog, [key]: f.cfg });
+      writeFileSync(f.cfg, text, 'utf8');
+      for (const action of key === 'settings_file' ? ['add', 'remove', 'check'] : ['add']) { // the other two keys are used by add only
+        const r = runSync(SETTINGS_TOOL, [action, '--config', f.cfg, '--hook', HOOK, '--python', PYBIN]);
+        expect(r.status, `${key}, ${action}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr).toMatch(/same file/);
+        expect(readText(f.cfg), `${key}, ${action}: the configuration file is untouched`).toBe(text);
+      }
+    }
+  });
+
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
     const f = fixture('settings-timeout');
     const original = JSON.stringify(base(), null, 2) + '\n';
@@ -418,7 +432,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     const rel = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', 'pause.json', '--hook', HOOK, '--python', PYBIN]);
     expect(rel.status).toBe(2);
     expect(rel.stderr).toMatch(/pause file path 'pause\.json' is not absolute/);
-    for (const [label, doc] of [['hooks null', '{"hooks": null}'], ['PreToolUse not a list', '{"hooks": {"PreToolUse": {}}}'], ['group not an object', '{"hooks": {"PreToolUse": [1]}}'], ['top level not an object', '[]']]) {
+    for (const [label, doc] of [['hooks null', '{"hooks": null}'], ['PreToolUse not a list', '{"hooks": {"PreToolUse": {}}}'], ['group not an object', '{"hooks": {"PreToolUse": [1]}}'], ['hook not an object', '{"hooks": {"PreToolUse": [{"hooks": [1]}]}}'], ['hook text not an object', '{"hooks": {"PreToolUse": [{"hooks": ["x"]}]}}'], ['command not a string', '{"hooks": {"PreToolUse": [{"hooks": [{"command": 5}]}]}}'], ['top level not an object', '[]']]) {
       writeFileSync(f.settings, doc, 'utf8');
       for (const action of ['check', 'add', 'remove']) {
         const r = tool(f, action);
