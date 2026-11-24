@@ -13,7 +13,7 @@
 #   five-hour-guard-hook.py --pause-file <file> [--log <file>] [--poll <seconds>]
 # Both paths come from the hook command that five-hour-guard-settings.py writes into settings.json; the hook reads no
 # configuration file (it runs on every tool call). Without --pause-file there is nothing to wait for: exit 0.
-import json, math, os, sys, time
+import json, math, os, stat, sys, time
 from urllib.parse import urlparse
 
 DEADLINE_GRACE_S = 900       # never hold longer than this past the stored resume time
@@ -73,8 +73,13 @@ def log(msg):
     if not LOG:
         return
     try:
-        with open(LOG, 'a') as f:
-            f.write(time.strftime('%Y-%m-%d %H:%M:%S ') + msg + '\n')
+        # no link at the final component and nothing but a regular file: a link put in a shared directory must not redirect the write
+        fd = os.open(LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0), 0o644)
+        try:
+            if stat.S_ISREG(os.fstat(fd).st_mode):
+                os.write(fd, (time.strftime('%Y-%m-%d %H:%M:%S ') + msg + '\n').encode('utf-8', 'replace'))
+        finally:
+            os.close(fd)
     except Exception:
         pass
 

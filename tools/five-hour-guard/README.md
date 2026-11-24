@@ -37,8 +37,9 @@ Three standalone scripts, Python 3 standard library only:
    `threshold - 10` percent (the window was reset sooner than the cache said), and it extends the pause while the cache
    still shows the threshold with a later reset time.
 
-The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit (also when an earlier removal of the file failed and is still
-pending: the stop tries it once more), so a stop or a restart (also
+The guard and the hook append to their logs without following a symbolic link at the last component and only to a regular file (a link
+in a shared directory cannot redirect the write). The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit (also when an earlier removal of the file failed and is still
+pending: the stop tries it once more; and also when the unpaused state cannot be written at that moment: the file goes anyway, the stored pause stays and a restart keeps it only while it lasts), so a stop or a restart (also
 `systemctl --user restart`, which a change of `exclude` needs) releases the waiting sessions. The restarted guard brings
 the pause back from its first fresh reading of the cache, within one check; when the cache is stale at that moment the
 sessions run until a fresh reading shows the threshold. After a crash (SIGKILL, an uncaught exception) the state file

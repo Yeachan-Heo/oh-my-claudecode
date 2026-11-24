@@ -4,10 +4,10 @@
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, linkSync, lstatSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  ENV, CONFIG_DIR, HOME_DIR, GUARD, HOOK, UNIT, PYBIN, HAS_PYTHON3, cleanup, fixture, hookHeld, hookPasses, now, pauseDoc,
+  ENV, CONFIG_DIR, HOME_DIR, GUARD, HOOK, UNIT, PYBIN, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
   readJson, readText, runPyCode, runSync, sleep, spawnPy, spawnPyCode, startHook, waitFor, writeCache, writePause, type Fixture, type Proc,
 } from './five-hour-guard-support.js';
 
@@ -695,6 +695,69 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.stderr).toMatch(/is not a pause file of this guard/);
       expect(readText(f.pause), 'the foreign file is untouched').toBe('my notes, not a pause\n');
     }
+  });
+
+  it('a log that is a symbolic link is never written through, by the guard or by the hook: the file it points to is left as it was and nothing is created', async () => {
+    const f = fixture('log-link', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const victim = join(f.dir, 'victim.txt');
+    writeFileSync(victim, 'victim\n', 'utf8');
+    const absent = join(f.dir, 'not-created.txt');
+    for (const target of [victim, absent]) {
+      const link = join(f.dir, 'log-link.txt');
+      rmSync(link, { force: true });
+      symlinkSync(target, link);
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: link }), 'utf8');
+      expect(runSync(GUARD, guardArgs(f, ['--once'])).status).toBe(0);
+      expect(existsSync(absent), 'a link to a missing file does not create it').toBe(false);
+      expect(readText(victim), 'the guard did not write through the link').toBe('victim\n');
+      // the hook: held while a pause lasts, it logs hold-start and hold-end
+      writePause(f, { pid: process.pid });
+      const h = spawnPy(HOOK, ['--pause-file', f.pause, '--log', link, '--poll', '0.1'], { input: hookInput('linklog1') });
+      try {
+        await sleep(1500);
+        expect(h.exited, 'the hook holds').toBe(false);
+        unlinkSync(f.pause);
+        await Promise.race([h.done, sleep(20000)]);
+      } finally { await h.stop(); }
+      expect(existsSync(absent)).toBe(false);
+      expect(readText(victim), 'the hook did not write through the link').toBe('victim\n');
+    }
+  });
+
+  it('a stop whose unpaused state cannot be written still removes the pause file: sessions are not left waiting for the heartbeat', async () => {
+    const f = fixture('stop-state-write-fails', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const flag = join(f.dir, 'deny-state');
+    const code = ['import os, runpy, sys', 'real = os.open', 'flag = sys.argv[1]',
+      'def maybe(p, *a, **k):', '    if os.path.exists(flag) and "state.json" in str(p) and str(p).endswith(".tmp"): raise OSError(28, "No space left on device")', '    return real(p, *a, **k)',
+      'os.open = maybe', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const g = spawnPyCode(code, [flag, GUARD, ...guardArgs(f, ['--interval', '3', '--heartbeat', '10'])]);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      writeFileSync(flag, '', 'utf8');
+      g.child.kill('SIGTERM');
+      await Promise.race([g.done, sleep(20000)]);
+      expect(g.exited && g.code === 0, `exit ${g.code}`).toBe(true);
+    } finally { await g.stop(); }
+    expect(existsSync(f.pause), 'the pause file is removed although the state could not be written').toBe(false);
+    expect(readText(f.log)).toMatch(/RESUMED \(guard stopping, state not saved\)/);
+  });
+
+  it('the program that launches the hook is validated: it must be a Python that exists and the one the shell check tests', () => {
+    const f = fixture('launcher-drift', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const other = join(f.dir, 'python3-other');
+    writeFileSync(other, '#!/bin/sh\nexit 0\n', 'utf8');
+    chmodSync(other, 0o755);
+    const put = (launcher: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command',
+      command: `[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x ${PYBIN} ] || exit 0; exec ${launcher} -I ${HOOK} --pause-file ${f.pause}` }] }] } }), 'utf8');
+    put(PYBIN);
+    expect(guardOnce(f).stdout, 'the generated shape is accepted').not.toMatch(/WARNING/);
+    put(process.execPath);
+    expect(guardOnce(f).stdout, 'a launcher that is not a Python').toMatch(/WARNING \(start\): .* runs the hook with .*, which is not a Python/);
+    put(join(f.dir, 'python3-missing'));
+    expect(guardOnce(f).stdout, 'a launcher that is not there').toMatch(/runs the hook with .*python3-missing, which does not exist/);
+    put(other);
+    expect(guardOnce(f).stdout, 'a launcher other than the one tested').toMatch(/but its shell check tests .*: the two must be the same interpreter/);
   });
 
   it('a stored pause with times outside any window the guard writes is ignored, not a crash at start', () => {
