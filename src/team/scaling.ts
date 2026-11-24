@@ -73,6 +73,7 @@ import {
   capturePaneProcessTreeOfWorkerPane,
   readFencedPaneTree,
   serializePaneTree,
+  uniquePaneTrees,
 } from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget } from "./herdr-session.js";
 import {
@@ -2311,69 +2312,76 @@ export async function scaleDownOwned(
       // drain. A worker that finishes during the drain wait exits, its pane root goes with it, and a descendant that left its process
       // group is then no longer below the pane's root: a read taken after the wait does not find it. Nothing is signalled before the
       // launch fence of phase 3 is held.
+      // The trees of a worker read while its pane was live: the first before the drain request, the later ones during the drain wait (a
+      // worker that is drained may go on with its work and start a descendant that leaves its process group), each one once.
       const earlyPaneTrees = new Map<
         string,
-        { paneId: string; tree: PaneProcessTree }
+        { paneId: string; trees: PaneProcessTree[] }
       >();
       const captureUnsaved: string[] = [];
-      if (process.env.OMC_TEAM_KILL_PANE_TREE === "1") {
-        await Promise.all(
-          targetWorkers.map(async (worker) => {
-            try {
-              const initialOwnership = configuredPaneOwnership(
-                config,
-                worker.pane_id!,
-                worker.name,
-              );
-              if (
-                !worker.pane_id!.startsWith("%") ||
-                !initialOwnership ||
-                (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
-              )
-                return;
-              const adopted = await adoptWorkerPaneOwnership(
-                workerPaneOwnershipInput(config, worker.name, worker.pane_id!),
-              );
-              if (!adopted.ok || !adopted.ownership.tmuxServerIdentity) return;
-              const tree = await readWorkerPaneProcessTree(
-                adopted.ownership,
-              );
-              if (tree) {
-                earlyPaneTrees.set(worker.name, {
-                  paneId: adopted.ownership.paneId,
-                  tree,
-                });
-                // On disk before the drain request: a worker that finishes exits, and this is then the only copy of what it had started,
-                // so a leader interrupted from here on must not lose it (the fence merges it into its own capture).
-                const provider =
-                  worker.launch_descriptor?.provider ?? worker.worker_cli;
-                const attempt =
-                  provider && worker.launch_attempt_id
-                    ? await loadWorkerLaunchAttempt({
-                        cwd: leaderCwd,
-                        teamName: sanitized,
-                        workerName: worker.name,
-                        instanceId: originalInstanceId,
-                        paneId: worker.pane_id!,
-                        provider,
-                        attemptId: worker.launch_attempt_id,
-                        runtimeCliPath: resolveRuntimeCliPath(),
-                      })
-                    : null;
-                if (
-                  attempt &&
-                  !(await addToWorkerLaunchFencedCapture(attempt, [
-                    serializePaneTree(tree),
-                  ]).catch(() => false))
-                )
-                  captureUnsaved.push(worker.name);
-              }
-            } catch {
-              /* reading a tree must not hold up the scale down: the read before the launch fence is still taken */
-            }
-          }),
-        );
-      }
+      const captureEarlyPaneTree = async (
+        worker: (typeof targetWorkers)[number],
+      ): Promise<void> => {
+        try {
+          const initialOwnership = configuredPaneOwnership(
+            config,
+            worker.pane_id!,
+            worker.name,
+          );
+          if (
+            !worker.pane_id!.startsWith("%") ||
+            !initialOwnership ||
+            (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
+          )
+            return;
+          const adopted = await adoptWorkerPaneOwnership(
+            workerPaneOwnershipInput(config, worker.name, worker.pane_id!),
+          );
+          if (!adopted.ok || !adopted.ownership.tmuxServerIdentity) return;
+          const tree = await readWorkerPaneProcessTree(adopted.ownership);
+          if (!tree) return;
+          const known = earlyPaneTrees.get(worker.name);
+          const held =
+            known?.paneId === adopted.ownership.paneId ? known.trees : [];
+          if (uniquePaneTrees([...held, tree]).length === held.length) return; // already held, and already on disk
+          earlyPaneTrees.set(worker.name, {
+            paneId: adopted.ownership.paneId,
+            trees: [...held, tree],
+          });
+          // On disk before the drain request: a worker that finishes exits, and this is then the only copy of what it had started,
+          // so a leader interrupted from here on must not lose it (the fence merges it into its own capture). A tree that cannot be
+          // saved, for want of a launch attempt to save it with as much as for a failed write, counts as unsaved.
+          const provider =
+            worker.launch_descriptor?.provider ?? worker.worker_cli;
+          const attempt =
+            provider && worker.launch_attempt_id
+              ? await loadWorkerLaunchAttempt({
+                  cwd: leaderCwd,
+                  teamName: sanitized,
+                  workerName: worker.name,
+                  instanceId: originalInstanceId,
+                  paneId: worker.pane_id!,
+                  provider,
+                  attemptId: worker.launch_attempt_id,
+                  runtimeCliPath: resolveRuntimeCliPath(),
+                })
+              : null;
+          if (
+            !attempt ||
+            !(await addToWorkerLaunchFencedCapture(attempt, [
+              serializePaneTree(tree),
+            ]).catch(() => false))
+          ) {
+            if (!captureUnsaved.includes(worker.name))
+              captureUnsaved.push(worker.name);
+          }
+        } catch {
+          /* reading a tree must not hold up the scale down: the read before the launch fence is still taken */
+        }
+      };
+      const treeKillSwitch = process.env.OMC_TEAM_KILL_PANE_TREE === "1";
+      if (treeKillSwitch)
+        await Promise.all(targetWorkers.map(captureEarlyPaneTree));
       if (captureUnsaved.length > 0) {
         // The tree of a worker that finishes during the drain is then in memory only; no drain request has gone out, so the scale down
         // fails as a retryable operation instead.
@@ -2402,6 +2410,9 @@ export async function scaleDownOwned(
       if (!force) {
         const deadline = Date.now() + drainTimeoutMs;
         while (Date.now() < deadline) {
+          // A worker that is drained goes on running until it reports done or its pane dies: what it starts meanwhile is read here.
+          if (treeKillSwitch)
+            await Promise.all(targetWorkers.map(captureEarlyPaneTree));
           const allDrained = await Promise.all(
             targetWorkers.map(async (w) => {
               const status = await teamReadWorkerStatus(
@@ -2425,6 +2436,12 @@ export async function scaleDownOwned(
           if (allDrained.every(Boolean)) break;
           await new Promise((r) => setTimeout(r, 2_000));
         }
+      }
+      if (captureUnsaved.length > 0) {
+        // a tree read during the drain wait could not be saved: the drain requests are out, the retry goes on from what is on disk
+        const reason = `pane_tree_capture_unsaved:${captureUnsaved.join(",")}`;
+        await markScaleDownFailed(reason);
+        return { ok: false, error: reason };
       }
       if (!(await reserveEffects().catch(() => false))) {
         await markScaleDownFailed("scale_down_fence_lost_before_effects");
@@ -2466,8 +2483,10 @@ export async function scaleDownOwned(
         }
         // Opt-in tree kill: read once more before the provider is ended, for what the worker started after the read before the drain request.
         const earlyPaneTree = earlyPaneTrees.get(worker.name);
-        const earlyTree =
-          earlyPaneTree?.paneId === paneId ? earlyPaneTree.tree : null;
+        const earlyTrees =
+          earlyPaneTree?.paneId === paneId ? earlyPaneTree.trees : [];
+        const earlyTree = earlyTrees[0] ?? null;
+        const laterEarlyTrees = earlyTrees.slice(1);
         const paneTree = await readWorkerPaneProcessTree(paneOwnership);
         let attempt: Awaited<ReturnType<typeof loadWorkerLaunchAttempt>> = null;
         try {
@@ -2503,6 +2522,7 @@ export async function scaleDownOwned(
                 // The trees read before the drain request, before the fence and at it, first: the pane may be gone by now, and the
                 // descendants they name still run.
                 if (earlyTree) await terminatePaneProcessTree(earlyTree);
+                for (const tree of laterEarlyTrees) await terminatePaneProcessTree(tree);
                 if (paneTree) await terminatePaneProcessTree(paneTree);
                 for (const tree of fencedTrees) await terminatePaneProcessTree(tree);
                 // Verify pane-workspace membership independently of agent liveness.
@@ -2551,7 +2571,7 @@ export async function scaleDownOwned(
             },
             async (persisted) => {
               // a worker that exited during the drain leaves no pane to read here: the earlier reads are persisted with this one, so a retry has them
-              const read = await readFencedWorkerPaneTree(paneOwnership, persisted, [earlyTree, paneTree]);
+              const read = await readFencedWorkerPaneTree(paneOwnership, persisted, [...earlyTrees, paneTree]);
               fencedTrees = read.trees;
               return read.record;
             },

@@ -203,13 +203,15 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     // An attempt id with no expected-launch record: loadWorkerLaunchAttempt finds nothing, the fence cannot be taken.
     await reserve('pane-tree-no-record-team');
-    await writeTeam('pane-tree-no-record-team', '66666666-6666-4666-8666-666666666666');
+    const teamRoot = await writeTeam('pane-tree-no-record-team', '66666666-6666-4666-8666-666666666666');
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
     await expect(shutdownTeamV2('pane-tree-no-record-team', cwd, { timeoutMs: 0 })).resolves.toMatchObject({
       outcome: 'preserved',
       reason: 'provider_cleanup_unverified',
     });
+    // the tree was read but there is no launch attempt to save it with: no request to exit goes out
+    expect(await exists(join(teamRoot, 'workers', 'worker-1', 'shutdown-request.json'))).toBe(false);
 
     expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
     expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
@@ -480,9 +482,40 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
       }
       await shutdown;
 
-      expect(paneState.events).toEqual(['capture', 'terminate', 'terminate']);
+      // the wait reads the pane again (the same tree: held once, signalled once); only the order of the first read and the signals is fixed
+      expect(paneState.events[0]).toBe('capture');
+      expect(paneState.events.filter((event) => event !== 'capture')).toEqual(['terminate', 'terminate']);
       expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([FIXTURE_TREE, null]);
       expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+    });
+  }, 60_000);
+
+  // A worker that is waited for goes on running until it exits. A descendant it starts in that window, and then exits with, is in neither the
+  // read before the requests nor a read after the wait: the wait reads the pane as well, and saves what it finds.
+  it('reads the pane again while the workers are waited for and signals and persists a descendant started before the worker exited', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const startedLater = { panePid: 4_000_000, pids: [4_000_001, 4_000_002], startIdentities: new Map([[4_000_001, 'start-4000001'], [4_000_002, 'start-4000002']]) };
+    await withAcceptedProvider('pane-tree-wait-team', async (teamRoot, _provider, attempt) => {
+      const workerDir = join(teamRoot, 'workers', 'worker-1');
+      let reads = 0;
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+        if (paneState.rootGone) return null;
+        return ++reads === 1 ? FIXTURE_TREE : startedLater;
+      });
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      const shutdown = shutdownTeamV2('pane-tree-wait-team', cwd, { timeoutMs: 30_000 }); // no acknowledgement yet: only the wait can have read the pane again
+      const captureFile = `${attempt.decisionPath}.retired.fenced-capture`;
+      await vi.waitFor(async () => {
+        const saved = JSON.parse(await readFile(captureFile, 'utf8')) as { capture: unknown[] };
+        expect(saved.capture).toHaveLength(2); // the read before the requests and the one of the wait
+      }, { timeout: 8_000, interval: 10 });
+      paneState.rootGone = true; // the worker exits with the descendant it started meanwhile
+      await writeJson(cwd, join(workerDir, 'shutdown-ack.json'), { status: 'accept', reason: 'ok', updated_at: new Date().toISOString() });
+      await shutdown;
+
+      const signalled = tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0]);
+      expect(signalled).toContainEqual(FIXTURE_TREE);
+      expect(signalled).toContainEqual(startedLater);
     });
   }, 60_000);
 

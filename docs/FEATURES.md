@@ -11,6 +11,7 @@
 6. [Autopilot](#autopilot)
 7. [lookout](#lookout)
 8. [Task List](#task-list)
+9. [Team Task Escalation Marker](#team-task-escalation-marker)
 
 ---
 
@@ -691,3 +692,24 @@ Opt-in task lists of agents: an MCP tool the agent sends its list to, and a `Pos
 
 - The list is what the agent itself sent to a list tool; nothing here judges the work.
 - Details, the event journal, retention and the log files: [HOOKS.md](./HOOKS.md#task-list-scriptslibjev-task-listmjs). Tool and enablement: [REFERENCE.md](./REFERENCE.md).
+
+---
+
+## Team Task Escalation Marker
+
+A worker that cannot go on with a team task can say so in the first line of its terminal text: `ESCALATE: <lane>`. The task then records the lane, so the leader and other internal consumers can route the task without parsing free text.
+
+### Types
+
+- `TeamTaskEscalation` (`src/team/types.ts`): `lane` (the text after the marker, trimmed), `source` (always `terminal_result`) and `recorded_at` (ISO time of the transition).
+- `TeamTaskV2.escalation?: TeamTaskEscalation`: set on the task file by the terminal transition (`src/team/state/tasks.ts`, `extractEscalationLane`).
+
+### Marker contract
+
+- The marker counts only on the first non-empty line of the text, after optional leading white space: `ESCALATE:`, optional white space, then a lane. Blank lines before the marker are skipped; the lane is the rest of that line, trimmed, and may itself hold colons.
+- A marker on a later line, a marker without a lane or with a blank lane, and text that is not a string record nothing.
+
+### Terminal transitions
+
+- A transition to `completed` reads the marker from `result`; a transition to `failed` reads it from `error`. Each terminal transition replaces the field: a transition whose text has no valid marker clears an `escalation` an earlier transition recorded. Transitions to other statuses leave it unchanged.
+- The marker changes nothing else: the task still ends `completed` or `failed` and the claim is released as before.

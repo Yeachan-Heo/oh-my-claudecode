@@ -142,6 +142,7 @@ import {
   readFencedPaneTree,
   revivePaneTrees,
   serializePaneTree,
+  uniquePaneTrees,
 } from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget, herdrCloseWorkspace, herdrWorkspaceExists } from "./herdr-session.js";
 import { classifyPane, observePane } from "./pane-readiness.js";
@@ -9254,76 +9255,78 @@ export async function shutdownTeamV2(
   // pane's root: a read taken after the wait does not find it. Whatever the way out of the wait (acknowledgements, a rejection under --force,
   // the timeout), the trees were read while the panes were live; nothing is signalled until the launch fence is held in step 4.
   const startConfig = config;
-  const earlyPaneTrees = new Map<string, { paneId: string; tree: PaneProcessTree }>();
+  // The trees of a worker read while its pane was live, the first before the requests to exit and the later ones while it is waited for
+  // (a worker that has not exited yet may still start a descendant that leaves its process group), each one once.
+  const earlyPaneTrees = new Map<string, { paneId: string; trees: PaneProcessTree[] }>();
   // workers whose tree was read but could not be written to disk: no request to exit goes out while one is listed (see below)
   const captureUnsaved: string[] = [];
-  if (process.env.OMC_TEAM_KILL_PANE_TREE === "1") {
-    await Promise.all(
-      startConfig.workers.map(async (worker) => {
-        try {
-          const initialOwnership = configuredPaneOwnership(startConfig, worker);
-          if (
-            !worker.pane_id?.startsWith("%") ||
-            !initialOwnership ||
-            (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
-          )
-            return;
-          const ownership = await adoptWorkerPaneOwnership(
-            workerPaneOwnershipInput(startConfig, worker.name, worker.pane_id),
-          );
-          if (!ownership.ok || !ownership.ownership.tmuxServerIdentity) return;
-          const tree = await readWorkerPaneProcessTree(
-            ownership.ownership,
-          );
-          if (tree) {
-            earlyPaneTrees.set(worker.name, {
-              paneId: ownership.ownership.paneId,
-              tree,
-            });
-            // On disk before the request to exit goes out: a worker that follows it exits, and this is then the only copy of what it
-            // had started, so a leader interrupted from here on must not lose it (the fence merges it into its own capture).
-            const provider =
-              worker.launch_descriptor?.provider ?? worker.worker_cli;
-            const attempt =
-              provider && worker.launch_attempt_id
-                ? await loadWorkerLaunchAttempt({
-                    cwd,
-                    teamName: sanitized,
-                    instanceId: shutdownInstance.instance_id,
-                    workerName: worker.name,
-                    paneId: worker.pane_id,
-                    provider,
-                    attemptId: worker.launch_attempt_id,
-                    runtimeCliPath: resolveRuntimeCliPath(),
-                  })
-                : null;
-            if (
-              attempt &&
-              !(await addToWorkerLaunchFencedCapture(attempt, [
-                serializePaneTree(tree),
-              ]).catch(() => false))
-            )
-              captureUnsaved.push(worker.name);
-          }
-        } catch {
-          /* reading a tree must not hold up the shutdown: the read before the launch fence is still taken */
-        }
-      }),
-    );
-  }
-  if (captureUnsaved.length > 0) {
+  const captureEarlyPaneTree = async (worker: (typeof startConfig.workers)[number]): Promise<void> => {
+    try {
+      const initialOwnership = configuredPaneOwnership(startConfig, worker);
+      if (
+        !worker.pane_id?.startsWith("%") ||
+        !initialOwnership ||
+        (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
+      )
+        return;
+      const ownership = await adoptWorkerPaneOwnership(
+        workerPaneOwnershipInput(startConfig, worker.name, worker.pane_id),
+      );
+      if (!ownership.ok || !ownership.ownership.tmuxServerIdentity) return;
+      const tree = await readWorkerPaneProcessTree(ownership.ownership);
+      if (!tree) return;
+      const known = earlyPaneTrees.get(worker.name);
+      const held = known?.paneId === ownership.ownership.paneId ? known.trees : [];
+      if (uniquePaneTrees([...held, tree]).length === held.length) return; // already held, and already on disk
+      earlyPaneTrees.set(worker.name, {
+        paneId: ownership.ownership.paneId,
+        trees: [...held, tree],
+      });
+      // On disk before the request to exit goes out: a worker that follows it exits, and this is then the only copy of what it
+      // had started, so a leader interrupted from here on must not lose it (the fence merges it into its own capture). A tree
+      // that cannot be saved, for want of a launch attempt to save it with as much as for a failed write, counts as unsaved.
+      const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
+      const attempt =
+        provider && worker.launch_attempt_id
+          ? await loadWorkerLaunchAttempt({
+              cwd,
+              teamName: sanitized,
+              instanceId: shutdownInstance.instance_id,
+              workerName: worker.name,
+              paneId: worker.pane_id,
+              provider,
+              attemptId: worker.launch_attempt_id,
+              runtimeCliPath: resolveRuntimeCliPath(),
+            })
+          : null;
+      if (
+        !attempt ||
+        !(await addToWorkerLaunchFencedCapture(attempt, [
+          serializePaneTree(tree),
+        ]).catch(() => false))
+      ) {
+        if (!captureUnsaved.includes(worker.name)) captureUnsaved.push(worker.name);
+      }
+    } catch {
+      /* reading a tree must not hold up the shutdown: the read before the launch fence is still taken */
+    }
+  };
+  const treeKillSwitch = process.env.OMC_TEAM_KILL_PANE_TREE === "1";
+  if (treeKillSwitch) await Promise.all(startConfig.workers.map(captureEarlyPaneTree));
+  const preserveForUnsavedCapture = async (): Promise<ShutdownTeamV2Result> => {
     // The tree of a worker that follows the request to exit is then in memory only: a leader interrupted after the worker exited would
-    // retry with neither a live pane to read nor a persisted tree. Nothing was requested yet, so the shutdown is preserved for a retry.
+    // retry with neither a live pane to read nor a persisted tree. The shutdown is preserved for a retry.
     process.stderr.write(
-      `[team/runtime-v2] preserving panes/worktrees/state because the pane process tree could not be saved before the requests to exit: ${captureUnsaved.join(", ")}\n`,
+      `[team/runtime-v2] preserving panes/worktrees/state because the pane process tree could not be saved: ${captureUnsaved.join(", ")}\n`,
     );
     if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
     return {
       outcome: "preserved",
       reason: "provider_cleanup_unverified",
-      workers: captureUnsaved,
+      workers: [...captureUnsaved],
     };
-  }
+  };
+  if (captureUnsaved.length > 0) return preserveForUnsavedCapture(); // nothing was requested yet
 
   // 2. Send shutdown request to each worker
   const shutdownRequestTimes = new Map<string, string>();
@@ -9352,6 +9355,8 @@ export async function shutdownTeamV2(
   const ackedWorkers = new Set<string>();
 
   while (Date.now() < deadline) {
+    // A worker that is waited for keeps running until it exits: what it starts meanwhile is read here, while its pane is live.
+    if (treeKillSwitch) await Promise.all(startConfig.workers.map(captureEarlyPaneTree));
     for (const w of config.workers) {
       if (ackedWorkers.has(w.name)) continue;
       const ack = await readShutdownAck(
@@ -9395,6 +9400,8 @@ export async function shutdownTeamV2(
     await new Promise((r) => setTimeout(r, 2_000));
   }
 
+  // a tree read while the workers were waited for that could not be saved: the requests are out, the retry goes on from what is on disk
+  if (captureUnsaved.length > 0) return preserveForUnsavedCapture();
   config = await revalidateShutdownFence();
   // 4. Force kill remaining tmux panes
   const recordedWorkerPaneIds = config.workers
@@ -9450,8 +9457,10 @@ export async function shutdownTeamV2(
     // its process group outside the pane's tree, so the reads come first; nothing is signalled before the fence below is held (see the
     // cleanup callback).
     const earlyPaneTree = earlyPaneTrees.get(worker.name);
-    const earlyTree =
-      earlyPaneTree?.paneId === worker.pane_id ? earlyPaneTree.tree : null;
+    const earlyTrees =
+      earlyPaneTree?.paneId === worker.pane_id ? earlyPaneTree.trees : [];
+    const earlyTree = earlyTrees[0] ?? null;
+    const laterEarlyTrees = earlyTrees.slice(1);
     const paneTree = await readWorkerPaneProcessTree(paneOwnership);
     const attempt = await loadWorkerLaunchAttempt({
       cwd,
@@ -9476,6 +9485,7 @@ export async function shutdownTeamV2(
           try {
             // The trees read before the requests and before the fence first: the pane may be gone by now, and the descendants they name still run.
             await terminatePaneProcessTree(earlyTree);
+            for (const tree of laterEarlyTrees) await terminatePaneProcessTree(tree);
             await terminatePaneProcessTree(paneTree);
             for (const tree of fencedTrees) await terminatePaneProcessTree(tree);
             let lastLiveness: WorkerPaneLiveness = paneOwnership
@@ -9501,7 +9511,7 @@ export async function shutdownTeamV2(
         },
         async (persisted) => {
           // what a worker that exits meanwhile leaves of its pane: the earlier reads are persisted with the one at the fence
-          const read = await readFencedWorkerPaneTree(paneOwnership, persisted, [earlyTree, paneTree]);
+          const read = await readFencedWorkerPaneTree(paneOwnership, persisted, [...earlyTrees, paneTree]);
           fencedTrees = read.trees;
           return read.record;
         },

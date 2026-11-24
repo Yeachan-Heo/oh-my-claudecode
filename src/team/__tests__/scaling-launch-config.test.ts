@@ -140,7 +140,7 @@ const gitWorktreeMocks = vi.hoisted(() => ({
 }));
 
 const workerLaunchMocks = vi.hoisted(() => ({
-  addToWorkerLaunchFencedCapture: vi.fn(async () => true),
+  addToWorkerLaunchFencedCapture: vi.fn(async (_attempt: unknown, _items: unknown[]) => true),
   loadWorkerLaunchAttempt: vi.fn(async () => ({ attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' })),
   isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
