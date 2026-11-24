@@ -972,6 +972,33 @@ describe('task list: session retention sweep', () => {
       expect(logRows('task-list.jsonl').some((x) => x.event === 'moved_list_set_aside' && String(x.file).startsWith(sid))).toBe(false);
     });
 
+    it('a live list whose settled calls were all by task id and net to nothing (a task made and deleted) still goes over the moved list', () => {
+      fresh();
+      const now = Date.now();
+      const sid = session();
+      create(sid, 1, 'Historical task', now - 120_000);
+      moveAndSweep(sid, () => {
+        create(sid, 2, 'Made and deleted', now - 50_000);
+        L.recordListCall(postToolUse(sid, 'TaskUpdate', { taskId: '2', status: 'deleted' }), envFor(), now - 40_000);
+        create(sid, 3, 'In the window', now);
+      });
+      expect(L.readList(sid, 'main', envFor()).items.map((x) => `${x.id} ${x.content}`)).toEqual(['1 Historical task', '3 In the window']);
+      expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(false);
+    });
+
+    it('a live list whose settled calls replaced the list leaves the moved list set aside, also when the replacement was empty of tasks that remain', () => {
+      fresh();
+      const now = Date.now();
+      const sid = session();
+      create(sid, 1, 'Historical task', now - 120_000);
+      moveAndSweep(sid, () => {
+        L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: 'Replaces', status: 'pending' }] }), envFor(), now - 50_000);
+        L.recordListCall(postToolUse(sid, 'TodoWrite', { todos: [{ content: 'Replaces', status: 'pending' }] }), envFor(), now);
+      });
+      expect(L.readList(sid, 'main', envFor()).items.map((x) => x.content)).toEqual(['Replaces']);
+      expect(existsSync(join(root(), sid, 'main.json.moved'))).toBe(true);
+    });
+
     it('a recent call of the moved tree on a historical task is not lost when the new directory has settled calls of its own', () => {
       fresh();
       const now = Date.now();

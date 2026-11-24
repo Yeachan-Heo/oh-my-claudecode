@@ -586,24 +586,28 @@ function adoptMovedBase(moved, live, env, held = null) {
   return adopted;
 }
 
-// The live list has settled calls of its own, and its events are gone: they cannot be replayed on the moved base. When every task of the live
-// base has an id, those calls were made by id (TaskCreate, TaskUpdate of its own tasks): none of them replaced the list, so the tasks the moved
-// list holds are still there, and the live tasks are put over them by id, the later calls on top (a TaskCreate of a known id moves the task to the
-// end, as nextList does). The moved list is taken as it is shown, with the events of its window applied: they are older than the settled live
-// calls, so they would be dropped as behind (see mergeEvents) and the effect must already be in the base. The marks, the clock and the names
-// of the live record stay, and the events of its window are replayed on the new base by the next fold. A live base without tasks or with a
-// task without an id (a call that replaced the list settled there) leaves the moved list set aside: it is the older list. Same lock and
-// generation checks as adoptMovedBase; the caller holds the lock.
+// The live list has settled calls of its own, and its events are gone: they cannot be replayed on the moved base. When none of them replaced
+// the list (the record says so: `replaced`; a record without the field and without a base is judged by its tasks, all with an id and at least
+// one), they were made by task id (TaskCreate, TaskUpdate of its own tasks), so the tasks the moved list holds are still there, also when those
+// calls net to nothing (a task made and deleted), and the live tasks are put over them by id, the later calls on top (a TaskCreate of a known id
+// moves the task to the end, as nextList does). The moved list is taken as it is shown, with the events of its window applied: they are older
+// than the settled live calls, so they would be dropped as behind (see mergeEvents) and the effect must already be in the base. The marks, the
+// clock and the names of the live record stay, and the events of its window are replayed on the new base by the next fold. When a settled
+// call replaced the list, the moved list is the older list and stays set aside. A settled call on a task only the moved list holds changed
+// nothing in the live directory and is not part of the result (the event was settled and removed; see syncList). Same lock and generation
+// checks as adoptMovedBase; the caller holds the lock.
 function rebaseOnMoved(m, l, live, read, owned, env) {
-  const liveBase = 'base' in l ? l.base : l;
+  const hasBase = 'base' in l;
+  const liveBase = hasBase ? l.base : l;
   const liveTasks = Array.isArray(liveBase?.items) ? liveBase.items : [];
-  if (!liveTasks.length || !liveTasks.every((x) => typeof x?.id === 'string')) return false;
+  const byId = liveTasks.length > 0 && liveTasks.every((x) => typeof x?.id === 'string');
+  if (hasBase ? liveBase?.replaced === true : !byId) return false;
   const ids = new Set(liveTasks.map((x) => x.id));
   const settledOver = (items) => [...items.filter((x) => !ids.has(x?.id)), ...liveTasks].slice(-ITEMS_MAX);
   const liveIds = new Set(l.items.filter((x) => typeof x?.id === 'string').map((x) => x.id));
   return publishJson(live, {
     ...l,
-    base: { ...listFields(liveBase), items: settledOver(m.items) },
+    base: { ...listFields(liveBase ?? { ...l, replaced: undefined }), items: settledOver(m.items) }, // no base: only calls that changed nothing settled
     base_name: settledMarks(l).settledName,
     items: [...m.items.filter((x) => !liveIds.has(x?.id)), ...l.items].slice(-ITEMS_MAX),
     rev: revOf(l) + 1,
@@ -803,12 +807,14 @@ function applyEvent(record, event, key, env, broken) {
     updates: (Number.isInteger(record?.updates) ? record.updates : 0) + 1,
     items,
     ...(sent > items.length ? { dropped: sent - items.length } : {}),
+    // some call settled into this record replaced the whole list: a moved list cannot be put under it by task id (see rebaseOnMoved)
+    ...(record?.replaced === true || replacesList(event.tool_name, event.tool_input) ? { replaced: true } : {}),
   };
 }
 
 // The part of a list record that describes the list; the rest of the file is what a fold keeps to replay the events.
-const listFields = ({ v, session_id, agent, agent_type, tool, tool_use_id, prompt_id, updated, updates, items, dropped }) => ({
-  v, session_id, agent, agent_type, tool, tool_use_id, prompt_id, updated, updates, items, ...(dropped !== undefined ? { dropped } : {}),
+const listFields = ({ v, session_id, agent, agent_type, tool, tool_use_id, prompt_id, updated, updates, items, dropped, replaced }) => ({
+  v, session_id, agent, agent_type, tool, tool_use_id, prompt_id, updated, updates, items, ...(dropped !== undefined ? { dropped } : {}), ...(replaced === true ? { replaced } : {}),
 });
 
 // The generation of the list file as a fold read it: the number of times it was written (`rev`; the `updates` of a file of an earlier version),

@@ -701,7 +701,7 @@ A worker that cannot go on with a team task can say so in the first line of its 
 
 ### Types
 
-- `TeamTaskEscalation` (`src/team/types.ts`): `lane` (the text after the marker, trimmed), `source` (always `terminal_result`) and `recorded_at` (ISO time of the transition).
+- `TeamTaskEscalation` (`src/team/types.ts`, exported from the `oh-my-claudecode/team` entry point like `TeamTaskV2`): `lane` (the text after the marker, trimmed), `source` (always `terminal_result`) and `recorded_at` (ISO time of the transition).
 - `TeamTaskV2.escalation?: TeamTaskEscalation`: set on the task file by the terminal transition (`src/team/state/tasks.ts`, `extractEscalationLane`).
 
 ### Marker contract

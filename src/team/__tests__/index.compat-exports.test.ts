@@ -6,6 +6,7 @@ import {
   clearResolvedPathCache,
   LayoutStabilizer,
 } from '../index.js';
+import type { TeamTaskEscalation, TeamTaskV2 } from '../index.js';
 
 describe('team index backward-compat exports', () => {
   it('re-exports legacy CLI path helpers', () => {
@@ -23,5 +24,12 @@ describe('team index backward-compat exports', () => {
     });
     expect(instance).toBeInstanceOf(LayoutStabilizer);
     instance.dispose();
+  });
+
+  // a type-only export: the check is that this file compiles (tsc), a consumer of the `./team` entry point imports it the same way
+  it('re-exports the escalation type of a task through the public team entry point', () => {
+    const escalation: TeamTaskEscalation = { lane: 'architecture', source: 'terminal_result', recorded_at: '2026-01-01T00:00:00.000Z' };
+    const task: Pick<TeamTaskV2, 'escalation'> = { escalation };
+    expect(task.escalation?.lane).toBe('architecture');
   });
 });
