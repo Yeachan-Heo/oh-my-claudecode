@@ -437,6 +437,18 @@ describe('omc-doctor Step 1 takes the installed version from the manifest of the
       expect(block['Registry mismatch']).toContain('names 5.8.0, 5.9.0 for one install');
     });
 
+    // A component that does not exist cannot be folded away by the ..: the file system answers ENOENT for <cache>/missing/../5.8.0, so
+    // that spelling names nothing, and a root on the real 5.8.0 is not the install it records.
+    test.skipIf(process.platform === 'win32')('an installPath with a missing component before .. names nothing, so the explicit root is a checkout', () => {
+      const block = step1({
+        plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ installPath: path.join(cache(dir, '5.9.0'), '..', 'missing') + path.sep + '..' + path.sep + '5.8.0' }] }),
+        clone: { omc: '5.9.0' },
+        cache: { omc: ['5.8.0', '5.9.0'] },
+        env: (dir) => ({ OMC_PLUGIN_ROOT: cache(dir, '5.8.0') }),
+      });
+      expect(block.Channel).toBe('plugin-dir');
+    });
+
     test('with no root variable the entry contradicts itself all the same, in either direction', () => {
       for (const [version, leaf] of [['5.9.0', '5.8.0'], ['5.8.0', '5.9.0']]) {
         const block = step1({ plugins: (dir) => ({ 'oh-my-claudecode@omc': [{ version, installPath: cache(dir, leaf) }] }), clone: { omc: '5.9.0' }, setup: (dir) => write(path.join(cache(dir, leaf), 'README.md'), 'x') });

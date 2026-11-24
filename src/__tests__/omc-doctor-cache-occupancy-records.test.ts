@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { commands, digitVersions, movedAside, PLUGIN_ID, makeCache, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, digitVersions, scriptText, movedAside, PLUGIN_ID, makeCache, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { deadPid, epermPreload, minutes, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 
 // What an occupancy record says about a cache version: only a record whose owner is not proven gone protects, a record of
@@ -87,6 +87,26 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
           rmSync(dir, { recursive: true, force: true });
         }
       }
+    }
+  });
+
+  // The reverse direction cannot be run on a Linux host (the host decides, not the reported platform), so the rule itself is
+  // taken from the script and asked with the host named: on a Windows host a rooted POSIX path of a record is foreign, a drive
+  // or UNC path is not; on a POSIX host the Windows forms are foreign and a POSIX path is not.
+  test('a record or root variable path of the other system is foreign to the host, whichever host it is', () => {
+    const grab = (name: string) => {
+      const hit = scriptText.match(new RegExp(`^const ${name} = [\\s\\S]*?;\\n(?=\\S|$)`, 'm'));
+      if (!hit) throw new Error(`${name} not found in the script`);
+      return hit[0];
+    };
+    const build = new Function('path', 'isDirectory', `${grab('windowsPath')}\n${grab('foreignToHost')}\nreturn foreignToHost;`);
+    const foreignToHost = build({ sep: '/' }, () => false) as (target: string, windowsHost?: boolean) => boolean;
+    const asked = (target: string, windowsHost: boolean) => foreignToHost(target, windowsHost);
+    for (const posixRoot of ['/mnt/c/Users/u/.claude/plugins/cache/omc/oh-my-claudecode/5.7.0', '/home/u/cache/5.7.0']) {
+      expect({ posixRoot, onWindows: asked(posixRoot, true), onPosix: asked(posixRoot, false) }).toEqual({ posixRoot, onWindows: true, onPosix: false });
+    }
+    for (const windowsRoot of ['C:\\Users\\u\\cache\\5.7.0', 'c:/users/u/cache/5.7.0', '\\\\server\\share\\5.7.0', '//server/share/5.7.0']) {
+      expect({ windowsRoot, onWindows: asked(windowsRoot, true), onPosix: asked(windowsRoot, false) }).toEqual({ windowsRoot, onWindows: false, onPosix: true });
     }
   });
 

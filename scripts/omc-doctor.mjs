@@ -168,7 +168,10 @@ const linkChain = (start) => {
         info = fs.lstatSync(at);
       } catch (error) {
         if (!(error && ['ENOENT', 'ENOTDIR'].includes(error.code))) unreadable = true;
-        paths.push(path.resolve(at, ...parts.slice(i + 1)));
+        // What lies after the missing component is kept as written: a .. there is not folded away, because the file system
+        // answers ENOENT for <missing>/../x and so the spelling names nothing.
+        const after = parts.slice(i + 1);
+        paths.push(after.includes('..') ? [at, ...after].join(path.sep) : path.resolve(at, ...after));
         return { paths, unreadable };
       }
       if (info.isSymbolicLink()) {
@@ -685,7 +688,8 @@ const claudeMdVersion = () => {
   // A registry that cannot be used (as in Step 1) leaves open which marketplace the session runs, and a cache that cannot be
   // read may hold the newest version, so no version is named while either is unreadable.
   const registryUnusable = registry.unreadable || (registry.supported.length > 0 ? registry.malformed : registry.ambiguous);
-  const rootsConflict = roots.length > 1 && askSame(roots[0], roots[1]) == 'no';
+  const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
+  const rootsConflict = sameRoots == 'no';
   let unreadableCache = '';
   const latestIn = (market) => {
     const latest = highestCached(cacheDirOf(market));
@@ -698,8 +702,8 @@ const claudeMdVersion = () => {
     // As in Step 1: among the entries of one plugin ID a certain match decides, but a match that is unknown for any ID
     // leaves open which marketplace the session runs.
     pluginVersion = '(unknown)';
-  } else if (rootsConflict) {
-    // As in Step 1 (Channel: unknown): the session runs one of two different roots, and the runtime reads CLAUDE_PLUGIN_ROOT alone.
+  } else if (sameRoots != 'yes') {
+    // As in Step 1 (Channel: unknown): the session runs one of two different roots (or two that cannot be told apart), and the runtime reads CLAUDE_PLUGIN_ROOT alone.
     pluginVersion = '(unknown)';
   } else if (running.length > 1) {
     // Entries of several marketplaces hold the same root: which of their caches the session runs is not told by the root.
@@ -789,7 +793,12 @@ const foreignPath = (target) => process.platform != 'win32' && windowsPath(targe
 // The same question for a path of an occupancy record or of a plugin root variable, answered by the system the command really
 // runs on (the path module is the real one; process.platform may be reported otherwise, and a real Windows path is no foreign
 // path on a real Windows host whatever platform is reported).
-const foreignToHost = (target) => path.sep != '\\' && windowsPath(target) && !(target.startsWith('//') && isDirectory(target));
+// On a Windows host the reverse holds: a rooted POSIX path (/mnt/c/..., written by a WSL or Linux session) is foreign, and
+// resolved here it would name a directory of the current drive.
+const foreignToHost = (target, windowsHost = path.sep == '\\') =>
+  windowsHost
+    ? !windowsPath(target) && /^[\\/]/.test(target)
+    : windowsPath(target) && !(target.startsWith('//') && isDirectory(target));
 const relativePath = (target) => !path.isAbsolute(target) && !windowsPath(target);
 const readRegistry = () => {
   let unreadable = false;
@@ -824,6 +833,10 @@ const readRegistry = () => {
         }
         if (isSupported && typeof entry.installPath == 'string' && foreignPath(entry.installPath.trim())) {
           reason = 'an entry of ' + key + ' has the Windows path ' + JSON.stringify(entry.installPath) + ' as installPath, which this system cannot read';
+          throw 0;
+        }
+        if (isSupported && typeof entry.installPath == 'string' && path.sep == '\\' && foreignToHost(entry.installPath.trim())) {
+          reason = 'an entry of ' + key + ' has the POSIX path ' + JSON.stringify(entry.installPath) + ' as installPath, which this system cannot read';
           throw 0;
         }
         if (typeof entry.installPath == 'string' && relativePath(entry.installPath.trim())) {

@@ -358,6 +358,28 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
+    // Two roots whose identity cannot be compared (a file system that reports inode 0) and whose spellings differ only in letter
+    // case are not known to be one directory: Step 1 says Channel: unknown, and Step 4 must not pick a cache either.
+    test.skipIf(process.platform === 'win32')('two roots that cannot be told apart from one directory skip the check, as Step 1 reports Channel: unknown', () => {
+      const zeroInode = "const fs = require('fs'); const real = fs.statSync; fs.statSync = function (target, options) { const stat = real.call(fs, target, options); if (options && options.bigint) stat.ino = 0n; return stat; };\n";
+      const dir = fresh();
+      try {
+        const upper = path.join(dir, 'roots', 'Foo');
+        const lower = path.join(dir, 'roots', 'foo');
+        mkdirSync(upper, { recursive: true });
+        mkdirSync(lower, { recursive: true });
+        if (existsSync(path.join(dir, 'roots', 'FOO'))) return;
+        addCache(dir, [NEW], 'omc');
+        writeRegistry(dir, { [OMC]: [{ scope: 'user', version: NEW, installPath: upper }] });
+        writeFileSync(path.join(dir, 'zero-inode.cjs'), zeroInode);
+        const out = claudeMdAt(dir, OLD, 'linux', { OMC_PLUGIN_ROOT: upper, CLAUDE_PLUGIN_ROOT: lower, NODE_OPTIONS: `--require ${path.join(dir, 'zero-inode.cjs')}` });
+        expect(out[0]).toBe('Latest cached plugin version: (unknown)');
+        expect(out[1]).toMatch(/^VERSION CHECK SKIPPED/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     test('one root that the entries of two marketplaces both record is ambiguous: the check is skipped instead of taking the highest cache', () => {
       for (const order of ORDERS) {
         const dir = fresh();
