@@ -6,7 +6,38 @@ export const PANE_ID = '%2';
 export type KeyRecord = { fn: string; pane: string; guarded: boolean; keys: string[]; at_ms: number };
 
 // A pane that answers keys, for cases where the frame depends on what was sent.
-export type TracePane = { capture: () => string; send: (keys: string[]) => void };
+// A pane with partial frames also counts the keys sent on them.
+export type TracePane = {
+  capture: () => string;
+  send: (keys: string[]) => void;
+  partial?: () => { keys: number; captures: number };
+};
+
+// One screen of a scriptedPane: it moves to `next` after one capture, and to
+// the screen named by Down or Enter when that key arrives.
+export type TraceScreen = { frame: string; partial?: boolean; next?: string; Down?: string; Enter?: string };
+
+// Plays screens from `start`. Each key is charged to the screen the last
+// capture returned, the one the code under test decided on.
+export function scriptedPane(screens: Record<string, TraceScreen>, start: string): TracePane {
+  let shown = start;
+  let lastReturned: TraceScreen | null = null;
+  const partial = { keys: 0, captures: 0 };
+  return {
+    send: keys => {
+      if (lastReturned?.partial) partial.keys++;
+      const next = keys.length === 1 ? screens[shown]![keys[0] as 'Down' | 'Enter'] : undefined;
+      if (next) shown = next;
+    },
+    capture: () => {
+      lastReturned = screens[shown]!;
+      if (lastReturned.partial) partial.captures++;
+      shown = lastReturned.next ?? shown;
+      return lastReturned.frame;
+    },
+    partial: () => ({ ...partial }),
+  };
+}
 
 export const trace = {
   frame: '',

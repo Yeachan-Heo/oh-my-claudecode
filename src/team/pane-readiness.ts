@@ -172,7 +172,7 @@ function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): b
 // bypass warning and the renderer offer after it (recorded on 2.1.328). Only
 // the Claude startup wait reads them; every other pane reader sees what it saw
 // before them. 'claude_startup_dialog_unidentified' is a dialog whose choices
-// are off screen.
+// are off screen or not drawn yet.
 export type ClaudeStartupDialogKind =
   | 'claude_onboarding'
   | 'claude_bypass_permissions'
@@ -279,9 +279,30 @@ function claudeStartupDialogIn(tail: string, captured: string): ClaudeStartupDia
   return footer ? 'claude_fullscreen_renderer' : 'claude_startup_dialog_unidentified';
 }
 
+// The trust dialog captured while Claude Code draws it (recorded on 2.1.330)
+// or redraws it after Down: below the question, the last ❯ line is a choice
+// cut short with at most the start of the next choice below it. The ready
+// detector would read that ❯ line as an input box.
+function claudeTrustDialogDrawing(lines: readonly string[]): boolean {
+  const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
+  if (question < 0) return false;
+  const below = lines.slice(question + 1);
+  if (below.some((line) => /^(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(line))) return false;
+  const prompt = below.findLastIndex((line) => PANE_PATTERNS.claude.idlePromptLine.test(line));
+  if (prompt < 0) return false;
+  const drawn = squeeze(below[prompt]!.replace(PANE_PATTERNS.claude.idlePromptLine, ''));
+  const after = below.slice(prompt + 1);
+  const startsYes = (text: string) => CLAUDE_TRUST_CHOICES.some((choice) => choice.startsWith(text));
+  // First drawn: "No, exit" is focused.
+  if ('No,exit'.startsWith(drawn)) return after.length === 0 || (after.length === 1 && startsYes(squeeze(after[0]!)));
+  // Redrawn after Down: "Yes" is focused below "No, exit", with or without its old ❯.
+  return after.length === 0 && /^(?:❯\s*)?No,\s*exit$/i.test(below[prompt - 1] ?? '') && startsYes(drawn);
+}
+
 // Read only by the Claude startup wait, before it reads the trust dialogs.
 export function detectClaudeStartupDialog(captured: string): ClaudeStartupDialogKind | null {
-  return claudeStartupDialogIn(claudeDialogTail(captured), captured);
+  return claudeStartupDialogIn(claudeDialogTail(captured), captured)
+    ?? (claudeTrustDialogDrawing(paneLines(captured)) ? 'claude_startup_dialog_unidentified' : null);
 }
 
 function detectTrustPrompt(

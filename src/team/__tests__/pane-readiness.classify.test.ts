@@ -74,6 +74,8 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/2.1.330/bypass-permissions-body-partial.txt': '',
   'claude/2.1.330/bypass-permissions-no-choices.txt': '',
   'claude/2.1.330/bypass-permissions.txt': 'idlePrompt',
+  'claude/2.1.330/trust-60col.txt': 'trust:claude_directory idlePrompt',
+  'claude/2.1.330/trust-80col.txt': 'trust:claude_directory idlePrompt',
   'claude/2.1.330/trust-body-partial.txt': '',
   'claude/2.1.330/trust-no-choice-partial.txt': 'idlePrompt',
   'claude/2.1.330/trust-yes-choice-partial.txt': 'idlePrompt',
@@ -526,5 +528,90 @@ describe('Claude Code first-run dialogs', () => {
       }
       expect(classifyPane(observePane(captured)).kind).toBe('idle');
     }
+  });
+});
+
+// Claude Code 2.1.330 draws its trust dialog over several captures. A capture
+// cut below the focused choice shows a ❯ line, which the ready detector reads
+// as an input box; the startup wait must read it as a dialog still drawing.
+describe('the Claude trust dialog captured while it draws', () => {
+  const WHOLE = [
+    'claude/2.1.330/trust.txt',
+    'claude/2.1.330/trust-80col.txt',
+    'claude/2.1.330/trust-60col.txt',
+    'claude/2.1.325/trust.txt',
+    'claude/2.1.310/trust-35col.txt',
+    'claude/2.1.310/trust-59col.txt',
+  ];
+  const YES_FOCUSED = ['claude/2.1.330/trust-yes-focused.txt', 'claude/2.1.328/trust-yes-focused.txt'];
+  const QUESTION = 'Quick safety check: Is this a project you created or one you trust?';
+
+  // What the startup wait would type the trigger into: no dialog read, no
+  // trust dialog read, and an input box seen.
+  const readAsInputBox = (captured: string) =>
+    detectClaudeStartupDialog(captured) === null &&
+    detectPaneTrustPromptKind(captured, 'claude') === null &&
+    paneLooksReady(captured, 'claude');
+  const endOfLine = (text: string, pattern: RegExp) => {
+    const match = new RegExp(`^.*${pattern.source}.*$`, 'm').exec(text)!;
+    return match.index + match[0].length;
+  };
+  // Each capture taken while the text from `from` to `to` is drawn: nothing
+  // below the cut is on screen yet.
+  const cutsBetween = (text: string, from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, index) => text.slice(0, from + index));
+  const cutsByLine = (text: string) => {
+    const lines = text.split('\n');
+    const question = lines.findIndex(line => /Quick safety check|Do you trust the files/.test(line));
+    const footer = lines.findIndex(line => line.includes('Enter to confirm'));
+    return Array.from({ length: footer - question + 1 }, (_, index) => `${lines.slice(0, question + index + 1).join('\n')}\n`);
+  };
+
+  it.each(WHOLE)('never reads %s cut at any line or character as an input box', (file) => {
+    const whole = frame(file);
+    const cuts = [
+      ...cutsByLine(whole),
+      ...cutsBetween(whole, endOfLine(whole, /Security guide/), endOfLine(whole, /Yes, I trust this folder/)),
+    ];
+    expect(cuts.filter(readAsInputBox)).toEqual([]);
+  });
+
+  // After Down, Claude Code redraws both choices: "No, exit" loses the ❯ and
+  // "Yes, I trust this folder" gains it, in either order.
+  it.each(YES_FOCUSED.flatMap(file => [[file, 'No redrawn first'], [file, 'Yes redrawn first']] as const))(
+    'never reads %s cut while redrawn after Down (%s) as an input box',
+    (file, order) => {
+      const yes = frame(file);
+      const redrawn = order === 'No redrawn first' ? yes : yes.replace(/^(\s*) {2}No, exit/m, '$1❯ No, exit');
+      const cuts = cutsBetween(redrawn, endOfLine(redrawn, /No, exit/), endOfLine(redrawn, /Yes, I trust this folder/));
+      expect(cuts.filter(readAsInputBox)).toEqual([]);
+      expect(detectPaneTrustPromptKind(cuts.at(-1)!, 'claude')).toBe('claude_directory');
+    },
+  );
+
+  it.each(WHOLE)('still reads %s as the trust dialog once its Yes line is drawn, footer or not', (file) => {
+    const whole = frame(file);
+    for (const cut of cutsBetween(whole, endOfLine(whole, /Yes, I trust this folder/), whole.length)) {
+      expect(detectPaneTrustPromptKind(cut, 'claude')).toBe('claude_directory');
+      expect(detectClaudeStartupDialog(cut)).toBeNull();
+    }
+  });
+
+  it.each([
+    ['the recorded frame cut at "❯ No, exi"', (): string => frame('claude/2.1.330/trust-no-choice-partial.txt')],
+    ['the recorded frame cut at "Yes, I trust th"', (): string => frame('claude/2.1.330/trust-yes-choice-partial.txt')],
+    ['a redraw after Down cut at "❯ Yes, I tr"', (): string => `${QUESTION}\nSecurity guide\n  No, exit\n❯ Yes, I tr\n`],
+    ['a redraw after Down cut at "❯ Yes, I tr" with the old ❯ still on No', (): string => `${QUESTION}\nSecurity guide\n❯ No, exit\n❯ Yes, I tr\n`],
+  ])('reads %s as a first-run dialog still drawing', (_, captured) => {
+    expect(detectClaudeStartupDialog(captured())).toBe('claude_startup_dialog_unidentified');
+  });
+
+  it.each([
+    ['an answered trust dialog above a boxed input prompt', (): string => `${frame('claude/2.1.330/trust.txt')}\n${frame('claude/2.1.325/idle.txt')}`],
+    ['the trust question quoted in a reply above a boxed input prompt', (): string => `⏺ The pane asked: ${QUESTION}\n${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}\n`],
+    ['"No, exit" typed into a boxed input prompt below the quoted question', (): string => `⏺ ${QUESTION}\n${'─'.repeat(40)}\n❯ No, exit\n${'─'.repeat(40)}\n`],
+  ])('reads %s as it did before', (_, captured) => {
+    expect(detectClaudeStartupDialog(captured())).toBeNull();
+    expect(paneLooksReady(captured(), 'claude')).toBe(true);
   });
 });
