@@ -22,6 +22,8 @@ const DESCRIPTOR_FILE_NAME = "descriptor.json";
 const SNAPSHOT_FILE_NAME = "projection.json";
 export const JOURNAL_FILE_NAME = "journal.jsonl";
 export const TORN_COPY_PREFIX = `${JOURNAL_FILE_NAME}.torn-`;
+// A second name of the journal that exists only while a repair publishes the shortened one.
+export const KEPT_JOURNAL_PREFIX = `${JOURNAL_FILE_NAME}.before-repair-`;
 export const QUARANTINE_PREFIX = ".deleted-";
 
 // A quarantine name ends with the identity (device and inode) of the directory that was checked to be the scanned run

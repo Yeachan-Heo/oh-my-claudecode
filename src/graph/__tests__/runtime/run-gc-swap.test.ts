@@ -110,15 +110,16 @@ describe("omc graph gc: a name swapped under the repair", () => {
         const interlock: RepairInterlock = {
           beforeTruncate: () => {
             // Another process puts an empty regular file where the repaired journal is waiting to be published.
-            const waiting = readdirSync(dir).filter((name) => name !== "journal.jsonl" && /journal\.jsonl|repair|tmp/.test(name) && !name.startsWith("journal.jsonl.torn-"));
+            const waiting = readdirSync(dir).filter((name) => /^\.journal\.jsonl\.tmp\./.test(name));
             expect(waiting, "the interlock found no temporary file").toHaveLength(1);
             rmSync(join(dir, waiting[0]));
             writeFileSync(join(dir, waiting[0]), "", { mode: 0o600 });
           },
         };
-        expect(() => repairTornTail(dir, NOW, identity, interlock)).toThrow();
+        expect(() => repairTornTail(dir, NOW, identity, interlock)).toThrow(/replaced at publication/);
         expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the journal was replaced by a file that was not written").toBe(original);
         expect(readdirSync(dir).filter((name) => name.startsWith("journal.jsonl.torn-")), "the tail was not kept").toHaveLength(1);
+        expect(readdirSync(dir).filter((name) => /rollback|before-repair|\.tmp\./.test(name)), "a file of the repair was left behind").toEqual([]);
       });
     });
 
@@ -141,6 +142,7 @@ describe("omc graph gc: a name swapped under the repair", () => {
         expect(readFileSync(join(dir, outcome.copy as string), "utf8")).toBe(TORN);
         expect(readFileSync(join(dir, "journal.jsonl"), "utf8")).toBe(journalText(1));
         expect(existsSync(join(dir, "owner.lock"))).toBe(false);
+        expect(readdirSync(dir).filter((name) => name.startsWith("journal.jsonl.before-repair-")), "the second name of the journal was left").toEqual([]);
       });
     });
   });
@@ -382,6 +384,38 @@ describe.runIf(process.platform === "linux")("a failed put-back of a moved direc
       const kept = readdirSync(root).filter((name) => name !== "run-rollback" && existsSync(join(root, name, "journal.jsonl")));
       expect(kept, "a later pass deleted the directory that could not be put back").toHaveLength(1);
       expect(readFileSync(join(root, kept[0], "journal.jsonl"), "utf8")).toBe(replacementJournal);
+    });
+  });
+});
+
+// The runs root is held open for the staging, the promotion and the put-back: a root that is swapped for a link after the
+// last check of the run cannot redirect those renames to a directory outside it.
+describe.runIf(process.platform === "linux")("a runs root swapped for a link while a run is moved out of its namespace", () => {
+  it("the run of the root that was held is moved, and the run of the directory the link leads to is untouched", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-anchored");
+      ageTree(dir, OLD);
+      const outside = join(base, "outside");
+      mkdirSync(outside, { recursive: true });
+      makeFinishedRun(outside, "run-anchored");
+      const outsideBefore = snapshot(outside);
+      const scanned: ScannedRun = {
+        ...scannedFirst(root),
+        beforeMove: () => {
+          renameSync(root, join(base, "parked"));
+          symlinkSync(outside, root);
+        },
+        afterMove: () => {
+          rmSync(root);
+          renameSync(join(base, "parked"), root);
+        },
+      };
+
+      removeRun(realRoot, "run-anchored", scanned);
+      expect(snapshot(outside), "a run outside the runs root was moved or changed").toBe(outsideBefore);
+      expect(readdirSync(root), "the scanned run was not removed from the root that was held").toEqual([]);
     });
   });
 });

@@ -45,7 +45,10 @@
  *     protect a run.
  *   - A torn last journal line is copied to `journal.jsonl.torn-<stamp>` before the journal is
  *     shortened (the complete lines go to a new file that is renamed over the journal, so the checked inode is never
- *     modified). This command never deletes such a copy: a run that holds one is kept.
+ *     modified). While the shortened journal is published the journal has a second name (`journal.jsonl.before-repair-<stamp>`),
+ *     so that a file that takes the name instead of the one that was written (the writer leaves such a file alone) cannot
+ *     cost the committed history: the second name is put back in that case, and removed after a success. This command
+ *     never deletes a torn copy: a run that holds one is kept.
  *   - Removal takes ownership of the run first, through the same single-writer fence the runtime uses: a run that is
  *     owned, or whose ownership cannot be taken, is not removed. The scan records the identity (device and inode) of
  *     every run directory. Removal opens the directory without following a link and refuses it when it is not the
@@ -61,7 +64,8 @@
  *     repair, and the directory sync. The name of the run is checked again before the copy, before the shortened journal is put in place and
  *     after the decision reads; a name that was swapped refuses the step. A directory can only be renamed by name, so
  *     the name is checked right before the move and the moved directory right after it, and a directory that is not
- *     the scanned one is put back; when the name is taken again and it cannot be put back, it stays under
+ *     the scanned one is put back; the moves are relative to the runs root, which is held open from before the last check
+ *     of the run, so a root that is swapped for a link cannot redirect them; when the name is taken again and it cannot be put back, it stays under
  *     its staging name `.moving-<run id>-<time>-<random>`. The moved directory waits under the staging name, which no
  *     pass deletes, until it is known to be the scanned one; only then is it renamed to `.deleted-...`, so a process
  *     that ends after the move leaves nothing that the next pass would delete unchecked.

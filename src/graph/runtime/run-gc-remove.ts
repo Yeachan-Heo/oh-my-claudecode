@@ -157,24 +157,30 @@ function removeEntriesOf(
   }
 }
 
-// A directory cannot be renamed through its open descriptor, so the move is by name: the name is checked right before
-// it, and the moved directory is checked right after. The directory waits under a staging name, outside the namespace
-// that a later pass deletes from, until it is known to be the scanned one: a process that ends between the move and the
-// check leaves a directory that nothing deletes. When the name was swapped in between, the directory that was moved is
-// not the scanned one: it is put back, and nothing is deleted. When the name is taken again and it cannot be put back,
-// it stays under its staging name.
-function putBackUnlessScanned(runDir: string, moved: string, scanned: FileIdentity): void {
+// A directory cannot be renamed through its own open descriptor, so the move is by name, but relative to the runs root
+// that is held open: a root that is swapped for a link after its last check cannot redirect the staging, the promotion
+// or the put-back to another directory. The name is checked right before the move, and the moved directory is checked
+// right after. The directory waits under a staging name, outside the namespace that a later pass deletes from, until it
+// is known to be the scanned one: a process that ends between the move and the check leaves a directory that nothing
+// deletes. When the name was swapped in between, the directory that was moved is not the scanned one: it is put back, and
+// nothing is deleted. When the name is taken again and it cannot be put back, it stays under its staging name.
+interface RootMoves {
+  readonly rename: (from: string, to: string) => void;
+  readonly identityOf: (name: string) => FileIdentity;
+}
+
+function putBackUnlessScanned(moves: RootMoves, id: string, moved: string, scanned: FileIdentity): void {
   let identity: FileIdentity | null = null;
   try {
-    identity = fileIdentity(lstatSync(moved));
+    identity = moves.identityOf(moved);
   } catch {
     // Nothing is at the new name; the check below refuses.
   }
   if (identity !== null && identity.dev === scanned.dev && identity.ino === scanned.ino) return;
   try {
-    renameSync(moved, runDir);
+    moves.rename(moved, id);
   } catch {
-    throw new Error(`the run directory was replaced while it was moved; the moved directory could not be put back and stays as ${basename(moved)}`);
+    throw new Error(`the run directory was replaced while it was moved; the moved directory could not be put back and stays as ${moved}`);
   }
   throw new Error("the run directory was replaced while it was moved; the moved directory was put back");
 }
@@ -195,10 +201,27 @@ export function quarantineRun(
   if (realpathSync(runDir) !== runDir) throw new Error("run directory resolves outside the runs root");
   const operationsFor = scanned?.operationsFor ?? directoryOperationsIfSupported;
   const { fence, epoch } = takeOwnership(runDir, "run is held by a live owner; not removed", scanned?.identity);
-  const staging = join(realRoot, `${STAGING_PREFIX}${id}-${nowMs}-${suffix}`);
+  const stagingName = `${STAGING_PREFIX}${id}-${nowMs}-${suffix}`;
   // The identity that the quarantine name will carry: the scanned directory, or the one that is there now.
   const named = lstatSync(runDir);
-  const quarantine = join(realRoot, quarantineNameFor(id, nowMs, suffix, scanned?.identity ?? { dev: named.dev, ino: named.ino }));
+  const quarantineName = quarantineNameFor(id, nowMs, suffix, scanned?.identity ?? { dev: named.dev, ino: named.ino });
+  const quarantine = join(realRoot, quarantineName);
+  // The runs root is opened without following a link and must be the directory that the name leads to now; the moves go
+  // through that handle. Where the platform has no directory-relative operations the moves are by path (a scanned run
+  // never gets here: it was refused above).
+  let rootFd: number | null = null;
+  try {
+    rootFd = openSync(realRoot, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0) | NOFOLLOW);
+    assertIdentity(fstatSync(rootFd), fileIdentity(lstatSync(realRoot)), "the runs root");
+  } catch (error) {
+    if (rootFd !== null) closeSync(rootFd);
+    fence.releaseSync(epoch);
+    throw error;
+  }
+  const rootOperations = (scanned?.operationsFor ?? directoryOperationsIfSupported)(rootFd);
+  const moves: RootMoves = rootOperations === null
+    ? { rename: (from, to) => renameSync(join(realRoot, from), join(realRoot, to)), identityOf: (name) => fileIdentity(lstatSync(join(realRoot, name))) }
+    : { rename: (from, to) => rootOperations.rename(from, to), identityOf: (name) => fileIdentity(rootOperations.lstat(name)) };
   try {
     if (scanned !== undefined) {
       scanned.afterOwnership?.();
@@ -218,16 +241,16 @@ export function quarantineRun(
       assertIdentity(lstatSync(runDir), scanned.identity, "the run directory");
       scanned.beforeMove?.();
     }
-    renameSync(runDir, staging);
+    moves.rename(id, stagingName);
     scanned?.afterMove?.();
-    if (scanned !== undefined) putBackUnlessScanned(runDir, staging, scanned.identity);
+    if (scanned !== undefined) putBackUnlessScanned(moves, id, stagingName, scanned.identity);
     try {
       scanned?.beforePromote?.();
-      renameSync(staging, quarantine);
+      moves.rename(stagingName, quarantineName);
     } catch (error) {
       // The name is not usable: the run goes back where it was.
       try {
-        renameSync(staging, runDir);
+        moves.rename(stagingName, id);
       } catch {
         // It stays under its staging name, which no pass deletes.
       }
@@ -241,6 +264,8 @@ export function quarantineRun(
       // The error below is the one to report.
     }
     throw error;
+  } finally {
+    closeSync(rootFd);
   }
   // The lock moved with the directory; only the descriptor is left to close.
   fence.closeHeldDescriptor();

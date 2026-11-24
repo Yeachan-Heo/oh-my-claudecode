@@ -17,6 +17,7 @@ import { directoryOperationsIfSupported, type DirectoryOperations } from "./cont
 import { takeOwnership, withRunDirectory, type AnchoredRun } from "./run-gc-owner.js";
 import {
   JOURNAL_FILE_NAME,
+  KEPT_JOURNAL_PREFIX,
   NONBLOCK,
   splitTornTail,
   TORN_COPY_PREFIX,
@@ -135,6 +136,34 @@ export function repairTornTail(
   return outcome;
 }
 
+// After a failed publication the name must lead to the journal that was checked, which this process owns. When it does
+// not (a foreign file took the name, or nothing is left under it), the second name is put in its place; when that is
+// not possible either, the second name stays and the error says so.
+function restoreJournal(operations: DirectoryOperations, keptName: string, before: FileIdentity, error: Error): Error {
+  let intact = false;
+  try {
+    const named = operations.lstat(JOURNAL_FILE_NAME);
+    intact = named.dev === before.dev && named.ino === before.ino;
+  } catch {
+    // Nothing is under the name.
+  }
+  if (intact) {
+    try {
+      operations.unlink(keptName);
+    } catch {
+      // The second name does no harm.
+    }
+    return error;
+  }
+  try {
+    operations.rename(keptName, JOURNAL_FILE_NAME);
+    operations.sync();
+  } catch {
+    return new Error(`${error.message}; the journal could not be put back and is kept as ${keptName}`);
+  }
+  return new Error(`${error.message}; the previous journal was put back`);
+}
+
 function repairOwnedJournal(
   run: AnchoredRun,
   nowMs: number,
@@ -164,19 +193,33 @@ function repairOwnedJournal(
     }
     const named = operations.lstat(JOURNAL_FILE_NAME);
     if (named.dev !== before.dev || named.ino !== before.ino) throw new Error("journal was replaced during repair; left unchanged, torn copy kept");
-    // Published by the atomic writer: the descriptor stays open through the rename, the file that was written is checked
-    // to be the one that takes the name, and the previous journal is put back when it is not.
-    atomicWriteFileSync(
-      JOURNAL_FILE_NAME,
-      complete,
-      {
-        beforeRename: () => {
-          run.assertNamed();
-          interlock.beforeTruncate?.();
+    // A second name of the journal that is checked: whatever happens to the name during the publication, the committed
+    // history stays reachable, because the writer does not put the previous journal back when the file that took the name
+    // is not the one it wrote (a foreign replacement is left alone) and then removes its own backup.
+    const keptName = `${KEPT_JOURNAL_PREFIX}${copyName.slice(TORN_COPY_PREFIX.length)}`;
+    operations.link(JOURNAL_FILE_NAME, keptName);
+    try {
+      // Published by the atomic writer: the descriptor stays open through the rename, and the file that was written is
+      // checked to be the one that takes the name.
+      atomicWriteFileSync(
+        JOURNAL_FILE_NAME,
+        complete,
+        {
+          beforeRename: () => {
+            run.assertNamed();
+            interlock.beforeTruncate?.();
+          },
         },
-      },
-      operations,
-    );
+        operations,
+      );
+    } catch (error) {
+      throw restoreJournal(operations, keptName, before, error as Error);
+    }
+    try {
+      operations.unlink(keptName);
+    } catch {
+      // The second name does no harm; the run is repaired.
+    }
     operations.sync();
     return { repaired: true, copy: copyName };
   } finally {
