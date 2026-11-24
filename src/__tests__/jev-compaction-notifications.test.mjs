@@ -259,6 +259,52 @@ describe('the envelopes of the deliveries after a notification', () => {
   });
 });
 
+describe('the envelopes of the deliveries after a notification: the rows that build writes', () => {
+  const words = Array.from({ length: 60 }, (_, k) => `The coordinator sent a message while you were working:\nd${k}`);
+  const enveloped = words.map((w, k) => `<system-reminder id="jev-${k + 50}">\n${w}\n</system-reminder id="jev-${k + 50}">`);
+  const result = (id, body) => [
+    { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command: `cat ${id}.txt` } }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `${body} ${'x'.repeat(7000)}`, isError: false }] },
+  ];
+
+  it('without the token cascade a notification kept whole charges nothing: the results are cut as with no delivery', async () => {
+    const plain = row(note('Status: registry', `Report ${'r'.repeat(20000)}`), { handle: 'n1' });
+    const messages = () => [...talk(3), ...LAUNCH, ...result('r1', 'RES1'), ...result('r2', 'RES2'), ...result('r3', 'RES3'), ...result('r4', 'RES4'), plain, ...talk(30)];
+    const at = messages().indexOf(plain);
+    const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET: '0.9' };
+    const none = await compactRun(env, messages(), { score: 3 });
+    const delivered = await compactRun(env, messages(), { score: 3, deliver: { [at]: words } });
+    expect(none.record).toMatchObject({ result: 'jev', notifications: 1 });
+    expect(delivered.record).toMatchObject({ result: 'jev', notifications: 1, queued_carried: 0 });
+    expect(delivered.out.messages.some((m) => m.handle === 'n1')).toBe(true);
+    expect(delivered.record.traced).toBe(none.record.traced);
+    expect(delivered.record.kept_full).toBe(none.record.kept_full);
+  });
+
+  it('a notification of envelopes only, replaced by a trace, is charged the envelopes that its replacement row holds', async () => {
+    const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '80', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
+    const only = row(`<system-reminder id="jev-1">\n${note('Status: registry', `Report ${'r'.repeat(30000)}`)}\n</system-reminder id="jev-1">`, { handle: 'n1' });
+    expect(isNotification(only)).toBe(true);
+    const messages = () => { const w = talk(30); return [...w.slice(0, 3), ...LAUNCH, only, ...w.slice(3)]; };
+    const at = messages().indexOf(only);
+    const none = await compactRun(env, messages(), { tokens: 30000 });
+    const run = await compactRun(env, messages(), { tokens: 30000, deliver: { [at]: enveloped } });
+    expect(run.record).toMatchObject({ result: 'jev', notifications: 1 });
+    const carried = run.out.messages.find((m) => /^\[compacted\] background task notification/.test(m.text || ''));
+    expect(carried).toBeTruthy();
+    // What the replacement row holds besides the trace and the delivered blocks themselves: an envelope round each block (the trace is outside the envelopes).
+    const trace = carried.text.slice(0, carried.text.indexOf('\n'));
+    const wrapper = carried.text.length - trace.length - enveloped.reduce((n, b) => n + b.length, 0);
+    expect(wrapper).toBeGreaterThan(60 * 20);
+    const extra = 0.363 * wrapper;
+    for (const key of ['tokens_after_pred', 'tokens_after']) {
+      const grew = run.record[key] - none.record[key];
+      expect(grew, key).toBeGreaterThan(extra - 2);
+      expect(grew, key).toBeLessThan(extra + 8);
+    }
+  });
+});
+
 describe('a row of marker-only envelopes before a tagged notification', () => {
   it('is read in linear time: the compaction does not time out', async () => {
     const w = talk(30);
