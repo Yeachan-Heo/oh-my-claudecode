@@ -101,6 +101,27 @@ describe("omc graph gc: a name swapped under the repair", () => {
       });
     });
 
+    it("a temporary file replaced just before it takes the name of the journal does not become the journal", () => {
+      withBase((base) => {
+        const root = makeRoot(base);
+        const dir = makeTornRun(root, "run-torn-temp");
+        const identity = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW }).runs[0].identity as { dev: number; ino: number };
+        const original = `${journalText(1)}${TORN}`;
+        const interlock: RepairInterlock = {
+          beforeTruncate: () => {
+            // Another process puts an empty regular file where the repaired journal is waiting to be published.
+            const waiting = readdirSync(dir).filter((name) => name !== "journal.jsonl" && /journal\.jsonl|repair|tmp/.test(name) && !name.startsWith("journal.jsonl.torn-"));
+            expect(waiting, "the interlock found no temporary file").toHaveLength(1);
+            rmSync(join(dir, waiting[0]));
+            writeFileSync(join(dir, waiting[0]), "", { mode: 0o600 });
+          },
+        };
+        expect(() => repairTornTail(dir, NOW, identity, interlock)).toThrow();
+        expect(readFileSync(join(dir, "journal.jsonl"), "utf8"), "the journal was replaced by a file that was not written").toBe(original);
+        expect(readdirSync(dir).filter((name) => name.startsWith("journal.jsonl.torn-")), "the tail was not kept").toHaveLength(1);
+      });
+    });
+
     it("without a swap the same repair copies the tail, truncates the journal and releases the lock", () => {
       withBase((base) => {
         const root = makeRoot(base);

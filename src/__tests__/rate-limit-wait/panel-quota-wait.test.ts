@@ -4,6 +4,7 @@
  * from a loopback HTTP stub. The helpers are in panel-quota-wait-fixtures.ts.
  */
 import { describe, it, expect } from 'vitest';
+import { createHash } from 'node:crypto';
 import { runPanelQuotaPass, detectQuotaError, wrapperOwnsPane, paneKey, planQuotaWait, passLimitMs, type PanelEnv, type PanelQuotaDeps, type PanelState, type PanePoint, type QuotaReading } from '../../features/rate-limit-wait/panel-quota-wait.js';
 import { BASE_MS, ERR_1308, ERR_1310, H, KEY_A, ON, PANE_A, PANE_B, WRAPPER_LINE, World, exhausted5h, exhaustedWeek, reading, screen, world } from './panel-quota-wait-fixtures.js';
 
@@ -42,6 +43,83 @@ describe('panel quota wait: decision logic', () => {
     w.clock.now = BASE_MS + 2 * H;
     await runPanelQuotaPass(state, w.deps, ON);
     expect(w.sent, 'one key for each of the two panes').toEqual(['%7', '%7']);
+  });
+
+  it('a pane that leaves the session prefix keeps its delivery guard: back in the prefix, the unchanged error gets no second key', async () => {
+    const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + 2 * H) });
+    const sig = createHash('sha256').update(screen(ERR_1308)).digest('hex').slice(0, 16);
+    const state: PanelState = {
+      panes: { [KEY_A]: { key: KEY_A, pane: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1, waits: 1, state: 'resumed', unconfirmed: true, sig, resumedAt: BASE_MS - 2 * H } },
+    };
+    // The same pane, moved to a session outside the prefix: still listed, never inspected or sent to.
+    w.panes = [{ ...PANE_A, session: 'elsewhere' }];
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A]?.unconfirmed, 'the delivery guard of a live pane was dropped').toBe(true);
+    expect(w.sent).toEqual([]);
+
+    // A pane that is gone loses its entry.
+    w.panes = [];
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(state.panes[KEY_A]).toBeUndefined();
+  });
+
+  it('a pane that moved back into the prefix with the same unconfirmed error is not sent a second key', async () => {
+    const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + 2 * H) });
+    const sig = createHash('sha256').update(screen(ERR_1308)).digest('hex').slice(0, 16);
+    const state: PanelState = {
+      panes: { [KEY_A]: { key: KEY_A, pane: '%7', session: 'omc-team-a', windowIndex: 0, paneIndex: 1, waits: 1, state: 'resumed', unconfirmed: true, sig, resumedAt: BASE_MS - 2 * H } },
+    };
+    w.panes = [{ ...PANE_A, session: 'elsewhere' }];
+    await runPanelQuotaPass(state, w.deps, ON);
+    w.panes = [PANE_A];
+    await runPanelQuotaPass(state, w.deps, ON);
+    w.clock.now = BASE_MS + 3 * H;
+    await runPanelQuotaPass(state, w.deps, ON);
+    expect(w.sent, 'a second key went to a pane with a partly delivered first one').toEqual([]);
+  });
+
+  describe('the key goes only to the program that was running when the wait began', () => {
+    async function waitingWorld(identity: { value: string | null }): Promise<{ w: World; state: PanelState }> {
+      const w = world({ panes: [PANE_A], screens: { '%7': screen(ERR_1308) }, readingValue: exhausted5h(BASE_MS + 2 * H) });
+      w.deps.providerIdentity = () => identity.value;
+      const state: PanelState = { panes: {} };
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(state.panes[KEY_A].state).toBe('waiting_quota');
+      return { w, state };
+    }
+
+    it('the same program at the reset: the key is sent', async () => {
+      const identity = { value: '5151:started-at-ten' };
+      const { w, state } = await waitingWorld(identity);
+      expect(state.panes[KEY_A].providerIdentity).toBe('5151:started-at-ten');
+      w.clock.now = BASE_MS + 2 * H;
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(w.sent).toEqual(['%7']);
+    });
+
+    it('another program in the foreground that is not a shell: no key, and the wait is closed', async () => {
+      const identity = { value: '5151:started-at-ten' };
+      const { w, state } = await waitingWorld(identity);
+      identity.value = '6262:started-at-eleven';
+      w.clock.now = BASE_MS + 2 * H;
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(w.sent, 'the key went to an unrelated program').toEqual([]);
+      expect(state.panes[KEY_A].state).toBe('resumed');
+      expect(w.log.some((text) => /no longer runs there; no keys sent/.test(text))).toBe(true);
+    });
+
+    it('an identity that cannot be read at the reset: no key, and the wait is tried again on the next pass', async () => {
+      const identity: { value: string | null } = { value: '5151:started-at-ten' };
+      const { w, state } = await waitingWorld(identity);
+      identity.value = null;
+      w.clock.now = BASE_MS + 2 * H;
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(w.sent).toEqual([]);
+      expect(state.panes[KEY_A].state).toBe('waiting_quota');
+      identity.value = '5151:started-at-ten';
+      await runPanelQuotaPass(state, w.deps, ON);
+      expect(w.sent).toEqual(['%7']);
+    });
   });
 
   it('week reset: no resume, the wait ends with class quota and the reset date', async () => {

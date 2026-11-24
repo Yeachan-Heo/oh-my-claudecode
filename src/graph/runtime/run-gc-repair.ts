@@ -3,7 +3,6 @@
  * while this process owns the run. The rules and the safety notes are in run-gc.ts.
  */
 
-import { randomBytes } from "node:crypto";
 import {
   closeSync,
   constants as fsConstants,
@@ -13,6 +12,7 @@ import {
   readFileSync,
   writeSync,
 } from "node:fs";
+import { atomicWriteFileSync } from "../../lib/atomic-write.js";
 import { directoryOperationsIfSupported, type DirectoryOperations } from "./contained-fd.js";
 import { takeOwnership, withRunDirectory, type AnchoredRun } from "./run-gc-owner.js";
 import {
@@ -71,7 +71,8 @@ export interface RepairInterlock {
 
 // Moves the torn last line of one journal to a copy beside it. Complete lines are not touched.
 // The copy is written and synced before the journal is shortened, so the tail is never lost. The shortened journal is
-// written to a new private file and renamed over the journal, relative to the open run directory: the inode that was
+// published by the atomic writer (a new private file renamed over the journal, relative to the open run directory, with
+// the written file checked to be the one that took the name): the inode that was
 // checked is never modified, so a name added to it after the check cannot carry the change to another file.
 // The journal is changed only while this process owns the run (the same fence as the removal), so a writer cannot
 // append between the last look and the truncation. Every file is opened relative to the open run directory, whose
@@ -163,26 +164,19 @@ function repairOwnedJournal(
     }
     const named = operations.lstat(JOURNAL_FILE_NAME);
     if (named.dev !== before.dev || named.ino !== before.ino) throw new Error("journal was replaced during repair; left unchanged, torn copy kept");
-    const shortenedName = `${JOURNAL_FILE_NAME}.repair-${randomBytes(4).toString("hex")}`;
-    const shortenedFd = operations.open(shortenedName, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, before.mode & 0o777);
-    try {
-      try {
-        writeAll(shortenedFd, complete);
-        fsyncSync(shortenedFd);
-      } finally {
-        closeSync(shortenedFd);
-      }
-      run.assertNamed();
-      interlock.beforeTruncate?.();
-      operations.rename(shortenedName, JOURNAL_FILE_NAME);
-    } catch (error) {
-      try {
-        operations.unlink(shortenedName);
-      } catch {
-        // The error below is the one to report.
-      }
-      throw error;
-    }
+    // Published by the atomic writer: the descriptor stays open through the rename, the file that was written is checked
+    // to be the one that takes the name, and the previous journal is put back when it is not.
+    atomicWriteFileSync(
+      JOURNAL_FILE_NAME,
+      complete,
+      {
+        beforeRename: () => {
+          run.assertNamed();
+          interlock.beforeTruncate?.();
+        },
+      },
+      operations,
+    );
     operations.sync();
     return { repaired: true, copy: copyName };
   } finally {

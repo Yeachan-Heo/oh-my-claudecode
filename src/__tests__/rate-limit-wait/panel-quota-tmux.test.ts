@@ -204,6 +204,31 @@ describe('panelQuotaTmux adapter', () => {
     });
   });
 
+  describe('providerIdentity', () => {
+    it('is the foreground process group of the pane terminal and the start time of its leader', () => {
+      vi.mocked(tmuxExec).mockReset();
+      vi.mocked(execFileSync).mockReset();
+      vi.mocked(tmuxExec).mockReturnValueOnce('0 4242\n');
+      vi.mocked(execFileSync).mockReturnValueOnce(' 5151\n').mockReturnValueOnce('Tue Nov 24 10:00:00 2026\n');
+      expect(panelQuotaTmux.providerIdentity?.(PANE)).toBe('5151:Tue Nov 24 10:00:00 2026');
+      expect(vi.mocked(execFileSync).mock.calls.map((call) => call[1])).toEqual([['-o', 'tpgid=', '-p', '4242'], ['-o', 'lstart=', '-p', '5151']]);
+    });
+
+    it('is null for a dead pane, a terminal without a foreground group, and when ps fails', () => {
+      const ask = (status: string, ps: string | Error): string | null => {
+        vi.mocked(tmuxExec).mockReset();
+        vi.mocked(execFileSync).mockReset();
+        vi.mocked(tmuxExec).mockReturnValueOnce(status);
+        if (ps instanceof Error) vi.mocked(execFileSync).mockImplementationOnce(() => { throw ps; });
+        else vi.mocked(execFileSync).mockReturnValueOnce(ps);
+        return panelQuotaTmux.providerIdentity?.(PANE) ?? null;
+      };
+      expect(ask('1 4242\n', ' 5151\n')).toBeNull();
+      expect(ask('0 4242\n', ' -1\n')).toBeNull();
+      expect(ask('0 4242\n', new Error('ps: not found'))).toBeNull();
+    });
+  });
+
   it('providerRunning is false for a dead pane, true for a foreground command that is not a shell, null when unknown', () => {
     const ask = (output: string | Error): boolean | null => {
       vi.mocked(tmuxExec).mockReset();

@@ -101,6 +101,12 @@ export interface PanelTmux {
   sendContinue(pane: PanePoint): ResumeDelivery;
   /** Whether the provider still runs in the pane: false for a dead pane or a shell in the foreground, null when it cannot be told. */
   providerRunning(pane: PanePoint): boolean | null;
+  /**
+   * What identifies the program that holds the pane's terminal now (its process group and start time), or null when it
+   * cannot be told. Read when a wait begins and again before a key is sent: a pane whose provider exited and that now runs
+   * another program is not the pane that was waiting.
+   */
+  providerIdentity?(pane: PanePoint): string | null;
 }
 
 export interface PanelEntry {
@@ -112,6 +118,8 @@ export interface PanelEntry {
   /** Incarnation of the tmux server the pane id belongs to, set when the entry is created and never refreshed (see PanePoint.server). */
   server?: string;
   waits: number;
+  /** The program that held the pane's terminal when the wait began (see PanelTmux.providerIdentity); a key goes only to that program. */
+  providerIdentity?: string;
   /** "resuming": the continue key is about to be sent, or was sent without the pass finishing; it is never sent again. */
   state?: 'waiting_quota' | 'resuming' | 'resumed' | 'quota-ended';
   /**
@@ -151,6 +159,7 @@ export interface PanelQuotaDeps {
   capture(pane: PanePoint, lines: number): string | null | undefined;
   sendContinue(pane: PanePoint): ResumeDelivery;
   providerRunning(pane: PanePoint): boolean | null;
+  providerIdentity?(pane: PanePoint): string | null;
   readQuota(): Promise<QuotaReading | null>;
   log(text: string): void;
   journal(row: Journal): void;
@@ -288,6 +297,7 @@ const PanelEntrySchema = z
     paneIndex: finiteNumber,
     server: z.string().optional(),
     waits: z.number().int().nonnegative(),
+    providerIdentity: z.string().optional(),
     state: z.enum(['waiting_quota', 'resuming', 'resumed', 'quota-ended']).optional(),
     unconfirmed: z.boolean().optional(),
     sig: z.string().nullable().optional(),
@@ -436,7 +446,9 @@ export async function runPanelQuotaPass(
   // An entry belongs to a pane id of one tmux server run: a pane that is gone, or whose id now belongs to another run
   // of the server (a restart can give an unrelated worker the same id), loses its entry. A listing that carries no
   // server value cannot tell, and keeps the entry.
-  const live = new Map(panes.map((pane) => [paneKey(pane), pane]));
+  // The session prefix decides which panes are inspected and sent to, not which saved waits and delivery guards are kept: a
+  // pane that left the prefix and may come back keeps its entry, so an unchanged error is not taken for a new event.
+  const live = new Map(listedPanes.map((pane) => [paneKey(pane), pane]));
   for (const [key, entry] of Object.entries(state.panes)) {
     const pane = live.get(key);
     if (!pane || (pane.server !== undefined && entry.server !== pane.server)) delete state.panes[key];
@@ -511,6 +523,22 @@ export async function runPanelQuotaPass(
         entry.resumedAt = now;
         deps.log(`pane ${key}: the provider no longer runs in the pane; no keys sent`);
         continue;
+      }
+      // The error is still on the screen, but the program that was running when the wait began may be gone, with another
+      // one in the foreground that would take the key as input.
+      if (entry.providerIdentity !== undefined && deps.providerIdentity) {
+        const current = deps.providerIdentity(pane);
+        if (current === null) {
+          deps.log(`pane ${key}: cannot tell which program runs in the pane; retry on next pass`);
+          continue;
+        }
+        if (current !== entry.providerIdentity) {
+          entry.state = 'resumed';
+          entry.sig = screenSignature(fresh);
+          entry.resumedAt = now;
+          deps.log(`pane ${key}: the program that ran in the pane when the wait began no longer runs there; no keys sent`);
+          continue;
+        }
       }
       if (timeLeft() <= 0) { stopForTimeLimit(); limitedAt = { index, attempted: true }; break; }
       // The intent goes to disk before the key goes to the pane. A key that cannot be taken back must not depend on
@@ -618,6 +646,9 @@ export async function runPanelQuotaPass(
     if (plan.wait) {
       entry.waits += 1;
       entry.state = 'waiting_quota';
+      const identity = deps.providerIdentity?.(pane);
+      if (identity) entry.providerIdentity = identity;
+      else delete entry.providerIdentity;
       entry.untilMs = plan.untilMs;
       entry.resetMs = plan.reset;
       deps.log(`pane ${key}: quota error ${err.code}; waiting until ${iso(plan.untilMs)} (wait ${entry.waits} of ${max})`);
@@ -751,6 +782,7 @@ export async function runDaemonPanelQuotaPass({
     capture: (pane, lines) => tmux.capture(pane, lines),
     sendContinue: (pane) => tmux.sendContinue(pane),
     providerRunning: (pane) => tmux.providerRunning(pane),
+    providerIdentity: tmux.providerIdentity ? (pane) => tmux.providerIdentity?.(pane) ?? null : undefined,
     readQuota: readQuota ?? (() => readProviderQuota(env)),
     log,
     journal: (row) => appendJournal(env, row),

@@ -50,4 +50,24 @@ describe.runIf(tmuxInstalled)('panel quota adapter: a tmux server that restarted
     expect(panelQuotaTmux.sendContinue(listed)).toBe('not_attempted');
     expect(tmux(socket, 'capture-pane', '-t', id, '-p').stdout, 'a key reached the replacement pane').not.toContain('continue');
   });
+
+  it('the identity of the program in the pane is stable while it runs and differs once another program takes the pane', () => {
+    const dir = mkdtempSync(join('/tmp', 'pq-'));
+    dirs.push(dir);
+    const socket = join(dir, 's.sock');
+    sockets.push(socket);
+    startServer(socket, 'sleep 60');
+    const [server, id] = tmux(socket, 'list-panes', '-a', '-F', '#{pid}:#{start_time} #{pane_id}').stdout.trim().split(' ');
+    const listed = { id, server, socket, session: 'omc-team-restart', windowIndex: 0, paneIndex: 0, windowName: 'w' } as TmuxPane;
+
+    const first = panelQuotaTmux.providerIdentity?.(listed);
+    expect(first).toBeTruthy();
+    expect(panelQuotaTmux.providerIdentity?.(listed)).toBe(first);
+
+    // The program exits and an unrelated one takes the pane; the old error would still be on the screen.
+    expect(tmux(socket, 'respawn-pane', '-k', '-t', id, 'cat').status).toBe(0);
+    const second = panelQuotaTmux.providerIdentity?.(listed);
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
 });

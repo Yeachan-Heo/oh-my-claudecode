@@ -1012,6 +1012,7 @@ export const panelQuotaTmux = {
   capture: (pane: TmuxPane, lines: number): string | null => capturePaneContentStrict(pane.id, lines, pane.socket, pane.server),
   sendContinue: (pane: TmuxPane): PaneSendOutcome => sendToPaneOutcome(pane.id, 'continue', true, pane.socket, pane.server),
   providerRunning: (pane: TmuxPane): boolean | null => paneProviderRunning(pane.id, pane.socket, pane.server),
+  providerIdentity: (pane: TmuxPane): string | null => paneProviderIdentity(pane.id, pane.socket, pane.server),
 };
 
 /**
@@ -1047,6 +1048,44 @@ function paneProviderRunning(paneId: string, socket?: string, server?: string): 
       return true;
     }
     return shellHasForegroundJob(panePid);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What identifies the program that holds the pane's terminal: its process group (the foreground group of the pane's
+ * terminal) and the start time of that group's leader. Two reads give the same value only while the same program runs
+ * in the foreground; null when it cannot be told (dead pane, no terminal, ps unavailable).
+ */
+function paneProviderIdentity(paneId: string, socket?: string, server?: string): string | null {
+  if (!isTmuxAvailable() || !isValidPaneId(paneId)) {
+    return null;
+  }
+  try {
+    const call = tmuxCall(socket, server, ['display-message', '-t', paneId, '-p', '#{pane_dead} #{pane_pid}']);
+    if (call === null) return null;
+    const status = tmuxExec(call.args, { stripTmux: true, stdio: 'pipe', timeout: 3000 }).trim();
+    if (call.marker !== null && status.includes(call.marker)) return null;
+    const [dead, panePid] = status.split(/\s+/);
+    if (dead === '1' || !/^\d+$/.test(panePid ?? '')) return null;
+    const foreground = execFileSync('ps', ['-o', 'tpgid=', '-p', panePid], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 3000,
+    }).trim();
+    if (!/^\d+$/.test(foreground) || Number(foreground) <= 0) return null;
+    let started = '';
+    try {
+      started = execFileSync('ps', ['-o', 'lstart=', '-p', foreground], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 3000,
+      }).trim();
+    } catch {
+      // The group leader may have exited while its group lives on: the group id alone identifies it.
+    }
+    return `${foreground}:${started}`;
   } catch {
     return null;
   }
