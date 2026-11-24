@@ -116,8 +116,13 @@ function isNonClaudeModelName(value) {
 // The model values that identify the provider: the first non-blank of CLAUDE_MODEL and
 // ANTHROPIC_MODEL; with neither, the first non-blank native default of each tier
 // (CLAUDE_CODE_BEDROCK_<TIER>_MODEL, then ANTHROPIC_DEFAULT_<TIER>_MODEL).
+// The session model as the provider checks of the Jev gates read it: the first non-blank of
+// CLAUDE_MODEL and ANTHROPIC_MODEL, trimmed ('' when neither is set).
+function normalizedSessionModelId() {
+  return [process.env.CLAUDE_MODEL, process.env.ANTHROPIC_MODEL].map((v) => (v || '').trim()).find(Boolean) || '';
+}
 function providerDetectionModelIds() {
-  const session = [process.env.CLAUDE_MODEL, process.env.ANTHROPIC_MODEL].map((v) => (v || '').trim()).find(Boolean);
+  const session = normalizedSessionModelId();
   if (session) return [session];
   return Object.values(TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG)
     .map((keys) => keys.map((key) => (process.env[key] || '').trim()).find(Boolean))
@@ -182,7 +187,13 @@ function cloudFamilyOfModelId(modelId) {
 function isMappingOfOtherCloud(modelId) {
   const family = cloudFamilyOfModelId(modelId);
   if (!family) return false;
-  const active = [isBedrockProviderEnv() && 'bedrock', isVertexProviderEnv() && 'vertex'].filter(Boolean);
+  // The flags and the session model, read normalized (trimmed, first non-blank, without a context
+  // suffix) as well as raw, so a padded or suffixed session ID names its cloud too.
+  const session = cloudFamilyOfModelId(normalizedSessionModelId().replace(/\[\d+[mk]\]$/i, ''));
+  const active = [
+    (isBedrockProviderEnv() || session === 'bedrock') && 'bedrock',
+    (isVertexProviderEnv() || session === 'vertex') && 'vertex',
+  ].filter(Boolean);
   return active.length > 0 && !active.includes(family);
 }
 // nativeOnly skips OMC_SUBAGENT_MODEL: Claude Code does not read it, so it is no proof that

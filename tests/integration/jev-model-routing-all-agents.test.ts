@@ -264,6 +264,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for every agent call", () => 
     ["usable winner", { CLAUDE_CODE_BEDROCK_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6", ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
     ["unusable winner and a usable later default", { CLAUDE_CODE_BEDROCK_SONNET_MODEL: "other-proxy-model", ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" }, false],
     ["a Vertex mapping under the Bedrock flag", { ANTHROPIC_DEFAULT_SONNET_MODEL: "vertex_ai/claude-sonnet-4-6" }, false],
+    ["a Bedrock mapping under a padded Vertex session model", { ANTHROPIC_MODEL: " vertex_ai/claude-opus-4-6 ", CLAUDE_CODE_USE_BEDROCK: "", ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" }, false],
     ["a Vertex mapping under both flags", { CLAUDE_CODE_USE_VERTEX: "1", ANTHROPIC_DEFAULT_SONNET_MODEL: "vertex_ai/claude-sonnet-4-6" }, true],
     ["blank winner and a usable later default", { CLAUDE_CODE_BEDROCK_SONNET_MODEL: " ", ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6" }, true],
   ])("the first native mapping decides for a call without a model and for a use marker: %s", async (_label, mapping, set) => {
