@@ -470,6 +470,11 @@ export interface TeamOpsConfig {
     costMode?: TeamCostMode;
     /** Opt-in native team worker worktrees. Disabled unless explicitly set. */
     worktreeMode?: 'disabled' | 'off' | 'detached' | 'branch' | 'named';
+    /**
+     * Multiplexer backend for team worker panes. Default (and unset) is tmux.
+     * 'herdr' runs workers as tabs/agents inside a Herdr workspace instead.
+     */
+    multiplexer?: 'tmux' | 'herdr';
 }
 /** `team` config block in PluginConfig. */
 export interface TeamConfigBlock {

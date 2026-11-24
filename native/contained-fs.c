@@ -122,10 +122,11 @@ static int process_pid(napi_env env, napi_value value, pid_t *result) {
 }
 
 static napi_value process_start_time(napi_env env, napi_callback_info info) {
-  napi_value args[1], result, value;
+  napi_value args[1];
   pid_t pid;
   if (!arguments(env, info, 1, args) || !process_pid(env, args[0], &pid)) return NULL;
 #ifdef __APPLE__
+  napi_value result, value;
   int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)pid };
   struct kinfo_proc process;
   size_t size = sizeof(process);

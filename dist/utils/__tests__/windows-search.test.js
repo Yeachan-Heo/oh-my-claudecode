@@ -100,9 +100,23 @@ describe('every Node entry point hardens the Windows executable search', () => {
                         found.add(src[1]);
             }
         }
-        // Claude Code hooks: the script node runs first (the runner).
-        for (const m of read('hooks/hooks.json').matchAll(/"command":\s*"node \\"\$\{CLAUDE_PLUGIN_ROOT\}\\"\/([^ "\\]+)/g))
-            found.add(m[1]);
+        // Claude Code hooks. Exec form lists the runner in args; the old shell
+        // command listed it inside command. Either form must still see scripts/run.cjs.
+        const hooksManifest = JSON.parse(read('hooks/hooks.json'));
+        for (const groups of Object.values(hooksManifest.hooks ?? {})) {
+            for (const group of groups) {
+                for (const hook of group.hooks ?? []) {
+                    const command = hook.command ?? '';
+                    const shell = command.match(/node "\$\{CLAUDE_PLUGIN_ROOT\}"\/([^ "]+)/);
+                    if (shell)
+                        found.add(shell[1]);
+                    for (const arg of hook.args ?? []) {
+                        if (arg.replace(/\\/g, '/').endsWith('/scripts/run.cjs'))
+                            found.add('scripts/run.cjs');
+                    }
+                }
+            }
+        }
         // Scripts that skills and commands run with `node <root>/scripts/x.mjs`, plus skill-local scripts.
         for (const dir of ['skills', 'commands']) {
             if (!existsSync(join(ROOT, dir)))

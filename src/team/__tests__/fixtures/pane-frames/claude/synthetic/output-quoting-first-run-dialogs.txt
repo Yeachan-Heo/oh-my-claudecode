@@ -1,0 +1,14 @@
+⏺ On a fresh config Claude Code shows two screens after the trust dialog:
+
+  WARNING: Claude Code running in Bypass Permissions mode
+  ❯ No, exit
+    Yes, I accept
+
+  Try the new fullscreen renderer?
+  ❯ 1. Yes, try it
+    2. Not now
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

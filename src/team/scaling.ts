@@ -76,6 +76,7 @@ import {
   uniquePaneTrees,
 } from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget } from "./herdr-session.js";
+import { parseReadyTimeoutMs } from "./ready-timeout.js";
 import {
   TeamPaths,
   absPath,
@@ -2783,39 +2784,8 @@ export async function scaleDown(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const DECIMAL_INTEGER_TEXT =
-  /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
-
-function parseExactInteger(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const negative = trimmed.startsWith("-");
-  const magnitude =
-    negative || trimmed.startsWith("+") ? trimmed.slice(1) : trimmed;
-  const match = DECIMAL_INTEGER_TEXT.exec(magnitude);
-  if (!match) return null;
-  const integerDigits = match[1] ?? "";
-  const fractionDigits = match[2] ?? match[3] ?? "";
-  const exponent = match[4] === undefined ? 0 : Number(match[4]);
-  const shift = fractionDigits.length - exponent;
-  if (shift > 0) {
-    const significand = integerDigits + fractionDigits;
-    if (/[1-9]/.test(significand)) {
-      const trailingZeros =
-        significand.length - significand.replace(/0+$/, "").length;
-      if (trailingZeros < shift) return null;
-    }
-  }
-  const parsed = (negative ? -1 : 1) * Number(magnitude);
-  return Number.isSafeInteger(parsed) ? parsed : null;
-}
-
 export function resolveWorkerReadyTimeoutMs(env: NodeJS.ProcessEnv): number {
-  const raw = env.OMC_TEAM_READY_TIMEOUT_MS;
-  const parsed =
-    raw == null || String(raw).trim() === ""
-      ? null
-      : parseExactInteger(String(raw));
-  if (parsed !== null && parsed >= 5_000) return parsed;
+  const parsed = parseReadyTimeoutMs(env);
+  if (parsed !== undefined && parsed >= 5_000) return parsed;
   return 45_000;
 }

@@ -404,7 +404,7 @@ The model selected with `/model` applies to the main conversation loop only. Del
 
 To run delegated work on a different model, use one of the supported surfaces (all three are honored by OMC's production `PreToolUse` enforcer):
 
-- **Per-call**: pass `model` explicitly on the `Task`/`Agent` call (e.g. `model: "fable"`); explicit models are always preserved.
+- **Per-call**: pass `model` explicitly on the `Task`/`Agent` call (e.g. `model: "fable"`). An explicit model is kept by default; with Jev `model-routing` active, Jev's answer replaces an explicit `haiku`, `sonnet` or `opus`, and with `OMC_JEV_MODEL_ROUTING_NAMED_MODELS=1` also a model such as `fable` (see the section "Model routing: what Jev sees and which calls are asked" of `docs/HOOKS.md`). With `OMC_JEV_MODEL_ROUTING_MARKER=1`, a first line `use fable` pins the model of one call in either case.
 - **Per-agent override**: `"agents": { "planner": { "model": "fable" } }` — precise, applies to a single agent; the resolved tier alias is injected into the Task call automatically.
 - **Everything inherits**: `"routing": { "forceInherit": true }` — drops per-agent routing entirely (the "nuclear option"; auto-enabled on Bedrock/Vertex/proxy for provider compatibility).
 

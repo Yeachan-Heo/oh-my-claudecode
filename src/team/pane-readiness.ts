@@ -160,6 +160,151 @@ function codexTrustQuestionIsActive(lines: readonly string[]): boolean {
   return activePrompt === '' && !previousChoiceWasRendered;
 }
 
+// True when the question, wrapped over at most 3 lines, is in the lines from index on.
+function claudeTrustQuestionStartsAt(lines: readonly string[], index: number): boolean {
+  return /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(
+    lines.slice(index, index + 3).join(' '),
+  );
+}
+
+// The screens Claude Code shows on the first launch with a fresh config
+// directory: onboarding before the trust dialog (recorded on 2.1.329), the
+// bypass warning and the renderer offer after it (recorded on 2.1.328). Only
+// the Claude startup wait reads them; every other pane reader sees what it saw
+// before them. 'claude_startup_dialog_unidentified' is a dialog whose choices
+// are off screen or not drawn yet.
+export type ClaudeStartupDialogKind =
+  | 'claude_onboarding'
+  | 'claude_bypass_permissions'
+  | 'claude_fullscreen_renderer'
+  | 'claude_startup_dialog_unidentified';
+export type ClaudeDialogKind = 'claude_directory' | 'claude_bypass_permissions' | 'claude_fullscreen_renderer';
+
+// Every dialog is read from the capture with all whitespace removed, so how
+// the pane wraps it (Claude Code at a space, tmux mid-word, a choice split over
+// two lines) cannot hide it. A short pane with no scrollback can also lose the
+// dialog's top, so any part of one counts: a dialog seen in part gets no
+// trigger and no Enter.
+const CLAUDE_STARTUP_CHOICES = {
+  claude_bypass_permissions: ['No,exit', 'Yes,Iaccept'],
+  claude_fullscreen_renderer: ['1.Yes,tryit', '2.Notnow'],
+} as const;
+const CLAUDE_TRUST_CHOICES = ['Yes,Itrustthisfolder', 'Yes,proceed'];
+// Onboarding's theme picker and security notes, in parts that each survive a
+// pane too short for the whole screen. A theme name counts only as the picker
+// draws it, never as a bare "Dark mode" that a path could also hold.
+const CLAUDE_THEME_CHOICES = [
+  'Auto(matchterminal)',
+  'Darkmode',
+  'Lightmode',
+  'Darkmode(colorblind-friendly)',
+  'Lightmode(colorblind-friendly)',
+  'Darkmode(ANSIcolorsonly)',
+  'Lightmode(ANSIcolorsonly)',
+];
+const CLAUDE_ONBOARDING_TEXT = [
+  "Let'sgetstarted.",
+  'Choosethetextstyle',
+  'Tochangethislater,run/theme',
+  ...CLAUDE_THEME_CHOICES.filter((choice) => choice.includes('(')),
+  'DarkmodeLightmode',
+  'Syntaxtheme:',
+  '(ctrl+ttodisable)',
+  'Securitynotes:',
+  'Claudecanmakemistakes',
+  'Duetopromptinjectionrisks',
+  'PressEntertocontinue',
+];
+// The footer below the trust dialog and both first-run dialogs.
+const CLAUDE_DIALOG_FOOTER = 'Entertoconfirm·Esctocancel';
+// The first line of each first-run dialog: every copy of it starts here.
+const CLAUDE_STARTUP_HEADINGS = {
+  claude_bypass_permissions: 'WARNING:ClaudeCoderunninginBypassPermissionsmode',
+  claude_fullscreen_renderer: 'Trythenewfullscreenrenderer?',
+} as const;
+const CLAUDE_CHOICES: readonly string[] = [
+  ...Object.values(CLAUDE_STARTUP_CHOICES).flat(),
+  ...CLAUDE_TRUST_CHOICES,
+  ...CLAUDE_THEME_CHOICES,
+];
+
+const squeeze = (text: string) => text.replace(/\s+/g, '');
+
+// A line the ready detector reads as an input prompt can instead be a dialog
+// choice focused with ❯ (a theme choice also with ✔), wrapped over the next
+// lines in a narrow pane. It is a choice only if the line holds nothing else.
+function lineMarksClaudeChoice(lines: readonly string[], index: number): boolean {
+  const rest = squeeze(lines[index]!.replace(PANE_PATTERNS.claude.idlePromptLine, '')).replace(/^✔/u, '');
+  if (!rest) return false;
+  const drawn = rest + squeeze(lines.slice(index + 1, index + 4).join(''));
+  return CLAUDE_CHOICES.some((choice) => choice.startsWith(rest) && drawn.startsWith(choice));
+}
+
+// The squeezed capture below the last live input prompt, as the ready detector
+// reads prompts (❯, ›, >), not counting a focused dialog choice. A dialog quoted
+// above that prompt is not on screen. What sits below it is always read, the
+// HUD included: a screen missed here could get the trigger and Enter, while one
+// read wrongly only stops the start.
+function claudeDialogTail(captured: string): string {
+  const lines = paneLines(captured);
+  const prompt = lines.findLastIndex(
+    (line, index) => PANE_PATTERNS.claude.idlePromptLine.test(line) && !lineMarksClaudeChoice(lines, index),
+  );
+  return squeeze(lines.slice(prompt + 1).join(''));
+}
+
+// The dialog whose choice (or onboarding text) is drawn last is the live one:
+// an answered dialog can remain above it. "No, exit" alone is the bypass warning only with the
+// footer, as the trust dialog draws it too.
+function claudeStartupDialogIn(tail: string, captured: string): ClaudeStartupDialogKind | null {
+  const footer = tail.includes(CLAUDE_DIALOG_FOOTER);
+  const lastOf = (choices: readonly string[]) => Math.max(...choices.map((choice) => tail.lastIndexOf(choice)));
+  const accept = tail.lastIndexOf('Yes,Iaccept');
+  const trust = lastOf(CLAUDE_TRUST_CHOICES);
+  const renderer = lastOf(CLAUDE_STARTUP_CHOICES.claude_fullscreen_renderer);
+  const onboarding = lastOf(CLAUDE_ONBOARDING_TEXT);
+  const latest = Math.max(accept, trust, renderer, onboarding);
+  if (latest < 0) {
+    if (!footer) return null;
+    return tail.includes('No,exit') ? 'claude_bypass_permissions' : 'claude_startup_dialog_unidentified';
+  }
+  if (latest === onboarding) return 'claude_onboarding';
+  if (latest === accept) return 'claude_bypass_permissions';
+  // The trust dialog (#5108) is left to the trust detector while it reads it.
+  if (latest === trust) {
+    return detectTrustPrompt(paneLines(captured), ['claude_directory'])
+      ? null
+      : 'claude_startup_dialog_unidentified';
+  }
+  return footer ? 'claude_fullscreen_renderer' : 'claude_startup_dialog_unidentified';
+}
+
+// The trust dialog captured while Claude Code draws it (recorded on 2.1.330)
+// or redraws it after Down: below the question, the last ❯ line is a choice
+// cut short with at most the start of the next choice below it. The ready
+// detector would read that ❯ line as an input box.
+function claudeTrustDialogDrawing(lines: readonly string[]): boolean {
+  const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
+  if (question < 0) return false;
+  const below = lines.slice(question + 1);
+  if (below.some((line) => /^(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(line))) return false;
+  const prompt = below.findLastIndex((line) => PANE_PATTERNS.claude.idlePromptLine.test(line));
+  if (prompt < 0) return false;
+  const drawn = squeeze(below[prompt]!.replace(PANE_PATTERNS.claude.idlePromptLine, ''));
+  const after = below.slice(prompt + 1);
+  const startsYes = (text: string) => CLAUDE_TRUST_CHOICES.some((choice) => choice.startsWith(text));
+  // First drawn: "No, exit" is focused.
+  if ('No,exit'.startsWith(drawn)) return after.length === 0 || (after.length === 1 && startsYes(squeeze(after[0]!)));
+  // Redrawn after Down: "Yes" is focused below "No, exit", with or without its old ❯.
+  return after.length === 0 && /^(?:❯\s*)?No,\s*exit$/i.test(below[prompt - 1] ?? '') && startsYes(drawn);
+}
+
+// Read only by the Claude startup wait, before it reads the trust dialogs.
+export function detectClaudeStartupDialog(captured: string): ClaudeStartupDialogKind | null {
+  return claudeStartupDialogIn(claudeDialogTail(captured), captured)
+    ?? (claudeTrustDialogDrawing(paneLines(captured)) ? 'claude_startup_dialog_unidentified' : null);
+}
+
 function detectTrustPrompt(
   lines: readonly string[],
   kinds: readonly PaneTrustPromptKind[],
@@ -191,11 +336,7 @@ function detectTrustPrompt(
   const claudeQuestionLines = lines.slice(-20);
   if (
     kinds.includes('claude_directory') &&
-    claudeQuestionLines.some((_, index) =>
-      /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(
-        claudeQuestionLines.slice(index, index + 3).join(' '),
-      ),
-    ) &&
+    claudeQuestionLines.some((_, index) => claudeTrustQuestionStartsAt(claudeQuestionLines, index)) &&
     tailHas(/\bNo,\s*exit\b/i) &&
     tailHas(/\bYes,\s*(?:proceed|I trust this folder)\b/i)
   ) {
@@ -277,6 +418,38 @@ export function detectPaneTrustPromptKind(
   provider?: CliAgentType,
 ): PaneTrustPromptKind | null {
   return detectTrustPrompt(paneLines(captured), patternsFor(provider).trustKinds);
+}
+
+// Which choice of a Claude Code dialog is focused (marked with ❯). Claude Code
+// draws "Yes" right below "No, exit" in its trust dialog; only the pair after
+// the latest question is the live dialog. Null while that pair is not drawn
+// yet; 'stale' when an input prompt is drawn below it.
+export function claudeDialogFocus(
+  captured: string,
+  kind: ClaudeDialogKind,
+): 'first' | 'second' | 'stale' | null {
+  if (kind !== 'claude_directory') {
+    const [first, second] = CLAUDE_STARTUP_CHOICES[kind];
+    const tail = claudeDialogTail(captured);
+    if (claudeStartupDialogIn(tail, captured) !== kind) {
+      const stream = captured.replace(/\s+/g, '');
+      return stream.includes(first) || stream.includes(second) ? 'stale' : null;
+    }
+    // The same dialog drawn before Down can remain above the latest copy, ❯
+    // and footer included, so both are read below its latest heading only.
+    const copy = tail.slice(Math.max(0, tail.lastIndexOf(CLAUDE_STARTUP_HEADINGS[kind])));
+    const [firstAt, secondAt] = [copy.lastIndexOf(`❯${first}`), copy.lastIndexOf(`❯${second}`)];
+    if ((firstAt < 0 && secondAt < 0) || !copy.includes(CLAUDE_DIALOG_FOOTER)) return null;
+    return secondAt > firstAt ? 'second' : 'first';
+  }
+  const lines = paneLines(captured);
+  const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
+  if (question < 0) return null;
+  const no = lines.findIndex((line, index) => index > question && /^\s*(?:❯\s*)?No,\s*exit\b/i.test(line));
+  const yes = no >= 0 ? lines[no + 1] ?? '' : '';
+  if (!/^\s*(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(yes)) return null;
+  if (lines.slice(no + 2).some((line) => patternsFor('claude').idlePromptLine.test(line))) return 'stale';
+  return /^\s*❯/.test(yes) ? 'second' : 'first';
 }
 
 export function paneHasTrustPrompt(

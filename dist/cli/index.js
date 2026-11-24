@@ -148,11 +148,11 @@ program
     .description('Launch split-pane tmux session with Claude Code (OMC) and Codex (OMX)')
     .addHelpText('after', `
 Requirements:
-  - Must be running inside a tmux session
+  - Must be running inside a tmux session (or a Herdr pane / herdr backend)
   - Claude CLI must be installed
   - Codex CLI recommended (graceful fallback if missing)`)
-    .action(() => {
-    interopCommand();
+    .action(async () => {
+    await interopCommand();
 });
 /**
  * Ask command - Run provider advisor prompt (claude|gemini)
@@ -937,8 +937,8 @@ waitCmd
     .command('status')
     .description('Show detailed rate limit and daemon status')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
-    await waitStatusCommand(options);
+    .action(async (_options, command) => {
+    await waitStatusCommand({ json: command.optsWithGlobals().json });
 });
 waitCmd
     .command('daemon <action>')
@@ -968,9 +968,9 @@ waitCmd
     .description('Scan for blocked Claude Code sessions in tmux')
     .option('--json', 'Output as JSON')
     .option('-l, --lines <number>', 'Number of pane lines to analyze', integerOption(1), 15)
-    .action(async (options) => {
+    .action(async (options, command) => {
     await waitDetectCommand({
-        json: options.json,
+        json: command.optsWithGlobals().json,
         lines: options.lines,
     });
 });
@@ -1022,19 +1022,27 @@ Note:
         console.log('');
         return;
     }
-    await teleportCommand(ref, {
+    const result = await teleportCommand(ref, {
         worktree: true, // Always create worktree
         worktreePath: options.path,
         base: options.base,
         json: options.json,
     });
+    if (!result.success) {
+        // teleportCommand prints the error only in text mode. Set the exit code
+        // instead of exiting, so that a long error reaches a pipe in full.
+        if (options.json) {
+            console.log(JSON.stringify({ success: false, error: result.error }));
+        }
+        process.exitCode = 1;
+    }
 });
 teleportCmd
     .command('list')
     .description('List existing worktrees in ~/Workspace/omc-worktrees/')
     .option('--json', 'Output as JSON')
-    .action(async (options) => {
-    await teleportListCommand(options);
+    .action(async (_options, command) => {
+    await teleportListCommand({ json: command.optsWithGlobals().json });
 });
 teleportCmd
     .command('remove <path>')
@@ -1042,8 +1050,8 @@ teleportCmd
     .description('Remove a worktree')
     .option('-f, --force', 'Force removal even with uncommitted changes')
     .option('--json', 'Output as JSON')
-    .action(async (path, options) => {
-    const exitCode = await teleportRemoveCommand(path, options);
+    .action(async (path, options, command) => {
+    const exitCode = await teleportRemoveCommand(path, { ...options, json: command.optsWithGlobals().json });
     if (exitCode !== 0)
         process.exit(exitCode);
 });
@@ -1196,9 +1204,9 @@ Examples:
   $ omc doctor conflicts                        Check for configuration issues
   $ omc doctor conflicts --json                 Output results as JSON
   $ omc doctor conflicts --plugin-dir /tmp/foo  Check against a specific plugin dir`)
-    .action(async (options) => {
+    .action(async (options, command) => {
     applyPluginDirOption(options.pluginDir);
-    const exitCode = await doctorConflictsCommand(options);
+    const exitCode = await doctorConflictsCommand({ ...options, json: command.optsWithGlobals().json });
     process.exit(exitCode);
 });
 // Headless AFK ralph launcher (factory AFK profile + declared verify commands).

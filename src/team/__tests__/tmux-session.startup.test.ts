@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { WorkerLaunchAttempt } from '../worker-launch-ack.js';
 import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
@@ -54,6 +56,8 @@ vi.mock('../../platform/process-utils.js', async importOriginal => ({
 const tmuxState = vi.hoisted(() => ({
   args: [] as string[][],
   captures: [] as Array<string | Error>,
+  captureAt: null as (() => string) | null,
+  sendTimes: [] as number[],
   paneStatus: '0 cmd\n',
   paneMode: '0\n',
   ownedPaneIds: '%2\n',
@@ -79,6 +83,7 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
       if (command === 'capture-pane') {
         if (commandIndex === 2) tmuxState.args.push(args.slice(commandIndex));
         if (tmuxState.captureError) throw tmuxState.captureError;
+        if (tmuxState.captureAt) return { stdout: tmuxState.captureAt(), stderr: '' };
         const next = tmuxState.captures.length > 1 ? tmuxState.captures.shift() : tmuxState.captures[0];
         if (next instanceof Error) throw next;
         return { stdout: next ?? '', stderr: '' };
@@ -199,6 +204,7 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
         const syntheticArgs = words.slice(0, words.indexOf('display-message'));
         if (nativeCommand === 'send-keys') {
           tmuxState.args.push(syntheticArgs);
+          tmuxState.sendTimes.push(Date.now());
           if (syntheticArgs.includes('-l')) {
             const commandText = syntheticArgs[syntheticArgs.indexOf('-l') + 1] ?? '';
             const descriptorMatch = commandText.match(/OMC_WORKER_LAUNCH_SPEC_FILE='([^']+)'/);
@@ -344,6 +350,8 @@ function restoreFixtureEnv(): void {
 beforeEach(() => {
   tmuxState.args = [];
   tmuxState.captures = [];
+  tmuxState.captureAt = null;
+  tmuxState.sendTimes = [];
   tmuxState.paneStatus = '0 cmd\n';
   tmuxState.paneMode = '0\n';
   tmuxState.ownedPaneIds = '%2\n';
@@ -879,6 +887,7 @@ describe('worker pane startup safety', () => {
       const context = await acceptedContext('claude');
       tmuxState.captures = [
         `${question}\n❯ No, exit\n  ${affirmativeChoice}\n`,
+        `${question}\n  No, exit\n❯ ${affirmativeChoice}\n`,
         '❯ ready\n',
       ];
 
@@ -898,6 +907,711 @@ describe('worker pane startup safety', () => {
       expect(inboxIndex).toBeGreaterThan(confirmYesIndex);
     },
   );
+
+  strictTmuxIt('presses Enter in Claude Code’s trust dialog only once the pane shows the affirmative choice focused', async () => {
+    const context = await acceptedContext('claude');
+    const question = 'Quick safety check: Is this a project you created or one you trust?';
+    const frames = {
+      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      declined: `${question}\n❯ No, exit\n  Yes, I trust this folder\nClaude Code didn't start because this folder isn't trusted.\n`,
+      trusted: '❯ \n',
+    };
+    // Hypothesis fitting the recorded failures: a busy Claude Code startup
+    // reads the keys sent between two captures together and applies them
+    // against the focus it drew before them.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys' && !args.includes('-l'))
+        .map(args => args.at(-1));
+      applied = tmuxState.args.length;
+      const drawn = focus;
+      for (const key of drawn === 'no' || drawn === 'yes' ? keys : []) {
+        if (key === 'Enter') {
+          focus = drawn === 'yes' ? 'trusted' : 'declined';
+          break;
+        }
+        if (key === 'Down') focus = 'yes';
+      }
+      return frames[focus];
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    expect(focus).toBe('trusted');
+  });
+
+  strictTmuxIt('sends Down again when the first Down after the dialog draws is dropped', async () => {
+    const context = await acceptedContext('claude');
+    const question = 'Quick safety check: Is this a project you created or one you trust?';
+    const frames = {
+      no: `${question}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${question}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      trusted: '❯ \n',
+    };
+    // Measured on Claude Code 2.1.328: a Down sent right after the dialog
+    // first draws can be dropped. This pane drops the first Down.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    let downs = 0;
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys' && !args.includes('-l'))
+        .map(args => args.at(-1));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        if (key === 'Down' && ++downs > 1 && focus === 'no') focus = 'yes';
+        if (key === 'Enter' && focus === 'yes') focus = 'trusted';
+      }
+      return frames[focus];
+    };
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 3_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    expect(focus).toBe('trusted');
+    expect(downs).toBe(2);
+  });
+
+  const trustQuestion = 'Quick safety check: Is this a project you created or one you trust?';
+  const readFrame = (path: string) =>
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames', path), 'utf8');
+  strictTmuxIt.each([
+    ['Claude Code trust', () => ({
+      no: `${trustQuestion}\n❯ No, exit\n  Yes, I trust this folder\n`,
+      yes: `${trustQuestion}\n  No, exit\n❯ Yes, I trust this folder\n`,
+      trusted: '❯ \n',
+    })],
+    ['the fullscreen renderer offer', () => ({
+      no: readFrame('claude/2.1.328/fullscreen-renderer.txt'),
+      yes: readFrame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      trusted: readFrame('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    })],
+  ] as const)('reads the pane once more after answering %s at the last poll before the deadline', async (_, dialogFrames) => {
+    const context = await acceptedContext('claude');
+    const frames = dialogFrames();
+    // The dialog first appears at 29,500 ms of a 30,000 ms wait and takes each key at once.
+    let focus: keyof typeof frames = 'no';
+    let applied = 0;
+    let startedAt = 0;
+    tmuxState.captureAt = () => {
+      for (const args of tmuxState.args.slice(applied)) {
+        if (args[0] !== 'send-keys' || args.includes('-l')) continue;
+        if (args.at(-1) === 'Down' && focus === 'no') focus = 'yes';
+        if (args.at(-1) === 'Enter' && focus === 'yes') focus = 'trusted';
+      }
+      applied = tmuxState.args.length;
+      return Date.now() - startedAt < 29_500 ? 'Starting…\n' : frames[focus];
+    };
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      startedAt = Date.now();
+      const work = waitForStartupPaneReady(context, { timeoutMs: 30_000, pollIntervalMs: 250, attemptAlreadyFenced: true });
+      let settled = false;
+      void work.then(() => { settled = true; }, () => { settled = true; });
+      while (!settled) {
+        if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync();
+        else await new Promise(resolveTick => setImmediate(resolveTick));
+      }
+      await expect(work).resolves.toEqual({ ok: true });
+      expect(focus).toBe('trusted');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  strictTmuxIt('sends no key to an answered Claude trust dialog left above a live input prompt', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const answered = readFileSync(join(corpus, 'claude/unversioned/trust-files-then-idle.txt'), 'utf8');
+    // The user pressed Up: the live prompt now shows a history entry.
+    tmuxState.captures = [answered, `${answered.trimEnd()} previous prompt from history\n`];
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 3_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: false, reason: 'selector_persistent' });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  strictTmuxIt('sends Down, not Enter, when only a stale line above the live trust dialog shows Yes focused', async () => {
+    const context = await acceptedContext('claude');
+    const live = 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n';
+    tmuxState.captures = [` ❯ Yes, I trust this folder\n${live}`, '❯ ready\n'];
+
+    await deliverStartupInbox(context, 'Read inbox.md, execute now.');
+    const keys = tmuxState.args.filter(args => args[0] === 'send-keys' && !args.includes('-l')).map(args => args.at(-1));
+    expect(keys[0]).toBe('Down');
+  });
+
+  strictTmuxIt('waits for a new trust dialog below an answered one to draw its choices, then sends Down, then Enter', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const answered = readFileSync(join(corpus, 'claude/2.1.328/trust-yes-focused.txt'), 'utf8');
+    const live = readFileSync(join(corpus, 'claude/2.1.325/trust.txt'), 'utf8');
+    const midDraw = live.slice(0, live.indexOf('Security guide') + 'Security guide'.length);
+    const yesFocused = live.replace('❯ No, exit', '  No, exit').replace('  Yes, I trust this folder', '❯ Yes, I trust this folder');
+    const stages = [`${answered}\n${midDraw}`, `${answered}\n${live}`, `${answered}\n${yesFocused}`];
+    const keysAfterStage: string[][] = stages.map(() => []);
+    let stage = -1;
+    let seen = 0;
+    tmuxState.captureAt = () => {
+      const sent = tmuxState.args.slice(seen).filter(args => args[0] === 'send-keys' && !args.includes('-l')).map(args => String(args.at(-1)));
+      seen = tmuxState.args.length;
+      if (stage >= 0 && stage < stages.length) keysAfterStage[stage]!.push(...sent);
+      stage = Math.min(stage + 1, stages.length);
+      return stages[stage] ?? '❯ ready\n';
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    expect(keysAfterStage).toEqual([[], ['Down'], ['Enter']]);
+  });
+
+  strictTmuxIt('fails at once on Claude Code’s Bypass Permissions warning and sends it no key', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    tmuxState.captures = [readFileSync(join(corpus, 'claude/2.1.328/bypass-permissions.txt'), 'utf8')];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'claude_bypass_permissions_consent_required',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    expect(tmuxState.args.filter(args => args[0] === 'capture-pane')).toHaveLength(1);
+  });
+
+  strictTmuxIt.each(['bypass-permissions.txt', 'bypass-permissions-yes-focused.txt'].flatMap(file => [18, 39].map(cols => [file, cols] as const)))(
+    'fails at once on %s wrapped to %i columns and sends it no key',
+    async (file, cols) => {
+      const context = await acceptedContext('claude');
+      const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+      const recorded = readFileSync(join(corpus, 'claude/2.1.328', file), 'utf8');
+      tmuxState.captures = [recorded.split('\n').flatMap(line => line.match(new RegExp(`.{1,${cols}}`, 'gu')) ?? ['']).join('\n')];
+
+      await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+        ok: false,
+        reason: 'claude_bypass_permissions_consent_required',
+      });
+      expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    },
+  );
+
+  strictTmuxIt.each(['onboarding-theme.txt', 'onboarding-security-notes.txt'])(
+    'fails at once on Claude Code onboarding (%s) and sends it no key',
+    async (file) => {
+      const context = await acceptedContext('claude');
+      const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+      tmuxState.captures = [readFileSync(join(corpus, 'claude/2.1.329', file), 'utf8')];
+
+      await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+        ok: false,
+        reason: 'claude_onboarding_required',
+      });
+      expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    },
+  );
+
+  strictTmuxIt('fails with the onboarding reason when onboarding first shows at the check before the trigger is typed', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    tmuxState.captures = [
+      readFileSync(join(corpus, 'claude/2.1.325/idle.txt'), 'utf8'),
+      readFileSync(join(corpus, 'claude/2.1.329/onboarding-theme.txt'), 'utf8'),
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'claude_onboarding_required',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  // Only a Claude pane is read for Claude Code's first-run screens. Another
+  // provider showing the same text is read by its own rules, as before them.
+  strictTmuxIt('reads a gemini pane that shows the Bypass Permissions warning by gemini rules at every startup check', async () => {
+    const message = 'Read inbox.md, execute now.';
+    const warning = readFrame('claude/2.1.328/bypass-permissions-yes-focused.txt');
+    const sentKeys = () => tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+
+    tmuxState.captures = [warning];
+    await expect(waitForStartupPaneReady(await acceptedContext('gemini'), { timeoutMs: 50, pollIntervalMs: 1, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    expect(sentKeys()).toEqual([]);
+
+    tmuxState.args = [];
+    tmuxState.captures = ['> \n', warning];
+    await expect(deliverStartupInbox(await acceptedContext('gemini'), message))
+      .resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    expect(sentKeys()).toEqual([message, 'Enter', 'Enter']);
+
+    tmuxState.args = [];
+    tmuxState.captures = [`> ${message}\n${warning}`];
+    await expect(retryStartupInboxSubmit(await acceptedContext('gemini'), message, { attemptAlreadyFenced: true }))
+      .resolves.toBe('resubmitted');
+    expect(sentKeys()).toEqual(['Enter']);
+  });
+
+  // Enter resubmits the typed trigger only while no first-run screen is drawn
+  // below it: on any of them Enter would answer the screen instead.
+  strictTmuxIt.each([
+    ['the Bypass Permissions warning focusing Yes, I accept', (): string => readFrame('claude/2.1.328/bypass-permissions-yes-focused.txt')],
+    ['the fullscreen renderer offer', (): string => readFrame('claude/2.1.328/fullscreen-renderer.txt')],
+    ['Claude Code onboarding', (): string => readFrame('claude/2.1.329/onboarding-security-notes.txt')],
+    ['a first-run screen with only its footer on screen', (): string => '\n  Enter to confirm · Esc to cancel\n'],
+  ] as const)('does not resubmit with Enter while %s is drawn below the typed trigger', async (_, screen) => {
+    const context = await acceptedContext('claude');
+    tmuxState.captures = [`❯ Read inbox.md, execute now.\n${screen()}`];
+
+    await expect(retryStartupInboxSubmit(context, 'Read inbox.md, execute now.', { attemptAlreadyFenced: true }))
+      .resolves.toBe('unavailable');
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  strictTmuxIt('fails with the consent reason when the Bypass Permissions warning first shows at the check before the trigger is typed', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    tmuxState.captures = [
+      readFileSync(join(corpus, 'claude/2.1.325/idle.txt'), 'utf8'),
+      readFileSync(join(corpus, 'claude/2.1.328/bypass-permissions.txt'), 'utf8'),
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'claude_bypass_permissions_consent_required',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  // Only a first-run screen with an answer (the renderer offer, or one whose
+  // choices are off screen) sends the check before the trigger back to the
+  // wait. The bypass warning, onboarding and the folder trust dialog stop the
+  // start on that one read, even when the next read would show an idle pane.
+  strictTmuxIt.each([
+    ['the Bypass Permissions warning', 'claude/2.1.328/bypass-permissions.txt', 'claude_bypass_permissions_consent_required'],
+    ['Claude Code onboarding', 'claude/2.1.329/onboarding-theme.txt', 'claude_onboarding_required'],
+    ['the folder trust dialog', 'claude/2.1.325/trust.txt', 'selector_persistent'],
+  ] as const)('stops on the one read of %s at the check before the trigger is typed', async (_, file, reason) => {
+    const context = await acceptedContext('claude');
+    const idle = readFrame('claude/2.1.325/idle.txt');
+    tmuxState.captures = [idle, readFrame(file), idle];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({ ok: false, reason });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    expect(tmuxState.args.filter(args => args[0] === 'capture-pane')).toHaveLength(2);
+  });
+
+  // Claude Code 2.1.330 was measured drawing its trust dialog and the bypass
+  // warning over several captures, each partial frame on screen for about
+  // 4 ms. No key goes out on a partial frame; once the whole screen is drawn
+  // it is handled as before: the trust dialog gets Down then Enter, the
+  // bypass warning no key at all.
+  const v330 = (state: string) => readFrame(`claude/2.1.330/${state}.txt`);
+  strictTmuxIt.each([
+    ['trust-no-choice-partial', 'trust'],
+    ['trust-yes-choice-partial', 'trust'],
+    ['trust-body-partial', 'trust'],
+    ['bypass-permissions-no-choices', 'bypass-permissions'],
+    ['bypass-permissions-body-partial', 'bypass-permissions'],
+  ] as const)('sends no key on the recorded 2.1.330 frame %s, drawn before the whole %s screen', async (partial, whole) => {
+    const context = await acceptedContext('claude');
+    const frames = {
+      partial: v330(partial),
+      'trust': v330('trust'),
+      'trust-yes-focused': v330('trust-yes-focused'),
+      'bypass-permissions': v330('bypass-permissions'),
+      idle: readFrame('claude/2.1.325/idle.txt'),
+    };
+    // `shown` is what the pane draws now; each key is charged to the frame the
+    // last capture returned, the one the code decided on.
+    let shown: keyof typeof frames = 'partial';
+    let lastReturned: keyof typeof frames | null = null;
+    let applied = 0;
+    const keysSeenOn: Array<[keyof typeof frames | null, string]> = [];
+    const applyKeys = () => {
+      const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([lastReturned, key]);
+        if (key === 'Down' && shown === 'trust') shown = 'trust-yes-focused';
+        if (key === 'Enter' && shown === 'trust-yes-focused') shown = 'idle';
+      }
+    };
+    tmuxState.captureAt = () => {
+      applyKeys();
+      lastReturned = shown;
+      if (shown === 'partial') shown = whole;
+      return frames[lastReturned];
+    };
+
+    await deliverStartupInbox(context, 'Read inbox.md, execute now.');
+    applyKeys();
+    expect(keysSeenOn.filter(([frame]) => frame === 'partial')).toEqual([]);
+  });
+
+  // A pane that draws `screens[start]`, moves to the screen named by a key
+  // when that key arrives, and to `next` after one capture. Each key is
+  // charged to the screen the last capture returned, the one the code decided on.
+  type Screen = { frame: string; next?: string; Down?: string; Enter?: string };
+  function scriptedPane(screens: Record<string, Screen>, start: string) {
+    let shown = start;
+    let lastReturned: string | null = null;
+    let applied = 0;
+    const keysSeenOn: Array<[string | null, string]> = [];
+    const applyKeys = () => {
+      const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([lastReturned, key]);
+        shown = screens[shown]![key as 'Down' | 'Enter'] ?? shown;
+      }
+    };
+    tmuxState.captureAt = () => {
+      applyKeys();
+      lastReturned = shown;
+      shown = screens[shown]!.next ?? shown;
+      return screens[lastReturned]!.frame;
+    };
+    return {
+      keysOn: (screen: string) => {
+        applyKeys();
+        return keysSeenOn.filter(([on]) => on === screen).map(([, key]) => key);
+      },
+    };
+  }
+  const trigger = 'Read inbox.md, execute now.';
+  const delivered = ['Down', 'Enter', trigger, 'Enter', 'Enter'];
+  const sentKeys = () => tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+
+  strictTmuxIt.each(['trust-no-choice-partial', 'trust-yes-choice-partial'] as const)(
+    'waits out the recorded 2.1.330 frame %s, then answers the whole trust dialog and delivers',
+    async (partial) => {
+      const context = await acceptedContext('claude');
+      const pane = scriptedPane({
+        partial: { frame: v330(partial), next: 'trust' },
+        trust: { frame: v330('trust'), Down: 'yes' },
+        yes: { frame: v330('trust-yes-focused'), Enter: 'idle' },
+        idle: { frame: readFrame('claude/2.1.325/idle.txt') },
+      }, 'partial');
+
+      await expect(deliverStartupInbox(context, trigger)).resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+      expect(sentKeys()).toEqual(delivered);
+      expect(pane.keysOn('partial')).toEqual([]);
+    },
+  );
+
+  // After Down, Claude Code redraws both choices; a capture can cut the
+  // redraw below a "❯ Yes" line not drawn whole, with the old ❯ on "No, exit"
+  // gone or still there.
+  strictTmuxIt.each([
+    ['"No, exit" redrawn first', '  No, exit'],
+    ['"Yes" redrawn first', '❯ No, exit'],
+  ] as const)('waits out a trust dialog redrawn after Down and cut at "❯ Yes, I tr" (%s), then delivers', async (_, noLine) => {
+    const context = await acceptedContext('claude');
+    const yes = v330('trust-yes-focused');
+    const cut = `${yes.slice(0, yes.indexOf('  No, exit'))}${noLine}\n ❯ Yes, I tr\n`;
+    const pane = scriptedPane({
+      trust: { frame: v330('trust'), Down: 'cut' },
+      cut: { frame: cut, next: 'yes' },
+      yes: { frame: yes, Enter: 'idle' },
+      idle: { frame: readFrame('claude/2.1.325/idle.txt') },
+    }, 'trust');
+
+    await expect(deliverStartupInbox(context, trigger)).resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    expect(sentKeys()).toEqual(delivered);
+    expect(pane.keysOn('cut')).toEqual([]);
+  });
+
+  // A guard, not a measured sequence: the trust dialog starting to draw after
+  // the wait saw an idle pane is unlikely. It pins that the check before the
+  // trigger is typed, catching the dialog mid-draw, sends the start back to
+  // the wait instead of typing into it.
+  strictTmuxIt('sends the start back to the wait when the check before the trigger catches the trust dialog mid-draw', async () => {
+    const context = await acceptedContext('claude');
+    const idle = readFrame('claude/2.1.325/idle.txt');
+    const pane = scriptedPane({
+      idleFirst: { frame: idle, next: 'partial' },
+      partial: { frame: v330('trust-no-choice-partial'), next: 'trust' },
+      trust: { frame: v330('trust'), Down: 'yes' },
+      yes: { frame: v330('trust-yes-focused'), Enter: 'idle' },
+      idle: { frame: idle },
+    }, 'idleFirst');
+
+    await expect(deliverStartupInbox(context, trigger)).resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    expect(sentKeys()).toEqual(delivered);
+    expect(pane.keysOn('partial')).toEqual([]);
+  });
+
+  strictTmuxIt('stops without Enter when the check after the trigger is typed catches the trust dialog mid-draw', async () => {
+    const context = await acceptedContext('claude');
+    const idle = readFrame('claude/2.1.325/idle.txt');
+    const pane = scriptedPane({
+      idleWait: { frame: idle, next: 'idleCheck' },
+      idleCheck: { frame: idle, next: 'partial' },
+      partial: { frame: v330('trust-no-choice-partial'), next: 'trust' },
+      trust: { frame: v330('trust') },
+    }, 'idleWait');
+
+    await expect(deliverStartupInbox(context, trigger)).resolves.toEqual({ ok: false, reason: 'selector_persistent' });
+    expect(sentKeys()).toEqual([trigger]);
+    expect(pane.keysOn('partial')).toEqual([]);
+  });
+
+  strictTmuxIt('answers the whole recorded 2.1.330 trust dialog with Down then Enter, then delivers', async () => {
+    const context = await acceptedContext('claude');
+    const frames = { trust: v330('trust'), yes: v330('trust-yes-focused'), idle: readFrame('claude/2.1.325/idle.txt') };
+    let shown: keyof typeof frames = 'trust';
+    let applied = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && shown === 'trust') shown = 'yes';
+        if (key === 'Enter' && shown === 'yes') shown = 'idle';
+      }
+      return frames[shown];
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.'))
+      .resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    expect(keysSeenOn.slice(0, 3)).toEqual([['trust', 'Down'], ['yes', 'Enter'], ['idle', 'Read inbox.md, execute now.']]);
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+      .toEqual(['Down', 'Enter', 'Read inbox.md, execute now.', 'Enter', 'Enter']);
+  });
+
+  strictTmuxIt('fails at once on the whole recorded 2.1.330 Bypass Permissions warning and sends it no key', async () => {
+    const context = await acceptedContext('claude');
+    tmuxState.captures = [v330('bypass-permissions')];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: false,
+      reason: 'claude_bypass_permissions_consent_required',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+  });
+
+  strictTmuxIt('sends no key to a renderer offer redrawn below an old one focused on Not now until the new copy draws its ❯', async () => {
+    const context = await acceptedContext('claude');
+    const offer = readFrame('claude/2.1.328/fullscreen-renderer.txt');
+    const notNow = readFrame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt');
+    const frames = {
+      partial: `${notNow}\n${offer.slice(0, offer.indexOf('❯ 1. Yes') + '❯ 1. Ye'.length)}\n`,
+      unmarked: `${notNow}\n${offer.replace('❯ 1. Yes, try it', '  1. Yes, try it')}`,
+      offered: `${notNow}\n${offer}`,
+      notNow: `${notNow}\n${notNow}`,
+      accepted: readFrame('claude/2.1.325/idle.txt'),
+      dismissed: readFrame('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    };
+    // The new copy is drawn halfway, then whole without its ❯, then with it.
+    let shown: keyof typeof frames = 'partial';
+    let captures = 0;
+    let applied = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && shown === 'offered') shown = 'notNow';
+        if (key === 'Enter' && shown !== 'dismissed') shown = shown === 'notNow' ? 'dismissed' : 'accepted';
+      }
+      captures++;
+      if (captures === 2 && shown === 'partial') shown = 'unmarked';
+      if (captures === 4 && shown === 'unmarked') shown = 'offered';
+      return frames[shown];
+    };
+
+    await deliverStartupInbox(context, 'Read inbox.md, execute now.');
+    expect(keysSeenOn.slice(0, 2)).toEqual([['offered', 'Down'], ['notNow', 'Enter']]);
+    expect(shown).toBe('dismissed');
+  });
+
+  strictTmuxIt('answers a fullscreen renderer offer that first shows at the check before the trigger is typed, then delivers', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const read = (file: string) => readFileSync(join(corpus, file), 'utf8');
+    const frames = {
+      idle: read('claude/2.1.325/idle.txt'),
+      offered: read('claude/2.1.328/fullscreen-renderer.txt'),
+      notNow: read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      accepted: 'fullscreen renderer on\n',
+      dismissed: read('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    };
+    // Idle at the readiness wait, then the offer from the next capture on.
+    let shown: keyof typeof frames = 'idle';
+    let captures = 0;
+    let applied = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      if (++captures === 2) shown = 'offered';
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys')
+        .map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && shown === 'offered') shown = 'notNow';
+        if (key === 'Enter' && (shown === 'offered' || shown === 'notNow')) shown = shown === 'notNow' ? 'dismissed' : 'accepted';
+      }
+      return frames[shown];
+    };
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+      ok: true,
+      kind: 'attempted_unconfirmed',
+    });
+    expect(keysSeenOn.slice(0, 3)).toEqual([['offered', 'Down'], ['notNow', 'Enter'], ['dismissed', 'Read inbox.md, execute now.']]);
+    expect(shown).toBe('dismissed');
+  });
+
+  // The wait answers a dialog seen at the check before the trigger is typed
+  // once. A dialog still pending at the next check is not answered again: the
+  // trigger is never typed and no key follows the first answer. The bypass
+  // warning and onboarding keep their own reasons there too.
+  strictTmuxIt.each([
+    ['the renderer offer drawn again', () => readFrame('claude/2.1.328/fullscreen-renderer.txt'), 'selector_persistent'],
+    ['a first-run screen with only its footer on screen', () =>
+      `${readFrame('claude/2.1.325/idle.txt').trimEnd()}\n\n  Enter to confirm · Esc to cancel\n`, 'selector_persistent'],
+    ['the Bypass Permissions warning', () => readFrame('claude/2.1.328/bypass-permissions.txt'), 'claude_bypass_permissions_consent_required'],
+    ['Claude Code onboarding', () => readFrame('claude/2.1.329/onboarding-theme.txt'), 'claude_onboarding_required'],
+  ] as const)('stops before typing the trigger when %s follows the answered renderer offer', async (_, pendingAgain, reason) => {
+    const context = await acceptedContext('claude');
+    const idle = readFrame('claude/2.1.325/idle.txt');
+    const offer = readFrame('claude/2.1.328/fullscreen-renderer.txt');
+    // Readiness wait, pre-input check, the retried wait (offer, Down, Not now,
+    // Enter, dismissed), then the second pre-input check.
+    tmuxState.captures = [
+      idle,
+      offer,
+      offer,
+      readFrame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      readFrame('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+      pendingAgain(),
+    ];
+
+    await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({ ok: false, reason });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+      .toEqual(['Down', 'Enter']);
+  });
+
+  // A first-run screen can also draw after the trigger text is typed, when only
+  // Enter is left to send. Enter would answer the dialog instead of submitting
+  // the trigger, so delivery stops there and the dialog gets no key at all.
+  const paneFrameCorpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+  const postInjectionDialogs = [
+    ['the fullscreen renderer offer', 'claude/2.1.328/fullscreen-renderer.txt', 'selector_persistent'],
+    ['Claude Code onboarding', 'claude/2.1.329/onboarding-theme.txt', 'claude_onboarding_required'],
+    ['the Bypass Permissions warning', 'claude/2.1.328/bypass-permissions.txt', 'claude_bypass_permissions_consent_required'],
+    ['the folder trust dialog', 'claude/2.1.328/trust-yes-focused.txt', 'selector_persistent'],
+  ] as const;
+
+  strictTmuxIt.each(postInjectionDialogs.flatMap(([dialog, file, reason]) => [
+    { dialog, stage: 'the first startup Enter', file, reason, enters: 0 },
+    { dialog, stage: 'the second startup Enter', file, reason, enters: 1 },
+  ]))(
+    'stops before $stage when $dialog draws after the trigger is typed, and sends it no key',
+    async ({ file, reason, enters }) => {
+      const context = await acceptedContext('claude');
+      const message = 'Read inbox.md, execute now.';
+      const idle = readFileSync(join(paneFrameCorpus, 'claude/2.1.325/idle.txt'), 'utf8');
+      const idleUntilDialog = Array.from({ length: enters }, () => idle);
+      // One capture for the readiness wait, one for the pre-input check, then
+      // one before each Enter: the dialog draws before the Enter under test.
+      tmuxState.captures = [idle, idle, ...idleUntilDialog, readFileSync(join(paneFrameCorpus, file), 'utf8')];
+
+      await expect(deliverStartupInbox(context, message)).resolves.toEqual({ ok: false, reason });
+      expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+        .toEqual([message, ...idleUntilDialog.map(() => 'Enter')]);
+    },
+  );
+
+  strictTmuxIt('stops before the first startup Enter when the renderer offer draws below the typed trigger', async () => {
+    const context = await acceptedContext('claude');
+    const message = 'Read inbox.md, execute now.';
+    const idle = readFileSync(join(paneFrameCorpus, 'claude/2.1.325/idle.txt'), 'utf8');
+    const offer = readFileSync(join(paneFrameCorpus, 'claude/2.1.328/fullscreen-renderer.txt'), 'utf8');
+    tmuxState.captures = [idle, idle, `❯ ${message}\n${offer}`];
+
+    await expect(deliverStartupInbox(context, message)).resolves.toEqual({
+      ok: false,
+      reason: 'selector_persistent',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+      .toEqual([message]);
+  });
+
+  strictTmuxIt('stops before the first startup Enter when only a first-run screen’s footer is on screen', async () => {
+    const context = await acceptedContext('claude');
+    const message = 'Read inbox.md, execute now.';
+    const idle = readFileSync(join(paneFrameCorpus, 'claude/2.1.325/idle.txt'), 'utf8');
+    tmuxState.captures = [idle, idle, `❯ ${message}\n\n  Enter to confirm · Esc to cancel\n`];
+
+    await expect(deliverStartupInbox(context, message)).resolves.toEqual({
+      ok: false,
+      reason: 'selector_persistent',
+    });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1))))
+      .toEqual([message]);
+  });
+
+  strictTmuxIt('sends no key while only a first-run screen’s footer is on screen, then answers the offer once its choices show', async () => {
+    const context = await acceptedContext('claude');
+    const footerOnly = '\n  Enter to confirm · Esc to cancel\n';
+    tmuxState.captures = [
+      footerOnly,
+      footerOnly,
+      readFrame('claude/2.1.328/fullscreen-renderer.txt'),
+      readFrame('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      readFrame('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    ];
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 5_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    const captures = tmuxState.args.filter(args => args[0] === 'capture-pane' || args[0] === 'send-keys');
+    expect(captures.map(args => args[0] === 'send-keys' ? String(args.at(-1)) : 'capture'))
+      .toEqual(['capture', 'capture', 'capture', 'Down', 'capture', 'Enter', 'capture']);
+  });
+
+  strictTmuxIt('answers Claude Code’s fullscreen renderer offer with Not now, resending a dropped Down', async () => {
+    const context = await acceptedContext('claude');
+    const corpus = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'pane-frames');
+    const read = (file: string) => readFileSync(join(corpus, file), 'utf8');
+    const frames = {
+      offered: read('claude/2.1.328/fullscreen-renderer.txt'),
+      notNow: read('claude/2.1.328/fullscreen-renderer-not-now-focused.txt'),
+      accepted: 'fullscreen renderer on\n',
+      dismissed: read('claude/2.1.328/idle-after-fullscreen-renderer.txt'),
+    };
+    // Drops the first Down, like Claude Code 2.1.328's trust dialog; Enter
+    // confirms the choice focused when it arrives.
+    let shown: keyof typeof frames = 'offered';
+    let applied = 0;
+    let downs = 0;
+    const keysSeenOn: Array<[keyof typeof frames, string]> = [];
+    tmuxState.captureAt = () => {
+      const keys = tmuxState.args.slice(applied)
+        .filter(args => args[0] === 'send-keys' && !args.includes('-l'))
+        .map(args => String(args.at(-1)));
+      applied = tmuxState.args.length;
+      for (const key of keys) {
+        keysSeenOn.push([shown, key]);
+        if (key === 'Down' && ++downs > 1 && shown === 'offered') shown = 'notNow';
+        if (key === 'Enter' && (shown === 'offered' || shown === 'notNow')) shown = shown === 'notNow' ? 'dismissed' : 'accepted';
+      }
+      return frames[shown];
+    };
+
+    await expect(waitForStartupPaneReady(context, { timeoutMs: 5_000, attemptAlreadyFenced: true }))
+      .resolves.toEqual({ ok: true });
+    expect(shown).toBe('dismissed');
+    expect(keysSeenOn).toEqual([['offered', 'Down'], ['offered', 'Down'], ['notNow', 'Enter']]);
+  });
 
   strictTmuxIt.each([
     ['Cursor workspace trust', 'Workspace Trust Required\nDo you trust the contents of this directory?\nPass --trust, --yolo, or -f to skip this prompt.\n'],
@@ -1346,5 +2060,103 @@ describe('startup input after the provider exits to a shell prompt', () => {
 
     await expect(probeStartupPaneActivity(context)).resolves.toBe('dead');
     expect(sendKeys()).toEqual([]);
+  });
+});
+
+describe('startup readiness wait set by OMC_TEAM_READY_TIMEOUT_MS', () => {
+  const message = 'Read inbox.md, execute now.';
+  const framesRoot = join(__dirname, 'fixtures', 'pane-frames', 'claude');
+  let warnings: string[] = [];
+  let savedReadyTimeout: string | undefined;
+
+  beforeEach(() => {
+    savedReadyTimeout = process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    delete process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    warnings = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    if (savedReadyTimeout === undefined) delete process.env.OMC_TEAM_READY_TIMEOUT_MS;
+    else process.env.OMC_TEAM_READY_TIMEOUT_MS = savedReadyTimeout;
+  });
+
+  // Advance the fake clock only while the code under test sleeps, so file I/O
+  // in the attempt checks never lets the deadline pass early.
+  async function settleOnFakeClock<T>(work: Promise<T>): Promise<T> {
+    let settled = false;
+    void work.then(() => { settled = true; }, () => { settled = true; });
+    while (!settled) {
+      if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync();
+      else await new Promise(resolve => setImmediate(resolve));
+    }
+    return work;
+  }
+
+  async function bannerThenIdle(bannerMs: number): Promise<number> {
+    const banner = await readFile(join(framesRoot, 'unversioned', 'startup-banner-bypass.txt'), 'utf8');
+    const idle = await readFile(join(framesRoot, '2.1.325', 'idle.txt'), 'utf8');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const startedAt = Date.now();
+    tmuxState.captureAt = () => (Date.now() - startedAt < bannerMs ? banner : idle);
+    return startedAt;
+  }
+
+  strictTmuxIt('waits out a 40s banner at 60000 and then sends the inbox once', async () => {
+    const context = await acceptedContext('claude');
+    process.env.OMC_TEAM_READY_TIMEOUT_MS = '60000';
+    const startedAt = await bannerThenIdle(40_000);
+
+    await expect(settleOnFakeClock(deliverStartupInbox(context, message)))
+      .resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+    const literals = tmuxState.args.filter(args => args[0] === 'send-keys' && args.includes('-l'));
+    expect(literals.map(args => args.at(-1))).toEqual([message]);
+    expect(Math.min(...tmuxState.sendTimes) - startedAt).toBeGreaterThanOrEqual(40_000);
+    expect(warnings).toEqual([]);
+  });
+
+  strictTmuxIt.each([
+    [undefined, 30_000, 'OMC_TEAM_READY_TIMEOUT_MS unset (effective 30000ms'],
+    ['abc', 30_000, 'OMC_TEAM_READY_TIMEOUT_MS=abc (effective 30000ms'],
+    ['5000', 30_000, 'OMC_TEAM_READY_TIMEOUT_MS=5000 (effective 30000ms'],
+    ['600000', 120_000, 'OMC_TEAM_READY_TIMEOUT_MS=600000 (effective 120000ms'],
+  ] as const)('times out a banner that never clears at the clamped wait for %j', async (raw, waitMs, note) => {
+    const context = await acceptedContext('claude');
+    if (raw !== undefined) process.env.OMC_TEAM_READY_TIMEOUT_MS = raw;
+    const startedAt = await bannerThenIdle(Number.POSITIVE_INFINITY);
+
+    await expect(settleOnFakeClock(deliverStartupInbox(context, message)))
+      .resolves.toEqual({ ok: false, reason: 'readiness_timeout' });
+    expect(Date.now() - startedAt).toBe(waitMs);
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`timed out after ${waitMs}ms`);
+    expect(warnings[0]).toContain(note);
+  });
+
+  strictTmuxIt('reports the timeout of the second wait when a first-run screen drawn at the check before the trigger never shows its choices', async () => {
+    const context = await acceptedContext('claude');
+    const idle = await readFile(join(framesRoot, '2.1.325', 'idle.txt'), 'utf8');
+    tmuxState.captures = [idle, `${idle.trimEnd()}\n\n  Enter to confirm · Esc to cancel\n`];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+
+    await expect(settleOnFakeClock(deliverStartupInbox(context, message)))
+      .resolves.toEqual({ ok: false, reason: 'readiness_timeout' });
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys')).toEqual([]);
+    expect(warnings).toHaveLength(1);
+  });
+
+  strictTmuxIt('reports the wait the caller passed, not one recomputed from the variable', async () => {
+    const context = await acceptedContext('claude');
+    await bannerThenIdle(Number.POSITIVE_INFINITY);
+
+    await expect(settleOnFakeClock(waitForStartupPaneReady(context, { timeoutMs: 50, pollIntervalMs: 1 })))
+      .resolves.toEqual({ ok: false, reason: 'readiness_timeout' });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('timed out after 50ms; OMC_TEAM_READY_TIMEOUT_MS unset (effective 50ms;');
   });
 });

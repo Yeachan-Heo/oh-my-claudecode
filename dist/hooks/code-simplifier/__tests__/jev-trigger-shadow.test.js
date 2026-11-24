@@ -56,7 +56,7 @@ afterEach(() => {
         rmSync(dir, { recursive: true, force: true });
     }
 });
-function stubFetch() {
+function stubFetch(noul = true) {
     const calls = [];
     const fetchFn = (async (_url, init) => {
         const body = init?.body;
@@ -66,7 +66,7 @@ function stubFetch() {
             status: 200,
             json: async () => ({
                 answers: {
-                    simplification_worthy: { type: 'noul', noul: true, confidence: 0.8 },
+                    simplification_worthy: { type: 'noul', noul, confidence: 0.8 },
                 },
             }),
         };
@@ -176,6 +176,28 @@ describe('simplifier-trigger shadow judgment point', () => {
         expect(entry.mode).toBe('degraded');
         expect(entry.heuristic).toBe(true);
         expect(entry.jev).toBeNull();
+    });
+});
+describe('simplifier-trigger point in active mode', () => {
+    // The API returns noul as the probability of "yes". Each file list is picked
+    // so that the twin says the opposite of Jev, which shows that Jev decided.
+    it.each([
+        { noul: 0.92, files: [], expected: true },
+        { noul: 0.08, files: ['a.ts'], expected: false },
+    ])('reads a noul probability of $noul as $expected', async ({ noul, files, expected }) => {
+        process.env.TYPESAFE_API_KEY = TEST_KEY;
+        process.env.OMC_JEV = 'simplifier-trigger:active';
+        expect(computeSimplifierTriggerTwin(stateDir, files)).toBe(!expected);
+        const { fetchFn, calls } = stubFetch(noul);
+        const result = await recordSimplifierTriggerShadow({
+            cwd: repoDir,
+            stateDir,
+            files,
+            shouldBlock: !expected,
+            fetchFn,
+        });
+        expect(result).toEqual({ answer: expected, source: 'jev', mode: 'active' });
+        expect(calls).toHaveLength(1);
     });
 });
 //# sourceMappingURL=jev-trigger-shadow.test.js.map

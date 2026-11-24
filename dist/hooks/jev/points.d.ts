@@ -51,6 +51,8 @@ export interface RecordJudgmentCall<T> {
     /** Index into the point's question sets (loop-continuation's Score call uses 1).
      * Provided to mapHeuristic to allow conditional extraction of the right field. */
     questionSet?: number;
+    /** Ids of the hook call for the log line (OMC_JEV_LOG_CONTEXT); see ResolveJudgmentArgs.logContext. */
+    logContext?: unknown;
     /** Test hook: injected transport. */
     fetchFn?: typeof fetch;
 }

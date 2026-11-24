@@ -2,7 +2,7 @@
  * Stop Hook Callbacks
  *
  * Provides configurable callback handlers for session end events.
- * Supports file logging, Telegram, and Discord notifications.
+ * Supports file logging, Telegram, Discord, and Slack notifications.
  */
 import type { SessionMetrics } from './index.js';
 /**
@@ -10,7 +10,7 @@ import type { SessionMetrics } from './index.js';
  */
 export declare function formatSessionSummary(metrics: SessionMetrics, format?: 'markdown' | 'json'): string;
 export interface TriggerStopCallbacksOptions {
-    skipPlatforms?: Array<'file' | 'telegram' | 'discord'>;
+    skipPlatforms?: Array<'file' | 'telegram' | 'discord' | 'slack'>;
     /** Stable manifest action key for retries of a local callback write. */
     idempotencyKey?: string;
 }

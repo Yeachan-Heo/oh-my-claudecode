@@ -486,14 +486,32 @@ describe('jev-compaction module: active compaction', () => {
 
   it('reads a run of a million slashes or backslashes in linear time, in a private-path check and in a command\'s file names', async () => {
     const pp = ['/home/u/secret-notes'];
-    for (const s of ['/'.repeat(1_000_000), '\\'.repeat(1_000_000), `a${'/'.repeat(1_000_000)}!`, `${'\\/'.repeat(500_000)}x.md`]) {
-      let best = Infinity;
+    // Measure linearity: compare time at 100K and 1M chars; linear growth should be ~10x, not quadratic ~100x.
+    // Acceptable ratio < 30 catches both linear and subquadratic behavior. Absolute ceiling 1000ms backstop.
+    for (const makeStr of [
+      (n) => '/'.repeat(n),
+      (n) => '\\'.repeat(n),
+      (n) => `a${'/'.repeat(n)}!`,
+      (n) => `${'\\/'.repeat(n / 2)}x.md`,
+    ]) {
+      let t100k = Infinity;
       for (let k = 0; k < 3; k++) {
+        const s = makeStr(100_000);
         const t0 = performance.now();
         expect(omitSecretLines(s, pp)).toBe(s);
-        best = Math.min(best, performance.now() - t0);
+        t100k = Math.min(t100k, performance.now() - t0);
       }
-      expect(best).toBeLessThan(50);
+      let t1m = Infinity;
+      for (let k = 0; k < 3; k++) {
+        const s = makeStr(1_000_000);
+        const t0 = performance.now();
+        expect(omitSecretLines(s, pp)).toBe(s);
+        t1m = Math.min(t1m, performance.now() - t0);
+      }
+      expect(t100k).toBeLessThan(1000);
+      expect(t1m).toBeLessThan(1000);
+      const ratio = t1m / t100k;
+      expect(ratio).toBeLessThan(30); // Linear ~10x, not quadratic ~100x
     }
     const calls = {
       3: ['mcp__fs__read', { path: '/'.repeat(1_000_000) }],

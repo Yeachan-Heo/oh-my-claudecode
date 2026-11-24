@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,6 +95,7 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
   let status: number;
   let answer: Record<string, unknown>;
   let responseDelayMs: number;
+  let shadowRuns: number;
 
   beforeEach(async () => {
     cwd = mkdtempSync(join(tmpdir(), "jev-context-pruning-"));
@@ -102,6 +103,7 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     status = 200;
     answer = scoreAnswer(0);
     responseDelayMs = 0;
+    shadowRuns = 0;
     server = createServer((request, response) => {
       let raw = "";
       request.setEncoding("utf8");
@@ -166,11 +168,28 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     };
   });
 
+  // The detached shadow resolver writes its row to jev-logs/shadow.jsonl after
+  // the hook has exited, so wait for it before the directory is removed.
+  async function waitForShadowRows() {
+    const logPath = join(cwd, "jev-logs", "shadow.jsonl");
+    for (let i = 0; i < 100 && shadowRuns > 0; i++) {
+      const rows = existsSync(logPath)
+        ? readFileSync(logPath, "utf8")
+            .split("\n")
+            .filter((line) => line.includes('"mode":"shadow"')).length
+        : 0;
+      if (rows >= shadowRuns) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
   afterEach(async () => {
+    await waitForShadowRows();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
-    rmSync(cwd, { recursive: true, force: true });
+    // A detached shadow resolver can still hold a file for a moment on Windows.
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
 
   function postToolInput(toolName = "read", contextPercent = 95, sessionSuffix = "") {
@@ -347,6 +366,9 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     expect(requests).toHaveLength(0);
 
     const shadowInput = postToolInput("read", 80, "-shadow");
+    // Register the run before the hook starts, so afterEach waits for the
+    // detached resolver even if an assertion below fails first.
+    shadowRuns += 1;
     const shadow = await runScript(
       "post-tool-verifier.mjs",
       shadowInput,
@@ -359,9 +381,10 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     const shadowJson = JSON.parse(shadow.stdout);
     const baselineJson = JSON.parse(baseline.stdout);
     expect(shadowJson).toEqual(baselineJson);
-    // Shadow mode should still attempt the request (in the background, may not complete immediately)
-    // Give the detached child a moment to post its request
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Shadow mode should still attempt the request, from a detached child that
+    // may start late on a busy machine: wait for its shadow row, which is
+    // written after the request completes.
+    await waitForShadowRows();
     expect(requests.length).toBeGreaterThanOrEqual(1);
   });
 

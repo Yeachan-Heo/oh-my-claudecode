@@ -27,10 +27,12 @@ import { buildHudWrapper } from '../lib/hud-wrapper-template.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 import { syncOmcLearnedUserSkillsForClaudeCode } from '../utils/user-skill-compat.js';
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
+import { applyExtraDisallowedToolsToMarkdown, getExtraDisallowedTools, isPlainYamlToken } from '../agents/utils.js';
 import { analyzeLegacyClaudeMd, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
 import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig } from './claude-md-transaction.js';
 import { HISTORICAL_AGENT_OWNERSHIP } from './historical-agent-ownership.js';
 import entitlementManifest from '../config/builtin-skill-entitlements.json' with { type: 'json' };
+import { parseHookInvocation } from '../../scripts/lib/hook-command-normalizer.mjs';
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
 export const AGENTS_DIR = join(CLAUDE_CONFIG_DIR, 'agents');
@@ -482,6 +484,16 @@ export function isProjectScopedPlugin() {
 function isObjectRecord(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
+/** Same script, whether the manifest still uses a shell string or exec `args`. */
+function installedHookIdentity(entry) {
+    if (typeof entry.command !== 'string')
+        return '';
+    const parsed = parseHookInvocation(entry);
+    if (!parsed)
+        return entry.command;
+    const tail = parsed.extra.length > 0 ? ` ${parsed.extra.join(' ')}` : '';
+    return `omc:${parsed.script}${tail}`;
+}
 function filterSettingsPluginDuplicateHooks(hooks, commandsByEvent) {
     const filteredHooks = Object.create(null);
     const removedByEvent = new Map();
@@ -505,7 +517,7 @@ function filterSettingsPluginDuplicateHooks(hooks, commandsByEvent) {
                 const hook = entry;
                 const isDuplicate = hook.type === 'command'
                     && typeof hook.command === 'string'
-                    && eventCommands.has(hook.command);
+                    && eventCommands.has(installedHookIdentity(hook));
                 if (isDuplicate) {
                     removed++;
                     removedByEvent.set(eventType, (removedByEvent.get(eventType) ?? 0) + 1);
@@ -1507,7 +1519,7 @@ function collectPluginHookManifestSnapshot() {
                             diagnostics: [`${root}: hooks.${eventType} contains a command hook without a string command`],
                         };
                     }
-                    commands.add(entry.command);
+                    commands.add(installedHookIdentity(entry));
                 }
             }
             if (commands.size > 0)
@@ -1786,6 +1798,9 @@ export function syncInstalledPluginPayload() {
     const sourceResolution = resolveBestPluginSyncSource(targetRoots);
     const sourceRoot = sourceResolution.sourceRoot;
     if (!sourceRoot) {
+        // If all target roots have complete plugin payloads, we can skip sync
+        // and return without errors. Complete payloads don't need to be repaired
+        // from a source; they just need deduplication cleanup which happens separately.
         if (targetRoots.every(root => validatePluginSyncPayload(root).length === 0)) {
             return { synced: false, errors: [], sourceRoot: null, targetRoots };
         }
@@ -2240,7 +2255,14 @@ export function install(options = {}) {
             // Install agents
             if (shouldInstallLegacyAgents) {
                 log('Installing agent definitions...');
-                for (const [filename, content] of Object.entries(loadAgentDefinitions())) {
+                const extraDisallowedTools = getExtraDisallowedTools();
+                for (const token of extraDisallowedTools) {
+                    if (!isPlainYamlToken(token)) {
+                        log(`  Skipping extra disallowed tool ${JSON.stringify(token)} (not a plain YAML value)`);
+                    }
+                }
+                for (const [filename, rawContent] of Object.entries(loadAgentDefinitions())) {
+                    const content = applyExtraDisallowedToolsToMarkdown(rawContent, extraDisallowedTools);
                     const filepath = join(AGENTS_DIR, filename);
                     if (existsSync(filepath) && !options.force) {
                         log(`  Skipping ${filename} (already exists)`);
@@ -2447,8 +2469,9 @@ export function install(options = {}) {
                     runningAsPlugin,
                 });
                 // 3. Persist the detected node binary path into .omc-config.json so that
-                //    find-node.sh (used in hooks/hooks.json) can locate it at hook runtime
-                //    even when node is not on PATH (nvm/fnm users, issue #892).
+                //    find-node.sh can locate it at hook runtime on Unix, where a published
+                //    cache rewrites hooks to the sh bootstrap (nvm/fnm, issue #892).
+                //    The shipped hooks.json spawns node directly and does not call it.
                 try {
                     const configPath = join(CLAUDE_CONFIG_DIR, OMC_CONFIG_FILE_REL);
                     let omcConfig = {};
