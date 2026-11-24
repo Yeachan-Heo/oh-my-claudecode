@@ -354,6 +354,41 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readme, 'no claim that edits are picked up while a session runs').not.toMatch(/normally picks up edits/);
   });
 
+  it('add refuses an interpreter that cannot run the hook: not executable, or one that fails on the hook (so a successful add can hold calls)', () => {
+    const f = fixture('settings-interpreter');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const noExec = join(f.dir, 'python-no-exec');
+    writeFileSync(noExec, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    chmodSync(noExec, 0o644);
+    const broken = join(f.dir, 'python-broken');
+    writeFileSync(broken, '#!/bin/sh\necho "boom: this is not python" >&2\nexit 1\n', { mode: 0o755 });
+    chmodSync(broken, 0o755);
+    const r1 = tool(f, 'add', ['--python', noExec]);
+    expect(r1.status, `${r1.stdout}${r1.stderr}`).toBe(2);
+    expect(r1.stderr).toMatch(/interpreter .* is not executable/);
+    const r2 = tool(f, 'add', ['--python', broken]);
+    expect(r2.status, `${r2.stdout}${r2.stderr}`).toBe(2);
+    expect(r2.stderr).toMatch(/interpreter .* cannot run the hook/);
+    expect(readText(f.settings), 'nothing written').toBe(original);
+    expect(backups(f), 'no backup either').toHaveLength(0);
+  });
+
+  it('add refuses a pause file, hook log, hook or interpreter that is the same file as another of them or as settings.json', () => {
+    const f = fixture('settings-aliases');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    writeFileSync(f.settings, original, 'utf8');
+    const link = join(f.dir, 'pause-link.json');
+    symlinkSync(f.settings, link);
+    for (const extra of [['--pause-file', f.settings], ['--pause-file', link], ['--hook-log', f.settings], ['--hook-log', f.pause], ['--pause-file', HOOK]]) {
+      const r = tool(f, 'add', extra);
+      expect(r.status, `${extra.join(' ')}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+      expect(readText(f.settings), 'settings.json is untouched').toBe(original);
+    }
+    expect(tool(f, 'add').status, 'distinct files are fine').toBe(0);
+  });
+
   it('add refuses a timeout that is not positive: Claude Code would cancel the hook at once', () => {
     const f = fixture('settings-timeout');
     const original = JSON.stringify(base(), null, 2) + '\n';

@@ -23,7 +23,7 @@
 # pause_file, hook_log_file. Without a settings path the file is $CLAUDE_CONFIG_DIR/settings.json (surrounding blanks
 # removed, a leading ~ expanded, as the guard and OMC do), else ~/.claude/settings.json.
 # --hook defaults to the hook script next to this script, --python to the interpreter that runs this script.
-import argparse, json, os, shlex, sys, time
+import argparse, json, os, shlex, subprocess, sys, time
 
 MARK = 'five-hour-guard-hook.py'
 
@@ -186,6 +186,20 @@ def run_once():
         for label, path in (('hook', A.hook), ('interpreter', A.python)):
             if not os.path.isfile(path):
                 fail(f'the {label} {path!r} does not exist: the entry would be written but the shell guard of the command would let every call through')
+        if not os.access(A.python, os.X_OK):
+            fail(f'the interpreter {A.python!r} is not executable: the shell guard of the command (`[ -x ... ]`) would let every call through')
+        distinct = [('pause file', PAUSE_FILE), ('hook log', HOOK_LOG), ('settings file', SETTINGS), ('hook', A.hook), ('interpreter', A.python)]
+        for i, (la, pa) in enumerate(distinct):
+            for lb, pb in distinct[i + 1:]:
+                if pa and pb and (os.path.realpath(pa) == os.path.realpath(pb) or (os.path.exists(pa) and os.path.exists(pb) and os.path.samefile(pa, pb))):
+                    fail(f'the {la} ({pa}) and the {lb} ({pb}) are the same file: the hook or the guard would overwrite one as the other')
+        try:
+            probe = subprocess.run([A.python, '-I', '-c', 'import json, math, os, sys, time, urllib.parse; compile(open(sys.argv[1]).read(), sys.argv[1], "exec")', A.hook],
+                                   capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            fail(f'the interpreter {A.python!r} cannot run the hook: {e!r}')
+        if probe.returncode != 0:
+            fail(f'the interpreter {A.python!r} cannot run the hook (it must be Python 3 with the standard library): {probe.stderr.strip()[-300:]}')
         if MARK not in os.path.basename(A.hook):
             fail(f'the file name of the hook {A.hook!r} does not contain {MARK}: the entry is recognised by that name, so `check` and `remove` would not find it (copy the hook to another directory, keep its name)')
         entry = {'matcher': '*', 'hooks': [{'type': 'command', 'command': command(), 'timeout': A.timeout}]}

@@ -84,6 +84,7 @@ def check_range(name, value, low, high=None):
 
 
 check_range('--margin', A.margin, 0, MAX_MARGIN_S)
+check_range('--max-age', A.max_age, 1)   # a negative or zero age makes every entry stale: the guard would fail open for ever
 check_range('--interval', A.interval, MIN_INTERVAL_S)
 check_range('--heartbeat', A.heartbeat, 2 * A.interval, MAX_HEARTBEAT_S)   # a pause must outlive one missed tick
 check_range('--warn-every', A.warn_every, 0, 86400)
@@ -143,6 +144,31 @@ def check_writable_dir(path, label):
 
 if not os.path.isabs(PAUSE_FILE):
     fail(f'"pause_file" must be an absolute path, not {PAUSE_FILE!r}: the hook entry accepts only an absolute path and would read another file')
+
+
+def same_file(a, b):
+    """The same path once links are resolved, or the same existing file (a hard link)."""
+    if os.path.realpath(a) == os.path.realpath(b):
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def check_distinct(files):
+    """Two configured files that are one file would be read as each other's content: a pause file that is settings.json
+    would be removed as a leftover pause at start. Refuse before anything is touched."""
+    named = [(label, path) for label, path in files if path]
+    for i, (la, pa) in enumerate(named):
+        for lb, pb in named[i + 1:]:
+            if same_file(pa, pb):
+                fail(f'"{la}" ({pa}) and "{lb}" ({pb}) are the same file: the guard would remove or overwrite one as the other')
+
+
+check_distinct([('pause_file', PAUSE_FILE), ('state_file', STATE), ('state_file lock', STATE + '.lock' if STATE else ''),
+                ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS),
+                ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
 if STATE:
     check_writable_dir(STATE, 'state_file')
@@ -452,6 +478,7 @@ def main():
     if state.get('paused'):
         if state.get('resume_at') and time.time() < state['resume_at']:
             log(f'start during a pause, resume at {ts(state["resume_at"])}')
+            hook_check('start')   # the restored pause is republished on every tick: say so when no hook would observe it
         else:
             leave_pause(state, 'stored pause already over at start')
     else:

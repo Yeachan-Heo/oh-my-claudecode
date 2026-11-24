@@ -41,7 +41,7 @@ The guard removes the pause file on SIGTERM and SIGINT and on every orderly exit
 `systemctl --user restart`, which a change of `exclude` needs) releases the waiting sessions. The restarted guard brings
 the pause back from its first fresh reading of the cache, within one check; when the cache is stale at that moment the
 sessions run until a fresh reading shows the threshold. After a crash (SIGKILL, an uncaught exception) the state file
-keeps the pause: the restarted guard resumes it, and when it does not come back the pause file lapses within
+keeps the pause: the restarted guard resumes it (and checks the hook entry first, as at any start), and when it does not come back the pause file lapses within
 `--heartbeat` seconds.
 
 At start the guard checks that the directories of `pause_file` and `state_file` exist and can be written to (status 2
@@ -166,7 +166,9 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    temporary file and the backup are created readable by the owner only and get the mode of the original before any
    content is written. The rest of the file is kept as it is; a hook of another tool, also in the same group, stays (in
    a group of its own with its matcher). `add` twice changes nothing. `add` with another hook path replaces the entry in
-   place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, and a hook file whose
+   place. `add` refuses paths that are not absolute, a hook or interpreter file that does not exist, an interpreter that is not
+   executable or cannot run the hook (it is tried once: Python 3 with the standard library), two of the pause file, hook log,
+   `settings.json`, hook and interpreter that are one file, and a hook file whose
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The
    entry has a `timeout` of 21600 s (`--timeout`, at least 1), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
@@ -229,7 +231,7 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 | `--cache`, `--pause-file`, `--state`, `--log`, `--settings`, `--exclude` | from the file | the keys above (`--exclude` takes comma separated prefixes; `--settings ""` turns the hook entry check off) |
 | `--threshold <percent>` | 97 | pause at or above this five-hour percentage; above 0 and at most 100 |
 | `--resume-below <percent>` | threshold minus 10 | resume early when a fresh cache shows less; from 0 up to the threshold (a higher value would enter and leave the pause on alternate ticks) |
-| `--max-age <seconds>` | 180 | data older than this is not acted on |
+| `--max-age <seconds>` | 180 | data older than this is not acted on; at least 1 |
 | `--margin <seconds>` | 150 | resume this long after the reset time; 0 to 1800 |
 | `--interval <seconds>` | 30 | seconds between checks; at least 0.1 |
 | `--heartbeat <seconds>` | 300 | validity of the pause file after each check, which is how long a dead guard keeps sessions waiting; from twice `--interval` (one missed check must not release the sessions) up to 1800 |
@@ -240,7 +242,8 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 | `--dry-run` | off | log what would happen and write nothing |
 
 A configuration error (a missing required key, a wrong type, a number that is not finite or outside its range, a
-directory of the pause or state file that is missing, a `pause_file` that is not absolute) exits with status 2. A state
+directory of the pause or state file that is missing, a `pause_file` that is not absolute, two configured files (`pause_file`, `state_file` and its `.lock`, `usage_cache`,
+`log_file`, `settings_file`) that are one file by path, symbolic link or hard link) exits with status 2. A state
 file that does not have the shape the guard writes is ignored: the guard starts without a pause.
 
 ## Which sessions load the hook

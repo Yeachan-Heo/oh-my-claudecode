@@ -4,7 +4,7 @@
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, linkSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, GUARD, HOOK, UNIT, PYBIN, HAS_PYTHON3, cleanup, fixture, hookHeld, hookPasses, now, pauseDoc,
@@ -505,6 +505,47 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(r.stderr).toMatch(/"pause_file" must be an absolute path/);
   });
 
+  it('configured files that are one file (same path, a link, a hard link) are refused before anything is removed or written', () => {
+    const f = fixture('aliases', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const settingsText = JSON.stringify({ hooks: {}, env: { KEEP: '1' } });
+    const run = (config: Record<string, unknown>) => {
+      writeFileSync(f.settings, settingsText, 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${JSON.stringify(config)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+      expect(readText(f.settings), 'settings.json is untouched').toBe(settingsText);
+      expect(existsSync(f.settings)).toBe(true);
+    };
+    run({ pause_file: f.settings });                       // the pause file is settings.json
+    run({ state_file: f.pause });                          // pause and state
+    run({ usage_cache: f.pause });                         // pause and cache
+    run({ log_file: f.state });                            // log and state
+    run({ state_file: f.settings });                       // state and settings
+    run({ pause_file: join(f.dir, '.', 'settings.json') }); // a different spelling of the same path
+    const viaLink = join(f.dir, 'pause-link.json');
+    rmSync(viaLink, { force: true });
+    symlinkSync(f.settings, viaLink);
+    run({ pause_file: viaLink });                          // a symbolic link to settings.json
+    const hard = join(f.dir, 'pause-hard.json');
+    rmSync(hard, { force: true });
+    linkSync(f.settings, hard);
+    run({ pause_file: hard });                             // a hard link to settings.json
+    run({ hook_log_file: f.log });                         // the log of the hook is the log of the guard
+    run({ log_file: f.state + '.lock' });                  // the log file is the lock file of the state file
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'distinct files start').toBe(0);
+  });
+
+  it('--max-age must be positive: a negative one makes every entry stale and the guard fail open for ever', () => {
+    const f = fixture('max-age', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    for (const bad of ['-1', '0']) {
+      const r = runSync(GUARD, guardArgs(f, ['--once', '--max-age', bad]));
+      expect(r.status, `${bad}: ${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/--max-age must be at least 1 seconds/);
+    }
+  });
+
   it('a state file of the wrong shape is a start from nothing, not a crash that the unit would restart for ever', () => {
     const f = fixture('bad-state', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     for (const bad of ['[]', '"paused"', '{"paused":"yes","resume_at":1}', '{"paused":true,"resume_at":"x","since":1}', '{"paused":true,"resume_at":' + (Date.now() / 1000 + 600) + '}',
@@ -532,6 +573,16 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(run('bad-ts', `{"timestamp": NaN, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-stale\)/);
     expect(run('no-reset', `{"timestamp": ${ts}, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": null}}`)).toMatch(/WARNING \(reset-missing\): 5h 99\.0 %, but the usage cache has no reset time/);
     expect(run('no-reset-low', `{"timestamp": ${ts}, "data": {"fiveHourPercent": 50, "fiveHourResetsAt": null}}`), 'a low percentage without a reset time is fine').not.toMatch(/WARNING/);
+  });
+
+  it('the hook entry is checked when a stored pause is restored too, not only on a start without a pause', () => {
+    const f = fixture('restore-check', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: {} }), 'utf8');
+    writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 60, resume_at: now() + 600 }), 'utf8');
+    const r = guardOnce(f);
+    expect(r.stdout).toMatch(/start during a pause, resume at/);
+    expect(r.stdout, 'the restored pause is not observed by any hook: said so').toMatch(/WARNING \(start\): hook five-hour-guard-hook\.py is NOT registered/);
   });
 
   it('hook entry check: a loud warning when settings.json has no hook entry or the entry names a hook file that does not exist', () => {
