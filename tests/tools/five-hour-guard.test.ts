@@ -276,7 +276,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(tp.out).not.toMatch(/must be/);
   });
 
-  it('one guard per state file; a pause file of a live process that is not ours stays at start, a dead one is removed', async () => {
+  it('one guard per state file; a pause file of a live process that is not ours refuses the start and stays, a dead one is removed', async () => {
     const f = fixture('two-guards', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const a = startGuard(f);
     try {
@@ -289,8 +289,15 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
 
     const live = fixture('leftover-live', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writePause(live, { pid: process.pid }); // the process of this test: alive, and not the guard
-    expect(guardOnce(live).stdout).toMatch(/WARNING \(start\): the pause file .* belongs to the running process \d+, left in place/);
+    const refusedLive = runSync(GUARD, guardArgs(live, ['--once']));
+    expect(refusedLive.status, `${refusedLive.stdout}${refusedLive.stderr}`).toBe(2);
+    expect(refusedLive.stderr).toMatch(/pause file .* belongs to the running process \d+: another guard uses it/);
     expect(existsSync(live.pause), 'the pause file of a live process stays').toBe(true);
+    expect(readJson(live.pause).pid, 'and is not overwritten by this guard').toBe(process.pid);
+    const liveHigh = fixture('leftover-live-high', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } }); // usage at the threshold: the second guard would publish at once
+    writePause(liveHigh, { pid: process.pid });
+    expect(runSync(GUARD, guardArgs(liveHigh, ['--once'])).status).toBe(2);
+    expect(readJson(liveHigh.pause).pid, 'the pause of the live guard is not replaced').toBe(process.pid);
     const dead = fixture('leftover-dead', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writePause(dead, { pid: DEAD_PID });
     guardOnce(dead);
@@ -601,6 +608,15 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): the hook entry in .* names \/nonexistent-dir\/five-hour-guard-hook\.py\.copy, which does not exist/);
   });
 
+  it('a state lock that cannot be opened is a configuration error (exit 2), not a traceback that the unit restarts', () => {
+    const f = fixture('lock-dir', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    mkdirSync(f.state + '.lock');
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/cannot open the lock file .*state\.json\.lock/);
+    expect(r.stderr).not.toMatch(/Traceback/);
+  });
+
   it('--max-age must be positive: a negative one makes every entry stale and the guard fail open for ever', () => {
     const f = fixture('max-age', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
     for (const bad of ['-1', '0']) {
@@ -636,6 +652,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const full = fixture('pct-100', { cache: { pct: 100, resetMs: ts + HOUR_MS } });
     guardOnce(full);
     expect(existsSync(full.pause), 'exactly 100 is a valid percentage: the pause starts').toBe(true);
+    expect(run('bad-string', `{"timestamp": ${ts}, "data": {"fiveHourPercent": "99", "fiveHourResetsAt": "${reset}"}}`), 'a string is not a number').toMatch(/WARNING \(cache-invalid-percent\)/);
+    expect(run('bad-bool', `{"timestamp": ${ts}, "data": {"fiveHourPercent": true, "fiveHourResetsAt": "${reset}"}}`), 'a boolean is not a number').toMatch(/WARNING \(cache-invalid-percent\)/);
+    expect(run('bad-ts-string', `{"timestamp": "${ts}", "data": {"fiveHourPercent": 99, "fiveHourResetsAt": "${reset}"}}`), 'a timestamp that is text is not a number').toMatch(/WARNING \(cache-stale\)/);
     expect(run('bad-neg', `{"timestamp": ${ts}, "data": {"fiveHourPercent": -3, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
     expect(run('bad-inf', `{"timestamp": ${ts}, "data": {"fiveHourPercent": Infinity, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-invalid-percent\)/);
     expect(run('bad-ts', `{"timestamp": NaN, "data": {"fiveHourPercent": 99, "fiveHourResetsAt": "${reset}"}}`)).toMatch(/WARNING \(cache-stale\)/);
@@ -665,6 +684,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(guardOnce(f).stdout).toMatch(/WARNING \(start\): the hook entry in .* names \/nonexistent-dir\/five-hour-guard-hook\.py, which does not exist/);
     writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.dir}/old-pause.json`), 'utf8');
     expect(guardOnce(f).stdout, 'a hook that reads another pause file than the guard writes').toMatch(/WARNING \(start\): the hook entry in .* reads the pause file .*old-pause\.json, but the guard writes .*pause\.json/);
+    for (const command of [`exec ${PYBIN} -I ${HOOK}`, `exec ${PYBIN} -I ${HOOK} --pause-file`, `exec ${PYBIN} -I ${HOOK} --log ${f.dir}/hook.log`]) {
+      writeFileSync(f.settings, entry(command), 'utf8');
+      expect(guardOnce(f).stdout, command).toMatch(/WARNING \(start\): the hook entry in .* has no value for --pause-file: the hook would start without a pause file and hold nothing/);
+    }
     writeFileSync(f.settings, entry(`[ -f ${f.pause} ] && [ -f ${HOOK} ] && [ -x /nonexistent-dir/python3 ] || exit 0; exec /nonexistent-dir/python3 -I ${HOOK} --pause-file ${f.pause}`), 'utf8');
     expect(guardOnce(f).stdout, 'an interpreter that does not exist').toMatch(/WARNING \(start\): the hook entry in .* names the interpreter \/nonexistent-dir\/python3, which does not exist/);
   });

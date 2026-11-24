@@ -256,12 +256,13 @@ def read_cache():
             d = json.load(f)
         copy_of_old_data = bool(d.get('error') or d.get('rateLimited'))
         seen_ms = d.get('lastSuccessAt') if copy_of_old_data else d.get('timestamp')
-        age = time.time() - float(seen_ms or 0) / 1000
+        age = time.time() - (seen_ms / 1000 if type(seen_ms) in (int, float) else 0)   # text or a boolean is not a time: the entry is stale
         x = d.get('data') or {}
         reset = x.get('fiveHourResetsAt')
         reset_ts = datetime.datetime.fromisoformat(reset.replace('Z', '+00:00')).timestamp() if reset else None
         pct = x.get('fiveHourPercent')
-        pct = float(pct) if pct is not None else None
+        if pct is not None:
+            pct = float(pct) if type(pct) in (int, float) else float('nan')   # "99" and true are not percentages: invalid, not coerced
     except FileNotFoundError:
         return None, None, 1e9, ('cache-missing', f'the usage cache {CACHE} does not exist: {NEEDS}')
     except Exception as e:
@@ -271,7 +272,7 @@ def read_cache():
         problem = ('cache-no-percent', f'the usage cache {CACHE} has no fiveHourPercent (no five-hour window on this account?): {NEEDS}')
     elif not math.isfinite(pct) or not 0 <= pct <= 100:   # OMC clamps the field to 0-100 when it writes it
         pct = None
-        problem = ('cache-invalid-percent', f'the usage cache {CACHE} has a fiveHourPercent that is not a percentage (not finite, below 0 or above 100): it is not acted on')
+        problem = ('cache-invalid-percent', f'the usage cache {CACHE} has a fiveHourPercent that is not a percentage (not a number, not finite, below 0 or above 100): it is not acted on')
     elif not age <= A.max_age:   # not "age > max": a timestamp that is not a number gives an age that is neither
         problem = ('cache-stale', f'the usage data is {age:.0f} s old, older than --max-age ({A.max_age:g} s), so it is not acted on: {NEEDS}')
     return pct, reset_ts, age, problem
@@ -307,7 +308,9 @@ def hook_check(where):
             tokens = shlex.split(command)
         except ValueError:
             continue
-        if '--pause-file' in tokens[:-1]:
+        if '--pause-file' not in tokens[:-1]:
+            log(f'WARNING ({where}): the hook entry in {SETTINGS} has no value for --pause-file: the hook would start without a pause file and hold nothing. Run five-hour-guard-settings.py add again')
+        else:
             read = tokens[tokens.index('--pause-file') + 1]
             if os.path.abspath(read) != os.path.abspath(PAUSE_FILE):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} reads the pause file {read}, but the guard writes {PAUSE_FILE}: a pause would hold no session. Run five-hour-guard-settings.py add again')
@@ -426,16 +429,8 @@ def is_guard_pause(path):
 
 
 def drop_leftover_pause():
-    """A pause file with no state behind it is a leftover of a dead guard: remove it. One that names a live process (another
-    guard that shares this pause file) stays."""
-    try:
-        with open(PAUSE_FILE) as f:
-            pid = json.load(f).get('pid')
-    except Exception:
-        pid = None
-    if pid != os.getpid() and pid_alive(pid):
-        log(f'WARNING (start): the pause file {PAUSE_FILE} belongs to the running process {pid}, left in place; two guards must not share one pause file')
-        return
+    """A pause file with no state behind it is a leftover of a dead guard: remove it (main has checked that it is a pause file
+    of this guard and that no live process owns it)."""
     unpublish()
 
 
@@ -449,7 +444,10 @@ def lock_state():
     if fcntl is None or A.dry_run or A.test_pause:
         return
     path = STATE + '.lock'
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as e:
+        fail(f'cannot open the lock file {path}: {e!r}')
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -496,6 +494,16 @@ def main():
     if os.path.exists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):
         # the start would remove it as a leftover: never remove a file that is not a pause of this guard (a mistyped path)
         fail(f'the file {PAUSE_FILE} exists and is not a pause file of this guard: it is left untouched; check "pause_file", or remove the file yourself')
+    owner = None
+    try:
+        with open(PAUSE_FILE) as f:
+            owner = json.load(f).get('pid')
+    except Exception:
+        pass
+    if owner is not None and owner != os.getpid() and pid_alive(owner):
+        # another guard that shares this pause file (with a different state file, so the lock does not stop it) would replace
+        # its pause on the first tick and the two would remove each other's: refuse to start
+        fail(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: another guard uses it; two guards must not share one pause_file')
     lock_state()
     state = load_state()
     if state.get('paused'):
