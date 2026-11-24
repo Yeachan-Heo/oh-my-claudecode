@@ -170,6 +170,21 @@ const BUILTIN_TIER_MODEL_DEFAULTS = {
   opus:   'claude-opus-4-8',
   fable:  'claude-fable-5',
 };
+// The cloud family of a provider-specific model ID: 'vertex' for vertex_ai/..., 'bedrock' for the
+// other provider-specific IDs (region profiles, bare anthropic.claude, ARNs), null for anything else.
+function cloudFamilyOfModelId(modelId) {
+  const name = String(modelId).trim();
+  if (name.toLowerCase().startsWith('vertex_ai/')) return 'vertex';
+  return isProviderSpecificModelId(name) ? 'bedrock' : null;
+}
+// A native mapping of the other cloud than the one the session runs on (named by a flag or by the
+// session model) is not a mapping the provider can serve; with no cloud named, any family passes.
+function isMappingOfOtherCloud(modelId) {
+  const family = cloudFamilyOfModelId(modelId);
+  if (!family) return false;
+  const active = [isBedrockProviderEnv() && 'bedrock', isVertexProviderEnv() && 'vertex'].filter(Boolean);
+  return active.length > 0 && !active.includes(family);
+}
 // nativeOnly skips OMC_SUBAGENT_MODEL: Claude Code does not read it, so it is no proof that
 // the provider serves the alias on a call. forNamedGate judges a plain ANTHROPIC_DEFAULT_* value
 // with the provider detection of the named-model gate, so the gate and its mapping agree.
@@ -188,6 +203,7 @@ function resolveTierAliasToSafeModel(tierAlias, nativeOnly = false, forNamedGate
     const isAnthropicDefaultTierVar = key.startsWith('ANTHROPIC_DEFAULT_');
     const isNativeCcVar = isAnthropicDefaultTierVar || key.startsWith('CLAUDE_CODE_BEDROCK_');
     const validator = isNativeCcVar ? isProviderSpecificModelId : isSubagentSafeModelId;
+    if (nativeOnly && value && isNativeCcVar && isMappingOfOtherCloud(value)) return '';
     if (value && (validator(value) || acceptsProxyAnthropicDefaultTierValue(key, value, forNamedGate))) return value;
     // Claude Code uses the first native variable that is set: when that one is unusable, a later
     // one is not what the alias resolves to (nativeOnly callers only).
