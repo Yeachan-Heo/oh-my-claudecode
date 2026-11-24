@@ -302,6 +302,7 @@ import {
   type RecoveryActivationGate,
 } from "./worker-activation-gate.js";
 import {
+  addToWorkerLaunchFencedCapture,
   isWorkerLaunchAttemptCurrent,
   isWorkerLaunchAttemptAccepted,
   loadCurrentWorkerLaunchAttempt,
@@ -1227,22 +1228,20 @@ function paneTreeFence(
   let trees: PaneProcessTree[] = [];
   return {
     read: async (persisted?: unknown) => {
-      // a capture an interrupted run of this retirement persisted is used as it is (the provider is gone, a new read would miss its descendants)
-      const earlier = revivePaneTrees(persisted);
-      if (earlier.length > 0) {
-        trees = earlier;
-        return undefined;
-      }
+      // what an earlier run (or the caller, before the requests to exit) persisted is kept: the provider may be gone. The pane is read again
+      // all the same: the provider may still be live (its termination failed) and have started descendants since.
+      const kept = revivePaneTrees(persisted);
+      let fresh: PaneProcessTree | null = null;
       if (
         process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
         ownership?.tmuxServerIdentity &&
         (!proved || (await proved()))
-      ) {
-        const tree = await readWorkerPaneProcessTree(ownership);
-        trees = tree ? [tree] : [];
-        return tree ? [serializePaneTree(tree)] : undefined;
-      }
-      return undefined;
+      )
+        fresh = await readWorkerPaneProcessTree(ownership);
+      const same = (a: PaneProcessTree, b: PaneProcessTree) =>
+        JSON.stringify(serializePaneTree(a)) === JSON.stringify(serializePaneTree(b));
+      trees = fresh && !kept.some((tree) => same(tree, fresh)) ? [...kept, fresh] : kept;
+      return trees.length > kept.length ? trees.map(serializePaneTree) : undefined;
     },
     terminate: async () => {
       for (const tree of trees) await terminatePaneProcessTree(tree);
@@ -9274,11 +9273,33 @@ export async function shutdownTeamV2(
           const tree = await readWorkerPaneProcessTree(
             ownership.ownership,
           );
-          if (tree)
+          if (tree) {
             earlyPaneTrees.set(worker.name, {
               paneId: ownership.ownership.paneId,
               tree,
             });
+            // On disk before the request to exit goes out: a worker that follows it exits, and this is then the only copy of what it
+            // had started, so a leader interrupted from here on must not lose it (the fence merges it into its own capture).
+            const provider =
+              worker.launch_descriptor?.provider ?? worker.worker_cli;
+            const attempt =
+              provider && worker.launch_attempt_id
+                ? await loadWorkerLaunchAttempt({
+                    cwd,
+                    teamName: sanitized,
+                    instanceId: shutdownInstance.instance_id,
+                    workerName: worker.name,
+                    paneId: worker.pane_id,
+                    provider,
+                    attemptId: worker.launch_attempt_id,
+                    runtimeCliPath: resolveRuntimeCliPath(),
+                  })
+                : null;
+            if (attempt)
+              await addToWorkerLaunchFencedCapture(attempt, [
+                serializePaneTree(tree),
+              ]);
+          }
         } catch {
           /* reading a tree must not hold up the shutdown: the read before the launch fence is still taken */
         }

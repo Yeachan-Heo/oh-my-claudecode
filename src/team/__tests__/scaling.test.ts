@@ -177,6 +177,7 @@ const gitWorktreeMocks = vi.hoisted(() => ({
 }));
 
 const workerLaunchMocks = vi.hoisted(() => ({
+  addToWorkerLaunchFencedCapture: vi.fn(async () => true),
   loadWorkerLaunchAttempt: vi.fn(async () => ({ attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' })),
   isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
@@ -1710,6 +1711,7 @@ describe('scaleUp duplicate worker guard', () => {
       attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
     });
     let persisted: unknown;
+    workerLaunchMocks.addToWorkerLaunchFencedCapture.mockClear();
     workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementationOnce(async (_attempt, _reason, cleanup, beforeProviderTermination) => {
       persisted = await beforeProviderTermination?.();
       return cleanup();
@@ -1718,6 +1720,11 @@ describe('scaleUp duplicate worker guard', () => {
       await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
         { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
       expect(persisted).toEqual([{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'linux:1:4001']] }]);
+      // and the tree read before the drain request is on disk before that request goes out, not only at the fence
+      expect(workerLaunchMocks.addToWorkerLaunchFencedCapture).toHaveBeenCalledWith(
+        expect.objectContaining({ decisionPath: '/tmp/decision' }),
+        [{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'linux:1:4001']] }],
+      );
     } finally {
       if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
       else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;

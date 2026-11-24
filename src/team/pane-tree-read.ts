@@ -68,13 +68,26 @@ export function revivePaneTrees(value: unknown): PaneProcessTree[] {
   return value.map(revivePaneTree).filter((tree): tree is PaneProcessTree => tree !== null);
 }
 
+/** The trees of the list that are not null, each one once (two reads of the same tree are signalled once). */
+export function uniquePaneTrees(list: ReadonlyArray<PaneProcessTree | null | undefined>): PaneProcessTree[] {
+  const seen = new Set<string>();
+  return list.filter((tree): tree is PaneProcessTree => {
+    if (!tree) return false;
+    const key = JSON.stringify(serializePaneTree(tree));
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
- * The read of a cleanup at the launch fence, for `retireAndCleanupCurrentWorkerLaunchAttempt`. `persisted` is the capture an earlier,
- * interrupted run of the same retirement persisted, which is used as it is (the provider is gone by now, and a read taken after that misses
- * the descendants that left its process group). Without one the pane is read as `capturePaneProcessTreeOfWorkerPane` does, and `record` is
- * what the hook gives back to be persisted: the new read together with `earlier`, the trees the caller read before the fence and signals
- * itself on this run (a worker that exited since then leaves them as the only identities there are, and a retry cannot read them again).
- * `trees` are the ones to signal at the fence: the persisted ones, or the new read.
+ * The read of a cleanup at the launch fence, for `retireAndCleanupCurrentWorkerLaunchAttempt`. `persisted` is the capture an earlier run
+ * (or the caller, before it asked the worker to exit) persisted: it is kept, since the provider may be gone by now and a read taken after
+ * that misses the descendants that left its process group, and the pane is read again all the same, since the provider may still be live
+ * (a termination that failed) and have started descendants since. `trees` are the ones to signal at the fence: the persisted ones (but those
+ * the caller signals itself, being in `earlier`) and the new read. `record` is what replaces the persisted capture: those together with `earlier`, the trees the caller read before the fence and
+ * signals itself on this run (a worker that exited since then leaves them as the only identities there are, and a retry cannot read them
+ * again); undefined when that adds nothing to what is persisted.
  */
 export async function readFencedPaneTree(
   ownership: WorkerPaneOwnership | null | undefined,
@@ -82,9 +95,10 @@ export async function readFencedPaneTree(
   persisted?: unknown,
   earlier: ReadonlyArray<PaneProcessTree | null | undefined> = [],
 ): Promise<{ trees: PaneProcessTree[]; record: ReturnType<typeof serializePaneTree>[] | undefined }> {
-  const again = revivePaneTrees(persisted);
-  if (again.length > 0) return { trees: again, record: undefined };
+  const kept = revivePaneTrees(persisted);
   const fresh = await capturePaneProcessTreeOfWorkerPane(ownership, ops);
-  const all = [...earlier, fresh].filter((tree): tree is PaneProcessTree => Boolean(tree));
-  return { trees: fresh ? [fresh] : [], record: all.length > 0 ? all.map(serializePaneTree) : undefined };
+  const all = uniquePaneTrees([...kept, ...earlier, fresh]);
+  const signalledByCaller = new Set(uniquePaneTrees(earlier).map((tree) => JSON.stringify(serializePaneTree(tree))));
+  const toSignal = kept.filter((tree) => !signalledByCaller.has(JSON.stringify(serializePaneTree(tree))));
+  return { trees: uniquePaneTrees([...toSignal, fresh]), record: all.length > uniquePaneTrees(kept).length ? all.map(serializePaneTree) : undefined };
 }

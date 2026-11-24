@@ -72,6 +72,7 @@ import {
 import {
   capturePaneProcessTreeOfWorkerPane,
   readFencedPaneTree,
+  serializePaneTree,
 } from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget } from "./herdr-session.js";
 import {
@@ -97,6 +98,7 @@ import {
 } from "./team-owner-epoch.js";
 import { resolveRuntimeCliPath } from "./runtime-owner-client.js";
 import {
+  addToWorkerLaunchFencedCapture,
   loadWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
 } from "./worker-launch-ack.js";
@@ -2335,11 +2337,33 @@ export async function scaleDownOwned(
               const tree = await readWorkerPaneProcessTree(
                 adopted.ownership,
               );
-              if (tree)
+              if (tree) {
                 earlyPaneTrees.set(worker.name, {
                   paneId: adopted.ownership.paneId,
                   tree,
                 });
+                // On disk before the drain request: a worker that finishes exits, and this is then the only copy of what it had started,
+                // so a leader interrupted from here on must not lose it (the fence merges it into its own capture).
+                const provider =
+                  worker.launch_descriptor?.provider ?? worker.worker_cli;
+                const attempt =
+                  provider && worker.launch_attempt_id
+                    ? await loadWorkerLaunchAttempt({
+                        cwd: leaderCwd,
+                        teamName: sanitized,
+                        workerName: worker.name,
+                        instanceId: originalInstanceId,
+                        paneId: worker.pane_id!,
+                        provider,
+                        attemptId: worker.launch_attempt_id,
+                        runtimeCliPath: resolveRuntimeCliPath(),
+                      })
+                    : null;
+                if (attempt)
+                  await addToWorkerLaunchFencedCapture(attempt, [
+                    serializePaneTree(tree),
+                  ]);
+              }
             } catch {
               /* reading a tree must not hold up the scale down: the read before the launch fence is still taken */
             }

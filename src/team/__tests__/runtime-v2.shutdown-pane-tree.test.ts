@@ -417,7 +417,7 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
 
       // the provider is gone: the reads of the retry find no tree below the pane's root; the one persisted by the first run is signalled
       expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toContainEqual(FIXTURE_TREE);
-      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledTimes(2); // the two reads before the fence; none at the fence, the persisted capture is used
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledTimes(3); // the two reads before the fence, and the one at the fence, which finds the provider gone; the persisted capture is used as well
     });
   }, 60_000);
 
@@ -460,7 +460,7 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
   ])('signals the tree read before the requests when the pane root exits during the wait: %s', async (_what, options, acknowledges) => {
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     const teamName = `pane-tree-exit-${acknowledges ? 'ack' : options.force ? 'force' : 'deadline'}`;
-    await withAcceptedProvider(teamName, async (teamRoot) => {
+    await withAcceptedProvider(teamName, async (teamRoot, _provider, attempt) => {
       const workerDir = join(teamRoot, 'workers', 'worker-1');
       // the first read sees the live pane; once the root has exited the pane is dead and a later read returns no tree
       tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
@@ -470,6 +470,10 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
       const { shutdownTeamV2 } = await import('../runtime-v2.js');
       const shutdown = shutdownTeamV2(teamName, cwd, options);
       await vi.waitFor(async () => expect(await exists(join(workerDir, 'shutdown-request.json'))).toBe(true), { timeout: 10_000, interval: 10 });
+      // the tree read before the request is on disk once the request is out: a leader interrupted from here on has lost nothing, whatever
+      // the worker does next
+      const persisted = JSON.parse(await readFile(`${attempt.decisionPath}.retired.fenced-capture`, 'utf8')) as { capture: unknown[] };
+      expect(persisted.capture).toEqual([{ panePid: FIXTURE_TREE.panePid, pids: FIXTURE_TREE.pids, startIdentities: [...FIXTURE_TREE.startIdentities] }]);
       paneState.rootGone = true;
       if (acknowledges) {
         await writeJson(cwd, join(workerDir, 'shutdown-ack.json'), { status: 'accept', reason: 'ok', updated_at: new Date().toISOString() });

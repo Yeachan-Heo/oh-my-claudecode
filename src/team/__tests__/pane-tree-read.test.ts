@@ -35,14 +35,34 @@ describe('the pane tree persisted with a launch retirement', () => {
     expect(revivePaneTree(value)).toBeNull();
   });
 
-  it('uses the capture an interrupted run persisted as it is, and reads nothing now (the provider is gone)', async () => {
+  it('keeps the capture an interrupted run persisted when the pane is gone, and adds nothing to it', async () => {
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     const ops = { verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'owned' })), capturePaneProcessTree: vi.fn(async () => null) };
     const read = await readFencedPaneTree(ownership(), ops, JSON.parse(JSON.stringify([serializePaneTree(TREE)])));
     expect(read.trees).toEqual([TREE]);
     expect(read.record).toBeUndefined(); // already persisted
-    expect(ops.verifyTeamTargetOwnership).not.toHaveBeenCalled();
-    expect(ops.capturePaneProcessTree).not.toHaveBeenCalled();
+  });
+
+  it('reads the pane again when a capture is persisted (the provider may still run and have started descendants since), and replaces the capture with the union', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const later: PaneProcessTree = { panePid: 4000, pids: [4001, 4002, 4003], startIdentities: new Map<number, string | null>([[4001, 'start-4001'], [4002, null], [4003, 'start-4003']]) };
+    const ops = { verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'owned' })), capturePaneProcessTree: vi.fn(async () => later) };
+    const read = await readFencedPaneTree(ownership(), ops, JSON.parse(JSON.stringify([serializePaneTree(TREE)])));
+    expect(ops.capturePaneProcessTree).toHaveBeenCalledTimes(1);
+    expect(read.trees).toEqual([TREE, later]);
+    expect(read.record).toEqual([serializePaneTree(TREE), serializePaneTree(later)]);
+    // the same tree read again is neither signalled twice nor persisted twice
+    const same = await readFencedPaneTree(ownership(), { ...ops, capturePaneProcessTree: vi.fn(async () => TREE) }, JSON.parse(JSON.stringify([serializePaneTree(TREE)])));
+    expect(same.trees).toEqual([TREE]);
+    expect(same.record).toBeUndefined();
+  });
+
+  it('leaves out of the trees to signal the persisted ones the caller signals itself, and keeps them in the record', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const ops = { verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'owned' })), capturePaneProcessTree: vi.fn(async () => null) };
+    const read = await readFencedPaneTree(ownership(), ops, JSON.parse(JSON.stringify([serializePaneTree(TREE)])), [TREE]);
+    expect(read.trees).toEqual([]);
+    expect(read.record).toBeUndefined();
   });
 
   it('without a persisted capture reads the pane and gives the capture back to be persisted; a capture that does not validate is read anew', async () => {
