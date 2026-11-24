@@ -233,8 +233,12 @@ def command_hooks(groups):
     only as an operand (an option value, an argument of another program) is not ours; one that cannot be parsed is kept, so that
     hook_check can say so."""
     found = []   # (group, handler)
-    for g in groups:
+    for g in groups if isinstance(groups, list) else []:
+        if not isinstance(g, dict) or not isinstance(g.get('hooks', []), list):
+            continue   # not a group of Claude Code: skipped here, so that the entries after it are still seen
         for h in g.get('hooks', []):
+            if not isinstance(h, dict):
+                continue
             command = h.get('command')
             if h.get('type') != 'command' or not isinstance(command, str) or HOOK_NAME not in command:
                 continue
@@ -474,10 +478,16 @@ def hook_check(where):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
     runtime = [('pause_file', PAUSE_FILE), ('state_file', STATE), ('usage_cache', CACHE), ('log_file', LOG), ('settings_file', SETTINGS),
                ('lock of the pause file', PAUSE_FILE + '.lock'), ('lock of the usage cache', CACHE + '.lock'), ('configuration file', A.config), *own_files()]
+    programs = []   # the programs of every recognised entry: a log of one entry can be the program of another
+    for command in ours:
+        try:
+            hooks, interpreters, _logs, _pauses, _tests, launchers = entry_parts(command)
+        except ValueError:
+            continue   # reported below
+        programs += [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters + launchers]
     for command in ours:
         try:
             hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
-            programs = [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters + launchers]
             aliased = [(log_path, label) for log_path in logs for label, path in runtime + programs if path and same_file(log_path, path)]
             for log_path, label in aliased:
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} logs to {log_path}, which is the {label} of this guard: the hook would append its log lines to it (a pause file would stop being one, so a pause would hold no session). Run five-hour-guard-settings.py add again')
@@ -647,8 +657,10 @@ def pid_alive(pid):
 
 
 def is_guard_pause(path):
-    """True when the file has the shape publish() writes. Anything else is somebody else's file."""
+    """True when the file is a regular file (not a link, whatever it points to) with the shape publish() writes. Anything else is somebody else's file."""
     try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
         with open(path) as f:
             d = json.load(f)
         return (isinstance(d, dict) and d.get('v') == 2 and type(d.get('v')) is int and d.get('paused') is True and type(d.get('pid')) is int

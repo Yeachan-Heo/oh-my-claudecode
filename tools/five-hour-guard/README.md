@@ -58,7 +58,7 @@ hours): `WARNING (reset-too-far)` and no pause.
 
 One guard per state file and one per pause file: a second guard with the same `state_file` or the same `pause_file` stops with
 status 2 (it takes an exclusive lock on `<state_file>.lock` and on `<pause_file>.lock`, empty files next to those files; on Windows, where Python has no `fcntl`, the same files are locked with `msvcrt.locking`; only a platform with neither has no lock). At start the guard removes a pause file nobody owns, but refuses to start (status 2) when the existing file is not a pause file of this
-guard (a mistyped `pause_file` must never delete another file; a dangling symbolic link there counts as such a file and is left alone; the file is looked at again right before it is removed, so one that appeared or changed since the start check is kept, and the start stops with status 2), and relies on the lock on `<pause_file>.lock` to tell a running guard from a leftover (a pid in the file proves nothing: it can belong to an unrelated process after a crash; only on a platform without `fcntl` the pid and a current heartbeat decide). Two guards must not share one `pause_file`: with different state files they would overwrite each
+guard (a mistyped `pause_file` must never delete another file; a symbolic link there, dangling or pointing at a valid pause document, counts as such a file and is left alone; the file is looked at again right before it is removed, so one that appeared or changed since the start check is kept, and the start stops with status 2), and relies on the lock on `<pause_file>.lock` to tell a running guard from a leftover (a pid in the file proves nothing: it can belong to an unrelated process after a crash; only on a platform without `fcntl` the pid and a current heartbeat decide). Two guards must not share one `pause_file`: with different state files they would overwrite each
 other's pause (the lock on the pause file stops the second one).
 
 ### The hook never wedges a session (fail-open)
@@ -273,7 +273,7 @@ asks for: user-level hooks then run in unattended sessions), or register the ent
 `exclude` lists session id prefixes whose tool calls are never held. Use it for a session that has to stay able to
 answer during a pause, for example the one in which you stop the guard. Without it a held session cannot run the command
 that would release it. Prefixes are matched against the `session_id` that Claude Code puts in the hook event. A change
-of `exclude` in the file takes effect when the guard is restarted. Sessions routed to another provider are never held
+of `exclude` in the file takes effect when the guard is restarted (a call that is already held is released as soon as it reads the new pause document that excludes it). Sessions routed to another provider are never held
 (see the table above).
 
 ## Order of events when a pause ends

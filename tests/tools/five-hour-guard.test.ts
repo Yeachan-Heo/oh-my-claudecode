@@ -778,6 +778,31 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a held call is judged again against every pause document it sees: a replacement that excludes the session (a restart with another exclude, no gap) releases it', async () => {
+    const f = fixture('hold-reevaluated', {});
+    writePause(f, { pid: process.pid });
+    const sid = 'abcd1234-held';
+    const h = startHook(f, sid);
+    try {
+      await waitFor(() => /hold-start/.test(readText(h.log)), 20000, 'hold-start');
+      await sleep(400);
+      expect(h.exited, 'held while nothing excludes the session').toBe(false);
+      writePause(f, { pid: process.pid, exclude: ['abcd'] });
+      await Promise.race([h.done, sleep(20000)]);
+      expect(h.exited && h.code === 0, `released, exit ${h.code}`).toBe(true);
+      expect(readText(h.log)).toMatch(/hold-end/);
+    } finally { await h.stop(); }
+    const other = fixture('hold-reevaluated-only', {});
+    writePause(other, { pid: process.pid });
+    const h2 = startHook(other, 'zzzz9999-held');
+    try {
+      await waitFor(() => /hold-start/.test(readText(h2.log)), 20000, 'hold-start');
+      writePause(other, { pid: process.pid, only: ['abcd'] });
+      await Promise.race([h2.done, sleep(20000)]);
+      expect(h2.exited && h2.code === 0, `released by a replacement that holds only other sessions, exit ${h2.code}`).toBe(true);
+    } finally { await h2.stop(); }
+  });
+
   it('a stop whose unpaused state cannot be written still removes the pause file: sessions are not left waiting for the heartbeat', async () => {
     const f = fixture('stop-state-write-fails', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     const flag = join(f.dir, 'deny-state');
@@ -1266,6 +1291,67 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(ok.status, `${ok.stdout}${ok.stderr}`).toBe(0);
     expect(readJson(clean.pause).paused, 'the pause is published').toBe(true);
     expect(readdirSync(clean.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+  });
+
+  it('a link at pause_file that appeared after the start is never replaced, also when its target holds a valid pause document', async () => {
+    const f = fixture('link-valid-target', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const target = join(f.dir, 'target-pause.json');
+    writeFileSync(target, JSON.stringify({ v: 2, paused: true, since: now() - 5, resume_at: now() + 600, valid_until: now() + 60, exclude: [], percent: 97, pid: 1 }), 'utf8');
+    const before = readText(target);
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      symlinkSync(target, f.pause);
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*is not a pause file of this guard/.test(readText(f.log)), 20000, 'the refusal');
+    } finally { await stopGuard(g); }
+    expect(lstatSync(f.pause).isSymbolicLink(), 'the link is still there').toBe(true);
+    expect(readText(target), 'the target is intact').toBe(before);
+    expect(existsSync(f.state) ? readJson(f.state).paused : false, 'no pause was stored').toBe(false);
+  });
+
+  it('an entry that is not an object, or a group that is not, does not hide the entries after it from the start check', () => {
+    const f = fixture('alias-after-non-object', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    const hookText = readFileSync(hook, 'utf8');
+    const valid = { type: 'command', command: generatedCommand(f.pause, hook, PYBIN), timeout: 21600 };
+    const layouts: unknown[] = [
+      [{ matcher: '*', hooks: [5, null, 'text', valid] }],
+      ['text', 7, null, { matcher: '*', hooks: [valid] }],
+      [{ matcher: '*', hooks: 'text' }, { matcher: '*', hooks: [valid] }],
+    ];
+    for (const [i, groups] of layouts.entries()) {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: groups } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: hook, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `layout ${i}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr).toMatch(/are the same file/);
+      expect(readFileSync(hook, 'utf8'), 'the registered hook is intact').toBe(hookText);
+    }
+  });
+
+  it('a hook log that is the program of another recognised entry is reported, whichever entry comes first', async () => {
+    const f = fixture('wiring-log-cross-entry', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    const hookBefore = readFileSync(hook, 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (...commands: string[]) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: commands.map((command) => ({ type: 'command', command, timeout: 21600 })) }] } });
+    const plain = generatedCommand(f.pause, HOOK, PYBIN);
+    const logging = generatedCommand(f.pause, hook, PYBIN, HOOK);   // its log is the bundled hook, which the other entry runs
+    const g = startGuard(f, ['--warn-every', '1']);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeFileSync(f.settings, entry(logging, plain), 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /logs to .*five-hour-guard-hook\.py, which is the registered hook of this guard/.test(readText(f.log)), 20000, 'the cross-entry alias warning');
+    } finally { await stopGuard(g); }
+    expect(readFileSync(hook, 'utf8')).toBe(hookBefore);
   });
 
   it('the hook entry check warns when the group matcher no longer covers every tool (an entry for Bash only), and accepts "*", empty and none', () => {

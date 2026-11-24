@@ -103,6 +103,14 @@ def foreign_provider():
     return not (host == 'anthropic.com' or host.endswith('.anthropic.com'))
 
 
+def spared(p, sid):
+    """True when this pause document does not hold the session: an excluded prefix, or `only` naming other sessions."""
+    if any(sid.startswith(x) for x in p.get('exclude', []) if x):
+        return True
+    only = [x for x in p.get('only', []) if x]
+    return bool(only) and not any(sid.startswith(x) for x in only)   # a test pause aimed at chosen sessions holds nobody else
+
+
 def main():
     if not PAUSE_FILE:
         return 0
@@ -117,17 +125,17 @@ def main():
     if not isinstance(ev, dict):
         ev = {}   # a list or a text on stdin is no event: the call is held like any other
     sid = str(ev.get('session_id') or '')
-    if any(sid.startswith(x) for x in p.get('exclude', []) if x):
+    if spared(p, sid):
         return 0
-    only = [x for x in p.get('only', []) if x]
-    if only and not any(sid.startswith(x) for x in only):
-        return 0   # a test pause aimed at chosen sessions holds nobody else
     if foreign_provider():
         return 0
     t0 = time.time()
     who = f"{sid[:8]} {ev.get('tool_name', '?')}" + (f" agent={ev.get('agent_id')}" if ev.get('agent_id') else '')
     log(f'hold-start {who}')
-    while pause_state() is not None:
+    while True:
+        current = pause_state()
+        if current is None or spared(current, sid):   # a replacement (a restart with another exclude) is judged like the first document
+            break
         time.sleep(POLL_S)
     log(f'hold-end {who} waited={int(time.time() - t0)}s')
     return 0
