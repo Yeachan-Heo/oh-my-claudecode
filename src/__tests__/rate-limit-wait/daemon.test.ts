@@ -449,4 +449,9 @@ describe('daemon child environment allowlist', () => {
     expect(env.OMC_PANEL_QUOTA_WEEK_UNIT).toBe('7');
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
+
+  it('forwards TMUX_TMPDIR, so the daemon reaches the default tmux server the team was started on', () => {
+    process.env = { ...originalEnv, TMUX_TMPDIR: '/var/tmp/custom-tmux-sockets' };
+    expect(createMinimalDaemonEnv().TMUX_TMPDIR).toBe('/var/tmp/custom-tmux-sockets');
+  });
 });

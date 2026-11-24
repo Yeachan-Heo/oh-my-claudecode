@@ -378,21 +378,29 @@ const PRIVATE_SOCKET_NAME = /^o-[0-9a-z]+-[0-9a-z]+-[0-9a-f]{8}\.sock$/;
 
 /**
  * The private tmux endpoints that `omc team` creates when it starts without a default server (see
- * buildPrivateTmuxSocketPath): sockets of this user in the private socket directory.
+ * buildPrivateTmuxSocketPath): sockets of this user in the private socket directory. An entry that is gone by the time
+ * it is examined is skipped; null when the directory or an entry cannot be examined for any other reason, because a
+ * shorter list would be taken for the whole inventory.
  */
-function privateTmuxSockets(): string[] {
+function privateTmuxSockets(): string[] | null {
   if (process.platform === 'win32') return [];
   const directory = privateTmuxSocketDirectory();
-  const sockets: string[] = [];
+  let names: string[];
   try {
-    for (const name of readdirSync(directory)) {
-      if (!PRIVATE_SOCKET_NAME.test(name)) continue;
-      const path = join(directory, name);
+    names = readdirSync(directory);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? [] : null;
+  }
+  const sockets: string[] = [];
+  for (const name of names) {
+    if (!PRIVATE_SOCKET_NAME.test(name)) continue;
+    const path = join(directory, name);
+    try {
       const stat = lstatSync(path);
       if (stat.isSocket() && stat.uid === process.getuid?.()) sockets.push(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') return null;
     }
-  } catch {
-    // An unreadable directory has no endpoints to add.
   }
   return sockets;
 }
@@ -408,7 +416,9 @@ function listPanelQuotaPanes(): TmuxPane[] | null {
   }
   const panes: TmuxPane[] = [];
   let running = 0;
-  for (const socket of [undefined, ...privateTmuxSockets()]) {
+  const privateSockets = privateTmuxSockets();
+  if (privateSockets === null) return null;
+  for (const socket of [undefined, ...privateSockets]) {
     const listed = listPanesAt(socket, true);
     if (listed === null) return null;
     if (listed === 'absent') continue;

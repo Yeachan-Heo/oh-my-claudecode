@@ -59,6 +59,7 @@ describe('panelQuotaTmux adapter', () => {
     const onPrivate = { ...PANE, socket: SOCKET } as TmuxPane;
 
     beforeEach(() => {
+      vi.mocked(tmuxExec).mockReset();
       vi.mocked(readdirSync).mockReset();
       vi.mocked(lstatSync).mockReset();
       vi.mocked(readdirSync).mockReturnValue(['o-1k-lz9x2b-1a2b3c4d.sock', 'o-not-a-socket-name', 'unrelated.sock'] as never);
@@ -89,6 +90,42 @@ describe('panelQuotaTmux adapter', () => {
       const panes = panelQuotaTmux.listPanes();
       expect(panes).toEqual([expect.objectContaining({ id: '%7' })]);
       expect(panes?.[0].socket).toBeUndefined();
+    });
+
+    describe('the socket directory is read entry by entry', () => {
+      const OTHER = '/tmp/o-2m-lzaaaa-5e6f7a8b.sock';
+      const failure = (code: string): Error => Object.assign(new Error(code), { code });
+      const LIST_A = '4100:1795000000 omc-team-a:0.1 %7 1 team title\n';
+      const LIST_B = '4200:1795000001 omc-team-b:0.1 %3 1 team title\n';
+
+      it('an entry that disappears after the directory was read is skipped and the later sockets are still listed', () => {
+        vi.mocked(readdirSync).mockReturnValue(['o-1k-lz9x2b-1a2b3c4d.sock', 'o-2m-lzaaaa-5e6f7a8b.sock'] as never);
+        vi.mocked(lstatSync).mockReset();
+        vi.mocked(lstatSync).mockImplementationOnce(() => { throw failure('ENOENT'); }).mockReturnValueOnce(ownSocket);
+        vi.mocked(tmuxExec).mockReturnValueOnce(LIST_A).mockReturnValueOnce(LIST_B);
+        const panes = panelQuotaTmux.listPanes();
+        expect(panes?.map((pane) => pane.socket)).toEqual([undefined, OTHER]);
+        expect(panes?.map((pane) => pane.id)).toEqual(['%7', '%3']);
+      });
+
+      it('an entry that cannot be examined makes the inventory unreadable, not shorter', () => {
+        vi.mocked(lstatSync).mockReset();
+        vi.mocked(lstatSync).mockImplementationOnce(() => { throw failure('EACCES'); });
+        vi.mocked(tmuxExec).mockReturnValueOnce(LIST_A);
+        expect(panelQuotaTmux.listPanes()).toBeNull();
+      });
+
+      it('a directory that cannot be read makes the inventory unreadable; a missing directory has no endpoints', () => {
+        vi.mocked(readdirSync).mockReset();
+        vi.mocked(readdirSync).mockImplementationOnce(() => { throw failure('EACCES'); });
+        vi.mocked(tmuxExec).mockReturnValueOnce(LIST_A);
+        expect(panelQuotaTmux.listPanes()).toBeNull();
+
+        vi.mocked(readdirSync).mockReset();
+        vi.mocked(readdirSync).mockImplementationOnce(() => { throw failure('ENOENT'); });
+        vi.mocked(tmuxExec).mockReturnValueOnce(LIST_A);
+        expect(panelQuotaTmux.listPanes()).toEqual([expect.objectContaining({ id: '%7' })]);
+      });
     });
 
     it('an endpoint that cannot be read makes the inventory unreadable', () => {

@@ -44,7 +44,8 @@
  *     retention window); or when its state is not final. An owner.lock whose pid is dead does not
  *     protect a run.
  *   - A torn last journal line is copied to `journal.jsonl.torn-<stamp>` before the journal is
- *     truncated. This command never deletes such a copy: a run that holds one is kept.
+ *     shortened (the complete lines go to a new file that is renamed over the journal, so the checked inode is never
+ *     modified). This command never deletes such a copy: a run that holds one is kept.
  *   - Removal takes ownership of the run first, through the same single-writer fence the runtime uses: a run that is
  *     owned, or whose ownership cannot be taken, is not removed. The scan records the identity (device and inode) of
  *     every run directory. Removal opens the directory without following a link and refuses it when it is not the
@@ -56,7 +57,7 @@
  *     the next pass, unless the lock inside it still names a live process.
  *   - Under ownership every file of the run is reached through the open run directory, whose identity is the scanned
  *     one (withRunDirectory): the decision reads (the age of the run and its state), the journal and torn copy of a
- *     repair, and the directory sync. The name of the run is checked again before the copy, before the truncation and
+ *     repair, and the directory sync. The name of the run is checked again before the copy, before the shortened journal is put in place and
  *     after the decision reads; a name that was swapped refuses the step. A directory can only be renamed by name, so
  *     the name is checked right before the move and the moved directory right after it, and a directory that is not
  *     the scanned one is put back; when the name is taken again and it cannot be put back, it stays under

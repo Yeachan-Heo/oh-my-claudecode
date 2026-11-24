@@ -92,7 +92,7 @@ const DAEMON_ENV_ALLOWLIST = [
   // Locale settings
   'LANG', 'LC_ALL', 'LC_CTYPE',
   // Terminal/tmux (required for tmux integration)
-  'TERM', 'TMUX', 'TMUX_PANE',
+  'TERM', 'TMUX', 'TMUX_PANE', 'TMUX_TMPDIR',
   // Multiplexer election + herdr binary pin (non-secret paths/values)
   'OMC_TEAM_MULTIPLEXER', 'HERDR_BIN_PATH',
   // Temp directories

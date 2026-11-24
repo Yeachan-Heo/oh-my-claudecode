@@ -3,12 +3,12 @@
  * while this process owns the run. The rules and the safety notes are in run-gc.ts.
  */
 
+import { randomBytes } from "node:crypto";
 import {
   closeSync,
   constants as fsConstants,
   fstatSync,
   fsyncSync,
-  ftruncateSync,
   lstatSync,
   readFileSync,
   writeSync,
@@ -36,8 +36,8 @@ function stampFor(nowMs: number): string {
 }
 
 // Opens the journal through the open run directory, without following a link. It must be a regular file with no other
-// name: a hard link shares its inode with another name, possibly outside the runs root, and truncating it would
-// change that file too.
+// name: a hard link shares its inode with another name, possibly outside the runs root. The repair never changes that
+// inode (it publishes a new one), but a journal that has other names is not a private file of the run and is left alone.
 function openJournal(operations: DirectoryOperations, flags: number): number {
   const fd = operations.open(JOURNAL_FILE_NAME, flags);
   try {
@@ -59,9 +59,9 @@ export interface RepairInterlock {
   readonly afterHandle?: () => void;
   /** The name was checked for the last time before the torn copy is created. */
   readonly beforeCopy?: () => void;
-  /** The torn copy is written and synced; the journal is not truncated yet. */
+  /** The torn copy is written and synced; the shortened journal is not written yet. */
   readonly afterCopy?: () => void;
-  /** The name was checked for the last time before the journal is truncated. */
+  /** The name was checked for the last time before the shortened journal is put in place of the journal. */
   readonly beforeTruncate?: () => void;
   /** The repair is done; the lock is not released yet. */
   readonly beforeRelease?: () => void;
@@ -70,11 +70,13 @@ export interface RepairInterlock {
 }
 
 // Moves the torn last line of one journal to a copy beside it. Complete lines are not touched.
-// The copy is written and synced before the journal is truncated, so the tail is never lost.
+// The copy is written and synced before the journal is shortened, so the tail is never lost. The shortened journal is
+// written to a new private file and renamed over the journal, relative to the open run directory: the inode that was
+// checked is never modified, so a name added to it after the check cannot carry the change to another file.
 // The journal is changed only while this process owns the run (the same fence as the removal), so a writer cannot
 // append between the last look and the truncation. Every file is opened relative to the open run directory, whose
 // identity is the scanned one, so a name that was swapped for a link or for another directory can neither be read nor
-// written; the name is checked again before the copy and before the truncation. Returns { repaired, copy }. Throws when
+// written; the name is checked again before the copy and before the shortened journal is put in place. Returns { repaired, copy }. Throws when
 // the run is owned by another process, or the journal is not a private regular file.
 export function repairTornTail(
   runDir: string,
@@ -159,10 +161,29 @@ function repairOwnedJournal(
     if (fstatSync(fd).size !== before.size) {
       throw new Error("journal changed during repair; left unchanged, torn copy kept");
     }
-    run.assertNamed();
-    interlock.beforeTruncate?.();
-    ftruncateSync(fd, complete.length);
-    fsyncSync(fd);
+    const named = operations.lstat(JOURNAL_FILE_NAME);
+    if (named.dev !== before.dev || named.ino !== before.ino) throw new Error("journal was replaced during repair; left unchanged, torn copy kept");
+    const shortenedName = `${JOURNAL_FILE_NAME}.repair-${randomBytes(4).toString("hex")}`;
+    const shortenedFd = operations.open(shortenedName, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, before.mode & 0o777);
+    try {
+      try {
+        writeAll(shortenedFd, complete);
+        fsyncSync(shortenedFd);
+      } finally {
+        closeSync(shortenedFd);
+      }
+      run.assertNamed();
+      interlock.beforeTruncate?.();
+      operations.rename(shortenedName, JOURNAL_FILE_NAME);
+    } catch (error) {
+      try {
+        operations.unlink(shortenedName);
+      } catch {
+        // The error below is the one to report.
+      }
+      throw error;
+    }
+    operations.sync();
     return { repaired: true, copy: copyName };
   } finally {
     closeSync(fd);

@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { removeRun, removeTree, repairTornTail, type RepairInterlock, scanRuns, type ScannedRun } from "../../runtime/run-gc.js";
 import { KINDS_WITH_OPERATIONS, NOW, OLD, SCENARIOS, ageTree, decisionOf, gc, journalText, makeFinishedRun, makeRealRun, makeRoot, makeScenarioRun, makeTornRun, macLike, noOperations, operationCalls, removeTempBases, scannedFirst, snapshot, withBase } from "./run-gc-fixtures.js";
@@ -85,6 +85,21 @@ describe("omc graph gc: a name swapped under the repair", () => {
       }
       }
     }
+
+    it("a hard link added just before the journal is shortened does not carry the change to the other name", () => {
+      withBase((base) => {
+        const root = makeRoot(base);
+        const dir = makeTornRun(root, "run-torn-linked");
+        const identity = scanRuns({ runsRoot: root, retentionDays: 7, nowMs: NOW }).runs[0].identity as { dev: number; ino: number };
+        const outside = join(base, "outside-name");
+        const outcome = repairTornTail(dir, NOW, identity, { beforeTruncate: () => linkSync(join(dir, "journal.jsonl"), outside) });
+        expect(outcome.repaired).toBe(true);
+        expect(readFileSync(outside, "utf8"), "the file behind the other name was changed").toBe(`${journalText(1)}${TORN}`);
+        expect(readFileSync(join(dir, "journal.jsonl"), "utf8")).toBe(journalText(1));
+        expect(lstatSync(join(dir, "journal.jsonl")).nlink, "the repaired journal still shares its inode").toBe(1);
+        expect(readdirSync(dir).filter((name) => name.includes("repair")), "a temporary file was left").toEqual([]);
+      });
+    });
 
     it("without a swap the same repair copies the tail, truncates the journal and releases the lock", () => {
       withBase((base) => {
