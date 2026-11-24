@@ -220,7 +220,7 @@ the `Environment=CLAUDE_CONFIG_DIR=` line of the unit.
 ### Try it
 
 `--test-pause` writes a pause file for a few seconds without reading the usage cache or touching the state file, then
-removes it. With `--test-only` only the sessions whose id starts with one of the given prefixes wait, so a try does not
+removes it (a stop before the end removes it at once; a removal that fails is tried five times and then reported as an error with exit status 1, the sessions being released when the file lapses). With `--test-only` only the sessions whose id starts with one of the given prefixes wait, so a try does not
 stop your other sessions:
 
 ```
@@ -255,7 +255,7 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 
 A configuration error (a missing required key, a wrong type, a number that is not finite or outside its range, a
 directory of the pause or state file that is missing, a `pause_file` that is not absolute, a `pause_file` or `state_file` that is not a regular file (a directory), two configured files (`pause_file`, `state_file` and its `.lock`, `usage_cache`,
-`log_file`, `settings_file`, the configuration file itself, the scripts of the guard, hook and settings tool, the hook, interpreter or other launching program and `--log` file named by the registered entry, and the lock files `<state_file>.lock`, `<pause_file>.lock` and `<usage_cache>.lock`) that are one file by path, symbolic link or hard link)
+`log_file`, `settings_file`, the configuration file itself, the scripts of the guard, hook and settings tool, the hook, interpreter or other launching program and `--log` file named by the registered entry, and the lock files `<state_file>.lock`, `<pause_file>.lock` and `<usage_cache>.lock`) that are one file by path, symbolic link or hard link; the only pairs that may be one file are the bundled hook and the registered hook, an interpreter named by two entries, and a hook run directly, which is its own launcher by the same path: a hook that is a link to the interpreter, the entry module or another script of the guard is refused, and the wiring check reports the same collisions after the start)
 exits with status 2. A state
 file that does not have the shape the guard writes (times that are not positive or are more than 6 hours ahead included) is ignored: the guard starts without a pause. A file at `pause_file` is removed as a leftover only when it has the full shape the guard publishes (`v` 2, `paused` true, `pid`, `since`, `resume_at`, `valid_until`).
 

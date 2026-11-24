@@ -859,6 +859,25 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(g); }
   });
 
+  it('a registered hook that a swap after the start made a link to another program of the guard is reported at the wiring pass', async () => {
+    const f = fixture('wiring-hook-swapped', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, hook, PYBIN), timeout: 21600 }] }] } }), 'utf8');
+    const g = startGuard(f, ['--warn-every', '1']);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      expect(readText(f.log), 'a wired hook: no warning').not.toMatch(/WARNING/);
+      unlinkSync(hook);
+      symlinkSync(ENTRY_MODULE, hook);
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /WARNING \((pause start|pause)\): the registered hook .*five-hour-guard-hook\.py is the entry module of this guard/.test(readText(f.log)), 20000, 'the swap warning');
+    } finally { await stopGuard(g); }
+  });
+
   it('a link at pause_file is no pause for the hook, whatever its target holds: the call is not held', async () => {
     const f = fixture('hook-link', {});
     const target = join(f.dir, 'foreign-pause.json');
@@ -899,6 +918,31 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(g2); }
     expect(readText(stateB), 'the program is intact').toBe('the program\n');
     expect(existsSync(idle.pause), 'no pause was published').toBe(false);
+  });
+
+  it('an early stop of a test pause retries a failed removal and does not report it as done: a removal that never succeeds is an error with exit 1', async () => {
+    const run = async (name: string, refusals: number) => {
+      const f = fixture(name, {});
+      const code = ['import os, runpy, sys', 'real = os.unlink', 'target = sys.argv[1]', 'left = [int(sys.argv[2])]',
+        'def maybe(p, *a, **k):', '    if str(p) == target and left[0] > 0:', '        left[0] -= 1', '        raise OSError(1, "Operation not permitted")', '    return real(p, *a, **k)',
+        'os.unlink = maybe', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+      const g = spawnPyCode(code, [f.pause, String(refusals), GUARD, ...guardArgs(f, ['--test-pause', '600'])]);
+      try {
+        await waitFor(() => existsSync(f.pause), 20000, 'the test pause');
+        g.child.kill('SIGTERM');
+        await Promise.race([g.done, sleep(30000)]);
+      } finally { await g.stop(); }
+      return { f, code: g.code, log: readText(f.log) + g.out };
+    };
+    const once = await run('test-pause-retry', 1);
+    expect(existsSync(once.f.pause), 'the second try removed the file').toBe(false);
+    expect(once.code).toBe(0);
+    expect(once.log).toMatch(/test pause over: pause file removed/);
+    const never = await run('test-pause-never', 99);
+    expect(existsSync(never.f.pause), 'the file could not be removed').toBe(true);
+    expect(never.code, 'exit 1').toBe(1);
+    expect(never.log).toMatch(/ERROR: test pause over, but the pause file .* could not be removed/);
+    expect(never.log, 'not reported as removed').not.toMatch(/test pause over: pause file removed/);
   });
 
   it('a stop whose first removal of the pause file fails tries once more: the state is already unpaused and the sessions are not left waiting for the heartbeat', async () => {
@@ -1242,6 +1286,21 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.stderr).toMatch(/are the same file/);
       expect(readFileSync(hook, 'utf8'), 'the registered hook is intact').toBe(hookText);
     }
+  });
+
+  it('a registered hook that became a link to the interpreter of its own entry is refused at the start, while a hook that is run directly (its own launcher) is not', () => {
+    const f = fixture('alias-hook-is-interpreter', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+    put(`[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${HOOK} --pause-file ${f.pause}`);
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'the hook run directly').toBe(0);
+    const hook = join(f.dir, 'as-python', 'five-hour-guard-hook.py');
+    mkdirSync(join(f.dir, 'as-python'), { recursive: true });
+    symlinkSync(PYBIN, hook);
+    put(generatedCommand(f.pause, hook, PYBIN));
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/are the same file/);
   });
 
   it('a registered hook that became a link to another program of the guard is refused at the start, while the bundled hook as the registered one is not', () => {

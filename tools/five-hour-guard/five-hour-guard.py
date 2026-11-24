@@ -191,19 +191,36 @@ def same_file(a, b):
         return False
 
 
-HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}   # may be one file: the bundled hook is the registered one, and a hook that is run directly is its own launcher
+HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}
+
+
+def may_be_one_file(la, pa, lb, pb):
+    """The pairs that are one file by design: the hook as the bundled and as the registered one (and a hook that two entries name),
+    an interpreter that two entries name, a hook that is run directly and so is its own launcher (the same path in both places: a
+    hook that is a link to the interpreter is not), and the hook log of the configuration that is the log of the entry."""
+    if {la, lb} == {'hook_log_file', 'registered hook log'}:
+        return True
+    if la in ('hook script', 'registered hook') and lb in ('hook script', 'registered hook'):
+        return True
+    if la == lb == 'registered interpreter':
+        return True
+    if la in HOOK_PROGRAMS and lb in HOOK_PROGRAMS:   # a hook and an interpreter
+        return os.path.normcase(os.path.abspath(pa)) == os.path.normcase(os.path.abspath(pb))   # the same path as written, not the same file: a link to the interpreter is not the hook
+    return False
+
+
+def collisions(files):
+    """[(label a, path a, label b, path b)]: pairs of files that are one file and may not be."""
+    named = [(label, path) for label, path in files if path]
+    return [(la, pa, lb, pb) for i, (la, pa) in enumerate(named) for lb, pb in named[i + 1:]
+            if not may_be_one_file(la, pa, lb, pb) and same_file(pa, pb)]
 
 
 def check_distinct(files):
     """Two configured files that are one file would be read as each other's content: a pause file that is settings.json
     would be removed as a leftover pause at start. Refuse before anything is touched."""
-    named = [(label, path) for label, path in files if path]
-    for i, (la, pa) in enumerate(named):
-        for lb, pb in named[i + 1:]:
-            if (la in HOOK_PROGRAMS and lb in HOOK_PROGRAMS) or {la, lb} == {'hook_log_file', 'registered hook log'}:
-                continue   # the hook as the bundled and as the registered one, and as its own launcher; the hook log of the configuration is the log of the entry. Any other pair of program files (a hook that became a link to the entry module) is a collision
-            if same_file(pa, pb):
-                fail(f'"{la}" ({pa}) and "{lb}" ({pb}) are the same file: the guard would remove or overwrite one as the other')
+    for la, pa, lb, pb in collisions(files)[:1]:
+        fail(f'"{la}" ({pa}) and "{lb}" ({pb}) are the same file: the guard would remove or overwrite one as the other')
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -495,8 +512,11 @@ def hook_check(where):
         for problem in ENTRY.handler_problems(handler):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
     runtime = configured_files()
-    for label, path, out_label in program_collisions():
-        log(f'WARNING ({where}): the {label} {path} is the {out_label} of this guard: a write of the guard would replace the program, so a pause would hold no session. Run five-hour-guard-settings.py add again')
+    for la, pa, lb, pb in collisions(configured_files() + registered_runtime_files()):
+        if 'registered hook log' in (la, lb) or not ({la, lb} & {'registered hook', 'registered interpreter'}):
+            continue   # the log of an entry is reported below, with its own sentence; two configured files were refused at the start
+        program, other = ((la, pa), (lb, pb)) if la.startswith('registered') and not lb.startswith('registered') else ((lb, pb), (la, pa))
+        log(f'WARNING ({where}): the {program[0]} {program[1]} is the {other[0]} of this guard ({other[1]}): the entry would not run the hook, or a write of the guard would replace the program, so a pause would hold no session. Run five-hour-guard-settings.py add again')
     programs = []   # the programs of every recognised entry: a log of one entry can be the program of another
     for command in ours:
         try:
@@ -740,6 +760,7 @@ def test_pause():
     publish(st, only=ONLY)
     log(f'test pause: pause file written for {A.test_pause:.0f} s (exclude {EXCLUDE}, only {ONLY or "all sessions"})')
     end = now + A.test_pause
+    status = 0
     try:
         while not STOP and time.time() < end:
             time.sleep(0.5)
@@ -750,10 +771,17 @@ def test_pause():
         except Exception:
             ours = False
         if ours:
-            unpublish()
-            log('test pause over: pause file removed')
+            for attempt in range(5):   # an early stop of a long test must not leave the sessions held for the rest of it
+                if unpublish():
+                    log('test pause over: pause file removed')
+                    break
+                time.sleep(1)
+            else:
+                log(f'ERROR: test pause over, but the pause file {PAUSE_FILE} could not be removed: the sessions it holds are released when it lapses (valid_until), at the latest {A.heartbeat:.0f} s after it was written')
+                status = 1
         else:
             log('test pause over: the pause file is gone or no longer ours (a real pause may have started), left alone')
+    return status
 
 
 def main():
