@@ -2315,6 +2315,7 @@ export async function scaleDownOwned(
         string,
         { paneId: string; tree: PaneProcessTree }
       >();
+      const captureUnsaved: string[] = [];
       if (process.env.OMC_TEAM_KILL_PANE_TREE === "1") {
         await Promise.all(
           targetWorkers.map(async (worker) => {
@@ -2359,16 +2360,26 @@ export async function scaleDownOwned(
                         runtimeCliPath: resolveRuntimeCliPath(),
                       })
                     : null;
-                if (attempt)
-                  await addToWorkerLaunchFencedCapture(attempt, [
+                if (
+                  attempt &&
+                  !(await addToWorkerLaunchFencedCapture(attempt, [
                     serializePaneTree(tree),
-                  ]);
+                  ]).catch(() => false))
+                )
+                  captureUnsaved.push(worker.name);
               }
             } catch {
               /* reading a tree must not hold up the scale down: the read before the launch fence is still taken */
             }
           }),
         );
+      }
+      if (captureUnsaved.length > 0) {
+        // The tree of a worker that finishes during the drain is then in memory only; no drain request has gone out, so the scale down
+        // fails as a retryable operation instead.
+        const reason = `pane_tree_capture_unsaved:${captureUnsaved.join(",")}`;
+        await markScaleDownFailed(reason);
+        return { ok: false, error: reason };
       }
 
       // Phase 1: Set workers to 'draining' status. Worktree safety is checked

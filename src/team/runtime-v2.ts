@@ -9255,6 +9255,8 @@ export async function shutdownTeamV2(
   // the timeout), the trees were read while the panes were live; nothing is signalled until the launch fence is held in step 4.
   const startConfig = config;
   const earlyPaneTrees = new Map<string, { paneId: string; tree: PaneProcessTree }>();
+  // workers whose tree was read but could not be written to disk: no request to exit goes out while one is listed (see below)
+  const captureUnsaved: string[] = [];
   if (process.env.OMC_TEAM_KILL_PANE_TREE === "1") {
     await Promise.all(
       startConfig.workers.map(async (worker) => {
@@ -9295,16 +9297,32 @@ export async function shutdownTeamV2(
                     runtimeCliPath: resolveRuntimeCliPath(),
                   })
                 : null;
-            if (attempt)
-              await addToWorkerLaunchFencedCapture(attempt, [
+            if (
+              attempt &&
+              !(await addToWorkerLaunchFencedCapture(attempt, [
                 serializePaneTree(tree),
-              ]);
+              ]).catch(() => false))
+            )
+              captureUnsaved.push(worker.name);
           }
         } catch {
           /* reading a tree must not hold up the shutdown: the read before the launch fence is still taken */
         }
       }),
     );
+  }
+  if (captureUnsaved.length > 0) {
+    // The tree of a worker that follows the request to exit is then in memory only: a leader interrupted after the worker exited would
+    // retry with neither a live pane to read nor a persisted tree. Nothing was requested yet, so the shutdown is preserved for a retry.
+    process.stderr.write(
+      `[team/runtime-v2] preserving panes/worktrees/state because the pane process tree could not be saved before the requests to exit: ${captureUnsaved.join(", ")}\n`,
+    );
+    if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+    return {
+      outcome: "preserved",
+      reason: "provider_cleanup_unverified",
+      workers: captureUnsaved,
+    };
   }
 
   // 2. Send shutdown request to each worker

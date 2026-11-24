@@ -485,4 +485,25 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
       expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
     });
   }, 60_000);
+
+  // A tree that cannot be written to disk before the requests to exit is in memory only: a worker that follows the request exits, and a
+  // leader interrupted after that has nothing to signal on the retry. No request goes out; the shutdown is preserved for a retry.
+  it('sends no request to exit and preserves the shutdown when the tree read before the requests cannot be saved', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    await withAcceptedProvider('pane-tree-unsaved-team', async (teamRoot, _provider, attempt) => {
+      // a directory in the place of the capture file: it cannot be read as a capture or replaced by one
+      await mkdir(join(`${attempt.decisionPath}.retired.fenced-capture`, 'occupied'), { recursive: true });
+      tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => FIXTURE_TREE);
+      const { shutdownTeamV2 } = await import('../runtime-v2.js');
+      await expect(shutdownTeamV2('pane-tree-unsaved-team', cwd, { timeoutMs: 0, force: true })).resolves.toMatchObject({
+        outcome: 'preserved',
+        reason: 'provider_cleanup_unverified',
+        workers: ['worker-1'],
+      });
+      expect(await exists(join(teamRoot, 'workers', 'worker-1', 'shutdown-request.json'))).toBe(false);
+      expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+      expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+      await terminateWorkerLaunchProvider(attempt, 2_000); // the shutdown left the provider running; the helper waits for it to end
+    });
+  }, 60_000);
 });

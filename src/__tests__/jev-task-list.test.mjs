@@ -863,6 +863,24 @@ describe('task list: session retention sweep', () => {
     expect(readdirSync(root()).filter((n) => n.endsWith('.sweeping'))).toEqual([]);
   });
 
+  it('folds the lists of a tree that goes back to its own name by one rename: the list file shows what the events give as soon as it is back', () => {
+    fresh();
+    const now = Date.now();
+    const sid = session();
+    L.recordListCall(postToolUse(sid, 'TaskCreate', { subject: 'Written once' }, { tool_response: 'Task #1 created successfully: Written once' }), envFor(), now - 5000);
+    const listFile = join(root(), sid, 'main.json');
+    const beforeUpdate = readFileSync(listFile, 'utf8');
+    L.recordListCall(postToolUse(sid, 'TaskUpdate', { taskId: '1', status: 'completed' }), envFor(), now - 1000);
+    writeFileSync(listFile, beforeUpdate); // the call published its event, and the directory was moved before the fold wrote the list
+    expect(JSON.parse(readFileSync(listFile, 'utf8')).items[0].status).toBe('pending');
+    renameSync(join(root(), sid), join(root(), `.${sid}.0123456789ab.sweeping`)); // what the sweep did a moment ago
+    rmSync(join(root(), '.sweep'), { force: true });
+    L.sweep(envFor(), now);
+    expect(existsSync(join(root(), `.${sid}.0123456789ab.sweeping`))).toBe(false);
+    expect(JSON.parse(readFileSync(listFile, 'utf8')).items[0].status).toBe('completed'); // not only what readList computes
+    expect(L.readList(sid, 'main', envFor()).items[0].status).toBe('completed');
+  });
+
   it('merges a tree in use under a hidden name into the directory a hook made again: its events and claims arrive, nothing the live tree has is replaced (its list is kept next to the live list), locks and temporary files are left behind', () => {
     fresh();
     const now = Date.now();

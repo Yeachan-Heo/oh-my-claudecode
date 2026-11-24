@@ -590,9 +590,17 @@ function hasHiddenTree(sessionId, env) {
 // A moved tree with recent activity goes back to its own name: one rename when the name is free. When a hook has made the directory
 // again, the rename fails and the tree is merged into the new one, so an event published into the old tree stays visible to the readers of
 // the live path. A tree that cannot be merged completely stays under its hidden name; the next sweep tries again (see sweep). The lists
-// that took a moved base are folded once the merge is done, so the list file shows what the events give.
+// that took a moved base are folded once the merge is done, so the list file shows what the events give; so are the lists of a tree that
+// went back by the one rename, since the directory may have been moved after an event was published and before its fold wrote the list.
 function putBack(aside, dir, env) {
-  try { renameSync(aside, dir); return; } catch { /* the name is taken: merge */ }
+  let renamed = false;
+  try { renameSync(aside, dir); renamed = true; } catch { /* the name is taken: merge */ }
+  if (renamed) {
+    try {
+      for (const name of readdirSync(dir)) if (name.endsWith('.events')) syncList(basename(dir), name.slice(0, -'.events'.length), env);
+    } catch { /* the next call folds them */ }
+    return;
+  }
   const adopted = [];
   try { if (mergeTree(aside, dir, env, true, adopted)) rmSync(aside, { recursive: true, force: true }); } catch { /* kept under its hidden name */ }
   for (const path of adopted) syncList(basename(dir), basename(path, '.json'), env);
