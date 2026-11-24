@@ -6,7 +6,7 @@
 
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, realpathSync, renameSync, rmdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { directoryOperationsIfSupported } from "./contained-fd.js";
 import { assertIdentity, takeOwnership, withRunDirectory } from "./run-gc-owner.js";
 import {
@@ -14,6 +14,7 @@ import {
   leaseOf,
   measureTree,
   NOFOLLOW,
+  KEPT_PREFIX,
   QUARANTINE_PREFIX,
   type FileIdentity,
   type OperationsFor,
@@ -33,6 +34,8 @@ export interface ScannedRun {
   readonly afterReads?: () => void;
   /** Test-only interlock: after the name was checked for the last time, right before the directory is moved. */
   readonly beforeMove?: () => void;
+  /** Test-only interlock: right after the directory was moved, before the moved directory is checked. */
+  readonly afterMove?: () => void;
   /** Test-only: replaces the directory-relative operations of the platform (see OperationsFor). */
   readonly operationsFor?: OperationsFor;
 }
@@ -115,7 +118,9 @@ function removeEntriesOf(
 
 // A directory cannot be renamed through its open descriptor, so the move is by name: the name is checked right before
 // it, and the moved directory is checked right after. When the name was swapped in between, the directory that was
-// moved is not the scanned one: it is put back, and nothing is deleted.
+// moved is not the scanned one: it is put back, and nothing is deleted. When the name is taken again and it cannot be
+// put back, it is renamed out of the quarantine namespace, because it was never validated and a later pass deletes what
+// is left under a quarantine name.
 function putBackUnlessScanned(runDir: string, moved: string, scanned: FileIdentity): void {
   let identity: FileIdentity | null = null;
   try {
@@ -128,7 +133,13 @@ function putBackUnlessScanned(runDir: string, moved: string, scanned: FileIdenti
   try {
     renameSync(moved, runDir);
   } catch {
-    // The name is taken again; the moved directory stays under its quarantine name for the operator.
+    const kept = join(dirname(moved), `${KEPT_PREFIX}${basename(moved).slice(QUARANTINE_PREFIX.length)}`);
+    try {
+      renameSync(moved, kept);
+    } catch {
+      throw new Error("the run directory was replaced while it was moved; the moved directory could not be put back and stays under its quarantine name");
+    }
+    throw new Error(`the run directory was replaced while it was moved; the moved directory could not be put back and was kept as ${basename(kept)}`);
   }
   throw new Error("the run directory was replaced while it was moved; the moved directory was put back");
 }
@@ -170,6 +181,7 @@ export function quarantineRun(
       scanned.beforeMove?.();
     }
     renameSync(runDir, quarantine);
+    scanned?.afterMove?.();
     if (scanned !== undefined) putBackUnlessScanned(runDir, quarantine, scanned.identity);
   } catch (error) {
     // The run stays where it was, so the lock this process took must not stay with it.

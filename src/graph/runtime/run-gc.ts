@@ -59,7 +59,9 @@
  *     repair, and the directory sync. The name of the run is checked again before the copy, before the truncation and
  *     after the decision reads; a name that was swapped refuses the step. A directory can only be renamed by name, so
  *     the name is checked right before the move and the moved directory right after it, and a directory that is not
- *     the scanned one is put back.
+ *     the scanned one is put back; when the name is taken again and it cannot be put back, it is renamed to
+ *     `.kept-<run id>-<time>-<random>`, outside the quarantine namespace, so that no later pass deletes what was never
+ *     validated.
  *   - The platform is never told by its name: every platform that has directory-relative operations (the runtime's
  *     contained filesystem layer: Linux, and macOS with the native module) makes all of those decisions and the
  *     removal through them. A platform that has none cannot take ownership (the fence needs the same operations), and

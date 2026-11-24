@@ -300,3 +300,40 @@ describe.runIf(process.platform === "linux")("decisions and removal under owners
     });
   });
 });
+
+// A directory that was moved under a name it did not belong to and could not be put back is not the scanned run and
+// was never validated: the next pass must not treat it as the leftover of an interrupted removal.
+describe.runIf(process.platform === "linux")("a failed put-back of a moved directory", () => {
+  it("keeps the moved directory out of the namespace that a later pass deletes", () => {
+    withBase((base) => {
+      const root = makeRoot(base);
+      const realRoot = realpathSync(root);
+      const dir = makeFinishedRun(root, "run-rollback");
+      ageTree(dir, OLD);
+      let replacementJournal = "";
+      const scanned: ScannedRun = {
+        ...scannedFirst(root),
+        beforeMove: () => {
+          // Another directory takes the name after its last check, so the move takes that one.
+          renameSync(dir, join(base, "moved-away"));
+          makeFinishedRun(root, "run-rollback");
+          ageTree(dir, OLD);
+          replacementJournal = readFileSync(join(dir, "journal.jsonl"), "utf8");
+        },
+        afterMove: () => {
+          // A new launch recreates the name before the put-back, so the put-back cannot be done.
+          mkdirSync(dir);
+          writeFileSync(join(dir, "descriptor.json"), "{}\n");
+        },
+      };
+
+      expect(() => removeRun(realRoot, "run-rollback", scanned)).toThrow(/replaced while it was moved; the moved directory could not be put back and was kept as \.kept-run-rollback-/);
+      expect(readdirSync(root).filter((name) => name.startsWith(".deleted-")), "the moved directory is still in the deletable namespace").toEqual([]);
+
+      gc(root);
+      const kept = readdirSync(root).filter((name) => name !== "run-rollback" && existsSync(join(root, name, "journal.jsonl")));
+      expect(kept, "a later pass deleted the directory that could not be put back").toHaveLength(1);
+      expect(readFileSync(join(root, kept[0], "journal.jsonl"), "utf8")).toBe(replacementJournal);
+    });
+  });
+});
