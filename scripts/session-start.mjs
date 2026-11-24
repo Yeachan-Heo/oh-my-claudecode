@@ -936,8 +936,9 @@ function isTruthyProviderFlag(value) {
   return value === '1' || value === 'true';
 }
 
+// The first non-blank of CLAUDE_MODEL and ANTHROPIC_MODEL, trimmed ('' when neither is set).
 function getSessionModelId() {
-  return process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+  return [process.env.CLAUDE_MODEL, process.env.ANTHROPIC_MODEL].map((v) => (v || '').trim()).find(Boolean) || '';
 }
 
 function isBedrockSession() {
@@ -945,7 +946,7 @@ function isBedrockSession() {
   const modelId = getSessionModelId();
   return Boolean(
     modelId && (
-      /^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId) ||
+      /^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId) ||
       (
         /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId) &&
         /:(inference-profile|application-inference-profile)\//i.test(modelId) &&
