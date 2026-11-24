@@ -78192,6 +78192,104 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 5129,
+      "targetRef": "main",
+      "mergeBaseSha": "4c7f14fe18fc0bc62348445e1acbbcdf9076f66c",
+      "headSha": "a2e733f5de24663c06a6b0d03b22efd0b40068f0",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-31T23:59:59.999Z",
+      "generatedDelta": {
+        "count": 14,
+        "sha256": "fc0afd20accad8b3def43a594d2ec6fe85db4067a0a0395245ac0c610c4bef86"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "e5927c8166fc0b9ed51e37d4db2141a5132a7d81",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "693ee6328af3c7e2f1e8d744f3ef573a72d05fa2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "64c93f129891a93d2bb6f0fa179d3d8e75499866",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "939cf7bca7acc1314d35aec8ad20d01e76ced27d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "5f07abe935a701ab9a722c120e4105c584f5989b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/bedrock-lm-suffix-hook.test.js",
+          "sha": "c49cf9d589e425834fb78cd4a915b616a098576c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/bedrock-lm-suffix-hook.test.js.map",
+          "sha": "eac9ad33f146e8ce367192505bc33838ab56f299",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/__tests__/models.test.js",
+          "sha": "b76821d50a1bf6929a4a376aea298979c0b66cb9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/__tests__/models.test.js.map",
+          "sha": "3bc1bbad0a64a91537dd5b92f222e95763c5d9ab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/models.js",
+          "sha": "694e5e88a9ce085c4390bff6ab4ae9253e1bcb06",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/models.js.map",
+          "sha": "43e2ce87122c2e3013d61a3773195aa17884b142",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.d.ts.map",
+          "sha": "c803cdb0d46004e6ae31ea2d073d51fae694ac8e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js",
+          "sha": "623de14651ba0dc5b24c1320c1428f15fabb3680",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js.map",
+          "sha": "44a194940bd59ec4e45c5a5d0507ce1550b6c0b2",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
