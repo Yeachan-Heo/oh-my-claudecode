@@ -786,6 +786,70 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for calls that name a model (
       expect(await routedInput(input, { ...NAMED, ...env })).toEqual({ ...input.tool_input, model: "sonnet", effort: "medium" });
     }, 15000);
 
+    // The whole table of the named-model gate: every source of the provider and of the tier mapping
+    // against the decision (true: Jev's alias replaces the named model; false: the name stays and only
+    // the effort is set). Jev answers sonnet. Sources read: the Bedrock and Vertex flags, the base URL,
+    // CLAUDE_MODEL, ANTHROPIC_MODEL, the native defaults of the four tiers and forceInherit. Not read, as
+    // in src/config/models.ts: OMC_MODEL_*, and a Foundry flag. The first non-blank native default of
+    // the sonnet tier is the mapping: when it is unusable, a later one is not looked at.
+    const BEDROCK_ID = "global.anthropic.claude-sonnet-4-6";
+    const OPUS_BEDROCK_ID = "global.anthropic.claude-opus-4-6-v1:0";
+    const FLAG = { CLAUDE_CODE_USE_BEDROCK: "1" };
+    const PROXY = { ANTHROPIC_BASE_URL: "http://proxy.example.invalid/v1" };
+    const FORCE = { OMC_ROUTING_FORCE_INHERIT: "true" };
+    const GATE_TABLE: [string, NodeJS.ProcessEnv, boolean][] = [
+      ["nothing set", {}, true],
+      ["Anthropic base URL", { ANTHROPIC_BASE_URL: "https://api.anthropic.com" }, true],
+      ["Bedrock flag", FLAG, false],
+      ["Bedrock flag, native mapping in the Bedrock variable", { ...FLAG, CLAUDE_CODE_BEDROCK_SONNET_MODEL: BEDROCK_ID }, true],
+      ["Bedrock flag, native mapping in the default variable", { ...FLAG, ANTHROPIC_DEFAULT_SONNET_MODEL: BEDROCK_ID }, true],
+      ["Bedrock flag, unusable winner and a usable later default", { ...FLAG, CLAUDE_CODE_BEDROCK_SONNET_MODEL: "other-proxy-model", ANTHROPIC_DEFAULT_SONNET_MODEL: BEDROCK_ID }, false],
+      ["Bedrock flag, usable winner and a plain later default", { ...FLAG, CLAUDE_CODE_BEDROCK_SONNET_MODEL: BEDROCK_ID, ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5" }, true],
+      ["Bedrock flag, blank winner and a usable later default", { ...FLAG, CLAUDE_CODE_BEDROCK_SONNET_MODEL: " ", ANTHROPIC_DEFAULT_SONNET_MODEL: BEDROCK_ID }, true],
+      ["Bedrock flag, blank winner and a plain later default", { ...FLAG, CLAUDE_CODE_BEDROCK_SONNET_MODEL: " ", ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5" }, false],
+      ["Bedrock flag, only OMC_SUBAGENT_MODEL", { ...FLAG, OMC_SUBAGENT_MODEL: BEDROCK_ID }, false],
+      ["Bedrock flag, OMC_SUBAGENT_MODEL and a plain default", { ...FLAG, OMC_SUBAGENT_MODEL: BEDROCK_ID, ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5" }, false],
+      ["Vertex flag", { CLAUDE_CODE_USE_VERTEX: "1" }, false],
+      ["Vertex flag, Vertex mapping", { CLAUDE_CODE_USE_VERTEX: "1", ANTHROPIC_DEFAULT_SONNET_MODEL: "vertex_ai/claude-sonnet-4-6" }, true],
+      ["Vertex flag, plain default", { CLAUDE_CODE_USE_VERTEX: "1", ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5" }, false],
+      ["foreign base URL", PROXY, false],
+      ["foreign base URL, plain default", { ...PROXY, ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
+      ["foreign base URL, unusable winner and a plain later default", { ...PROXY, CLAUDE_CODE_BEDROCK_SONNET_MODEL: "other-proxy-model", ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, false],
+      ["foreign base URL, plain default of another tier", { ...PROXY, ANTHROPIC_DEFAULT_OPUS_MODEL: "other-proxy-model" }, false],
+      ["session alias", { CLAUDE_MODEL: "sonnet" }, true],
+      ["CLAUDE_MODEL wins over ANTHROPIC_MODEL: alias over a foreign name", { CLAUDE_MODEL: "sonnet", ANTHROPIC_MODEL: "deepseek-chat" }, true],
+      ["CLAUDE_MODEL wins over ANTHROPIC_MODEL: foreign name over an alias", { CLAUDE_MODEL: "deepseek-chat", ANTHROPIC_MODEL: "sonnet" }, false],
+      ["blank CLAUDE_MODEL, ANTHROPIC_MODEL decides", { CLAUDE_MODEL: " ", ANTHROPIC_MODEL: "deepseek-chat" }, false],
+      ["session alias hides a Bedrock tier default", { ANTHROPIC_MODEL: "opus[1m]", CLAUDE_CODE_BEDROCK_OPUS_MODEL: OPUS_BEDROCK_ID }, true],
+      ["foreign session name, plain default", { ANTHROPIC_MODEL: "deepseek-chat", ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
+      ["foreign session name, no mapping", { ANTHROPIC_MODEL: "deepseek-chat", ANTHROPIC_DEFAULT_OPUS_MODEL: "opus" }, false],
+      ["Bedrock session ID", { ANTHROPIC_MODEL: OPUS_BEDROCK_ID }, false],
+      ["Bedrock session ID, plain default", { ANTHROPIC_MODEL: OPUS_BEDROCK_ID, ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5" }, false],
+      ["Vertex session ID", { CLAUDE_MODEL: "vertex_ai/claude-opus-4-6" }, false],
+      ["foreign tier default only", { ANTHROPIC_DEFAULT_OPUS_MODEL: "other-proxy-model" }, false],
+      ["foreign tier default and a plain sonnet default", { ANTHROPIC_DEFAULT_OPUS_MODEL: "other-proxy-model", ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5" }, true],
+      ["Bedrock ID in a tier default only", { CLAUDE_CODE_BEDROCK_OPUS_MODEL: OPUS_BEDROCK_ID }, false],
+      ["Bedrock ID in a tier default, plain sonnet default", { CLAUDE_CODE_BEDROCK_OPUS_MODEL: OPUS_BEDROCK_ID, ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5" }, false],
+      ["Bedrock ID in a tier default, Bedrock sonnet default", { CLAUDE_CODE_BEDROCK_OPUS_MODEL: OPUS_BEDROCK_ID, ANTHROPIC_DEFAULT_SONNET_MODEL: BEDROCK_ID }, true],
+      ["Claude and alias tier defaults", { ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4-8", ANTHROPIC_DEFAULT_HAIKU_MODEL: "haiku[1m]" }, true],
+      ["forceInherit alone", FORCE, false],
+      ["forceInherit, plain default of a Claude provider", { ...FORCE, ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-4-5" }, false],
+      ["forceInherit, session alias, plain default", { ...FORCE, ANTHROPIC_MODEL: "sonnet", ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-4-5" }, false],
+      ["forceInherit, native mapping", { ...FORCE, ANTHROPIC_DEFAULT_SONNET_MODEL: BEDROCK_ID }, true],
+      ["forceInherit, foreign base URL and a plain default", { ...FORCE, ...PROXY, ANTHROPIC_DEFAULT_SONNET_MODEL: "other-proxy-model" }, true],
+      ["forceInherit, only OMC_SUBAGENT_MODEL", { ...FORCE, OMC_SUBAGENT_MODEL: BEDROCK_ID }, false],
+      ["OMC_MODEL_MEDIUM is not read", { OMC_MODEL_MEDIUM: "deepseek-chat" }, true],
+      ["a Foundry flag is not read", { CLAUDE_CODE_USE_FOUNDRY: "1" }, true],
+    ];
+    it.each(GATE_TABLE)("gate table: %s", async (_label, env, replaced) => {
+      // The name comes from a definition: a call that names a model of its own is denied under forceInherit by another gate.
+      writeAgent(projectAgents(), "table-agent", "model: deepseek-chat\n");
+      const input = agentInput({ subagent_type: "table-agent" });
+      const routed = await routedInput(input, { ...NAMED, ...env });
+      expect(requests).toHaveLength(1);
+      expect(routed).toEqual(replaced ? { ...input.tool_input, model: "sonnet", effort: "medium" } : { ...input.tool_input, effort: "medium" });
+    }, 15000);
+
     it("a session model that is not a Claude name still keeps the named model", async () => {
       const input = agentInput({ model: "fable" });
       expect(await routedInput(input, { ...NAMED, ANTHROPIC_MODEL: "deepseek-chat" })).toEqual({ ...input.tool_input, effort: "medium" });

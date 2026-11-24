@@ -189,6 +189,9 @@ function resolveTierAliasToSafeModel(tierAlias, nativeOnly = false, forNamedGate
     const isNativeCcVar = isAnthropicDefaultTierVar || key.startsWith('CLAUDE_CODE_BEDROCK_');
     const validator = isNativeCcVar ? isProviderSpecificModelId : isSubagentSafeModelId;
     if (value && (validator(value) || acceptsProxyAnthropicDefaultTierValue(key, value, forNamedGate))) return value;
+    // Claude Code uses the first native variable that is set: when that one is unusable, a later
+    // one is not what the alias resolves to (nativeOnly callers only).
+    if (nativeOnly && value && isNativeCcVar) return '';
   }
   return '';
 }
