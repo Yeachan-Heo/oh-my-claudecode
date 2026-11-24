@@ -105,6 +105,37 @@ describe('agent trim (OMC_JEV_COMPACT_AGENT_TRIM)', () => {
   });
 });
 
+describe('agent trim: the search of an agent\'s earlier messages is bounded', () => {
+  // Fifteen reports of 58 000 characters of one letter, then many short idle notifications whose result is nearly that text but never inside it:
+  // each one is searched for in everything the agent has said (about 870 000 characters).
+  const rows = () => {
+    const m = [user('Task: coordinate the agents.')];
+    for (let k = 0; k < 15; k++) m.push(user(report('a1', 'a'.repeat(58000), `N${k} done`)), assistant('Noted.'));
+    for (let k = 0; k < 2000; k++) m.push(user(idle('a1', `${'a'.repeat(39)}b`)));
+    for (let k = 0; k < 12; k++) m.push(k % 2 ? assistant(`tail ${k}`) : user(`tail ${k}`));
+    return m;
+  };
+
+  it('stays within a few seconds on rows that match nothing (it took 9 s without the bound), and still finds a duplicate in what was said', () => {
+    const m = rows();
+    const started = Date.now();
+    const { stats } = trimAgentRows(m, { keepFrom: m.length - 12 });
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(stats.idle_kept).toBeGreaterThan(0);
+    // A duplicate within the budget is removed as before.
+    const small = [user('Task.'), user(report('a1', `Findings: ${filler(300)}`, 'N1')), assistant('Noted.'), user(idle('a1', filler(300).slice(0, 100))), assistant('Noted.'), ...Array.from({ length: 12 }, (_, k) => (k % 2 ? assistant('t') : user('t')))];
+    expect(trimAgentRows(small, { keepFrom: small.length - 12 }).stats.idle_removed).toBe(1);
+  });
+
+  it('starts no more rows once the deadline has passed', () => {
+    const m = rows();
+    const { stats, rows: out } = trimAgentRows(m, { keepFrom: m.length - 12, deadline: Date.now() - 1 });
+    expect(stats.timed_out).toBe(1);
+    expect(stats.rows).toBe(0);
+    expect(out.size).toBe(0);
+  });
+});
+
 describe('agent trim: the whole conversation', () => {
   const R = {
     report1: report('a1', `Report a1: ${filler(1500)}`, 'N1 done'),

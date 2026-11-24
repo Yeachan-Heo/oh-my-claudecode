@@ -381,6 +381,29 @@ describe('token accounting: record of a compaction', () => {
   });
 });
 
+describe('token accounting: the window of the cascade', () => {
+  // An automatic compaction of a subagent whose estimate is under the threshold: the cascade narrows the window to the estimate (`+agent`).
+  async function agentRecord(extra) {
+    const messages = conversation(30);
+    const fake = fakeDollar({ env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20', ...extra }, usage: usageOf });
+    fake.$.session.messages = async () => messages;
+    const handlers = {};
+    register((event, hook) => { handlers[event] = hook; });
+    await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', agentId: 'agent-1', messages }), async () => ({ messages: [] }));
+    return fake.records()[0];
+  }
+
+  it('keeps the window, the threshold and the source the cascade planned with when token accounting is on', async () => {
+    const plain = await agentRecord({});
+    expect(plain.window_source).toMatch(/\+agent$/);
+    expect(plain.window).toBeLessThan(200000);
+    const accounted = await agentRecord({ OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' });
+    expect(accounted).toMatchObject({ window: plain.window, threshold: plain.threshold, window_source: plain.window_source });
+    expect(accounted.cascade_target_tokens).toBe(plain.cascade_target_tokens);
+    expect(accounted).toHaveProperty('tokens_before');
+  });
+});
+
 describe('token accounting: own threshold window', () => {
   // A host breakdown without rawMaxTokens: the window is the one the settings give (100 000) with the switch on, the model's (200 000) without it.
   const noRaw = (opts) => (opts?.breakdown ? { context: { tokens: 130000, window: 200000, breakdown: {} } } : { context: { tokens: 130000, window: 200000 } });

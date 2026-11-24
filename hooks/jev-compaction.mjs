@@ -2522,12 +2522,12 @@ function tokensBeforeOf(e, cfg, messages, api, detail, usage) {
 // The record fields of one compaction with token accounting: the window and threshold, the tokens before (the host's usage in the main loop, else
 // the prefix plus the estimate of the API form) and after (the tokens before less what the keep decisions of allocate remove), the target and its
 // ceiling. Read-only: the cut itself stays with allocate.
-// The host reads (`known` when the caller made them already) and the settings read stay within `deadline`, the compaction's own: once it has passed the
+// The host reads (`known` when the caller made them already, with `win`, the window the cascade planned with, which then stands in the record) and the settings read stay within `deadline`, the compaction's own: once it has passed the
 // estimate of the API form and no window stand in the record. `installedStageTokens`: what the text stages that installed took off.
 async function tokenAccounting($, e, cfg, messages, api, candidates, installedStageTokens, deadline, known = {}) {
   const detail = 'detail' in known ? known.detail : await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
   const usage = 'usage' in known ? known.usage : await hostValue($, () => $.session.usage(), deadline);
-  const win = await resolveWindow($, cfg, detail, usage, deadline);
+  const win = known.win ?? await resolveWindow($, cfg, detail, usage, deadline);
   const real = usage?.context?.tokens;
   const main = e.agentId === undefined && finitePositive(real) !== undefined;
   const tokensBefore = Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates));
@@ -3516,7 +3516,7 @@ function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionI
   const from = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
   if (skip && !skip.unmatched) {
     try {
-      trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates });
+      trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates, deadline });
       stats = trim.stats;
     } catch (error) { trim = undefined; stats = { error: clip(oneLine(String(error?.message ?? error)), 200) }; }
   }
@@ -3559,6 +3559,9 @@ const TRIM_HEAD = 'Another Claude session sent a message:';
 const TRIM_NOTE = /^\n*This came from another Claude session[^\n]*?permission laundering\./; // the note after a block, read from the start of the text after it
 const TRIM_STATE_MAX = 200; // a longer result is a state only when the agent's earlier message carries its summary
 const TRIM_DUP_MIN = 40; // a shorter result is never a duplicate by its text
+// The search of a result in everything an agent said is linear in that text and makes no progress it could be stopped at, so the characters one trim searches
+// are bounded: past the budget a result is no duplicate by its text (it stays, as every other result the search does not find does).
+const TRIM_SEARCH_BUDGET_CHARS = 10_000_000;
 const trimNorm = (t) => String(t ?? '').replace(/\s+/g, ' ').trim();
 // The pattern of a state result: a configured phrase at the start or at the end (a phrase may be followed by `: ...` at the end). No phrases, no state
 // (only an empty result and a repeated report are removed then).
@@ -3668,7 +3671,7 @@ function reframe(row, blocks, drop) {
   return out;
 }
 // opts: keepFrom (the first row of the tail), skipRows (a Set of rows the host cannot rebuild from text), queuedRows (a Map of rows with delivered blocks
-// anchored to them), statePattern. Returns {rows: Map row -> rebuilt row, saved: Map row -> characters, stats}.
+// anchored to them), statePattern, deadline (no row is started after it: the rest stays as it is, `timed_out` in the stats). Returns {rows: Map row -> rebuilt row, saved: Map row -> characters, stats}.
 export function trimAgentRows(messages, opts = {}) {
   const tail = Number.isInteger(opts.keepFrom) ? opts.keepFrom : Math.max(1, messages.length - KEEP_LAST);
   const skip = opts.skipRows instanceof Set ? opts.skipRows : new Set();
@@ -3677,6 +3680,7 @@ export function trimAgentRows(messages, opts = {}) {
   const stats = { rows: 0, pre: 0, note: 0, idle_removed: 0, idle_kept: 0, rows_dropped: 0, chars: 0, anchored: 0, unbalanced: 0 };
   const rows = new Map();
   const saved = new Map();
+  let searchLeft = TRIM_SEARCH_BUDGET_CHARS;
   const said = new Map(); // what every agent said outside idle notifications in the rows before the current one: summaries and bodies
   const learn = (m) => {
     if (m.role !== 'user' || (m.toolResults || []).length || typeof m.text !== 'string' || m.text.length > AGENT_ROW_MAX_CHARS || !m.text.includes('<teammate-message')) return;
@@ -3695,6 +3699,7 @@ export function trimAgentRows(messages, opts = {}) {
     }
   };
   for (let i = 1; i < tail; i++) {
+    if (opts.deadline !== undefined && Date.now() >= opts.deadline) { stats.timed_out = 1; break; }
     const m = messages[i];
     const row = m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS ? m.text : undefined;
     const lead = row === undefined ? '' : row.trimStart();
@@ -3717,7 +3722,12 @@ export function trimAgentRows(messages, opts = {}) {
       const r = trimNorm(d.result);
       const e = said.get(who);
       const isState = state.test(r);
-      const dup = !r || (isState && r.length <= TRIM_STATE_MAX) || (isState && d.summary && e && e.sums.has(trimNorm(d.summary))) || (r.length >= TRIM_DUP_MIN && e && e.body.includes(r));
+      const inBody = () => {
+        if (!(r.length >= TRIM_DUP_MIN && e) || e.body.length > searchLeft) return false;
+        searchLeft -= e.body.length;
+        return e.body.includes(r);
+      };
+      const dup = !r || (isState && r.length <= TRIM_STATE_MAX) || (isState && d.summary && e && e.sums.has(trimNorm(d.summary))) || inBody();
       if (!dup) stats.idle_kept++;
       return Boolean(dup);
     };
@@ -3980,6 +3990,7 @@ async function decide($, e, cfg, record, started) {
     }
     tokens.tokens = Math.round(tokens.tokens);
     Object.assign(record, { window: win.window, threshold: win.threshold, window_source: win.source });
+    known.win = win; // the window that governs the cut: the token accounting records it as it is
     // The rule's target: the usual target before the owner's limit (`raw`), then the limit from the configured window ceiling (absent by default).
     const raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
     const ceiling = tokenCeiling(cfg.maxWindowTokens, cfg.rates);
