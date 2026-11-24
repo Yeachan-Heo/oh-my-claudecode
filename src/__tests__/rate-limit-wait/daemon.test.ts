@@ -451,7 +451,7 @@ describe('daemon child environment allowlist', () => {
   });
 
   it('forwards TMUX_TMPDIR, so the daemon reaches the default tmux server the team was started on', () => {
-    process.env = { ...originalEnv, TMUX_TMPDIR: '/var/tmp/custom-tmux-sockets' };
-    expect(createMinimalDaemonEnv().TMUX_TMPDIR).toBe('/var/tmp/custom-tmux-sockets');
+    process.env = { ...originalEnv, TMUX_TMPDIR: '/custom/tmux-sockets' };
+    expect(createMinimalDaemonEnv().TMUX_TMPDIR).toBe('/custom/tmux-sockets');
   });
 });
