@@ -63,6 +63,7 @@ const PARTIAL_STATES = ['reference', 'initial-partial', 'post-down-partial', 'pr
 // Enter. The startup test "sends the start back to the wait when the check
 // before the trigger catches the trust dialog mid-draw" plays the same frames.
 const PRE_TYPING_HEAD_WAIT_MS = 2 * STARTUP_POLL_MS + 100 + 120;
+const PRE_TYPING_KEYS_FROM = 'reference claude/2.1.330/trust.txt';
 
 // The product's own parser decides which values may lengthen the wait, so the
 // comparator cannot read a value differently from it (6e4, unsafe integers).
@@ -96,6 +97,8 @@ const SET_CRITERIA = {
         if (base.result?.kind !== 'attempted_unconfirmed' || base.keys.length === 0) {
           failures.push(`${id} base result ${JSON.stringify(base.result)} with ${base.keys.length} key(s) no longer types into the frozen frame`);
         }
+        const timeout = resolveStartupReadyTimeoutMs(base.env.OMC_TEAM_READY_TIMEOUT_MS === null ? {} : { OMC_TEAM_READY_TIMEOUT_MS: base.env.OMC_TEAM_READY_TIMEOUT_MS });
+        if (head.wait_ms < timeout) failures.push(`${id} head gave up after ${head.wait_ms}ms, before its ${timeout}ms timeout`);
         if (head.wait_ms > STARTUP_WAIT_MAX_MS) failures.push(`${id} head waited ${head.wait_ms}ms > ${STARTUP_WAIT_MAX_MS}ms`);
         continue;
       }
@@ -166,15 +169,18 @@ const SET_CRITERIA = {
           if (base.result?.reason !== 'selector_persistent') failures.push(`${id} base result ${JSON.stringify(base.result)} is not selector_persistent`);
           if (!succeeded(head)) failures.push(`${id} head result ${JSON.stringify(head.result)}`);
           if (!isDeepStrictEqual(keySequence(head), keySequence(reference.base))) failures.push(`${id} head keys differ from the reference on base`);
-          const limit = reference.base.wait_ms + head.partial_captures * STARTUP_POLL_MS;
-          if (head.wait_ms > limit) failures.push(`${id} head waited ${head.wait_ms}ms > ${limit}ms`);
+          // Exactly one poll per partial capture: fewer means head reread without sleeping.
+          const expected = reference.base.wait_ms + head.partial_captures * STARTUP_POLL_MS;
+          if (head.wait_ms !== expected) failures.push(`${id} head waited ${head.wait_ms}ms, not ${expected}ms`);
         }
       }
       if (base.eventState === 'pre-typing-partial') {
         if (!succeeded(head)) failures.push(`${id} head result ${JSON.stringify(head.result)}`);
-        const keys = head.keys.map(key => (key.keys[0] === '-l' ? '<trigger>' : key.keys.join(' ')));
-        const expected = ['Down', 'Enter', '<trigger>', 'Enter', 'Enter'];
-        if (!isDeepStrictEqual(keys, expected)) failures.push(`${id} head keys ${JSON.stringify(keys)}`);
+        // Down, Enter, the trigger, Enter, Enter: what base sends the whole
+        // 2.1.330 dialog, compared send by send (text, pane, guard).
+        const reference = byId.get(PRE_TYPING_KEYS_FROM);
+        if (!reference) failures.push(`${id} has no case ${PRE_TYPING_KEYS_FROM} to take its keys from`);
+        else if (!isDeepStrictEqual(keySequence(head), keySequence(reference.base))) failures.push(`${id} head keys differ from ${PRE_TYPING_KEYS_FROM} on base`);
         if (head.wait_ms !== PRE_TYPING_HEAD_WAIT_MS) failures.push(`${id} head waited ${head.wait_ms}ms, not ${PRE_TYPING_HEAD_WAIT_MS}ms`);
         if (base.result?.reason !== 'selector_persistent') failures.push(`${id} base result ${JSON.stringify(base.result)} is not selector_persistent`);
         if (!(base.keys_on_partial >= 1)) failures.push(`${id} base sent no key on the partial frame: the case misses the gap`);

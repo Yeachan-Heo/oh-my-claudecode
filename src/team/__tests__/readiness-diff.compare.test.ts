@@ -176,6 +176,13 @@ describe('readiness-diff set r5 on a frozen trust dialog still drawing', () => {
     },
   );
 
+  it('fails when head gives up before its readiness timeout', () => {
+    const file = 'claude/2.1.330/trust-no-choice-partial.txt';
+    const head = frozen(file, 'head');
+    head.wait_ms = 250;
+    expect(run(file, head)).toContain('head gave up after 250ms, before its 30000ms timeout');
+  });
+
   it('fails the same difference on any other fixture', () => {
     expect(run('claude/2.1.330/trust-body-partial.txt')).toMatch(/RESULT FAIL$/);
   });
@@ -205,7 +212,7 @@ describe('readiness-diff set trust-partial', () => {
   const partialCase = (id: string, state: string, keys: string[][], result: unknown, waitMs: number, onPartial: number): TraceCase => ({
     case: id,
     eventState: state,
-    ...(state === 'reference' || state === 'pre-typing-partial' ? {} : { reference_case: 'reference' }),
+    ...(state === 'reference' || state === 'pre-typing-partial' ? {} : { reference_case: 'reference claude/2.1.330/trust.txt' }),
     env: { OMC_TEAM_READY_TIMEOUT_MS: null },
     control: state === 'reference',
     keys: keys.map(send),
@@ -216,13 +223,13 @@ describe('readiness-diff set trust-partial', () => {
     partial_captures: state === 'reference' ? 0 : 1,
   });
   const base = (): Trace => ({ set: 'trust-partial', loaded_modules: [], cases: [
-    partialCase('reference', 'reference', delivered, ok, 720, 0),
+    partialCase('reference claude/2.1.330/trust.txt', 'reference', delivered, ok, 720, 0),
     partialCase('initial', 'initial-partial', [], persistent, 0, 0),
     partialCase('post-down', 'post-down-partial', [['Down']], persistent, 250, 0),
     partialCase('pre-typing', 'pre-typing-partial', [['-l', 'Read inbox.md']], persistent, 100, 1),
   ] });
   const goodHead = (): Trace => ({ set: 'trust-partial', loaded_modules: [], cases: [
-    partialCase('reference', 'reference', delivered, ok, 720, 0),
+    partialCase('reference claude/2.1.330/trust.txt', 'reference', delivered, ok, 720, 0),
     partialCase('initial', 'initial-partial', delivered, ok, 970, 0),
     partialCase('post-down', 'post-down-partial', delivered, ok, 970, 0),
     partialCase('pre-typing', 'pre-typing-partial', delivered, ok, 720, 0),
@@ -243,9 +250,15 @@ describe('readiness-diff set trust-partial', () => {
     expect(runPartial(head)).toContain('failure: initial head sent 1 key(s) on a partial frame');
   });
 
-  it('fails when head waits more than one poll per partial capture past the reference', () => {
+  it.each([1_220, 720])('fails when head waits %ims, not one poll per partial capture past the reference', (waitMs) => {
     const head = goodHead();
-    head.cases[2]!.wait_ms = 1_220;
-    expect(runPartial(head)).toContain('failure: post-down head waited 1220ms > 970ms');
+    head.cases[2]!.wait_ms = waitMs;
+    expect(runPartial(head)).toContain(`failure: post-down head waited ${waitMs}ms, not 970ms`);
+  });
+
+  it('fails when the pre-typing case types another trigger than the reference', () => {
+    const head = goodHead();
+    head.cases[3]!.keys[2] = send(['-l', '']);
+    expect(runPartial(head)).toContain('failure: pre-typing head keys differ from reference claude/2.1.330/trust.txt on base');
   });
 });
