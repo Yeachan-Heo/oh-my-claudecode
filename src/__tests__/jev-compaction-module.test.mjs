@@ -4275,6 +4275,19 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
       expect(replyOf(run.out, brief)).toBeDefined();
     });
 
+    it('keeps a run that names a secret path or a private path, which masking leaves unchanged', async () => {
+      const sshRun = `${long('reply1')}\nthe deploy key is /home/u/.ssh/id_ed25519`;
+      const privateRun = `${long('reply2')}\nthe draft is in /work/Private/plan.md`;
+      const messages = replyConversation(10, { middle: (k) => (k === 1 ? sshRun : k === 2 ? privateRun : long(`reply${k}`)) });
+      const run = await compactPastes(messages, { env: { ...REPLIES, OMC_JEV_COMPACT_PRIVATE_PATHS: '/work/private' } });
+      expect(run.record.replies).toMatchObject({ secret: 2 });
+      expect(replyOf(run.out, 'reply1-START').text).toBe(sshRun);
+      expect(replyOf(run.out, 'reply2-START').text).toBe(privateRun);
+      expect([...run.files.values()].some((text) => text.includes('.ssh/') || text.includes('/work/Private/'))).toBe(false);
+      // The other old middle replies still move, so the two stay for their paths alone.
+      expect(run.record.replies.moved).toBeGreaterThan(0);
+    });
+
     it('moves nothing from a row the host could not rebuild from text', async () => {
       const messages = replyConversation(8);
       const form = apiOf(messages);
