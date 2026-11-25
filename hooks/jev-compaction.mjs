@@ -1507,11 +1507,14 @@ const unknownFile = (word, known) => {
   const file = outputFileOf(word);
   return Boolean(file) && !known.has(file) && !known.has(file.slice(file.lastIndexOf('/') + 1));
 };
-// The same for a call that reads such a file (a `cat` or `tail` of `.../tasks/<id>.output`): the file of a background call that an earlier compaction cut.
+// The same for a call that reads such a file (a `cat` or `tail` of `.../tasks/<id>.output`): the file of a background call that an earlier compaction cut. The file is named
+// as the host writes it (`.../tasks/<name>.output`) or as an agent in the task directory reads it, by its name alone (`cd <dir> && cat <id>.output`) or by a path relative to
+// it (`tasks/<id>.output`, `./<id>.output`): a name that is an id (4 to 64 word characters and hyphens, as TASK_ID_IN_RESULT reads one) and the extension .output is the file
+// of a task whatever stands before it. The files of the host are not known here, so a file of another kind with such a name is held too.
 function readsUnknownOutput(input, known) {
   // Every run of slashes and backslashes as one slash first (a Windows path, its JSON form with doubled backslashes, mixed separators), as the index of the files
-  // is kept. Then only the part from `/tasks/` on (the file's own name is what the index holds too), so that the read is linear whatever the input holds.
-  for (const m of inputJson(input).replace(/[\\/]+/g, '/').matchAll(/\/tasks\/[\w.-]+\.output\b/gi)) if (unknownFile(m[0], known)) return true;
+  // is kept. Then only the file's own name is what the index holds, so that the read is linear whatever the input holds (a name starts where no name character stands before it).
+  for (const m of inputJson(input).replace(/[\\/]+/g, '/').matchAll(/\/tasks\/[\w.-]+\.output\b|(?<![\w.-])[\w-]{4,64}\.output\b/gi)) if (!known.has(m[0].slice(m[0].lastIndexOf('/') + 1).toLowerCase())) return true;
   return false;
 }
 // Does a string of the input name one of the files as a whole name (not a part of a longer name or path)? The files

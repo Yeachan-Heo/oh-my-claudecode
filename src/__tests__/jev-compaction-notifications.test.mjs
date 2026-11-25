@@ -418,6 +418,58 @@ describe('a notification of a background task that reads the output file of a ta
       expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: links + 1 });
     });
   }
+
+  // The same two passes when the Agent names the file as one working in the task directory would: by its name alone after a cd, by a path relative to the directory
+  // or to the current one, with another command than cat, or in a command of its own in the background. Nothing in the conversation names the file after the first
+  // pass, so only the shape of the name says that it is the output of a task.
+  const NAMED = [
+    ['a name alone after a cd', 'Agent', (name) => ({ prompt: `Run cd /tmp/work/tasks && cat ${name}.output and summarize it for the report.` })],
+    ['a path relative to the task directory', 'Agent', (name) => ({ prompt: `Summarize tasks/${name}.output for the report.` })],
+    ['a path from the current directory', 'Agent', (name) => ({ prompt: `Summarize ./${name}.output for the report.` })],
+    ['tail of a name alone', 'Agent', (name) => ({ prompt: `Run cd /tmp/work/tasks && tail -n 50 ${name}.output for the report.` })],
+    ['head of a name alone', 'Agent', (name) => ({ prompt: `Run cd /tmp/work/tasks && head -n 50 ${name}.output for the report.` })],
+    ['a command of its own in the background', 'Bash', (name) => ({ command: `cd /tmp/work/tasks && cat ${name}.output` })],
+  ];
+  for (const [label, tool, input] of NAMED) {
+    it(`is traced and never sent to Jev when the first task was removed by an earlier compaction and an Agent reads its file by ${label}`, async () => {
+      const w = talk(30);
+      const first = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...chain(0).rows, ...[1, 2, 3].flatMap(reads), ...w.slice(3)]);
+      expect(first.record).toMatchObject({ result: 'jev' });
+      expect(JSON.stringify(first.out.messages)).not.toContain('bk7x2mq9');
+      const rows = [start('c1', tool, input('bk7x2mq9')), launched('c1', 'ag1b2c3d')];
+      const second = await compactRun(NOTE_ENV, [...first.out.messages.slice(0, 4), ...rows, ...[4, 5, 6].flatMap(reads), report('ag1b2c3d', 'SECRETBODY'), ...first.out.messages.slice(4)]);
+      expect(second.bodies.join('')).not.toContain('SECRETBODY');
+      expect(JSON.stringify(second.out.messages)).not.toContain('SECRETBODY');
+      // The launch result of the Agent and the report are held, as when the file is named by its whole path.
+      expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 2 });
+    });
+  }
+
+  it('is scored as any other when the file read by its name alone is the output of a task that is still in the conversation and not on a secret path', async () => {
+    const w = talk(30);
+    const rows = [start('c0', 'Bash', { command: 'npm test' }), launched('c0', 'bk7x2mq9'), start('c1', 'Agent', { prompt: 'Run cd /tmp/work/tasks && cat bk7x2mq9.output and summarize it.' }), launched('c1', 'ag1b2c3d')];
+    const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...rows, ...[1, 2, 3].flatMap(reads), report('ag1b2c3d', 'PLAINBODY'), ...w.slice(3)]);
+    expect(run.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
+    expect(run.bodies.join('')).toContain('PLAINBODY');
+  });
+
+  // The name of a task is its id (the same shape as the id that a result names, 4 to 64 word characters and hyphens) and the extension .output. A name of another
+  // shape is no task output and is read as any file; a name of that shape is held whatever file it is, which is the price of not knowing the files of the host.
+  it('a file whose name is not the id of a task is no output of a task, and a file named like one is held', async () => {
+    const w = talk(30);
+    const readOf = (name, body) => [
+      { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: 'rf1', tool: 'Bash', input: { command: `cd /tmp/work && cat ${name}` } }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'rf1', text: `${body} ${'f'.repeat(7000)}`, isError: false }] },
+    ];
+    for (const name of ['my.report.output', 'ab.output', 'build.log', 'build.outputs']) {
+      const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...readOf(name, 'PLAINBODY'), ...w.slice(3)]);
+      expect(run.record, name).toMatchObject({ result: 'jev', secret_held: 0 });
+      expect(run.bodies.join(''), name).toContain('PLAINBODY');
+    }
+    const held = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...readOf('build.output', 'PLAINBODY'), ...w.slice(3)]);
+    expect(held.record).toMatchObject({ result: 'jev', secret_held: 1 });
+    expect(held.bodies.join('')).not.toContain('PLAINBODY');
+  });
 });
 
 describe('the envelopes of the deliveries after a notification', () => {
