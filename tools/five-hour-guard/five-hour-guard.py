@@ -346,7 +346,7 @@ def command_programs(command, depth=0, own=False):
     (its first operand: not an option, and for a Python not the value of -W, -X or -Q, for Node not the value of -r or --require; the options are read up to it, not after it; none when it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
     the script of an interpreter behind a command that is not one (nice python3 audit), any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
     longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
-    and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out; the other simple
+    and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out, apart from a wrapper with an executable file in front of the hook; the other simple
     commands of such a handler are read, also one that only has the name of the hook among its arguments."""
     if not isinstance(command, str) or len(command) > MAX_COMMAND_CHARS or '\0' in command:
         return []
@@ -375,7 +375,14 @@ def command_programs(command, depth=0, own=False):
     simple.append(words)
     found = []
     for words in simple:
-        if own and ENTRY.command_hook(words):
+        if own and ENTRY.command_hook(words):   # the hook and its interpreter are read by the entry; a wrapper in front of them (/opt/env python3 hook) is a program the entry needs too
+            for w in words[:ENTRY.skip_wrappers(words)]:
+                try:
+                    path = program_path(w, False) if os.path.basename(w) in ENTRY.WRAPPERS and executable_file(w) else None
+                except Exception:
+                    path = None
+                if path and path not in found:
+                    found.append(path)
             continue
         i = ENTRY.skip_wrappers(words)
         if depth < 2:   # env -S 'command': the string is a command (-S STRING, -SSTRING, --split-string STRING, --split-string=STRING, which GNU env also takes abbreviated)

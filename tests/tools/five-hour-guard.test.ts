@@ -1463,6 +1463,23 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a wrapper written with a path in front of the hook of this guard (/opt/env python3 hook) is a program that the entry needs: the high reading does not replace it', () => {
+    for (const [k, build] of [(env: string, pause: string) => `${env} ${PYBIN} -I ${HOOK} --pause-file ${pause}`, (env: string, pause: string) => `[ -f ${pause} ] || exit 0; exec ${env} -i ${PYBIN} -I ${HOOK} --pause-file ${pause}`,
+      (env: string, pause: string) => `FOO=1 ${env} ${PYBIN} -I ${HOOK} --pause-file ${pause}`].entries()) {
+      const f = fixture(`own-wrapper-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const env = join(f.dir, 'env');   // a copy of a wrapper: its path is a program of the entry
+      writeFileSync(env, '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+      const command = build(env, f.pause);
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: env, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${env}) and "program of another hook" (${env}) are the same file`);
+      expect(readText(env), `${command}: the wrapper is intact`).toBe('#!/bin/sh\nexec "$@"\n');
+      expect(existsSync(f.pause), `${command}: no pause was published`).toBe(false);
+    }
+  });
+
   it('the options of an interpreter end at its script: python3 audit -c config passes -c to the script, so audit (no suffix, no execute bit) is still a program of another hook; a shell still reads -c behind -o NAME', () => {
     const forms = [(audit: string) => `${PYBIN} ${audit} -c config`, (audit: string) => `${PYBIN} -I ${audit} -e x`, (audit: string) => `${PYBIN} -W ignore ${audit} -m mod`,
       (audit: string) => `sh ${audit} -c x`, (audit: string) => `node ${audit} -e x`, (audit: string) => `bash -o pipefail -c 'python3 ${audit}'`, (audit: string) => `bash -O extglob -c 'python3 ${audit}'`];
