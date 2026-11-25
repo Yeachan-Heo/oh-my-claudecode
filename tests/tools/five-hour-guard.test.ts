@@ -64,6 +64,22 @@ const NO_NOFOLLOW_REPARSE_DRIVER = [
   'def lstat(path, *args, **kwargs):', '    st = real(path, *args, **kwargs)', '    return Reparse(st) if path == marked else st',
   'os.lstat = lstat', 'sys.argv = sys.argv[2:]', "runpy.run_path(sys.argv[0], run_name='__main__')",
 ].join('\n');
+// settings.json is rewritten, and the file at the log path replaced, at the moment the wiring check of the start opens settings.json: after the
+// line "guard start" and before the check, whatever the speed of the machine (argv: settings.json, the document that replaces it, the log, the file copied to the log)
+const REWRITE_AT_WIRING_CHECK_DRIVER = [
+  'import builtins, runpy, shutil, sys',
+  'real, settings, replacement, log, program = builtins.open, sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]',
+  'done = []',
+  'def spy(path, *args, **kw):',
+  '    if str(path) == settings and not done and sys._getframe(1).f_code.co_name == "check_wiring":',
+  '        done.append(1)',
+  '        shutil.copyfile(replacement, settings)',
+  '        shutil.copyfile(program, log)',
+  '    return real(path, *args, **kw)',
+  'builtins.open = spy',
+  'sys.argv = sys.argv[5:]',
+  "runpy.run_path(sys.argv[0], run_name='__main__')",
+].join('\n');
 // the guard runs in another working directory (a relative path of a settings entry is read from it)
 const CHDIR_DRIVER = ['import os, runpy, sys', 'os.chdir(sys.argv[1])', 'sys.argv = sys.argv[2:]', "runpy.run_path(sys.argv[0], run_name='__main__')"].join('\n');
 // the first reads of the usage cache from the given time on (argv: cache, time, count) see what a refresh of OMC shows in the middle: an empty file, then half a document
@@ -1142,6 +1158,24 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(g.out.match(/ERROR: tick failed/g)?.length ?? 0, 'the failing ticks went on').toBeGreaterThan(1);
     expect(readText(logPath), 'the hook is intact').toBe(hookText);
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
+  it('a settings.json that is rewritten between the line "guard start" and the wiring check of the start is read by that check: nothing is appended to a log_file that the rewrite made a registered hook, within a second of the line before', () => {
+    const f = fixture('log-is-program-at-start', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const logPath = join(f.dir, 'five-hour-guard-hook.py.log');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: logPath, settings_file: f.settings }), 'utf8');
+    const entry = (hook: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, hook, PYBIN), timeout: 21600 }] }] } });
+    const replacement = join(f.dir, 'settings-after.json');
+    writeFileSync(replacement, entry(logPath), 'utf8');
+    writeFileSync(f.settings, entry(HOOK), 'utf8');
+    const hookText = readFileSync(HOOK, 'utf8');
+    const r = runPyCode(REWRITE_AT_WIRING_CHECK_DRIVER, [f.settings, replacement, logPath, HOOK, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout, 'the start was logged before the rewrite').toMatch(/guard start/);
+    expect(readText(f.settings), 'the driver rewrote settings.json').toBe(entry(logPath));
+    expect(r.stdout, 'the wiring check of the start read the rewrite').toMatch(/WARNING \(start\): the registered hook .*five-hour-guard-hook\.py\.log is the log_file of this guard/);
+    expect(r.stdout, 'the notice is on stdout').toMatch(/the log file .*five-hour-guard-hook\.py\.log is a program that a command in .*settings\.json runs: nothing is appended to it/);
+    expect(readText(logPath), 'the hook is intact').toBe(hookText);
   });
 
   it('a launcher given by its bare name counts as the file the PATH of the guard resolves it to: a state file that is that program is not replaced, after a settings rewrite or at the start', async () => {

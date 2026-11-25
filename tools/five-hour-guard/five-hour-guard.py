@@ -427,6 +427,10 @@ def other_commands(data, ours):
 LAST_SCAN = [[]]   # what every readable settings.json gave since the start: neither a file that cannot be read (a rewrite in progress, a broken edit) nor a rewrite that removes an entry lifts the protection
 
 
+LOG_LOOK_S = 1.0
+LOG_LOOK = [None, False]   # [time.monotonic() of the last look, whether the log file was a program of a registered entry then]
+
+
 def registered_runtime_files():
     """The hook script and the interpreter that the hook entry in settings.json names (they can be anywhere: `add --hook` takes
     any path), and the programs that the commands of every other hook and of the status line run (command_programs: a hook of another
@@ -469,6 +473,8 @@ def registered_runtime_files():
                 continue   # one command that cannot be read must not hide the others
     except Exception:
         return list(LAST_SCAN[0])
+    if any(x not in LAST_SCAN[0] for x in found):
+        LOG_LOOK[0] = None   # a program that no earlier scan found: the look at the log, made before and kept for a second, did not know it
     LAST_SCAN[0] = found + [x for x in LAST_SCAN[0] if x not in found]   # the programs of this scan first: a collision is reported with their label
     return list(LAST_SCAN[0])
 
@@ -556,14 +562,11 @@ def append_line(path, text):
         os.close(fd)
 
 
-LOG_LOOK_S = 1.0
-LOG_LOOK = [None, False]   # [time.monotonic() of the last look, whether the log file was a program of a registered entry then]
-
-
 def log_is_program():
     """Whether log_file is a hook, interpreter or launcher that a registered entry names, or a program that a command of another hook runs
     (settings.json can be rewritten after the start): nothing is appended to a program. settings.json is read once per tick (safe_tick
-    forgets the look) and at most once a second outside a tick, not for every line. The notice goes to stdout only, never through log()."""
+    forgets the look) and at most once a second outside a tick, not for every line; a scan that finds a program no earlier scan found
+    forgets the look too (registered_runtime_files). The notice goes to stdout only, never through log()."""
     now = time.monotonic()
     if LOG_LOOK[0] is None or now - LOG_LOOK[0] >= LOG_LOOK_S:
         try:
