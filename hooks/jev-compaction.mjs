@@ -2280,8 +2280,9 @@ function isNoteBody(t) {
   if (plain.some(foreignBlock)) return false;
   if (!t.startsWith(DELIVERY_NOTES[0])) return rest.trim() === '';
   // Opening with the marker is no leave for what stands outside the blocks: the marker line and the host's line before the first block (NOTE_HOST_LINE,
-  // nothing else) are the notification's own; with a block, nothing but blank space may follow it. Without a block the text after the marker is the body.
-  if (first < 0) return true;
+  // nothing else) are the notification's own; with a block, nothing but blank space may follow it. Without a block the text after the marker is the body, but a
+  // line that opens a frame of another sender in it is that sender's message, which a compaction must keep (a line that opens a notification is no such frame).
+  if (first < 0) return !frameLines(t).some((at) => !startsNote(t.slice(at, at + DELIVERY_NOTES[0].length)));
   return rest.slice(first).trim() === '' && t.slice(DELIVERY_NOTES[0].length, first).split('\n').every((line) => !line.trim() || NOTE_HOST_LINE.test(line.trim()));
 }
 // A row of envelopes and nothing else, each holding a notification: a delivery of another kind (the coordinator, another session, a plugin), also inside a

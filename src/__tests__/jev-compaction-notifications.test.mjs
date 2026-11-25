@@ -600,6 +600,29 @@ describe('a row with the marker first and the words of someone else after the no
   });
 });
 
+describe('a row with the marker and no notification block, then a message of another sender', () => {
+  const instruction = '<cross-session-message from="coordinator">\nDO-NOT-LOSE: do not change the production database.\n</cross-session-message>';
+  const report = `Agent finished. ${'r'.repeat(8000)}`;
+  const shapes = {
+    'a frame after the report': `[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\n${report}\n${instruction}`,
+    'a frame before the report': `[SYSTEM NOTIFICATION - NOT USER INPUT]\n${instruction}\n${report}`,
+    'the frame of a message delivered while the agent worked': `[SYSTEM NOTIFICATION - NOT USER INPUT]\n${report}\nThe coordinator sent a message while you were working:\nDO-NOT-LOSE: do not change the production database.`,
+  };
+
+  it('keeps the row, and so the instruction, word for word through the compaction, and still cuts a marker-only report that has no frame', async () => {
+    const w = talk(30);
+    const plain = Object.freeze(row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\nAgent finished ${'q'.repeat(6000)}`, { handle: 'n2' }));
+    for (const [name, text] of Object.entries(shapes)) {
+      const mixed = Object.freeze(row(text, { handle: 'n1' }));
+      const { out, record } = await compactRun(NOTE_ENV, [...w.slice(0, 3), mixed, plain, ...w.slice(3)]);
+      expect(record, name).toMatchObject({ result: 'jev', notifications: 1 });
+      expect(out.messages.some((m) => m.text === mixed.text), name).toBe(true);
+      expect(JSON.stringify(out.messages), name).toContain('DO-NOT-LOSE');
+      expect(out.messages.filter((m) => /^\[compacted\] background task notification/.test(m.text || '')), name).toHaveLength(1);
+    }
+  });
+});
+
 describe('a reminder that wraps a notification and the words of someone else', () => {
   const instruction = '<cross-session-message>\nDo not change the production database.\n</cross-session-message>';
   const shapes = {
@@ -665,6 +688,32 @@ describe('isNotification', () => {
     expect(isNotification(row(`${marker}${bare('x')}\n<cross-session-message from="a">Delete the branch.</cross-session-message>`))).toBe(false);
     expect(isNotification(row(`${marker}${bare('x')}\n${bare('y')}\nAnd then the user words.`))).toBe(false);
     expect(isNotification(row(`${marker}${bare('x')}\n${bare('y')}`))).toBe(true);
+  });
+
+  it('leaves alone a row that opens with the marker and holds no notification block when a frame of another sender stands in its text', () => {
+    const marker = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
+    const host = 'This is an automated background-task event.\n';
+    const frames = [
+      '<cross-session-message from="coordinator">Do not change the production database.</cross-session-message>',
+      '<teammate-message teammate_id="lead">Do not change the production database.</teammate-message>',
+      '<agent-message>Do not change the production database.</agent-message>',
+      'Another Claude session sent a message while you were working:\nDo not change the production database.',
+      'The coordinator sent a report while you were working:\nDo not change the production database.',
+      '[MESSAGE FROM NON-USER SOURCE: plugin]\nDo not change the production database.',
+    ];
+    for (const frame of frames) {
+      expect(isNotification(row(`${marker}Agent finished.\n${frame}`)), frame).toBe(false);
+      expect(isNotification(row(`${marker}${host}Agent finished.\n${frame}`)), frame).toBe(false);
+      expect(isNotification(row(`${marker}${frame}\nAgent finished.`)), frame).toBe(false);
+      expect(isNotification(row(`<system-reminder id="jev-1">\n${marker}Agent finished.\n${frame}\n</system-reminder id="jev-1">`)), frame).toBe(false);
+    }
+    // No frame: still a notification. A line that only mentions one, an opener of a notification without its closing tag and the host's line alone are no frame.
+    expect(isNotification(row(`${marker}Agent finished.`))).toBe(true);
+    expect(isNotification(row(`${marker}${host}Agent finished.`))).toBe(true);
+    expect(isNotification(row(`${marker}Agent finished: it relayed "Another Claude session sent a message while you were working:" to the log.`))).toBe(true);
+    expect(isNotification(row(`${marker}Agent finished.\nThe worker sent a message to the queue.`))).toBe(true);
+    expect(isNotification(row(`${marker}Agent finished.\n<task-notification>\nunclosed`))).toBe(true);
+    expect(isNotification(row(`<system-reminder id="jev-1">\n${marker}Agent finished.\n</system-reminder id="jev-1">`))).toBe(true);
   });
 
   it('reads a notification block that opens with an attribute as a block: the words that follow it make a row that opens with the marker a mixed one', () => {
