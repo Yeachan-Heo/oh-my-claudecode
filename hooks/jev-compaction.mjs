@@ -2717,8 +2717,8 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     if (!resultsAt(m) || ((!cut || st.changed === 0) && !textRow.has(i))) return blocksAt(i);
     return (m.text || queuedAt(i) ? 1 : 0) + (cut ? st.left : resultsAt(m));
   };
-  // A tracker follows the keep decisions as they are made (set) and says what they take off the list's overhead in tokens: `removed` all of it, `gain` what the
-  // decisions add to what build does whatever is decided.
+  // A tracker follows the keep decisions as they are made (set) and says what they take off the list's overhead in tokens (`removed`): all of it, with what build
+  // does whatever is decided.
   const tracker = () => {
     const asst = new Map([...assistants].map(([g, u]) => [g, { ...u, traces: 0 }]));
     const state = new Map();
@@ -2739,7 +2739,6 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
       runN.set(r, n);
       total += messageTokens(n, r.tok, rates);
     }
-    const base = orig - total;
     // `dText`: the change of the text of the row's message (the zero floor of a message).
     const reread = (i, dText) => {
       const st = state.get(i);
@@ -2784,7 +2783,6 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
         if (st) { st.left -= gone(keep) - gone(was); st.changed += Number(keep !== 'full') - Number(was !== 'full'); reread(c.resIdx, resultNow - resultWas); }
       },
       removed: () => orig - total,
-      gain: () => orig - total - base,
     };
   };
   let best; // a tracker with every candidate that can be cut (no task call) at its trace: what each one takes off the list at best, beside the others
@@ -2803,10 +2801,10 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
       return gain;
     },
     // The overhead taken off the list when each of `list` is decided as `keep` (a keep, or a function of the candidate), the rest as it stands.
-    shed(list, keep, gain = false) {
+    shed(list, keep) {
       const t = tracker();
       for (const c of list) t.set(c, typeof keep === 'function' ? keep(c) : keep);
-      return gain ? t.gain() : t.removed();
+      return t.removed();
     },
   };
 }

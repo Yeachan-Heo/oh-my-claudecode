@@ -594,7 +594,7 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     }
   });
 
-  it('a row of thinking is dropped and the rows of one message are one: the overhead build takes off whatever is decided (`removed`) is apart from what the decisions take (`gain`)', () => {
+  it('a row of thinking is dropped and the rows of one message are one: the overhead build takes off whatever is decided, and what the decisions take comes on top of it', () => {
     const rows = [{ role: 'user', text: 'Task.', toolUses: [] }, { role: 'assistant', text: '', toolUses: [] }, { role: 'assistant', text: 'Look.', toolUses: [] },
       { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a', tool: 'Bash', input: { command: 'cat a' } }] }, { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: 'out', isError: false }] },
       { role: 'user', text: 'Last.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] }];
@@ -604,11 +604,11 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     const none = shape.tracker();
     // The thinking block is gone: three blocks (thinking, text, call) become two (text, call).
     expect(none.removed()).toBeCloseTo(msg(3) - msg(2), 6);
-    expect(none.gain()).toBeCloseTo(0, 6);
     const traced = shape.tracker();
     traced.set(candidates[0], 'trace');
-    expect(traced.gain()).toBeCloseTo(msg(2) - msg(1) + (msg(2) - msg(1)), 6);
-    expect(traced.removed() - traced.gain()).toBeCloseTo(none.removed(), 6);
+    // The trace takes the block of the call and the message of the result on top of the thinking block.
+    expect(traced.removed() - none.removed()).toBeCloseTo(msg(2) - msg(1) + (msg(2) - msg(1)), 6);
+    expect(traced.removed()).toBeCloseTo(msg(3) - msg(2) + (msg(2) - msg(1)) + (msg(2) - msg(1)), 6);
   });
 
   it('the deliveries after a row are one block of the rebuilt row: the blocks of the rest are given back', () => {
