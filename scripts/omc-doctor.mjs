@@ -1171,10 +1171,11 @@ const protectionOf = (dir, versions, foldCase = false) => {
   };
   // win32 only: the SessionStart publisher stores the plugin root of a record in lower case. foldCase asks for the same comparison elsewhere:
   // the read made after a version was moved, on a volume that ignores letter case, where no identity can resolve another spelling any more.
+  // Both sides are folded the way folded() does (Unicode form and letter case): a volume that ignores letter case usually ignores the form too.
   const isUnderLowercase = (target, parent) => {
     if (process.platform != 'win32' && !foldCase) return false;
-    target = path.resolve(target).toLowerCase();
-    parent = path.resolve(parent).toLowerCase();
+    target = folded(path.resolve(target));
+    parent = folded(path.resolve(parent));
     return target === parent || target.startsWith(parent + path.sep);
   };
   const realDir = chainOf(dir).pop();

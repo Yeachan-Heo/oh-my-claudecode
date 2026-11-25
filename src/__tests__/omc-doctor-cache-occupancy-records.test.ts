@@ -1,10 +1,11 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import vm from 'node:vm';
-import { ROOT, commands, digitVersions, scriptText, movedAside, PLUGIN_ID, makeCache, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { deadPid, epermPreload, minutes, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
+import { ROOT, addCache, backupDir, commands, digitVersions, scriptText, movedAside, PLUGIN_ID, makeCache, runCommand, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { deadPid, epermPreload, minutes, ownHost, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 
 // What an occupancy record says about a cache version: only a record whose owner is not proven gone protects, a record of
 // another system cannot be judged, and an entry that is not a regular file is skipped without being opened.
@@ -301,6 +302,44 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
           expect(movedAside(dir)).toBe(2);
         } finally {
           rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  // A volume that ignores Unicode form as well as letter case (the usual macOS volume) names one directory by its composed (NFC) and its decomposed (NFD)
+  // spelling. A record published right after the move may spell the cache path in the other form, and once the directory is gone only the text of
+  // the path can tell it. The accent is in the name of the configuration directory, so the two spellings differ only above the cache.
+  const publishAfterMove = `const fs = require('fs'), path = require('path'), crypto = require('crypto'); const real = fs.lstatSync; let published = false;
+fs.lstatSync = function (target, ...rest) {
+  const text = String(target);
+  if (!published && text.endsWith(path.sep + 'package.json') && text.startsWith(process.env.BACKUPS + path.sep)) {
+    published = true;
+    const records = path.join(process.env.CLAUDE_CONFIG_DIR, '.omc', 'cache-occupancy');
+    fs.mkdirSync(records, { recursive: true });
+    const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.RECORD_ROOT, host: process.env.OWN_HOST, updatedAt: new Date().toISOString() });
+    fs.writeFileSync(path.join(records, crypto.createHash('sha256').update(record).digest('hex') + '.json'), record);
+  }
+  return real.call(this, target, ...rest);
+};
+`;
+  test('a record published right after the move that spells the cache path in the other Unicode form keeps the version on a volume that ignores letter case', () => {
+    for (const command of commands) {
+      for (const cacheForm of ['NFC', 'NFD'] as const) {
+        for (const recordForm of ['NFC', 'NFD'] as const) {
+          const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+          try {
+            const dir = path.join(base, 'caf\u00e9'.normalize(cacheForm));
+            const cache = addCache(dir, ['5.8.0', '5.9.0']);
+            writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
+            const preload = path.join(base, 'publish-after-move.cjs');
+            writeFileSync(preload, publishAfterMove);
+            const env = { BACKUPS: backupDir(dir), OWN_HOST: ownHost(), RECORD_ROOT: path.join(base, 'caf\u00e9'.normalize(recordForm), path.relative(dir, path.join(cache, '5.8.0'))) };
+            const result = runCommand(command, dir, { env, preloads: [writeCaseFoldPreload(base), preload] });
+            expect({ command, cacheForm, recordForm, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ command, cacheForm, recordForm, status: 0, versions: '5.8.0,5.9.0', moved: 0 });
+          } finally {
+            rmSync(base, { recursive: true, force: true });
+          }
         }
       }
     }
