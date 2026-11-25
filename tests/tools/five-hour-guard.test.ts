@@ -1211,6 +1211,92 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(f.log), 'the guard ran').toMatch(/guard start/);
   });
 
+  it('a program that runs next to the hook in a handler of this guard (before it, after it) is never a file the guard writes: the high reading does not replace it', () => {
+    for (const [name, wrap] of [['before', (generated: string, audit: string) => `${audit}; ${generated}`], ['after', (generated: string, audit: string) => `${generated}; ${audit}`],
+      ['both', (generated: string, audit: string) => `${audit} && ${generated} || ${audit}`]] as const) {
+      const f = fixture(`companion-${name}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const audit = join(f.dir, 'audit');   // no suffix: only its place in the command makes it a program
+      writeFileSync(audit, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: wrap(generatedCommand(f.pause, HOOK, PYBIN), audit), timeout: 21600 }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, name).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      expect(readText(audit), `${name}: the program is intact`).toBe('#!/bin/sh\nexit 0\n');
+      expect(existsSync(f.pause), `${name}: no pause was published`).toBe(false);
+    }
+  });
+
+  it('a program behind the options of env, exec, command and time, and behind the separators, groups and redirections of a shell command, is found', () => {
+    const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
+      'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);
+    const syntax = ['true && AUDIT', 'false || AUDIT', 'echo x | AUDIT', 'true; AUDIT', 'true;AUDIT', 'AUDIT &', 'true & AUDIT', '(AUDIT)', 'AUDIT > AUDIT.out 2>&1', "sh -c 'AUDIT'", 'bash -lc "AUDIT"',
+      'echo $(AUDIT)', "env -S 'AUDIT --flag'", "env -S 'env -i AUDIT'"].map((form) => (audit: string) => form.replaceAll('AUDIT', audit));
+    for (const [k, build] of [...wrappers, ...syntax].entries()) {
+      const f = fixture(`wrapper-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const audit = join(f.dir, 'audit');
+      writeFileSync(audit, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const command = build(audit);
+      const other = { matcher: 'Bash', hooks: [{ type: 'command', command }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] }, other] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      expect(readText(audit), `${command}: the program is intact`).toBe('#!/bin/sh\nexit 0\n');
+    }
+    // an entry of this guard written by hand behind env -i is still the entry: the wiring check finds it
+    const f = fixture('wrapper-own-entry', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `env -i ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`, timeout: 21600 }] }] } }), 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const own = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(own.status, `${own.stdout}${own.stderr}`).toBe(0);
+    expect(own.stdout, 'the entry behind env -i is found').not.toMatch(/NOT registered/);
+  });
+
+  it('a hook, an interpreter and a log whose path ends in a semicolon keep it: the quoted character is no shell syntax, and each of them is refused as state_file', () => {
+    const f = fixture('semicolon-paths', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hook = join(f.dir, 'five-hour-guard-hook.py;');
+    const python = join(f.dir, 'python3;');
+    const hookLog = join(f.dir, 'hook.log;');
+    for (const path of [hook, python, hookLog]) writeFileSync(path, `the file ${path}\n`, 'utf8');
+    const command = generatedCommand(f.pause, hook, python, hookLog);
+    const parsed = runPyCode([
+      'import importlib.util, json, sys',
+      'sys.dont_write_bytecode = True',
+      'spec = importlib.util.spec_from_file_location("entry", sys.argv[1])',
+      'module = importlib.util.module_from_spec(spec)',
+      'spec.loader.exec_module(module)',
+      'print(json.dumps(module.entry_parts(sys.argv[2])))',
+    ].join('\n'), [ENTRY_MODULE, command]);
+    expect(parsed.status, `${parsed.stdout}${parsed.stderr}`).toBe(0);
+    const [hooks, interpreters, logs, pauses, tests, launchers] = JSON.parse(parsed.stdout);
+    expect(hooks, 'the hook keeps its semicolon').toEqual([hook]);
+    expect(launchers, 'the launcher keeps its semicolon').toEqual([python]);
+    expect(interpreters, 'the interpreter of the check keeps its semicolon').toEqual([python]);
+    expect(logs, 'the log keeps its semicolon').toEqual([hookLog]);
+    expect(pauses).toEqual([f.pause]);
+    expect(tests).toEqual([f.pause, hook]);
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+    for (const [what, path] of [['hook', hook], ['interpreter', python], ['log', hookLog]] as const) {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: path, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${what} as state_file: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, what).toMatch(/are the same file/);
+      expect(readText(path), `${what}: the file is intact`).toBe(`the file ${path}\n`);
+    }
+    // the separators outside quotes still separate commands (also glued to a word, as in `exit 0;`)
+    const plain = runPyCode([
+      'import importlib.util, json, sys',
+      'sys.dont_write_bytecode = True',
+      'spec = importlib.util.spec_from_file_location("entry", sys.argv[1])',
+      'module = importlib.util.module_from_spec(spec)',
+      'spec.loader.exec_module(module)',
+      'print(json.dumps(module.entry_parts(sys.argv[2])))',
+    ].join('\n'), [ENTRY_MODULE, generatedCommand(f.pause, HOOK, PYBIN)]);
+    expect(JSON.parse(plain.stdout)[0], 'the generated command of the bundled hook').toEqual([HOOK]);
+  });
+
   it('a registered hook or launcher that a settings rewrite made the state file is reported at every wiring pass, and the pause that would replace it is refused', async () => {
     const rewrite = (f: Fixture, program: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, program, PYBIN), timeout: 21600 }] }] } }), 'utf8');
     const config = (f: Fixture, state: string) => writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');

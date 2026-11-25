@@ -12,6 +12,10 @@ PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BAS
                      'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL', 'OMC_MODEL_MEDIUM', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
                      'ANTHROPIC_DEFAULT_SONNET_MODEL', 'OMC_MODEL_HIGH', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
                      'OMC_MODEL_LOW', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL')
+# Commands that run the command that follows them, with the options that take the next word as their value. A command word that
+# is one of these is not the program: skip_wrappers() steps over it, its options and the NAME=VALUE assignments.
+WRAPPERS = {'exec': ('-a',), 'env': ('-u', '--unset', '-C', '--chdir', '-S', '--split-string'), 'command': (), 'nohup': (),
+            'time': ('-f', '--format', '-o', '--output')}
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
 
 
@@ -51,22 +55,43 @@ def entry_command(pause_file, hook, python, hook_log=None):
     return cmd + (f' --log {q(hook_log)}' if hook_log else '')
 
 
+def skip_wrappers(words):
+    """The index of the command word in the words of a simple command: after the wrappers (exec, env, command, nohup, time), their options
+    (`env -i`, `env -u NAME`, `exec -a NAME`, a lone `--` ends the options) and the NAME=VALUE assignments. A word that starts with `-` is
+    an option only after a wrapper, so a command word is never taken for one."""
+    i, wrapper = 0, None
+    while i < len(words):
+        word = words[i]
+        if word in WRAPPERS:
+            wrapper = word
+        elif re.match(r'[A-Za-z_]\w*=', word):
+            pass
+        elif wrapper and word == '--':
+            wrapper = None
+        elif wrapper and len(word) > 1 and word[0] == '-':
+            i += 2 if word in WRAPPERS[wrapper] else 1   # the value of -u, -C, -S and the like is the next word
+            continue
+        else:
+            break
+        i += 1
+    return i
+
+
 def entry_parts(command):
     """(hook scripts, interpreter files, log files, pause files, preflight files, launchers) that a hook entry command names, by the
     option or position they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their file names say, and
     neither is an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file as data). The
     hook script is the command word of a simple command, or the first argument after it when the command word is a Python or the
     command carries --pause-file. Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
-    tokens = shlex.split(command)
+    lex = shlex.shlex(command, posix=True, punctuation_chars=';&|')   # the separators are told from quoted text: a quoted path may end in `;`
+    lex.whitespace_split, lex.commenters = True, ''
+    tokens = list(lex)
     if any('\0' in t for t in tokens):
         raise ValueError('NUL character in the command')
     simple, current = [], []
     for t in tokens:
         if t in (';', '&&', '||', '|'):
             simple.append(current)
-            current = []
-        elif len(t) > 1 and t.endswith(';'):
-            simple.append(current + [t[:-1]])
             current = []
         else:
             current.append(t)
@@ -76,9 +101,7 @@ def entry_parts(command):
         operands = {i + 1: t for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
         for i, option in operands.items():
             found[option].append(words[i])
-        first = 0
-        while first < len(words) and (words[first] in ('exec', 'env', 'command') or re.match(r'[A-Za-z_]\w*=', words[first])):
-            first += 1
+        first = skip_wrappers(words)
         if first >= len(words) or first in operands:
             continue
         if MARK in os.path.basename(words[first]):

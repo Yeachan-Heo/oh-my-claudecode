@@ -304,13 +304,14 @@ def program_path(word, command_word):
     return word if os.path.isfile(word) else None
 
 
-def command_programs(command, depth=0):
+def command_programs(command, depth=0, own=''):
     """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
     shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
     (its first argument, unless it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep)
     and any argument that is named like a script. Wrong or hostile text gives what could be read and never an error: a command that is
     longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
-    and of programs."""
+    and of programs. `own`: the simple commands that contain this text are left out (the hook and the interpreter of an entry of this
+    guard, which entry_parts reads); the other simple commands of such a handler are read."""
     if not isinstance(command, str) or len(command) > MAX_COMMAND_CHARS or '\0' in command:
         return []
     try:
@@ -338,9 +339,13 @@ def command_programs(command, depth=0):
     simple.append(words)
     found = []
     for words in simple:
-        i = 0
-        while i < len(words) and (words[i] in ('exec', 'env', 'command', 'nohup', 'time') or re.match(r'[A-Za-z_]\w*=', words[i])):
-            i += 1
+        if own and any(own in w for w in words):
+            continue
+        i = ENTRY.skip_wrappers(words)
+        if depth < 2:   # env -S 'command': the string is a command
+            for k in range(min(i, len(words)) - 1):
+                if words[k] in ('-S', '--split-string'):
+                    found += command_programs(words[k + 1], depth + 1, own)
         if i >= len(words):
             continue
         base = os.path.basename(words[i]).lower()
@@ -356,7 +361,7 @@ def command_programs(command, depth=0):
         if takes_code and depth < 2 and SHELL_NAME.fullmatch(base):
             for k in range(i + 1, len(words) - 1):
                 if words[k].startswith('-') and not words[k].startswith('--') and 'c' in words[k][1:]:
-                    found += command_programs(words[k + 1], depth + 1)
+                    found += command_programs(words[k + 1], depth + 1, own)
                     break
         for word, command_word in candidates:
             try:
@@ -400,6 +405,10 @@ def registered_runtime_files():
             data = json.load(f)
         entries = command_hooks(data.get('hooks', {}).get('PreToolUse', []))
         for _group, handler in entries:
+            try:   # a command that runs before or after the hook in the same handler is a program of another hook too
+                found += [(OTHER_PROGRAM, t) for t in command_programs(handler['command'], own=HOOK_NAME)]
+            except Exception:
+                pass
             try:   # one handler that cannot be parsed must not hide the ones after it
                 hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(handler['command'])
             except Exception:
