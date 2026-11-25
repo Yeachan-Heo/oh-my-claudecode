@@ -483,6 +483,12 @@ def decode_ansi_c(command):
     return ''.join(out)
 
 
+def join_continuations(command):
+    """The command without its line continuations: a backslash and the newline after it (not an escaped backslash) are removed, as the shell does
+    before it reads anything else, so before the comments, the quotes and the substitutions are looked at."""
+    return re.sub(r'(?<!\\)((?:\\\\)*)\\\n', r'\1', command)
+
+
 def command_tokens(command, quoted=False):
     """The words and the operators of a command as the shell splits them (shlex), None for a command with a NUL character or one that cannot be
     parsed. Raises ScanIncomplete past MAX_COMMAND_CHARS or MAX_COMMAND_WORDS: a prefix would pass for the whole command."""
@@ -490,7 +496,7 @@ def command_tokens(command, quoted=False):
         return None
     if len(command) > MAX_COMMAND_CHARS:
         raise ScanIncomplete('command too long to scan')
-    command = re.sub(r'(?<!\\)((?:\\\\)*)\\\n', r'\1', command)   # a backslash and the newline after it (not an escaped backslash) are removed before the words are split, as the shell does
+    command = join_continuations(command)
     tokens = None
     for text in dict.fromkeys([decode_ansi_c(command), command]):   # the command with its `$'...'` decoded first, then as written: a shell that has no such quote (dash) reads `$` and the text
         if not quoted:   # the text of a quoted word is not told apart from data (`echo "a #b file"`), so no comment is removed from it
@@ -671,6 +677,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
     two levels) raises ScanIncomplete: a prefix would pass for the whole command. A word longer than MAX_PATH_CHARS names no file and is skipped. `exclude`: a list of words that are not
     candidates, each once (the words of the entry that this guard generates, see registered_runtime_files)."""
     exclude = [] if exclude is None else exclude
+    command = join_continuations(command) if depth == 0 and isinstance(command, str) else command   # (the text of a quoted word has had its continuations removed with the command around it)
     if has_substitution(command if depth > 0 else strip_comments(command)):   # at depth 0 a comment is no command (as in command_tokens); a quoted command is read as it is
         raise ScanIncomplete('command has a command substitution, whose result cannot be known')
     tokens = command_tokens(command, depth > 0)

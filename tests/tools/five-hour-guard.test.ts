@@ -2560,6 +2560,46 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(bare.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
   });
 
+  it('a line continuation inside a command substitution, an arithmetic expansion, a Bash quote with a control sequence or the pattern of a trimming expression is removed before they are looked for: the command is refused like the same text on one line; an escaped backslash before the newline is no continuation', () => {
+    const f = fixture('foreign-continued-substitution', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, '# the script that the command runs\n', 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, key: string) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: audit }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const sh = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout;
+    const cont = '\\\n';   // a backslash and a newline
+    expect(sh(`cd ${hooks}; printf %s "$${cont}(pwd)/audit"`), 'the shell removes the continuation first').toBe(audit);
+    // refused, as the same text on one line is: [the command, the reason that the refusal names]
+    const refused: Array<[string, RegExp]> = [
+      [`cd ${hooks}; python3 "$${cont}(pwd)/audit"`, /command substitution/], [`cd ${hooks}; python3 "$(${cont}pwd)/audit"`, /command substitution/],
+      [`python3 "${hooks}/a$${cont}((1+1))"`, /command substitution/], [`python3 "${hooks}/a$((${cont}1+1))"`, /command substitution/], [`python3 "${hooks}/a$${cont}[1+1]"`, /command substitution/],
+      [`python3 $${cont}'${hooks}/a\\cbdit'`, /control sequence in a Bash quote/], [`A=${hooks}/audit.py; python3 "\${A%${cont}'.py'}"`, /quote in the pattern of a trimming expression/],
+      [`sh -c 'cd ${hooks}; python3 "$${cont}(pwd)/audit"'`, /command substitution/],
+    ];
+    for (const [command, reason] of refused) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, key);
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(reason);
+        expect(r.stderr).not.toMatch(/Traceback/);
+      }
+    }
+    // not refused: an escaped backslash before the newline is no continuation, and a continuation outside a substitution joins a path as before
+    for (const command of [`python3 "$\\\\\n(pwd)/audit"`, `python3 "${hooks}/au${cont}dit2"`]) {
+      const r = start(command, 'state_file');
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+    const joined = start(`python3 ${hooks}/au${cont}dit`, 'state_file');
+    expect(joined.status, 'a path split in two lines is the file').toBe(2);
+    expect(joined.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+  });
+
   it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {
     const f = fixture('foreign-comments', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
