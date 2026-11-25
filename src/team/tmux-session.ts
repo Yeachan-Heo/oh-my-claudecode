@@ -4653,7 +4653,7 @@ export async function killOwnedWorkerPane(
     }
   }
 
-  const membership = await verifyTeamTargetOwnership({
+  const membershipTarget = {
     provider: ownership.provider,
     providerTarget: ownership.providerTarget,
     recipient: "worker",
@@ -4662,7 +4662,8 @@ export async function killOwnedWorkerPane(
     ...(ownership.provider === "tmux"
       ? { tmuxServerIdentity: ownership.tmuxServerIdentity }
       : {}),
-  } as MailboxNotificationTarget);
+  } as MailboxNotificationTarget;
+  const membership = await verifyTeamTargetOwnership(membershipTarget);
   if (membership.kind !== "owned")
     throw new Error("owned_pane_membership_unverified");
   if (ownership.provider === "herdr") {
@@ -4678,10 +4679,18 @@ export async function killOwnedWorkerPane(
     await cmuxCloseSurface(ownership.paneId);
     return;
   }
-  await killWorkerPaneProcessTree(
+  const tree = await capturePaneProcessTree(
     ownership.tmuxServerIdentity!,
     ownership.paneId,
   );
+  // The pane may have left its target and been respawned between the proof above and the read: the tree is then the one of a
+  // replacement, so it is signalled only when the pane shows to be a pane of the team after the read as well.
+  if (
+    tree &&
+    (await verifyTeamTargetOwnership(membershipTarget)).kind !== "owned"
+  )
+    throw new Error("owned_pane_membership_unverified");
+  await terminatePaneProcessTree(tree);
   const result = await runGuardedNativeTmuxCommand(
     ownership.tmuxServerIdentity!,
     tmuxCommandString(["kill-pane", "-t", ownership.paneId]),

@@ -1329,7 +1329,7 @@ describe('scaleUp duplicate worker guard', () => {
     }
   });
 
-  it('keeps the pane trees saved for a worker whose pane is gone when the scale down stops before it terminates any provider', async () => {
+  it.each<'dead' | 'unknown'>(['dead', 'unknown'])('keeps the pane trees saved for a worker whose pane is %s when the scale down stops before it terminates any provider', async (leftState) => {
     const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
@@ -1344,10 +1344,10 @@ describe('scaleUp duplicate worker guard', () => {
           launch_attempt_id: 'attempt-3', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
       ],
     });
-    // both panes are alive while the trees are read; worker-2 finishes and its pane is gone by the time the scale down stops
+    // both panes are alive while the trees are read; worker-2 finishes and its pane is gone (or cannot be read) by the time the scale down stops
     let finished = false;
     tmuxSessionMocks.getWorkerLiveness.mockReset();
-    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async (paneId?: string) => (finished && paneId === '%2' ? 'dead' : 'alive'));
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async (paneId?: string) => (finished && paneId === '%2' ? leftState : 'alive'));
     tmuxSessionMocks.capturePaneProcessTree.mockReset();
     tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => tree);
     tmuxSessionMocks.terminatePaneProcessTree.mockReset();
@@ -1374,7 +1374,7 @@ describe('scaleUp duplicate worker guard', () => {
       const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2', 'worker-3'], drainTimeoutMs: 25 },
         { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
       expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
-      // the tree of the worker that is still alive goes; the one of the worker whose pane is gone stays for a retry
+      // the tree of the worker that is known to be alive goes; the one of the worker whose pane is gone or cannot be read stays for a retry
       expect(workerLaunchMocks.discardWorkerLaunchFencedCapture.mock.calls.map((call) => (call[0] as { attempt_id: string }).attempt_id)).toEqual(['attempt-3']);
       expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
     } finally {

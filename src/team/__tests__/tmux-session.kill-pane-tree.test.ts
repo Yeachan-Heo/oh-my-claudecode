@@ -854,6 +854,34 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)("killOw
     expect(killSpy.mock.calls.some(([pid]) => pid === pane.pid)).toBe(false);
   }, 30_000);
 
+  // The proof of membership precedes the read of the tree: a pane that has left its target (and may have been respawned) while the tree was
+  // read is not the pane of the team any more, so the tree read from it is not signalled and the pane is not killed.
+  it("with the variable set: a pane that left its target while its tree was read is neither signalled nor killed", async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = "1";
+    const pane = startPane(`sh -c 'sleep 240.${TAG}' & sleep 241.${TAG} & wait`);
+    await waitForTaggedSleeps("240", 1);
+    await waitForTaggedSleeps("241", 1);
+    const { events } = mockTmuxServer(pane.pid!);
+    const answerGuarded = tmuxUtilsMocks.tmuxCmdAsync.getMockImplementation()!;
+    let left = false;
+    tmuxUtilsMocks.tmuxCmdAsync.mockImplementation(async (args: string[]) => {
+      if (args.join(" ").includes("#{pane_pid}")) left = true; // the pane leaves the target as its tree is read
+      return answerGuarded(args);
+    });
+    tmuxUtilsMocks.tmuxExecAsync.mockImplementation(async (args: string[]) => ({
+      stdout: args.includes("list-panes") ? (left ? "%1\n" : `${PANE_ID}\n%1\n`) : "",
+      stderr: "",
+    }));
+    const killSpy = vi.spyOn(process, "kill");
+
+    await expect(killOwnedWorkerPane(ownership)).rejects.toThrow("owned_pane_membership_unverified");
+
+    expect(events).toEqual(["pane-pid-query", "pane-pid-query"]); // the tree was read, and the pane was not killed
+    expect(killSpy.mock.calls.filter(([, signal]) => signal === "SIGTERM" || signal === "SIGKILL")).toEqual([]);
+    expect((await taggedSleeps("240")).length).toBe(1);
+    expect((await taggedSleeps("241")).length).toBe(1);
+  }, 30_000);
+
   it("without the variable: the pane is killed with no tree query and the descendants are left alone", async () => {
     const pane = startPane(`sh -c 'sleep 240.${TAG}' & sleep 241.${TAG} & wait`);
     await waitForTaggedSleeps("240", 1);

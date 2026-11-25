@@ -567,20 +567,21 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     });
   }, 60_000);
 
-  // The workers do not all answer alike: one that accepts exits (its pane may be gone by the time another one's rejection ends the shutdown), and
-  // what it had started is then recorded in its saved capture only. Only the capture of the worker that rejected, which goes on, is removed.
-  it('keeps the saved pane tree of a worker that accepted the shutdown when another worker rejects it', async () => {
+  // The workers do not all answer alike: one that accepts exits (its pane may be gone by the time another one's rejection ends the shutdown),
+  // and one that has not answered yet may exit later; what either had started is then recorded in its saved capture only. Only the capture
+  // of the worker that rejected, which goes on, is removed.
+  it.each<[string, boolean]>([['accepted', true], ['has not answered', false]])('keeps the saved pane tree of a worker that %s the shutdown when another worker rejects it', async (_what, answers) => {
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     const teamName = 'pane-tree-mixed-team';
     await reserve(teamName);
-    const accepting = await prepare(teamName);
+    const leaving = await prepare(teamName);
     const rejecting = await prepare(teamName, 'worker-2', '%3');
-    const teamRoot = await writeTeam(teamName, accepting.attempt_id);
+    const teamRoot = await writeTeam(teamName, leaving.attempt_id);
     const written = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf8')) as { workers: Array<Record<string, unknown>> };
     written.workers.push({ ...written.workers[0], name: 'worker-2', index: 2, pane_id: '%3', launch_attempt_id: rejecting.attempt_id });
     await writeJson(cwd, join(teamRoot, 'config.json'), { ...written, worker_count: 2 });
     tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => FIXTURE_TREE);
-    const acceptingCapture = `${accepting.decisionPath}.retired.fenced-capture`;
+    const leavingCapture = `${leaving.decisionPath}.retired.fenced-capture`;
     const rejectingCapture = `${rejecting.decisionPath}.retired.fenced-capture`;
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
@@ -590,13 +591,13 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
       expect(await exists(join(teamRoot, 'workers', 'worker-1', 'shutdown-request.json'))).toBe(true);
       expect(await exists(join(teamRoot, 'workers', 'worker-2', 'shutdown-request.json'))).toBe(true);
     }, { timeout: 10_000, interval: 10 });
-    expect(await exists(acceptingCapture)).toBe(true);
+    expect(await exists(leavingCapture)).toBe(true);
     expect(await exists(rejectingCapture)).toBe(true);
-    await writeJson(cwd, join(teamRoot, 'workers', 'worker-1', 'shutdown-ack.json'), { status: 'accept', reason: 'ok', updated_at: new Date().toISOString() });
+    if (answers) await writeJson(cwd, join(teamRoot, 'workers', 'worker-1', 'shutdown-ack.json'), { status: 'accept', reason: 'ok', updated_at: new Date().toISOString() });
     await writeJson(cwd, join(teamRoot, 'workers', 'worker-2', 'shutdown-ack.json'), { status: 'reject', reason: 'still working', updated_at: new Date().toISOString() });
     await expect(shutdown).rejects.toThrow(/shutdown_rejected:worker-2:still working/);
 
-    const kept = JSON.parse(await readFile(acceptingCapture, 'utf8')) as { capture: unknown[] };
+    const kept = JSON.parse(await readFile(leavingCapture, 'utf8')) as { capture: unknown[] };
     expect(kept.capture).toEqual([serializePaneTree(FIXTURE_TREE)]);
     expect(await exists(rejectingCapture)).toBe(false);
   }, 60_000);

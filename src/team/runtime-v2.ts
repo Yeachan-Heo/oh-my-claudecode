@@ -9600,7 +9600,8 @@ export async function shutdownTeamV2(
   const earlyPaneTrees = new Map<string, { paneId: string; trees: PaneProcessTree[] }>();
   // workers whose tree was read but could not be written to disk: no request to exit goes out while one is listed (see below)
   const captureUnsaved: string[] = [];
-  // the launch attempts a capture was written for: removed again when the shutdown is rolled back before any provider was terminated
+  // the launch attempts a capture was written for: the capture of a worker that rejected the shutdown is removed again when it is rolled back
+  // before any provider was terminated; the others stay until their attempt is retired (a worker that accepted may have exited)
   const capturedAttempts = new Map<string, WorkerLaunchAttempt>();
   const captureEarlyPaneTree = async (worker: (typeof startConfig.workers)[number]): Promise<void> => {
     try {
