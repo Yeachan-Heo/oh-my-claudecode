@@ -519,6 +519,20 @@ describe('isNotification', () => {
     expect(isNotification(row(`${marker}${bare('x')}\n${bare('y')}`))).toBe(true);
   });
 
+  it('reads a notification block that opens with an attribute as a block: the words that follow it make a row that opens with the marker a mixed one', () => {
+    const marker = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
+    const opens = ['<task-notification status="done">', '<task-notification >', `<task-notification note="${'a'.repeat(300)}">`, '<task-notification\nstatus="done">'];
+    for (const open of opens) {
+      const block = (text) => bare(text).replace('<task-notification>', open);
+      expect(isNotification(row(`${marker}${block('x')}`)), open).toBe(true);
+      expect(isNotification(row(`${marker}${block('x')}\n${block('y')}`)), open).toBe(true);
+      expect(isNotification(row(`${marker}${block('x')}\nDo not change the production database.`)), open).toBe(false);
+      expect(isNotification(row(`${marker}${block('x')}\n${block('y')}\nDo not change the production database.`)), open).toBe(false);
+      expect(isNotification(row(`${marker}Do not change the production database.\n${block('x')}`)), open).toBe(false);
+      expect(isNotification(row(`${block('x')}\nDo not change the production database.`)), open).toBe(false);
+    }
+  });
+
   it('reads a row of 40 000 unclosed reminder tags with a bounded number of searches for the closing tag', () => {
     // The searches are counted, not timed: a search for the closing tag from every opener would make 40 000 of them (and a quadratic read).
     const search = vi.spyOn(String.prototype, 'indexOf');

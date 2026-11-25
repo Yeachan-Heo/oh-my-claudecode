@@ -2190,7 +2190,12 @@ const NOTE_LABEL = 'background task notification';
 // The text without its closed <system-reminder> and <task-notification> blocks (`rest`) and the <system-reminder> blocks cut out (`plain`). Linear: an
 // opener without a closer ends the search for its kind (no later opener has a closer either).
 function withoutReminderBlocks(text) {
-  const kinds = [{ open: '<system-reminder>', close: '</system-reminder>', next: -2, plain: true }, { open: '<task-notification>', close: '</task-notification>', next: -2, plain: false }];
+  // A notification block opens as NOTE_BLOCK_OPEN says (its name, then an attribute or the end of the tag); the search for its closing tag starts after the name.
+  const noteOpen = (from) => { NOTE_BLOCK_OPEN.lastIndex = from; return NOTE_BLOCK_OPEN.exec(text)?.index ?? -1; };
+  const kinds = [
+    { find: (from) => text.indexOf('<system-reminder>', from), len: '<system-reminder>'.length, close: '</system-reminder>', next: -2, plain: true },
+    { find: noteOpen, len: '<task-notification'.length, close: '</task-notification>', next: -2, plain: false },
+  ];
   const plain = [];
   let rest = '';
   let first = -1; // where the first closed block starts
@@ -2199,11 +2204,11 @@ function withoutReminderBlocks(text) {
     let kind;
     for (const x of kinds) {
       if (x.next === -1) continue;
-      if (x.next < at) x.next = text.indexOf(x.open, at);
+      if (x.next < at) x.next = x.find(at);
       if (x.next >= 0 && (!kind || x.next < kind.next)) kind = x;
     }
     if (!kind) break;
-    const end = text.indexOf(kind.close, kind.next + kind.open.length);
+    const end = text.indexOf(kind.close, kind.next + kind.len);
     if (end < 0) { kind.next = -1; continue; }
     rest += text.slice(at, kind.next);
     if (first < 0) first = kind.next;
