@@ -49,6 +49,7 @@ HEARTBEAT_SLACK_S = 1                 # --heartbeat must exceed two intervals by
 STATE_MAX_AHEAD_S = 21600            # a stored pause (or its start) further ahead than the hook honours is not ours
 FUTURE_SKEW_S = 120                  # a cache timestamp further ahead than this is not believed
 MIN_INTERVAL_S = 0.1
+DEFAULT_HEARTBEAT_S = 300
 
 
 def finite_float(text):
@@ -67,11 +68,11 @@ ap.add_argument('--log', default=None, help='log file (config: log_file)')
 ap.add_argument('--settings', default=None, help='settings.json checked for the hook entry; "" disables the check (config: settings_file)')
 ap.add_argument('--exclude', default=None, help='comma separated session id prefixes whose tool calls are never held (config: exclude)')
 ap.add_argument('--threshold', type=finite_float, default=97)
-ap.add_argument('--resume-below', type=finite_float, default=None, help='early resume when the fresh cache shows less than this percent (default threshold-10)')
+ap.add_argument('--resume-below', type=finite_float, default=None, help='early resume when the fresh cache shows less than this percent (default: 10 under the threshold, but at least half of it)')
 ap.add_argument('--max-age', type=finite_float, default=180, help='data older than this many seconds is not acted on (keep it above the status line usage poll interval, 90 s by default)')
 ap.add_argument('--margin', type=finite_float, default=150, help=f'resume this many seconds after the reset time (0 to {MAX_MARGIN_S})')
 ap.add_argument('--interval', type=finite_float, default=30, help=f'seconds between ticks (at least {MIN_INTERVAL_S:g})')
-ap.add_argument('--heartbeat', type=finite_float, default=300, help=f'pause file validity after each tick; the hook lets sessions go when it lapses (guard dead); from twice --interval plus {HEARTBEAT_SLACK_S} s to {MAX_HEARTBEAT_S}')
+ap.add_argument('--heartbeat', type=finite_float, default=None, help=f'pause file validity after each tick; the hook lets sessions go when it lapses (guard dead); from twice --interval plus {HEARTBEAT_SLACK_S} s to {MAX_HEARTBEAT_S} (default {DEFAULT_HEARTBEAT_S}, or twice --interval plus {HEARTBEAT_SLACK_S} s when that is more)')
 ap.add_argument('--warn-every', type=finite_float, default=600, help='at most one WARNING about the usage data (missing, stale, no percentage, implausible reset time) per this many seconds and kind')
 ap.add_argument('--test-pause', type=finite_float, default=0, metavar='SECONDS', help=f'install check: hold sessions for this many seconds (up to {MAX_TEST_PAUSE_S}), then release; touches no state')
 ap.add_argument('--test-only', default='', metavar='PREFIXES', help='with --test-pause: comma separated session id prefixes; only those sessions are held')
@@ -94,6 +95,8 @@ def check_range(name, value, low, high=None):
 check_range('--margin', A.margin, 0, MAX_MARGIN_S)
 check_range('--max-age', A.max_age, 1)   # a negative or zero age makes every entry stale: the guard would fail open for ever
 check_range('--interval', A.interval, MIN_INTERVAL_S)
+if A.heartbeat is None:   # a default that is refused for an interval the user may choose is no default: it follows the interval (an interval too long for any heartbeat is refused below)
+    A.heartbeat = min(max(DEFAULT_HEARTBEAT_S, 2 * A.interval + HEARTBEAT_SLACK_S), MAX_HEARTBEAT_S)
 check_range('--heartbeat', A.heartbeat, 2 * A.interval + HEARTBEAT_SLACK_S, MAX_HEARTBEAT_S)   # a pause must outlive one missed tick, with room for the time that tick took
 check_range('--warn-every', A.warn_every, 0, 86400)
 check_range('--test-pause', A.test_pause, 0, MAX_TEST_PAUSE_S)
@@ -194,14 +197,20 @@ def same_file(a, b):
 
 
 HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}
+OTHER_PROGRAM = 'program of another hook'   # a file that a command of any other hook (or the status line) in settings.json runs
+PROGRAM_LABELS = HOOK_PROGRAMS | {OTHER_PROGRAM, 'guard script', 'settings tool script', 'entry module'}
+PROTECTED_LABELS = {'registered hook', 'registered interpreter', OTHER_PROGRAM}   # the programs that no write of the guard may replace
 
 
 def may_be_one_file(la, pa, lb, pb):
     """The pairs that are one file by design: the hook as the bundled and as the registered one (and a hook that two entries name),
     an interpreter that two entries name, a hook that is run directly and so is its own launcher (the same path in both places: a
-    hook that is a link to the interpreter is not), and the hook log of the configuration that is the log of the entry."""
+    hook that is a link to the interpreter is not), the hook log of the configuration that is the log of the entry,
+    and a program of another hook entry that is one of those programs."""
     if {la, lb} == {'hook_log_file', 'registered hook log'}:
         return True
+    if OTHER_PROGRAM in (la, lb):   # the interpreter or script of another hook can be one of ours; what it may not be is a file the guard writes
+        return (lb if la == OTHER_PROGRAM else la) in PROGRAM_LABELS
     if la in ('hook script', 'registered hook') and lb in ('hook script', 'registered hook'):
         return True
     if la == lb == 'registered interpreter':
@@ -271,18 +280,126 @@ def command_hooks(groups):
     return found
 
 
+MAX_COMMAND_CHARS = 65536   # a longer command is not read (the command of a hook is a few hundred characters)
+MAX_PATH_CHARS = 4096
+MAX_COMMAND_WORDS = 4096
+MAX_COMMAND_PROGRAMS = 64
+PUNCTUATION = '();<>|&\n'
+INTERPRETER_NAME = re.compile(r'(python|pypy|node|nodejs|deno|bun|ruby|perl|php|lua|pwsh|powershell|tsx|ts-node|sh|bash|zsh|dash|ksh|ash|fish)[\d.]*(\.exe)?')
+SHELL_NAME = re.compile(r'(sh|bash|zsh|dash|ksh|ash|fish)(\.exe)?')
+SCRIPT_SUFFIXES = ('.py', '.pyw', '.sh', '.bash', '.zsh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl', '.php', '.lua', '.ps1', '.bat', '.cmd')
+
+
+def program_path(word, command_word):
+    """The file a word of a command names, or None: a word with a directory part as written (with ~ and variables of this process expanded),
+    the command word without one as the PATH of the guard resolves it (as the wiring check does), any other bare word only when such a
+    file is there (an option value or a plain argument names no program)."""
+    word = os.path.expanduser(os.path.expandvars(word))
+    if not word or len(word) > MAX_PATH_CHARS or '\0' in word:
+        return None
+    if os.sep in word or (os.altsep and os.altsep in word):
+        return word
+    if command_word:
+        return shutil.which(word)
+    return word if os.path.isfile(word) else None
+
+
+def command_programs(command, depth=0):
+    """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
+    shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
+    (its first argument, unless it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep)
+    and any argument that is named like a script. Wrong or hostile text gives what could be read and never an error: a command that is
+    longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
+    and of programs."""
+    if not isinstance(command, str) or len(command) > MAX_COMMAND_CHARS or '\0' in command:
+        return []
+    try:
+        lex = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
+        lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''
+        tokens = []
+        for token in lex:
+            tokens.append(token)
+            if len(tokens) >= MAX_COMMAND_WORDS:
+                break
+    except Exception:
+        return []   # a command the shell cannot parse runs nothing
+    simple, words, redirect = [], [], False
+    for token in tokens:
+        if redirect:
+            redirect = False   # the file of a redirection is no program
+        elif token and token[0] in PUNCTUATION:   # (an empty string is a word: '')
+            if '<' in token or '>' in token:
+                redirect = True
+            else:
+                simple.append(words)
+                words = []
+        else:
+            words.append(token)
+    simple.append(words)
+    found = []
+    for words in simple:
+        i = 0
+        while i < len(words) and (words[i] in ('exec', 'env', 'command', 'nohup', 'time') or re.match(r'[A-Za-z_]\w*=', words[i])):
+            i += 1
+        if i >= len(words):
+            continue
+        base = os.path.basename(words[i]).lower()
+        arguments = words[i + 1:]
+        options = [w for w in arguments if w.startswith('-') and not w.startswith('--')]
+        takes_code = any(o in ('-e', '-m') or ('c' in o[1:] and o[1:].isalpha()) for o in options)
+        operands = [w for w in arguments if not w.startswith('-')]
+        candidates = [(words[i], True)]
+        if not takes_code:   # with code on the command line the operands are its arguments
+            if INTERPRETER_NAME.fullmatch(base) and operands:
+                candidates.append((operands[0], False))
+            candidates += [(w, False) for w in operands if w.lower().endswith(SCRIPT_SUFFIXES)]
+        if takes_code and depth < 2 and SHELL_NAME.fullmatch(base):
+            for k in range(i + 1, len(words) - 1):
+                if words[k].startswith('-') and not words[k].startswith('--') and 'c' in words[k][1:]:
+                    found += command_programs(words[k + 1], depth + 1)
+                    break
+        for word, command_word in candidates:
+            try:
+                path = program_path(word, command_word)
+            except Exception:
+                path = None   # one word that cannot be resolved must not hide the others
+            if path and path not in found:
+                found.append(path)
+            if len(found) >= MAX_COMMAND_PROGRAMS:
+                return found
+    return found
+
+
+def other_commands(data, ours):
+    """The commands of every command handler in settings.json (all hook events, and the status line) except the handlers `ours` (ids of
+    the handlers of the hook entry of this guard, which entry_parts reads)."""
+    found = []
+    events = data.get('hooks')
+    for groups in events.values() if isinstance(events, dict) else []:
+        for g in groups if isinstance(groups, list) else []:
+            for h in g.get('hooks') if isinstance(g, dict) and isinstance(g.get('hooks'), list) else []:
+                if isinstance(h, dict) and h.get('type') == 'command' and isinstance(h.get('command'), str) and id(h) not in ours:
+                    found.append(h['command'])
+    status = data.get('statusLine')
+    if isinstance(status, dict) and status.get('type') == 'command' and isinstance(status.get('command'), str):
+        found.append(status['command'])
+    return found
+
+
 def registered_runtime_files():
     """The hook script and the interpreter that the hook entry in settings.json names (they can be anywhere: `add --hook` takes
-    any path). A relative hook, or an interpreter given with a directory part, is taken as the file it names from the working
-    directory of the guard: a session resolves it from its own directory, which cannot be known here, so this is the conservative
-    reading for the collision checks. An interpreter or launcher given by its bare name is looked up on the PATH of the guard, as the
-    wiring check does, and the file found is the one that counts. Best effort: an unreadable settings file gives none (hook_check says
-    so later)."""
+    any path), and the programs that the commands of every other hook and of the status line run (command_programs: a hook of another
+    tool is as much a file the guard must not replace as ours). A relative hook, or an interpreter given with a directory part, is taken
+    as the file it names from the working directory of the guard: a session resolves it from its own directory, which cannot be known
+    here, so this is the conservative reading for the collision checks. An interpreter or launcher given by its bare name is looked up on
+    the PATH of the guard, as the wiring check does, and the file found is the one that counts. Best effort: an unreadable settings file
+    gives none (hook_check says so later)."""
     found = []
     try:
         with open(SETTINGS or default_settings()) as f:
-            groups = json.load(f).get('hooks', {}).get('PreToolUse', [])
-        for _group, handler in command_hooks(groups):
+            data = json.load(f)
+        entries = command_hooks(data.get('hooks', {}).get('PreToolUse', []))
+        for _group, handler in entries:
             try:   # one handler that cannot be parsed must not hide the ones after it
                 hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(handler['command'])
             except Exception:
@@ -296,6 +413,12 @@ def registered_runtime_files():
                 if program:
                     found.append(('registered interpreter', program))
             found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
+        ours = {id(h) for _g, h in entries}
+        for command in other_commands(data, ours):
+            try:
+                found += [(OTHER_PROGRAM, t) for t in command_programs(command)]
+            except Exception:
+                continue   # one command that cannot be read must not hide the others
     except Exception:
         pass
     return found
@@ -310,10 +433,11 @@ def configured_files():
 
 def program_collisions():
     """[(label of the program, path, file of the guard)]: a hook, interpreter or launcher that the registered entries name and that is
-    a file the guard writes (a settings rewrite after the start can put it there). A write would replace the program."""
+    a file the guard writes (a settings rewrite after the start can put it there), or a program of another hook entry that is one. A write
+    would replace the program."""
     outputs = [('pause_file', PAUSE_FILE), ('state_file', STATE), ('log_file', LOG), ('lock of the pause file', PAUSE_FILE + '.lock'),
                ('lock of the state file', STATE + '.lock' if STATE else '')]
-    return [(label, path, out_label) for label, path in registered_runtime_files() if label in ('registered hook', 'registered interpreter')
+    return [(label, path, out_label) for label, path in registered_runtime_files() if label in PROTECTED_LABELS
             for out_label, out in outputs if out and same_file(path, out)]
 
 
@@ -344,7 +468,16 @@ def parse_exclude():
 
 EXCLUDE = parse_exclude()
 ONLY = [x for x in A.test_only.split(',') if x]
-RESUME_BELOW = A.resume_below if A.resume_below is not None else A.threshold - 10
+
+
+def default_resume_below(threshold):
+    """The early-resume cutoff when --resume-below is not given: 10 percent under the threshold, but at least half of it. A cutoff of 0 or less
+    (a threshold of 10 or less) can never be undercut by a percentage (0 to 100), so a pause could not end early; half of any allowed threshold
+    is above 0 and below the threshold (`or`: a threshold so small that half of it rounds to 0 resumes below the threshold itself)."""
+    return max(threshold - 10, threshold / 2) or threshold
+
+
+RESUME_BELOW = A.resume_below if A.resume_below is not None else default_resume_below(A.threshold)
 STOP = False
 
 
@@ -371,9 +504,9 @@ LOG_LOOK = [None, False]   # [time.monotonic() of the last look, whether the log
 
 
 def log_is_program():
-    """Whether log_file is a hook, interpreter or launcher that a registered entry names (settings.json can be rewritten after the
-    start): nothing is appended to a program. settings.json is read once per tick (safe_tick forgets the look) and at most once a
-    second outside a tick, not for every line. The notice goes to stdout only, never through log()."""
+    """Whether log_file is a hook, interpreter or launcher that a registered entry names, or a program that a command of another hook runs
+    (settings.json can be rewritten after the start): nothing is appended to a program. settings.json is read once per tick (safe_tick
+    forgets the look) and at most once a second outside a tick, not for every line. The notice goes to stdout only, never through log()."""
     now = time.monotonic()
     if LOG_LOOK[0] is None or now - LOG_LOOK[0] >= LOG_LOOK_S:
         try:
@@ -385,7 +518,7 @@ def log_is_program():
             blocked = False   # a look that fails never costs the log
         LOG_LOOK[:] = [now, blocked]
         if blocked:
-            print(f'{ts()} the log file {LOG} is a program that a registered hook entry names: nothing is appended to it (run five-hour-guard-settings.py add again, or change "log_file")', flush=True)
+            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard)', flush=True)
     return LOG_LOOK[1]
 
 
@@ -400,12 +533,19 @@ def log(msg):
             pass
 
 
-def refuse_program_overwrite(path):
-    """A hook, interpreter or launcher that a registered entry names is never replaced by a write of the guard: settings.json can be
-    rewritten at any moment, so this is looked at at every write (the entry into a pause, each renewal, the end of a pause)."""
-    for label, program in registered_runtime_files():
-        if label in ('registered hook', 'registered interpreter') and same_file(program, path):
-            raise OSError(f'the {label} {program} is {path}, a file this guard writes: it is not replaced (run five-hour-guard-settings.py add again)')
+def fix_hint(label):
+    return 'check the configured paths' if label == OTHER_PROGRAM else 'run five-hour-guard-settings.py add again'
+
+
+def refuse_program_overwrite(*paths):
+    """A hook, interpreter or launcher that a registered entry names, or a program that another hook entry runs, is never replaced by a
+    write of the guard: settings.json can be rewritten at any moment, so this is looked at at every write (the entry into a pause, each
+    renewal and the end of a pause). One look at settings.json serves all the paths of one write."""
+    programs = [(label, program) for label, program in registered_runtime_files() if label in PROTECTED_LABELS]
+    for path in paths:
+        for label, program in programs:
+            if same_file(program, path):
+                raise OSError(f'the {label} {program} is {path}, a file this guard writes: it is not replaced ({fix_hint(label)})')
 
 
 def write_json(path, obj, no_clobber=False):
@@ -413,9 +553,8 @@ def write_json(path, obj, no_clobber=False):
     instead of a rename; where links are not supported the destination is reserved exclusively first)."""
     if A.dry_run:
         return
-    refuse_program_overwrite(path)
     tmp = f'{path}.{os.getpid()}.tmp'
-    refuse_program_overwrite(tmp)   # the leftover removed below is not a program of an entry either
+    refuse_program_overwrite(path, tmp)   # the leftover of the temporary file that is removed below is not a program of an entry either
     try:
         os.unlink(tmp)   # a leftover of a crashed run, or a link somebody put there: the link itself goes, never what it points to
     except FileNotFoundError:
@@ -566,10 +705,14 @@ def check_wiring(where):
         for problem in ENTRY.handler_problems(handler):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
     runtime = configured_files()
-    for la, pa, lb, pb in collisions(configured_files() + registered_runtime_files()):
-        if 'registered hook log' in (la, lb) or not ({la, lb} & {'registered hook', 'registered interpreter'}):
+    registered = registered_runtime_files()
+    for la, pa, lb, pb in collisions(runtime + registered):
+        if 'registered hook log' in (la, lb) or not ({la, lb} & PROTECTED_LABELS):
             continue   # the log of an entry is reported below, with its own sentence; two configured files were refused at the start
-        program, other = ((la, pa), (lb, pb)) if la.startswith('registered') and not lb.startswith('registered') else ((lb, pb), (la, pa))
+        program, other = ((la, pa), (lb, pb)) if la in PROTECTED_LABELS and lb not in PROTECTED_LABELS else ((lb, pb), (la, pa))
+        if program[0] == OTHER_PROGRAM:
+            log(f'WARNING ({where}): the {program[0]} {program[1]} (run by a command in {SETTINGS}) is the {other[0]} of this guard ({other[1]}): every write of the guard to that file is refused, so the guard stores no pause (check the configured paths)')
+            continue
         log(f'WARNING ({where}): the {program[0]} {program[1]} is the {other[0]} of this guard ({other[1]}): the entry would not run the hook, or a write of the guard would replace the program, so a pause would hold no session. Run five-hour-guard-settings.py add again')
     programs = []   # the programs of every recognised entry: a log of one entry can be the program of another
     for command in ours:
@@ -578,6 +721,7 @@ def check_wiring(where):
         except ValueError:
             continue   # reported below
         programs += [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters + launchers]
+    programs += [x for x in registered if x[0] == OTHER_PROGRAM]
     for command in ours:
         try:
             hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
@@ -664,7 +808,7 @@ def enter_pause(state, pct, reset_ts):
     if not A.dry_run:
         check_pause_path()   # before anything is stored: a pause that cannot be published must not be remembered
         for label, path, out_label in program_collisions():
-            raise OSError(f'the {label} {path} is the {out_label} of this guard: a pause would replace the program, so none is stored (run five-hour-guard-settings.py add again)')
+            raise OSError(f'the {label} {path} is the {out_label} of this guard: a pause would replace the program, so none is stored ({fix_hint(label)})')
     state.update(paused=True, since=time.time(), resume_at=reset_ts + A.margin)
     log(f'THRESHOLD: 5h {pct} %, reset {ts(reset_ts)}; pause until {ts(state["resume_at"])}')
     hook_check('pause start')

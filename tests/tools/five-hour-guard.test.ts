@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
-  ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
+  ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, SETTINGS_TOOL, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
   readJson, readText, runPyCode, runSync, sleep, spawnPy, spawnPyCode, startHook, waitFor, writeCache, writePause, type Fixture, type Proc,
 } from './five-hour-guard-support.js';
 
@@ -540,6 +540,64 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(guardOnce(f, ['--resume-below', '97']).status, 'resume level equal to the threshold is allowed').toBe(0);
   });
 
+  it('the default early-resume cutoff can be undercut for every allowed threshold: 10 under the threshold, never under half of it (a cutoff of 0 or less would end no pause early)', () => {
+    const run = (f: Fixture, t: number) => runSync(GUARD, ['--config', f.cfg, '--once', '--threshold', String(t)]);
+    const cutoffOf = (t: number) => (t - 10 >= t / 2 ? t - 10 : t / 2) || t;   // the rule as the README states it, from the threshold alone
+    const thresholds = [Number.MIN_VALUE, 0.01, 1, 5, 9.99, 10, 10.01, 15, 19.99, 20, 20.01, 50, 97, 100];
+    for (const t of thresholds) {
+      const f = fixture(`resume-default-${t}`, { cache: { pct: t, resetMs: Date.now() + HOUR_MS } });
+      const entered = run(f, t);
+      expect(entered.status, `threshold ${t}: ${entered.stdout}${entered.stderr}`).toBe(0);
+      expect(existsSync(f.pause), `threshold ${t}: the pause is entered at the threshold`).toBe(true);
+      const cutoff = cutoffOf(t);
+      expect(cutoff, `threshold ${t}: a cutoff that a percentage can undercut`).toBeGreaterThan(0);
+      expect(cutoff, `threshold ${t}: and that is not above the threshold`).toBeLessThanOrEqual(t);
+      if (cutoff < t) {   // a reading between the cutoff and the threshold keeps the pause
+        writeCache(f, { pct: (cutoff + t) / 2, resetMs: Date.now() + HOUR_MS });
+        const kept = run(f, t);
+        expect(kept.status, `threshold ${t}: ${kept.stdout}${kept.stderr}`).toBe(0);
+        expect(existsSync(f.pause), `threshold ${t}: a reading above the cutoff keeps the pause`).toBe(true);
+      }
+      writeCache(f, { pct: Math.max(0, cutoff - 0.5), resetMs: Date.now() + HOUR_MS });   // below the cutoff; 0 where the cutoff is under 0.5
+      const resumed = run(f, t);
+      expect(resumed.status, `threshold ${t}: ${resumed.stdout}${resumed.stderr}`).toBe(0);
+      expect(resumed.stdout, `threshold ${t}: the early resume is logged`).toMatch(/RESUMED \(window reset seen early/);
+      expect(existsSync(f.pause), `threshold ${t}: the pause file is gone after the early resume`).toBe(false);
+    }
+    // an explicit --resume-below still wins, 0 included (no early resume at all)
+    const f = fixture('resume-explicit', { cache: { pct: 97, resetMs: Date.now() + HOUR_MS } });
+    expect(runSync(GUARD, ['--config', f.cfg, '--once', '--resume-below', '0']).status).toBe(0);
+    writeCache(f, { pct: 0, resetMs: Date.now() + HOUR_MS });
+    expect(runSync(GUARD, ['--config', f.cfg, '--once', '--resume-below', '0']).status).toBe(0);
+    expect(existsSync(f.pause), 'a cutoff of 0 ends no pause early').toBe(true);
+  }, 120000);
+
+  it('the default heartbeat follows the interval: every interval that a heartbeat can cover starts without --heartbeat, a longer one is refused, an explicit heartbeat is kept', () => {
+    const published = (iv: number, extra: string[] = []) => {
+      const f = fixture(`heartbeat-default-${iv}-${extra.join('')}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const r = runSync(GUARD, ['--config', f.cfg, '--once', '--interval', String(iv), ...extra]);
+      return { r, f };
+    };
+    for (const iv of [0.1, 1, 30, 149.5, 149.6, 150, 200, 449.5, 899, 899.5]) {
+      const { r, f } = published(iv);
+      expect(r.status, `--interval ${iv}: ${r.stdout}${r.stderr}`).toBe(0);
+      const doc = readJson(f.pause);
+      const heartbeat = Math.min(Math.max(300, 2 * iv + 1), 1800);   // 300 s, or two intervals plus a second when that is more, at most 1800
+      expect(doc.valid_until - doc.since, `--interval ${iv}: the pause file is valid for the default heartbeat`).toBeGreaterThanOrEqual(heartbeat);
+      expect(doc.valid_until - doc.since, `--interval ${iv}: and for no longer`).toBeLessThan(heartbeat + 10);
+      expect(doc.valid_until - doc.since, `--interval ${iv}: and outlives two ticks`).toBeGreaterThan(2 * iv);
+    }
+    for (const iv of [899.6, 900, 1000]) {
+      const { r, f } = published(iv);
+      expect(r.status, `--interval ${iv}`).toBe(2);
+      expect(r.stderr, `--interval ${iv}`).toMatch(/--heartbeat must be between/);
+      expect(existsSync(f.pause), 'no pause was written').toBe(false);
+    }
+    const { r, f } = published(30, ['--heartbeat', '100']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(readJson(f.pause).valid_until - readJson(f.pause).since, 'an explicit heartbeat is kept').toBeLessThan(110);
+  }, 120000);
+
   it('the pause file must be an absolute path (the hook entry only accepts an absolute one)', () => {
     const f = fixture('relative-pause');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: 'pause.json', state_file: f.state }), 'utf8');
@@ -988,7 +1046,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       await waitFor(() => /ERROR: tick failed/.test(g.out), 20000, 'the refusal of the pause');
       await sleep(800);   // a few more ticks, each with its own ERROR line
     } finally { await stopGuard(g); }
-    expect(g.out, 'the notice is on stdout').toMatch(/the log file .*five-hour-guard-hook\.py\.log is a program that a registered hook entry names: nothing is appended to it/);
+    expect(g.out, 'the notice is on stdout').toMatch(/the log file .*five-hour-guard-hook\.py\.log is a program that a command in .*settings\.json runs: nothing is appended to it/);
     expect(g.out.match(/ERROR: tick failed/g)?.length ?? 0, 'the failing ticks went on').toBeGreaterThan(1);
     expect(readText(logPath), 'the hook is intact').toBe(hookText);
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
@@ -1042,6 +1100,115 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(f.log), 'the write was refused').toMatch(/ERROR: tick failed.*the registered hook .*five-hour-guard-hook\.py\.state\.\d+\.tmp is .*\.tmp, a file this guard writes/);
     expect(readText(temp), 'the hook is intact').toBe(hookText);
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
+  it('a program that the command of another hook, of another event or of the status line runs is never a file the guard writes: refused at the start, and not appended to after a settings rewrite', async () => {
+    const f = fixture('foreign-programs', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const tools = join(f.dir, 'tools');
+    mkdirSync(tools);
+    const scripts = { audit: join(tools, 'audit-hook.py'), notify: join(tools, 'notify.mjs'), status: join(tools, 'status.sh'), nested: join(tools, 'nested.sh') };
+    for (const [name, path] of Object.entries(scripts)) writeFileSync(path, `# the program ${name}\n`, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = JSON.stringify({
+      hooks: {
+        PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `${PYBIN} -I ${scripts.audit} --strict` }] }],
+        PostToolUse: [{ hooks: [{ type: 'command', command: `env FOO=1 node ${scripts.notify} 2>&1 | tee -a /dev/null` }] }],
+        Stop: [{ hooks: [{ type: 'command', command: `sh -c 'exec ${scripts.nested}'` }] }],
+      },
+      statusLine: { type: 'command', command: `bash ${scripts.status}` },
+    });
+    writeFileSync(f.settings, settings, 'utf8');
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const [name, path] of Object.entries(scripts)) {
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: path });
+        expect(r.status, `${name} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${name} as ${key}`).toContain(`"${key}" (${path}) and "program of another hook" (${path}) are the same file`);
+        expect(readText(path), `${name} as ${key}: the program is intact`).toBe(`# the program ${name}\n`);
+      }
+    }
+    // the same interpreter as ours, the scripts of the guard itself, and the log as data (an argument of a program that is no interpreter, or of a script) are no collision
+    writeFileSync(join(tools, 'reader.py'), '# reads a log\n', 'utf8');
+    writeFileSync(f.settings, JSON.stringify({
+      hooks: {
+        PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `${PYBIN} ${scripts.audit}` }, { type: 'command', command: `${PYBIN} ${SETTINGS_TOOL} check` },
+          { type: 'command', command: `tail -n 5 ${f.log}` }, { type: 'command', command: `${PYBIN} ${join(tools, 'reader.py')} ${f.log} ${f.state}` }] }],
+      },
+    }), 'utf8');
+    const quiet = start({});
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+    expect(readText(f.log), 'the log is written').toMatch(/guard start/);
+
+    // a settings rewrite after the start: the log file becomes the program of another hook
+    const logPath = join(f.dir, 'audit-log.py');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: logPath, settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours] } }), 'utf8');
+    const program = '# a hook of another tool\nprint("audit")\n';
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(logPath)), 20000, 'the start in the log');
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `${PYBIN} ${logPath}` }] }] } }), 'utf8');
+      writeFileSync(logPath, program, 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*program of another hook .*audit-log\.py is the log_file of this guard/.test(g.out), 20000, 'the refusal of the pause');
+      await sleep(800);
+    } finally { await stopGuard(g); }
+    expect(g.out, 'the notice is on stdout').toMatch(/the log file .*audit-log\.py is a program that a command in .*settings\.json runs: nothing is appended to it/);
+    expect(readText(logPath), 'the program of the other hook is intact').toBe(program);
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
+  it('the commands of other hooks are read without a failure and at a bounded cost: hostile text, wrong shapes and very long commands, and a program after them is still protected', () => {
+    const f = fixture('foreign-hostile', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const victim = join(f.dir, 'later-hook.py');
+    writeFileSync(victim, '# a hook of another tool\n', 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const hostile = [
+      `echo 'unbalanced ${'x'.repeat(50)}`,
+      `python3 ${'a;'.repeat(30000)}`,
+      'x'.repeat(70000),
+      '('.repeat(40000),
+      `python${'.'.repeat(30000)}x /tmp/a.py`,
+      'a\u0000b',
+      Array.from({ length: 5000 }, (_, i) => `/tmp/script-${i}.py`).join(' '),
+      `${'bash -c "'.repeat(5)}x${'"'.repeat(5)}`,
+      `echo ${'\\'.repeat(5000)}`,
+      `${'$(python3 '.repeat(2000)}`,
+      '\u202e\ud83d\ude00 emoji > /tmp/out <<EOF 2>&1 &',
+      '',
+      '   ',
+      ';;; && || | & ( ) < >',
+      `echo '' "" '' ${PYBIN} '' ''`,
+    ];
+    const handlers = hostile.map((command) => ({ type: 'command', command }));
+    const settings = {
+      hooks: {
+        PreToolUse: [ours, { matcher: 'x', hooks: handlers }, 'not a group', null, 7, { hooks: 'not a list' }, { hooks: [null, 3, 'x', { type: 'command' }, { type: 'command', command: 12 }, { command: `${PYBIN} /tmp/untyped.py` }] },
+          { matcher: 'Bash', hooks: [{ type: 'command', command: `${PYBIN} ${victim}` }] }],
+        PostToolUse: 'not a list',
+        Stop: [{ hooks: handlers }],
+        Notification: { not: 'a list' },
+        SessionStart: [null, { hooks: [{ type: 'command', command: ['an', 'array'] }] }],
+      },
+      statusLine: 'not an object',
+    };
+    writeFileSync(f.settings, JSON.stringify(settings), 'utf8');
+    const start = (logFile: string) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: logFile, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once'], { timeout: 60000 });
+    };
+    const refused = start(victim);
+    expect(refused.status, `${refused.stdout}${refused.stderr}`).toBe(2);
+    expect(refused.stderr, 'the program that comes after the hostile handlers is still protected').toMatch(/"log_file" .* and "program of another hook" \(.*later-hook\.py\) are the same file/);
+    expect(refused.stderr).not.toMatch(/Traceback/);
+    expect(readText(victim), 'the program is intact').toBe('# a hook of another tool\n');
+    const ok = start(f.log);
+    expect(ok.status, `${ok.stdout}${ok.stderr}`).toBe(0);
+    expect(ok.stderr).not.toMatch(/Traceback/);
+    expect(readText(f.log), 'the guard ran').toMatch(/guard start/);
   });
 
   it('a registered hook or launcher that a settings rewrite made the state file is reported at every wiring pass, and the pause that would replace it is refused', async () => {
