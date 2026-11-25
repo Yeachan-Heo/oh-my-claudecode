@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PANE_ID, trace } from './helpers/readiness-trace-tmux.js';
+import { PANE_ID, scriptedPane, trace } from './helpers/readiness-trace-tmux.js';
 const TRACE_OUT = process.env.READINESS_TRACE_OUT;
 const TRACE_SET = process.env.READINESS_TRACE_SET ?? 'r5';
 const FIXTURE_ROOT = process.env.READINESS_FIXTURE_ROOT
@@ -34,16 +34,19 @@ import { awaitWorkerLaunchAcknowledgement, prepareWorkerLaunchAttempt } from '..
 // arrives. `batched` applies the keys sent since the last capture together,
 // against the focus drawn before them: the hypothesis that fits the recorded
 // Claude Code 2.1.328 failures.
-function claudeTrustPane(noFocused, idle, mode) {
+function yesFocused(noFocused) {
     const lines = noFocused.split('\n');
     const no = lines.findIndex(line => /❯\s*No, exit/.test(line));
     const yes = lines.findIndex(line => /^\s*Yes, (?:proceed|I trust this folder)/.test(line));
     const column = lines[no].indexOf('❯');
     lines[no] = `${lines[no].slice(0, column)} ${lines[no].slice(column + 1)}`;
     lines[yes] = `${lines[yes].slice(0, column)}❯${lines[yes].slice(column + 1)}`;
+    return lines.join('\n');
+}
+function claudeTrustPane(noFocused, idle, mode) {
     const frames = {
         no: noFocused,
-        yes: lines.join('\n'),
+        yes: yesFocused(noFocused),
         declined: `${noFocused.trimEnd()}\nClaude Code didn't start because this folder isn't trusted.\n`,
         trusted: idle,
     };
@@ -115,6 +118,79 @@ const SETS = {
             pane: mode === 'stale' ? undefined : () => claudeTrustPane(readFileSync(join(FIXTURE_ROOT, fixture.file), 'utf8'), idle, mode),
             run: () => deliverStartupInbox(contexts.get(fixture.provider), STARTUP_MESSAGE, { attemptAlreadyFenced: true }),
         })));
+    },
+    // Claude Code 2.1.330's trust dialog captured while it draws, each partial
+    // frame shown for one capture. reference: the whole dialog, answered.
+    // initial-partial: a partial frame of the first draw, then the reference.
+    // post-down-partial: the redraw after Down cut short. pre-typing-partial: an
+    // idle pane, then the dialog starting to draw, a guard for the check before
+    // the trigger is typed rather than a measured sequence.
+    'trust-partial': (_fixtures, contexts) => {
+        const read = (file) => readFileSync(join(FIXTURE_ROOT, file), 'utf8');
+        const idle = read('claude/2.1.325/idle.txt');
+        const answered = (whole, partial) => {
+            const pane = {
+                whole: { frame: whole, Down: partial?.afterDown ? 'partial' : 'yes' },
+                yes: { frame: yesFocused(whole), Enter: 'idle' },
+                idle: { frame: idle },
+            };
+            if (!partial)
+                return () => scriptedPane(pane, 'whole');
+            const next = partial.afterDown ? 'yes' : 'whole';
+            return () => scriptedPane({ ...pane, partial: { frame: partial.frame, partial: true, next } }, partial.afterDown ? 'whole' : 'partial');
+        };
+        const base = (id, eventState, pane, extra = {}) => ({
+            case: id,
+            fn: 'deliverStartupInbox',
+            fixture: 'claude/2.1.330/trust.txt',
+            eventState,
+            env: { OMC_TEAM_READY_TIMEOUT_MS: null },
+            control: false,
+            pane,
+            run: () => deliverStartupInbox(contexts.get('claude'), STARTUP_MESSAGE, { attemptAlreadyFenced: true }),
+            ...extra,
+        });
+        const reference = (file) => `reference ${file}`;
+        const wholes = ['claude/2.1.330/trust.txt', 'claude/2.1.330/trust-80col.txt', 'claude/2.1.330/trust-60col.txt'];
+        const trust = read('claude/2.1.330/trust.txt');
+        const no = trust.indexOf('❯ No, exit');
+        const cut = (end) => `${trust.slice(0, end)}\n`;
+        const initial = [
+            ['recorded trust-no-choice-partial', read('claude/2.1.330/trust-no-choice-partial.txt'), 'claude/2.1.330/trust-80col.txt'],
+            ['recorded trust-yes-choice-partial', read('claude/2.1.330/trust-yes-choice-partial.txt'), 'claude/2.1.330/trust-60col.txt'],
+            ['recorded trust-body-partial', read('claude/2.1.330/trust-body-partial.txt'), 'claude/2.1.330/trust.txt'],
+            ['cut at "❯"', cut(no + 1), 'claude/2.1.330/trust.txt'],
+            ['cut at "❯ N"', cut(no + 3), 'claude/2.1.330/trust.txt'],
+            ['cut at "❯ No, exit"', cut(no + 10), 'claude/2.1.330/trust.txt'],
+            ['cut at "Y"', cut(trust.indexOf('Yes, I trust this folder') + 1), 'claude/2.1.330/trust.txt'],
+        ];
+        const yes = yesFocused(trust);
+        const noLine = yes.indexOf('  No, exit');
+        const postDown = [
+            ['"No, exit" and an empty "❯"', `${yes.slice(0, noLine)}  No, exit\n ❯\n`],
+            ['"No, exit" and "❯ Yes, I tr"', `${yes.slice(0, noLine)}  No, exit\n ❯ Yes, I tr\n`],
+            ['"❯ No, exit" and "❯ Yes, I tr"', `${yes.slice(0, noLine)}❯ No, exit\n ❯ Yes, I tr\n`],
+        ];
+        return [
+            ...wholes.map(file => base(reference(file), 'reference', answered(read(file)), {
+                fixture: file,
+                control: file === 'claude/2.1.330/trust.txt',
+            })),
+            ...initial.map(([name, frame, whole]) => base(`initial-partial ${name}`, 'initial-partial', answered(read(whole), { frame }), {
+                fixture: whole,
+                reference_case: reference(whole),
+            })),
+            ...postDown.map(([name, frame]) => base(`post-down-partial ${name}`, 'post-down-partial', answered(trust, { frame, afterDown: true }), {
+                reference_case: reference('claude/2.1.330/trust.txt'),
+            })),
+            base('pre-typing-partial recorded trust-no-choice-partial', 'pre-typing-partial', () => scriptedPane({
+                idleFirst: { frame: idle, next: 'partial' },
+                partial: { frame: read('claude/2.1.330/trust-no-choice-partial.txt'), partial: true, next: 'whole' },
+                whole: { frame: trust, Down: 'yes' },
+                yes: { frame: yes, Enter: 'idle' },
+                idle: { frame: idle },
+            }, 'idleFirst')),
+        ];
     },
 };
 // Advance the fake clock only while the code under test sleeps; between
@@ -228,10 +304,12 @@ describe.skipIf(!TRACE_OUT)('readiness trace harness', () => {
             }
             const waitMs = Date.now() - trace.startedAt;
             vi.useRealTimers();
+            const partial = trace.pane?.partial?.();
             trace.pane = null;
             const { run: _run, pane: _pane, ...described } = traceCase;
             results.push({
                 ...described,
+                ...(partial ? { keys_on_partial: partial.keys, partial_captures: partial.captures } : {}),
                 keys: trace.keys,
                 result,
                 wait_ms: waitMs,

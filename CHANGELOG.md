@@ -1,3 +1,22 @@
+# oh-my-claudecode v5.8.9: Maintenance release with provider parsing, trust dialog, and graph improvements
+
+## Release Notes
+
+v5.8.9 is a maintenance patch that stabilizes provider flag parsing, improves team worker trust dialog handling, and enhances graph-based status reporting. Key improvements include Bedrock/Vertex provider detection, mid-draw trust dialog recovery, and optional panel quota wait for workspace management.
+
+### Features
+
+- **feat(graph): signal cleanup, status and gc; opt-in panel quota wait** (#5084) — adds graph-based workspace cleanup and optional quota wait for panel management
+- **feat(session-end): forward OMC_HOME/XDG roots to detached worker** (#5140) — improves environment variable forwarding for session teardown
+
+### Bug Fixes
+
+- **fix: consistent provider flag parsing for Bedrock/Vertex** (#5132) — resolves provider detection issues (Fixes #5131)
+- **fix(team): wait out a Claude trust dialog captured mid-draw instead of typing into it** (#5135) — prevents premature input during trust prompts
+- **fix(project-memory): track hot paths whose names only contain an ignored word** (#5137) — fixes hot-path tracking with filtered keywords (Fixes #5136)
+
+---
+
 # oh-my-claudecode v5.8.8: Maintenance release with named-model routing support
 
 ## Release Notes

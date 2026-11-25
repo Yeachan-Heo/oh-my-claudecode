@@ -35,6 +35,7 @@ export function directoryOperations(fd, platform = process.platform) {
             lstat: (name) => fs.lstatSync(path(name)),
             rename: (source, destination) => fs.renameSync(path(source), path(destination)),
             unlink: (name) => fs.unlinkSync(path(name)),
+            rmdir: (name) => fs.rmdirSync(path(name)),
             link: (source, destination) => fs.linkSync(path(source), path(destination)),
             readDir: () => fs.readdirSync(containedFdPath(fd, platform)),
             realpath: () => fs.realpathSync(containedFdPath(fd, platform)),
@@ -68,5 +69,9 @@ export function directoryOperations(fd, platform = process.platform) {
         realpath: () => native.realpathFd(fd),
         sync: () => fs.fsyncSync(fd),
     };
+}
+/** Operations for an open directory, or null where the platform has none: no pathname fallback is offered. */
+export function directoryOperationsIfSupported(fd, platform = process.platform) {
+    return containedFsPlatformSupported(platform) ? directoryOperations(fd, platform) : null;
 }
 //# sourceMappingURL=contained-fd.js.map
