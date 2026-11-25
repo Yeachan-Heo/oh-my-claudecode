@@ -1820,10 +1820,13 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
       }
     }
-    // no directory is named: the relative path is no file of that directory
+    // no directory is named: the shell runs it from the directory of the session, which the guard does not know, so a path that ends the path of a file of the guard is not read to its end
     writeFileSync(f.settings, settings('./audit'), 'utf8');
-    const quiet = start({ state_file: join(hooks, 'audit') });
-    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+    const unknown = start({ state_file: join(hooks, 'audit') });
+    expect(unknown.status, `${unknown.stdout}${unknown.stderr}`).toBe(2);
+    expect(unknown.stderr).toMatch(/not read to its end/);
+    const quiet = start({});
+    expect(quiet.status, `a path that no file of the guard ends: ${quiet.stdout}${quiet.stderr}`).toBe(0);
   });
 
   it('a file name split by a line continuation in the command of another hook is that file (the shell removes a backslash and newline before it splits the words), and an escaped backslash before a newline is not a continuation', () => {
@@ -2645,6 +2648,45 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
         expect(readText(file), `${JSON.stringify(command)} as ${key}: the program is intact`).toBe(text);
       }
+    }
+  });
+
+  it('a path of another hook that is relative where the command names no directory is run from the directory of the session, which the guard does not know: when it ends the path of a file the guard writes the guard refuses to start; a cd, an absolute path or a name that no file of the guard has settles it as before', () => {
+    const f = fixture('foreign-session-directory', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
+    mkdirSync(join(project, 'sub'), { recursive: true });
+    const text = '# the script that the command runs\n';
+    const files = { './audit': join(project, 'audit'), 'sub/audit': join(project, 'sub', 'audit'), '../project/audit': join(project, 'audit') };
+    for (const file of new Set(Object.values(files))) writeFileSync(file, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const cat = (path: string, cwd: string) => spawnSync('sh', ['-c', `cat ${path}`], { encoding: 'utf8', cwd });
+    expect(cat('./audit', project).stdout, 'the shell takes a relative path from the directory of the session').toBe(text);
+    expect(cat('./audit', f.dir).status, 'and from no other').not.toBe(0);
+    // the guard cannot tell which directory that is, so a path that may be one of its files is refused, whichever file it is
+    for (const [word, file] of Object.entries(files)) {
+      for (const command of [`python3 ${word}`, `true; python3 ${word} x`, `sh -c 'python3 ${word}'`, `python3 -u --log=${word}`]) {
+        for (const key of ['state_file', 'pause_file', 'log_file']) {
+          const r = start(command, { [key]: file });
+          expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+          expect(r.stderr).not.toMatch(/Traceback/);
+          expect(readText(file), `${command} as ${key}: the file is intact`).toBe(text);
+        }
+      }
+    }
+    // not refused for that: a path of another name, and a path that a directory of the command settles (that is the collision of an earlier test)
+    expect(start('python3 ./audit', {}).status, 'no file of the guard ends it').toBe(0);
+    expect(start('python3 ./audit-other', { state_file: files['./audit'] }).status, 'another name').toBe(0);
+    for (const command of [`python3 ${files['./audit']}`, `cd ${project}; python3 ./audit`, `env -C ${project} python3 sub/audit`, `sh -c 'cd ${project} && ./audit'`, `python3 ./audit --directory ${project}`]) {
+      const r = start(command, { state_file: command.includes('sub/') ? files['sub/audit'] : files['./audit'] });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
     }
   });
 

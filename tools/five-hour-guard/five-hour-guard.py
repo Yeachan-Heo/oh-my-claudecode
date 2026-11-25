@@ -297,6 +297,26 @@ class ScanIncomplete(Exception):
     guard writes nothing while it stands in settings.json (see UNSCANNED)."""
 
 
+def session_dependent(piece, directories, named):
+    """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
+    neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command names no directory (no
+    `cd DIR`: the shell runs it from the directory of the session) and that ends the path of a file the guard writes; a word without a
+    directory part is not decided here. A piece that holds blanks is a quoted command (read as one), one that still holds a `$` has a parameter that is not decided here."""
+    path = os.path.expanduser(os.path.expandvars(piece))
+    if not path or '$' in path or len(path) > MAX_PATH_CHARS or '\0' in path or any(c.isspace() for c in path) or path[0] == '-' or re.match(r'[^/\\]*=', path):
+        return False   # (an option, or a NAME=value word: the value after the `=` is a piece of its own)
+    key = lambda text: os.path.normcase(text).lower() if sys.platform == 'darwin' else os.path.normcase(text)
+    written = [key(path_key(out)) for _label, out in written_files()]
+    if os.sep in path or (os.altsep and os.altsep in path):
+        if os.path.isabs(path) or named:
+            return False
+        parts = os.path.normpath(path).split(os.sep)
+        while parts and parts[0] == '..':
+            parts.pop(0)
+        return bool(parts) and parts != ['.'] and any(out.endswith(os.sep + key(os.sep.join(parts))) for out in written)
+    return False
+
+
 def word_files(word, directories, named=()):
     """The files a word of a command can be: a word with a directory part is that path as written (with ~ and variables of this process
     expanded); a word without one is the file of that name in each of `directories` (the working directory first, then the PATH) where there is one.
@@ -724,6 +744,8 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
                 found += [t for t in command_programs(word, exclude, depth + 1, named, assigned) if t not in found]
             for piece in word_pieces(word, assigned):
+                if session_dependent(piece, directories, named):
+                    raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:
                         found.append(path)
@@ -829,14 +851,18 @@ def configured_files():
             ('pause_file lock', PAUSE_FILE + '.lock')]
 
 
+def written_files():
+    """[(label, path)]: the files the guard writes (a write replaces whatever else is there)."""
+    return [(label, path) for label, path in (('pause_file', PAUSE_FILE), ('state_file', STATE), ('log_file', LOG), ('lock of the pause file', PAUSE_FILE + '.lock'),
+                                               ('lock of the state file', STATE + '.lock' if STATE else '')) if path]
+
+
 def program_collisions():
     """[(label of the program, path, file of the guard)]: a hook, interpreter or launcher that the registered entries name and that is
     a file the guard writes (a settings rewrite after the start can put it there), or a program of another hook entry that is one. A write
     would replace the program."""
-    outputs = [('pause_file', PAUSE_FILE), ('state_file', STATE), ('log_file', LOG), ('lock of the pause file', PAUSE_FILE + '.lock'),
-               ('lock of the state file', STATE + '.lock' if STATE else '')]
     return [(label, path, out_label) for label, path in registered_runtime_files() if label in PROTECTED_LABELS
-            for out_label, out in outputs if out and same_file(path, out)]
+            for out_label, out in written_files() if same_file(path, out)]
 
 
 def own_files():
