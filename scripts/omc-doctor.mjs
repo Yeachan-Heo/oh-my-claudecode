@@ -1366,7 +1366,9 @@ const backupPlace = (registry) => {
         }
       }
     } catch (error) {
-      // Not a readable directory: the cache commands report that themselves.
+      // A namespace that cannot be listed may hide a version link to a tree the backup must lie outside of, and no cache command reads a
+      // namespace that the registry does not name. A file in its place (ENOTDIR) hides nothing.
+      if (!absent(error, space) && !(error && error.code == 'ENOTDIR')) return stop('the plugin cache ' + space + ' could not be read completely');
     }
   }
   const trees = [

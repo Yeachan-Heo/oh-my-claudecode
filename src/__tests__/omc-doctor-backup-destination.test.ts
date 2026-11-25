@@ -206,6 +206,46 @@ describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and 
     }
   });
 
+  // The same for a namespace of the cache that the registry does not name: no cache command reads it, so the listing of the backup check is the only one
+  // that can fail, and a version link inside it may lead to the tree the backup directory is in. A regular file among the namespaces (a stray file
+  // of a file manager) hides nothing and is no refusal.
+  test.each([['EACCES'], ['EPERM'], ['EIO']])('a cache namespace outside the registry that cannot be listed (%s) is refused before anything is moved, as the overlap is where the listing works', (code) => {
+    for (const command of commands) {
+      for (const listed of [false, true]) {
+        const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+        try {
+          const space = path.join(dir, 'plugins', 'cache', 'other-market', 'oh-my-claudecode');
+          const hidden = path.join(dir, 'elsewhere', '9.9.9', 'skill-bodies', 'omc-doctor');
+          mkdirSync(hidden, { recursive: true });
+          link(path.join(dir, 'elsewhere', '9.9.9'), path.join(space, '9.9.9'));
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] });
+          link(hidden, path.join(dir, 'plugins', 'backups'));
+          const preload = path.join(dir, 'unlistable.cjs');
+          writeFileSync(preload, `const fs = require('fs'); const real = fs.readdirSync;\nfs.readdirSync = function (target, ...rest) {\n  if (!process.env.LISTABLE && String(target) === process.env.UNLISTABLE) throw Object.assign(new Error('${code}'), { code: '${code}' });\n  return real.call(this, target, ...rest);\n};\n`);
+          const result = runCommand(command, dir, { preloads: [preload], env: { UNLISTABLE: space, ...(listed ? { LISTABLE: '1' } : {}) }, timeout: 20_000 });
+          expect({ command, listed, status: result.status, said: result.stdout.includes('could not be read completely'), overlap: REFUSED.test(result.stdout), cache: readdirSync(cache).sort(), landed: readdirSync(hidden) })
+            .toEqual({ command, listed, status: 1, said: !listed, overlap: listed, cache: ['5.8.0', '5.9.0'], landed: [] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
+  test('a regular file among the namespaces of the cache is no refusal: the cleanup goes on', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+      try {
+        writeFileSync(path.join(dir, 'plugins', 'cache', 'stray-file'), 'not a namespace');
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] });
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, cache: readdirSync(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, cache: ['5.9.0'], moved: 1 });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   // A rename cannot cross a file system. A destination on another device than the cache (reported here by a preload that
   // gives everything under the vault another device number) is refused before the directory is created, not half way.
   test('a redirected backup directory on another file system than the cache is refused before anything is created or moved', () => {

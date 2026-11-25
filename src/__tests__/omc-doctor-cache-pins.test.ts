@@ -372,7 +372,12 @@ for (const name of ['statSync', 'readdirSync']) {
               const result = runCommand(command, dir, { preloads: [failing(dir, rules)] });
               expect({ keys, fails, status: result.status, first: digitVersions(cache), second: digitVersions(other), moved: movedAside(dir) })
                 .toEqual({ keys, fails, status: 1, first: '5.8.0,5.9.0', second: '5.7.0,5.8.0', moved: 0 });
-              expect(result.stdout).toContain(`${fails}: Nothing moved: could not read ${broken} (EACCES)`);
+              // The first cache by name reports it: its own read fails, or, when the unreadable one is the later cache, the check of the backup directory that lists every namespace first.
+              expect(result.stdout).toContain(
+                fails === 'oh-my-claudecode'
+                  ? `oh-my-claudecode: Nothing moved: could not read ${broken} (EACCES)`
+                  : `oh-my-claudecode: Nothing moved: the plugin cache ${broken} could not be read completely`,
+              );
               expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean|Moved|Cache move failed/);
             } finally {
               rmSync(dir, { recursive: true, force: true });
