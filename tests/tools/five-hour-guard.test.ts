@@ -2303,6 +2303,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'a log of its own is fine').toBe(0);
   });
 
+  it('the log of a hook entry that carries the marker is no file that another word of the entry names: a positional script or an argument that is the --log file is refused, a log of its own is fine', () => {
+    const f = fixture('entry-log-positional', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const custom = join(f.dir, 'custom.py');
+    const program = '# the script of the entry\nprint("hold")\n';
+    writeFileSync(custom, program, 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+    for (const [name, command] of [
+      ['a positional script', `exec ${PYBIN} ${custom} --pause-file ${f.pause} --log ${custom} # five-hour-guard-entry`],
+      ['an argument', `exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause} --other ${custom} --log ${custom} # five-hour-guard-entry`],
+    ] as const) {
+      put(command);
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, name).toMatch(/"registered hook log" \(.*custom\.py\) and "file named by the hook entry" \(.*custom\.py\) are the same file|"file named by the hook entry" \(.*custom\.py\) and "registered hook log" \(.*custom\.py\) are the same file/);
+      expect(readText(custom), `${name}: the script is intact`).toBe(program);
+      expect(existsSync(f.pause), `${name}: no pause was published`).toBe(false);
+    }
+    put(`exec ${PYBIN} ${custom} --pause-file ${f.pause} --log ${join(f.dir, 'custom.log')} # five-hour-guard-entry`);
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'a log of its own is fine').toBe(0);
+    expect(readText(custom), 'the script is intact').toBe(program);
+  });
+
   it('a handler without the marker is not read for roles: its --log is a word like any other, a program of another hook for the guard', () => {
     const f = fixture('foreign-log-not-read', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
@@ -2694,7 +2717,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     try {
       await waitFor(() => existsSync(f.pause), 20000, 'the pause');
       writeFileSync(f.settings, settings(f.state), 'utf8');
-      await waitFor(() => /ERROR: tick failed.*the file named by the hook entry .*state\.json is .*state\.json, a file this guard writes/.test(readText(f.log)), 20000, 'the refusal of a renewal');
+      await waitFor(() => /ERROR: tick failed.*the registered hook log .*state\.json is .*state\.json, a file this guard writes/.test(readText(f.log)), 20000, 'the refusal of a renewal');
       const seen = readJson(f.pause).valid_until;
       await sleep(1000);   // five ticks
       expect(readJson(f.pause).valid_until, 'the heartbeat of the pause is not extended').toBe(seen);

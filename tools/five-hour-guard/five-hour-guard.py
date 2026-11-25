@@ -203,7 +203,7 @@ UNSCANNED = 'command that cannot be read to its end'   # the entry for a command
 OTHER_PROGRAM = 'program of another hook'   # a file that a command of any other hook (or the status line) in settings.json runs
 PROGRAM_LABELS = HOOK_PROGRAMS | {OTHER_PROGRAM, 'guard script', 'settings tool script', 'entry module'}
 READ_ONLY_LABELS = {'configuration file', 'usage_cache', 'usage_cache lock', 'settings_file'}   # files the guard only reads (many hooks name them): a command of another hook that names one is no collision
-PROTECTED_LABELS = {'registered hook', 'registered interpreter', OTHER_PROGRAM, ENTRY_FILE}   # the programs that no write of the guard may replace
+PROTECTED_LABELS = {'registered hook', 'registered interpreter', OTHER_PROGRAM, ENTRY_FILE, ENTRY_LOG}   # the programs that no write of the guard may replace
 
 
 def may_be_one_file(la, pa, lb, pb):
@@ -215,8 +215,8 @@ def may_be_one_file(la, pa, lb, pb):
         return (lb if la == OTHER_PROGRAM else la) in PROGRAM_LABELS | READ_ONLY_LABELS
     if {la, lb} == {'hook_log_file', ENTRY_LOG}:
         return True
-    if ENTRY_FILE in (la, lb):   # a word of the entry beyond the generated ones (the hook, interpreter, log, pause file) may be the same file as another one of them; it may not be a file of the guard
-        return (lb if la == ENTRY_FILE else la) in (ENTRY_FILE, ENTRY_LOG, 'registered hook', 'registered interpreter')
+    if ENTRY_FILE in (la, lb):   # a word of the entry beyond the generated ones (the hook, interpreter, pause file) may be the same file as another one of them; it may not be a file of the guard, nor the log of the entry
+        return (lb if la == ENTRY_FILE else la) in (ENTRY_FILE, 'registered hook', 'registered interpreter')
     if la in ('hook script', 'registered hook') and lb in ('hook script', 'registered hook'):
         return True
     if la == lb == 'registered interpreter':
@@ -440,9 +440,10 @@ def registered_runtime_files():
             found += [('registered hook', BUNDLED_HOOK), ('registered interpreter', sys.executable)]
         for _group, handler in entries:
             try:   # one handler that cannot be read must not hide the ones after it
-                found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated))]
-                if ENTRY.ENTRY_MARKER in handler['command']:   # the roles of three words are read in the entry that `add` writes, not in a command found by its exact path
-                    hooks, interpreters, logs = entry_roles(handler['command'])
+                marked = ENTRY.ENTRY_MARKER in handler['command']   # the roles of three words are read in the entry that `add` writes, not in a command found by its exact path
+                hooks, interpreters, logs = entry_roles(handler['command']) if marked else ([], [], [])
+                found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated) + [t for t in logs if os.path.isabs(t)])]   # the log is a file of its own below, so no other word of the entry may be it
+                if marked:
                     found += [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters] + [(ENTRY_LOG, t) for t in logs if os.path.isabs(t)]
             except ScanIncomplete as e:
                 found.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
