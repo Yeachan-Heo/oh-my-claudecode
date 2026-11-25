@@ -7,6 +7,7 @@ import { ageVersions, backupDir, codeOf, commands, digitVersions, makeCache, mov
 import { step1 } from './helpers/omc-doctor-step1.js';
 // @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
 import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
+import { ownHost } from './helpers/omc-doctor-occupancy-fixture.js';
 
 // A path that goes through a link and then `..` names the parent of the link's target: the file system reads the
 // components of a path in order. The commands resolve such a path the same way (one `linkChain` function in the script,
@@ -131,7 +132,7 @@ describe.skipIf(!POSIX)('omc-doctor: a protecting path that has `..` after a lin
 
   // The publisher folds a plugin root as text before it stores it, so a record that still has `..` is written by hand.
   function writeRecord(dir: string, root: string) {
-    const record = { version: 1, pid: process.pid, processStartIdentity: ownIdentity(), pluginRoot: root, updatedAt: new Date().toISOString() };
+    const record = { version: 1, pid: process.pid, processStartIdentity: ownIdentity(), pluginRoot: root, host: ownHost(), updatedAt: new Date().toISOString() };
     const directory = path.join(dir, '.omc', 'cache-occupancy');
     mkdirSync(directory, { recursive: true });
     writeFileSync(path.join(directory, `${createHash('sha256').update(JSON.stringify(record)).digest('hex')}.json`), JSON.stringify(record));

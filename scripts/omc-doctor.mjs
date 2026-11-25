@@ -1064,7 +1064,7 @@ const placeId = () => {
   } catch {}
   return os.hostname() + '|' + machine + '|' + namespace;
 };
-const isForeignOwner = (record) => typeof record?.host === 'string' && record.host !== '' && (machineId() === '' || record.host !== placeId());
+const isForeignOwner = (record) => typeof record?.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
 // A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time
 // differs from the recorded one, or the record is dated more than 5 minutes in the future (not for a record of another place, whose clock this
 // system cannot judge).

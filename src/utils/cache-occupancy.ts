@@ -70,7 +70,7 @@ function processAlive(pid: number): boolean {
 
 // Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; empty where there is none)
 // and, on Linux, the PID namespace; the same text as scripts/lib/cache-occupancy.mjs, where the reason is given. A record that names another
-// place belongs to an owner this machine cannot probe, so a local process probe never proves it gone; the same when this machine
+// place, or none (a record of the previous publisher), belongs to an owner this machine cannot probe, so a local process probe never proves it gone; the same when this machine
 // cannot name itself (no machine id file and no network interface address: the machine id is empty).
 function machineId(): string {
   let machine = '';
@@ -95,7 +95,7 @@ function placeId(): string {
 }
 
 function isForeignOwner(record: CacheOccupancyRecord): boolean {
-  return typeof record.host === 'string' && record.host !== '' && (machineId() === '' || record.host !== placeId());
+  return typeof record.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
 }
 
 export interface CacheOccupancyRecord {

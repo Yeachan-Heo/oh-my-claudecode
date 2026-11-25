@@ -21,6 +21,7 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     { label: 'record of another host dated 10 minutes ahead (the clock of that host is not judged here)', write: (d, r) => writeRecord(d, r, { host: 'another-machine|id|pid:[4026539999]', updatedAt: minutes(10) }), expected: 'kept' },
     { label: 'process that no longer exists', write: (d, r) => writeRecord(d, r, { pid: deadPid() }), expected: 'moved' },
     { label: 'process that does not exist here, record of another host or PID namespace (it cannot be judged by a local probe)', write: (d, r) => writeRecord(d, r, { pid: deadPid(), host: 'another-machine|pid:[4026539999]' }), expected: 'kept' },
+    { label: 'process that does not exist here, record without the field host (the previous publisher: unknown origin, never judged by a local probe)', write: (d, r) => writeRecord(d, r, { pid: deadPid(), host: undefined }), expected: 'kept' },
     { label: 'process that no longer exists, record without a plugin root (proven gone is enough, it cannot block)', write: (d, r) => writeRecord(d, r, { pid: deadPid(), pluginRoot: undefined }), expected: 'moved' },
     { label: 'pid answers EPERM (alive, owned by another user)', write: (d, r) => writeRecord(d, r, { pid: deadPid() }), expected: 'kept', eperm: true },
     { label: `pid reused by another process: start identity differs (${readsIdentity ? 'read on Linux' : 'cannot be read here, so the record is kept'})`, write: (d, r) => writeRecord(d, r, { processStartIdentity: 'not-the-recorded-start' }), expected: readsIdentity ? 'moved' : 'kept' },
@@ -80,13 +81,14 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
         expect({ label, side, onA: foreignOn(a, fromA), onB: foreignOn(b, fromA) }).toEqual({ label, side, onA: false, onB: true });
       }
     }
-    // A machine that cannot name itself (no machine id file, no interface address) compares with nothing: every record that names a place is foreign to it.
+    // A machine that cannot name itself (no machine id file, no interface address) compares with nothing: every record is foreign to it. A record without the
+    // field (the previous publisher) has an unknown origin and is foreign on every machine.
     const nameless = machine('');
     for (const side of ['lib', 'doctor'] as const) {
       const source = side === 'lib' ? libSource : doctorSource;
       const foreignOn = (m: typeof nameless, record: unknown) => vm.runInNewContext(`${source}\nisForeignOwner(record)`, { ...m[side], record }) as boolean;
       const own = { host: vm.runInNewContext(`${source}\nplaceId()`, nameless[side]) as string };
-      expect({ side, own: foreignOn(nameless, own), other: foreignOn(nameless, { host: 'build-host|id|pid:[4026531836]' }), noField: foreignOn(nameless, {}) }).toEqual({ side, own: true, other: true, noField: false });
+      expect({ side, own: foreignOn(nameless, own), other: foreignOn(nameless, { host: 'build-host|id|pid:[4026531836]' }), noField: foreignOn(nameless, {}) }).toEqual({ side, own: true, other: true, noField: true });
     }
   });
 

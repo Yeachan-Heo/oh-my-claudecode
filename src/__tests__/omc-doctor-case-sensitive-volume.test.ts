@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { addCache, ageVersions, backupDir, CLAUDE_MD_VERSION, commands, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, STEP1, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry, writeZeroInodePreload } from './helpers/omc-doctor-cache-fixture.js';
+import { ownHost } from './helpers/omc-doctor-occupancy-fixture.js';
 
 const step1Command = STEP1;
 const PLATFORMS = ['linux', 'darwin', 'win32'] as const;
@@ -152,7 +153,7 @@ describe.skipIf(volumeFoldsCase())('omc-doctor on a volume that tells letter cas
 // An occupancy record as the publisher of SessionStart writes it: the plugin root in the form of `pathIdentity`
 // (resolved, in lower case on win32). The record is of this live process, so it is kept while the process lives.
 function writeRecord(dir: string, root: string) {
-  const record = { version: 1, pid: process.pid, pluginRoot: root, updatedAt: new Date().toISOString() };
+  const record = { version: 1, pid: process.pid, pluginRoot: root, host: ownHost(), updatedAt: new Date().toISOString() };
   const directory = path.join(dir, '.omc', 'cache-occupancy');
   mkdirSync(directory, { recursive: true });
   writeFileSync(path.join(directory, `${createHash('sha256').update(JSON.stringify(record)).digest('hex')}.json`), JSON.stringify(record));
@@ -410,7 +411,7 @@ fs.mkdirSync = function (target, ...rest) {
     fired = true;
     const dir = path.join(process.env.CLAUDE_CONFIG_DIR, '.omc', 'cache-occupancy');
     realMkdir.call(fs, dir, { recursive: true });
-    const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.RACE_ROOT, updatedAt: new Date().toISOString() });
+    const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.RACE_ROOT, host: ${JSON.stringify(ownHost())}, updatedAt: new Date().toISOString() });
     fs.writeFileSync(path.join(dir, crypto.createHash('sha256').update(record).digest('hex') + '.json'), record);
   }
   return realMkdir.call(fs, target, ...rest);

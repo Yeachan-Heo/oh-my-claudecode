@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, syml
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { blockOf, guideSection, read, commands, scriptSection, scriptText, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, addCache, makeCache, volumeFoldsCase, writeCaseFoldPreload, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { ownHost } from './helpers/omc-doctor-occupancy-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (pins, registry shapes, failed moves)', { timeout: 120_000 }, () => {
   function makeConfigDir(versions: string[], pinned: string | null, installed = true, pluginId = 'oh-my-claudecode@omc') {
@@ -88,7 +89,7 @@ fs.readdirSync = function (target, ...rest) {
   if (String(target).endsWith('cache-occupancy') && ++reads === 3) {
     const stat = fs.readFileSync('/proc/self/stat', 'utf8');
     const start = stat.substring(stat.lastIndexOf(')') + 2).split(' ')[19];
-    fs.writeFileSync(path.join(String(target), 'a'.repeat(64) + '.json'), JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: start, pluginRoot: process.env.HELD_DIR, updatedAt: new Date().toISOString() }));
+    fs.writeFileSync(path.join(String(target), 'a'.repeat(64) + '.json'), JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: start, pluginRoot: process.env.HELD_DIR, host: ${JSON.stringify(ownHost())}, updatedAt: new Date().toISOString() }));
   }
   return names;
 };

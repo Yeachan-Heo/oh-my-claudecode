@@ -118,10 +118,11 @@ function placeId() {
   try { namespace = readlinkSync('/proc/self/ns/pid'); } catch {}
   return `${hostname()}|${machine}|${namespace}`;
 }
-// A record without the field (made before it existed) is a local record. When this machine cannot name itself, no record can be
-// compared with it, so every record that carries the field is foreign (never judged by a local probe).
+// Only a record that names this very place is local. A record without the field (made by the previous publisher, possibly on another machine
+// of a shared profile during a rolling update) has an unknown origin and is foreign: never judged by a local probe, never removed as gone.
+// When this machine cannot name itself, no record can be compared with it, so every record is foreign.
 export function isForeignOwner(record) {
-  return typeof record?.host === 'string' && record.host !== '' && (machineId() === '' || record.host !== placeId());
+  return typeof record?.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
 }
 function alive(pid) {
   try { process.kill(pid, 0); return true; }

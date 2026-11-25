@@ -27,14 +27,29 @@ export function ownIdentity(): string {
   }
 }
 
+// The place of this machine as the publisher writes it into the field `host` of a record (a record without it has an unknown origin and is foreign).
+let placeOfThisMachine: string | undefined;
+export function ownHost(): string {
+  if (placeOfThisMachine) return placeOfThisMachine;
+  const probe = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+  try {
+    expect(publishCacheOccupancy(probe, probe, process.pid, ownIdentity())).toBe(true);
+    const directory = path.join(probe, '.omc', 'cache-occupancy');
+    placeOfThisMachine = JSON.parse(readFileSync(path.join(directory, readdirSync(directory)[0]), 'utf8')).host as string;
+    return placeOfThisMachine;
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+}
+
 // Publishes a record for this process with the publisher the SessionStart hook uses.
 export function publishOwn(root: string, dir: string): boolean {
   return publishCacheOccupancy(root, dir, process.pid, ownIdentity());
 }
 
-// An occupancy record that is valid for this live process unless `overrides` says otherwise.
+// An occupancy record of this machine that is valid for this live process unless `overrides` says otherwise.
 export function writeRecord(dir: string, root: string, overrides: Record<string, unknown> = {}): string {
-  const record = { version: 1, pid: process.pid, processStartIdentity: ownIdentity(), pluginRoot: root, updatedAt: new Date().toISOString(), ...overrides };
+  const record = { version: 1, pid: process.pid, processStartIdentity: ownIdentity(), pluginRoot: root, host: ownHost(), updatedAt: new Date().toISOString(), ...overrides };
   const directory = path.join(dir, '.omc', 'cache-occupancy');
   mkdirSync(directory, { recursive: true });
   const file = path.join(directory, `${createHash('sha256').update(JSON.stringify(record)).digest('hex')}.json`);

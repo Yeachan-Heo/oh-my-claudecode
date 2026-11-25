@@ -3,7 +3,7 @@ import { existsSync, lstatSync, lutimesSync, mkdirSync, readdirSync, rmSync, sym
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { blockOf, commands, GUIDE_GUARD, ageVersions, runBlock, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
-import { deadPid, publishOwn, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
+import { deadPid, ownHost, publishOwn, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (occupancy, links, platforms)', { timeout: 120_000 }, () => {
   // A preload makes the command see another platform; the volume under it stays the real one, and only the volume decides
@@ -514,7 +514,7 @@ fs.mkdirSync = function (target, ...rest) {
     if (kind === 'record') {
       const dir = path.join(process.env.CLAUDE_CONFIG_DIR, '.omc', 'cache-occupancy');
       realMkdir.call(fs, dir, { recursive: true });
-      const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.RACE_ROOT, updatedAt: new Date().toISOString() });
+      const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.RACE_ROOT, host: ${JSON.stringify(ownHost())}, updatedAt: new Date().toISOString() });
       fs.writeFileSync(path.join(dir, crypto.createHash('sha256').update(record).digest('hex') + '.json'), record);
     } else if (kind === 'pin') {
       fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json'), process.env.RACE_REGISTRY);

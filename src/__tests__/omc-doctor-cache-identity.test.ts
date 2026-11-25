@@ -3,6 +3,7 @@ import { lutimesSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { ownHost } from './helpers/omc-doctor-occupancy-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (identity of paths)', { timeout: 120_000 }, () => {
   // Whether another spelling names an existing path here, without a preload: only where the volume folds letter case.
@@ -17,7 +18,7 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
   }
   // An occupancy record of this live process; a record without a start identity is kept while its process is alive.
   function writeRecord(dir: string, root: string): string {
-    const record = { version: 1, pid: process.pid, pluginRoot: root, updatedAt: new Date().toISOString() };
+    const record = { version: 1, pid: process.pid, pluginRoot: root, host: ownHost(), updatedAt: new Date().toISOString() };
     const directory = path.join(dir, '.omc', 'cache-occupancy');
     mkdirSync(directory, { recursive: true });
     const file = path.join(directory, `${createHash('sha256').update(JSON.stringify(record)).digest('hex')}.json`);
