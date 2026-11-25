@@ -1350,6 +1350,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a status line given as a string (the form before v4.5, which the installer still reads) is a program of another tool as much as the object form: the high reading does not replace it', () => {
+    const f = fixture('statusline-string', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const hud = join(f.dir, 'omc-hud.mjs');
+    writeFileSync(hud, '// the status line of another tool\n', 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours] }, statusLine: hud }), 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: hud, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain(`"state_file" (${hud}) and "program of another hook" (${hud}) are the same file`);
+    expect(readText(hud), 'the program is intact').toBe('// the status line of another tool\n');
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
   it('a program behind the options of env, exec, command and time, and behind the separators, groups, keywords and wrappers of a shell command, is found', () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);

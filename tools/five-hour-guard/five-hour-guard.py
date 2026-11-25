@@ -409,7 +409,9 @@ def other_commands(data, ours):
                 if isinstance(h, dict) and h.get('type') == 'command' and isinstance(h.get('command'), str) and id(h) not in ours:
                     found.append(h['command'])
     status = data.get('statusLine')
-    if isinstance(status, dict) and status.get('type') == 'command' and isinstance(status.get('command'), str):
+    if isinstance(status, str):   # the form before v4.5, which the installer still reads: the string is the command
+        found.append(status)
+    elif isinstance(status, dict) and status.get('type') == 'command' and isinstance(status.get('command'), str):
         found.append(status['command'])
     return found
 
