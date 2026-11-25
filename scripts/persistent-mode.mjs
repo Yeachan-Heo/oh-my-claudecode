@@ -1822,6 +1822,33 @@ async function main() {
           }
         }
       }
+
+      // Process named workflow advancement/completion on re-entry without re-blocking.
+      // The initial Stop already emitted a block; this re-entry must consume completion
+      // or advancement without triggering safety overrides for repeated blocks.
+      const autopilot = readStateFileWithSession(
+        stateDir,
+        globalStateDir,
+        "autopilot-state.json",
+        sessionId,
+      );
+      const currentAutopilot = isCurrentAutopilotState(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
+        ? autopilot.state
+        : null;
+
+      if (currentAutopilot && autopilot.state?.active === true && hasNamedWorkflowMarkers(currentAutopilot)) {
+        // Check if workflow has advanced to a new stage or completed
+        const workflowAdvance = advanceWorkflowOnStop(currentAutopilot, data, sessionId);
+        if (workflowAdvance) {
+          const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);
+          if (commit.committed) {
+            // Workflow advanced; silently continue (next Stop will show the new prompt)
+            emit({ continue: true, suppressOutput: true });
+            return;
+          }
+        }
+      }
+
       emit({ continue: true, suppressOutput: true });
       return;
     }

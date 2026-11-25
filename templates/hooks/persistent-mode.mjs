@@ -1373,6 +1373,29 @@ async function main() {
           }
         }
       }
+
+      // Process named workflow advancement/completion on re-entry without re-blocking.
+      // The initial Stop already emitted a block; this re-entry must consume completion
+      // or advancement without triggering safety overrides for repeated blocks.
+      const autopilotForReentry = readStateFileWithSession(
+        stateDir,
+        globalStateDir,
+        "autopilot-state.json",
+        sessionId,
+      );
+      if (autopilotForReentry.state?.active && hasNamedWorkflowMarkers(autopilotForReentry.state) && isSessionMatch(autopilotForReentry.state, sessionId)) {
+        // Check if workflow has advanced to a new stage or completed
+        const workflowAdvance = advanceWorkflowOnStop(autopilotForReentry.state, data, sessionId);
+        if (workflowAdvance) {
+          const commit = commitWorkflowAdvance(autopilotForReentry.path, workflowAdvance);
+          if (commit.committed) {
+            // Workflow advanced; silently continue (next Stop will show the new prompt)
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
+        }
+      }
+
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }

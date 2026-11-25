@@ -398,6 +398,29 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(readState(f)).toEqual(completed);
   });
 
+  it('processes workflow completion on stop_hook_active re-entry without re-blocking', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    // Complete stage 1 (ralplan)
+    appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+    const advancedOnce = invoke(f);
+    expect(advancedOnce.reason).toBe(expectedStagePrompt('execution'));
+    expect(readState(f).pipelineTracking.currentStageIndex).toBe(1);
+
+    // Complete stage 2 (execution)
+    appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
+    const completedResult = invoke(f);
+    expect(completedResult.reason).toContain('All selected stages are complete');
+    const beforeReentry = readState(f);
+    expect(beforeReentry).toMatchObject({ active: false, phase: 'complete' });
+
+    // Simulate stop_hook_active re-entry: workflow completion should be processed
+    // without emitting another decision:block (which would trigger safety overrides)
+    const reentryResult = invoke(f, { stop_hook_active: true });
+    expect(reentryResult).toEqual({ continue: true, suppressOutput: true });
+    expect(readState(f)).toEqual(beforeReentry);
+  });
+
   it('allows concurrent duplicate stops to commit only one revision', async () => {
     const f = fixture(kind);
     writeState(f, workflowState(f));
