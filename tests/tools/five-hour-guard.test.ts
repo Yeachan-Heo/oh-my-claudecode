@@ -2521,6 +2521,45 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(decoded.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
   });
 
+  it('a quote in the pattern of a trimming expression, where the shell removes it and the scan would keep it as a character ("${A%\'.py\'}"), is a command that is not read to its end: the guard refuses to start; patterns without a quote, with a backslash or with an unquoted quote are read as before', () => {
+    const f = fixture('foreign-trim-pattern-quotes', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, key: string, file = audit) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: file }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const value = `A=${hooks}/audit.py;`;
+    // what the shell makes of each: the quotes are removed from the pattern, and the cut is made
+    const sh = (expression: string) => spawnSync('sh', ['-c', `A='${hooks}/audit.py'; printf %s ${expression}`], { encoding: 'utf8' }).stdout;
+    expect(sh(`"\${A%'.py'}"`), 'a quote in the pattern in a quoted word').toBe(audit);
+    expect(sh('"${A%%\\"x\\"}"'), 'an escaped double quote in the pattern').toBe(`${hooks}/audit.py`);
+    expect(sh(`\${A%'.py'}`), 'a quote in the pattern in a bare word').toBe(audit);
+    for (const command of [`${value} python3 "\${A%'.py'}"`, `${value} python3 "\${A%%\\"x\\"}"`, `${value} sh -c 'python3 "\${A%".py"}"'`]) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, key);
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/quote in the pattern of a trimming expression/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+      }
+    }
+    // not refused: no quote, a backslash (decoded as before), the other forms with a quote in the word but not in the pattern
+    const other = join(hooks, 'other');
+    for (const command of [`${value} python3 "\${A%.py}"`, `${value} python3 "\${A%\\.py}"`, `${value} python3 "\${A:-'x'}"`, `${value} python3 '\${A%.py}'`]) {
+      const r = start(command, 'state_file', other);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+    // a quote that the scan removes before the word is read: the pattern arrives without it and the cut is found as before
+    const bare = start(`${value} python3 \${A%'.py'}`, 'state_file');
+    expect(bare.status, 'the bare quote is removed by the splitter: the cut is found').toBe(2);
+    expect(bare.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+  });
+
   it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {
     const f = fixture('foreign-comments', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');

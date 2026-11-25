@@ -564,6 +564,8 @@ def parameter_variants(piece, assigned):
                 elif operator in ('+', ':+'):
                     options.append([word, ''])
                 elif operator in ('%', '%%', '#', '##'):
+                    if "'" in word or '"' in word:   # the shell takes these as quotes and removes them (`"${A%'.py'}"`), the pattern here has them as characters: what it cuts is not known
+                        raise ScanIncomplete('command has a quote in the pattern of a trimming expression, which the scan does not read like a shell')
                     cuts = [cut for pattern in (parameter_variants(word, assigned) if '$' in word else [word]) for cut in trimmed_values(values, operator, pattern)]   # the pattern is filled in as any word is, then cuts
                     options.append(list(dict.fromkeys(cuts)) or [m.group(0)])
                 else:   # ${NAME?word} gives the value or ends the command: nothing is left to run, so the text stays as written
