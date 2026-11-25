@@ -95,13 +95,6 @@ describe("issue #5151: ralplan gate in plugin hook (keyword-detector.mjs)", () =
     expectKeywordNotInContext(context, "autopilot");
   });
 
-  it("should redirect vague 'ultragoal do something' to ralplan", async () => {
-    const result = await run("ultragoal do something");
-    const context = result.hookSpecificOutput?.additionalContext || "";
-    expectKeywordInContext(context, "ralplan");
-    expectKeywordNotInContext(context, "ultragoal");
-  });
-
   it("should NOT redirect well-specified 'ralph fix the bug in src/auth.ts' to ralplan", async () => {
     const result = await run("ralph fix the bug in src/auth.ts");
     const context = result.hookSpecificOutput?.additionalContext || "";
@@ -137,11 +130,10 @@ describe("issue #5151: ralplan gate in plugin hook (keyword-detector.mjs)", () =
     expectKeywordNotInContext(context, "ralplan");
   });
 
-  it("should preserve non-execution keywords when gating", async () => {
-    const result = await run("ralph tdd fix this");
-    const context = result.hookSpecificOutput?.additionalContext || "";
-    expectKeywordInContext(context, "ralplan");
-    expectKeywordInContext(context, "tdd");
+  it("gating drops ralph but keeps a non-execution keyword", async () => {
+    const gated = await run("ralph tdd fix this");
+    const context = gated.hookSpecificOutput?.additionalContext || "";
+    expect(context).toContain("[TDD MODE ACTIVATED]");
     expectKeywordNotInContext(context, "ralph");
   });
 

@@ -2386,25 +2386,17 @@ async function main() {
     }
 
     // Apply ralplan gate: redirect underspecified execution requests to ralplan (issue #5151)
-    // Import the gate function and removeCodeBlocks (best-effort, requires npm run build)
-    let applyRalplanGate = null;
-    let removeCodeBlocks = null;
-    try {
-      const gateModule = await import('../dist/hooks/keyword-detector/index.js');
-      applyRalplanGate = gateModule.applyRalplanGate;
-      removeCodeBlocks = gateModule.removeCodeBlocks;
-    } catch { /* silent — dist/ may not exist yet */ }
-    
-    if (applyRalplanGate && removeCodeBlocks && resolved.length > 0) {
+    // The gate is the one bridge.ts applies; a missing build is an error, not a reason to skip it.
+    if (resolved.length > 0) {
+      const { applyRalplanGate, removeCodeBlocks } = await import('../dist/hooks/keyword-detector/index.js');
       // Use removeCodeBlocks like bridge.ts does, not sanitizeForKeywordDetection
       // (which also strips file paths, breaking concrete specifications)
       const cleanedForGate = removeCodeBlocks(prompt);
       const gateKeywords = resolved.map((m) => m.name);
       const gateResult = applyRalplanGate(gateKeywords, cleanedForGate);
-      
       if (gateResult.gateApplied) {
         // Replace execution keywords with ralplan
-        resolved = gateResult.keywords.map((kw) => ({ name: kw, args: '' }));
+        resolved = resolveConflicts(gateResult.keywords.map((kw) => ({ name: kw, args: "" })));
       }
     }
 
