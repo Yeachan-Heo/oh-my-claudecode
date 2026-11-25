@@ -52,7 +52,7 @@ muse --version
 - **Antigravity CLI install** (Google's successor to the Gemini CLI): install the `agy`
   binary per the [official Antigravity instructions](https://antigravity.google) (inspect
   any installer before running it). Verify: `agy --version`
-  > **Platform note:** `omc ask antigravity` is supported on macOS/Linux. On Windows it is guarded with a clear error, because `agy --print` takes the prompt as an argv value (it cannot read stdin) and has known upstream Windows `-p` limitations; use `omc ask gemini` on Windows.
+  > **Platform note:** `omc ask antigravity` is supported on macOS, Linux, and Windows.
 - **Gemini CLI** remains supported for enterprise/API-key use cases.
 - **Muse and Grok** require versions supporting `--prompt-file`. The wrapper uses private temporary files for prompts, including role files with YAML frontmatter. Muse runs with approvals disabled and preserves its configured sandbox behavior.
 
