@@ -28,7 +28,7 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, glob, itertools, json, math, os, re, shlex, signal, stat, string, sys, time
+import argparse, datetime, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
 
 try:
     import fcntl
@@ -340,21 +340,49 @@ def command_tokens(command):
     return tokens
 
 
-def word_pieces(word, assigned=None):
-    """The word, and the parts of it that can be a file name too. `assigned`: {name: [values]} that the command assigns (NAME=value words, in
-    any order, none expanded by another): each piece is also given with every combination of those values in the `$NAME` and `${NAME}` it holds."""
+PARAMETER = re.compile(r'\$(?:(\w+)|\{(\w+)(?:(:?[-=+])([^{}]*))?\})')   # $NAME, ${NAME}, ${NAME:-word} (also -, =, :=, + and :+)
+
+
+def parameter_variants(piece, assigned):
+    """The piece filled in every way its parameters can be: `$NAME` and `${NAME}` with each value that the command assigns to NAME and the
+    one that the guard has (a name that has none stays as written); `${NAME:-word}`, `-`, `:=` and `=` with those values and with the word;
+    `${NAME:+word}` and `+` with the word and with nothing. Which way the shell takes is not decided. A word that holds a parameter is filled
+    in innermost first, in three passes. More than MAX_COMMAND_PROGRAMS variants is ScanIncomplete."""
+    variants = [piece]
+    for _ in range(3):
+        grown = []
+        for text in variants:
+            matches = list(PARAMETER.finditer(text))
+            options = []
+            for m in matches:
+                name, operator, word = m.group(1) or m.group(2), m.group(3), m.group(4)
+                values = assigned.get(name, []) + ([os.environ[name]] if name in os.environ else [])
+                options.append([word, ''] if operator in ('+', ':+') else (values + [word] if operator else values) or [m.group(0)])
+            for choice in itertools.islice(itertools.product(*options), MAX_COMMAND_PROGRAMS + 1):
+                parts, last = [], 0
+                for m, value in zip(matches, choice):
+                    parts += [text[last:m.start()], value]
+                    last = m.end()
+                grown.append(''.join(parts) + text[last:])
+        grown = list(dict.fromkeys(grown))
+        if len(grown) > MAX_COMMAND_PROGRAMS:
+            raise ScanIncomplete('command has too many ways to fill in its variables to scan')
+        if grown == variants:
+            break
+        variants = grown
+    return variants
+
+
+def word_pieces(word, assigned):
+    """The word, and the parts of it that can be a file name too, each also filled in with the values of its parameters (parameter_variants).
+    `assigned`: {name: [values]} that the command assigns (NAME=value words, in any order, none expanded by another)."""
     pieces = [word]
     if '=' in word:
         pieces.append(word.partition('=')[2])   # --log=FILE, NAME=FILE
     if word[:1] == '-' and word[1:2] not in ('-', '') and len(word) > 2:
         pieces.append(word[2:])   # -SFILE, -oFILE: the value of a short option glued to it
-    if assigned and '$' in word:
-        for piece in pieces[:]:
-            names = [n for n in assigned if n in piece]
-            combinations = list(itertools.islice(itertools.product(*[assigned[n] for n in names]), MAX_COMMAND_PROGRAMS + 1))
-            if len(combinations) > MAX_COMMAND_PROGRAMS:
-                raise ScanIncomplete('command assigns too many values to scan')
-            pieces += [string.Template(piece).safe_substitute(dict(zip(names, values))) for values in combinations]
+    if '$' in word:
+        pieces += [v for piece in pieces[:] for v in parameter_variants(piece, assigned)]
     return list(dict.fromkeys(pieces))
 
 
@@ -363,7 +391,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
     word means (nothing is run, nothing is expanded by a shell): every word of the command, each word that is a quoted command (it holds a
     blank: the words of an argument of -c or -S, two levels deep), the part of a word after its first `=` and the part after a short option that is glued to its value (`-SFILE`). A word with a directory part
     stands for that path, a word without one for the file of that name in the working directory of the guard and in each directory of the
-    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered; the same words `NAME=value` of the whole command are also the values of `$NAME` and `${NAME}` in any word). A word without a directory part, and a relative one with a directory part (`./prog`), is also looked for in each existing directory that any word of the whole command names (`cd DIR; prog`, `env -C DIR prog`: the shell may run it from there; no command is recognised), also in a quoted command inside it (`env -C DIR sh -c 'prog x'`). The rule is deliberately wide:
+    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered; the same words `NAME=value` of the whole command are also the values of `$NAME` and `${NAME}` in any word, and `${NAME:-word}` is both: see parameter_variants). A word without a directory part, and a relative one with a directory part (`./prog`), is also looked for in each existing directory that any word of the whole command names (`cd DIR; prog`, `env -C DIR prog`: the shell may run it from there; no command is recognised), also in a quoted command inside it (`env -C DIR sh -c 'prog x'`). The rule is deliberately wide:
     a word that is no program at all (an argument, an option value) is a file the guard then does not write, and no program is missed by
     not being recognised. A command with a NUL character or one that the shell cannot parse runs nothing and gives none. A command that a limit cuts
     short (more than MAX_COMMAND_CHARS characters, MAX_COMMAND_WORDS words or MAX_COMMAND_PROGRAMS files, or quoted commands nested deeper than

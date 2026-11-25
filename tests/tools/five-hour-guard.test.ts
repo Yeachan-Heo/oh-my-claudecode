@@ -1844,6 +1844,44 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
   });
 
+  it('a default-value parameter in the command of another hook is filled in with both of its values (${NAME:-word}, ${NAME-word}, ${NAME:=word}, ${NAME:+word}, with a variable inside the word): never a file the guard writes', () => {
+    const f = fixture('foreign-default-value', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const text = '# the hook script of another tool\n';
+    const defaulted = join(HOME_DIR, '.claude', 'hooks', 'audit.mjs');   // the branch of the word when the variable is not set
+    const valued = join(CONFIG_DIR, 'hooks', 'audit.mjs');   // the branch of the value of the variable
+    for (const script of [defaulted, valued]) {
+      mkdirSync(join(script, '..'), { recursive: true });
+      writeFileSync(script, text, 'utf8');
+    }
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const withoutConfigDir = { ...ENV };
+    delete withoutConfigDir.CLAUDE_CONFIG_DIR;
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once'], { env: withoutConfigDir });
+    };
+    for (const form of ['${CLAUDE_CONFIG_DIR:-$HOME/.claude}', '${CLAUDE_CONFIG_DIR-$HOME/.claude}', '${CLAUDE_CONFIG_DIR:=$HOME/.claude}', '${CLAUDE_CONFIG_DIR:-${HOME}/.claude}']) {
+      for (const [script, where] of [[defaulted, 'the guard has no CLAUDE_CONFIG_DIR'], [valued, 'the command assigns it']] as const) {
+        const command = where === 'the command assigns it' ? `CLAUDE_CONFIG_DIR=${CONFIG_DIR}; node "${form}/hooks/audit.mjs"` : `node "${form}/hooks/audit.mjs"`;
+        writeFileSync(f.settings, settings(command), 'utf8');
+        for (const key of ['log_file', 'state_file', 'pause_file']) {
+          const r = start({ [key]: script });
+          expect(r.status, `${command} as ${key} (${where}): ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+          expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
+        }
+      }
+    }
+    // the word of the + forms is the value when the variable is set, nothing when it is not
+    writeFileSync(f.settings, settings(`node "$HOME/.claude/hooks/audit\${NAME:+.mjs}"`), 'utf8');
+    expect(start({ state_file: defaulted }).status, 'the form with the word').toBe(2);
+    // a default word that names no guard file leaves the guard free
+    writeFileSync(f.settings, settings('node "${NOTHING_SET:-/nonexistent}/hooks/audit.mjs"'), 'utf8');
+    const quiet = start({ state_file: defaulted });
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
