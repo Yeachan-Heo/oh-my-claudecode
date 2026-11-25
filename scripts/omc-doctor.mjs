@@ -1379,9 +1379,15 @@ const backupPlace = (registry) => {
     ...installPaths.flatMap(bothForms).map((target) => ['an install path of the registry', target]),
   ];
   // What the configuration says without any link: a tree that holds this place already (an active root that is the
-  // configuration directory itself) is no overlap that a link made.
+  // configuration directory itself) is no overlap that a link made. A link inside the tree that moved the place to
+  // another spot of it is such a link: the place then is not where the tree, read through its own links, holds the written one.
   const written = path.resolve(backups);
-  const holdsWritten = (tree) => written == path.resolve(tree) || written.startsWith(path.resolve(tree) + path.sep);
+  const holdsWritten = (tree) => {
+    const from = path.resolve(tree);
+    if (written != from && !written.startsWith(from + path.sep)) return false;
+    const real = linkChain(tree).paths;
+    return place == path.join(real[real.length - 1], path.relative(from, written));
+  };
   let unknown = '';
   for (const [label, tree] of trees) {
     const inside = askInside(place, tree);

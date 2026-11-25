@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 // Where a version is moved aside is as much a part of "reversible and outside the cache" as the version that is moved: a
 // link in the way of the backup directory (plugins/backups, or its child oh-my-claudecode) may lead into a cached
@@ -374,6 +374,32 @@ fs.lstatSync = function (target, ...rest) {
             rmSync(dir, { recursive: true, force: true });
           }
         }
+      }
+    }
+  });
+
+  // A root that holds the configuration directory (here the configuration lives in <root>/.claude) excuses only the destination that the
+  // configuration writes inside it. A link at plugins/backups that leads somewhere else inside the root is a redirect that a link made, and the
+  // payload of the root (skill-bodies) is cleared by the next same-version sync, so a copy there is refused. A root reached through a link is
+  // no redirect: the destination is where the configuration puts it.
+  test.each([['plain', false], ['redirected inside the root', true], ['root given through a link', false]] as const)('a plugin root that holds the configuration directory excuses the written destination only: %s', (mode, redirected) => {
+    for (const command of commands) {
+      const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+      const real = path.join(base, 'root');
+      const root = mode == 'root given through a link' ? path.join(base, 'via') : real;
+      try {
+        if (root != real) symlinkSync(real, root);
+        const cache = addCache(path.join(real, '.claude'), ['5.7.0', '5.8.0', '5.9.0']);
+        writeRegistry(path.join(real, '.claude'), { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0', installPath: path.join(cache, '5.8.0') }] });
+        const bodies = path.join(real, 'skill-bodies', 'omc-doctor');
+        mkdirSync(bodies, { recursive: true });
+        if (redirected) link(bodies, path.join(real, '.claude', 'plugins', 'backups'));
+        const result = runCommand(command, path.join(root, '.claude'), { env: { OMC_PLUGIN_ROOT: root }, timeout: 20_000 });
+        expect({ command, mode, status: result.status, tree: REFUSED.exec(result.stdout)?.[1], left: readdirSync(cache).sort(), landed: readdirSync(bodies) }).toEqual(
+          redirected ? { command, mode, status: 1, tree: 'the plugin root', left: ALL, landed: [] } : { command, mode, status: 0, tree: undefined, left: ['5.8.0'], landed: [] },
+        );
+      } finally {
+        rmSync(base, { recursive: true, force: true });
       }
     }
   });
