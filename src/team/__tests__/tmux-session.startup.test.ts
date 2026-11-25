@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -303,6 +303,7 @@ import {
   type WorkerPaneOwnership,
 } from '../tmux-session.js';
 import { paneLineLooksLikeIdlePrompt } from '../pane-readiness.js';
+import { ensureProviderEventsLog } from '../provider-events.js';
 import {
   awaitWorkerLaunchAcknowledgement,
   prepareWorkerLaunchAttempt,
@@ -2004,6 +2005,40 @@ describe('worker pane startup safety', () => {
     expect(lstatSync(log).isFile()).toBe(true);
     expect(readFileSync(log, 'utf8')).toBe('');
     delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
+  });
+
+  // The log is display-only, so a launch must go on without it.
+  strictTmuxIt('launches the claude provider when its event log cannot be created', async () => {
+    cwd = await createFixture('omc-startup-provider-events-refused-');
+    const workerDir = join(getOmcRoot(cwd), 'state', 'team', 'startup-team', 'workers', 'worker-1');
+    const log = join(workerDir, 'provider-events.jsonl');
+    const outside = join(cwd, 'outside.jsonl');
+    await mkdir(workerDir, { recursive: true });
+    await symlink(outside, log);
+    await expect(ensureProviderEventsLog(cwd, 'startup-team', 'worker-1')).rejects.toThrow('team_instance_path_symlink');
+
+    // Launch-failure cleanup always rejects, so resolving means it did not run.
+    const { attempt } = await spawnOwnedWorkerInPane('startup:0', ownership(), {
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      instanceId: randomUUID(),
+      envVars: {},
+      launchArgs: ['--version'],
+      launchBinary: '/usr/bin/claude',
+      cwd,
+      provider: 'claude',
+      launchBootstrapPath: '/runtime-cli.js',
+      launchStateCwd: cwd,
+      launchContext: { kind: 'initial' },
+    });
+
+    const launchSend = tmuxState.args.find(args => args[0] === 'send-keys' && args.includes('-l'));
+    expect(launchSend?.at(-1)).toContain(attempt.bootstrapDescriptorPath);
+    const descriptor = JSON.parse(await readFile(attempt.bootstrapDescriptorPath, 'utf8')) as Record<string, unknown>;
+    expect(descriptor.provider_argv).toEqual(['/usr/bin/claude', '--version']);
+    expect(JSON.parse(await readFile(attempt.decisionPath, 'utf8'))).toMatchObject({ kind: 'worker_launch_decision', decision: 'accepted' });
+    expect(lstatSync(log).isSymbolicLink()).toBe(true);
+    expect(lstatSync(outside, { throwIfNoEntry: false })).toBeUndefined();
   });
 
   it('refuses an owned worker launch without its immutable instance id', async () => {
