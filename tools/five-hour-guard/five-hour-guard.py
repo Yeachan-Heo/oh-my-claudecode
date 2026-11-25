@@ -329,6 +329,12 @@ def word_files(word, directories, named=()):
     return found
 
 
+def is_operator(token):
+    """Whether shlex returned the token as a shell operator: it is made of operator characters only. A quoted word that merely starts with one
+    (`';audit'`, `'>out'`) is a word, and a file name."""
+    return bool(token) and all(c in PUNCTUATION for c in token)
+
+
 def command_tokens(command):
     """The words and the operators of a command as the shell splits them (shlex), None for a command with a NUL character or one that cannot be
     parsed. Raises ScanIncomplete past MAX_COMMAND_CHARS or MAX_COMMAND_WORDS: a prefix would pass for the whole command."""
@@ -504,7 +510,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
         return []   # a command with a NUL character (no process can be started with one in its arguments) or one the shell cannot parse runs nothing
     simple, words = [], []
     for token in tokens:
-        if token and token[0] in PUNCTUATION:   # (an empty string is a word: '')
+        if is_operator(token):   # (an empty string is a word: '')
             if '<' not in token and '>' not in token:   # the file of a redirection is a word like any other
                 simple.append(words)
                 words = []
@@ -588,7 +594,7 @@ def entry_roles(command):
     """(hooks, interpreters, logs) of a hook entry that carries the marker, the format that `add` generates: the word after `-I` or `--hook`
     is the hook, the word after `exec` or `--python` the interpreter, the word after `--log` the log, in the words that shlex splits the
     command into. Read for no other command (a handler without the marker is never read this way)."""
-    words = [t for t in command_tokens(command) or [] if t and t[0] not in PUNCTUATION]
+    words = [t for t in command_tokens(command) or [] if t and not is_operator(t)]
     after = lambda *names: [words[i + 1] for i, w in enumerate(words[:-1]) if w in names]
     return after('-I', '--hook'), after('exec', '--python'), after('--log')
 
@@ -610,7 +616,7 @@ def registered_runtime_files():
         env = data.get('env')   # the top-level env of settings.json reaches the hook processes, not this one: its values are values of the parameters of the commands
         env = {k: [v] for k, v in env.items() if isinstance(k, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', k) and isinstance(v, str)} if isinstance(env, dict) else {}
         SCANNED[0] = True   # the document was read and has the shape of a settings file: what the scan below finds is what it holds
-        generated = [t for t in command_tokens(ENTRY.entry_command(PAUSE_FILE, BUNDLED_HOOK, sys.executable, hook_log_setting())) if t[:1] not in PUNCTUATION or not t]
+        generated = [t for t in command_tokens(ENTRY.entry_command(PAUSE_FILE, BUNDLED_HOOK, sys.executable, hook_log_setting())) if not is_operator(t)]
         if entries:
             found += [('registered hook', BUNDLED_HOOK), ('registered interpreter', sys.executable)]
         for _group, handler in entries:

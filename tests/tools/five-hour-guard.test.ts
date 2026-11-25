@@ -2143,6 +2143,40 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start({ state_file: join(hooks, 'audit') }).status, 'a name that is not set').toBe(0);
   });
 
+  it('a quoted word that starts with an operator character is a word and a file name (python3 \';audit\', \'&&audit\', \'|audit\', \'>audit\'); a real operator, quoted or not, is no file', () => {
+    const f = fixture('foreign-operator-words', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const name of [';audit', '&&audit', '|audit', '>audit', '(audit', 'audit;']) {
+      const script = join(hooks, name);
+      writeFileSync(script, text, 'utf8');
+      for (const command of [`cd ${hooks}; python3 '${name}'`, `python3 "${script}"`]) {
+        writeFileSync(f.settings, settings(command), 'utf8');
+        for (const key of ['log_file', 'state_file', 'pause_file']) {
+          const r = start({ [key]: script });
+          expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+          expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
+        }
+      }
+    }
+    // the operator itself makes no candidate: a real ; between two commands, and a quoted ;
+    const operator = join(hooks, ';');
+    writeFileSync(operator, text, 'utf8');
+    for (const command of [`python3 x ; python3 y`, `cd ${hooks} && python3 x || python3 y`, `cd ${hooks}; python3 ';' x`]) {
+      writeFileSync(f.settings, settings(command), 'utf8');
+      const r = start({ state_file: operator });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
