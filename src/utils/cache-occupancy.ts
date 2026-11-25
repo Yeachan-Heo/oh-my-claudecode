@@ -2,7 +2,7 @@ import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkS
 import { hostname, type as osType } from 'os';
 import { mkdir, writeFile, rename, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { getClaudeConfigDir } from './config-dir.js';
 
@@ -68,17 +68,38 @@ function processAlive(pid: number): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
-// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; else the operating system name)
+// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; Windows: MachineGuid, macOS:
+// IOPlatformUUID, each read once per process by one subprocess with a short limit; empty where there is none)
 // and, on Linux, the PID namespace; the same text as scripts/lib/cache-occupancy.mjs, where the reason is given. A record that names another
 // place, or none (a record of the previous publisher), belongs to an owner this machine cannot probe, so a local process probe never proves it gone.
-// Without a machine id file the operating system name stands in: unlike a set of hardware addresses it does not change when a network adapter comes or goes.
+// Where no machine id can be read at all the machine is unknown (empty) and every record is foreign. The hardware addresses of the network interfaces
+// are no stand-in: they change when an adapter comes or goes.
 function machineId(): string {
   let machine = '';
   for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
     try { machine = readFileSync(file, 'utf8').trim(); } catch { /* no such file */ }
     if (machine) break;
   }
-  return machine || `system:${osType()}`;
+  return machine || systemMachineId();
+}
+
+let systemMachine: string | undefined;
+function systemMachineId(): string {
+  if (systemMachine !== undefined) return systemMachine;
+  systemMachine = '';
+  try {
+    const kind = osType();
+    const windows = kind === 'Windows_NT';
+    if (windows || kind === 'Darwin') {
+      // Absolute paths: a bare name would also be searched for in the working directory on Windows.
+      const command = windows ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe') : '/usr/sbin/ioreg';
+      const args = windows ? ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'] : ['-rd1', '-c', 'IOPlatformExpertDevice'];
+      const result = spawnSync(command, args, { encoding: 'utf8', timeout: 1000, windowsHide: true });
+      const found = result.status === 0 && (windows ? /MachineGuid\s+REG_SZ\s+(\S+)/ : /"IOPlatformUUID" = "([^"]+)"/).exec(result.stdout ?? '');
+      if (found) systemMachine = `${kind}:${found[1]}`;
+    }
+  } catch { /* no id: the machine is unknown */ }
+  return systemMachine;
 }
 
 function placeId(): string {
@@ -89,7 +110,7 @@ function placeId(): string {
 }
 
 function isForeignOwner(record: CacheOccupancyRecord): boolean {
-  return typeof record.host !== 'string' || record.host === '' || record.host !== placeId();
+  return typeof record.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
 }
 
 export interface CacheOccupancyRecord {

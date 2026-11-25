@@ -90,21 +90,39 @@ function identities(pids, probeTimeoutMs = 3000) {
   }
   return result;
 }
-// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; else the operating system name)
+// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; Windows: MachineGuid, macOS:
+// IOPlatformUUID, each read once per process by one subprocess with a short limit; empty where there is none)
 // and, on Linux, the PID namespace. Two machines can report the same host name and the same namespace text, so the machine id tells them
 // apart. A profile shared over NFS or mounted into a container holds records of owners that this machine cannot probe, so a record that
 // names another place is never judged by a local process probe. A record made before the machine id was added has the other format and
 // is taken for another place (kept, never judged by a local probe).
-// Where no machine id file can be read (Windows, macOS), the host name and the operating system name stand alone: they do not change when a network
-// adapter comes or goes (a hardware address set would, and the records of the same machine would then look foreign for good), at the cost
-// that two machines of one operating system and one host name on a shared profile are taken for one.
+// Where no machine id can be read at all, the machine is unknown (empty) and every record is then foreign, never judged by a local probe (see
+// isForeignOwner). The hardware addresses of the network interfaces are no stand-in: they change when an adapter comes or goes.
 function machineId() {
   let machine = '';
   for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
     try { machine = readFileSync(file, 'utf8').trim(); } catch {}
     if (machine) break;
   }
-  return machine || `system:${osType()}`;
+  return machine || systemMachineId();
+}
+let systemMachine;
+function systemMachineId() {
+  if (systemMachine !== undefined) return systemMachine;
+  systemMachine = '';
+  try {
+    const kind = osType();
+    const windows = kind === 'Windows_NT';
+    if (windows || kind === 'Darwin') {
+      // Absolute paths: a bare name would also be searched for in the working directory on Windows.
+      const command = windows ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe') : '/usr/sbin/ioreg';
+      const args = windows ? ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'] : ['-rd1', '-c', 'IOPlatformExpertDevice'];
+      const result = spawnSync(command, args, { encoding: 'utf8', timeout: 1000, windowsHide: true });
+      const found = result.status === 0 && (windows ? /MachineGuid\s+REG_SZ\s+(\S+)/ : /"IOPlatformUUID" = "([^"]+)"/).exec(result.stdout ?? '');
+      if (found) systemMachine = `${kind}:${found[1]}`;
+    }
+  } catch {}
+  return systemMachine;
 }
 function placeId() {
   const machine = machineId();
@@ -114,8 +132,9 @@ function placeId() {
 }
 // Only a record that names this very place is local. A record without the field (made by the previous publisher, possibly on another machine
 // of a shared profile during a rolling update) has an unknown origin and is foreign: never judged by a local probe, never removed as gone.
+// When this machine cannot name itself, no record can be compared with it, so every record is foreign.
 export function isForeignOwner(record) {
-  return typeof record?.host !== 'string' || record.host === '' || record.host !== placeId();
+  return typeof record?.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
 }
 function alive(pid) {
   try { process.kill(pid, 0); return true; }

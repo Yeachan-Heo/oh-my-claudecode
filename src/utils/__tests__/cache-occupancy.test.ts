@@ -13,9 +13,21 @@ const lstatFailures = vi.hoisted(() => new Map<string, string>());
 const machineId = vi.hoisted(() => ({ value: '' }));
 // The network interfaces a test plays; undefined reads the real ones.
 const interfaces = vi.hoisted(() => ({ value: undefined as Record<string, unknown[]> | undefined }));
+// The operating system a test plays, and what the one program that names the machine answers; an empty kind is the real system.
+const system = vi.hoisted(() => ({ kind: '', stdout: '', status: 0, runs: 0 }));
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof import('os')>('os');
-  return { ...actual, networkInterfaces: () => (interfaces.value ?? actual.networkInterfaces()) as ReturnType<typeof actual.networkInterfaces> };
+  return { ...actual, type: () => system.kind || actual.type(), networkInterfaces: () => (interfaces.value ?? actual.networkInterfaces()) as ReturnType<typeof actual.networkInterfaces> };
+});
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawnSync: ((command: string, ...rest: unknown[]) => {
+      if (system.kind && /reg\.exe$|ioreg$/i.test(String(command).replace(/\\/g, '/'))) { system.runs++; return { status: system.status, stdout: system.stdout }; }
+      return (actual.spawnSync as (...args: unknown[]) => unknown)(command, ...rest);
+    }) as typeof actual.spawnSync,
+  };
 });
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -197,35 +209,49 @@ describe('cache occupancy registry', () => {
     expect(existsSync(file)).toBe(true);
   });
 
-  // Where no machine id file can be read (Windows, macOS) the place is named by the operating system and the host name, not by the network adapters:
-  // a VPN, a dock or a virtual card that comes or goes does not turn the records of this machine into those of another one.
+  // Where no machine id file can be read, Windows and macOS name the machine through one program (MachineGuid, IOPlatformUUID), run once per process;
+  // a machine that nothing names is unknown, so every record is foreign to it and none is judged by a local process probe. The network adapters play no part.
   it.each([
     ['typescript', null],
     ['script', '../../../scripts/lib/cache-occupancy.mjs'],
     ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
-  ])('keeps the place of its owner when a network adapter comes or goes without a machine id file, for %s', async (_name, path) => {
-    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
-    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+  ])('names a machine without a machine id file by the program of its system, and takes one that nothing names as unknown, for %s', async (_name, path) => {
     const root = join(dir, 'plugins', '1.0.0');
     mkdirSync(root, { recursive: true });
-    const card = (mac: string) => ({ eth0: [{ mac, internal: false }] });
+    const windows = (guid: string) => ({ kind: 'Windows_NT', status: 0, stdout: `\r\n    MachineGuid    REG_SZ    ${guid}\r\n` });
+    const mac = (uuid: string) => ({ kind: 'Darwin', status: 0, stdout: `    "IOPlatformUUID" = "${uuid}"\n` });
+    const worlds = [windows('guid-a'), windows('guid-b'), mac('uuid-a'), { kind: 'Windows_NT', status: 1, stdout: '' }, { kind: 'Darwin', status: 0, stdout: 'no id here' }];
     readFailures.set('/etc/machine-id', 'ENOENT');
     readFailures.set('/var/lib/dbus/machine-id', 'ENOENT');
+    const outcome: { host: string; kept: boolean; runs: number }[] = [];
     try {
-      interfaces.value = card('aa:aa:aa:aa:aa:aa');
-      expect(await (path ? publish(root, dir, process.pid, 'same-start') : publish(root, dir, 'same-start'))).toBe(true);
-      const registry = join(dir, '.omc', 'cache-occupancy');
-      const file = join(registry, readdirSync(registry)[0]);
-      const published = JSON.parse(readFileSync(file, 'utf8')) as { host: string };
-      writeFileSync(file, JSON.stringify({ ...published, pid: spawnSync(process.execPath, ['-e', '']).pid }));
-      // Another adapter, then none at all: the owner is judged by a local probe (it has exited), so the record goes.
-      interfaces.value = { lo: [{ mac: '00:00:00:00:00:00', internal: true }], eth1: [{ mac: 'bb:bb:bb:bb:bb:bb', internal: false }, { mac: 'cc:cc:cc:cc:cc:cc', internal: false }] };
-      read(dir);
-      expect({ host: published.host.includes('aa:aa'), kept: existsSync(file) }).toEqual({ host: false, kept: false });
+      for (const world of worlds) {
+        Object.assign(system, world, { runs: 0 });
+        vi.resetModules();
+        const mod = path ? await import(path) : await import('../cache-occupancy.js');
+        rmSync(join(dir, '.omc'), { recursive: true, force: true });
+        expect(await (path ? mod.publishCacheOccupancy(root, dir, process.pid, 'same-start') : mod.publishCacheOccupancy(root, dir, 'same-start'))).toBe(true);
+        const registry = join(dir, '.omc', 'cache-occupancy');
+        const file = join(registry, readdirSync(registry)[0]);
+        const published = JSON.parse(readFileSync(file, 'utf8')) as { host: string };
+        // The owner has exited: where the machine is named the record is its own and goes; where it is unknown the record is foreign and stays.
+        writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), pid: spawnSync(process.execPath, ['-e', '']).pid }));
+        mod.readOccupiedPluginRoots(dir);
+        mod.readOccupiedPluginRoots(dir);
+        outcome.push({ host: published.host.split('|')[1], kept: existsSync(file), runs: system.runs });
+      }
     } finally {
-      interfaces.value = undefined;
+      Object.assign(system, { kind: '', stdout: '', status: 0, runs: 0 });
       readFailures.clear();
+      vi.resetModules();
     }
+    expect(outcome).toEqual([
+      { host: 'Windows_NT:guid-a', kept: false, runs: 1 },
+      { host: 'Windows_NT:guid-b', kept: false, runs: 1 },
+      { host: 'Darwin:uuid-a', kept: false, runs: 1 },
+      { host: '', kept: true, runs: 1 },
+      { host: '', kept: true, runs: 1 },
+    ]);
   });
 
   // The place of the owner is part of the name of its record: two sessions of a shared profile that have the same root, the same PID (of

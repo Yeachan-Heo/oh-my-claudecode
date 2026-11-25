@@ -1048,7 +1048,25 @@ const machineId = () => {
     } catch {}
     if (machine) break;
   }
-  return machine || 'system:' + os.type();
+  return machine || systemMachineId();
+};
+let systemMachine;
+const systemMachineId = () => {
+  if (systemMachine !== undefined) return systemMachine;
+  systemMachine = '';
+  try {
+    const kind = os.type();
+    const windows = kind === 'Windows_NT';
+    if (windows || kind === 'Darwin') {
+      // Absolute paths: a bare name would also be searched for in the working directory on Windows.
+      const command = windows ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe') : '/usr/sbin/ioreg';
+      const args = windows ? ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'] : ['-rd1', '-c', 'IOPlatformExpertDevice'];
+      const result = childProcess.spawnSync(command, args, { encoding: 'utf8', timeout: 1000, windowsHide: true });
+      const found = result.status === 0 && (windows ? /MachineGuid\s+REG_SZ\s+(\S+)/ : /"IOPlatformUUID" = "([^"]+)"/).exec(result.stdout || '');
+      if (found) systemMachine = kind + ':' + found[1];
+    }
+  } catch {}
+  return systemMachine;
 };
 const placeId = () => {
   const machine = machineId();
@@ -1058,7 +1076,7 @@ const placeId = () => {
   } catch {}
   return os.hostname() + '|' + machine + '|' + namespace;
 };
-const isForeignOwner = (record) => typeof record?.host !== 'string' || record.host === '' || record.host !== placeId();
+const isForeignOwner = (record) => typeof record?.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
 // A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time
 // differs from the recorded one, or the record is dated more than 5 minutes in the future (not for a record of another place, whose clock this
 // system cannot judge).
