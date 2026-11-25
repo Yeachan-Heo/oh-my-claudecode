@@ -1364,6 +1364,27 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
   });
 
+  it('the script of a Python is the first operand after the options that take a value (-W, -X): python3 -W ignore audit names audit, a file with no suffix and no execute bit', () => {
+    // `run.py -W`: after the script, -W is an option of the script, not of the Python, so the word after it hides no program named like a script;
+    // `perl -X`: only a Python takes a value with -X (for perl it disables warnings), so there the next word is the script
+    const forms: Array<[string, string[], string]> = [[PYBIN, ['-W', 'ignore'], 'audit'], [PYBIN, ['-X', 'dev'], 'audit'], [PYBIN, ['-B', '-W', 'ignore', '-X', 'dev', '-u'], 'audit'],
+      [PYBIN, ['-W', 'ignore', '-W', 'error'], 'audit'], [PYBIN, ['run.py', '-W'], 'audit.py'], ['perl', ['-X'], 'audit']];
+    for (const [k, [launcher, options, name]] of forms.entries()) {
+      const f = fixture(`python-option-values-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const audit = join(f.dir, name);   // `audit`: no suffix and no execute bit, only its place after the options makes it the script
+      writeFileSync(audit, '# a program of another tool\n', 'utf8');
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      const other = { matcher: 'Bash', hooks: [{ type: 'command', command: `${launcher} ${options.join(' ')} ${audit}` }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, other] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${launcher} ${options.join(' ')}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, options.join(' ')).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      expect(readText(audit), `${options.join(' ')}: the program is intact`).toBe('# a program of another tool\n');
+      expect(existsSync(f.pause), `${options.join(' ')}: no pause was published`).toBe(false);
+    }
+  });
+
   it('a program behind the options of env, exec, command and time, and behind the separators, groups, keywords and wrappers of a shell command, is found', () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);

@@ -287,6 +287,7 @@ MAX_COMMAND_PROGRAMS = 64
 PUNCTUATION = '();<>|&\n'
 INTERPRETER_NAME = re.compile(r'(python|pypy|node|nodejs|deno|bun|ruby|perl|php|lua|pwsh|powershell|tsx|ts-node|sh|bash|zsh|dash|ksh|ash|fish)[\d.]*(\.exe)?')
 SHELL_NAME = re.compile(r'(sh|bash|zsh|dash|ksh|ash|fish)(\.exe)?')
+PYTHON_VALUE_OPTIONS = ('-W', '-X', '-Q', '--check-hash-based-pycs')   # the options of a Python that take the next word as their value (python3 --help)
 SCRIPT_SUFFIXES = ('.py', '.pyw', '.sh', '.bash', '.zsh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl', '.php', '.lua', '.ps1', '.bat', '.cmd')
 
 
@@ -321,7 +322,7 @@ def executable_file(word):
 def command_programs(command, depth=0, own=False):
     """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
     shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
-    (its first argument, unless it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
+    (its first operand: not an option, and for a Python not the value of -W, -X or -Q; none when it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
     any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
     longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
     and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out; the other simple
@@ -374,7 +375,14 @@ def command_programs(command, depth=0, own=False):
         arguments = words[i + 1:]
         options = [w for w in arguments if w.startswith('-') and not w.startswith('--')]
         takes_code = any(o in ('-e', '-m') or ('c' in o[1:] and o[1:].isalpha()) for o in options)
-        operands = [w for w in arguments if not w.startswith('-')]
+        operands, value = [], False
+        for w in arguments:
+            if value:
+                value = False   # the value of the option before it, not the script
+            elif w.startswith('-'):
+                value = not operands and w in PYTHON_VALUE_OPTIONS and re.fullmatch(ENTRY.PYTHON_NAME, base) is not None
+            else:
+                operands.append(w)
         candidates = [(words[i], True)]
         if not takes_code:   # with code on the command line the operands are its arguments
             if INTERPRETER_NAME.fullmatch(base) and operands:
