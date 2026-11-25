@@ -101,7 +101,8 @@ def command_path(words):
 def strip_comments(command):
     """The command without its shell comments, the one place that says what a comment is (the readers of a command in the guard and in
     this module call it before they split the text): an unquoted `#` that starts a word (at the start, after a blank or one of ; & | ( ) < >)
-    comments out the rest of the line, the newline that ends it stays; a `#` inside a word (`a#b`, `${#x}`), in quotes or after a
+    comments out the rest of the line, the newline that ends it stays; a backslash and newline (a line continuation, outside single
+    quotes) are removed before that, as the shell does; a `#` inside a word (`a#b`, `${#x}`), in quotes or after a
     backslash is text. The shell is the POSIX sh that the hook entry needs (Git Bash on Windows); a cmd.exe command has no such comment."""
     out, i, n, quote, word_start = [], 0, len(command), None, True
     while i < n:
@@ -109,6 +110,9 @@ def strip_comments(command):
         if quote is None and c == '#' and word_start:
             while i < n and command[i] != '\n':
                 i += 1
+            continue
+        if c == '\\' and quote != "'" and command[i + 1:i + 2] == '\n':   # a line continuation is removed first: the `#` after it is read as if the lines were one
+            i += 2
             continue
         if c == '\\' and quote != "'" and i + 1 < n:   # the escaped character is text, and so is what follows it in the word
             out.append(command[i:i + 2])

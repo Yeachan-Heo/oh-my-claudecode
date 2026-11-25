@@ -575,6 +575,24 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
   });
 
+  it('a backslash and newline are removed before a comment is read: a `#` after one starts a comment, so a command that has the hook only after it is not our hook, and one that continues its line runs the hook', () => {
+    const f = fixture('settings-continuation-comment');
+    const hook = '/opt/five-hour-guard-hook.py';
+    const foreign = [`echo \\\n#${hook} --pause-file /tmp/pause`, `echo audit \\\n  #${hook} --pause-file /tmp/pause`, `echo audit; \\\n# ${hook} --pause-file /tmp/pause`,
+      `echo audit \\\n\\\n#${hook} --pause-file /tmp/pause`].map((command) => ({ type: 'command', command }));
+    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+    expect(tool(f, 'check').status, 'none of them is our hook').toBe(1);
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
+    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
+    const g = fixture('settings-continuation-run');
+    write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `${quote(PYBIN)} \\\n${hook} --pause-file /tmp/p`, timeout: 21600 }] }] } });
+    expect(tool(g, 'check').status, 'a continued line is one command: it runs the hook').toBe(0);
+  });
+
   it('env, nohup and time with --help or --version print and run nothing: a handler that has the hook file after them is not our hook, the same wrappers with other options run it', () => {
     const f = fixture('settings-info-modes');
     const hook = '/opt/five-hour-guard-hook.py';
