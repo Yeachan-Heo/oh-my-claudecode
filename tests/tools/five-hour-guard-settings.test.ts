@@ -575,6 +575,28 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
   });
 
+  it('env, nohup and time with --help or --version print and run nothing: a handler that has the hook file after them is not our hook, the same wrappers with other options run it', () => {
+    const f = fixture('settings-info-modes');
+    const hook = '/opt/five-hour-guard-hook.py';
+    const foreign = [`env --help ${hook} --pause-file /tmp/p`, `env --version ${hook} --pause-file /tmp/p`, `env -i --help ${hook} --pause-file /tmp/p`, `/usr/bin/env --help ${hook} --pause-file /tmp/p`,
+      `FOO=1 env --version ${hook} --pause-file /tmp/p`, `nohup --help ${hook} --pause-file /tmp/p`, `nohup --version ${hook} --pause-file /tmp/p`, `time --help ${hook} --pause-file /tmp/p`,
+      `/usr/bin/time --version ${hook} --pause-file /tmp/p`, `exec env --help python3 ${hook} --pause-file /tmp/p`].map((command) => ({ type: 'command', command }));
+    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
+    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
+    for (const [k, command] of [`env -i ${hook} --pause-file /tmp/p`, `env --ignore-environment python3 ${hook} --pause-file /tmp/p`, `nohup ${hook} --pause-file /tmp/p`, `time -p ${hook} --pause-file /tmp/p`,
+      `env --debug ${hook} --pause-file /tmp/p`].entries()) {
+      const g = fixture(`settings-info-run-${k}`);
+      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      expect(tool(g, 'check').status, `${command}: it runs the hook`).toBe(0);
+    }
+  });
+
   it('a Python that is given option values before the hook (-W ignore, -X dev, -Q, --check-hash-based-pycs) runs the hook behind them: check reports it and remove takes it away; a script in front of the hook file still makes it data', () => {
     const forms = (hook: string, pause: string) => [`${quote(PYBIN)} -W ignore ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -X dev ${hook} --pause-file ${pause}`,
       `${quote(PYBIN)} -W ignore -X dev -I ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -Q new ${hook} --pause-file ${pause}`,

@@ -16,6 +16,8 @@ PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BAS
 # is one of these is not the program: skip_wrappers() steps over it, its options and the NAME=VALUE assignments.
 WRAPPERS = {'exec': ('-a',), 'env': ('-u', '--unset', '-C', '--chdir', '-S', '--split-string'), 'command': (), 'nohup': (),
             'time': ('-f', '--format', '-o', '--output')}
+INFO_WRAPPERS = ('env', 'nohup', 'time')   # the wrappers of WRAPPERS that print their help or version and exit with --help or --version, and then run nothing
+INFO_OPTIONS = ('--help', '--version')
 PYTHON_VALUE_OPTIONS = ('-W', '-X', '-Q', '--check-hash-based-pycs')   # the options of a Python that take the next word as their value (python3 --help)
 SEPARATORS = ';&|\n'   # the characters of the operators that end a simple command (the parentheses and the redirections are not read here)
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
@@ -61,8 +63,8 @@ def entry_command(pause_file, hook, python, hook_log=None):
 def skip_wrappers(words):
     """The index of the command word in the words of a simple command: after the wrappers (exec, env, command, nohup, time, also written with a path), their options
     (`env -i`, `env -u NAME`, `exec -a NAME`, a lone `--` ends the options) and the NAME=VALUE assignments. A word that starts with `-` is
-    an option only after a wrapper, so a command word is never taken for one. `command -v` and `command -V` run nothing: the index is
-    then the number of words (no command word)."""
+    an option only after a wrapper, so a command word is never taken for one. `command -v` and `command -V`, and `--help` and `--version` of
+    env, nohup and time, run nothing: the index is then the number of words (no command word)."""
     i, wrapper = 0, None
     while i < len(words):
         word = words[i]
@@ -75,6 +77,8 @@ def skip_wrappers(words):
         elif wrapper and len(word) > 1 and word[0] == '-':
             if wrapper == 'command' and set(word[1:]) <= set('pVv') and set(word[1:]) & set('vV'):
                 return len(words)   # command -v and -V (alone or with -p) only describe what follows: no command is run
+            if word in INFO_OPTIONS and wrapper in INFO_WRAPPERS:
+                return len(words)   # env --help, nohup --version and the like print and exit: no command is run
             i += 2 if word in WRAPPERS[wrapper] else 1   # the value of -u, -C, -S and the like is the next word
             continue
         else:
