@@ -464,16 +464,18 @@ describe('scaleUp launch config', () => {
     }
   });
 
-  it('launches a claude scale-up worker under an absolute configured team root as the config records it', async () => {
+  it.each(['alias', 'canonical'] as const)('launches a claude scale-up worker under an absolute configured team root as the config records it (%s)', async spelling => {
     modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--dangerously-skip-permissions']);
     // The storage anchor may be a symlink, so the recorded root can name the canonical one through it.
     const canonicalRoot = teamStateRoot(cwd, 'demo-team');
     const alias = join(cwd, '.omc-state-alias');
     await symlink(process.env.OMC_STATE_DIR!, alias, 'junction');
     process.env.OMC_STATE_DIR = alias;
-    config = makeConfig();
-    const recordedRoot = config.team_state_root!;
-    expect(recordedRoot).not.toBe(canonicalRoot);
+    const aliasRoot = teamStateRoot(cwd, 'demo-team');
+    expect(aliasRoot).not.toBe(canonicalRoot);
+    // The environment names the alias in both cases, so only the config can yield the canonical spelling.
+    const recordedRoot = spelling === 'alias' ? aliasRoot : canonicalRoot;
+    config = makeConfig({ team_state_root: recordedRoot });
     expect(await realpath(recordedRoot)).toBe(canonicalRoot);
 
     const result = await scaleUp(

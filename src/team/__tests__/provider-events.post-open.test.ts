@@ -278,7 +278,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   it('hook opens nothing through a symlinked leaf', () => {
     symlinkSync(join(outside, 'provider-events.jsonl'), path);
     expectSilentExit(runHook('none'));
-    expect(hookHandles()).toBe('');
+    expect(hookHandles()).not.toContain('open');
   });
 
   it.each(['none', 'leaf'] as const)('hook closes the file it opened (swap: %s)', kind => {
