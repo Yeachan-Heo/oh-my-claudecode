@@ -830,10 +830,12 @@ const claudeMdVersion = () => {
     return /\/plugins\/cache\/omc\/oh-my-claudecode\/\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(text.replace(/\\/g, '/'));
   };
   // The runtime reads CLAUDE_PLUGIN_ROOT alone, so that root decides (the other one only where it is absent).
+  // A root spelled inside the omc cache is managed whether or not its directory still exists (the runtime classifies it by its text), so a
+  // missing one is kept and compared with the omc cache, not replaced by another marketplace.
   const claudeRoot = rootOf(process.env.CLAUDE_PLUGIN_ROOT);
-  const loadedRoot = claudeRoot && isDirectory(claudeRoot) ? claudeRoot : roots[0];
+  const loadedRoot = claudeRoot && (isDirectory(claudeRoot) || lexicallyManaged(claudeRoot)) ? claudeRoot : roots[0];
   // A loaded root that exists and lies outside the omc cache is external whether or not an entry holds it (a raw --plugin-dir session beside a
-  // valid registration): the runtime reads its own package, whatever the registry says. loadedRoot is undefined without an existing root.
+  // valid registration): the runtime reads its own package, whatever the registry says. loadedRoot is undefined where there is neither an existing root nor a missing one in the omc cache.
   const external = (running.length == 1 || running.length == 0) && !!loadedRoot && !lexicallyManaged(loadedRoot);
   const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
   const rootsConflict = sameRoots == 'no';

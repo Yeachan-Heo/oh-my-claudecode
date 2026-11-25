@@ -204,7 +204,7 @@ describe.skipIf(process.platform === 'win32')('omc-doctor: Step 4 names the vers
   // A root spelled inside the omc cache is managed whatever the registry holds: the runtime names the omc cache for it also where no entry holds the root
   // (the entry moved on to a cache of its own, another entry holds another install). With no entry of a supported ID at all the doctor keeps the reading of Step 1,
   // where a root variable alone is a plugin-dir checkout and names no cache.
-  test('a loaded root in the omc cache that no entry holds is compared with the omc cache, as the runtime does', () => {
+  test('a loaded root in the omc cache that no entry holds, or whose directory is gone, is compared with the omc cache, as the runtime does', () => {
     const omc = (dir: string) => {
       const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
       makeVersion(cache, '5.8.0', '5.8.0');
@@ -220,6 +220,7 @@ describe.skipIf(process.platform === 'win32')('omc-doctor: Step 4 names the vers
       { label: 'the entry of the supported ID moved on to its own newer cache', build: (dir) => { const cache = omc(dir); const mine = own(dir); return { root: path.join(cache, '5.8.0'), registry: { 'oh-my-claudecode@oh-my-claudecode': [{ scope: 'user', version: '6.0.0', installPath: path.join(mine, '6.0.0') }] } }; } },
       { label: 'the entry of the omc marketplace holds another install of the omc cache', build: (dir) => { const cache = omc(dir); return { root: path.join(cache, '5.8.0'), registry: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] } }; } },
       { label: 'the entry holds this very install', build: (dir) => { const cache = omc(dir); return { root: path.join(cache, '5.8.0'), registry: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0', installPath: path.join(cache, '5.8.0') }] } }; } },
+      { label: 'the root names a version of the omc cache whose directory is gone, and another marketplace is registered with a newer cache', build: (dir) => { const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode'); makeVersion(cache, '5.9.0', '5.9.0'); const mine = own(dir); return { root: path.join(cache, '5.8.0'), registry: { 'oh-my-claudecode@oh-my-claudecode': [{ scope: 'user', version: '6.0.0', installPath: path.join(mine, '6.0.0') }] } }; } },
     ]);
   });
 
