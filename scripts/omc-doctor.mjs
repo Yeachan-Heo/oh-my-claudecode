@@ -1340,7 +1340,7 @@ const protectionOf = (dir, versions, foldCase = false) => {
 // its nearest existing parent and the rest of the name), and has to lie outside every tree below. backupPlace(registry)
 // answers { place, problem }: place is the real directory the moves go to, problem is empty when all is well and says
 // why nothing is moved otherwise. The trees: the plugin cache (the cache of every marketplace lies inside it), the
-// marketplace clones, every cache namespace (a link may take one out of the cache) and the directory a skill-bodies link of a version leads to, the occupancy records, the plugin root variables and every installPath of the registry, each as
+// marketplace clones, every cache namespace (a link may take one out of the cache) and the directory a skill-bodies link of a version leads to, the occupancy records, the standalone skills of the profile (the setup of the installer removes whole skills there), the plugin root variables and every installPath of the registry, each as
 // written and as the file system reads it (a .. after a link). Both directions count (the destination inside a tree, a
 // tree inside the destination); a destination the configuration itself writes inside a tree (an active root that is the
 // configuration directory) is not an overlap that a link made. A destination that cannot be resolved (a link to nothing, a loop, no permission) or
@@ -1413,6 +1413,8 @@ const backupPlace = (registry) => {
     ...[...new Set(versionTrees)].map((tree) => ['the plugin cache', tree]),
     ['the marketplace clones', path.join(configDir, 'plugins', 'marketplaces')],
     ['the occupancy records', occupancyDir],
+    // The setup of the installer removes whole skill directories here (a copy of a skill of the plugin, a skill it created), and which ones depends on the plugin.
+    ['the standalone skills of the profile', path.join(configDir, 'skills')],
     ...roots.flatMap(bothForms).map((root) => ['the plugin root', root]),
     ...installPaths.flatMap(bothForms).map((target) => ['an install path of the registry', target]),
   ];

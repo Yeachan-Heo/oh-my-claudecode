@@ -151,6 +151,7 @@ jobs:
           src/__tests__/omc-doctor-cache-registry-order.test.ts
           src/__tests__/omc-doctor-cache-namespace.test.ts
           src/__tests__/omc-doctor-cache-redirect.test.ts
+          src/__tests__/omc-doctor-backup-skills.test.ts
           src/installer/__tests__/claude-md-transaction.test.ts
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts
