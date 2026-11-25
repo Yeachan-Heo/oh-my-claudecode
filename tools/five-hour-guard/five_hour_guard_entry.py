@@ -52,10 +52,13 @@ def entry_command(pause_file, hook, python, hook_log=None):
 
 def is_entry(handler, hook):
     """Whether a hook handler is the entry of this guard: a command handler whose command holds ENTRY_MARKER (what `add` writes now) or
-    the exact path `hook` of the hook script, as a whole word of the command (it starts and ends at a blank, a quote or an operator of the
-    shell, or at an end of the command: a character that is valid in a file name, such as `+`, `,`, `@`, `%`, `=`, `:` or `~`, is no boundary, so
-    `hook.py+audit` is another file): the entries that earlier versions of `add` wrote have no marker, and their command holds the path of the hook."""
+    the exact path `hook` of the hook script, as a whole word of the command (it starts and ends at a blank, an operator of the shell or an
+    end of the command: a character that is valid in a file name, such as `+`, `,`, `@`, `%`, `=`, `:` or `~`, is no boundary, so `hook.py+audit` is
+    another file; a quote that opens at the start of the word closes at its end, `'hook'` and `"hook"`, so `'hook'+audit` and `audit'hook'` are other
+    words; a quote that opens in front of the path and stays open, as in `sh -c 'hook --pause-file p'`, is the text of a quoted command): the entries
+    that earlier versions of `add` wrote have no marker, and their command holds the path of the hook."""
     command = handler.get('command') if isinstance(handler, dict) else None
     if not isinstance(command, str) or handler.get('type') != 'command':
         return False
-    return ENTRY_MARKER in command or re.search(r'(?<![^\s\'";&|()<>])' + re.escape(hook) + r'(?![^\s\'";&|()<>])', command) is not None
+    path, edge = re.escape(hook), r'[^\s;&|()<>]'
+    return ENTRY_MARKER in command or re.search(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', command) is not None
