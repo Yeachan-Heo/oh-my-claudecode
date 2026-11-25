@@ -104,6 +104,17 @@ function pwdSession(batches, size) {
   return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
 }
 
+/** `n` steps that each update a task (a call of the task list and its result, which the cut never takes) and a last request with its answer. */
+function taskSession(n) {
+  const m = [{ role: 'user', text: 'Task: plan the work.', toolUses: [] }];
+  for (let i = 1; i <= n; i++) {
+    m.push({ role: 'assistant', text: `Step ${i}.`, toolUses: [{ tool_use_id: `t${i}`, tool: 'TaskUpdate', input: { taskId: String(i), status: 'completed' } }] });
+    m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${i}`, text: `Updated task #${i}`, isError: false }] });
+  }
+  m.push({ role: 'user', text: 'Good, now sum up the results.', toolUses: [] }, { role: 'assistant', text: 'Summary: done.', toolUses: [] });
+  return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+}
+
 // The compaction through register(on): the record, the scoring requests and what the host gets back. `form: false` leaves the API form out (the host answers rows);
 // `api` is the API form the host answers instead of the one made from the rows; `tokens: null` is a host with no usage to give (the tokens before are estimated).
 async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after, api } = {}) {
@@ -198,6 +209,25 @@ describe('a session of screenshots in the compaction (the character gate in toke
     const run = await compactRun(TARGET_20, shots(), { after: deliveries });
     expect(run.record).toMatchObject({ result: 'jev', queued_other: 4000 });
     expect(run.record.max_reduction_tokens).toBeGreaterThan(0.3);
+  });
+
+  it('the gate counts the deliveries that build carries as one block of a row of text results even when no result of the row is cut', async () => {
+    // Every result of this session is a task update, which the cut never takes, so no result gives anything back. The 2 000 messages delivered after the result of
+    // step 5 are 2 000 blocks of the host's list and one block of the row that build rewrites whatever is decided (about 91 000 tokens of overhead less the envelopes
+    // it adds): that is the whole cut.
+    const rows = taskSession(30);
+    const after = { t5: Array.from({ length: 2000 }, (_, k) => note(k)) };
+    const counted = Math.round(listTokens(apiOf(rows, after)));
+    const plain = await compactRun(TARGET_20, rows, { tokens: Math.round(listTokens(apiOf(rows))), trigger: 'manual' });
+    expect(plain.record).toMatchObject({ result: 'fallback', reason: 'too_few_results' });
+    const run = await compactRun({ ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' }, rows, { tokens: counted, trigger: 'manual', after });
+    expect(run.record).toMatchObject({ result: 'jev', queued_other: 2000 });
+    const installed = listTokens(apiOf(run.out.messages));
+    expect(run.record.max_reduction_tokens).toBeGreaterThanOrEqual(0.3);
+    expect(1 - installed / counted).toBeGreaterThanOrEqual(0.3);
+    // The prediction is the list that is installed, and the gate said what that list is: the cut it measured is the cut the compaction makes.
+    expect(Math.abs(run.record.tokens_after_pred - installed)).toBeLessThanOrEqual(2);
+    expect(Math.abs(run.record.max_reduction_tokens - (1 - installed / counted))).toBeLessThan(0.02);
   });
 
   it('a session that passes the character gate is decided as before in token mode: the token measure is not read', async () => {

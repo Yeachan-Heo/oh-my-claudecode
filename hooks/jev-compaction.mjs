@@ -2787,8 +2787,9 @@ export function cutInTokens(candidates, messages, api, envelopes = 0, rates = DE
     const t = itemTokens(c, rates);
     removable += t.full - t.trace; // under 0 for a result that its blocks free (isPinned)
   }
-  // The blocks and messages those results take with them (the shape of the list) are part of what they give back.
-  if (shape) removable += shape.shed(free, 'trace', true);
+  // The blocks and messages those results take with them (the shape of the list) are part of what they give back, with what build changes whatever is decided (the
+  // deliveries after a row of text results become one block of it): the cut is the whole of the difference between the list and the list that is installed.
+  if (shape) removable += shape.shed(free, 'trace');
   if (removable <= 0) return { removable: 0, listed: 0 };
   return { removable: removable - rates.RATE_NOTE * envelopes, listed: listTokens(api ?? rowsAsApi(messages), rates) };
 }
