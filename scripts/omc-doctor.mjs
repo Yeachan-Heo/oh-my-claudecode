@@ -1451,8 +1451,9 @@ const cacheRepair = (kind) => {
         const redirected = target.place != path.join(realPath(path.dirname(path.dirname(backups))), 'backups', 'oh-my-claudecode');
         moveStarted = true;
         fs.mkdirSync(target.place, { recursive: true });
-        // Whether a version may be moved by its modification dates: counts what it leaves alone and answers false then. Asked twice, first
-        // for the choice and again after the last read of the protection, right before the rename, because an update may touch it between.
+        // Whether a version may be moved by its modification dates: counts what it leaves alone and answers false then. Asked three times, first
+        // for the choice, again after the protection read before the last one, and once more after the last read of the protection, right before the
+        // rename, because an update may touch it between.
         const settled = (name) => {
           let newest;
           try {
@@ -1496,7 +1497,8 @@ const cacheRepair = (kind) => {
             const last = protectionOf(dir, versions);
             if (last.unreadable || last.noIdentity || !last.pinned.length || last.kept.includes(name)) {
               skipped++;
-            } else {
+            } else if (settled(name)) {
+              // The read above takes its time: an update that touched the version during it is seen only by this last date check.
               fs.renameSync(path.join(dir, name), backup);
               moved++;
             }

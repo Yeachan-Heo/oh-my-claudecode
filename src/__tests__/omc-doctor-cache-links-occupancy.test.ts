@@ -555,6 +555,42 @@ fs.mkdirSync = function (target, ...rest) {
     }
   });
 
+  // The dates of a version are judged before the last read of the protection, which walks the registry and the occupancy records and takes its time:
+  // an update that touches the version during that walk is seen only by a date check right before the rename. The touch is played at the n-th read of
+  // the occupancy directory, for every read of the run, so that the one that is the last pass of the protection is among them.
+  test('a version that an update touches during any read of the protection, the last one included, is left in place', () => {
+    const touch = `const fs = require('fs'), path = require('path'); const real = fs.readdirSync; let reads = 0;
+fs.readdirSync = function (target, ...rest) {
+  const names = real.call(this, target, ...rest);
+  if (String(target).endsWith('cache-occupancy') && ++reads === Number(process.env.TOUCH_AT)) {
+    const now = new Date();
+    fs.utimesSync(path.join(process.env.TOUCH_DIR, 'package.json'), now, now);
+  }
+  return names;
+};
+`;
+    for (const command of commands) {
+      for (const at of [1, 2, 3, 4, 5]) {
+        const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
+          ageVersions(cache);
+          mkdirSync(path.join(dir, '.omc', 'cache-occupancy'), { recursive: true });
+          const preload = path.join(dir, 'touch.cjs');
+          writeFileSync(preload, touch);
+          const result = runCommand(command, dir, { env: { TOUCH_AT: String(at), TOUCH_DIR: path.join(cache, '5.8.0') }, preloads: [preload] });
+          expect(result.status).toBe(0);
+          // Read 5 does not exist: nothing touches the version and it moves, which shows that the reads before it are the ones that count.
+          expect({ command, at, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
+            at === 5 ? { command, at, versions: '5.9.0', moved: 1 } : { command, at, versions: '5.8.0,5.9.0', moved: 0 },
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   // ---- Platforms: the command is plain Node, so these run everywhere; win32 is reported by a preload on the others ----
   const win32Preload = platformPreload('win32');
 
