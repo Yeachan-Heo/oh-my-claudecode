@@ -294,6 +294,7 @@ PUNCTUATION = '();<>|&\n'
 
 SHELL_KEYWORDS = frozenset({'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', '!', '{', '}'})   # words that stand before the command of a simple command
 SHELL_WRAPPERS = frozenset({'exec', 'command', 'env', 'time', 'nohup'})   # words that run the word after them (and its options)
+CHDIR_WORDS = frozenset({'cd', 'pushd', '-C', '--directory', '--chdir'})   # words that change the working directory of the command (`--directory=DIR` and `--chdir=DIR` too): the only constructs that tell where a relative path is run from
 
 
 class ScanIncomplete(Exception):
@@ -315,10 +316,11 @@ def command_word(words):
     return None
 
 
-def session_dependent(piece, runs, directories, named, assigned):
+def session_dependent(piece, runs, directories, named, moved, assigned):
     """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
-    neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command names no directory (no
-    `cd DIR`: the shell runs it from the directory of the session) and that ends the path of a file the guard writes; a word without a
+    neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command does not move its working
+    directory (`moved`: no `cd`, `pushd`, `-C`, `--directory` or `--chdir` word, so the shell runs it from the directory of the session, whatever
+    directories the words of the command name as arguments) and that ends the path of a file the guard writes; a word without a
     directory part that the command runs (`runs`) and that is the name of a file the guard writes and no file in any directory the guard
     looks in (its PATH, the one a `PATH=` word or the settings give, the directories the command names): the shell looks it up on the PATH of
     the session. A parameter that nothing here gives a value (the command and the settings assign none; what the guard has in its own environment is a
@@ -340,7 +342,7 @@ def session_dependent(piece, runs, directories, named, assigned):
     if '$' in path:
         return False
     if os.sep in path or (os.altsep and os.altsep in path):
-        if os.path.isabs(path) or named:
+        if os.path.isabs(path) or (named and moved):
             return False
         parts = os.path.normpath(path).split(os.sep)
         while parts and parts[0] == '..':
@@ -717,12 +719,12 @@ def word_pieces(word, assigned):
     return list(dict.fromkeys(pieces))
 
 
-def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
+def command_programs(command, exclude=None, depth=0, inherited=(), values=None, moved=False):
     """The files that a shell command of a hook that is not ours may run or read, the same for every command and without knowing what any
     word means (nothing is run, nothing is expanded by a shell): every word of the command, each word that is a quoted command (it holds a
     blank: the words of an argument of -c or -S, two levels deep), the part of a word after its first `=` and the part after a short option that is glued to its value (`-SFILE`). A word with a directory part
     stands for that path, a word without one for the file of that name in the working directory of the guard and in each directory of the
-    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered; the same words `NAME=value` of the whole command are also the values of `$NAME` and `${NAME}` in any word, and `${NAME:-word}` is both: see parameter_variants). A word without a directory part, and a relative one with a directory part (`./prog`), is also looked for in each existing directory that any word of the whole command names (`cd DIR; prog`, `env -C DIR prog`: the shell may run it from there; no command is recognised), also in a quoted command inside it (`env -C DIR sh -c 'prog x'`). The rule is deliberately wide:
+    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered; the same words `NAME=value` of the whole command are also the values of `$NAME` and `${NAME}` in any word, and `${NAME:-word}` is both: see parameter_variants). A word without a directory part, and a relative one with a directory part (`./prog`), is also looked for in each existing directory that any word of the whole command names (`cd DIR; prog`, `env -C DIR prog`: the shell may run it from there; no command is recognised, only the words `cd`, `pushd`, `-C`, `--directory` and `--chdir`, which tell that a relative path is run from there and not from the directory of the session), also in a quoted command inside it (`env -C DIR sh -c 'prog x'`). The rule is deliberately wide:
     a word that is no program at all (an argument, an option value) is a file the guard then does not write, and no program is missed by
     not being recognised. A command with a NUL character or one that the shell cannot parse runs nothing and gives none. A command that a limit cuts
     short (more than MAX_COMMAND_CHARS characters, MAX_COMMAND_WORDS words or MAX_COMMAND_PROGRAMS files, or quoted commands nested deeper than
@@ -757,6 +759,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
                 if m.group(3) in (':=', '='):   # ${NAME:=word} and ${NAME=word} assign NAME for the words that follow: the word is a value of NAME in the whole command, as an assignment is
                     if own_value(m.group(2), m.group(4)) not in assigned.setdefault(m.group(2), []):
                         assigned[m.group(2)].append(own_value(m.group(2), m.group(4)))
+    moved = moved or any(w in CHDIR_WORDS or w.startswith(('--directory=', '--chdir=')) for words in simple for w in words)   # whether the command moves its working directory (of the command it is quoted in too): a directory that is only an argument does not
     named = list(inherited)   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR) and of the command it is quoted in: the shell may run a later word from there
     for words in simple:
         for word in words:
@@ -775,9 +778,9 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
             if any(c.isspace() for c in word) and not is_operator(word):   # (a newline is an operator: not a command to read)
                 if depth >= 2:
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
-                found += [t for t in command_programs(word, exclude, depth + 1, named, assigned) if t not in found]
+                found += [t for t in command_programs(word, exclude, depth + 1, named, assigned, moved) if t not in found]
             for piece in word_pieces(word, assigned):
-                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, assigned):
+                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, moved, assigned):
                     raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:

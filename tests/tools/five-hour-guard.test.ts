@@ -2718,6 +2718,50 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a directory that a word of the command only names (an argument) does not move the working directory: a relative path that ends the path of a file the guard writes is still run from the directory of the session and the guard refuses to start; a cd, pushd, -C, --directory or --chdir settles it as before', () => {
+    const f = fixture('foreign-session-directory-argument', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
+    const other = join(f.dir, 'other');   // a directory that the command names as an argument
+    mkdirSync(join(project, 'sub'), { recursive: true });
+    mkdirSync(other);
+    const text = '# the script that the command runs\n';
+    const files = { './audit': join(project, 'audit'), 'sub/audit': join(project, 'sub', 'audit') };
+    for (const file of Object.values(files)) writeFileSync(file, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const shell = (command: string, cwd: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd }).stdout;
+    expect(shell(`cat ./audit ${other}`, project), 'the shell runs ./audit from the directory of the session, whatever directory is an argument').toBe(text);
+    expect(shell(`cd ${other}; cat ./audit`, project), 'and from the directory that a cd names').toBe('');
+    for (const [word, file] of Object.entries(files)) {
+      for (const command of [`python3 ${word} ${other}`, `python3 ${word} --flag ${other}`, `python3 ${other} ${word}`, `ls ${other}; python3 ${word}`, `sh -c 'python3 ${word} ${other}'`, `python3 -u --log=${word} --out ${other}`]) {
+        for (const key of ['state_file', 'pause_file', 'log_file']) {
+          const r = start(command, { [key]: file });
+          expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+          expect(r.stderr).not.toMatch(/Traceback/);
+          expect(readText(file), `${command} as ${key}: the file is intact`).toBe(text);
+        }
+      }
+    }
+    // a construct that moves the working directory settles it: the file is that of the directory it names (the collision of an earlier test)
+    for (const command of [`cd ${project}; python3 ./audit`, `pushd ${project} && python3 ./audit`, `env -C ${project} python3 ./audit`, `python3 ./audit --directory ${project}`, `python3 ./audit --directory=${project}`,
+      `make -C ${project} ./audit`, `env --chdir=${project} python3 ./audit`, `sh -c 'cd ${project} && ./audit'`, `cd ${other}; python3 ${other}/x; cd ${project}; ./audit`]) {
+      const r = start(command, { state_file: files['./audit'] });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    // a construct that moves it to another directory: the file of the session is not the one that runs
+    for (const command of [`cd ${other}; python3 ./audit`, `env -C ${other} python3 ./audit --directory ${other}`]) {
+      const r = start(command, { state_file: files['./audit'] });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a program of another hook that the PATH of the guard does not find is looked up on the PATH of the session, which the guard does not know: when its name is that of a file the guard writes the guard refuses to start; a PATH that the guard, the command or the settings has, or a name that no file of the guard has, settles it as before', () => {
     const f = fixture('foreign-session-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
