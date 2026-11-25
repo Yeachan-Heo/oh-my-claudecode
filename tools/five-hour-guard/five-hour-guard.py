@@ -436,10 +436,14 @@ def strip_comments(command):
     return ''.join(out)
 
 
+SUBSTITUTION_STARTS = ('$(', '$[', '$?', '$$', '$!', '$#', '$*', '$@', '$-')   # a command substitution, an arithmetic expansion, and the special parameters without braces (the status of the last command, the PID of the shell, the PID of the last job, the number of arguments, the arguments, the options)
+
+
 def has_substitution(command):
-    """Whether the text has a command substitution `$(...)`, an arithmetic expansion `$((...))` or `$[...]`, or a backtick, that a shell would run: outside
-    single quotes (also those of `$'...'`, where a backslash escapes) and not after a backslash. The result of a program cannot be known or
-    modelled, so the file that it names is not found by reading the words."""
+    """Whether the text has a command substitution `$(...)`, an arithmetic expansion `$((...))` or `$[...]`, a backtick, or a special parameter
+    without braces (`$?`, `$$`, `$!`, `$#`, `$*`, `$@`, `$-`) that a shell would expand: outside single quotes (also those of `$'...'`, where a
+    backslash escapes) and not after a backslash, so also inside double quotes. The result of a program, and the value of a special parameter
+    of the shell of the session, cannot be known or modelled, so the file that it names is not found by reading the words."""
     quote, i = None, 0
     while i < len(command):
         c = command[i]
@@ -450,7 +454,7 @@ def has_substitution(command):
                 quote = None
             elif quote == '"' and c == '\\':
                 i += 1
-            elif quote == '"' and (c == '`' or command.startswith(('$(', '$['), i)):
+            elif quote == '"' and (c == '`' or command.startswith(SUBSTITUTION_STARTS, i)):
                 return True
         elif c == '\\':
             i += 1
@@ -461,7 +465,7 @@ def has_substitution(command):
         elif command.startswith("$'", i):
             quote = "$'"
             i += 1
-        elif c == '`' or command.startswith(('$(', '$['), i):
+        elif c == '`' or command.startswith(SUBSTITUTION_STARTS, i):
             return True
         i += 1
     return False
@@ -753,7 +757,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     exclude = [] if exclude is None else exclude
     command = join_continuations(command) if depth == 0 and isinstance(command, str) else command   # (the text of a quoted word has had its continuations removed with the command around it)
     if has_substitution(command if depth > 0 else strip_comments(command)):   # at depth 0 a comment is no command (as in command_tokens); a quoted command is read as it is
-        raise ScanIncomplete('command has a command substitution, whose result cannot be known')
+        raise ScanIncomplete('command has a command substitution or a special parameter of the shell, whose value cannot be known')
     tokens = command_tokens(command, depth > 0)
     if tokens is None:
         return []   # a command with a NUL character (no process can be started with one in its arguments) or one the shell cannot parse runs nothing

@@ -2693,7 +2693,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     writeFileSync(hashed, text, 'utf8');
     const named: Array<[string, string]> = [
       [`python3 ${audit} # note`, audit], [`echo '# x ${audit}'`, audit], [`echo "a #b ${audit}"`, audit], [`python3 ${hashed}`, hashed], [`python3 \\# ${audit}`, audit],
-      [`true # note\npython3 ${audit}`, audit], [`true; python3 ${audit} # note`, audit], [`echo $# ${audit}`, audit], ['FHG_A=1; python3 "${FHG_A#x}" ' + audit, audit],
+      [`true # note\npython3 ${audit}`, audit], [`true; python3 ${audit} # note`, audit], [`echo \\$# ${audit}`, audit], ['FHG_A=1; python3 "${FHG_A#x}" ' + audit, audit],
       [`sh -c 'python3 ${audit} # note'`, audit], [`echo $'/a #x' ${audit}`, audit], [`cat <<EOF\n# ${audit}\nEOF`, audit],
     ];
     for (const [command, file] of named) {
@@ -2876,6 +2876,46 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of settled(other)) {
       const r = start(command, { state_file: file });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
+  it('an unbraced special parameter in the command of another hook (dollar and ?, $, !, #, *, @ or -), also inside double quotes, is a word that the scan cannot know, so the guard refuses to start; single quotes, a backslash, a dollar before a blank or at the end, the braced forms and the other parameters are read as before', () => {
+    const f = fixture('foreign-special-parameter', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit1 = join(hooks, 'audit1');
+    writeFileSync(audit1, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ env: { FHG_V: audit1 }, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    expect(spawnSync('sh', ['-c', `false; printf %s ${hooks}/audit$?`], { encoding: 'utf8' }).stdout, 'the shell makes the path of the file out of the exit status').toBe(audit1);
+    expect(spawnSync('sh', ['-c', `false; printf %s "${hooks}/audit$?"`], { encoding: 'utf8' }).stdout, 'also in double quotes').toBe(audit1);
+    expect(spawnSync('sh', ['-c', `printf %s '${hooks}/audit$?'`], { encoding: 'utf8' }).stdout, 'but not in single quotes').toBe(`${hooks}/audit$?`);
+    const refused = [`false; python3 ${hooks}/audit$?`, `python3 ${hooks}/audit$$`, `python3 ${hooks}/audit$!`, `python3 ${hooks}/audit$#`, `python3 ${hooks}/audit$*`, `python3 ${hooks}/audit$@`, `python3 ${hooks}/audit$-`,
+      `false; python3 "${hooks}/audit$?"`, `python3 "$@"`, `python3 -u --log=${hooks}/audit$?`, `sh -c 'python3 ${hooks}/audit$?'`, `python3 ${hooks}/audit$1`, `python3 "$1"`,
+      `python3 ${hooks}/audit\${?}`, `python3 ${hooks}/audit\${#}`, `python3 ${hooks}/audit\${@}`, `python3 ${hooks}/audit\${*}`, `python3 ${hooks}/audit\${-}`, `python3 ${hooks}/audit\${$}`, `python3 ${hooks}/audit\${!}`];
+    for (const command of refused) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit1 });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit1), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // read as before: single quotes (the text), a backslash, a dollar before a blank or at the end of the word, other parameters
+    for (const command of [`python3 '${hooks}/audit$?'`, `python3 '$$' '$@'`, `python3 ${hooks}/audit\\$?`, `python3 "${hooks}/audit\\$?"`, `python3 ${hooks}/audit$ x`, `python3 ${hooks}/audit$`, `python3 "${hooks}/audit$"`, `python3 $'${hooks}/audit$?'`]) {
+      const r = start(command, { state_file: audit1 });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+    for (const command of ['python3 "$FHG_V"', 'python3 "${FHG_V}"', 'python3 "${FHG_V:-x}"']) {
+      const r = start(command, { state_file: audit1 });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${audit1}) and "program of another hook" (${audit1}) are the same file`);
     }
   });
 
