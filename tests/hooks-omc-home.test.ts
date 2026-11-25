@@ -367,9 +367,9 @@ describe('auto-invoke history loading with legacy path support', () => {
     }
   });
 
-  it('should load invocation history from legacy ~/.omc/state/analytics/invocations when OMC_HOME is unset', () => {
+  it('should load invocation history from legacy ~/.omc/analytics/invocations when OMC_HOME is unset', () => {
     // Create a legacy history file
-    const legacyInvocationsDir = join(tempHome, '.omc', 'state', 'analytics', 'invocations');
+    const legacyInvocationsDir = join(tempHome, '.omc', 'analytics', 'invocations');
     mkdirSync(legacyInvocationsDir, { recursive: true });
 
     const sessionId = 'test-session-legacy';
@@ -414,7 +414,7 @@ describe('auto-invoke history loading with legacy path support', () => {
 
   it('should aggregate stats from legacy invocations directory', () => {
     // Create legacy history files
-    const legacyInvocationsDir = join(tempHome, '.omc', 'state', 'analytics', 'invocations');
+    const legacyInvocationsDir = join(tempHome, '.omc', 'analytics', 'invocations');
     mkdirSync(legacyInvocationsDir, { recursive: true });
 
     const session1Data = {
@@ -455,6 +455,29 @@ describe('auto-invoke history loading with legacy path support', () => {
     expect(stats.successRate).toBeGreaterThan(0);
     expect(stats.topSkills.length).toBeGreaterThan(0);
     expect(stats.topSkills[0].skillId).toBe('ralph');
+  });
+
+  it('aggregates history from both the current state root and legacy ~/.omc/analytics/invocations', () => {
+    const record = (skillId: string) => ({
+      sessionId: skillId,
+      config: { enabled: true, confidenceThreshold: 80, maxAutoInvokes: 3, cooldownMs: 30000 },
+      invocations: [{ skillId, skillName: skillId, timestamp: 1, confidence: 90, prompt: 'p', wasSuccessful: true, feedbackScore: null }],
+    });
+    const legacyDir = join(tempHome, '.omc', 'analytics', 'invocations');
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, 'old-session.json'), JSON.stringify(record('legacy-skill')), 'utf-8');
+
+    const omcHome = join(tempHome, 'omc-home');
+    const currentDir = join(omcHome, 'state', 'analytics', 'invocations');
+    mkdirSync(currentDir, { recursive: true });
+    writeFileSync(join(currentDir, 'new-session.json'), JSON.stringify(record('current-skill')), 'utf-8');
+
+    process.env.HOME = tempHome;
+    process.env.OMC_HOME = omcHome;
+
+    const stats = getAggregatedStats();
+    expect(stats.totalSessions).toBe(2);
+    expect(stats.topSkills.map((s) => s.skillId).sort()).toEqual(['current-skill', 'legacy-skill']);
   });
 
   it('should prefer OMC_HOME over legacy path when both exist', () => {

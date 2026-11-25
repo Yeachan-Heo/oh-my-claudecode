@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
-import { getGlobalOmcStatePath, getGlobalOmcStateCandidates } from '../../utils/paths.js';
+import { getGlobalOmcStatePath, getGlobalOmcStateCandidates, getLegacyOmcPath } from '../../utils/paths.js';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
 
 export interface InvocationConfig {
@@ -218,10 +218,22 @@ export function saveInvocationHistory(state: AutoInvokeState): void {
 }
 
 /**
+ * Directories that may hold invocation history, newest location first: the state root
+ * (OMC_HOME or XDG), its legacy ~/.omc/state form, and ~/.omc/analytics/invocations,
+ * where releases before #5141 wrote it.
+ */
+function invocationHistoryDirs(): string[] {
+  return [...new Set([
+    ...getGlobalOmcStateCandidates('analytics', 'invocations'),
+    getLegacyOmcPath('analytics', 'invocations'),
+  ])];
+}
+
+/**
  * Load invocation history from disk
  */
 export function loadInvocationHistory(sessionId: string): AutoInvokeState | null {
-  const historyFileCandidates = getGlobalOmcStateCandidates('analytics', 'invocations', `${sessionId}.json`);
+  const historyFileCandidates = invocationHistoryDirs().map((dir) => path.join(dir, `${sessionId}.json`));
 
   try {
     // Try each candidate path, taking the first one that exists
@@ -255,19 +267,18 @@ export function getAggregatedStats(): {
   successRate: number;
   topSkills: Array<{ skillId: string; skillName: string; count: number; successRate: number }>;
 } {
-  const historyDirCandidates = getGlobalOmcStateCandidates('analytics', 'invocations');
-
   try {
-    // Find the first candidate directory that exists
-    let historyDir: string | null = null;
-    for (const candidate of historyDirCandidates) {
-      if (fs.existsSync(candidate)) {
-        historyDir = candidate;
-        break;
+    // Read every history directory; a session file in a newer location wins over the same
+    // session in an older one, so history written before the move is still counted.
+    const sessionFiles = new Map<string, string>();
+    for (const dir of invocationHistoryDirs()) {
+      if (!fs.existsSync(dir)) continue;
+      for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.json'))) {
+        if (!sessionFiles.has(file)) sessionFiles.set(file, path.join(dir, file));
       }
     }
 
-    if (!historyDir) {
+    if (sessionFiles.size === 0) {
       return {
         totalSessions: 0,
         totalInvocations: 0,
@@ -276,12 +287,12 @@ export function getAggregatedStats(): {
       };
     }
 
-    const files = fs.readdirSync(historyDir).filter(f => f.endsWith('.json'));
+    const files = [...sessionFiles.values()];
     const allInvocations: InvocationRecord[] = [];
     const skillStats = new Map<string, { name: string; total: number; successful: number }>();
 
     for (const file of files) {
-      const data = JSON.parse(fs.readFileSync(path.join(historyDir, file), 'utf-8'));
+      const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
       allInvocations.push(...data.invocations);
 
       for (const inv of data.invocations as InvocationRecord[]) {
