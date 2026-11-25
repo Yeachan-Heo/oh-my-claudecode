@@ -194,6 +194,39 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
     expect(existsSync(join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs'))).toBe(true);
   });
 
+  // The signal stops every change of a cached version, not one branch: an entry that is a link already (to 4.4.2) is repointed to the newest version by
+  // another branch than a real directory is replaced by a link, and it is as much a change of what the other host still reads.
+  it('does not repoint a version that is a link already while a record of another host names a root that lies in no cache here', () => {
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+    symlinkSync('4.4.2', join(fakeCacheBase, '4.4.1'));
+    const registry = join(fakeHome, '.claude', '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    writeFileSync(join(registry, `${'a'.repeat(64)}.json`), JSON.stringify({
+      version: 1,
+      pid: 999999,
+      processStartIdentity: 'start',
+      pluginRoot: '/Users/b/.claude/plugins/cache/omc/oh-my-claudecode/4.4.1',
+      host: 'another-machine|id|pid:[4026539999]',
+      updatedAt: new Date().toISOString(),
+    }));
+
+    runSessionStart();
+
+    expect(lstatSync(join(fakeCacheBase, '4.4.1')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(fakeCacheBase, '4.4.1'))).toBe('4.4.2');
+  });
+
+  it('repoints a version that is a link already when no record stops the cleanup', () => {
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+    symlinkSync('4.4.2', join(fakeCacheBase, '4.4.1'));
+
+    runSessionStart();
+
+    expect(readlinkSync(join(fakeCacheBase, '4.4.1'))).toBe('4.4.3');
+  });
+
   it('with only 2 versions, no symlinks are created', () => {
     createFakeVersion('4.4.2');
     createFakeVersion('4.4.3');

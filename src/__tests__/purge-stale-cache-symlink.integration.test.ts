@@ -116,6 +116,46 @@ afterEach(() => {
   rmSync(configDir, { recursive: true, force: true });
 });
 
+// A record of another host whose root lies in no cache here leaves open which version that host still reads: nothing is relinked or removed.
+describe('purgeStalePluginCacheVersions while the occupancy registry is unavailable', () => {
+  const writeForeignRecord = () => {
+    const registry = join(configDir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    writeFileSync(join(registry, `${'a'.repeat(64)}.json`), JSON.stringify({
+      version: 1,
+      pid: 999999,
+      processStartIdentity: 'start',
+      pluginRoot: `/Users/b/.claude/plugins/cache/${PLUGIN}/${STALE}`,
+      host: 'another-machine|id|pid:[4026539999]',
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  it('relinks a stale version beside the active one when nothing stops it', () => {
+    const stale = writeVersion(STALE);
+    makeStale(stale);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.symlinked).toBe(1);
+    expect(lstatSync(stale).isSymbolicLink()).toBe(true);
+  });
+
+  it('leaves a stale version beside the active one alone while a record of another host cannot be mapped', () => {
+    const stale = writeVersion(STALE);
+    makeStale(stale);
+    writeForeignRecord();
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.symlinked).toBe(0);
+    expect(result.removed).toBe(0);
+    expect(result.skippedPaths).toContain(stale);
+    expect(lstatSync(stale).isDirectory()).toBe(true);
+    expect(lstatSync(stale).isSymbolicLink()).toBe(false);
+  });
+});
+
 describe('purgeStalePluginCacheVersions symlink payload validation', () => {
   it('preserves OMC payload when a required entry point links into the stale tree', () => {
     const stale = writeVersion(STALE);

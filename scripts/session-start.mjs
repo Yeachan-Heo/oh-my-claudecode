@@ -1886,7 +1886,8 @@ ${cleanBlock(cleanContent)}
           }
         }) ?? null;
 
-        if (latest && versions.length > 2) {
+        // Every change below (a link repointed, a directory replaced by a link) is held back while the registry cannot say which version another host still reads.
+        if (latest && versions.length > 2 && !occupancy.unavailable) {
           const toSymlink = versions.slice(2).filter(v => v !== latest);
           for (const version of toSymlink) {
             try {
@@ -1919,7 +1920,7 @@ ${cleanBlock(cleanContent)}
                   }
                 }
               } else if (stat.isDirectory()) {
-                if (occupancy.unavailable || occupancy.roots.has(pathIdentity(versionPath))) continue;
+                if (occupancy.roots.has(pathIdentity(versionPath))) continue;
                 // Directory → symlink: cannot be atomic, but run.cjs now
                 // handles missing targets gracefully (issue #1007).
                 rmSync(versionPath, { recursive: true, force: true });
