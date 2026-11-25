@@ -331,6 +331,51 @@ function foldNodeResultRecord(descriptor, projection, transition) {
         identities: buildReplayNodeResultIdentities(descriptor, transition),
     });
 }
+/** The projection of a run before any record is committed: the entry activations are ready. */
+export function initialRunProjection(stored) {
+    return initializeGraphProjection(stored, entryActivationIds(stored));
+}
+/**
+ * Replays committed journal records over `projection`, the way a resume does. Epoch provenance: takeovers only ever
+ * raise the epoch, so committed history must be non-decreasing and must never exceed `epochCeiling`, the epoch the
+ * resuming process acquired; anything else is forged or stale-writer provenance. Each record is bound to the
+ * descriptor, passes its envelope and request fingerprints and folds through the scheduler. Throws
+ * GraphSchedulerError for a record that does not.
+ */
+export function foldJournalRecords(stored, projection, records, epochCeiling) {
+    let folded = projection;
+    let lastRecordEpoch = 0;
+    for (const record of records) {
+        if (record.descriptor_hash !== stored.descriptor_hash) {
+            throw new GraphSchedulerError("descriptor_mismatch", `journal record ${record.seq} is bound to descriptor ${record.descriptor_hash}`);
+        }
+        if (record.epoch < lastRecordEpoch || record.epoch > epochCeiling) {
+            throw new GraphSchedulerError("transition_fenced", `journal record ${record.seq} carries epoch ${record.epoch} outside fenced history (last ${lastRecordEpoch}, acquired ${epochCeiling})`);
+        }
+        if (record.transition.descriptor_hash !== record.descriptor_hash) {
+            throw new GraphSchedulerError("descriptor_mismatch", `journal record ${record.seq} transition descriptor does not match its envelope`);
+        }
+        lastRecordEpoch = record.epoch;
+        folded = foldOneRecord(stored, folded, record);
+    }
+    return folded;
+}
+/**
+ * How a run ends when nothing is in flight: `succeeded` when the scheduler success rule holds, `failed` when no
+ * activation can be started, resolved or approved, otherwise `open`. `excluded` names the ready executable
+ * activations that must not count as work (in flight, or out of attempts). After a replay an activation whose
+ * attempts are used up is already terminal (scheduler: the final-budget release), so a status or a gc pass that has
+ * nothing in flight excludes none.
+ */
+export function idleOutcome(sealed, projection, excluded) {
+    if (isGraphSucceeded(sealed, projection)) {
+        return "succeeded";
+    }
+    const hasWork = listReadyExecutableActivations(sealed, projection).some((activation) => !excluded(activation.activation_id)) ||
+        listReadyApprovalActivations(sealed, projection).length > 0 ||
+        listReadyJoinActivations(sealed, projection).length > 0;
+    return hasWork ? "open" : "failed";
+}
 /**
  * Runs one sealed graph to a terminal outcome.
  *
@@ -420,7 +465,7 @@ export async function runGraph(sealed, options) {
         if (!descriptorIsFresh && records.length === 0) {
             throw new GraphSchedulerError("transition_fenced", `persisted descriptor for run ${runId} has no committed journal history`);
         }
-        let projection = initializeGraphProjection(stored, entryActivationIds(stored));
+        let projection = initialRunProjection(stored);
         if (descriptorIsFresh) {
             await store.save({
                 schema_version: 1,
@@ -432,23 +477,8 @@ export async function runGraph(sealed, options) {
                 projection,
             }, () => fence.assertEpoch(epoch));
         }
-        // Epoch provenance: takeovers only ever raise the epoch, so committed
-        // history must be non-decreasing and must never exceed the epoch this
-        // process acquired — anything else is forged or stale-writer provenance.
-        let lastRecordEpoch = 0;
-        for (const record of records) {
-            if (record.descriptor_hash !== stored.descriptor_hash) {
-                throw new GraphSchedulerError("descriptor_mismatch", `journal record ${record.seq} is bound to descriptor ${record.descriptor_hash}`);
-            }
-            if (record.epoch < lastRecordEpoch || record.epoch > epoch) {
-                throw new GraphSchedulerError("transition_fenced", `journal record ${record.seq} carries epoch ${record.epoch} outside fenced history (last ${lastRecordEpoch}, acquired ${epoch})`);
-            }
-            if (record.transition.descriptor_hash !== record.descriptor_hash) {
-                throw new GraphSchedulerError("descriptor_mismatch", `journal record ${record.seq} transition descriptor does not match its envelope`);
-            }
-            lastRecordEpoch = record.epoch;
-            projection = foldOneRecord(stored, projection, record);
-        }
+        // Epoch provenance, descriptor binding and fingerprints are checked by the fold.
+        projection = foldJournalRecords(stored, projection, records, epoch);
         emit({ type: "replayed", records: records.length, epoch });
         // --- main loop ---
         phase = "live";
@@ -727,7 +757,9 @@ export async function runGraph(sealed, options) {
                 continue;
             }
             // Idle: evaluate terminal conditions.
-            if (isGraphSucceeded(sealed, projection)) {
+            const idle = idleOutcome(sealed, projection, (activationId) => inflight.some((entry) => entry.activationId === activationId) ||
+                deadActivations.has(activationId));
+            if (idle === "succeeded") {
                 terminalResult = {
                     terminal: "succeeded",
                     run_id: runId,
@@ -738,11 +770,7 @@ export async function runGraph(sealed, options) {
                 terminalSummary = `graph succeeded (${nextSeq} committed transitions)`;
                 break;
             }
-            const hasWork = listReadyExecutableActivations(sealed, projection).some((activation) => !inflight.some((entry) => entry.activationId === activation.activation_id) &&
-                !deadActivations.has(activation.activation_id)) ||
-                listReadyApprovalActivations(sealed, projection).length > 0 ||
-                listReadyJoinActivations(sealed, projection).length > 0;
-            if (!hasWork) {
+            if (idle === "failed") {
                 terminalResult = {
                     terminal: "failed",
                     run_id: runId,

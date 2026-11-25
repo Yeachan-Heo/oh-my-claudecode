@@ -20,6 +20,18 @@ const TIER_ENV_KEYS = {
     ],
 };
 /**
+ * Parse a provider flag env var that accepts both "1" and "true" (case-insensitive).
+ * Returns true only when the value (after trim) equals "1" or "true" (case-insensitive).
+ * Empty strings, "0", "false", and null/undefined return false.
+ *
+ * This matches SessionStart's behavior: CLAUDE_CODE_USE_BEDROCK=true
+ * or CLAUDE_CODE_USE_BEDROCK=1 both enable Bedrock.
+ */
+function isTruthyProviderFlag(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return normalized === '1' || normalized === 'true';
+}
+/**
  * Canonical Claude family defaults.
  * Keep these date-less so version bumps are a one-line edit per family.
  */
@@ -214,7 +226,7 @@ function hasBedrockModelId(modelIds) {
  */
 export function isBedrock() {
     // Primary signal: Claude Code's own env var
-    if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
+    if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) {
         return true;
     }
     // Fallback: detect Bedrock model ID patterns in the active model env value.
@@ -284,7 +296,7 @@ export function isSubagentSafeModelId(modelId) {
  * expects full Vertex model paths.
  */
 export function isVertexAI() {
-    if (process.env.CLAUDE_CODE_USE_VERTEX === '1') {
+    if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) {
         return true;
     }
     // Fallback: detect vertex_ai/ prefix in the active model env value.
@@ -360,10 +372,10 @@ export function shouldAutoForceInherit() {
     if (process.env.OMC_ROUTING_FORCE_INHERIT === 'true') {
         return true;
     }
-    if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
+    if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) {
         return true;
     }
-    if (process.env.CLAUDE_CODE_USE_VERTEX === '1') {
+    if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) {
         return true;
     }
     const directModelValues = getDirectProviderDetectionModelEnvValues();
