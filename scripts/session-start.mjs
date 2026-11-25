@@ -1236,9 +1236,9 @@ function getClaudeMdVersion() {
     let version = extractOmcVersion(content);
     if (!version) {
       // The file-split layout keeps the marker in a companion file, found as the doctor finds it: the CLAUDE-*.md files that CLAUDE.md
-      // references (every name bounded by white space or a closing parenthesis, in order), otherwise CLAUDE-omc.md and then every other
+      // references (every name that ends at white space, a closing parenthesis or the end of the text, in order), otherwise CLAUDE-omc.md and then every other
       // CLAUDE-*.md in name order; the first marker decides.
-      const referenced = content.match(/CLAUDE-[^\s)]*[.]md/g) || [];
+      const referenced = content.match(/CLAUDE-[^\s)]*[.]md(?![^\s)])/g) || [];
       let names = referenced;
       if (!referenced.length) {
         names = ['CLAUDE-omc.md'];
