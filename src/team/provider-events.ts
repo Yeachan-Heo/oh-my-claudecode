@@ -10,7 +10,7 @@
  * recommendations, or nudges from it.
  */
 import { constants, type Stats } from 'node:fs';
-import { lstat, open, rename, writeFile } from 'node:fs/promises';
+import { lstat, open, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertTeamStatePathSafe, canonicalTeamStateRoot } from './state-paths.js';
@@ -162,7 +162,12 @@ export async function writeProviderEventSettings(teamStateRoot: string): Promise
     [{ hooks: [{ type: 'command', command: providerEventHookCommand(event) }] }],
   ]));
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify({ hooks }, null, 2)}\n`);
-  await rename(tmp, path);
+  try {
+    await writeFile(tmp, `${JSON.stringify({ hooks }, null, 2)}\n`);
+    await rename(tmp, path);
+  } catch (error) {
+    await rm(tmp, { force: true }).catch(() => undefined);
+    throw error;
+  }
   return path;
 }

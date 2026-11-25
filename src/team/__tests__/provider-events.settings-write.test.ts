@@ -3,11 +3,11 @@
 // This writes the file in two steps, as a slow disk could, and reads the
 // settings path or runs the other writer between them.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-const probe = vi.hoisted(() => ({ path: '', seen: [] as string[], between: null as null | (() => Promise<unknown>) }));
+const probe = vi.hoisted(() => ({ path: '', seen: [] as string[], between: null as null | (() => Promise<unknown>), rmError: null as null | Error }));
 
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -20,7 +20,11 @@ vi.mock('node:fs/promises', async importOriginal => {
     await between?.();
     await actual.appendFile(file, text.slice(text.length / 2));
   }) as typeof actual.writeFile;
-  return { ...actual, writeFile, default: { ...actual, writeFile } };
+  const rm = (async (...args: Parameters<typeof actual.rm>) => {
+    if (probe.rmError) throw probe.rmError;
+    await actual.rm(...args);
+  }) as typeof actual.rm;
+  return { ...actual, writeFile, rm, default: { ...actual, writeFile, rm } };
 });
 
 import { providerEventSettingsPath, writeProviderEventSettings } from '../provider-events.js';
@@ -32,6 +36,7 @@ describe('writeProviderEventSettings while a reader looks', () => {
     probe.path = providerEventSettingsPath(root);
     probe.seen = [];
     probe.between = null;
+    probe.rmError = null;
   });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
@@ -60,5 +65,26 @@ describe('writeProviderEventSettings while a reader looks', () => {
     }
     expect(probe.seen).toHaveLength(2);
     expect(Object.keys(JSON.parse(readFileSync(probe.path, 'utf8')).hooks)).toHaveLength(4);
+  });
+
+  it('leaves no temporary file when the write fails halfway', async () => {
+    probe.between = async () => { throw new Error('disk full'); };
+    await expect(writeProviderEventSettings(root)).rejects.toThrow('disk full');
+    expect(probe.seen).toHaveLength(1);
+    expect(readdirSync(root)).toEqual([]);
+  });
+
+  it('leaves no temporary file when the rename fails', async () => {
+    // A file cannot be renamed over a directory.
+    mkdirSync(probe.path);
+    await expect(writeProviderEventSettings(root)).rejects.toThrow();
+    expect(probe.seen).toHaveLength(1);
+    expect(readdirSync(root)).toEqual([basename(probe.path)]);
+  });
+
+  it('reports the write failure when the temporary file cannot be removed either', async () => {
+    probe.between = async () => { throw new Error('disk full'); };
+    probe.rmError = new Error('rm failed');
+    await expect(writeProviderEventSettings(root)).rejects.toThrow('disk full');
   });
 });
