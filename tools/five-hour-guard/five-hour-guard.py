@@ -315,18 +315,30 @@ def command_word(words):
     return None
 
 
-def session_dependent(piece, runs, directories, named):
+def session_dependent(piece, runs, directories, named, assigned):
     """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
     neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command names no directory (no
     `cd DIR`: the shell runs it from the directory of the session) and that ends the path of a file the guard writes; a word without a
     directory part that the command runs (`runs`) and that is the name of a file the guard writes and no file in any directory the guard
     looks in (its PATH, the one a `PATH=` word or the settings give, the directories the command names): the shell looks it up on the PATH of
-    the session. A piece that holds blanks is a quoted command (read as one), one that still holds a `$` has a parameter that is not decided here."""
+    the session. A parameter that nothing here gives a value (the command and the settings assign none, the guard has none; `HOME` and `~` are the
+    session's, whatever the guard has) is the session's too: it is refused when what follows it in the word is empty or ends the path of a file the
+    guard writes (`"$AUDIT"`, `$DIR/audit`); a word with something else after it is read as before. A piece that holds blanks is a quoted command
+    (read as one), one that still holds a `$` has a parameter that is not decided here."""
     path = os.path.expanduser(os.path.expandvars(piece))
-    if not path or '$' in path or len(path) > MAX_PATH_CHARS or '\0' in path or any(c.isspace() for c in path) or path[0] == '-' or re.match(r'[^/\\]*=', path):
+    if not path or len(path) > MAX_PATH_CHARS or '\0' in path or any(c.isspace() for c in path) or path[0] == '-' or re.match(r'[^/\\]*=', path):
         return False   # (an option, or a NAME=value word: the value after the `=` is a piece of its own)
     key = lambda text: os.path.normcase(text).lower() if sys.platform == 'darwin' else os.path.normcase(text)
     written = [key(path_key(out)) for _label, out in written_files()]
+    scan = re.sub(r'^~[^/\\]*', '${HOME}', piece)   # (a leading ~ is the HOME of the session)
+    for m in PARAMETER.finditer(scan):
+        name = m.group(1) or m.group(2) or m.group(5)
+        if not assigned.get(name) and (name not in os.environ or name == 'HOME') and m.group(3) not in ('-', ':-', '=', ':=', '+', ':+', '?', ':?'):
+            rest = os.path.expandvars(scan[m.end():])
+            if not rest or any(out.endswith(key(rest)) for out in written):
+                return True
+    if '$' in path:
+        return False
     if os.sep in path or (os.altsep and os.altsep in path):
         if os.path.isabs(path) or named:
             return False
@@ -765,7 +777,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
                 found += [t for t in command_programs(word, exclude, depth + 1, named, assigned) if t not in found]
             for piece in word_pieces(word, assigned):
-                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named):
+                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, assigned):
                     raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:
