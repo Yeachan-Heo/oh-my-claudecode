@@ -79708,6 +79708,266 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 5152,
+      "targetRef": "main",
+      "mergeBaseSha": "b8fe8682ae5b3696d96ef43225c06b7461327a26",
+      "headSha": "3e220060455ee5c0d2feaefe15d1c99e68191b04",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-31T23:59:59.999Z",
+      "generatedDelta": {
+        "count": 41,
+        "sha256": "400108e7d2c6e5d91ae1c87ff07fa223aa889ad486c69c89a22a31be6315a9ed"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "6875bdf1a0f7cd8932407ccd6e5394ad845a9ea3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "6da9c28c3d6cd06361d132f20ed23a767396cbcf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "dcd848b6b67e10822b5e328d70a0f3c4590ecd00",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/agent-usage-reminder/constants.d.ts",
+          "sha": "e75b3cb32ac711f8a9a1c3d7b9c5771e9d8bd40a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/agent-usage-reminder/constants.d.ts.map",
+          "sha": "c03ded6dbb94cdcaf7f9134b34cec3219b5d69a3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/agent-usage-reminder/constants.js",
+          "sha": "d4cf4d76db95760c6a7d2654b30224adb9887db3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/agent-usage-reminder/constants.js.map",
+          "sha": "f85dfa01439f3ed9af67a512a873b181854e91a6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/agent-usage-reminder/storage.d.ts.map",
+          "sha": "ef027439ac2f770756bf282b9d6bf069d83bc0c4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/agent-usage-reminder/storage.js",
+          "sha": "f2deeeeae42b74ea503ed878a43ef609fec83705",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/agent-usage-reminder/storage.js.map",
+          "sha": "e3352d0434a89b7728650bd7b84b8765a72af99a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/directory-readme-injector/constants.d.ts",
+          "sha": "8ac13776ec0059e97db6e144dacd3b3dcea62d9c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/directory-readme-injector/constants.d.ts.map",
+          "sha": "da3a8eccc311901272261d095c43aa5c3b57a06a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/directory-readme-injector/constants.js",
+          "sha": "0b293706402c19e1fc16145f3560274446f1bab1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/directory-readme-injector/constants.js.map",
+          "sha": "0795c1af168e1e755815940851a5ec48ff90cb26",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/directory-readme-injector/storage.d.ts.map",
+          "sha": "70d7ef95b9645886df259794b2f68faec9beaa3d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/directory-readme-injector/storage.js",
+          "sha": "e81dc19bd384063797717fed58f3ded57ed0f75f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/directory-readme-injector/storage.js.map",
+          "sha": "9ed6fcf9385720bab3051977c9a2650a60d14a85",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/index.d.ts",
+          "sha": "cdb69599e7bf114701ff264471bf35080fe42b84",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/index.d.ts.map",
+          "sha": "b880848aaf954b15686552e1517acde076c5bbc6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/index.js",
+          "sha": "21ecd5d0e27520325fb89ef88daf5c63ff529459",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/index.js.map",
+          "sha": "1df8e51516b6e65a979e7021c80fade232fa2b28",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/auto-invoke.d.ts.map",
+          "sha": "cc97858711c785c9b5d66729201fbbfe8ec8c726",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/auto-invoke.js",
+          "sha": "74883013e999f7089c17c4a361f3aa698b94b840",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/auto-invoke.js.map",
+          "sha": "925b3627a876dd45eef3b60df82542ecacf00cb1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/bridge.d.ts.map",
+          "sha": "737f80eba7cd829d74f5ee9a1b23c789e2f22810",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/bridge.js",
+          "sha": "660382bca72c988a60b7acd766085c4d135dd444",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/bridge.js.map",
+          "sha": "1faa3799897251e1198c6456b71e340f54d46e74",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/constants.d.ts",
+          "sha": "251e89b240b4e9860b6f3e5040fc83fbcd3d898d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/constants.d.ts.map",
+          "sha": "1c02c0ed030132c732541d14e62393de9de9c01a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/constants.js",
+          "sha": "390a8a131f8ad7223ffcb6292913a1d3fc66da02",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/constants.js.map",
+          "sha": "7ab7bf74714bacc03e0c19a6576772af1329084a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/finder.js",
+          "sha": "90de6ce5ceee4ca27240580bd5e46839885b5c82",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/finder.js.map",
+          "sha": "a7f7bd31434a263cfd27f231569006cd7b730dcf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/rules-injector/constants.d.ts",
+          "sha": "85e12789b557fa1e04b40263eba164815db2f0db",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/rules-injector/constants.d.ts.map",
+          "sha": "ab5054dabcebb73f0fcf947d0e33c8137cc67eb2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/rules-injector/constants.js",
+          "sha": "41038419c1358f1a302c3d4e0c99a0112a017c03",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/rules-injector/constants.js.map",
+          "sha": "b064f353ca48869d11a407058ec528e77337eee4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/rules-injector/storage.d.ts.map",
+          "sha": "c6dd46f934b39ef1775413a5c0ea44fe7853242c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/rules-injector/storage.js",
+          "sha": "e10477efc3b8e853b08cec57d237af953dab1e7b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/rules-injector/storage.js.map",
+          "sha": "4bd5fa56158900609f45bf2d0fbb93adadd15377",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/skill-bridge.cjs",
+          "sha": "b77b48deebf1b350cb80655e20d6ec1a8f9fa516",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
