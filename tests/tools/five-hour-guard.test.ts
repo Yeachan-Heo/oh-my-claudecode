@@ -2382,6 +2382,42 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start(`python3 "${hooks}/audit\${#FHG_NOBODY}"`, join(hooks, 'audit0')).status, 'a name that is not set').toBe(0);
   });
 
+  it('a PATH assignment is filled in with the values of its parameters before it is split into directories (PATH=$HOME/bin:/usr/bin audit, a name inside an entry); a name with no value stays as written; a relative entry that comes out of it is still joined with a directory that the command names', () => {
+    const f = fixture('foreign-path-parameters', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const home = join(f.dir, 'home');
+    mkdirSync(join(home, 'bin'), { recursive: true });
+    mkdirSync(join(f.dir, 'hooks', 'bin'), { recursive: true });
+    const text = '#!/bin/sh\nexit 0\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, file: string, env: Record<string, string> = {}) => {
+      writeFileSync(f.settings, JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: file, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const inHomeBin = join(home, 'bin', 'audit');
+    const inHooksBin = join(f.dir, 'hooks', 'bin', 'audit');
+    writeFileSync(inHomeBin, '#!/bin/sh\necho home\n', { mode: 0o755 });
+    writeFileSync(inHooksBin, '#!/bin/sh\necho hooks\n', { mode: 0o755 });
+    const ran = (command: string, env: Record<string, string>) => spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...env } }).stdout;
+    expect(ran('PATH=$HOME/bin:/usr/bin audit', { HOME: home }), 'what sh runs').toBe('home\n');
+    expect(ran(`cd ${f.dir}/hooks; PATH=$FHG_REL:/usr/bin audit`, { FHG_REL: 'bin' }), 'a relative entry that a variable gives').toBe('hooks\n');
+    writeFileSync(inHomeBin, text, { mode: 0o755 });
+    writeFileSync(inHooksBin, text, { mode: 0o755 });
+    // [the command, the file it runs, the env of settings.json]
+    const refused: Array<[string, string, Record<string, string>]> = [
+      ['PATH=$HOME/bin:/usr/bin audit', inHomeBin, { HOME: home }], ['PATH=${HOME}/bin audit', inHomeBin, { HOME: home }], [`PATH=${f.dir}/$FHG_NAME/bin audit`, inHomeBin, { FHG_NAME: 'home' }],
+      [`cd ${f.dir}/hooks; PATH=$FHG_REL:/usr/bin audit`, inHooksBin, { FHG_REL: 'bin' }],
+    ];
+    for (const [command, file, env] of refused) {
+      const r = start(command, file, env);
+      expect(r.status, `${command} with ${JSON.stringify(env)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${file}) and "program of another hook" (${file}) are the same file`);
+      expect(readText(file), `${command}: the program is intact`).toBe(text);
+    }
+    // a name with no value stays as written and no refusal comes of it
+    expect(start('PATH=$FHG_NOBODY/bin:/usr/bin audit', inHomeBin).status, 'a name that nobody sets').toBe(0);
+  });
+
   it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {
     const f = fixture('foreign-comments', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');

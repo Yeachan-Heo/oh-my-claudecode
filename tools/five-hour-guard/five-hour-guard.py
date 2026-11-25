@@ -602,7 +602,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
     simple.append(words)
     found = []
     assigned = {n: [own_value(n, x) for x in v] for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
-    given_path = [os.path.expanduser(os.path.expandvars(d)) for v in assigned.get('PATH', []) for d in v.split(os.pathsep)]   # the PATH that settings.json gives the hook processes: the guard does not have it, the shell of the hook looks a bare word up there
+    given_path = [os.path.expanduser(os.path.expandvars(d)) for v in assigned.get('PATH', []) for variant in parameter_variants(v, assigned) for d in variant.split(os.pathsep)]   # the PATH that settings.json gives the hook processes: the guard does not have it, the shell of the hook looks a bare word up there
     for words in simple:
         for word in words:
             name, equals, value = word.partition('=')
@@ -622,7 +622,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
                 if directory and len(directory) <= MAX_PATH_CHARS and '\0' not in directory and os.path.isdir(directory) and directory not in named:
                     named.append(directory)
     for words in simple:
-        path_dirs = os.environ.get('PATH', os.defpath).split(os.pathsep) + [d for w in words if w.startswith('PATH=') for d in w[5:].split(os.pathsep)] + given_path
+        path_dirs = os.environ.get('PATH', os.defpath).split(os.pathsep) + [os.path.expanduser(os.path.expandvars(d)) for w in words if w.startswith('PATH=') for piece in word_pieces(w, assigned) if piece.startswith('PATH=') for d in piece[5:].split(os.pathsep)] + given_path   # a PATH= word is filled in with the values of its parameters first, then split
         directories = [''] + path_dirs + [os.path.normpath(os.path.join(n, d)) for d in path_dirs if d and not os.path.isabs(d) for n in named] + named   # a PATH=dir word adds its directories for every word of the simple command; a relative PATH entry is also looked up from each directory that the command names (`cd /dir; PATH=bin prog`)
         for word in words:
             if word in exclude:
