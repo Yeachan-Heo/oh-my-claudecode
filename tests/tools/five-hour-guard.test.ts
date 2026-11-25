@@ -2694,7 +2694,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const named: Array<[string, string]> = [
       [`python3 ${audit} # note`, audit], [`echo '# x ${audit}'`, audit], [`echo "a #b ${audit}"`, audit], [`python3 ${hashed}`, hashed], [`python3 \\# ${audit}`, audit],
       [`true # note\npython3 ${audit}`, audit], [`true; python3 ${audit} # note`, audit], [`echo $# ${audit}`, audit], ['FHG_A=1; python3 "${FHG_A#x}" ' + audit, audit],
-      [`sh -c 'python3 ${audit} # note'`, audit], [`echo \${'$'}'a #x' ${audit}`, audit], [`cat <<EOF\n# ${audit}\nEOF`, audit],
+      [`sh -c 'python3 ${audit} # note'`, audit], [`echo $'/a #x' ${audit}`, audit], [`cat <<EOF\n# ${audit}\nEOF`, audit],
     ];
     for (const [command, file] of named) {
       writeFileSync(f.settings, settings(command), 'utf8');
@@ -2961,6 +2961,53 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     // read as before: another ending of the word, and a default word
     for (const command of ['bash "$FHG_OTHER_DIR"/tools/chmura/x.sh', 'python3 "$FHG_OTHER_DIR/other"', 'python3 "${FHG_OTHER_AUDIT:-x}"']) {
       const r = start(command, { state_file: audit }, {}, guardEnv);
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
+  it('a parameter expansion that the scan does not model (replacement, case change, a transformation with @, indirection, a slice, an array) is not read to its end, so the guard refuses to start; a plain ${NAME}, the modeled operators and braces without a dollar are read as before', () => {
+    const f = fixture('foreign-unmodeled-expansion', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settingsEnv = { FHG_X: `${audit}.py`, FHG_Y: 'FHG_X' };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ env: settingsEnv, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const expansions = ['${FHG_X/.py/}', '${FHG_X//.py/}', '${FHG_X/#?/}', '${FHG_X/%.py/}', '${FHG_X^}', '${FHG_X^^}', '${FHG_X,}', '${FHG_X,,}', '${FHG_X@Q}', '${FHG_X@U}', '${!FHG_Y}', '${FHG_X:0:5}', '${FHG_X:2}', '${FHG_X[0]}', '${FHG_X[@]}',
+      '${#FHG_X[@]}', '${FHG_X:-${FHG_X/.py/}}', '${FHG_X/${FHG_NOBODY}/y}'];
+    if (HAS_BASH) {   // what the shell makes of the first two: the file that the guard writes
+      const run = (expression: string) => spawnSync('bash', ['-c', `printf %s "${expression}"`], { encoding: 'utf8', env: { ...process.env, ...settingsEnv } });
+      expect(run('${FHG_X/.py/}').stdout, 'the replacement runs the file').toBe(audit);
+      expect(run('${FHG_X//.py/}').stdout).toBe(audit);
+      for (const expression of expansions.slice(0, 16)) expect(run(expression).status, `${expression} is an expansion of the shell`).toBe(0);
+    }
+    for (const expression of expansions) {
+      for (const command of [`python3 "${expression}"`, `bash -c 'python3 "${expression}"'`, `true; python3 -u --log=${expression}`]) {
+        for (const key of ['state_file', 'pause_file', 'log_file']) {
+          const r = start(command, { [key]: audit });
+          expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+          expect(r.stderr).not.toMatch(/Traceback/);
+          expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
+        }
+      }
+    }
+    // read as before: the plain form and the operators that the scan models, whichever file is meant
+    for (const expression of ['${FHG_X}', '${FHG_X:-x}', '${FHG_X-x}', '${FHG_X:=x}', '${FHG_X:+x}', '${FHG_X#x}', '${FHG_X##x}', '${#FHG_X}', '${FHG_X?x}']) {
+      const r = start(`python3 "${expression}"`, { state_file: audit });
+      expect(r.status, `${expression}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+    const trimmed = start('bash -c \'python3 "${FHG_X%.py}"\'', { state_file: audit });
+    expect(trimmed.status, `${trimmed.stdout}${trimmed.stderr}`).toBe(2);
+    expect(trimmed.stderr, 'a modeled operator names the file').toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+    for (const command of ['find . -name x -exec python3 {} \\;', 'python3 {a,b}', 'awk \'{print $1}\' x', 'python3 $FHG_X']) {
+      const r = start(command, { state_file: audit });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
     }
   });

@@ -602,6 +602,22 @@ def trimmed_values(values, operator, pattern):
     return list(dict.fromkeys(found))
 
 
+BRACED = re.compile(r'\$\{[^{}]*\}')   # an innermost `${...}`
+
+
+def unmodeled_expansion(text):
+    """Whether the text holds a `${...}` that is none of the forms of PARAMETER once the ones inside it are taken out: a replacement
+    (`${A/x/y}`, `${A//x/y}`), a change of case (`${A^}`, `${A,}`), a transformation (`${A@Q}`), an indirection (`${!A}`), a slice
+    (`${A:1:2}`) or an array (`${A[0]}`). The shell makes a word of those that the scan cannot tell."""
+    while True:
+        m = BRACED.search(text)
+        if not m:
+            return False
+        if not PARAMETER.fullmatch(m.group(0)):
+            return True
+        text = text[:m.start()] + 'x' + text[m.end():]
+
+
 def parameter_variants(piece, assigned):
     """The piece filled in every way its parameters can be: `$NAME` and `${NAME}` with each value that the command assigns to NAME and the
     one that the guard has (a name that has none stays as written); `${NAME:-word}`, `-`, `:=` and `=` with those values and with the word;
@@ -609,7 +625,10 @@ def parameter_variants(piece, assigned):
     in innermost first, pass after pass until a pass changes nothing (a name with no value and no word stays as written, so that is where it
     ends). A chain of parameters ends within the `$` of the word plus the names that the command assigns; a pass beyond that is a cycle
     (`A=$B B=$A`) or an expansion that does not end. More than MAX_COMMAND_PROGRAMS variants, a text longer than MAX_COMMAND_CHARS or no
-    end of the passes is ScanIncomplete."""
+    end of the passes is ScanIncomplete. A `${...}` of another form (see unmodeled_expansion) is ScanIncomplete too: the shell makes a word of it that
+    is not known here."""
+    if unmodeled_expansion(piece):
+        raise ScanIncomplete('command has a parameter expansion that the scan does not read like a shell (a replacement, a change of case, an indirection, a slice or an array)')
     variants = [piece]
     for _ in range(piece.count('$') + len(assigned) + 2):
         grown = []
