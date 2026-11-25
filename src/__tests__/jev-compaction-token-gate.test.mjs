@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { cutInTokens, listTokens, register, worthInTokens } from '../../hooks/jev-compaction.mjs';
+import { cutInTokens, listTokens, ratesFrom, register, worthInTokens } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const TARGET_20 = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
@@ -92,9 +92,10 @@ function parallelSession(batches, size, { chars = 300 } = {}) {
   return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
 }
 
-// The compaction through register(on): the record, the scoring requests and what the host gets back. `form: false` leaves the API form out (the host answers rows).
-async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after } = {}) {
-  const fake = fakeDollar({ env, usage: usageOf(tokens), messages, api: form ? apiOf(messages, after) : undefined });
+// The compaction through register(on): the record, the scoring requests and what the host gets back. `form: false` leaves the API form out (the host answers rows);
+// `api` is the API form the host answers instead of the one made from the rows; `tokens: null` is a host with no usage to give (the tokens before are estimated).
+async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after, api } = {}) {
+  const fake = fakeDollar({ env, usage: usageOf(tokens), messages, api: api ?? (form ? apiOf(messages, after) : undefined) });
   const handlers = {};
   register((event, hook) => { handlers[event] = hook; });
   const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger, messages }), async () => ({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] }));
@@ -363,5 +364,37 @@ describe('cutInTokens and worthInTokens', () => {
 
   it('the list of the API form counts an image of a result at the image rate', () => {
     expect(listTokens(apiOf(session(3)))).toBeGreaterThan(3 * 2348);
+  });
+
+  // A standalone image block of a message (a screenshot the user attached) is a block like the others: the image rate and the overhead of a block, and the message
+  // costs its constant once.
+  const RATES = ratesFrom('{"RATE_IMAGE":1000,"RATE_BLOCK":50}');
+  it('a standalone image block costs the image rate and the overhead of a block, as every other block of its message', () => {
+    const images = (n) => Array.from({ length: n }, () => IMAGE);
+    // 80 images in one message: 80 blocks of 1050 and the constant of the message (-40.5) once.
+    expect(listTokens([{ role: 'user', content: images(80) }], RATES)).toBeCloseTo(80 * 1050 - 40.5, 6);
+    // The same images beside a text and a call of the assistant: each block takes its overhead, the images no less than the others.
+    const withText = listTokens([{ role: 'user', content: [{ type: 'text', text: 'Look at these.' }, ...images(3)] }], RATES) - listTokens([{ role: 'user', content: [{ type: 'text', text: 'Look at these.' }] }], RATES);
+    expect(withText).toBeCloseTo(3 * 1050, 6);
+    // The image inside a result is no block of the message: the result's own block holds it, at the image rate.
+    const inResult = [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: [IMAGE] }] }];
+    expect(listTokens(inResult, RATES)).toBeCloseTo(1000 + 50 - 40.5, 6);
+  });
+
+  it('the tokens before and the prediction of a compaction with no usage from the host count each standalone image at its rate and the overhead of its block', async () => {
+    const env = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_RATES: '{"RATE_IMAGE":1000,"RATE_BLOCK":50}' };
+    const rows = session(30, { shot: () => false, chars: 600 });
+    const run = async (n) => {
+      const api = apiOf(rows);
+      api[0].content.push(...Array.from({ length: n }, () => IMAGE));
+      return (await compactRun(env, rows, { tokens: null, trigger: 'manual', api })).record;
+    };
+    const none = await run(0);
+    const some = await run(20);
+    expect(none).toMatchObject({ result: 'jev', tokens_source: 'estimate' });
+    expect(some).toMatchObject({ result: 'jev', tokens_source: 'estimate' });
+    // 20 more blocks in the first message: 20 images of 1000 and 20 blocks of 50, the same cut.
+    for (const key of ['tokens_before', 'tokens_after_pred']) expect(some[key] - none[key], key).toBeGreaterThanOrEqual(20 * 1050 - 1);
+    for (const key of ['tokens_before', 'tokens_after_pred']) expect(some[key] - none[key], key).toBeLessThanOrEqual(20 * 1050 + 1);
   });
 });

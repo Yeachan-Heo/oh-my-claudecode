@@ -17,6 +17,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { boundExcerpts, classifyFailure, readConfig, wellFormedBody, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass, tailRedacted, pasteMode, pasteTags, ownerMarkerPatterns, ownerMarked, replyRuns, replyTrace, directReplyRows } from '../../hooks/jev-compaction.mjs';
 import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
+import { sweepPastes } from '../../scripts/lib/jev-compaction-state.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
 import { boundExcerpts as tsBoundExcerpts, excerptCharsFor, parseJevConfig } from '../hooks/jev/config.ts';
@@ -3623,6 +3624,30 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     expect(ownerMarked('anything', [])).toBe(false);
   });
 
+  it('ignores an owner marker that repeats a group holding a repeat, an optional part or an alternative, and keeps every other one', () => {
+    // The shapes that take exponential time on a text that nearly matches: the group repeated holds something that can match the same text in more than one way.
+    const unsafe = ['(a+)+$', '(a*)*b', '((a+))+$', '(?:a+)+$', '(a|a)*$', '(a|aa)+$', '(?:x|y+)*z', '(\\w+\\s?)*$', '(a?){30}a{30}', '(a+){2,}$', '(?=(a+)+$)', '(?<w>\\w+\\.)+x', '(a+?)+$'];
+    for (const source of unsafe) expect(ownerMarkerPatterns(source), source).toEqual([]);
+    // One of a list is left out; the others stay.
+    expect(ownerMarkerPatterns('ok,(a+)+$,^fine').map(String)).toEqual(['/ok/imu', '/^fine/imu']);
+    // Repeats of one character or class, groups that are repeated but hold neither, groups that hold something but are no repeated one, and escaped or classed signs.
+    const safe = ['^note:', '\\bplease\\s+\\w+\\s+me\\b', '(?:foo)+bar', '(?:ab){3}', '(foo|bar)baz', '^(?:thanks|thx)\\b', '(a+)?b', '(a|b){1}c', 'a{2,3}b', '[ ]<-+[ ]', '[(+*|]+x', '\\(a+\\)+', '\\p{L}+(?:x)+', '(?<=a+)b', '(?:\\s*please\\b)?'];
+    for (const source of safe) expect(ownerMarkerPatterns(source), source).toHaveLength(1);
+  });
+
+  it('a pathological owner marker is left out, so a pasted tag with a long run that nearly matches it is not held up and the stage goes on as with no markers', async () => {
+    // Without the check 27 characters of `a` and an `x` hold the hook for seconds (the test of a pattern is synchronous, no deadline stops it).
+    const nearly = tag(`${filler('alpha', 1500)} ${'a'.repeat(27)}x ${filler('omega', 1500)}`);
+    const messages = withPastes([`${OUTSIDE} ${nearly}`]);
+    const t0 = performance.now();
+    const run = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_OWNER_MARKERS: '(a+)+$' } });
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(run.record.pastes).toMatchObject({ owner_marked: 0, moved: 1 });
+    // A safe marker beside it still holds the tag back.
+    const marked = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_OWNER_MARKERS: '(a+)+$,omega' } });
+    expect(marked.record.pastes).toMatchObject({ owner_marked: 1, moved: 0 });
+  });
+
   it('reads OMC_JEV_COMPACT_PASTES as off, shadow or active in any case; anything else is off', () => {
     expect([undefined, '', 'off', 'yes', '1', 'true', 'activ'].map(pasteMode)).toEqual(Array(7).fill('off'));
     expect(['active', 'Active', ' SHADOW ', 'shadow'].map(pasteMode)).toEqual(['active', 'active', 'shadow', 'shadow']);
@@ -3927,16 +3952,52 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     expect(userRow(stalled.out, OUTSIDE).text).toBe(`${OUTSIDE} ${sized(3000, 1)}`);
   });
 
-  it('names the file after the sha-256 of the tag: an identical file is reused without a write, a broken one is written again', async () => {
+  it('names the file after the sha-256 of the tag: an identical file is reused (and written again, so that it is as new as the trace), a broken one is written again', async () => {
     const report = sized(3000);
     const messages = withPastes([`${OUTSIDE} ${report}`]);
     const path = `${DIR}/${createHash('sha256').update(report).digest('hex').slice(0, 32)}.txt`;
     const reused = await compactWith(messages, (fake) => fake.files.set(path, report));
     expect(reused.record.pastes).toMatchObject({ reused: 1, written: 0, moved: 1, installed: true });
-    expect(reused.calls.write).toBe(1); // the record
+    expect(reused.calls.write).toBe(2); // the file and the record
+    expect(reused.files.get(path)).toBe(report);
     const broken = await compactWith(messages, (fake) => fake.files.set(path, report.slice(0, 100)));
     expect(broken.files.get(path)).toBe(report);
     expect(broken.record.pastes).toMatchObject({ reused: 0, written: 1, moved: 1 });
+  });
+
+  it('a file that a later compaction finds written already is as new as that compaction: the retention sweep of another session leaves what its trace points to', async () => {
+    // A session that lives longer than OMC_JEV_PASTES_DAYS archives a tag, and archives the same tag again: the file of the first time is old, the directory with it.
+    const state = mkdtempSync(join(tmpdir(), 'jev-pastes-reuse-'));
+    try {
+      const report = sized(3000);
+      const messages = withPastes([`${OUTSIDE} ${report}`]);
+      const dir = join(state, 'compaction-pastes', 'sess-1');
+      const file = join(dir, `${createHash('sha256').update(report).digest('hex').slice(0, 32)}.txt`);
+      const compact = async () => {
+        const fake = fakeDollar({ env: { ...PASTES, OMC_JEV_LOG_DIR: state }, respond: jevSays(0.95), messages, diskPrefix: state });
+        fake.$.session.messages = async (opts) => (opts?.as === 'api' ? apiOf(messages) : messages);
+        return load()['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), summaryNext());
+      };
+      const sweepEnv = { OMC_JEV_LOG_DIR: state, OMC_JEV_PASTES_DAYS: '30' };
+      await compact();
+      expect(readFileSync(file, 'utf8')).toBe(report);
+      const old = new Date(Date.now() - 40 * 24 * 3600_000);
+      utimesSync(file, old, old);
+      utimesSync(dir, old, old);
+      const again = await compact();
+      expect(userRow(again, OUTSIDE).text).toContain(file); // the trace of the new compaction names the old file
+      expect(Date.now() - statSync(file).mtimeMs).toBeLessThan(24 * 3600_000);
+      // Another session starts: its sweep removes the directories whose newest file is older than the days, and not this one.
+      expect(sweepPastes('other-session', Date.now(), sweepEnv)).toBe(0);
+      expect(readFileSync(file, 'utf8')).toBe(report);
+      // Without a compaction that reuses it, the same file and directory are old and are removed.
+      utimesSync(file, old, old);
+      utimesSync(dir, old, old);
+      expect(sweepPastes('other-session', Date.now(), sweepEnv)).toBe(1);
+      expect(existsSync(file)).toBe(false);
+    } finally {
+      rmSync(state, { recursive: true, force: true });
+    }
   });
 
   it('writes no file when the compaction ends in the built-in summary, and the scoring request has the first claim on OMC_JEV_MAX_REQUESTS', async () => {

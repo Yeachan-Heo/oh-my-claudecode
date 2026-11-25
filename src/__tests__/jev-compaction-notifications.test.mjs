@@ -166,6 +166,39 @@ describe('a notification whose background call was compacted earlier', () => {
     expect(open.bodies.join('')).toContain('PLAINBODY');
   });
 
+  // The same on Windows, in two passes: the input of a call holds the path with backslashes (and a JSON form with doubled ones), a drive letter, or both kinds of separator.
+  const WINDOWS = [
+    ['backslashes', { tool: 'Bash', input: (f) => ({ command: `type ${f}` }), file: 'C:\\Users\\u\\AppData\\Local\\Temp\\claude\\tasks\\abcdef123456.output' }],
+    ['mixed separators and a drive letter', { tool: 'Bash', input: (f) => ({ command: `cat ${f}` }), file: 'D:/work/proj\\.claude\\tasks/abcdef123456.output' }],
+    ['the file_path of a Read, in its JSON form', { tool: 'Read', input: (f) => ({ file_path: f }), file: 'C:\\Users\\u\\AppData\\Local\\Temp\\claude\\tasks\\abcdef123456.output' }],
+  ];
+  for (const [name, { tool, input, file }] of WINDOWS) {
+    it(`a later read of that output file is held on Windows too, in the second pass after the call was removed: ${name}`, async () => {
+      const w = talk(30);
+      const readOf = (id, f, body) => [
+        { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: id, tool, input: input(f) }] },
+        { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `${body} ${'s'.repeat(7000)}`, isError: false }] },
+      ];
+      const secretLaunch = { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'bg1', text: `Command running in background. Output is being written to: ${file}`, isError: false }] };
+      const fillers = [1, 2, 3].flatMap((k) => [
+        { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: `rd${k}`, tool: 'Bash', input: { command: 'cat a.txt' } }] },
+        { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `rd${k}`, text: `Filler ${k} ${'s'.repeat(7000)}`, isError: false }] },
+      ]);
+      const first = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('cat ~/.ssh/id_rsa'), secretLaunch, ...fillers, ...w.slice(3)]);
+      expect(first.record).toMatchObject({ result: 'jev' });
+      // The first pass took the call away with its result: nothing in the conversation names the output file or says what the task was.
+      expect(JSON.stringify(first.out.messages)).not.toContain('abcdef123456');
+      const second = await compactRun(NOTE_ENV, [...first.out.messages.slice(0, 4), ...readOf('r1', file, 'SECRETBODY'), ...first.out.messages.slice(4)]);
+      expect(second.record).toMatchObject({ result: 'jev', secret_held: 1 });
+      expect(second.bodies.join('')).not.toContain('SECRETBODY');
+      expect(JSON.stringify(second.out.messages)).not.toContain('SECRETBODY');
+      // A read of the same path whose call is still there is scored, so the normalized path does not hold what it should not.
+      const open = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('npm test'), secretLaunch, ...readOf('r1', file, 'PLAINBODY'), ...w.slice(3)]);
+      expect(open.record).toMatchObject({ result: 'jev', secret_held: 0 });
+      expect(open.bodies.join('')).toContain('PLAINBODY');
+    });
+  }
+
   it('is scored as any other when its call and the name of the file are still there', async () => {
     const w = talk(30);
     const { record, bodies } = await compactRun(NOTE_ENV, [...w.slice(0, 3), call('npm test'), launched, notice('PLAINBODY'), ...w.slice(3)]);

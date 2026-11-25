@@ -81,7 +81,7 @@
  *   KEEP_LAST messages and the open tool loop, and holds no image or file block (the API form of the conversation has to be available to tell);
  * - it names no secret or private path and masking leaves it unchanged (it goes neither to Jev nor to a file otherwise);
  * - it carries none of the user's own style as OMC_JEV_COMPACT_OWNER_MARKERS describes it (comma separated regular expression
- *   sources; empty by default, so no tag is held back by it);
+ *   sources; empty by default, so no tag is held back by it; one that repeats a group holding a repeat is ignored, see repeatsRepeat);
  * - Jev, who gets the whole tag (one request per tag, at most PASTE_MAX_ASKS of the largest, so every removed character was
  *   read), says yes with a probability of PASTE_YES (OMC_JEV_COMPACT_PASTE_YES) or more to "is all of it pasted material, none of it the user's own writing"
  *   (the requests start after the scoring ones and count against OMC_JEV_MAX_REQUESTS, the breaker and OMC_JEV_MAX_RPM);
@@ -92,7 +92,8 @@
  * text they move comes off the prediction, and a fallback after that leaves the files). `shadow` asks and counts but writes
  * nothing and changes nothing; `active` acts only while the point itself is active. Files:
  * <state dir>/compaction-pastes/<session>/<sha256 of the tag, 32 hex>.txt, named by their content so two compactions write the
- * same text; scripts/lib/jev-compaction-state.mjs removes old session directories (OMC_JEV_PASTES_DAYS). The record gets
+ * same text, and a file found written already is written again so that it is as new as its trace; scripts/lib/jev-compaction-state.mjs removes old
+ * session directories (OMC_JEV_PASTES_DAYS). The record gets
  * `pastes` with the counts (tags, why they stayed, requests, answers, files, characters moved, installed) and, for each tag
  * asked about, the name its file has (so shadow can be checked against the transcript), its size and Jev's probability.
  *
@@ -1466,8 +1467,9 @@ const unknownFile = (word, known) => {
 };
 // The same for a call that reads such a file (a `cat` or `tail` of `.../tasks/<id>.output`): the file of a background call that an earlier compaction cut.
 function readsUnknownOutput(input, known) {
-  // Only the part from `/tasks/` on (the file's own name is what the index holds too), so that the read is linear whatever the input holds.
-  for (const m of inputJson(input).matchAll(/\/tasks\/[\w.-]+\.output\b/g)) if (unknownFile(m[0], known)) return true;
+  // Every run of slashes and backslashes as one slash first (a Windows path, its JSON form with doubled backslashes, mixed separators), as the index of the files
+  // is kept. Then only the part from `/tasks/` on (the file's own name is what the index holds too), so that the read is linear whatever the input holds.
+  for (const m of inputJson(input).replace(/[\\/]+/g, '/').matchAll(/\/tasks\/[\w.-]+\.output\b/gi)) if (unknownFile(m[0], known)) return true;
   return false;
 }
 // Does a string of the input name one of the files as a whole name (not a part of a longer name or path)? The files
@@ -2160,7 +2162,9 @@ function traceLine(c) {
 function shortText(c) {
   if (c.note) {
     const body = /<result>([\s\S]*?)(?:<\/result>|$)/.exec(c.res.text);
-    const kept = body ? `${c.summary}\n${body[1].slice(0, SHORT_CHARS)}` : c.res.text.slice(0, SHORT_CHARS);
+    // The summary stays a <summary> field, after the source: the next compaction reads it from there (noteSummary), not the first line it finds, which is the source.
+    const summary = c.summary ? `<summary>${c.summary}</summary>\n` : '';
+    const kept = `${summary}${body ? body[1].slice(0, SHORT_CHARS) : c.res.text.slice(0, SHORT_CHARS)}`;
     // The source stays in the copy (the task ids and output files of the notification, the first few): the next compaction ties it to its call by them.
     const source = [...c.res.text.matchAll(/<(task-id|output-file)>\s*([^<]{1,200}?)\s*<\/\1>/g)].slice(0, 8).map((m) => `<${m[1]}>${m[2]}</${m[1]}>\n`).join('');
     return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${source}${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]\n</task-notification>`;
@@ -2540,7 +2544,7 @@ export function listTokens(api, rates = DEFAULT_RATES) {
         let images = 0;
         for (const x of parts) { if (x?.type === 'text') text += strOf(x.text); else if (x?.type === 'image') images += RATE_IMAGE; }
         tok += RATE_OUT * text.length + RATE_NON_ASCII * nonAscii(text) + images + over;
-      } else if (b.type === 'image') tok += RATE_IMAGE;
+      } else if (b.type === 'image') tok += RATE_IMAGE + over;
       else tok += over;
     }
     // RATE_MESSAGE is negative, so a message of few blocks with a low RATE_BLOCK override would cost less than nothing: a message costs zero at least.
@@ -3297,8 +3301,61 @@ export function pasteTags(text) {
   return tags;
 }
 
+// Whether a regular expression source repeats a group (`*`, `+`, `{n,}`, or `{n,m}` with m above 1) that holds a repeat, an optional part or an alternative:
+// `(a+)+$`, `(a|a)*$`, `(a?){30}a{30}`. A text that nearly matches takes such an expression time that grows with the power of its length, and a synchronous test cannot be
+// stopped by the compaction's deadline. A hooks module may import only plain files of its plugin, so this is read from the source here and not by a package. A group that
+// is no repeated one (`(foo|bar)baz`, `(?:ab)+c`) and every repeat of a single character or class (`\w+\s+me`, `[ ]<-+[ ]`) pass.
+function repeatsRepeat(source) {
+  const text = String(source);
+  const open = /\((?:\?(?:[:=!]|<[=!]|<[^>]*>))?/y;
+  const counted = /\{(\d+)(?:,(\d*))?\}/y;
+  const frames = [{ rep: false }]; // the groups that are open; `rep`: a repeat, an optional part or an alternative stands in it
+  let last; // the group that just closed, when the next character may repeat it
+  const skip = (from, close) => { const at = text.indexOf(close, from); return at < 0 ? text.length : at + 1; };
+  for (let i = 0; i < text.length;) {
+    const c = text[i];
+    const before = last;
+    last = undefined;
+    if (c === '\\') {
+      const next = text[i + 1];
+      i = (next === 'p' || next === 'P' || next === 'u') && text[i + 2] === '{' ? skip(i + 2, '}') : next === 'k' && text[i + 2] === '<' ? skip(i + 2, '>') : i + 2;
+    } else if (c === '[') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== ']') j += text[j] === '\\' ? 2 : 1;
+      i = j + 1;
+    } else if (c === '(') {
+      open.lastIndex = i;
+      open.test(text);
+      i = open.lastIndex;
+      frames.push({ rep: false });
+    } else if (c === ')') {
+      i++;
+      if (frames.length > 1) { last = frames.pop(); frames[frames.length - 1].rep ||= last.rep; }
+    } else if (c === '|') {
+      frames[frames.length - 1].rep = true;
+      i++;
+    } else {
+      let max;
+      if (c === '*' || c === '+') max = Infinity;
+      else if (c === '?') max = 1;
+      else if (c === '{') {
+        counted.lastIndex = i;
+        const m = counted.exec(text);
+        if (m) { max = m[2] === undefined ? Number(m[1]) : m[2] === '' ? Infinity : Number(m[2]); i = counted.lastIndex - 1; }
+      }
+      i++;
+      if (max !== undefined) {
+        if (text[i] === '?') i++; // a lazy repeat
+        if (before?.rep && max > 1) return true;
+        frames[frames.length - 1].rep = true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
- * OMC_JEV_COMPACT_OWNER_MARKERS: regular expression sources separated by commas (a comma inside `{}` or `[]` does not separate), each compiled with the flags `imu`. A source that is not a valid expression is ignored. Unset or empty: no patterns.
+ * OMC_JEV_COMPACT_OWNER_MARKERS: regular expression sources separated by commas (a comma inside `{}` or `[]` does not separate), each compiled with the flags `imu`. A source that is not a valid expression, or that repeats a group holding a repeat, an optional part or an alternative (the shapes that take exponential time on a text that nearly matches), is ignored. Unset or empty: no patterns.
  */
 export function ownerMarkerPatterns(raw) {
   const sources = [];
@@ -3318,7 +3375,10 @@ export function ownerMarkerPatterns(raw) {
   sources.push(current);
   const patterns = [];
   for (const source of sources.map((x) => x.trim()).filter(Boolean)) {
-    try { patterns.push(new RegExp(source, 'imu')); } catch { /* an invalid pattern is ignored */ }
+    try {
+      const pattern = new RegExp(source, 'imu');
+      if (!repeatsRepeat(source)) patterns.push(pattern); // one that repeats a repeat is ignored: it could stall the hook on a pasted tag
+    } catch { /* an invalid pattern is ignored */ }
   }
   return patterns;
 }
@@ -3492,16 +3552,18 @@ async function fsCall($, gate, work) {
   return r;
 }
 
-// Writes the text to the file and reads it back: 'written', 'reused' (the file held it already), or why not: 'timeout', 'write', 'read'.
+// Writes the text to the file and reads it back: 'written', 'reused' (the file held it already), or why not: 'timeout', 'write', 'read'. A file that held the text
+// is written again all the same: the retention sweep of another session (sweepPastes) goes by the age of the newest file of the directory, and the trace this compaction
+// installs would otherwise point at a file that is as old as its first writing, which the next sweep may remove.
 async function savePaste($, gate, path, text) {
   const old = await fsCall($, gate, () => $.fs.read(path));
   if (old.timeout) return 'timeout';
-  if (old.value === text) return 'reused';
   const put = await fsCall($, gate, () => $.fs.write(path, text));
   if (!('value' in put)) return put.timeout ? 'timeout' : 'write';
   const back = await fsCall($, gate, () => $.fs.read(path));
   if (back.timeout) return 'timeout';
-  return back.value === text ? 'written' : 'read';
+  if (back.value !== text) return 'read';
+  return old.value === text ? 'reused' : 'written';
 }
 
 // Once the module's own result is certain (with a token target: before the plan, which takes the moved text off the prediction): writes the files
