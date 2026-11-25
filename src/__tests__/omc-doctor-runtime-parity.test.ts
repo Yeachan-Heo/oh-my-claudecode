@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, existsSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -112,5 +112,46 @@ describe.skipIf(process.platform === 'win32')('omc-doctor: Step 4 names the vers
       }
     }
     expect(differences).toEqual([]);
+  });
+
+  // The loaded root as the session sets it, against the registry: the doctor must name the version the runtime compares.
+  const compareWithRuntime = (cases: Array<{ label: string; build: (dir: string) => { root: string; registry: Record<string, unknown> } }>) => {
+    const differences: Array<{ label: string; doctor: string; runtime: string }> = [];
+    for (const { label, build } of cases) {
+      const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-parity-'));
+      try {
+        mkdirSync(path.join(dir, 'plugins'), { recursive: true });
+        const { root, registry } = build(dir);
+        writeRegistry(dir, registry);
+        writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.8.0 -->\n');
+        const run = runCommand(CLAUDE_MD_VERSION, dir, { env: { CLAUDE_PLUGIN_ROOT: root }, timeout: 30_000 });
+        expect(run.error).toBeUndefined();
+        const printed = (run.stdout.match(/^Latest cached plugin version: (.*)$/m) ?? [])[1] ?? '(no line)';
+        const expected = runtimeVersion(dir, root, []);
+        const shown = expected === null || expected === undefined ? '(none)' : typeof expected === 'string' ? expected : JSON.stringify(expected);
+        if (printed !== shown) differences.push({ label, doctor: printed, runtime: shown });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+    expect(differences).toEqual([]);
+  };
+
+  // The runtime joins the root and the file name as text (join folds a `..` after a link away), so a root spelled so names the manifest of that directory.
+  test('the loaded root with a .. after a link is read as the runtime reads it', () => {
+    compareWithRuntime([
+      {
+        label: 'a root with a .. after a link: the manifest of the text-folded directory',
+        build: (dir) => {
+          const checkout = path.join(dir, 'checkout');
+          mkdirSync(path.join(dir, 'other', 'nested'), { recursive: true });
+          makeVersion(path.join(dir), 'checkout', '5.9.0');
+          makeVersion(path.join(dir), 'other', '5.8.0');
+          symlinkSync(path.join(dir, 'other', 'nested'), path.join(checkout, 'link'));
+          const root = `${checkout}/link/..`;
+          return { root, registry: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.9.0', installPath: root }] } };
+        },
+      },
+    ]);
   });
 });

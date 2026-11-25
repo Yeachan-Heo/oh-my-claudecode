@@ -358,7 +358,8 @@ const manifestVersion = (dir) => {
 // whatever its type (a damaged package.json may hold a number or an object); '' for no package, an unreadable one or a falsy version.
 const loadedPackageVersion = (root) => {
   try {
-    return readJson([root, 'package.json'].join(path.sep)).version || '';
+    // The runtime joins the root and the file name as text (join folds a .. after a link away), so the path is folded the same way here.
+    return readJson(path.join(root, 'package.json')).version || '';
   } catch {
     return '';
   }
