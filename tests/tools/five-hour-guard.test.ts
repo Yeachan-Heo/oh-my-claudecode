@@ -2489,6 +2489,38 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start({ state_file: join(hooks, 'other') }).status, 'the escaped * is a character').toBe(0);
   });
 
+  it('a control sequence in a Bash quote (dollar, apostrophe, backslash, c) is a command that is not read to its end: the guard refuses to start, also in a quoted command; the other escapes are decoded as before, and the same text as data is no reason to refuse', () => {
+    const f = fixture('foreign-ansi-c-control', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, key: string, file = audit) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: file }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const command of [`python3 $'${hooks}/a\\cbdit'`, `python3 x $'\\cA'`, `sh -c "python3 $'${hooks}/a\\cbdit'"`]) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, key);
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/control sequence in a Bash quote.*not read to its end/s);
+        expect(r.stderr).not.toMatch(/Traceback/);
+      }
+    }
+    // not refused: a backslash twice before c (an escaped backslash and a c), single quotes, an escaped dollar sign, no Bash quote at all
+    const other = join(hooks, 'other');
+    for (const command of [`python3 $'${hooks}/ot\\\\cher'`, `python3 '\\cx'`, `python3 \\$'a\\cb'`, 'python3 a\\cb', `python3 "$'a\\cb'"`]) {
+      const r = start(command, 'state_file', other);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+    const decoded = start(`python3 $'${hooks}/a\\x75dit'`, 'state_file');
+    expect(decoded.status, 'the other escapes are decoded as before').toBe(2);
+    expect(decoded.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+  });
+
   it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {
     const f = fixture('foreign-comments', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');

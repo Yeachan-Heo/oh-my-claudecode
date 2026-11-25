@@ -422,7 +422,8 @@ def decode_ansi_c(command):
     """The command with each Bash quote `$'...'` replaced by its text, decoded as Bash does and quoted as plain text (`$'/dir/a\\x75dit'` is
     `/dir/audit`), and the `$` of `$"..."` dropped (the same word in the C locale), outside single and double quotes and not after a backslash. The
     escapes are `\\a \\b \\e \\E \\f \\n \\r \\t \\v`, a backslash, `'`, `"`, `?`, `\\nnn` (octal, up to three digits), `\\xHH`, `\\uHHHH` and `\\UHHHHHHHH`;
-    any other sequence stays with its backslash, and a decoded NUL ends the text, as in Bash. A quote that is not closed stays as written."""
+    any other sequence stays with its backslash, and a decoded NUL ends the text, as in Bash. `\\cX` (a control character) is not decoded: ScanIncomplete.
+    A quote that is not closed stays as written."""
     if "$'" not in command and '$"' not in command:
         return command
     out, quote, i = [], None, 0
@@ -464,6 +465,8 @@ def decode_ansi_c(command):
                     k = m.end()
                 elif d == '\\' and k + 1 < len(command):
                     e = command[k + 1]
+                    if e == 'c':
+                        raise ScanIncomplete('command has a control sequence in a Bash quote, whose result the scan does not know')
                     raw += (ANSI_C_SINGLE[e] if e in ANSI_C_SINGLE else d + e).encode('utf-8')
                     k += 2
                 else:
