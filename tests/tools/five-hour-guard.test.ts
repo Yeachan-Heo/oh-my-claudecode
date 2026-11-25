@@ -1684,7 +1684,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
       return runSync(GUARD, ['--config', f.cfg, '--once']);
     };
-    for (const command of [`cd ${hooks}; python3 audit`, `cd ${hooks} && audit`, `env -C ${hooks} audit`, `audit --directory ${hooks}`]) {
+    for (const command of [`cd ${hooks}; python3 audit`, `cd ${hooks} && audit`, `env -C ${hooks} audit`, `audit --directory ${hooks}`, `env -C ${hooks} sh -c 'python3 audit'`]) {
       writeFileSync(f.settings, settings(command), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: script });

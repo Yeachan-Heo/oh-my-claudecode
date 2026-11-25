@@ -342,12 +342,12 @@ def word_pieces(word):
     return pieces
 
 
-def command_programs(command, exclude=None, depth=0):
+def command_programs(command, exclude=None, depth=0, inherited=()):
     """The files that a shell command of a hook that is not ours may run or read, the same for every command and without knowing what any
     word means (nothing is run, nothing is expanded by a shell): every word of the command, each word that is a quoted command (it holds a
     blank: the words of an argument of -c or -S, two levels deep), the part of a word after its first `=` and the part after a short option that is glued to its value (`-SFILE`). A word with a directory part
     stands for that path, a word without one for the file of that name in the working directory of the guard and in each directory of the
-    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered). A word without a directory part is also looked for in each existing directory that any word of the whole command names (`cd DIR; prog`, `env -C DIR prog`: the shell may run it from there; no command is recognised). The rule is deliberately wide:
+    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered). A word without a directory part is also looked for in each existing directory that any word of the whole command names (`cd DIR; prog`, `env -C DIR prog`: the shell may run it from there; no command is recognised), also in a quoted command inside it (`env -C DIR sh -c 'prog x'`). The rule is deliberately wide:
     a word that is no program at all (an argument, an option value) is a file the guard then does not write, and no program is missed by
     not being recognised. A command with a NUL character or one that the shell cannot parse runs nothing and gives none. A command that a limit cuts
     short (more than MAX_COMMAND_CHARS characters, MAX_COMMAND_WORDS words or MAX_COMMAND_PROGRAMS files, or quoted commands nested deeper than
@@ -367,7 +367,7 @@ def command_programs(command, exclude=None, depth=0):
             words.append(token)
     simple.append(words)
     found = []
-    named = []   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR): the shell may run a later word from there
+    named = list(inherited)   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR) and of the command it is quoted in: the shell may run a later word from there
     for words in simple:
         for word in words:
             for piece in word_pieces(word):
@@ -383,7 +383,7 @@ def command_programs(command, exclude=None, depth=0):
             if any(c.isspace() for c in word):
                 if depth >= 2:
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
-                found += [t for t in command_programs(word, exclude, depth + 1) if t not in found]
+                found += [t for t in command_programs(word, exclude, depth + 1, named) if t not in found]
             for piece in word_pieces(word):
                 for path in word_files(piece, directories):
                     if path not in found:
