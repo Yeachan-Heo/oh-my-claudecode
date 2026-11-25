@@ -399,6 +399,25 @@ describe('a notification of a background task that reads the output file of a ta
     expect(run.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
     expect(run.bodies.join('')).toContain('PLAINBODY');
   });
+
+  // The first task is taken away by an earlier compaction, with the call and the name of its file: an Agent started afterwards that reads that file is held (its
+  // source is unknown), and so is the report of its task and of an Agent that reads the file of that one.
+  for (const links of [1, 2]) {
+    it(`is traced and never sent to Jev when the first task was removed by an earlier compaction: ${links === 1 ? 'an Agent that reads its file' : 'an Agent that reads the file of such an Agent'}`, async () => {
+      const w = talk(30);
+      const first = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...chain(0).rows, ...[1, 2, 3].flatMap(reads), ...w.slice(3)]);
+      expect(first.record).toMatchObject({ result: 'jev' });
+      expect(JSON.stringify(first.out.messages)).not.toContain('bk7x2mq9');
+      const agents = ['ag1b2c3d', 'ag4e5f6g'];
+      const rows = [];
+      for (let k = 1; k <= links; k++) rows.push(start(`c${k}`, 'Agent', { prompt: `Summarize ${file(k === 1 ? 'bk7x2mq9' : agents[k - 2])} for the report.` }), launched(`c${k}`, agents[k - 1]));
+      const second = await compactRun(NOTE_ENV, [...first.out.messages.slice(0, 4), ...rows, ...[4, 5, 6].flatMap(reads), report(agents[links - 1], 'SECRETBODY'), ...first.out.messages.slice(4)]);
+      expect(second.bodies.join('')).not.toContain('SECRETBODY');
+      expect(JSON.stringify(second.out.messages)).not.toContain('SECRETBODY');
+      // The launch result of each Agent and the report are held.
+      expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: links + 1 });
+    });
+  }
 });
 
 describe('the envelopes of the deliveries after a notification', () => {

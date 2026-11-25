@@ -1383,8 +1383,8 @@ function anySecretPath(input, privatePaths) {
 }
 
 // The output files that calls started with run_in_background name in their results ("Output is being written to:
-// <file>", "output_file: <file>"), for calls on secret or private paths (`secret`) and for prose calls naming one
-// (`held`): a later Read, `tail` or `cat` of such a file reads that call's output. A file is a word of the first
+// <file>", "output_file: <file>"), for calls on secret or private paths (`secret`) and for prose calls naming one or reading the
+// output of a call that an earlier compaction removed (`held`): a later Read, `tail` or `cat` of such a file reads that call's output. A file is a word of the first
 // OUTPUT_SCAN_CHARS of the result with at least two slashes (not a host hint such as `/tasks`, a directory or a
 // URL); it is kept whole and by its name (6 characters or more, for `cd <dir> && cat <name>` or `$D/<name>`), every one
 // of them, with runs of slashes joined and in lower case.
@@ -1406,7 +1406,7 @@ function backgroundOutputFiles(messages, privatePaths) {
     for (const u of m.toolUses || []) {
       if (u.input?.run_in_background !== true || !results.has(u.tool_use_id)) continue;
       const list = touchesSecretPath(u.tool, u.input, privatePaths) || readsFile(u.input, secretFiles) ? out.secret
-        : (PROSE_TOOLS.has(u.tool) && anySecretPath(u.input, privatePaths)) || readsFile(u.input, heldFiles) ? out.held : undefined;
+        : (PROSE_TOOLS.has(u.tool) && anySecretPath(u.input, privatePaths)) || readsFile(u.input, heldFiles) || readsUnknownOutput(u.input, known) ? out.held : undefined;
       const head = results.get(u.tool_use_id).slice(0, OUTPUT_SCAN_CHARS);
       const named = [...head.matchAll(TASK_ID_IN_RESULT)].map((m) => m[1]);
       for (const id of named) { ids.known.add(id); (list === out.secret ? ids.secret : list === out.held ? ids.held : ids.known).add(id); }
