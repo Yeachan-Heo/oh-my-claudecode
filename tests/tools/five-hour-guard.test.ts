@@ -1480,6 +1480,26 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a bare word behind a command that runs it (timeout, nice, sudo, xargs) is looked up on the PATH of the command: PATH=dir timeout 5 audit names the program in dir, which the guard does not replace', () => {
+    const forms: Array<(dir: string) => string> = [(dir) => `PATH=${dir}:/usr/bin /usr/bin/timeout 5 audit`, (dir) => `PATH=${dir} nice -n 5 audit`, (dir) => `env PATH=${dir} sudo -u root audit`,
+      (dir) => `PATH=${dir} xargs -n1 audit`, (dir) => `PATH=${dir} ionice -c 3 nice audit --flag`];
+    for (const [k, form] of forms.entries()) {
+      const f = fixture(`bare-behind-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const bin = join(f.dir, 'hooks');
+      mkdirSync(bin);
+      const audit = join(bin, 'audit');   // not on the PATH of the guard: only the PATH of the command finds it
+      writeFileSync(audit, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: form(bin) }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${form('DIR')}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, form('DIR')).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      expect(readText(audit), `${form('DIR')}: the program is intact`).toBe('#!/bin/sh\nexit 0\n');
+      expect(existsSync(f.pause), `${form('DIR')}: no pause was published`).toBe(false);
+    }
+  });
+
   it('the options of an interpreter end at its script: python3 audit -c config passes -c to the script, so audit (no suffix, no execute bit) is still a program of another hook; a shell still reads -c behind -o NAME', () => {
     const forms = [(audit: string) => `${PYBIN} ${audit} -c config`, (audit: string) => `${PYBIN} -I ${audit} -e x`, (audit: string) => `${PYBIN} -W ignore ${audit} -m mod`,
       (audit: string) => `sh ${audit} -c x`, (audit: string) => `node ${audit} -e x`, (audit: string) => `bash -o pipefail -c 'python3 ${audit}'`, (audit: string) => `bash -O extglob -c 'python3 ${audit}'`];

@@ -344,7 +344,7 @@ def command_programs(command, depth=0, own=False):
     """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
     shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
     (its first operand: not an option, and for a Python not the value of -W, -X or -Q, for Node not the value of -r or --require; the options are read up to it, not after it; none when it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
-    the script of an interpreter behind a command that is not one (nice python3 audit), any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
+    the script of an interpreter behind a command that is not one (nice python3 audit) and a bare word behind it that the PATH of the command resolves (timeout 5 audit), any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
     longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
     and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out, apart from a wrapper with an executable file in front of the hook; the other simple
     commands of such a handler are read, also one that only has the name of the hook among its arguments."""
@@ -415,6 +415,7 @@ def command_programs(command, depth=0, own=False):
                     behind_code, behind = interpreter_arguments(interpreter, words[k + 1:])
                     if behind and not behind_code:
                         candidates.append((behind[0], False))
+            candidates += [(w, True) for w in words[i + 1:] if w and not w.startswith('-') and os.sep not in w]   # nice, timeout, sudo, xargs run a bare word as a command: it is looked up on the PATH of the command
         candidates += [(w, False) for w in words if executable_file(w)]   # the syntax around a command is not parsed: a word that names a file that can be run is a program wherever it stands
         if takes_code and depth < 2 and SHELL_NAME.fullmatch(base):
             for k in range(i + 1, len(words) - 1):
