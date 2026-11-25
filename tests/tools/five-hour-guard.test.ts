@@ -1532,6 +1532,32 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('the launcher of a registered entry is looked up on the PATH that the entry gives it: PATH=dir python3 hook, env PATH=dir python3 hook, a PATH among other assignments name the Python in dir, which the guard does not replace', () => {
+    // the last form finds the program only through $PATH, which is the PATH of the guard (it is put in front of the PATH of the guard here)
+    const forms: Array<(dir: string, pause: string) => string> = [
+      (dir, pause) => `PATH=${dir} python3 ${HOOK} --pause-file ${pause}`, (dir, pause) => `env PATH=${dir} python3 -I ${HOOK} --pause-file ${pause}`,
+      (dir, pause) => `FOO=1 PATH=${dir}:/usr/bin python3 -I ${HOOK} --pause-file ${pause}`, (dir, pause) => `PATH=${dir}:$PATH python3 -I ${HOOK} --pause-file ${pause}`,
+      (dir, pause) => `[ -f ${pause} ] && [ -f ${HOOK} ] || exit 0; PATH=${dir} exec python3 -I ${HOOK} --pause-file ${pause}`, (_dir, pause) => `PATH=$PATH:/nonexistent python3 -I ${HOOK} --pause-file ${pause}`,
+    ];
+    for (const [k, form] of forms.entries()) {
+      for (const file of ['state_file', 'log_file']) {
+        const f = fixture(`launcher-path-${k}-${file}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+        const bin = join(f.dir, 'bin');
+        mkdirSync(bin);
+        const python = join(bin, 'python3');   // not on the PATH of the guard: only the PATH of the entry finds it
+        writeFileSync(python, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+        const command = form(bin, f.pause);
+        writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+        writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: file === 'state_file' ? python : f.state, log_file: file === 'log_file' ? python : f.log, settings_file: f.settings }), 'utf8');
+        const r = runSync(GUARD, ['--config', f.cfg, '--once'], k === forms.length - 1 ? { env: { ...ENV, PATH: `${bin}:${process.env.PATH}` } } : {});
+        expect(r.status, `${command} (${file}): ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} (${file})`).toContain(`"${file}" (${python}) and "registered interpreter" (${python}) are the same file`);
+        expect(readText(python), `${command} (${file}): the program is intact`).toBe('#!/bin/sh\nexit 0\n');
+        expect(existsSync(f.pause), `${command} (${file}): no pause was published`).toBe(false);
+      }
+    }
+  });
+
   it('a wrapper written with a path (/usr/bin/env, /usr/bin/nohup, /usr/bin/time) is a wrapper all the same: the script behind it is a program of the command, and so is the wrapper itself', () => {
     // [the wrapper that the command starts with, the command]
     const forms: Array<[string, (wrapper: string, audit: string) => string]> = [['env', (w, a) => `${w}/env python3 ${a}`], ['env', (w, a) => `${w}/env -i FOO=1 python3 ${a}`],

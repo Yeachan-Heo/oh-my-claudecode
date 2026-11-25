@@ -82,6 +82,17 @@ def skip_wrappers(words):
     return i
 
 
+def command_path(words):
+    """The PATH that the NAME=VALUE assignments before the command word of a simple command (also after env) give it, variables such as
+    $PATH expanded as for the other words, the last one wins; None without one: the command word is then looked up on the PATH of the
+    process that asks."""
+    path = None
+    for word in words[:skip_wrappers(words)]:
+        if word.startswith('PATH='):
+            path = os.path.expandvars(word[5:])
+    return path
+
+
 def strip_comments(command):
     """The command without its shell comments, the one place that says what a comment is (the readers of a command in the guard and in
     this module call it before they split the text): an unquoted `#` that starts a word (at the start, after a blank or one of ; & | ( ) < >)
@@ -127,11 +138,17 @@ def command_hook(words):
 
 
 def entry_parts(command):
-    """(hook scripts, interpreter files, log files, pause files, preflight files, launchers) that a hook entry command names, by the
-    option or position they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their file names say, and
-    neither is an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file as data). The
-    hook script is the command word of a simple command, or the first argument after it when the command word is a Python or the
-    command carries --pause-file. Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
+    """read_entry() without the PATH of each launcher."""
+    return read_entry(command)[:6]
+
+
+def read_entry(command):
+    """(hook scripts, interpreter files, log files, pause files, preflight files, launchers, the PATH of each launcher) that a hook entry
+    command names, by the option or position they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their
+    file names say, and neither is an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file
+    as data). The hook script is the command word of a simple command, or the first argument after it when the command word is a Python
+    or the command carries --pause-file. The PATH of a launcher is the one that command_path() reads from its simple command (None
+    without a PATH assignment). Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
     lex = shlex.shlex(strip_comments(command), posix=True, punctuation_chars=SEPARATORS)   # the separators are told from quoted text: a quoted path may end in `;`
     lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''   # a newline ends a command, as ; does
     tokens = list(lex)
@@ -145,7 +162,7 @@ def entry_parts(command):
         else:
             current.append(t)
     simple.append(current)
-    hooks, launchers, found = [], [], {o: [] for o in OPERAND_OPTIONS}
+    hooks, launchers, paths, found = [], [], [], {o: [] for o in OPERAND_OPTIONS}
     for words in simple:
         operands = {i + 1: t for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
         for i, option in operands.items():
@@ -154,7 +171,8 @@ def entry_parts(command):
         if hook:
             hooks.append(hook[0])
             launchers.append(hook[1])
-    return hooks, found['-x'], found['--log'], found['--pause-file'], found['-f'], launchers
+            paths.append(command_path(words))
+    return hooks, found['-x'], found['--log'], found['--pause-file'], found['-f'], launchers, paths
 
 
 def is_python_file(path):

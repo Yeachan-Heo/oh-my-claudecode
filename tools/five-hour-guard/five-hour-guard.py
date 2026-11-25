@@ -384,10 +384,7 @@ def command_programs(command, depth=0, own=False):
                 value = not operands and w in PYTHON_VALUE_OPTIONS and re.fullmatch(ENTRY.PYTHON_NAME, base) is not None
             else:
                 operands.append(w)
-        search_path = None   # a PATH given before the command word (PATH=dir cmd, env PATH=dir cmd) is where the command word is looked up
-        for w in words[:i]:
-            if w.startswith('PATH='):
-                search_path = os.path.expandvars(w[5:])
+        search_path = ENTRY.command_path(words)   # a PATH given before the command word (PATH=dir cmd, env PATH=dir cmd) is where the command word is looked up
         candidates = [(words[i], True)]
         if not takes_code:   # with code on the command line the operands are its arguments
             if INTERPRETER_NAME.fullmatch(base) and operands:
@@ -441,8 +438,8 @@ def registered_runtime_files():
     any path), and the programs that the commands of every other hook and of the status line run (command_programs: a hook of another
     tool is as much a file the guard must not replace as ours). A relative hook, or an interpreter given with a directory part, is taken
     as the file it names from the working directory of the guard: a session resolves it from its own directory, which cannot be known
-    here, so this is the conservative reading for the collision checks. An interpreter or launcher given by its bare name is looked up on
-    the PATH of the guard, as the wiring check does, and the file found is the one that counts. Best effort: the programs found by every
+    here, so this is the conservative reading for the collision checks. An interpreter given by its bare name is looked up on the PATH of
+    the guard, as the wiring check does, a launcher on the PATH its entry gives it (else on that of the guard), and the file found is the one that counts. Best effort: the programs found by every
     scan since the start stay in the list (the unreadable file gives only those): a rewrite in progress or a broken edit does not open
     them to a write, and a session that loaded an entry keeps running its program after a rewrite removed it, until it is restarted;
     hook_check says that the file cannot be read."""
@@ -457,13 +454,13 @@ def registered_runtime_files():
             except Exception:
                 pass
             try:   # one handler that cannot be parsed must not hide the ones after it
-                hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(handler['command'])
+                hooks, interpreters, logs, _pauses, _tests, launchers, paths = ENTRY.read_entry(handler['command'])
             except Exception:
                 continue
             found += [('registered hook', t) for t in hooks]
-            for t in interpreters + launchers:
+            for t, search_path in [(x, None) for x in interpreters] + list(zip(launchers, paths)):   # a launcher is looked up on the PATH its entry gives it
                 try:
-                    program = t if os.path.dirname(t) else shutil.which(t)
+                    program = t if os.path.dirname(t) else shutil.which(t, path=search_path)
                 except Exception:
                     program = None   # one name that cannot be looked up must not hide the others
                 if program:
