@@ -522,6 +522,81 @@ describe('the words beside a result that stays: the drop of the calls between tw
   });
 });
 
+describe('the words of a row that held no result, joined to a message that keeps one: the host counts them beside it', () => {
+  // build drops a row of thinking alone (no text, no call), and the host joins the user rows on both sides of it. The words typed during the tool turn, which stood at the rate of
+  // the user's words (0.287 a character) in a message of their own, then stand beside the result that stays (a task result is never cut) at the rate of a text beside a result
+  // (0.363): the list that is installed holds them for more than the list before did, and the prediction has to count it before the cascade decides.
+  const ENV = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_HOST_HANDOFF: '1' };
+  // A task row, a first step (a task call, which is never cut, or a read when `pin` is false), the words of the user (after a row of thinking alone, or in the row of the first
+  // result), 48 reads of `chars` characters and an answer. The last three steps are in the last six messages and out of the cut.
+  function fixture({ chars, words, pin = true, where = 'after thinking' }) {
+    const typed = `Typed during the tool turn: ${'w'.repeat(words)}`;
+    const m = [{ role: 'user', text: 'Task: plan and read the notes.', toolUses: [] }];
+    const step = (id, tool, input, result, text = '') => {
+      m.push({ role: 'assistant', text: '', toolUses: [{ tool_use_id: id, tool, input }] });
+      m.push({ role: 'user', text, toolUses: [], toolResults: [{ tool_use_id: id, text: result, isError: false }] });
+    };
+    const inRow = where === 'in the row' ? typed : '';
+    if (pin) step('tp', 'TaskCreate', { subject: 'plan' }, 'Task #1 created', inRow);
+    else step('tp', 'Bash', { command: 'cat plan.txt' }, `RESULT-0 ${'x'.repeat(chars)}`, inRow);
+    if (where === 'after thinking') m.push({ role: 'assistant', text: '', toolUses: [] }, { role: 'user', text: typed, toolUses: [] });
+    for (let i = 1; i <= 48; i++) step(`d${i}`, 'Bash', { command: `cat notes-${i}.txt` }, `RESULT-${i} ${'x'.repeat(chars)}`);
+    m.push({ role: 'assistant', text: 'Summary: done.', toolUses: [] });
+    return Object.freeze(m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` })));
+  }
+  // The host's API form keeps the block of thinking of a row that has nothing else; listTokens counts its overhead.
+  const formOf = (rows) => apiOf(rows).map((a) => (a.role === 'assistant' && !a.content.length ? { ...a, content: [{ type: 'thinking', thinking: 'Considering the next step.' }] } : a));
+  const sameMessage = (messages, id) => apiOf(messages).some((a) => a.content.some((b) => b.type === 'tool_result' && b.tool_use_id === id) && a.content.some((b) => b.type === 'text' && b.text.startsWith('Typed during the tool turn')));
+  const run = async (opts) => {
+    const rows = fixture(opts);
+    const api = formOf(rows);
+    const counted = Math.round(listTokens(api));
+    const { record, out } = await compactRun(ENV, rows, { tokens: counted, trigger: 'manual', api });
+    return { rows, counted, record, out };
+  };
+
+  it('the tokens the host is told are the list that is installed: the words stay beside the result of the task', async () => {
+    const { record, out } = await run({ chars: 2500, words: 60000 });
+    expect(record.result).toBe('jev');
+    expect(sameMessage(out.messages, 'tp')).toBe(true);
+    expect(out.messages.some((m) => m.role === 'assistant' && !m.text && !(m.toolUses || []).length)).toBe(false);
+    const installed = listTokens(apiOf(out.messages));
+    // The 60 000 characters are 4 560 tokens more beside the result than alone: the prediction that left them out was that much under the list.
+    const slack = 0.6 * record.traced + 2;
+    expect(Math.abs(record.tokens_after_pred - installed), `pred ${record.tokens_after_pred}, installed ${installed}`).toBeLessThanOrEqual(slack);
+    expect(Math.abs(out.tokensAfter - installed), `told ${out.tokensAfter}, installed ${installed}`).toBeLessThanOrEqual(slack);
+  });
+
+  it('a cut that the installed list does not make is not taken for one that reaches the minimum of the host: 64 900 tokens go to about 49 000, not 39 100', async () => {
+    const { counted, record, out } = await run({ chars: 1200, words: 130000 });
+    expect(counted).toBeGreaterThan(64000);
+    // Taking every result that can go gives the list 24.5 percent less; with the words at the rate of the user's it looked like 38 percent, over the 30 percent that the
+    // gate asks for, and the handoff went ahead.
+    expect(record).toMatchObject({ result: 'fallback', reason: 'too_few_results' });
+    expect(out.messages).toEqual([{ role: 'user', text: 'SUMMARY', toolUses: [] }]);
+  });
+
+  it('the words in the row of the result were beside it already: the prediction is the installed list as before', async () => {
+    const { record, out } = await run({ chars: 2500, words: 60000, where: 'in the row' });
+    expect(record.result).toBe('jev');
+    expect(sameMessage(out.messages, 'tp')).toBe(true);
+    const installed = listTokens(apiOf(out.messages));
+    const slack = 0.6 * record.traced + 2;
+    expect(Math.abs(record.tokens_after_pred - installed), `pred ${record.tokens_after_pred}, installed ${installed}`).toBeLessThanOrEqual(slack);
+    expect(Math.abs(out.tokensAfter - installed), `told ${out.tokensAfter}, installed ${installed}`).toBeLessThanOrEqual(slack);
+  });
+
+  it('the first result is cut too: no result stays in the joined message, the words keep their own rate, and the prediction is the installed list', async () => {
+    const { record, out } = await run({ chars: 2500, words: 60000, pin: false });
+    expect(record.result).toBe('jev');
+    expect(sameMessage(out.messages, 'tp')).toBe(false);
+    const installed = listTokens(apiOf(out.messages));
+    const slack = 0.6 * record.traced + 2;
+    expect(Math.abs(record.tokens_after_pred - installed), `pred ${record.tokens_after_pred}, installed ${installed}`).toBeLessThanOrEqual(slack);
+    expect(Math.abs(out.tokensAfter - installed), `told ${out.tokensAfter}, installed ${installed}`).toBeLessThanOrEqual(slack);
+  });
+});
+
 describe('a notification traced with the deliveries of a coordinator: the trace line does not make the text that stays the words of the user', () => {
   // listTokens counts a text that is not the user's at the rate of a reminder (0.363 a character) and the words of the user alone at their own (0.287). A row that
   // opens with the trace of the module is not the user's writing, so the deliveries of the coordinator that the trace row carries stay at the rate they had.

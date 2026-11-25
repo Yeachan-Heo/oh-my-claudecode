@@ -585,7 +585,7 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     const listOf = (rows, rates) => listTokens(rows.map((m) => ({
       role: m.role,
       content: m.role === 'assistant'
-        ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
+        ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input })), ...(!m.text && !m.toolUses.length ? [{ type: 'thinking', thinking: 'Considering the next step.' }] : [])]
         : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : [])],
     })), rates);
     const resultRow = (id) => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(4000)}`, isError: false }] });
@@ -666,6 +666,100 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
       traced.set(dd, 'trace');
       traced.set(dd, 'full');
       expect(traced.removed()).toBeCloseTo(0, 6);
+    });
+
+    // A row of thinking alone (no text, no call) is gone from the start, and the user rows on both sides of it are one message of the host. The words of a row that held no
+    // result stood at the rate of the words of the user (0.287 a character) in a message of their own; in a message that keeps a result they stand beside it, at the rate of a
+    // text beside a result (0.363), so the list that is left holds them for more than the list before did, and what the cut gives back is that much less.
+    describe('the words of a row that held no result, joined to a message that keeps one', () => {
+      const think = { role: 'assistant', text: '', toolUses: [] };
+      const wordsRow = { role: 'user', text: WORDS, toolUses: [] };
+      const MORE = 'Typed again later: '.padEnd(3000, 'v');
+      const apiUser = (...blocks) => ({ role: 'user', content: blocks });
+      const apiAsst = (...blocks) => ({ role: 'assistant', content: blocks });
+      const apiText = (text) => ({ type: 'text', text });
+      const apiCall = (id) => ({ type: 'tool_use', id, name: 'Bash', input: { command: `cat notes-${id}.txt` } });
+      const apiResult = (id) => ({ type: 'tool_result', tool_use_id: id, content: `RESULT-${id} ${'x'.repeat(4000)}` });
+      // A call row of an assistant message is a group of its own; the result `p` is a task result, which is never cut.
+      function sceneOf(rows, { trim = [] } = {}) {
+        let g = 0;
+        const group = rows.map((m) => (m.role === 'assistant' ? g++ : -1));
+        const candidates = [];
+        rows.forEach((m, i) => (m.toolResults || []).forEach((r) => candidates.push({ ...item(r.tool_use_id, { score: 0, resIdx: i, task: r.tool_use_id === 'p' }), useIdx: rows.findIndex((x) => (x.toolUses || []).some((u) => u.tool_use_id === r.tool_use_id)) })));
+        return { candidates, shape: shapeOf(rows, candidates, { rows: rows.map((m, i) => (trim.includes(i) ? { ...m, trimDrop: true } : m)), group, keepFrom: rows.length }) };
+      }
+      const joined = (...texts) => listTokens([apiUser(apiText('Task.')), apiAsst(apiCall('p')), apiUser(apiResult('p'), ...texts.map(apiText)), apiAsst(apiText('Done.'))]);
+
+      it('the words after a row of thinking come to the result that stays: one message at the rate of a text beside a result, and the prediction is the installed list', () => {
+        const rows = [task, callRow('p'), resultRow('p'), think, wordsRow, callRow('d'), resultRow('d'), done];
+        const { candidates, shape } = sceneOf(rows);
+        // The call of d and its result go; the thinking goes; the result of p and the words are one message with the words at 0.363, where they were at 0.287.
+        expect(floorPrediction(candidates, listOf(rows), undefined, shape)).toBeCloseTo(joined(WORDS), 4);
+      });
+
+      it('nothing decided: the list that build writes holds the words beside the result that stays, and the tracker has not taken their discount', () => {
+        const rows = [task, callRow('a'), resultRow('a'), think, wordsRow, done];
+        const { shape } = sceneOf(rows);
+        const installed = listTokens([apiUser(apiText('Task.')), apiAsst(apiCall('a')), apiUser(apiResult('a'), apiText(WORDS)), apiAsst(apiText('Done.'))]);
+        expect(listOf(rows) - shape.tracker().removed()).toBeCloseTo(installed, 4);
+      });
+
+      it('the order of the rows does not matter: the words before the row of thinking and the result after it are one message the same way', () => {
+        // Not an order the host writes (the words come after the results), but the tracker joins the runs, whichever of them holds the result.
+        const rows = [task, callRow('p'), wordsRow, think, resultRow('p'), callRow('d'), resultRow('d'), done];
+        const { candidates, shape } = sceneOf(rows);
+        expect(floorPrediction(candidates, listOf(rows), undefined, shape)).toBeCloseTo(joined(WORDS), 4);
+      });
+
+      it('two rows of thinking join three user rows: the words of both rows are beside the result that stays', () => {
+        const rows = [task, callRow('p'), resultRow('p'), think, wordsRow, think, { role: 'user', text: MORE, toolUses: [] }, callRow('d'), resultRow('d'), done];
+        const { candidates, shape } = sceneOf(rows);
+        expect(floorPrediction(candidates, listOf(rows), undefined, shape)).toBeCloseTo(joined(WORDS, MORE), 4);
+      });
+
+      it('no result stays in the joined message: the words keep the rate they had, and nothing is taken off for them', () => {
+        const rows = [task, callRow('a'), resultRow('a'), think, wordsRow, done];
+        const { candidates, shape } = sceneOf(rows);
+        const after = listTokens([apiUser(apiText('Task.'), apiText(WORDS)), apiAsst(apiText('Done.'))]);
+        expect(floorPrediction(candidates, listOf(rows), undefined, shape)).toBeCloseTo(after, 4);
+      });
+
+      it('no result in either message: the rows are joined and the words keep their own rate', () => {
+        const rows = [task, think, wordsRow, done];
+        const { shape } = sceneOf(rows);
+        const installed = listTokens([apiUser(apiText('Task.'), apiText(WORDS)), apiAsst(apiText('Done.'))]);
+        expect(listOf(rows) - shape.tracker().removed()).toBeCloseTo(installed, 4);
+      });
+
+      it('the words of a row that the agent trim removes are gone with it: they cost nothing beside the result that stays', () => {
+        const short = { role: 'user', text: 'Ok.', toolUses: [] };
+        const rows = (row) => [task, callRow('p'), resultRow('p'), think, row, callRow('d'), resultRow('d'), done];
+        const long = sceneOf(rows(wordsRow), { trim: [4] });
+        const brief = sceneOf(rows(short), { trim: [4] });
+        expect(long.shape.tracker().removed()).toBeCloseTo(brief.shape.tracker().removed(), 6);
+        // The same row kept costs more than it did, and the tracker says so.
+        expect(sceneOf(rows(wordsRow)).shape.tracker().removed()).toBeLessThan(long.shape.tracker().removed());
+      });
+
+      it('a decision on the result in the joined message: cut, the words are at their own rate; taken back, they are beside it again', () => {
+        const rows = [task, callRow('a'), resultRow('a'), think, wordsRow, done];
+        const { candidates: [a], shape } = sceneOf(rows);
+        const baseline = shape.tracker().removed();
+        const dropped = shape.shed([a], 'drop');
+        const stepped = shape.tracker();
+        stepped.set(a, 'drop');
+        expect(stepped.removed()).toBeCloseTo(dropped, 6);
+        stepped.set(a, 'full');
+        expect(stepped.removed()).toBeCloseTo(baseline, 6);
+        stepped.set(a, 'trace');
+        stepped.set(a, 'drop');
+        expect(stepped.removed()).toBeCloseTo(dropped, 6);
+        stepped.set(a, 'trace');
+        stepped.set(a, 'full');
+        expect(stepped.removed()).toBeCloseTo(baseline, 6);
+        // The words cost 0.076 a character more beside the result than alone: the cut that takes the result gives that back.
+        expect(dropped - baseline).toBeGreaterThan(alone);
+      });
     });
   });
 
@@ -836,6 +930,7 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     const hello = { role: 'assistant', text: 'Hello.', toolUses: [] };
     const stepRow = (ids, text) => ({ role: 'assistant', text, toolUses: ids.map((id) => ({ tool_use_id: id, tool: 'Bash', input: { command: `cat notes-${id}.txt` } })) });
     const done = { role: 'assistant', text: 'Done.', toolUses: [] };
+    const thinking = { role: 'assistant', text: '', toolUses: [] };
     const noteRow = { role: 'user', text: REPORT, toolUses: [] };
     const resultsRow = (ids) => ({ role: 'user', text: '', toolUses: [], toolResults: ids.map((id) => ({ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(4000)}`, isError: false })) });
     // The API form of rows: the rows of the user in a run are one message, each row's results before its text, and the blocks delivered after a row come after its blocks.
@@ -843,7 +938,7 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
       const out = [];
       rows.forEach((m, i) => {
         const content = m.role === 'assistant'
-          ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
+          ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input })), ...(!m.text && !m.toolUses.length ? [{ type: 'thinking', thinking: 'Considering the next step.' }] : [])]
           : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : []), ...(delivered.get(i) || []).map((text) => ({ type: 'text', text }))];
         if (m.role === 'user' && out.length && out[out.length - 1].role === 'user') out[out.length - 1].content.push(...content); else out.push({ role: m.role, content });
       });
@@ -855,9 +950,9 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
       envelope: carried(TRACE, blocks).length - TRACE.length - chars(blocks), envelopeDrop: carried('', blocks).length - chars(blocks),
     });
     // The notification alone in its message (after the greeting), or after the row of a result in the message of that result. `blocks` are delivered after the notification.
-    function scene(blocks, { result = false, trim = false, said = true, ids = ['a'] } = {}) {
-      const rows = result ? [task, stepRow(ids, said ? 'Step 1.' : ''), resultsRow(ids), noteRow, done] : [task, hello, noteRow, done];
-      const group = result ? [-1, 0, -1, -1, 1] : [-1, 0, -1, 1];
+    function scene(blocks, { result = false, trim = false, said = true, ids = ['a'], think = false } = {}) {
+      const rows = result ? [task, stepRow(ids, said ? 'Step 1.' : ''), resultsRow(ids), ...(think ? [thinking] : []), noteRow, done] : [task, hello, noteRow, done];
+      const group = result ? (think ? [-1, 0, -1, 1, -1, 2] : [-1, 0, -1, -1, 1]) : [-1, 0, -1, 1];
       const at = rows.indexOf(noteRow);
       const note = noteFor(at, blocks);
       const results = result ? ids.map((id) => ({ ...item(id, { score: 0, resIdx: 2 }), useIdx: 1 })) : [];
@@ -867,7 +962,7 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
       const shape = shapeOf(rows, candidates, { rows: rows.map((m, i) => (trim && i === at ? { ...m, trimDrop: true } : m)), group, keepFrom: rows.length, queued });
       const before = listTokens(apiList(rows, queued));
       // The list when the notification is replaced as `keep` says (a trace, or a drop that leaves the deliveries) and the rest stays as it is.
-      const after = (keep) => listTokens(apiList(rows.map((m) => (m === noteRow ? { role: 'user', text: carried(keep === 'trace' ? TRACE : '', blocks), toolUses: [] } : m))));
+      const after = (keep) => listTokens(apiList(rows.filter((m) => m !== thinking).map((m) => (m === noteRow ? { role: 'user', text: carried(keep === 'trace' ? TRACE : '', blocks), toolUses: [] } : m))));
       return { rows, note, kept, results, candidates, shape, before, after };
     }
     // What the cost of the notification itself (itemTokens: its text less the replacement and the envelopes, at the rate of a reminder) and the shape (shed) take off the list.
@@ -893,6 +988,17 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
         expect(floorPrediction(candidates, before, undefined, shape), label).toBeCloseTo(after, 4);
       });
     }
+
+    it('a notification after a row of thinking, beside a result that stays: the words of the user in its deliveries are a text beside that result, as in the installed list', () => {
+      // The row of thinking is gone from the start and the host joins the row of the result to the notification; the block that replaces the notification is in a message that
+      // keeps the result, so the whole of it is at the rate of a reminder, where the words of the user in the deliveries stood at their own.
+      for (const [label, blocks] of cases) {
+        for (const keep of ['trace', 'drop']) {
+          const sc = scene(blocks, { result: true, think: true });
+          expect(predicted(sc, keep), `${label}, ${keep}`).toBeCloseTo(sc.before - sc.after(keep), 4);
+        }
+      }
+    });
 
     it('a notification that stays whole beside a result that goes: the words of the user in its deliveries stand in a message of no result any more', () => {
       const { kept, shape, before } = scene([USER, COORD(0)], { result: true });
