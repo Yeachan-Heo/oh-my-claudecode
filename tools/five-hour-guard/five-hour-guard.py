@@ -528,7 +528,15 @@ def ts(t=None):
 
 def append_line(path, text):
     """Append to a log without following a link at the final component and without opening anything but a regular file: a link
-    that somebody else put in a shared directory must not make this process write into the file it points to."""
+    that somebody else put in a shared directory must not make this process write into the file it points to. Where os has no O_NOFOLLOW
+    (Windows) a link or reparse point at the path is refused before the open."""
+    if not hasattr(os, 'O_NOFOLLOW'):
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            st = None
+        if st is not None and (stat.S_ISLNK(st.st_mode) or getattr(st, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0)):
+            raise OSError(f'{path} is a link: nothing is appended to it')
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0), 0o644)
     try:
         if stat.S_ISREG(os.fstat(fd).st_mode):

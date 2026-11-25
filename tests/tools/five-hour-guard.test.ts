@@ -55,6 +55,8 @@ const WHICH_FAILS_DRIVER = [
   'sys.argv = sys.argv[1:]',
   "runpy.run_path(sys.argv[0], run_name='__main__')",
 ].join('\n');
+// the guard runs where os has no O_NOFOLLOW (Windows): the attribute is taken away before the script is loaded
+const NO_NOFOLLOW_DRIVER = ['import os, runpy, sys', 'del os.O_NOFOLLOW', 'sys.argv = sys.argv[1:]', "runpy.run_path(sys.argv[0], run_name='__main__')"].join('\n');
 // the guard runs in another working directory (a relative path of a settings entry is read from it)
 const CHDIR_DRIVER = ['import os, runpy, sys', 'os.chdir(sys.argv[1])', 'sys.argv = sys.argv[2:]', "runpy.run_path(sys.argv[0], run_name='__main__')"].join('\n');
 // the first reads of the usage cache from the given time on (argv: cache, time, count) see what a refresh of OMC shows in the middle: an empty file, then half a document
@@ -880,6 +882,11 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(runSync(GUARD, guardArgs(f, ['--once'])).status).toBe(0);
       expect(existsSync(absent), 'a link to a missing file does not create it').toBe(false);
       expect(readText(victim), 'the guard did not write through the link').toBe('victim\n');
+      // without O_NOFOLLOW the open itself would follow the link: the link is refused before it
+      const bare = runPyCode(NO_NOFOLLOW_DRIVER, [GUARD, ...guardArgs(f, ['--once'])]);
+      expect(bare.status, `${bare.stdout}${bare.stderr}`).toBe(0);
+      expect(existsSync(absent), 'without O_NOFOLLOW: a link to a missing file does not create it').toBe(false);
+      expect(readText(victim), 'without O_NOFOLLOW: the guard did not write through the link').toBe('victim\n');
       // the hook: held while a pause lasts, it logs hold-start and hold-end
       writePause(f, { pid: process.pid });
       const h = spawnPy(HOOK, ['--pause-file', f.pause, '--log', link, '--poll', '0.1'], { input: hookInput('linklog1') });
@@ -892,6 +899,11 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(existsSync(absent)).toBe(false);
       expect(readText(victim), 'the hook did not write through the link').toBe('victim\n');
     }
+    // the refusal is for links only: an ordinary log is still written where os has no O_NOFOLLOW
+    const plain = fixture('log-plain-no-nofollow', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const ok = runPyCode(NO_NOFOLLOW_DRIVER, [GUARD, ...guardArgs(plain, ['--once'])]);
+    expect(ok.status, `${ok.stdout}${ok.stderr}`).toBe(0);
+    expect(readText(plain.log), 'the log is written').toMatch(/guard start/);
   });
 
   it('a held call is judged again against every pause document it sees: a replacement that excludes the session (a restart with another exclude, no gap) releases it', async () => {
