@@ -1,11 +1,13 @@
 """The hook entry of the five-hour limit guard: the one definition of the command that is registered in settings.json and of how a
 registered command is read. Loaded by five-hour-guard.py (drift check) and five-hour-guard-settings.py (add, check, remove, probe)
 from the directory the scripts are in; it is not run by itself and the hook script does not need it."""
-import math, os, re, shlex, sys
+import math, os, re, shlex, shutil, sys
 
 MARK = 'five-hour-guard-hook.py'
 OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
 PYTHON_NAME = r'(python|pythonw|pypy|py)[\d.]*(\.exe)?'   # the whole basename (python, python3, python3.12, pythonw.exe, pypy3, py): python-audit is no Python
+# The names of the programs that run their first operand as a script (an interpreter or a shell), whole basename, a version and .exe allowed.
+INTERPRETER_NAME = r'(python|pypy|node|nodejs|deno|bun|ruby|perl|php|lua|pwsh|powershell|tsx|ts-node|sh|bash|zsh|dash|ksh|ash|fish)[\d.]*(\.exe)?'
 # The variables with which the hook decides that a session does not draw on the subscription window (foreign_provider() of
 # five-hour-guard-hook.py, which imports nothing and so keeps its own copy of this list): the probe of `add` runs without them.
 PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
@@ -71,7 +73,7 @@ def skip_wrappers(words):
         word = words[i]
         if re.match(r'[A-Za-z_]\w*=', word):
             pass
-        elif os.path.basename(word) in WRAPPERS:   # by the name of the command: /usr/bin/env is env (the path stays a program of the command, see executable_file)
+        elif os.path.basename(word) in WRAPPERS:   # by the name of the command: /usr/bin/env is env (the path stays a program of the command for the guard, which counts every word)
             wrapper = os.path.basename(word)
         elif wrapper and word == '--':
             wrapper = None
@@ -166,9 +168,26 @@ def strip_comments(command):
     return ''.join(out)
 
 
+def runs_script(word):
+    """Whether the command word `word` is a program that runs its first operand as a script and can launch the hook when the command carries
+    --pause-file: an interpreter or a shell by name, or a launcher written with a directory part (a program of the user, which can have any
+    name) that is not the system utility of that name on the PATH. A bare name that is no interpreter (`printf`, `echo`) and a path to such a
+    utility (`/usr/bin/printf`) only print or read the operand."""
+    base = os.path.basename(word)
+    if re.fullmatch(INTERPRETER_NAME, base.lower()):
+        return True
+    if os.sep not in word and not (os.altsep and os.altsep in word):
+        return False
+    on_path = shutil.which(base)
+    try:
+        return not (on_path and os.path.samefile(on_path, os.path.expanduser(word)))
+    except (OSError, ValueError):
+        return True
+
+
 def command_hook(words):
     """(hook, launcher) when the simple command `words` runs the hook of this guard, else None: the command word (after the wrappers) is
-    the hook itself, or it is a Python or the command carries --pause-file and the first argument that is no option or operand is the
+    the hook itself, or it is a Python (or another launcher that runs its first operand, when the command carries --pause-file, see runs_script) and the first argument that is no option or operand is the
     hook (and the Python is not asked to print its help or version instead, or to run stdin with a lone `-`). A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
     words = expand_split_strings(words)
     operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
@@ -178,7 +197,7 @@ def command_hook(words):
     if MARK in os.path.basename(words[first]):
         return words[first], words[first]   # run directly: the script itself is the program
     python = re.fullmatch(PYTHON_NAME, os.path.basename(words[first]).lower()) is not None
-    if python or '--pause-file' in words:
+    if python or ('--pause-file' in words and runs_script(words[first])):   # printf hook --pause-file only prints the path
         values = {i + 1 for i in range(first + 1, len(words)) if python and words[i] in PYTHON_VALUE_OPTIONS}   # -W ignore: `ignore` is no script
         args = [i for i in range(first + 1, len(words)) if i not in operands and i not in values and (not words[i].startswith('-') or (python and words[i] == '-'))]   # a lone - is the script operand of a Python (stdin)
         if python and any(words[i] in PYTHON_INFO_OPTIONS and i not in values for i in range(first + 1, args[0] if args else len(words))):
@@ -197,9 +216,8 @@ def read_entry(command):
     """(hook scripts, interpreter files, log files, pause files, preflight files, launchers, the PATH of each launcher) that a hook entry
     command names, by the option or position they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their
     file names say, and neither is an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file
-    as data). The hook script is the command word of a simple command, or the first argument after it when the command word is a Python
-    or the command carries --pause-file. The PATH of a launcher is the one that command_path() reads from its simple command (None
-    without a PATH assignment). Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
+    as data). The hook script is the command word of a simple command, or the first argument after it when the command word is a Python or, with --pause-file, another launcher (runs_script).
+    The PATH of a launcher is the one that command_path() reads from its simple command (None without a PATH assignment). Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
     lex = shlex.shlex(strip_comments(command), posix=True, punctuation_chars=SEPARATORS)   # the separators are told from quoted text: a quoted path may end in `;`
     lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''   # a newline ends a command, as ; does
     tokens = list(lex)

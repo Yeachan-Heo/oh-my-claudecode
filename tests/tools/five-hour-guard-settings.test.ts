@@ -674,6 +674,26 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(tool(g, 'check').status, 'a dash after the hook is its argument: the hook runs').toBe(0);
   });
 
+  it('a command that only carries --pause-file is not the hook: printf, echo and the like print the path, so a handler that has the hook file after them is not our hook (check, add and remove leave it alone)', () => {
+    const f = fixture('settings-print-launcher');
+    const hook = '/opt/five-hour-guard-hook.py';
+    const printfPath = spawnSync('sh', ['-c', 'command -v printf'], { encoding: 'utf8' }).stdout.trim();   // the utility that the PATH gives, written with its path
+    const foreign = ['printf', ...(printfPath.startsWith('/') ? [printfPath] : []), 'echo', 'printf %s', 'cat', 'ls -l', 'exec printf', 'env -i printf'].map((c) => ({ type: 'command', command: `${c} ${hook} --pause-file /tmp/p` }));
+    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
+    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
+    for (const [k, command] of ['node', 'nodejs18', 'bash', '/bin/sh', 'ruby', 'env -i bash', `${process.execPath}`].map((c) => `${c} ${hook} --pause-file /tmp/p`).entries()) {
+      const g = fixture(`settings-print-launcher-run-${k}`);
+      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      expect(tool(g, 'check').status, `${command}: an interpreter or a launcher of the user runs the hook`).toBe(0);
+    }
+  });
+
   it('a Python that is given option values before the hook (-W ignore, -X dev, -Q, --check-hash-based-pycs) runs the hook behind them: check reports it and remove takes it away; a script in front of the hook file still makes it data', () => {
     const forms = (hook: string, pause: string) => [`${quote(PYBIN)} -W ignore ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -X dev ${hook} --pause-file ${pause}`,
       `${quote(PYBIN)} -W ignore -X dev -I ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -Q new ${hook} --pause-file ${pause}`,
