@@ -1558,7 +1558,7 @@ ${'- oversized startup guidance\n'.repeat(700)}
   });
 
   describe('CLAUDE.md version drift and claudeMdEnabled', () => {
-    function runDriftSession(claudeMdEnabled: boolean | undefined): string {
+    function runDriftSession(claudeMdEnabled: boolean | undefined, files: Record<string, string> = { 'CLAUDE.md': '# My own global config without OMC markers\n' }): string {
       const claudeDir = join(fakeHome, '.claude');
       const pluginRoot = join(tempDir, 'local-plugin-4.15.4');
       mkdirSync(join(claudeDir, '.omc'), { recursive: true });
@@ -1567,7 +1567,7 @@ ${'- oversized startup guidance\n'.repeat(700)}
       writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ version: '4.15.4', type: 'module' }));
       writeFileSync(join(claudeDir, 'hud', 'omc-hud.mjs'), '');
       writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ statusLine: 'node ~/.claude/hud/omc-hud.mjs' }));
-      writeFileSync(join(claudeDir, 'CLAUDE.md'), '# My own global config without OMC markers\n');
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(claudeDir, name), text);
       if (claudeMdEnabled !== undefined) {
         writeFileSync(join(claudeDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled }));
       }
@@ -1606,6 +1606,14 @@ ${'- oversized startup guidance\n'.repeat(700)}
     it('reports CLAUDE.md drift when claudeMdEnabled is true', () => {
       const combined = runDriftSession(true);
       expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    // The file-split layout: CLAUDE.md only references the companion file that carries the marker, and the doctor reads the marker there too.
+    it('reads the version marker from the companion file that CLAUDE.md references', () => {
+      const matching = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-omc.md\n', 'CLAUDE-omc.md': '<!-- OMC:VERSION:4.15.4 -->\n' });
+      expect(matching).not.toContain('CLAUDE.md instructions');
+      const outdated = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-omc.md\n', 'CLAUDE-omc.md': '<!-- OMC:VERSION:4.15.0 -->\n' });
+      expect(outdated).toContain('CLAUDE.md instructions: 4.15.0');
     });
 
     it('does not report CLAUDE.md drift when claudeMdEnabled is false', () => {
