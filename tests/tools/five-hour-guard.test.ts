@@ -1511,6 +1511,28 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('PATH assignments before a command are expanded in the order of the shell, each with the ones before it: PATH=dir PATH=$PATH:/usr/bin audit names the program in dir; after env they are expanded with the PATH of the guard', () => {
+    const forms: Array<[(dir: string) => string, boolean]> = [[(dir) => `PATH=${dir} PATH=$PATH:/usr/bin audit`, true], [(dir) => `FOO=${dir} PATH=$FOO audit`, true], [(dir) => `PATH=${dir} FOO=1 PATH=\${PATH}:/usr/bin audit`, true],
+      [(dir) => `FOO=1 PATH=${dir} PATH=$PATH:/usr/bin exec audit`, true], [(dir) => `PATH=${dir} PATH=$PATH:/usr/bin env PATH=$PATH:/x audit`, false], [(dir) => `env PATH=${dir} PATH=$PATH:/usr/bin audit`, false]];
+    for (const [k, [form, protectedProgram]] of forms.entries()) {
+      const f = fixture(`inline-path-order-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const bin = join(f.dir, 'hooks');
+      mkdirSync(bin);
+      const audit = join(bin, 'audit');   // not on the PATH of the guard: only the assignments in front of the command find it
+      writeFileSync(audit, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: form(bin) }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${form('DIR')}: ${r.stdout}${r.stderr}`).toBe(protectedProgram ? 2 : 0);
+      if (protectedProgram) {
+        expect(r.stderr, form('DIR')).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+        expect(readText(audit), `${form('DIR')}: the program is intact`).toBe('#!/bin/sh\nexit 0\n');
+        expect(existsSync(f.pause), `${form('DIR')}: no pause was published`).toBe(false);
+      }
+    }
+  });
+
   it('the two readers of a command (the hook entry and the programs of other hooks) take an unquoted # that starts a word as the start of a comment and a # anywhere else as text', () => {
     const f = fixture('comment-readers', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const audit = '/opt/x/audit.sh';   // named like a script: an argument that is one is a program wherever it stands

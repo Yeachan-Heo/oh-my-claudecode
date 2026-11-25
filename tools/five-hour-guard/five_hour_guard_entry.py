@@ -90,11 +90,21 @@ def skip_wrappers(words):
 def command_path(words):
     """The PATH that the NAME=VALUE assignments before the command word of a simple command (also after env) give it, variables such as
     $PATH expanded as for the other words, the last one wins; None without one: the command word is then looked up on the PATH of the
-    process that asks."""
-    path = None
+    process that asks. The assignments in front of everything else are expanded in the order of the shell, each one with the ones before
+    it (`PATH=/opt/hooks PATH=$PATH:/usr/bin cmd` looks cmd up in /opt/hooks too); the words after a wrapper (`env PATH=... cmd`) are
+    expanded by the shell before the wrapper runs, with the environment of the process that asks."""
+    path, environment, leading = None, dict(os.environ), True
     for word in words[:skip_wrappers(words)]:
-        if word.startswith('PATH='):
-            path = os.path.expandvars(word[5:])
+        assignment = re.match(r'([A-Za-z_]\w*)=(.*)', word, re.DOTALL)
+        if not assignment:
+            leading = False   # a wrapper: what follows is expanded before it runs
+            continue
+        name, value = assignment.groups()
+        value = re.sub(r'\$(\w+|\{[^}]*\})', lambda m: (environment if leading else os.environ).get(m.group(1).strip('{}'), m.group(0)), value)
+        if leading:
+            environment[name] = value
+        if name == 'PATH':
+            path = value
     return path
 
 
