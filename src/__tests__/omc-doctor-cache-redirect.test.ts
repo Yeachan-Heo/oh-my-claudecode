@@ -188,6 +188,92 @@ fs.readdirSync = function (target, ...rest) {
     }
   });
 
+  // The link leads only to a version that is a real directory, complete (its package.json names exactly that version, as the runtime counts a cached
+  // version) and settled (its dates are neither fresh nor in the future, as the move itself judges them): a higher version that an update is still
+  // writing is left alone by the repair and is no place to send a session to.
+  const pinnedTarget = (cache: string) => ({ link: isLink(path.join(cache, '5.8.0')), target: leadsTo(path.join(cache, '5.8.0')), pinned: realpathSync(path.join(cache, '5.9.0')), versions: digitEntries(cache) });
+
+  test('a higher version that is fresh and has no package.json is left in place and is not the target of the link', () => {
+    for (const command of commands) {
+      const { dir, cache } = setup(['5.8.0', '5.9.0']);
+      try {
+        mkdirSync(path.join(cache, '6.0.0'));
+        const result = runCommand(command, dir, { timeout: 60_000 });
+        expect({ command, status: result.status, moved: movedAside(dir) }).toEqual({ command, status: 0, moved: 1 });
+        expect(result.stdout).toMatch(/Moved 1 unprotected version/);
+        expect(result.stdout).toMatch(/Left 1 version\(s\) modified in the last 10 minutes alone/);
+        const now = pinnedTarget(cache);
+        expect({ command, link: now.link, target: now.target, versions: now.versions }).toEqual({ command, link: true, target: now.pinned, versions: '5.8.0,5.9.0,6.0.0' });
+        expect(isLink(path.join(cache, '6.0.0'))).toBe(false);
+        if (process.platform !== 'win32') expect(readlinkSync(path.join(cache, '5.8.0'))).toBe('5.9.0');
+      } finally {
+        clean(dir);
+      }
+    }
+  });
+
+  test('a higher version that is complete but fresh, or dated in the future, is not the target of the link', () => {
+    for (const command of commands) {
+      for (const dating of ['fresh', 'future']) {
+        const { dir, cache } = setup(['5.8.0', '5.9.0']);
+        try {
+          mkdirSync(path.join(cache, '6.0.0'));
+          writeFileSync(path.join(cache, '6.0.0', 'package.json'), JSON.stringify({ version: '6.0.0' }));
+          if (dating == 'future') age(path.join(cache, '6.0.0'), -HOUR);
+          const result = runCommand(command, dir, { timeout: 60_000 });
+          expect({ command, dating, status: result.status, moved: movedAside(dir) }).toEqual({ command, dating, status: 0, moved: 1 });
+          const now = pinnedTarget(cache);
+          expect({ command, dating, link: now.link, target: now.target, versions: now.versions }).toEqual({ command, dating, link: true, target: now.pinned, versions: '5.8.0,5.9.0,6.0.0' });
+        } finally {
+          clean(dir);
+        }
+      }
+    }
+  });
+
+  test('a higher version that is complete and settled stays the target when a running session keeps it', () => {
+    for (const command of commands) {
+      const { dir, cache } = setup(['5.8.0', '5.9.0', '6.0.0']);
+      try {
+        writeRecord(dir, path.join(cache, '6.0.0'));
+        const result = runCommand(command, dir, { timeout: 60_000 });
+        expect({ command, status: result.status, moved: movedAside(dir) }).toEqual({ command, status: 0, moved: 1 });
+        expect({ command, link: isLink(path.join(cache, '5.8.0')), target: leadsTo(path.join(cache, '5.8.0')) }).toEqual({ command, link: true, target: realpathSync(path.join(cache, '6.0.0')) });
+      } finally {
+        clean(dir);
+      }
+    }
+  });
+
+  test('with no version that can be led to, the version is moved without a link and without a message about one', () => {
+    // The only version that stays is incomplete (no package.json), fresh (modified now), or cannot be read to the end (reading it fails).
+    const unreadable = `const fs = require('fs'); const real = fs.readdirSync;
+fs.readdirSync = function (target, ...rest) {
+  if (String(target).endsWith(require('path').sep + '5.9.0')) throw Object.assign(new Error('input/output error'), { code: 'EIO' });
+  return real.call(this, target, ...rest);
+};
+`;
+    for (const command of commands) {
+      for (const state of ['incomplete', 'fresh', 'unreadable']) {
+        const { dir, cache } = setup(['5.8.0', '5.9.0']);
+        try {
+          if (state == 'incomplete') {
+            rmSync(path.join(cache, '5.9.0', 'package.json'));
+            age(path.join(cache, '5.9.0'));
+          }
+          if (state == 'fresh') age(path.join(cache, '5.9.0'), 0);
+          const preloads = state == 'unreadable' ? [preloadOf(dir, 'unreadable-target.cjs', unreadable)] : [];
+          const result = runCommand(command, dir, { preloads, timeout: 60_000 });
+          expect({ command, state, status: result.status, left: digitEntries(cache), moved: movedAside(dir) }).toEqual({ command, state, status: 0, left: '5.9.0', moved: 1 });
+          expect(result.stdout).toMatch(/Moved 1 unprotected version/);
+          expect(result.stdout).not.toMatch(/Left no link/);
+        } finally {
+          clean(dir);
+        }
+      }
+    }
+  });
+
   test('a link that is moved away (one of SessionStart) leaves no new link, and the version it led to is not moved', () => {
     for (const command of commands) {
       const { dir, cache } = setup(['5.9.0']);

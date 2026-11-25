@@ -323,19 +323,21 @@ const registryMarketplaces = () => {
 // complete is the runtime rule, getLatestPluginCacheVersion, applied exactly (see runtime order of cached versions): the names it counts,
 // the package.json that must name that name, its ordering and its choice of the last one.
 const RUNTIME_CACHE_NAME = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
+// Whether the runtime counts the directory `name` of a cache as a version: a name it counts, with a package.json that names exactly that name.
+const runtimeCounts = (dir, name) => {
+  if (!RUNTIME_CACHE_NAME.test(name)) return false;
+  try {
+    return readJson([dir, name, 'package.json'].join(path.sep)).version === name;
+  } catch {
+    return false;
+  }
+};
 const highestCached = (dir, complete = false) => {
   try {
     if (complete) {
       const versions = fs
         .readdirSync(dir)
-        .filter((name) => RUNTIME_CACHE_NAME.test(name))
-        .filter((name) => {
-          try {
-            return readJson([dir, name, 'package.json'].join(path.sep)).version === name;
-          } catch {
-            return false;
-          }
-        })
+        .filter((name) => runtimeCounts(dir, name))
         .sort(runtimeSemverCompare)
         .reverse();
       return versions[0] || '';
@@ -1445,16 +1447,27 @@ const REPAIR_MESSAGES = {
   },
 };
 
+// Whether a link may lead to the version `name` of a cache: a real directory that the runtime counts as a version (runtimeCounts) and that
+// no update is writing, by the dates that settled judges below (not modified in the last FRESH_MS, not dated more than FUTURE_MS ahead).
+// Nothing is counted here, and a version that cannot be read to the end is no target.
+const leadable = (dir, name) => {
+  try {
+    const at = path.join(dir, name);
+    if (!fs.lstatSync(at).isDirectory() || !runtimeCounts(dir, name)) return false;
+    const newest = newestChange(at);
+    return newest - Date.now() <= FUTURE_MS && Date.now() - newest >= FRESH_MS;
+  } catch {
+    return false;
+  }
+};
+
 // A version that was moved away leaves a link at its name: a session that picked the root of that version before the move and
 // publishes its record only after the last read of the records still opens it. The link leads to the newest version that is still
-// a real directory of the cache, the way the cleanup of SessionStart makes it (a relative link; a junction with an absolute target
-// on Windows). With no such version nothing is left. Returns true when the link could not be made.
+// a real directory of the cache and can be led to (leadable), the way the cleanup of SessionStart makes it (a relative link; a junction
+// with an absolute target on Windows). With no such version nothing is left. Returns true when the link could not be made.
 const redirectFailed = (dir, original) => {
   try {
-    let newest = '';
-    for (const name of versionDirs(dir)) {
-      if (fs.lstatSync(path.join(dir, name)).isDirectory() && (!newest || compareVersions(name, newest) > 0)) newest = name;
-    }
+    const newest = versionDirs(dir).sort(compareVersions).reverse().find((name) => leadable(dir, name));
     const windows = process.platform == 'win32';
     if (newest) fs.symlinkSync(windows ? path.join(dir, newest) : newest, original, windows ? 'junction' : undefined);
     return false;
