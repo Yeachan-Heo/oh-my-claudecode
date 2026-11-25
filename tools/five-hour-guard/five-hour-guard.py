@@ -508,6 +508,8 @@ def registered_runtime_files():
         with open(SETTINGS or default_settings()) as f:
             data = json.load(f)
         entries = command_hooks(data.get('hooks', {}).get('PreToolUse', []))
+        env = data.get('env')   # the top-level env of settings.json reaches the hook processes, not this one: its values are values of the parameters of the commands
+        env = {k: [v] for k, v in env.items() if isinstance(k, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', k) and isinstance(v, str)} if isinstance(env, dict) else {}
         SCANNED[0] = True   # the document was read and has the shape of a settings file: what the scan below finds is what it holds
         generated = [t for t in command_tokens(ENTRY.entry_command(PAUSE_FILE, BUNDLED_HOOK, sys.executable, hook_log_setting())) if t[:1] not in PUNCTUATION or not t]
         if entries:
@@ -516,7 +518,7 @@ def registered_runtime_files():
             try:   # one handler that cannot be read must not hide the ones after it
                 marked = ENTRY.ENTRY_MARKER in handler['command']   # the roles of three words are read in the entry that `add` writes, not in a command found by its exact path
                 hooks, interpreters, logs = entry_roles(handler['command']) if marked else ([], [], [])
-                found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated) + [t for t in logs if os.path.isabs(t)])]   # the log is a file of its own below, so no other word of the entry may be it
+                found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated) + [t for t in logs if os.path.isabs(t)], values=env)]   # the log is a file of its own below, so no other word of the entry may be it
                 if marked:
                     found += [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters] + [(ENTRY_LOG, t) for t in logs if os.path.isabs(t)]
             except ScanIncomplete as e:
@@ -526,7 +528,7 @@ def registered_runtime_files():
         ours = {id(h) for _g, h in entries}
         for command in other_commands(data, ours):
             try:
-                found += [(OTHER_PROGRAM, t) for t in command_programs(command)]
+                found += [(OTHER_PROGRAM, t) for t in command_programs(command, values=env)]
             except ScanIncomplete as e:
                 found.append((UNSCANNED, f'{e}: {command[:60]}'))
             except Exception:

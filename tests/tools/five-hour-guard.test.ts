@@ -1917,6 +1917,35 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(script), 'the program is intact').toBe(text);
   });
 
+  it('the top-level env of settings.json gives values to the parameters of the commands of other hooks (the hook processes get it, the guard does not): never a file the guard writes; an env of the wrong shape does not spoil the scan', () => {
+    const f = fixture('foreign-settings-env', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const script = join(f.dir, 'audit');
+    const text = '# the script that the command runs\n';
+    writeFileSync(script, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (env: unknown, command = 'python3 "$FHG_AUDIT"') => JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    writeFileSync(f.settings, settings({ FHG_AUDIT: script }), 'utf8');
+    for (const key of ['log_file', 'state_file', 'pause_file']) {
+      const r = start({ [key]: script });
+      expect(r.status, `as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, `as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+      expect(readText(script), `as ${key}: the program is intact`).toBe(text);
+    }
+    // in a default word too, and next to values of the wrong shape
+    writeFileSync(f.settings, settings({ FHG_AUDIT: 5, 'not a name': 'x', FHG_OTHER: script }, 'python3 "${FHG_AUDIT:-$FHG_OTHER}"'), 'utf8');
+    expect(start({ state_file: script }).status, 'valid entries of an env with invalid ones').toBe(2);
+    // an env that is no object, and values that are no text, name nothing and do not stop the guard
+    for (const env of [5, 'FHG_AUDIT', ['FHG_AUDIT'], null, { FHG_AUDIT: 5 }, { FHG_AUDIT: [script] }]) {
+      writeFileSync(f.settings, settings(env), 'utf8');
+      const r = start({ state_file: script });
+      expect(r.status, `env ${JSON.stringify(env)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
