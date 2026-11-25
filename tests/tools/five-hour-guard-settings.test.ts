@@ -575,6 +575,22 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
   });
 
+  it('a command that runs the hook after a newline, a glued && or || with a newline, or a lone & is our hook: check reports it and remove takes it away', () => {
+    const forms = (command: string) => [`true\n${command}`, `true;\n${command}`, `true &&\n${command}`, `false ||\n${command}`, `true &\n${command}`, `true & ${command}`, `echo a | cat\n\n${command}`];
+    for (const k of forms('').keys()) {
+      const f = fixture(`settings-newline-${k}`);
+      const doc = base();
+      const before = JSON.stringify(doc.hooks.PreToolUse);
+      const command = forms(`${quote(PYBIN)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)}`)[k];   // no ; of its own: the form is what separates it from `true`
+      doc.hooks.PreToolUse.push({ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] } as never);
+      write(f, doc);
+      expect(tool(f, 'check').status, `${JSON.stringify(command.slice(0, 40))}: the hook the shell runs is found`).toBe(0);
+      const rm = tool(f, 'remove');
+      expect(rm.status, rm.stderr).toBe(0);
+      expect(JSON.stringify(readJson(f.settings).hooks.PreToolUse), `${k}: remove took the handler`).toBe(before);
+    }
+  });
+
   it('add refuses a pause file that is the default usage cache or its lock when the configuration names no usage_cache', () => {
     const f = fixture('settings-default-cache');
     const original = JSON.stringify(base(), null, 2) + '\n';

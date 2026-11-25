@@ -1505,6 +1505,33 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('the two readers of a command end a simple command at a newline and at every control operator alike, also when the operator and the newline are written together', () => {
+    const f = fixture('newline-readers', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const bare = '/opt/x/audit';   // no suffix: a program only as the command word or as the script of an interpreter
+    const hook = '/opt/y/five-hour-guard-hook.py';
+    const run = `${PYBIN} -I ${hook} --pause-file /tmp/p`;
+    const seps = ['\n', '\n\n', ';\n', ' &&\n', ' ||\n', ' &\n', ' & ', ' | ', ' && ', '; '];
+    // [command, hook scripts of the entry that the command is, pause files it names, whether bare is a program of the command]
+    const rows: Array<[string, string[], string[], boolean]> = [
+      ...seps.map((sep): [string, string[], string[], boolean] => [`echo a${sep}${run}`, [hook], ['/tmp/p'], false]),
+      ...seps.map((sep): [string, string[], string[], boolean] => [`${run}${sep}echo a`, [hook], ['/tmp/p'], false]),
+      ...seps.map((sep): [string, string[], string[], boolean] => [`echo a${sep}${PYBIN} ${bare}`, [], [], true]),
+      [`echo a\n${hook} --pause-file /tmp/p`, [hook], ['/tmp/p'], false],
+      [`echo a ${hook}\n${PYBIN} ${bare}`, [], [], true],
+    ];
+    const driver = ['import json, runpy, sys', 'guard, rows = sys.argv[1], json.loads(sys.argv[2])', 'sys.argv = [guard] + sys.argv[3:]',
+      'g = runpy.run_path(guard, run_name="guard_functions")',
+      'print(json.dumps([[row, g["command_programs"](row), g["ENTRY"].entry_parts(row)] for row in rows]))'].join('\n');
+    const r = runPyCode(driver, [GUARD, JSON.stringify(rows.map((row) => row[0])), ...guardArgs(f)]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    const out = JSON.parse(r.stdout.trim().split('\n').pop() as string) as Array<[string, string[], [string[], string[], string[], string[]]]>;
+    for (const [k, [command, hooks, pauses, isProgram]] of rows.entries()) {
+      expect(out[k][2][0], `${JSON.stringify(command)}: the hooks of the entry`).toEqual(hooks);
+      expect(out[k][2][3], `${JSON.stringify(command)}: the pause files`).toEqual(pauses);
+      expect(out[k][1].includes(bare), `${JSON.stringify(command)}: ${bare} is ${isProgram ? '' : 'not '}a program`).toBe(isProgram);
+    }
+  });
+
   it('a program behind the options of env, exec, command and time, and behind the separators, groups, keywords and wrappers of a shell command, is found', () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);

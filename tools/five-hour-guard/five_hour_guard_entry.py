@@ -16,6 +16,7 @@ PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BAS
 # is one of these is not the program: skip_wrappers() steps over it, its options and the NAME=VALUE assignments.
 WRAPPERS = {'exec': ('-a',), 'env': ('-u', '--unset', '-C', '--chdir', '-S', '--split-string'), 'command': (), 'nohup': (),
             'time': ('-f', '--format', '-o', '--output')}
+SEPARATORS = ';&|\n'   # the characters of the operators that end a simple command (the parentheses and the redirections are not read here)
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
 
 
@@ -128,14 +129,14 @@ def entry_parts(command):
     neither is an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file as data). The
     hook script is the command word of a simple command, or the first argument after it when the command word is a Python or the
     command carries --pause-file. Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
-    lex = shlex.shlex(strip_comments(command), posix=True, punctuation_chars=';&|')   # the separators are told from quoted text: a quoted path may end in `;`
-    lex.whitespace_split, lex.commenters = True, ''
+    lex = shlex.shlex(strip_comments(command), posix=True, punctuation_chars=SEPARATORS)   # the separators are told from quoted text: a quoted path may end in `;`
+    lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''   # a newline ends a command, as ; does
     tokens = list(lex)
     if any('\0' in t for t in tokens):
         raise ValueError('NUL character in the command')
     simple, current = [], []
     for t in tokens:
-        if t in (';', '&&', '||', '|'):
+        if t and not t.strip(SEPARATORS):   # one token of operators: ; & && || | and newlines, also written together (`&&` and a newline)
             simple.append(current)
             current = []
         else:
