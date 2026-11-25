@@ -2,7 +2,8 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { commands, digitVersions, scriptText, movedAside, PLUGIN_ID, makeCache, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import vm from 'node:vm';
+import { ROOT, commands, digitVersions, scriptText, movedAside, PLUGIN_ID, makeCache, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { deadPid, epermPreload, minutes, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 
 // What an occupancy record says about a cache version: only a record whose owner is not proven gone protects, a record of
@@ -18,6 +19,7 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     { label: 'live process, record dated 4 minutes ahead (within the clock tolerance)', write: (d, r) => writeRecord(d, r, { updatedAt: minutes(4) }), expected: 'kept' },
     { label: 'record dated 6 minutes ahead', write: (d, r) => writeRecord(d, r, { updatedAt: minutes(6) }), expected: 'moved' },
     { label: 'process that no longer exists', write: (d, r) => writeRecord(d, r, { pid: deadPid() }), expected: 'moved' },
+    { label: 'process that does not exist here, record of another host or PID namespace (it cannot be judged by a local probe)', write: (d, r) => writeRecord(d, r, { pid: deadPid(), host: 'another-machine|pid:[4026539999]' }), expected: 'kept' },
     { label: 'process that no longer exists, record without a plugin root (proven gone is enough, it cannot block)', write: (d, r) => writeRecord(d, r, { pid: deadPid(), pluginRoot: undefined }), expected: 'moved' },
     { label: 'pid answers EPERM (alive, owned by another user)', write: (d, r) => writeRecord(d, r, { pid: deadPid() }), expected: 'kept', eperm: true },
     { label: `pid reused by another process: start identity differs (${readsIdentity ? 'read on Linux' : 'cannot be read here, so the record is kept'})`, write: (d, r) => writeRecord(d, r, { processStartIdentity: 'not-the-recorded-start' }), expected: readsIdentity ? 'moved' : 'kept' },
@@ -31,6 +33,21 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     { label: 'record with a pid written as a string', write: (d, r) => writeRecord(d, r, { pid: String(process.pid) }), expected: 'kept' },
     { label: 'record with a pid that is not a whole number', write: (d, r) => writeRecord(d, r, { pid: 1.5 }), expected: 'kept' },
   ];
+
+  // The doctor is plain Node and cannot import the plugin's helper, so it repeats the rule of scripts/lib/cache-occupancy.mjs that tells a
+  // record of another host or PID namespace from a local one; both texts are run here, with the same host and namespace, on the same records.
+  test('the doctor tells a record of another place from a local one exactly as the helper of the runtime does', () => {
+    const lib = readFileSync(path.join(ROOT, 'scripts', 'lib', 'cache-occupancy.mjs'), 'utf8');
+    const libSource = lib.slice(lib.indexOf('function placeId()'), lib.indexOf('function alive(')).replace('export function', 'function');
+    const doctorSource = scriptText.slice(scriptText.indexOf('const placeId = '), scriptText.indexOf('// A record is ignored only when')).replace(/^const (\w+) = /gm, 'var $1 = ');
+    const records = [{}, { host: '' }, { host: 5 }, { host: null }, { host: 'machine-a' }, { host: 'machine-a|pid:[1]' }, { host: 'machine-b' }, { host: 'machine-b|pid:[1]' }, { host: 'machine-b|pid:[2]' }, undefined];
+    for (const place of [{ host: 'machine-a', namespace: '' }, { host: 'machine-a', namespace: 'pid:[1]' }, { host: 'machine-b', namespace: 'pid:[2]' }]) {
+      const sandbox = { readlinkSync: () => { if (!place.namespace) throw new Error('not linux'); return place.namespace; }, hostname: () => place.host };
+      const fromLib = vm.runInNewContext(`${libSource}\nrecords => records.map(isForeignOwner)`, sandbox) as (records: unknown[]) => boolean[];
+      const fromDoctor = vm.runInNewContext(`${doctorSource}\nrecords => records.map(isForeignOwner)`, { fs: { readlinkSync: sandbox.readlinkSync }, os: { hostname: sandbox.hostname } }) as (records: unknown[]) => boolean[];
+      expect({ place, doctor: fromDoctor(records) }).toEqual({ place, doctor: fromLib(records) });
+    }
+  });
 
   test('an occupancy record protects a version only while its owner is not proven gone, and the commands never delete a record', () => {
     for (const command of commands) {

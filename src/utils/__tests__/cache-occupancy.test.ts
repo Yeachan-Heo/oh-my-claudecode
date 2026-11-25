@@ -51,6 +51,48 @@ describe('cache occupancy registry', () => {
     expect(read(dir).roots).toEqual(new Set([root]));
   });
 
+  // A record carries where its owner runs (host name and, on Linux, PID namespace). A profile shared over NFS or mounted into a container
+  // holds records of owners this machine cannot probe: a local "no such process" or another start time proves nothing about them.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps the record of an owner that runs elsewhere, and judges a record without the field locally, for %s', async (_name, path) => {
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    const exited = spawnSync(process.execPath, ['-e', '']).pid;
+    const write = (letter: string, fields: Record<string, unknown>) => {
+      const file = join(registry, `${letter.repeat(64)}.json`);
+      writeFileSync(file, JSON.stringify({ version: 1, pid: exited, processStartIdentity: 'start', pluginRoot: join(dir, `root-${letter}`), updatedAt: new Date().toISOString(), ...fields }));
+      return file;
+    };
+    const foreign = write('a', { host: 'another-machine|pid:[4026539999]' });
+    const foreignOtherStart = write('b', { host: 'another-machine|pid:[4026539999]', pid: process.pid });
+    const local = write('c', {});
+
+    const roots = read(dir).roots;
+
+    expect([...roots].sort()).toEqual([join(dir, 'root-a'), join(dir, 'root-b')]);
+    expect({ foreign: existsSync(foreign), foreignOtherStart: existsSync(foreignOtherStart), local: existsSync(local) }).toEqual({ foreign: true, foreignOtherStart: true, local: false });
+  });
+
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('writes the place of its owner into a record, so the record stays a local one for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    expect(await publish(root, dir)).toBe(true);
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    const record = JSON.parse(readFileSync(join(registry, readdirSync(registry)[0]), 'utf8')) as { host?: unknown };
+    expect(typeof record.host === 'string' && record.host.length > 0).toBe(true);
+    expect(read(dir).roots).toEqual(new Set([root]));
+  });
+
   it.each([
     ['typescript', null],
     ['script', '../../../scripts/lib/cache-occupancy.mjs'],

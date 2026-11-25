@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, lstatSync, readFileSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
+import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
+import { hostname } from 'os';
 import { join, resolve } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -89,6 +90,17 @@ function identities(pids, probeTimeoutMs = 3000) {
   }
   return result;
 }
+// Where this process runs: the host name and, on Linux, the PID namespace. A profile shared over NFS or mounted into a container holds
+// records of owners that this machine cannot probe, so a record that names another place is never judged by a local process probe.
+function placeId() {
+  let namespace = '';
+  try { namespace = readlinkSync('/proc/self/ns/pid'); } catch {}
+  return namespace ? `${hostname()}|${namespace}` : hostname();
+}
+// A record without the field (made before it existed) is a local record.
+export function isForeignOwner(record) {
+  return typeof record?.host === 'string' && record.host !== '' && record.host !== placeId();
+}
 function alive(pid) {
   try { process.kill(pid, 0); return true; }
   catch (error) { return error?.code === 'EPERM'; }
@@ -115,7 +127,7 @@ export function publishCacheOccupancy(pluginRoot, configDir, pid = process.ppid,
   const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(temp, JSON.stringify({ version: 1, pid, processStartIdentity: start, pluginRoot: root, updatedAt: new Date().toISOString() }), { mode: 0o600 });
+    writeFileSync(temp, JSON.stringify({ version: 1, pid, processStartIdentity: start, pluginRoot: root, host: placeId(), updatedAt: new Date().toISOString() }), { mode: 0o600 });
     renameSync(temp, target);
     return true;
   } catch { try { unlinkSync(temp); } catch {} return false; }
@@ -150,7 +162,7 @@ export function readOccupiedPluginRoots(configDir, options = {}) {
     }
     try { record = JSON.parse(content); } catch { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     const age = Date.now() - Date.parse(record?.updatedAt);
-    if (record?.version !== 1 || !Number.isSafeInteger(record?.pid) || !record?.processStartIdentity || !record?.pluginRoot || !Number.isFinite(Date.parse(record?.updatedAt)) || age < -300000 || !alive(record.pid)) {
+    if (record?.version !== 1 || !Number.isSafeInteger(record?.pid) || !record?.processStartIdentity || !record?.pluginRoot || !Number.isFinite(Date.parse(record?.updatedAt)) || age < -300000 || (!isForeignOwner(record) && !alive(record.pid))) {
       try { unlinkSync(path); } catch {}
       continue;
     }
@@ -163,12 +175,12 @@ export function readOccupiedPluginRoots(configDir, options = {}) {
     : (options.identities instanceof Map
       ? options.identities
       : identities(
-        [...(Array.isArray(options.includePids) ? options.includePids : []), ...records.map(({ record }) => record.pid)],
+        [...(Array.isArray(options.includePids) ? options.includePids : []), ...records.filter(({ record }) => !isForeignOwner(record)).map(({ record }) => record.pid)],
         remainingProbeMs(),
       ));
   for (const { path, record } of records) {
     const current = currentIdentities.get(record.pid);
-    if (current && current !== record.processStartIdentity) {
+    if (current && current !== record.processStartIdentity && !isForeignOwner(record)) {
       try { unlinkSync(path); } catch {}
       continue;
     }

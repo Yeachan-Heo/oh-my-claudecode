@@ -1,4 +1,5 @@
-import { readdirSync, lstatSync, readFileSync, unlinkSync } from 'fs';
+import { readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync } from 'fs';
+import { hostname } from 'os';
 import { mkdir, writeFile, rename, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'node:child_process';
@@ -67,11 +68,25 @@ function processAlive(pid: number): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
+// Where this process runs: the host name and, on Linux, the PID namespace (the same text as scripts/lib/cache-occupancy.mjs). A record that
+// names another place belongs to an owner this machine cannot probe, so a local process probe never proves it gone.
+function placeId(): string {
+  let namespace = '';
+  try { namespace = readlinkSync('/proc/self/ns/pid'); } catch { /* not Linux, or not readable */ }
+  return namespace ? `${hostname()}|${namespace}` : hostname();
+}
+
+function isForeignOwner(record: CacheOccupancyRecord): boolean {
+  return typeof record.host === 'string' && record.host !== '' && record.host !== placeId();
+}
+
 export interface CacheOccupancyRecord {
   version: 1;
   pid: number;
   processStartIdentity: string;
   pluginRoot: string;
+  /** Where the owner runs; absent in records made before the field existed (a local record). */
+  host?: string;
   updatedAt: string;
 }
 
@@ -100,6 +115,7 @@ export async function publishCacheOccupancy(pluginRoot: string, configDir?: stri
     pid: process.pid,
     processStartIdentity: identity,
     pluginRoot: normalizedRoot,
+    host: placeId(),
     updatedAt: new Date().toISOString(),
   };
   const target = recordPath(normalizedRoot, process.pid, identity, configDir);
@@ -166,19 +182,19 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), option
     if (!validRecord(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     const age = now - Date.parse(record.updatedAt);
     if (age < -5 * 60 * 1000) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
-    if (!processAlive(record.pid)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
+    if (!isForeignOwner(record) && !processAlive(record.pid)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     records.push({ path, record });
   }
   // A precomputed map (same-process reuse, issue #3995) verifies records
   // without a second PowerShell host; the fresh batched probe runs otherwise.
   const currentIdentities = options.identities instanceof Map
     ? options.identities
-    : processStartIdentities([...records.map(({ record }) => record.pid), ...(options.includePids ?? [])]);
+    : processStartIdentities([...records.filter(({ record }) => !isForeignOwner(record)).map(({ record }) => record.pid), ...(options.includePids ?? [])]);
   for (const { path, record } of records) {
     const currentIdentity = process.platform === 'win32'
       ? currentIdentities.get(record.pid)
       : processStartIdentity(record.pid);
-    if (currentIdentity && currentIdentity !== record.processStartIdentity) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
+    if (currentIdentity && currentIdentity !== record.processStartIdentity && !isForeignOwner(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     // A live process whose identity cannot be read (including EPERM) is retained
     // conservatively; only a proven-dead PID or proven mismatch self-invalidates.
     roots.add(pathIdentity(record.pluginRoot));
