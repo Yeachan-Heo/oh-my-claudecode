@@ -2385,6 +2385,29 @@ async function main() {
       resolved = resolved.filter((m) => !CODE_EDITING_SKILLS.has(m.name));
     }
 
+    // Apply ralplan gate: redirect underspecified execution requests to ralplan (issue #5151)
+    // Import the gate function and removeCodeBlocks (best-effort, requires npm run build)
+    let applyRalplanGate = null;
+    let removeCodeBlocks = null;
+    try {
+      const gateModule = await import('../dist/hooks/keyword-detector/index.js');
+      applyRalplanGate = gateModule.applyRalplanGate;
+      removeCodeBlocks = gateModule.removeCodeBlocks;
+    } catch { /* silent — dist/ may not exist yet */ }
+    
+    if (applyRalplanGate && removeCodeBlocks && resolved.length > 0) {
+      // Use removeCodeBlocks like bridge.ts does, not sanitizeForKeywordDetection
+      // (which also strips file paths, breaking concrete specifications)
+      const cleanedForGate = removeCodeBlocks(prompt);
+      const gateKeywords = resolved.map((m) => m.name);
+      const gateResult = applyRalplanGate(gateKeywords, cleanedForGate);
+      
+      if (gateResult.gateApplied) {
+        // Replace execution keywords with ralplan
+        resolved = gateResult.keywords.map((kw) => ({ name: kw, args: '' }));
+      }
+    }
+
     const permissionMode = data.permission_mode;
     if (isJevShadowOptedIn('skill-trigger', process.env, permissionMode)) {
       const keywords = resolved.map((match) => match.name);
