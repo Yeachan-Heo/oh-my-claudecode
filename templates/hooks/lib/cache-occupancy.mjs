@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
-import { hostname, type as osType } from 'os';
+import { type as osType } from 'os';
 import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -90,10 +90,12 @@ function identities(pids, probeTimeoutMs = 3000) {
   }
   return result;
 }
-// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; Windows: MachineGuid, macOS:
+// Where this process runs: the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; Windows: MachineGuid, macOS:
 // IOPlatformUUID, each read once per process by one subprocess with a short limit; empty where there is none)
-// and, on Linux, the PID namespace. Two machines can report the same host name and the same namespace text, so the machine id tells them
-// apart. A profile shared over NFS or mounted into a container holds records of owners that this machine cannot probe, so a record that
+// and, on Linux, the PID namespace. Two machines can report the same namespace text (the namespace of init is the same everywhere), so the
+// machine id tells them apart. The host name is no part of the place: it changes while the machine stays the same (a rename, a name that
+// follows the network), and a record of the machine written under its previous name must stay judgeable. Machines that share a machine id
+// (clones of one image) and the namespace of init are taken for one. A profile shared over NFS or mounted into a container holds records of owners that this machine cannot probe, so a record that
 // names another place is never judged by a local process probe. A record made before the machine id was added has the other format and
 // is taken for another place (kept, never judged by a local probe).
 // Where no machine id can be read at all, the machine is unknown (empty) and every record is then foreign, never judged by a local probe (see
@@ -128,7 +130,7 @@ function placeId() {
   const machine = machineId();
   let namespace = '';
   try { namespace = readlinkSync('/proc/self/ns/pid'); } catch {}
-  return `${hostname()}|${machine}|${namespace}`;
+  return `${machine}|${namespace}`;
 }
 // Only a record that names this very place is local. A record without the field (made by the previous publisher, possibly on another machine
 // of a shared profile during a rolling update) has an unknown origin and is foreign: never judged by a local probe, never removed as gone.

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync } from 'fs';
-import { hostname, type as osType } from 'os';
+import { type as osType } from 'os';
 import { mkdir, writeFile, rename, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -68,9 +68,9 @@ function processAlive(pid: number): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
-// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; Windows: MachineGuid, macOS:
+// Where this process runs: the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; Windows: MachineGuid, macOS:
 // IOPlatformUUID, each read once per process by one subprocess with a short limit; empty where there is none)
-// and, on Linux, the PID namespace; the same text as scripts/lib/cache-occupancy.mjs, where the reason is given. A record that names another
+// and, on Linux, the PID namespace; the host name is no part of it; the same text as scripts/lib/cache-occupancy.mjs, where the reason is given. A record that names another
 // place, or none (a record of the previous publisher), belongs to an owner this machine cannot probe, so a local process probe never proves it gone.
 // Where no machine id can be read at all the machine is unknown (empty) and every record is foreign. The hardware addresses of the network interfaces
 // are no stand-in: they change when an adapter comes or goes.
@@ -106,7 +106,7 @@ function placeId(): string {
   const machine = machineId();
   let namespace = '';
   try { namespace = readlinkSync('/proc/self/ns/pid'); } catch { /* not Linux, or not readable */ }
-  return `${hostname()}|${machine}|${namespace}`;
+  return `${machine}|${namespace}`;
 }
 
 function isForeignOwner(record: CacheOccupancyRecord): boolean {

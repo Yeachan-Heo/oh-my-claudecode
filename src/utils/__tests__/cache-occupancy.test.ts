@@ -11,13 +11,15 @@ const readFailures = vi.hoisted(() => new Map<string, string>());
 const lstatFailures = vi.hoisted(() => new Map<string, string>());
 // What the machine id file holds while a test plays another machine; empty reads the real file.
 const machineId = vi.hoisted(() => ({ value: '' }));
+// The host name a test plays; empty reads the real one.
+const hostName = vi.hoisted(() => ({ value: '' }));
 // The network interfaces a test plays; undefined reads the real ones.
 const interfaces = vi.hoisted(() => ({ value: undefined as Record<string, unknown[]> | undefined }));
 // The operating system a test plays, and what the one program that names the machine answers; an empty kind is the real system.
 const system = vi.hoisted(() => ({ kind: '', stdout: '', status: 0, runs: 0 }));
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof import('os')>('os');
-  return { ...actual, type: () => system.kind || actual.type(), networkInterfaces: () => (interfaces.value ?? actual.networkInterfaces()) as ReturnType<typeof actual.networkInterfaces> };
+  return { ...actual, type: () => system.kind || actual.type(), hostname: () => hostName.value || actual.hostname(), networkInterfaces: () => (interfaces.value ?? actual.networkInterfaces()) as ReturnType<typeof actual.networkInterfaces> };
 });
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -189,12 +191,12 @@ describe('cache occupancy registry', () => {
     expect(answers).toEqual({ 'another host': true, 'no host field': true, 'this host': false });
   });
 
-  // Two machines can report the same host name and the same PID namespace text; only the machine id tells them apart.
+  // Two machines can report the same PID namespace text (the namespace of init is the same everywhere on Linux); the machine id tells them apart.
   it.each([
     ['typescript', null],
     ['script', '../../../scripts/lib/cache-occupancy.mjs'],
     ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
-  ])('keeps the record of an owner whose host name and namespace match but whose machine id differs, for %s', async (_name, path) => {
+  ])('keeps the record of an owner whose namespace matches but whose machine id differs, for %s', async (_name, path) => {
     const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
     const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
     const root = join(dir, 'plugins', '1.0.0');
@@ -202,11 +204,46 @@ describe('cache occupancy registry', () => {
     expect(await publish(root, dir)).toBe(true);
     const file = join(dir, '.omc', 'cache-occupancy', readdirSync(join(dir, '.omc', 'cache-occupancy'))[0]);
     const record = JSON.parse(readFileSync(file, 'utf8')) as { host: string; pid: number };
-    const [name, , namespace] = record.host.split('|');
-    writeFileSync(file, JSON.stringify({ ...record, pid: spawnSync(process.execPath, ['-e', '']).pid, host: `${name}|another-machine-id|${namespace ?? ''}` }));
+    const [, namespace] = record.host.split('|');
+    writeFileSync(file, JSON.stringify({ ...record, pid: spawnSync(process.execPath, ['-e', '']).pid, host: `another-machine-id|${namespace ?? ''}` }));
 
     expect(read(dir).roots).toEqual(new Set([root]));
     expect(existsSync(file)).toBe(true);
+  });
+
+  // A host can be renamed (a workstation, a container, a laptop whose name follows the network) without a change of its machine id or PID
+  // namespace. The place is the same machine, so a record written under the previous name is still judged by a local probe and goes when its owner has exited.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps the place of a machine when its host name changes: the record of an owner that has exited goes, for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    const firstRecord = (configDir: string) => {
+      const registry = join(configDir, '.omc', 'cache-occupancy');
+      const file = join(registry, readdirSync(registry)[0]);
+      return { file, record: JSON.parse(readFileSync(file, 'utf8')) as { host: string } };
+    };
+    try {
+      machineId.value = 'id-of-this-machine';
+      hostName.value = 'before-the-rename';
+      expect(await (path ? publish(root, dir, process.pid, 'same-start') : publish(root, dir, 'same-start'))).toBe(true);
+      const before = firstRecord(dir);
+      // The owner exits, then the machine is renamed.
+      writeFileSync(before.file, JSON.stringify({ ...before.record, pid: spawnSync(process.execPath, ['-e', '']).pid }));
+      hostName.value = 'after-the-rename';
+      const otherConfig = join(dir, 'other-config');
+      expect(await (path ? publish(root, otherConfig, process.pid, 'same-start') : publish(root, otherConfig, 'same-start'))).toBe(true);
+      expect(firstRecord(otherConfig).record.host).toBe(before.record.host);
+      expect(read(dir).roots).toEqual(new Set());
+      expect(existsSync(before.file)).toBe(false);
+    } finally {
+      machineId.value = '';
+      hostName.value = '';
+    }
   });
 
   // Where no machine id file can be read, Windows and macOS name the machine through one program (MachineGuid, IOPlatformUUID), run once per process;
@@ -238,7 +275,7 @@ describe('cache occupancy registry', () => {
         writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), pid: spawnSync(process.execPath, ['-e', '']).pid }));
         mod.readOccupiedPluginRoots(dir);
         mod.readOccupiedPluginRoots(dir);
-        outcome.push({ host: published.host.split('|')[1], kept: existsSync(file), runs: system.runs });
+        outcome.push({ host: published.host.split('|')[0], kept: existsSync(file), runs: system.runs });
       }
     } finally {
       Object.assign(system, { kind: '', stdout: '', status: 0, runs: 0 });

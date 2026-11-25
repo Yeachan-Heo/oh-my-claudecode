@@ -1081,7 +1081,7 @@ const placeId = () => {
   try {
     namespace = fs.readlinkSync('/proc/self/ns/pid');
   } catch {}
-  return os.hostname() + '|' + machine + '|' + namespace;
+  return machine + '|' + namespace;
 };
 const isForeignOwner = (record) => typeof record?.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
 // A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time

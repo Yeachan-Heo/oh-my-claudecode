@@ -59,7 +59,7 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     const lib = readFileSync(path.join(ROOT, 'scripts', 'lib', 'cache-occupancy.mjs'), 'utf8');
     const libSource = lib.slice(lib.indexOf('function machineId()'), lib.indexOf('function alive(')).replace('export function', 'function');
     const doctorSource = scriptText.slice(scriptText.indexOf('const machineId = '), scriptText.indexOf('// A record is ignored only when')).replace(/^const (\w+) = /gm, 'var $1 = ');
-    const records = [{}, { host: '' }, { host: 5 }, { host: null }, { host: 'machine-a' }, { host: 'machine-a|pid:[1]' }, { host: 'machine-a|id-1|pid:[1]' }, { host: 'machine-a|id-2|pid:[1]' }, { host: 'machine-a|id-1|' }, { host: 'machine-a||' }, { host: 'machine-b|id-1|pid:[2]' }, { host: 'machine-b||pid:[2]' }, { host: 'machine-a|Windows_NT:GUID-1|' }, { host: 'machine-a|Darwin:UUID-1|' }, undefined];
+    const records = [{}, { host: '' }, { host: 5 }, { host: null }, { host: 'machine-a' }, { host: 'machine-a|pid:[1]' }, { host: 'machine-a|id-1|pid:[1]' }, { host: 'machine-a|id-2|pid:[1]' }, { host: 'machine-a|id-1|' }, { host: 'machine-a||' }, { host: 'machine-b|id-1|pid:[2]' }, { host: 'machine-b||pid:[2]' }, { host: 'machine-a|Windows_NT:GUID-1|' }, { host: 'machine-a|Darwin:UUID-1|' }, { host: 'id-1|pid:[1]' }, { host: 'id-2|pid:[1]' }, { host: 'id-1|' }, { host: '|' }, { host: 'Windows_NT:GUID-1|' }, { host: 'Darwin:UUID-1|' }, undefined];
     // The machine id comes from the first readable of two files; on Windows and macOS from the one program that names the machine; where nothing names it the machine is unknown.
     const worlds: World[] = [
       { host: 'machine-a', files: {}, namespace: '', kind: 'Linux' },
@@ -67,10 +67,12 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
       { host: 'machine-a', files: { '/var/lib/dbus/machine-id': 'id-2' }, namespace: 'pid:[1]', kind: 'Linux' },
       { host: 'machine-a', files: { '/etc/machine-id': 'id-1', '/var/lib/dbus/machine-id': 'id-2' }, namespace: '', kind: 'Linux' },
       { host: 'machine-b', files: {}, namespace: 'pid:[2]', kind: 'Linux' },
+      { host: 'machine-z', files: { '/etc/machine-id': 'id-1\n' }, namespace: 'pid:[1]', kind: 'Linux' },
       { host: 'machine-a', files: {}, namespace: '', kind: 'Windows_NT', program: windowsAnswer('GUID-1') },
       { host: 'machine-a', files: {}, namespace: '', kind: 'Windows_NT', program: { status: 1, stdout: '' } },
       { host: 'machine-a', files: {}, namespace: '', kind: 'Windows_NT', program: { error: 'timed out' } },
       { host: 'machine-a', files: {}, namespace: '', kind: 'Darwin', program: macAnswer('UUID-1') },
+      { host: 'machine-z', files: {}, namespace: '', kind: 'Darwin', program: macAnswer('UUID-1') },
       { host: 'machine-a', files: {}, namespace: '', kind: 'Darwin', program: { status: 0, stdout: 'no uuid here' } },
     ];
     for (const place of worlds) {
@@ -124,6 +126,48 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
       vm.runInNewContext(`${side === 'lib' ? libSource : doctorSource}\nplaceId(); placeId(); isForeignOwner({ host: 'x' });`, sandbox);
       expect({ side, runs: calls.length, command: String(calls[0]?.[0]).replace(/\\/g, '/').toLowerCase(), limit: (calls[0]?.[2] as { timeout: number })?.timeout, hidden: (calls[0]?.[2] as { windowsHide: boolean })?.windowsHide })
         .toEqual({ side, runs: 1, command: 'c:/windows/system32/reg.exe', limit: 1000, hidden: true });
+    }
+  });
+
+  // A host can be renamed (a workstation, a container, a laptop whose name follows the network) without a change of its machine id or PID
+  // namespace: its place is the same machine, so a record written under the previous name is local in the helper and in the doctor alike.
+  test('the place of a machine does not change with its host name, in the runtime helper and in the doctor', () => {
+    const lib = readFileSync(path.join(ROOT, 'scripts', 'lib', 'cache-occupancy.mjs'), 'utf8');
+    const libSource = lib.slice(lib.indexOf('function machineId()'), lib.indexOf('function alive(')).replace('export function', 'function');
+    const doctorSource = scriptText.slice(scriptText.indexOf('const machineId = '), scriptText.indexOf('// A record is ignored only when')).replace(/^const (\w+) = /gm, 'var $1 = ');
+    const named = (host: string, world: Omit<World, 'host'>): World => ({ ...world, host });
+    const worlds: Array<[string, Omit<World, 'host'>]> = [
+      ['a machine id file and a PID namespace', { files: { '/etc/machine-id': 'id-1\n' }, namespace: 'pid:[1]', kind: 'Linux' }],
+      ['a MachineGuid', { files: {}, namespace: '', kind: 'Windows_NT', program: windowsAnswer('GUID-1') }],
+      ['an IOPlatformUUID', { files: {}, namespace: '', kind: 'Darwin', program: macAnswer('UUID-1') }],
+    ];
+    for (const [label, world] of worlds) {
+      for (const side of ['lib', 'doctor'] as const) {
+        const source = side === 'lib' ? libSource : doctorSource;
+        const ask = (place: World, text: string, record?: unknown) => vm.runInNewContext(`${source}\n${text}`, { ...sandboxes(place)[side], record });
+        const before = named('name-before-the-rename', world);
+        const after = named('name-after-the-rename', world);
+        const written = { host: ask(before, 'placeId()') as string };
+        expect({ label, side, same: ask(after, 'placeId()') === written.host, foreign: ask(after, 'isForeignOwner(record)', written) }).toEqual({ label, side, same: true, foreign: false });
+      }
+    }
+  });
+
+  // The same through the cache commands: a record that the helper wrote before the rename names an owner that has exited, so it protects nothing.
+  test('a record written before the host was renamed is judged by the local probe: the record of an owner that has exited protects nothing', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.8.1', '5.9.0']);
+      try {
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.1' }] });
+        const file = writeRecord(dir, path.join(cache, '5.9.0'), { pid: deadPid() });
+        const renamed = path.join(dir, 'renamed.cjs');
+        writeFileSync(renamed, "require('os').hostname = () => 'name-after-the-rename';\n");
+        const result = runCommand(command, dir, { preloads: [renamed] });
+        expect({ command, status: result.status, versions: digitVersions(cache), moved: movedAside(dir), record: existsSync(file) })
+          .toEqual({ command, status: 0, versions: '5.8.1', moved: 2, record: true });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   });
 
