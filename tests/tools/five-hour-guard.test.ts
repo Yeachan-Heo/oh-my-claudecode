@@ -1672,6 +1672,51 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
   });
 
+  it('a bare word of the command of another hook is also a file in each directory that another word of the same command names (cd DIR; prog, env -C DIR prog): never a file the guard writes, at the start and after a settings rewrite', async () => {
+    const f = fixture('foreign-cd', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const script = join(hooks, 'audit');
+    writeFileSync(script, '# the script that the command runs after cd\n', 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const command of [`cd ${hooks}; python3 audit`, `cd ${hooks} && audit`, `env -C ${hooks} audit`, `audit --directory ${hooks}`]) {
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${command} as ${key}: the program is intact`).toBe('# the script that the command runs after cd\n');
+      }
+    }
+    // no directory is named: the bare word is no file of that directory
+    writeFileSync(f.settings, settings('python3 audit'), 'utf8');
+    const quiet = start({ state_file: script });
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+    writeFileSync(script, '# the script that the command runs after cd\n', 'utf8');
+
+    // a settings rewrite after the start: the command now changes into the directory of the log file
+    const logPath = join(hooks, 'late');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours] } }), 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: logPath, settings_file: f.settings }), 'utf8');
+    const program = '# a hook of another tool\nprint("audit")\n';
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(logPath)), 20000, 'the start in the log');
+      writeFileSync(f.settings, settings(`cd ${hooks}; late`), 'utf8');
+      writeFileSync(logPath, program, 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*program of another hook .*late is the log_file of this guard/.test(g.out), 20000, 'the refusal of the pause');
+      await sleep(800);
+    } finally { await stopGuard(g); }
+    expect(readText(logPath), 'the program of the other hook is intact').toBe(program);
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
