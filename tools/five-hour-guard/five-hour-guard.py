@@ -818,6 +818,8 @@ def check_wiring(where):
         for path in hooks:
             if not os.path.isfile(path):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which does not exist: the shell guard of the entry lets every call through, so a pause would hold no session')
+            elif not os.access(path, os.R_OK):
+                log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which is not readable: the shell guard of the entry lets every call through, so a pause would hold no session')
         for launcher in launchers:
             if launcher in hooks:
                 continue   # run directly: the drift warning above covers it

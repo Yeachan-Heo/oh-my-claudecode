@@ -48,10 +48,11 @@ def handler_problems(handler):
 
 def entry_command(pause_file, hook, python, hook_log=None):
     """The command of the hook entry. The shell pre-check keeps the cost outside a pause at ~2 ms per tool call (python alone ~35 ms);
-    a missing hook or interpreter file is fail-open too (exec of a missing file would exit 127 or 2; 2 is what a PreToolUse hook
-    reports as a blocking error). Needs a POSIX sh: sh -c on Linux and macOS, Git Bash on Windows."""
+    a missing or unreadable hook file or a missing interpreter file is fail-open too (exec of a missing file would exit 127 or 2, and
+    Python exits 2 for a script it cannot open; 2 is what a PreToolUse hook reports as a blocking error). Needs a POSIX sh: sh -c on
+    Linux and macOS, Git Bash on Windows."""
     q = shlex.quote
-    cmd = f'[ -f {q(pause_file)} ] && [ -f {q(hook)} ] && [ -x {q(python)} ] || exit 0; exec {q(python)} -I {q(hook)} --pause-file {q(pause_file)}'
+    cmd = f'[ -f {q(pause_file)} ] && [ -f {q(hook)} ] && [ -r {q(hook)} ] && [ -x {q(python)} ] || exit 0; exec {q(python)} -I {q(hook)} --pause-file {q(pause_file)}'
     return cmd + (f' --log {q(hook_log)}' if hook_log else '')
 
 

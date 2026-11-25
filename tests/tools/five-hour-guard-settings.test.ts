@@ -79,7 +79,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     runSync(SETTINGS_TOOL, [action, '--settings', f.settings, '--pause-file', f.pause, '--hook-log', f.hookLog, '--hook', HOOK, '--python', PYBIN, ...extra]);
   const backups = (f: Fixture) => readdirSync(f.dir).filter((n) => n.startsWith('settings.json.before-five-hour-guard-'));
   const entryCommand = (f: Fixture, python = PYBIN) =>
-    `[ -f ${quote(f.pause)} ] && [ -f ${quote(HOOK)} ] && [ -x ${quote(python)} ] || exit 0; exec ${quote(python)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)} --log ${quote(f.hookLog)}`;
+    `[ -f ${quote(f.pause)} ] && [ -f ${quote(HOOK)} ] && [ -r ${quote(HOOK)} ] && [ -x ${quote(python)} ] || exit 0; exec ${quote(python)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)} --log ${quote(f.hookLog)}`;
   const write = (f: Fixture, doc: unknown) => writeFileSync(f.settings, JSON.stringify(doc, null, 2) + '\n', 'utf8');
 
   it('check, add, add again, remove: backup, atomic replace, rest of the file unchanged', () => {
@@ -135,6 +135,24 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(pre[0].hooks[0].command).toBe('/x/other-hook.py');
     expect(pre[2].hooks[0].command).toBe('/x/last.py');
     expect({ ...readJson(f.settings), hooks: null }).toEqual({ ...base(), hooks: null });
+  });
+
+  it('the written command lets the call through when the hook script cannot be read: Python would exit 2, the status that blocks the tool call', () => {
+    const f = fixture('settings-hook-unreadable');
+    write(f, base());
+    const hook = join(f.dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    const root = process.getuid?.() === 0;
+    const python = root && existsSync('/usr/bin/python3') ? '/usr/bin/python3' : PYBIN;   // root reads any file: the command is run as another user, who has to reach the interpreter
+    const add = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', f.pause, '--hook', hook, '--python', python]);
+    expect(add.status, add.stderr).toBe(0);
+    const cmd: string = readJson(f.settings).hooks.PreToolUse.at(-1).hooks[0].command;
+    writePause(f);   // any regular file is enough for the shell check: this one is a valid pause
+    chmodSync(TMP, 0o755);
+    chmodSync(hook, 0o000);
+    const r = spawnSync('sh', ['-c', cmd], { encoding: 'utf8', env: ENV, timeout: 20000, ...(root ? { uid: 65534, gid: 65534 } : {}) });
+    expect(r.status, `${r.error}${r.stdout}${r.stderr}`).toBe(0);
+    expect(`${r.stdout}${r.stderr}`, 'silent').toBe('');
   });
 
   it('the written command runs: a missing hook file, interpreter or pause file is fail-open (exit 0, silent), a valid pause holds the session and logs it', async () => {

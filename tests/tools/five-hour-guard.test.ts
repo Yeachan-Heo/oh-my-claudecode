@@ -1638,7 +1638,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const pause = join(f.dir, 'five-hour-guard-hook.py.pause');
     const hookLog = join(f.dir, 'five-hour-guard-hook.py.log');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: pause, state_file: f.state, log_file: f.log, settings_file: f.settings, hook_log_file: hookLog }), 'utf8');
-    const command = `[ -f ${pause} ] && [ -f ${HOOK} ] && [ -x ${PYBIN} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${pause} --log ${hookLog}`;
+    const command = generatedCommand(pause, HOOK, PYBIN, hookLog);
     writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
     const r = guardOnce(f);
     expect(r.stdout, 'no wiring warning: the hook file exists, the pause file need not').not.toMatch(/WARNING/);
@@ -1813,6 +1813,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
     expect(r.stderr).toMatch(/are the same file/);
     expect(existsSync(`${f.cache}.lock`)).toBe(false);
+  });
+
+  it('a hook script that the guard cannot read is reported by the wiring check: the shell guard of the entry lets every call through, so a pause would hold no session', () => {
+    const f = fixture('hook-unreadable', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] }] } }), 'utf8');
+    expect(guardOnce(f).stdout, 'a hook that can be read: silent').not.toMatch(/WARNING/);
+    // root reads any file, so the answer of the access check is made "no" for the hook: the same as a file without the read permission
+    const driver = ['import os, runpy, sys', 'real = os.access', 'def access(path, mode, *args, **kw):',
+      '    if str(path).endswith("five-hour-guard-hook.py") and mode == os.R_OK:', '        return False', '    return real(path, mode, *args, **kw)',
+      'os.access = access', 'sys.argv = sys.argv[1:]', "runpy.run_path(sys.argv[0], run_name='__main__')"].join('\n');
+    const r = runPyCode(driver, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout).toMatch(/WARNING \(start\): the hook entry in .* names .*five-hour-guard-hook\.py, which is not readable: the shell guard of the entry lets every call through/);
   });
 
   it('the hook entry is compared with the generated one: an entry that differs warns once with the entry to paste, the generated entry (with or without a hook log) is silent', () => {
