@@ -664,10 +664,10 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
-    test('with no root that an entry holds the last supported ID whose cache has a version names it: no root, a checkout outside the registry, a root that does not exist', () => {
+    test('with no root that an entry holds the last supported ID whose cache has a version names it: no root, a root that does not exist', () => {
       for (const platform of PLATFORMS) {
         if (hostCannot(platform)) continue;
-        for (const [label, root] of [['no root', () => ''], ['a checkout', (dir: string) => { mkdirSync(path.join(dir, 'checkout')); return path.join(dir, 'checkout'); }], ['a path that does not exist', (dir: string) => path.join(dir, 'nowhere')]] as const) {
+        for (const [label, root] of [['no root', () => ''], ['a path that does not exist', (dir: string) => path.join(dir, 'nowhere')]] as const) {
           for (const [order, expected] of [[[OMC, OWN], NEW], [[OWN, OMC], OLD]] as const) {
             const { dir } = setup([...order]);
             try {
@@ -675,6 +675,27 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
             } finally {
               rmSync(dir, { recursive: true, force: true });
             }
+          }
+        }
+      }
+    });
+
+    // The runtime reads the package of an existing root that is not in the omc cache, whatever the registry holds (a raw --plugin-dir session beside a
+    // valid registration), so the doctor does too: the cache of a marketplace is no answer for it, with or without a manifest in the checkout.
+    test('an existing root outside every cache is read through its own package, not through a cache of the registry', () => {
+      for (const platform of PLATFORMS) {
+        if (hostCannot(platform)) continue;
+        for (const [order, expected] of [[[OMC, OWN], NEW], [[OWN, OMC], OLD]] as const) {
+          const { dir } = setup([...order]);
+          try {
+            const root = path.join(dir, 'checkout');
+            mkdirSync(root);
+            const noManifest = claudeMdAt(dir, expected, platform, { CLAUDE_PLUGIN_ROOT: root });
+            expect({ platform, order, noManifest: noManifest[0] }).toEqual({ platform, order, noManifest: 'Latest cached plugin version: (unknown)' });
+            writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: expected }));
+            expect({ platform, order, out: claudeMdAt(dir, expected, platform, { CLAUDE_PLUGIN_ROOT: root }) }).toEqual({ platform, order, out: [`Latest cached plugin version: ${expected}`, MATCH] });
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
           }
         }
       }

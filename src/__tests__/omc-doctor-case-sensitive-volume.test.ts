@@ -602,7 +602,7 @@ fs.lstatSync = function (target, options) {
 
   // Step 4 reads the cache of the marketplace whose entry holds the plugin root the session runs. Where that cannot be told
   // (the root is another letter case of the entry's install and the volume gives no identity) it names no cache and skips
-  // the check, as Step 1 names no channel.
+  // the check, as Step 1 names no channel; that spelling is no text inside the omc cache, so the root is read through its own package, which names no version here.
   test('Step 4 chooses no cache where the plugin root cannot be matched to an entry, and chooses one for the exact spelling', () => {
     for (const platform of PLATFORMS) {
       if (hostCannot(platform)) continue;
@@ -620,7 +620,7 @@ fs.lstatSync = function (target, options) {
             spelling,
             lines: spelling === 'exact'
               ? ['Latest cached plugin version: 5.8.0', 'VERSION MATCH: CLAUDE and plugin cache are aligned']
-              : ['Latest cached plugin version: (unknown)', 'VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen'],
+              : ['Latest cached plugin version: (unknown)', 'VERSION CHECK SKIPPED: the plugin root the session runs lies outside the plugin cache and its manifest names no usable version, so no cache is chosen'],
           });
         } finally {
           rmSync(dir, { recursive: true, force: true });

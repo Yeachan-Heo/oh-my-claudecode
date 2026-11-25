@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, lutimesSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, lutimesSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -88,7 +88,20 @@ export const blockOf = (command: string): string => {
 // Runs that block through bash, whole and in one call, as the Bash tool does. The plugin root is this checkout unless
 // `env` says otherwise.
 export function runBlock(command: string, configDir: string, options: { env?: Record<string, string>; cwd?: string; timeout?: number } = {}) {
-  return spawnSync('bash', ['-c', blockOf(command)], {
+  // The locator needs a plugin root that holds the script, and the version check reads the package of that root like the runtime does: this
+  // checkout (outside every cache) would be a --plugin-dir session. So the version check gets, as its root, a link to this checkout that lies
+  // in the omc cache of the configuration directory, the place a real session runs from.
+  let root = ROOT;
+  let linked = false;
+  if (command === CLAUDE_MD_VERSION && options.env?.CLAUDE_PLUGIN_ROOT === undefined) {
+    root = path.join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', 'block-root');
+    mkdirSync(path.dirname(root), { recursive: true });
+    if (!existsSync(root)) {
+      symlinkSync(ROOT, root);
+      linked = true;
+    }
+  }
+  const result = spawnSync('bash', ['-c', blockOf(command)], {
     encoding: 'utf8',
     timeout: options.timeout,
     cwd: options.cwd,
@@ -98,10 +111,13 @@ export function runBlock(command: string, configDir: string, options: { env?: Re
       HOME: configDir,
       USERPROFILE: configDir,
       OMC_PLUGIN_ROOT: '',
-      CLAUDE_PLUGIN_ROOT: ROOT,
+      CLAUDE_PLUGIN_ROOT: root,
       ...options.env,
     },
   });
+  // The link is the fixture's own: it is not left in the cache the test goes on to read or clean.
+  if (linked) rmSync(root, { force: true });
+  return result;
 }
 
 export const digitVersions = (cache: string) => readdirSync(cache).filter((n) => /^\d/.test(n)).sort().join(',');

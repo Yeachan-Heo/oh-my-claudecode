@@ -115,21 +115,23 @@ describe.skipIf(process.platform === 'win32')('omc-doctor: Step 4 names the vers
   });
 
   // The loaded root as the session sets it, against the registry: the doctor must name the version the runtime compares.
-  const compareWithRuntime = (cases: Array<{ label: string; build: (dir: string) => { root: string; registry: Record<string, unknown> } }>) => {
+  type Case = { label: string; build: (dir: string) => { root: string; registry: Record<string, unknown>; env?: Record<string, string> }; none?: boolean; doctor?: string };
+  const compareWithRuntime = (cases: Case[]) => {
     const differences: Array<{ label: string; doctor: string; runtime: string }> = [];
-    for (const { label, build } of cases) {
+    for (const { label, build, none, doctor } of cases) {
       const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-parity-'));
       try {
         mkdirSync(path.join(dir, 'plugins'), { recursive: true });
-        const { root, registry } = build(dir);
+        const { root, registry, env } = build(dir);
         writeRegistry(dir, registry);
         writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- OMC:VERSION:5.8.0 -->\n');
-        const run = runCommand(CLAUDE_MD_VERSION, dir, { env: { CLAUDE_PLUGIN_ROOT: root }, timeout: 30_000 });
+        const run = runCommand(CLAUDE_MD_VERSION, dir, { env: { CLAUDE_PLUGIN_ROOT: root, ...env }, timeout: 30_000 });
         expect(run.error).toBeUndefined();
         const printed = (run.stdout.match(/^Latest cached plugin version: (.*)$/m) ?? [])[1] ?? '(no line)';
         const expected = runtimeVersion(dir, root, []);
         const shown = expected === null || expected === undefined ? '(none)' : typeof expected === 'string' ? expected : JSON.stringify(expected);
-        if (printed !== shown) differences.push({ label, doctor: printed, runtime: shown });
+        // `none`: the runtime names no version and the doctor says it cannot name one; `doctor`: a known difference, the version the doctor names instead.
+        if (printed !== (none ? '(unknown)' : doctor ?? shown) || (none && shown !== '(none)') || (doctor !== undefined && shown !== '(none)')) differences.push({ label, doctor: printed, runtime: shown });
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -176,6 +178,34 @@ describe.skipIf(process.platform === 'win32')('omc-doctor: Step 4 names the vers
           return { root: path.join(cache, '5.8.0'), registry: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0', installPath: path.join(cache, '5.8.0') }] } };
         },
       },
+    ]);
+  });
+
+  // The class "doctor against hook" in one table: the root of the session by where it lies and what it holds, with a valid registration beside it.
+  test('a loaded root outside every cache is read through its own package, and without a manifest it names no version, as the runtime', () => {
+    const registered = (dir: string) => {
+      const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+      makeVersion(cache, '5.9.0', '5.9.0');
+      return { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] };
+    };
+    compareWithRuntime([
+      { label: 'a checkout outside every cache with its own package, a newer version registered and cached', build: (dir) => { makeVersion(dir, 'checkout', '5.8.0'); return { root: path.join(dir, 'checkout'), registry: registered(dir) }; } },
+      { label: 'a checkout outside every cache that holds no package.json', none: true, build: (dir) => { mkdirSync(path.join(dir, 'checkout')); return { root: path.join(dir, 'checkout'), registry: registered(dir) }; } },
+      { label: 'a root in the omc cache that holds no package.json', build: (dir) => { const registry = registered(dir); mkdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0')); return { root: path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.8.0'), registry }; } },
+    ]);
+  });
+
+  // The differences that stay, each with the version the doctor names instead of the runtime's none: it has no session root to read (none set, one that
+  // does not exist, two that differ), so it names the newest cached version of the registered marketplace, or none where it cannot tell which one.
+  test('the doctor names the registered cache where the session has no readable root, which the runtime does not compare at all', () => {
+    const registered = (dir: string) => {
+      const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+      makeVersion(cache, '5.9.0', '5.9.0');
+      return { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] };
+    };
+    compareWithRuntime([
+      { label: 'no root', doctor: '5.9.0', build: (dir) => ({ root: '', registry: registered(dir) }) },
+      { label: 'a root that does not exist', doctor: '5.9.0', build: (dir) => ({ root: path.join(dir, 'nowhere'), registry: registered(dir) }) },
     ]);
   });
 });

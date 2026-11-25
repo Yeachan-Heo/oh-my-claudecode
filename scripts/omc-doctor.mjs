@@ -822,15 +822,9 @@ const claudeMdVersion = () => {
   // The runtime reads CLAUDE_PLUGIN_ROOT alone, so that root decides (the other one only where it is absent).
   const claudeRoot = rootOf(process.env.CLAUDE_PLUGIN_ROOT);
   const loadedRoot = claudeRoot && isDirectory(claudeRoot) ? claudeRoot : roots[0];
-  // A root in the cache of a registry marketplace that no entry holds any more (the entry moved on to a newer version) is classified the same
-  // way: outside the omc cache the runtime reads its own package, whatever the registry says. A root that lies in no such cache stays unmatched.
-  const inRegistryCache = (root) =>
-    !!root &&
-    markets.some((market) => {
-      const inside = path.relative(path.resolve(cacheDirOf(market)), path.resolve(root));
-      return !!inside && !inside.startsWith('..') && !path.isAbsolute(inside);
-    });
-  const external = (running.length == 1 || (running.length == 0 && inRegistryCache(loadedRoot))) && !lexicallyManaged(loadedRoot);
+  // A loaded root that exists and lies outside the omc cache is external whether or not an entry holds it (a raw --plugin-dir session beside a
+  // valid registration): the runtime reads its own package, whatever the registry says. loadedRoot is undefined without an existing root.
+  const external = (running.length == 1 || running.length == 0) && !!loadedRoot && !lexicallyManaged(loadedRoot);
   const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
   const rootsConflict = sameRoots == 'no';
   let unreadableCache = '';
