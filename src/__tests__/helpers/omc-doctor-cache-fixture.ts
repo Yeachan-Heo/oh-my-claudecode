@@ -90,14 +90,14 @@ export const blockOf = (command: string): string => {
 export function runBlock(command: string, configDir: string, options: { env?: Record<string, string>; cwd?: string; timeout?: number } = {}) {
   // The locator needs a plugin root that holds the script, and the version check reads the package of that root like the runtime does: this
   // checkout (outside every cache) would be a --plugin-dir session. So the version check gets, as its root, a link to this checkout that lies
-  // in the omc cache of the configuration directory, the place a real session runs from.
+  // in the omc cache of the configuration directory, the place a real session runs from (a junction on Windows, which needs no privilege; a plain link elsewhere).
   let root = ROOT;
   let linked = false;
   if (command === CLAUDE_MD_VERSION && options.env?.CLAUDE_PLUGIN_ROOT === undefined) {
     root = path.join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', 'block-root');
     mkdirSync(path.dirname(root), { recursive: true });
     if (!existsSync(root)) {
-      symlinkSync(ROOT, root);
+      symlinkSync(ROOT, root, 'junction');
       linked = true;
     }
   }
