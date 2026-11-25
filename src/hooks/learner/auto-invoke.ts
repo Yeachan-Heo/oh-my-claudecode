@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
-import { getGlobalOmcStatePath } from '../../utils/paths.js';
+import { getGlobalOmcStatePath, getGlobalOmcStateCandidates } from '../../utils/paths.js';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
 
 export interface InvocationConfig {
@@ -221,22 +221,25 @@ export function saveInvocationHistory(state: AutoInvokeState): void {
  * Load invocation history from disk
  */
 export function loadInvocationHistory(sessionId: string): AutoInvokeState | null {
-  const historyFile = getGlobalOmcStatePath('analytics', 'invocations', `${sessionId}.json`);
+  const historyFileCandidates = getGlobalOmcStateCandidates('analytics', 'invocations', `${sessionId}.json`);
 
   try {
-    if (!fs.existsSync(historyFile)) {
-      return null;
+    // Try each candidate path, taking the first one that exists
+    for (const historyFile of historyFileCandidates) {
+      if (fs.existsSync(historyFile)) {
+        const data = JSON.parse(fs.readFileSync(historyFile, 'utf-8'));
+        return {
+          sessionId: data.sessionId,
+          config: data.config,
+          invocations: data.invocations,
+          lastInvokeTime: data.invocations.length > 0
+            ? Math.max(...data.invocations.map((inv: InvocationRecord) => inv.timestamp))
+            : 0,
+        };
+      }
     }
 
-    const data = JSON.parse(fs.readFileSync(historyFile, 'utf-8'));
-    return {
-      sessionId: data.sessionId,
-      config: data.config,
-      invocations: data.invocations,
-      lastInvokeTime: data.invocations.length > 0
-        ? Math.max(...data.invocations.map((inv: InvocationRecord) => inv.timestamp))
-        : 0,
-    };
+    return null;
   } catch (error) {
     console.error('[auto-invoke] Failed to load invocation history:', error);
     return null;
@@ -252,10 +255,19 @@ export function getAggregatedStats(): {
   successRate: number;
   topSkills: Array<{ skillId: string; skillName: string; count: number; successRate: number }>;
 } {
-  const historyDir = getGlobalOmcStatePath('analytics', 'invocations');
+  const historyDirCandidates = getGlobalOmcStateCandidates('analytics', 'invocations');
 
   try {
-    if (!fs.existsSync(historyDir)) {
+    // Find the first candidate directory that exists
+    let historyDir: string | null = null;
+    for (const candidate of historyDirCandidates) {
+      if (fs.existsSync(candidate)) {
+        historyDir = candidate;
+        break;
+      }
+    }
+
+    if (!historyDir) {
       return {
         totalSessions: 0,
         totalInvocations: 0,

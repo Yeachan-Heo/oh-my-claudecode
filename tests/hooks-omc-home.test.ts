@@ -21,6 +21,7 @@ import { saveInjectedPaths, loadInjectedPaths } from '../src/hooks/directory-rea
 import { saveInjectedRules, loadInjectedRules } from '../src/hooks/rules-injector/storage.js';
 import { saveAgentUsageState, loadAgentUsageState } from '../src/hooks/agent-usage-reminder/storage.js';
 import { loadAllSkills } from '../src/hooks/learner/loader.js';
+import { loadInvocationHistory, getAggregatedStats } from '../src/hooks/learner/auto-invoke.js';
 import { RULES_INJECTOR_STORAGE, README_INJECTOR_STORAGE } from '../src/index.js';
 
 describe('Hooks OMC_HOME Support (#5141)', () => {
@@ -329,6 +330,181 @@ source: project
         delete process.env.HOME;
       }
     }
+  });
+});
+
+describe('auto-invoke history loading with legacy path support', () => {
+  let tempHome: string;
+  let originalOmcHome: string | undefined;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    originalOmcHome = process.env.OMC_HOME;
+    originalHome = process.env.HOME;
+    delete process.env.OMC_HOME;
+
+    // Create a temporary HOME with .omc/state/analytics/invocations
+    tempHome = join(tmpdir(), `test-auto-invoke-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tempHome, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (originalOmcHome !== undefined) {
+      process.env.OMC_HOME = originalOmcHome;
+    } else {
+      delete process.env.OMC_HOME;
+    }
+
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+
+    // Clean up temp HOME
+    if (tempHome && existsSync(tempHome)) {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('should load invocation history from legacy ~/.omc/state/analytics/invocations when OMC_HOME is unset', () => {
+    // Create a legacy history file
+    const legacyInvocationsDir = join(tempHome, '.omc', 'state', 'analytics', 'invocations');
+    mkdirSync(legacyInvocationsDir, { recursive: true });
+
+    const sessionId = 'test-session-legacy';
+    const historyData = {
+      sessionId,
+      config: {
+        enabled: true,
+        confidenceThreshold: 80,
+        maxAutoInvokes: 3,
+        cooldownMs: 30000,
+      },
+      invocations: [
+        {
+          skillId: 'ralph',
+          skillName: 'Ralph',
+          timestamp: 1000,
+          confidence: 85,
+          prompt: 'test prompt',
+          wasSuccessful: true,
+          feedbackScore: null,
+        },
+      ],
+    };
+
+    writeFileSync(
+      join(legacyInvocationsDir, `${sessionId}.json`),
+      JSON.stringify(historyData),
+      'utf-8'
+    );
+
+    // Set HOME to temp and unset OMC_HOME
+    process.env.HOME = tempHome;
+
+    // Load the history
+    const loaded = loadInvocationHistory(sessionId);
+
+    expect(loaded).not.toBeNull();
+    expect(loaded?.sessionId).toBe(sessionId);
+    expect(loaded?.invocations).toHaveLength(1);
+    expect(loaded?.invocations[0].skillId).toBe('ralph');
+  });
+
+  it('should aggregate stats from legacy invocations directory', () => {
+    // Create legacy history files
+    const legacyInvocationsDir = join(tempHome, '.omc', 'state', 'analytics', 'invocations');
+    mkdirSync(legacyInvocationsDir, { recursive: true });
+
+    const session1Data = {
+      sessionId: 'session-1',
+      config: { enabled: true, confidenceThreshold: 80, maxAutoInvokes: 3, cooldownMs: 30000 },
+      invocations: [
+        { skillId: 'ralph', skillName: 'Ralph', timestamp: 1000, confidence: 85, prompt: 'test', wasSuccessful: true, feedbackScore: null },
+      ],
+    };
+
+    const session2Data = {
+      sessionId: 'session-2',
+      config: { enabled: true, confidenceThreshold: 80, maxAutoInvokes: 3, cooldownMs: 30000 },
+      invocations: [
+        { skillId: 'ralph', skillName: 'Ralph', timestamp: 2000, confidence: 90, prompt: 'test2', wasSuccessful: true, feedbackScore: null },
+      ],
+    };
+
+    writeFileSync(
+      join(legacyInvocationsDir, 'session-1.json'),
+      JSON.stringify(session1Data),
+      'utf-8'
+    );
+    writeFileSync(
+      join(legacyInvocationsDir, 'session-2.json'),
+      JSON.stringify(session2Data),
+      'utf-8'
+    );
+
+    // Set HOME to temp
+    process.env.HOME = tempHome;
+
+    // Get aggregated stats
+    const stats = getAggregatedStats();
+
+    expect(stats.totalSessions).toBe(2);
+    expect(stats.totalInvocations).toBe(2);
+    expect(stats.successRate).toBeGreaterThan(0);
+    expect(stats.topSkills.length).toBeGreaterThan(0);
+    expect(stats.topSkills[0].skillId).toBe('ralph');
+  });
+
+  it('should prefer OMC_HOME over legacy path when both exist', () => {
+    // Create both legacy and OMC_HOME files
+    const legacyInvocationsDir = join(tempHome, '.omc', 'state', 'analytics', 'invocations');
+    mkdirSync(legacyInvocationsDir, { recursive: true });
+
+    const tempOmcHome = join(tempHome, 'omc-home');
+    const omcHomeInvocationsDir = join(tempOmcHome, 'state', 'analytics', 'invocations');
+    mkdirSync(omcHomeInvocationsDir, { recursive: true });
+
+    const sessionId = 'test-session-preference';
+
+    // Write different data to each location
+    const legacyData = {
+      sessionId,
+      config: { enabled: true, confidenceThreshold: 80, maxAutoInvokes: 3, cooldownMs: 30000 },
+      invocations: [
+        { skillId: 'legacy', skillName: 'Legacy', timestamp: 1000, confidence: 50, prompt: 'legacy', wasSuccessful: false, feedbackScore: null },
+      ],
+    };
+
+    const omcHomeData = {
+      sessionId,
+      config: { enabled: true, confidenceThreshold: 80, maxAutoInvokes: 3, cooldownMs: 30000 },
+      invocations: [
+        { skillId: 'omc-home', skillName: 'OmcHome', timestamp: 2000, confidence: 90, prompt: 'omc-home', wasSuccessful: true, feedbackScore: null },
+      ],
+    };
+
+    writeFileSync(
+      join(legacyInvocationsDir, `${sessionId}.json`),
+      JSON.stringify(legacyData),
+      'utf-8'
+    );
+    writeFileSync(
+      join(omcHomeInvocationsDir, `${sessionId}.json`),
+      JSON.stringify(omcHomeData),
+      'utf-8'
+    );
+
+    // Set HOME and OMC_HOME
+    process.env.HOME = tempHome;
+    process.env.OMC_HOME = tempOmcHome;
+
+    // Load the history
+    const loaded = loadInvocationHistory(sessionId);
+
+    expect(loaded).not.toBeNull();
+    expect(loaded?.invocations[0].skillId).toBe('omc-home');
   });
 });
 
