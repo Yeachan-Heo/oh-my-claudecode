@@ -929,7 +929,15 @@ const cacheVersions = () => {
   for (const market of markets) {
     const lead = markets.length > 1 ? market + ': ' : '';
     try {
-      const names = versionDirs(cacheDirOf(market));
+      const dir = cacheDirOf(market);
+      // A link is no version of its own: the cleanup of SessionStart and both repair commands leave one at the name of an old version.
+      const names = versionDirs(dir).filter((name) => {
+        try {
+          return !fs.lstatSync(path.join(dir, name)).isSymbolicLink();
+        } catch {
+          return true;
+        }
+      });
       console.log(lead + names.length + ' version(s):', names.join(', '));
     } catch (error) {
       const dir = cacheDirOf(market);

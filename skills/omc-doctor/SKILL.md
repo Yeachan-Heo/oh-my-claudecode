@@ -171,7 +171,7 @@ node "$S" cache-versions
 ```
 
 **Diagnosis**:
-- If > 1 version (on any line when several marketplaces are printed): WARN - multiple cached versions (cleanup recommended)
+- If > 1 version (on any line when several marketplaces are printed): WARN - multiple cached versions (cleanup recommended); a link in the cache, such as the one SessionStart or a cleanup command leaves at the name of an old version, is no version and is not counted
 - If a line says `could not read <directory> (<code>)`: WARN - the plugin cache cannot be read (name the directory and the code); `0 versions` is printed only for a directory that is not there
 
 ### Step 7: Check for Legacy Curl-Installed Content

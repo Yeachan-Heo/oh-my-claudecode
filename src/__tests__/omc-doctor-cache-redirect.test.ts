@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { existsSync, lstatSync, lutimesSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { backupDir, commands, digitEntries, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { backupDir, CACHE_VERSIONS, commands, digitEntries, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { ownHost, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 
 // A version that a repair command moves away leaves a link at its name, to the newest version that is still a real directory of the cache (the
@@ -250,6 +250,39 @@ fs.symlinkSync = function (target, at, type) {
           clean(dir);
         }
       }
+    }
+  });
+
+  // Step 6 warns when the cache holds more than one version. A link is no version of its own: the one a repair command leaves at the name of a moved
+  // version, or the one SessionStart leaves at the name of an old version, would make the check right after a repair warn about the repair itself.
+  const count = (dir: string) => runCommand(CACHE_VERSIONS, dir, { timeout: 60_000 }).stdout.trim();
+
+  test('Step 6 counts one version after a repair has replaced the other one by a link', () => {
+    for (const command of commands) {
+      const { dir, cache } = setup(['5.8.0', '5.9.0']);
+      try {
+        expect({ command, before: count(dir) }).toEqual({ command, before: '2 version(s): 5.8.0, 5.9.0' });
+        expect(runCommand(command, dir, { timeout: 60_000 }).status).toBe(0);
+        // The link is there, and the check right after the repair counts only the directory that stayed.
+        expect({ command, link: isLink(path.join(cache, '5.8.0')), after: count(dir) }).toEqual({ command, link: true, after: '1 version(s): 5.9.0' });
+      } finally {
+        clean(dir);
+      }
+    }
+  });
+
+  test('Step 6 counts no link of SessionStart, relative or absolute, and the directories beside it as before', () => {
+    const { dir, cache } = setup(['5.8.0', '5.9.0']);
+    try {
+      link('5.9.0', path.join(cache, '5.7.0'));
+      link(path.join(cache, '5.9.0'), path.join(cache, '5.6.0'));
+      // A link to a directory outside the cache, and (where a link needs no existing target) one that points at nothing.
+      mkdirSync(path.join(dir, 'outside'));
+      link(path.join('..', '..', '..', '..', 'outside'), path.join(cache, '5.5.0'));
+      if (process.platform !== 'win32') symlinkSync('no-such-version', path.join(cache, '5.4.0'));
+      expect(count(dir)).toBe('2 version(s): 5.8.0, 5.9.0');
+    } finally {
+      clean(dir);
     }
   });
 });
