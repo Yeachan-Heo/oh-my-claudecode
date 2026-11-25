@@ -1,5 +1,6 @@
 # Example systemd USER unit for the five-hour limit guard (Linux only; the guard is an ordinary process and does not need systemd).
 # Template: replace the three @...@ values (see README.md, "Run the guard").
+# The values stay inside the double quotes of the ExecStart line, so a path with a space is one argument; write a % of a path as %% (systemd reads it as a specifier).
 #   @PYTHON_BIN@   absolute path of the python3 binary
 #   @INSTALL_DIR@  absolute path of the directory the three five-hour-guard*.py scripts and five_hour_guard_entry.py were copied to
 #   @CONFIG_FILE@  absolute path of the JSON configuration file (pause file, state file, exclude list; see five-hour-guard.py)
@@ -14,7 +15,7 @@ Description=Five-hour limit guard (pause file for the PreToolUse hook)
 
 [Service]
 Type=simple
-ExecStart=@PYTHON_BIN@ -I @INSTALL_DIR@/five-hour-guard.py --config @CONFIG_FILE@
+ExecStart="@PYTHON_BIN@" -I "@INSTALL_DIR@/five-hour-guard.py" --config "@CONFIG_FILE@"
 # Environment=CLAUDE_CONFIG_DIR=/path/of/your/claude-config-directory
 Restart=on-failure
 RestartSec=10s

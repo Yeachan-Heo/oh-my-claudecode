@@ -3386,8 +3386,13 @@ describe('five-hour guard unit template', () => {
     const lines = filled.split('\n');
     expect(text.split('\n').some((l) => /^#\s*Environment=CLAUDE_CONFIG_DIR=/.test(l)), 'a commented Environment line for CLAUDE_CONFIG_DIR').toBe(true);
     expect(body.includes('Environment='), 'which is not active by default').toBe(false);
-    for (const line of ['Type=simple', 'Restart=on-failure', 'RestartSec=10s', 'RestartPreventExitStatus=2', 'WantedBy=default.target', 'ExecStart=/usr/bin/python3 -I /opt/x/five-hour-guard.py --config /etc/x.json']) {
+    for (const line of ['Type=simple', 'Restart=on-failure', 'RestartSec=10s', 'RestartPreventExitStatus=2', 'WantedBy=default.target', 'ExecStart="/usr/bin/python3" -I "/opt/x/five-hour-guard.py" --config "/etc/x.json"']) {
       expect(lines.includes(line), line).toBe(true);
     }
+    // a path with a space is one argument of the command line, which systemd splits on whitespace outside quotes
+    const spaced = body.replace(/@PYTHON_BIN@/g, '/opt/my tools/bin/python3').replace(/@INSTALL_DIR@/g, '/opt/my tools/guard').replace(/@CONFIG_FILE@/g, '/etc/my tools/x.json');
+    const execStart = spaced.split('\n').find((l) => l.startsWith('ExecStart=')) ?? '';
+    const argv = Array.from(execStart.slice('ExecStart='.length).matchAll(/"([^"]*)"|(\S+)/g), (m) => m[1] ?? m[2]);
+    expect(argv, 'the executable, the script and the configuration file are one argument each').toEqual(['/opt/my tools/bin/python3', '-I', '/opt/my tools/guard/five-hour-guard.py', '--config', '/etc/my tools/x.json']);
   });
 });

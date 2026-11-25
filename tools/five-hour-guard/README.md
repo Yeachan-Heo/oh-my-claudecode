@@ -201,7 +201,8 @@ As an ordinary background process:
 nohup python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-hour-guard/config.json >/dev/null 2>&1 &
 ```
 
-As a systemd user service on Linux: fill the three `@...@` values of `five-hour-guard.service`, install it as
+As a systemd user service on Linux: fill the three `@...@` values of `five-hour-guard.service` (they stand inside double quotes in the
+`ExecStart` line, so a path with a space works; write a `%` of a path as `%%`), install it as
 `~/.config/systemd/user/five-hour-guard.service`, then
 
 ```
