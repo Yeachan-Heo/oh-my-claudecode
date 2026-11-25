@@ -18,6 +18,7 @@ WRAPPERS = {'exec': ('-a',), 'env': ('-u', '--unset', '-C', '--chdir', '-S', '--
             'time': ('-f', '--format', '-o', '--output')}
 INFO_WRAPPERS = ('env', 'nohup', 'time')   # the wrappers of WRAPPERS that print their help or version and exit with --help or --version, and then run nothing
 INFO_OPTIONS = ('--help', '--version')
+PYTHON_INFO_OPTIONS = ('-h', '-?', '--help', '-V', '-VV', '--version')   # the options of a Python that print and exit before it runs a script (python3 --help)
 PYTHON_VALUE_OPTIONS = ('-W', '-X', '-Q', '--check-hash-based-pycs')   # the options of a Python that take the next word as their value (python3 --help)
 SEPARATORS = ';&|\n'   # the characters of the operators that end a simple command (the parentheses and the redirections are not read here)
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
@@ -168,7 +169,7 @@ def strip_comments(command):
 def command_hook(words):
     """(hook, launcher) when the simple command `words` runs the hook of this guard, else None: the command word (after the wrappers) is
     the hook itself, or it is a Python or the command carries --pause-file and the first argument that is no option or operand is the
-    hook. A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
+    hook (and the Python is not asked to print its help or version instead). A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
     words = expand_split_strings(words)
     operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
     first = skip_wrappers(words)
@@ -180,6 +181,8 @@ def command_hook(words):
     if python or '--pause-file' in words:
         values = {i + 1 for i in range(first + 1, len(words)) if python and words[i] in PYTHON_VALUE_OPTIONS}   # -W ignore: `ignore` is no script
         args = [i for i in range(first + 1, len(words)) if i not in operands and i not in values and not words[i].startswith('-')]
+        if python and any(words[i] in PYTHON_INFO_OPTIONS and i not in values for i in range(first + 1, args[0] if args else len(words))):
+            return None   # python3 --help <hook>: Python prints its help and exits, the hook is not run
         if args and MARK in os.path.basename(words[args[0]]):
             return words[args[0]], words[first]   # the program that is asked to run the hook
     return None

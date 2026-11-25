@@ -179,7 +179,7 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    `settings.json`, hook, interpreter, configuration file and the two scripts that are one file, and a hook file whose
    name does not contain `five-hour-guard-hook.py` (the entry is found again by that name; exit 2). The tool counts a command as
    the hook only when that file is its script (after the string of `env -S`, which is split into the words that env runs, so `env -S 'printf %s' hook` runs printf: the command word, or the argument of a Python (after the values of its options `-W`, `-X`, `-Q` and `--check-hash-based-pycs`), or of a command that has
-   `--pause-file`; a Python is a file whose whole name is `python`, `pythonw`, `pypy` or `py`, with a version and `.exe` allowed, so `python-audit` is not one); a command of another tool that merely names the file as data is not ours and is never replaced or
+   `--pause-file`; a Python is a file whose whole name is `python`, `pythonw`, `pypy` or `py`, with a version and `.exe` allowed, so `python-audit` is not one; a Python that is asked to print its help or version with `-h`, `--help`, `-V` or `--version` runs no script); a command of another tool that merely names the file as data is not ours and is never replaced or
    removed. The usage cache counts as a configured file also when `usage_cache` is left out (OMC's default file and its
    `.lock`). The
    entry has a `timeout` of 21600 s (`--timeout`, a finite number of at least 21600: a shorter one is refused, since Claude Code would cancel the hook during a long pause and the tool call would go on, and so is an integer too large for a float), longer than any window. A `settings.json` that is a symbolic link is
