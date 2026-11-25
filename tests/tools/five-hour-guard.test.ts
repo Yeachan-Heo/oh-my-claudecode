@@ -2063,11 +2063,14 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(script), `PATH ${path}, ${command} as ${key}: the program is intact`).toBe(text);
       }
     }
-    // a PATH that is no text, or no PATH at all, names no directory
+    // a PATH that is no text, or no PATH at all, names no directory: the program is looked up on the PATH of the session, which the guard does not know
     for (const env of [{ PATH: 5 }, { PATH: [hooks] }, { PATH: null }, {}]) {
       writeFileSync(f.settings, settings(env), 'utf8');
       const r = start({ state_file: script });
-      expect(r.status, `env ${JSON.stringify(env)}: ${r.stdout}${r.stderr}`).toBe(0);
+      expect(r.status, `env ${JSON.stringify(env)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, `env ${JSON.stringify(env)}`).toMatch(/not read to its end/);
+      writeFileSync(f.settings, settings(env, 'sh'), 'utf8');
+      expect(start({ state_file: script }).status, `env ${JSON.stringify(env)}: a program on the PATH of the guard`).toBe(0);
     }
   });
 
@@ -2289,7 +2292,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(readText(file), `${command}: the program is intact`).toBe(text);
     }
     // a directory that does not exist is no directory of the command: nothing is added
-    expect(start(`cd ${join(f.dir, 'nonexistent')}; PATH=bin audit`, inBin).status, 'no such directory').toBe(0);
+    const missing = start(`cd ${join(f.dir, 'nonexistent')}; PATH=bin audit`, inBin);
+    expect(missing.status, `no such directory: the program is not found, and the session may find it: ${missing.stdout}${missing.stderr}`).toBe(2);
+    expect(missing.stderr).toMatch(/not read to its end/);
   });
 
   it('a quoted word that starts with an operator character is a word and a file name (python3 \';audit\', \'&&audit\', \'|audit\', \'>audit\'); a real operator between two commands is no file of its own', () => {
@@ -2421,8 +2426,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.stderr, command).toContain(`"state_file" (${file}) and "program of another hook" (${file}) are the same file`);
       expect(readText(file), `${command}: the program is intact`).toBe(text);
     }
-    // a name with no value stays as written and no refusal comes of it
-    expect(start('PATH=$FHG_NOBODY/bin:/usr/bin audit', inHomeBin).status, 'a name that nobody sets').toBe(0);
+    // a name with no value stays as written and no refusal comes of it (the program is looked up on the PATH of the session: refused below, as it is without any variable)
+    expect(start('PATH=$FHG_NOBODY/bin:/usr/bin sh', inHomeBin).status, 'a name that nobody sets').toBe(0);
+    expect(start('PATH=$FHG_NOBODY/bin:/usr/bin audit', inHomeBin).status, 'a name that nobody sets and a program that is not found').toBe(2);
   });
 
   it.skipIf(!HAS_BASH)('a Bash quote $\'...\' (and $"...") in the command of another hook is read as the text that Bash makes of it: hex, octal and Unicode escapes, a newline, an apostrophe, an unknown escape; quotes of other kinds are not decoded (needs bash: skipped where it is missing)', () => {
@@ -2688,6 +2694,45 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.stderr, command).toContain('are the same file');
       expect(r.stderr, command).not.toMatch(/not read to its end/);
     }
+  });
+
+  it('a program of another hook that the PATH of the guard does not find is looked up on the PATH of the session, which the guard does not know: when its name is that of a file the guard writes the guard refuses to start; a PATH that the guard, the command or the settings has, or a name that no file of the guard has, settles it as before', () => {
+    const f = fixture('foreign-session-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>, settingsEnv: Record<string, string> = {}, guardEnv: NodeJS.ProcessEnv = ENV) => {
+      writeFileSync(f.settings, JSON.stringify({ env: settingsEnv, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once'], { env: guardEnv });
+    };
+    // the process of the session has the directory in its PATH, the process of the guard has not
+    const sessionEnv = { ...process.env, PATH: `${hooks}:${process.env.PATH}` };
+    expect(spawnSync('sh', ['-c', 'audit'], { encoding: 'utf8', env: sessionEnv }).stdout, 'the session runs the program').toBe('ran\n');
+    expect(spawnSync('sh', ['-c', 'audit'], { encoding: 'utf8', env: ENV }).status, 'the guard does not find it').not.toBe(0);
+    for (const command of ['audit', 'exec audit', 'command audit', 'env audit --flag', 'true; audit', 'if true; then audit; fi', "sh -c 'audit --flag'", 'FOO=1 audit', '[ -f x ] || audit']) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // settled as before: a PATH of the guard, of the settings or of the command that has the directory is the collision of an earlier test
+    const settled: Array<[string, Record<string, string>, NodeJS.ProcessEnv]> = [['audit', {}, sessionEnv], ['audit', { PATH: hooks }, ENV], [`PATH=${hooks} audit`, {}, ENV], [`env PATH=${hooks} audit`, {}, ENV]];
+    for (const [command, settingsEnv, guardEnv] of settled) {
+      const r = start(command, { state_file: audit }, settingsEnv, guardEnv);
+      expect(r.status, `${command} with ${JSON.stringify(settingsEnv)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    // not refused: a name that no file of the guard has, and programs on the PATH of the guard
+    expect(start('audit', {}).status, 'no file of the guard has the name').toBe(0);
+    expect(start('sh -c "exit 0"; python3 -I x', { state_file: audit }).status, 'programs of the PATH of the guard').toBe(0);
   });
 
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {

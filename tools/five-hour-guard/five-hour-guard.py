@@ -292,16 +292,36 @@ MAX_COMMAND_PROGRAMS = 4096
 PUNCTUATION = '();<>|&\n'
 
 
+SHELL_KEYWORDS = frozenset({'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', '!', '{', '}'})   # words that stand before the command of a simple command
+SHELL_WRAPPERS = frozenset({'exec', 'command', 'env', 'time', 'nohup'})   # words that run the word after them (and its options)
+
+
 class ScanIncomplete(Exception):
     """A command that command_programs cannot read to its end (a limit was reached): what it names may be a file of the guard, so the
     guard writes nothing while it stands in settings.json (see UNSCANNED)."""
 
 
-def session_dependent(piece, directories, named):
+def command_word(words):
+    """The index of the word that a simple command runs, or None: the first word that is no operator, no NAME=value, no keyword of the shell and
+    no wrapper (`exec`, `command`, `env`, `time`, `nohup`) or option of a wrapper. Nothing else is recognised."""
+    wrapped = False
+    for i, word in enumerate(words):
+        if is_operator(word) or word in SHELL_KEYWORDS or re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', word, re.DOTALL):
+            continue
+        if word in SHELL_WRAPPERS:
+            wrapped = True
+        elif not (wrapped and word.startswith('-')):
+            return i
+    return None
+
+
+def session_dependent(piece, runs, directories, named):
     """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
     neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command names no directory (no
     `cd DIR`: the shell runs it from the directory of the session) and that ends the path of a file the guard writes; a word without a
-    directory part is not decided here. A piece that holds blanks is a quoted command (read as one), one that still holds a `$` has a parameter that is not decided here."""
+    directory part that the command runs (`runs`) and that is the name of a file the guard writes and no file in any directory the guard
+    looks in (its PATH, the one a `PATH=` word or the settings give, the directories the command names): the shell looks it up on the PATH of
+    the session. A piece that holds blanks is a quoted command (read as one), one that still holds a `$` has a parameter that is not decided here."""
     path = os.path.expanduser(os.path.expandvars(piece))
     if not path or '$' in path or len(path) > MAX_PATH_CHARS or '\0' in path or any(c.isspace() for c in path) or path[0] == '-' or re.match(r'[^/\\]*=', path):
         return False   # (an option, or a NAME=value word: the value after the `=` is a piece of its own)
@@ -314,7 +334,7 @@ def session_dependent(piece, directories, named):
         while parts and parts[0] == '..':
             parts.pop(0)
         return bool(parts) and parts != ['.'] and any(out.endswith(os.sep + key(os.sep.join(parts))) for out in written)
-    return False
+    return bool(runs) and any(os.path.basename(out) == key(path) for out in written) and not any(os.path.lexists(os.path.join(d, path)) for d in directories)
 
 
 def word_files(word, directories, named=()):
@@ -733,9 +753,10 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
                 if directory and len(directory) <= MAX_PATH_CHARS and '\0' not in directory and os.path.isdir(directory) and directory not in named:
                     named.append(directory)
     for words in simple:
+        run = command_word(words)
         path_dirs = os.environ.get('PATH', os.defpath).split(os.pathsep) + [os.path.expanduser(os.path.expandvars(d)) for w in words if w.startswith('PATH=') for piece in word_pieces(w, assigned) if piece.startswith('PATH=') for d in piece[5:].split(os.pathsep)] + given_path   # a PATH= word is filled in with the values of its parameters first, then split
         directories = [''] + path_dirs + [os.path.normpath(os.path.join(n, d)) for d in path_dirs if d and not os.path.isabs(d) for n in named] + named   # a PATH=dir word adds its directories for every word of the simple command; a relative PATH entry is also looked up from each directory that the command names (`cd /dir; PATH=bin prog`)
-        for word in words:
+        for index, word in enumerate(words):
             if word in exclude:
                 exclude.remove(word)   # one occurrence of a word of the generated entry is that word of the entry, not a file it names besides
                 continue
@@ -744,7 +765,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
                 found += [t for t in command_programs(word, exclude, depth + 1, named, assigned) if t not in found]
             for piece in word_pieces(word, assigned):
-                if session_dependent(piece, directories, named):
+                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named):
                     raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:
