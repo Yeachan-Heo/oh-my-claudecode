@@ -21,7 +21,7 @@ import { saveInjectedPaths, loadInjectedPaths } from '../src/hooks/directory-rea
 import { saveInjectedRules, loadInjectedRules } from '../src/hooks/rules-injector/storage.js';
 import { saveAgentUsageState, loadAgentUsageState } from '../src/hooks/agent-usage-reminder/storage.js';
 import { loadAllSkills } from '../src/hooks/learner/loader.js';
-import { loadInvocationHistory, getAggregatedStats } from '../src/hooks/learner/auto-invoke.js';
+import { loadInvocationHistory, getAggregatedStats, saveInvocationHistory, initAutoInvoke } from '../src/hooks/learner/auto-invoke.js';
 import { RULES_INJECTOR_STORAGE, README_INJECTOR_STORAGE } from '../src/index.js';
 
 describe('Hooks OMC_HOME Support (#5141)', () => {
@@ -528,6 +528,123 @@ describe('auto-invoke history loading with legacy path support', () => {
 
     expect(loaded).not.toBeNull();
     expect(loaded?.invocations[0].skillId).toBe('omc-home');
+  });
+});
+
+describe('saveInvocationHistory with OMC_HOME (#5141)', () => {
+  let tempOmcHome: string;
+  let tempHome: string;
+  let originalOmcHome: string | undefined;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    originalOmcHome = process.env.OMC_HOME;
+    originalHome = process.env.HOME;
+    
+    tempHome = join(tmpdir(), `test-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempOmcHome = join(tmpdir(), `test-omc-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tempHome, { recursive: true });
+    mkdirSync(tempOmcHome, { recursive: true });
+    
+    process.env.HOME = tempHome;
+    process.env.OMC_HOME = tempOmcHome;
+  });
+
+  afterEach(() => {
+    if (originalOmcHome !== undefined) {
+      process.env.OMC_HOME = originalOmcHome;
+    } else {
+      delete process.env.OMC_HOME;
+    }
+    
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    
+    if (tempHome && existsSync(tempHome)) {
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+    if (tempOmcHome && existsSync(tempOmcHome)) {
+      rmSync(tempOmcHome, { recursive: true, force: true });
+    }
+  });
+
+  it('should write invocation history to OMC_HOME state root, not HOME/.omc', async () => {
+    const sessionId = 'test-session-5141';
+    const state = initAutoInvoke(sessionId);
+    state.invocations.push({
+      skillId: 'ralph',
+      skillName: 'Ralph',
+      timestamp: Date.now(),
+      confidence: 85,
+      prompt: 'test prompt',
+      wasSuccessful: true,
+      feedbackScore: null,
+    });
+
+    // Call saveInvocationHistory and await it
+    await saveInvocationHistory(state);
+
+    // Verify file was written to OMC_HOME state root
+    const expectedPath = join(tempOmcHome, 'state', 'analytics', 'invocations', `${sessionId}.json`);
+    expect(existsSync(expectedPath)).toBe(true);
+
+    // Verify file is NOT in legacy HOME/.omc location
+    const legacyPath = join(tempHome, '.omc', 'analytics', 'invocations', `${sessionId}.json`);
+    expect(existsSync(legacyPath)).toBe(false);
+  });
+
+  it('should work with save->load round trip', async () => {
+    const sessionId = 'test-session-round-trip';
+    const state = initAutoInvoke(sessionId);
+    state.invocations.push({
+      skillId: 'autopilot',
+      skillName: 'Autopilot',
+      timestamp: 12345,
+      confidence: 92,
+      prompt: 'build a feature',
+      wasSuccessful: true,
+      feedbackScore: 5,
+    });
+
+    // Save
+    await saveInvocationHistory(state);
+
+    // Load
+    const loaded = loadInvocationHistory(sessionId);
+
+    expect(loaded).not.toBeNull();
+    expect(loaded?.sessionId).toBe(sessionId);
+    expect(loaded?.invocations).toHaveLength(1);
+    expect(loaded?.invocations[0].skillId).toBe('autopilot');
+    expect(loaded?.invocations[0].skillName).toBe('Autopilot');
+    expect(loaded?.invocations[0].confidence).toBe(92);
+    expect(loaded?.invocations[0].prompt).toBe('build a feature');
+    expect(loaded?.invocations[0].wasSuccessful).toBe(true);
+    expect(loaded?.invocations[0].feedbackScore).toBe(5);
+  });
+
+  it('should not create files in HOME/.omc when OMC_HOME is set', async () => {
+    const sessionId = 'test-session-no-legacy';
+    const state = initAutoInvoke(sessionId);
+    state.invocations.push({
+      skillId: 'plan',
+      skillName: 'Plan',
+      timestamp: Date.now(),
+      confidence: 75,
+      prompt: 'plan this',
+      wasSuccessful: false,
+      feedbackScore: null,
+    });
+
+    // Save to OMC_HOME
+    await saveInvocationHistory(state);
+
+    // Check no HOME/.omc files were created
+    const legacyDir = join(tempHome, '.omc');
+    expect(existsSync(legacyDir)).toBe(false);
   });
 });
 
