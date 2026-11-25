@@ -2474,17 +2474,17 @@ function allocate(candidates, before, target, added = 0) {
   // A notification that is replaced brings the envelopes of its deliveries with it (`envelope`): they are part of what its trace costs.
   const traced = (c) => c.traceCost + (c.envelope || 0);
   const fixed = before + added - candidates.reduce((s, c) => s + c.fullCost - traced(c), 0);
-  let avail = Math.floor(before * target) - fixed;
+  // A notification kept whole (its trace with the envelopes costs more than its text: nothing in the ranking changes that) writes none of the envelopes that `fixed` counted
+  // with its trace: they are given back before the ranking, so that no result is cut for them whatever the place of the notification in it.
+  const keptWhole = candidates.filter((c) => c.note && !c.secret && c.textOnly && c.fullCost - traced(c) < 0);
+  let avail = Math.floor(before * target) - fixed - keptWhole.reduce((s, c) => s + c.fullCost - traced(c), 0);
   const ranked = [...candidates].sort((a, b) => b.score - a.score || b.resIdx - a.resIdx);
   for (const c of ranked) {
     const upFull = c.fullCost - traced(c);
     const upShort = c.shortCost - c.traceCost;
     if (c.secret || !c.textOnly) c.keep = 'trace';
-    else if (upFull <= 0 || c.task) {
-      c.keep = 'full';
-      // A notification kept whole writes none of the envelopes that `fixed` counted with its trace: they are given back.
-      if (c.note && upFull < 0) avail -= upFull;
-    } else if (!c.asked) c.keep = 'trace';
+    else if (upFull <= 0 || c.task) c.keep = 'full';
+    else if (!c.asked) c.keep = 'trace';
     else if (upFull <= avail) { c.keep = 'full'; avail -= upFull; }
     else if (c.score >= SHORT_COPY_MIN_SCORE && c.shortCost < c.fullCost && upShort <= avail) { c.keep = 'short'; avail -= Math.max(0, upShort); }
     else c.keep = 'trace';

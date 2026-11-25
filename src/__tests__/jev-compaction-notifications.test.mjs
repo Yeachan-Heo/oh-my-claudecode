@@ -446,6 +446,26 @@ describe('the envelopes of the deliveries after a notification: the rows that bu
     expect(delivered.record.kept_full).toBe(none.record.kept_full);
   });
 
+  it('without the token cascade the results are cut as with no delivery whatever the place of the notification kept whole in the ranking: before the results, after them and between them', async () => {
+    const small = row(note('Status: registry', `Report ${'r'.repeat(1500)}`), { handle: 'n1' });
+    const many = Array.from({ length: 1000 }, (_, k) => `The coordinator sent a message while you were working:\nd${k}`);
+    const steps = Array.from({ length: 30 }, (_, k) => [
+      { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: `s${k}`, tool: 'Bash', input: { command: `cat s${k}.txt` } }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `s${k}`, text: `STEP${k} ${'x'.repeat(3000)}`, isError: false }] },
+    ]);
+    const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET: '0.9' };
+    for (const [place, at] of [['before the results', 0], ['between them', 15], ['after them', 30]]) {
+      const messages = () => [...talk(3), ...LAUNCH, ...steps.slice(0, at).flat(), small, ...steps.slice(at).flat(), ...talk(30)];
+      const row5 = messages().indexOf(small);
+      const none = await compactRun(env, messages(), { score: 3 });
+      const delivered = await compactRun(env, messages(), { score: 3, deliver: { [row5]: many } });
+      expect(delivered.record, place).toMatchObject({ result: 'jev', notifications: 1, queued_carried: 0 });
+      expect(delivered.out.messages.some((m) => m.handle === 'n1'), place).toBe(true);
+      // The envelopes of the deliveries are written only into a row that is rebuilt, and the notification is not: no result is traced for their sake.
+      expect(delivered.record.traced, place).toBeLessThanOrEqual(none.record.traced);
+    }
+  });
+
   it('a notification of envelopes only, replaced by a trace, is charged the envelopes that its replacement row holds', async () => {
     const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '80', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
     const only = row(`<system-reminder id="jev-1">\n${note('Status: registry', `Report ${'r'.repeat(30000)}`)}\n</system-reminder id="jev-1">`, { handle: 'n1' });
