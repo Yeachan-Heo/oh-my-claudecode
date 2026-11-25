@@ -57,6 +57,13 @@ const WHICH_FAILS_DRIVER = [
 ].join('\n');
 // the guard runs where os has no O_NOFOLLOW (Windows): the attribute is taken away before the script is loaded
 const NO_NOFOLLOW_DRIVER = ['import os, runpy, sys', 'del os.O_NOFOLLOW', 'sys.argv = sys.argv[1:]', "runpy.run_path(sys.argv[0], run_name='__main__')"].join('\n');
+// the same, and lstat reports the file named by argv[1] as a reparse point (a Windows file attribute that lstat has no way to show on other systems)
+const NO_NOFOLLOW_REPARSE_DRIVER = [
+  'import os, runpy, sys', 'del os.O_NOFOLLOW', 'real, marked = os.lstat, sys.argv[1]',
+  'class Reparse:', '    def __init__(self, st):', '        self.st_mode, self.st_file_attributes = st.st_mode, 0x400',
+  'def lstat(path, *args, **kwargs):', '    st = real(path, *args, **kwargs)', '    return Reparse(st) if path == marked else st',
+  'os.lstat = lstat', 'sys.argv = sys.argv[2:]', "runpy.run_path(sys.argv[0], run_name='__main__')",
+].join('\n');
 // the guard runs in another working directory (a relative path of a settings entry is read from it)
 const CHDIR_DRIVER = ['import os, runpy, sys', 'os.chdir(sys.argv[1])', 'sys.argv = sys.argv[2:]', "runpy.run_path(sys.argv[0], run_name='__main__')"].join('\n');
 // the first reads of the usage cache from the given time on (argv: cache, time, count) see what a refresh of OMC shows in the middle: an empty file, then half a document
@@ -904,6 +911,43 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const ok = runPyCode(NO_NOFOLLOW_DRIVER, [GUARD, ...guardArgs(plain, ['--once'])]);
     expect(ok.status, `${ok.stdout}${ok.stderr}`).toBe(0);
     expect(readText(plain.log), 'the log is written').toMatch(/guard start/);
+  });
+
+  it('where os has no O_NOFOLLOW (Windows) the hook refuses a log that is a link or a reparse point, and still writes an ordinary log', async () => {
+    const f = fixture('hook-log-no-nofollow', {});
+    const victim = join(f.dir, 'victim.txt');
+    const absent = join(f.dir, 'not-created.txt');
+    const marked = join(f.dir, 'reparse.txt');
+    const link = join(f.dir, 'log-link.txt');
+    const control = join(f.dir, 'control.log');
+    writeFileSync(victim, 'victim\n', 'utf8');
+    writeFileSync(marked, 'kept\n', 'utf8');
+    // the hook under test holds while a pause lasts, next to one with an ordinary log, which shows that the hold has begun
+    const hold = async (driver: string, lead: string[], log: string) => {
+      rmSync(control, { force: true });
+      writePause(f, { pid: process.pid });
+      const h = spawnPyCode(driver, [...lead, HOOK, '--pause-file', f.pause, '--log', log, '--poll', '0.1'], { input: hookInput('nofollow-a') });
+      const c = spawnPyCode(NO_NOFOLLOW_DRIVER, [HOOK, '--pause-file', f.pause, '--log', control, '--poll', '0.1'], { input: hookInput('nofollow-b') });
+      try {
+        await waitFor(() => /hold-start/.test(readText(control)), 20000, 'the hold-start of the hook with an ordinary log');
+        await sleep(500);
+        expect(h.exited, 'the hook holds').toBe(false);
+        unlinkSync(f.pause);
+        await Promise.race([h.done, sleep(20000)]);
+        await Promise.race([c.done, sleep(20000)]);
+      } finally { await h.stop(); await c.stop(); }
+    };
+    for (const target of [victim, absent]) {
+      rmSync(link, { force: true });
+      symlinkSync(target, link);
+      await hold(NO_NOFOLLOW_DRIVER, [], link);
+      expect(existsSync(absent), 'a link to a missing file does not create it').toBe(false);
+      expect(readText(victim), 'the hook did not write through the link').toBe('victim\n');
+    }
+    await hold(NO_NOFOLLOW_REPARSE_DRIVER, [marked], marked);
+    expect(readText(marked), 'a reparse point is not written').toBe('kept\n');
+    // the refusal is for links and reparse points only: an ordinary log is written where os has no O_NOFOLLOW
+    expect(readText(control), 'the ordinary log is written').toMatch(/hold-start/);
   });
 
   it('a held call is judged again against every pause document it sees: a replacement that excludes the session (a restart with another exclude, no gap) releases it', async () => {

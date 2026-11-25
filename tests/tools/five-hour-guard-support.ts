@@ -109,8 +109,8 @@ export function runSync(script: string, args: string[], opts: Omit<SpawnSyncOpti
 }
 
 /** A Python snippet in the background (`python3 -I -c`), for tests that have to reach inside a script: a wrapped function, a clock that steps. */
-export function spawnPyCode(code: string, args: string[], { env = ENV }: { env?: NodeJS.ProcessEnv } = {}): Proc {
-  return track(spawn(PYBIN, ['-I', '-c', code, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] }), '');
+export function spawnPyCode(code: string, args: string[], { env = ENV, input = '' }: { env?: NodeJS.ProcessEnv; input?: string } = {}): Proc {
+  return track(spawn(PYBIN, ['-I', '-c', code, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] }), input);
 }
 
 export function runPyCode(code: string, args: string[], opts: Omit<SpawnSyncOptions, 'encoding'> = {}): SpawnSyncReturns<string> {

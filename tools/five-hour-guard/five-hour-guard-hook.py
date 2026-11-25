@@ -87,6 +87,13 @@ def log(msg):
         return
     try:
         # no link at the final component and nothing but a regular file: a link put in a shared directory must not redirect the write
+        if not hasattr(os, 'O_NOFOLLOW'):   # Windows: there is no flag for it, so a link or a reparse point at the path is refused before the open
+            try:
+                st = os.lstat(LOG)
+            except FileNotFoundError:
+                st = None
+            if st is not None and (stat.S_ISLNK(st.st_mode) or getattr(st, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0)):
+                return
         fd = os.open(LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0), 0o644)
         try:
             if stat.S_ISREG(os.fstat(fd).st_mode):
