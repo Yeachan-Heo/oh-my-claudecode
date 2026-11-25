@@ -876,6 +876,31 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(first); }
   });
 
+  it('where no lock is available a guard that finds a live guard\'s pause when it enters a pause leaves it alone: the pause stays with its owner and its stop does not remove it', async () => {
+    // both guards start while the pause file is absent, so both pass the check of the start; the first one then publishes
+    const noLocks = ['import runpy, sys', 'sys.modules["fcntl"] = None', 'sys.modules["msvcrt"] = None', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const a = fixture('nolock-owner-a', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const b = fixture('nolock-owner-b', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS }, config: { pause_file: a.pause } });
+    const first = spawnPyCode(noLocks, [GUARD, ...guardArgs(a)]);
+    const second = spawnPyCode(noLocks, [GUARD, ...guardArgs(b)]);
+    try {
+      await waitFor(() => /guard start/.test(readText(a.log)) && /guard start/.test(readText(b.log)), 20000, 'both guards started');
+      writeCache(a, { pct: 99, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => existsSync(a.pause), 20000, 'the pause of the first guard');
+      expect(readJson(a.pause).pid).toBe(first.child.pid);
+      const late = runPyCode(noLocks, [GUARD, ...guardArgs(b, ['--once'])]);
+      expect(late.status, 'a guard that starts when the pause of the first is there does not start').toBe(2);
+      expect(late.stderr).toMatch(/belongs to the running process/);
+      writeCache(b, { pct: 99, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /belongs to the running process/.test(readText(b.log)), 20000, 'the second guard refuses to publish over the pause of the first');
+      await sleep(600); // a few more ticks of both guards
+      expect(readJson(a.pause).pid, 'the pause is still the first guard\'s').toBe(first.child.pid);
+      await stopGuard(second);
+      expect(existsSync(a.pause), 'stopping the second guard leaves the pause of the first in force').toBe(true);
+    } finally { await stopGuard(second); await stopGuard(first); }
+    expect(existsSync(a.pause), 'stopping the first guard removes its pause').toBe(false);
+  });
+
   it('a file that appears at pause_file after the start check is never removed as a leftover: exit 2, the file is kept', () => {
     // the driver puts the file in place when the guard first reads its state file, which is after the checks of the start and before the removal of a leftover
     const driver = ['import builtins, os, runpy, sys', 'real, target, text = builtins.open, sys.argv[1], sys.argv[2]', 'done = []',

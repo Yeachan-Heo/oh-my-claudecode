@@ -849,6 +849,20 @@ def check_wiring(where):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
 
 
+def live_owner():
+    """Where no lock names the owner of the pause file (LOCKING is false), the pid of another running process whose document there has a
+    current heartbeat; None otherwise (also whenever a lock is held: the lock is then the proof, a live pid proves nothing)."""
+    if LOCKING:
+        return None
+    try:
+        with open(PAUSE_FILE) as f:
+            doc = json.load(f)
+        owner, valid_until = doc.get('pid'), doc.get('valid_until') or 0
+        return owner if owner != os.getpid() and valid_until > time.time() and pid_alive(owner) else None
+    except Exception:
+        return None
+
+
 def check_pause_path():
     """Never publish over a file that is not a pause of this guard: something else may have created it after the start check (a shared or
     mistyped path). Returns the lstat result of the file that exists, None when there is none: the caller acts on this one look (a second
@@ -860,6 +874,9 @@ def check_pause_path():
         return None
     if not is_guard_pause(PAUSE_FILE):
         raise OSError(f'the file {PAUSE_FILE} is not a pause file of this guard: it is left untouched and no pause is published (check "pause_file")')
+    owner = live_owner()
+    if owner is not None:   # with no lock the shape of the document says nothing about whose it is: a second guard would renew it with its own pid
+        raise OSError(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: another guard uses it, so no pause is published (two guards must not share one pause_file)')
     return seen
 
 
@@ -1117,16 +1134,9 @@ def main():
     lock_state()   # one guard per pause file: a pid in the file proves nothing (it may be reused after a crash), the lock does
     if os.path.lexists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):   # again, now that no other guard can be changing it
         fail(f'the file {PAUSE_FILE} appeared or changed since the start check and is not a pause file of this guard: it is left untouched')
-    if not LOCKING:   # no lock on this platform: the heartbeat and the pid are all there is
-        owner, valid_until = None, 0
-        try:
-            with open(PAUSE_FILE) as f:
-                doc = json.load(f)
-            owner, valid_until = doc.get('pid'), doc.get('valid_until') or 0
-        except Exception:
-            pass
-        if owner is not None and owner != os.getpid() and valid_until > time.time() and pid_alive(owner):
-            fail(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: another guard uses it; two guards must not share one pause_file')
+    owner = live_owner()
+    if owner is not None:
+        fail(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: another guard uses it; two guards must not share one pause_file')
     state = load_state()
     if state.get('paused'):
         if state.get('resume_at') and time.time() < state['resume_at']:
