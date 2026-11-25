@@ -214,7 +214,7 @@ function completion(stage) {
   return `Signal: PIPELINE_${stage.toUpperCase()}_COMPLETE`;
 }
 
-const workflowIntegrityFailure = { continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow.' };
+const workflowIntegrityFailure = { continue: false, stopReason: '[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow.' };
 
 afterEach(() => {
   while (created.length) rmSync(created.pop(), { recursive: true, force: true });
@@ -253,12 +253,11 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const f = fixture(kind);
     writeState(f, workflowState(f));
     const before = readFileSync(f.statePath);
-    appendRawRecord(f, { sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(8 * 1024 * 1024 + 1) }] } });
+    appendRawRecord(f, { sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: Buffer.alloc(8 * 1024 * 1024, 0x41) } });
 
     expect(invoke(f)).toMatchObject({
       continue: false,
-      decision: 'block',
-      reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.',
+      stopReason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.',
     });
     expect(readFileSync(f.statePath)).toEqual(before);
   });
@@ -307,7 +306,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeState(f, workflowState(f));
     writeFileSync(f.transcript, Buffer.concat([Buffer.alloc(8 * 1024 * 1024, 0x20), delimiter]));
 
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(invoke(f)).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
   });
   it('rejects an oversized lone terminal CR at EOF', () => {
     const f = fixture(kind);
@@ -317,8 +316,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
 
     expect(invoke(f)).toMatchObject({
       continue: false,
-      decision: 'block',
-      reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.',
+      stopReason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.',
     });
     expect(readFileSync(f.statePath)).toEqual(before);
   });
@@ -377,7 +375,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f).reason).toBe(expectedStagePrompt('execution'));
     const advanced = readState(f);
     expect(advanced.pipelineTracking.activationBoundary.byteOffset).toBe(readFileSync(f.transcript).byteLength);
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('execution') });
+    expect(invoke(f)).toMatchObject({ decision: 'block', reason: expectedStagePrompt('execution') });
     expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 1, trackingRevision: 1 });
 
     appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
@@ -526,7 +524,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeState(f, workflowState(f));
     unlinkSync(lockPath);
 
-    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(await pending).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
   });
 
   it('fails closed when concurrent autopilot activation commits after lock retries expire', async () => {
@@ -599,7 +597,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeState(f, workflowState(f));
     unlinkSync(lockPath);
 
-    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(await pending).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
   });
 
   it('honors an exact same-run cancel signal for a named workflow', () => {
@@ -669,7 +667,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeState(f, replacement);
     unlinkSync(lockPath);
 
-    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt(change === 'advanced stage' ? 'execution' : 'ralplan') });
+    expect(await pending).toMatchObject({ decision: 'block', reason: expectedStagePrompt(change === 'advanced stage' ? 'execution' : 'ralplan') });
   });
 
   it.each([
@@ -787,7 +785,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeState(f, workflowState(f));
     unlinkSync(lockPath);
 
-    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(await pending).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
   });
 
   it('fails closed when a named workflow is missing tracking state', () => {
@@ -906,7 +904,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       message: { role: 'assistant', content: [{ type: 'thinking', thinking: 123 }, { type: 'text', text: completion('ralplan') }] },
     });
 
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(invoke(f)).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
     expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 0, trackingRevision: 0 });
   });
 
@@ -1041,7 +1039,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const state = workflowState(f);
     writeState(f, state);
     append(f);
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(invoke(f)).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
     expect(readState(f)).toMatchObject({ ...state, last_checked_at: expect.any(String), updated_at: expect.any(String) });
   });
 
@@ -1052,7 +1050,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     appendRawRecord(f, { sessionId: f.sessionId, type: 'system', message: { role: 'assistant', content: [{ type: 'text', text: completion('ralplan') }] } });
     appendRawRecord(f, { session_id: f.sessionId, type: 'assistant', message: { role: 'assistant', content: completion('ralplan') } });
     appendRawRecord(f, { sessionId: f.sessionId, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '   ' }, { type: 'text', text: completion('ralplan') }] } });
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(invoke(f)).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
     expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 0, trackingRevision: 0 });
   });
 
@@ -1063,7 +1061,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
     const cases = [
       [{ session_id: 'other-session' }, { continue: true, suppressOutput: true }],
-      [{ transcript_path: join(f.dir, 'escaped.jsonl') }, { continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') }],
+      [{ transcript_path: join(f.dir, 'escaped.jsonl') }, { decision: 'block', reason: expectedStagePrompt('ralplan') }],
     ] as const;
     writeFileSync(join(f.dir, 'escaped.jsonl'), JSON.stringify({ message: { role: 'assistant', content: completion('ralplan') } }));
     for (const [input, expected] of cases) {
@@ -1085,7 +1083,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     state.workflow.profileHash = 'b'.repeat(64);
     writeState(f, state);
     appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expect.stringContaining('workflow_descriptor_integrity_failed') });
+    expect(invoke(f)).toMatchObject({ continue: false, stopReason: expect.stringContaining('workflow_descriptor_integrity_failed') });
     expect(readState(f)).toEqual(state);
   });
 
@@ -1131,7 +1129,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     writeState(f, state);
     const bytesBefore = readFileSync(f.statePath);
 
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expect.stringContaining('workflow_descriptor_integrity_failed') });
+    expect(invoke(f)).toMatchObject({ continue: false, stopReason: expect.stringContaining('workflow_descriptor_integrity_failed') });
     expect(readFileSync(f.statePath)).toEqual(bytesBefore);
   });
 
@@ -1150,7 +1148,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     unlinkSync(lockPath);
 
     const result = await pending;
-    expect(result).toMatchObject({ continue: false, decision: 'block', reason: expect.stringContaining('workflow_descriptor_integrity_failed') });
+    expect(result).toMatchObject({ continue: false, stopReason: expect.stringContaining('workflow_descriptor_integrity_failed') });
     expect(readFileSync(f.statePath)).toEqual(bytesBeforeUnlock);
     expect(readState(f).pipelineTracking.trackingRevision).toBe(0);
   });
@@ -1187,7 +1185,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       writeState(f, corrupted);
       const before = readFileSync(f.statePath);
       appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
-      expect(invoke(f)).toMatchObject({ continue: false, decision: 'block' });
+      expect(invoke(f)).toMatchObject({ continue: false });
       expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
       writeState(f, validState);
     }
@@ -1209,7 +1207,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const replacementBytes = readFileSync(f.statePath);
     unlinkSync(lockPath);
 
-    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(await pending).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
     expectStateExceptLiveness(readState(f), JSON.parse(replacementBytes.toString('utf8')));
   });
 
@@ -1227,8 +1225,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     unlinkSync(lockPath);
 
     const result = await pending;
-    expect(result).toMatchObject({ continue: false, decision: 'block' });
-    expect([expectedStagePrompt('ralplan'), workflowIntegrityFailure.reason]).toContain(result.reason);
+    expect([expectedStagePrompt('ralplan'), workflowIntegrityFailure.stopReason]).toContain(result.stopReason ?? result.reason);
     expect(readState(f).pipelineTracking.trackingRevision).toBe(0);
   });
 
@@ -1245,8 +1242,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       NODE_ENV: 'test',
       OMC_WORKFLOW_TEST_MUTATE_AFTER_READ_BASE64: replacement.toString('base64'),
     });
-    expect(result).toMatchObject({ continue: false, decision: 'block' });
-    expect([expectedStagePrompt('ralplan'), workflowIntegrityFailure.reason]).toContain(result.reason);
+    expect([expectedStagePrompt('ralplan'), workflowIntegrityFailure.stopReason]).toContain(result.stopReason ?? result.reason);
     expectStateExceptLiveness(readState(f), JSON.parse(before.toString('utf8')));
   });
 
@@ -1281,12 +1277,12 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
     unlinkSync(lockPath);
 
-    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+    expect(await pending).toMatchObject({ decision: 'block', reason: expectedStagePrompt('ralplan') });
     expect(readState(f).pipelineTracking.trackingRevision).toBe(0);
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('execution') });
+    expect(invoke(f)).toMatchObject({ decision: 'block', reason: expectedStagePrompt('execution') });
     const committed = readState(f);
     expect(committed.pipelineTracking.activationBoundary.byteOffset).toBe(readFileSync(f.transcript).byteLength);
-    expect(invoke(f)).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('execution') });
+    expect(invoke(f)).toMatchObject({ decision: 'block', reason: expectedStagePrompt('execution') });
     expect(readState(f).pipelineTracking).toMatchObject({ currentStageIndex: 1, trackingRevision: 1 });
 
     appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
