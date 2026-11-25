@@ -842,6 +842,8 @@ def check_pause_path():
     look could find a file that appeared in between and take it for the pause it may replace) and gives the result to write_json, which
     renews exactly that file. Nothing is published either while the hook log of a registered entry is a file of the guard or a program
     (hook_log_collisions): it is every publication, the entry into a pause and each renewal."""
+    if not keep_locks():
+        raise OSError('a lock file of this guard was removed or replaced and another guard holds the new one: no pause is published or renewed')
     for log_path, label, _path in hook_log_collisions()[:1]:
         if LAST_WIRING_CHECK[0] is None or time.monotonic() - LAST_WIRING_CHECK[0] >= A.warn_every:
             hook_check('pause refused')   # the wiring check names every file the hook log is, as it does when a pause begins
@@ -998,8 +1000,13 @@ def tick(state):
 def safe_tick(state):
     """One tick that never ends the process: a write that fails (the directory of the pause file is gone, the disk is full)
     is logged and the next tick tries again, with the state kept in memory."""
+    global STOP
     LOG_LOOK[0] = None   # settings.json may have been rewritten since the last tick: the log is looked at again
     try:
+        if not keep_locks():   # another guard holds the lock of that name now: this one leaves the pause file to its heartbeat and stops, the service manager starts it again
+            log('ERROR: a lock file of this guard was removed or replaced and another guard holds the new one: stopping, the pause file is left alone')
+            STOP = True
+            return False
         tick(state)
         return True
     except Exception as e:
@@ -1043,15 +1050,14 @@ def drop_leftover_pause():
     return unpublish(strict=True)
 
 
-LOCK_FDS = []
+LOCK_FDS = []   # [descriptor, path] of every lock file held
+LOCK_LOST = [False]
 
 
-def lock_one(path, what):
-    """Hold an exclusive flock on a sibling file for the whole life of the process."""
-    try:
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o600)   # never through a link put there
-    except OSError as e:
-        fail(f'cannot open the lock file {path}: {e!r}')
+def take_lock(path):
+    """The descriptor of the lock file at `path` with an exclusive lock held on it; None when another process holds the lock; OSError
+    when the file cannot be opened."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o600)   # never through a link put there
     try:
         if fcntl is not None:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1059,8 +1065,41 @@ def lock_one(path, what):
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)   # one byte at the start of the empty file; released when the process ends
     except OSError:
         os.close(fd)
+        return None
+    return fd
+
+
+def lock_one(path, what):
+    """Hold an exclusive flock on a sibling file for the whole life of the process."""
+    try:
+        fd = take_lock(path)
+    except OSError as e:
+        fail(f'cannot open the lock file {path}: {e!r}')
+    if fd is None:
         fail(f'another guard holds {path}: one guard per {what}')
-    LOCK_FDS.append(fd)   # held until the process ends
+    LOCK_FDS.append([fd, path])   # held until the process ends
+
+
+def keep_locks():
+    """True when every lock file still is the file this guard holds the lock on. Cleanup or another process can remove or replace one
+    while the guard runs; the lock then excludes nobody, so the file now at the path is locked again. False (and LOCK_LOST) when another
+    guard holds it: this one must stop and publish or remove no pause. OSError when the path cannot be opened now (its directory is
+    gone): the caller fails like a write that fails, and the next tick tries again."""
+    for entry in LOCK_FDS:
+        fd, path = entry
+        try:
+            held, named = os.fstat(fd), os.lstat(path)
+            if (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino):
+                continue
+        except FileNotFoundError:
+            pass
+        fresh = take_lock(path)
+        if fresh is None:
+            LOCK_LOST[0] = True
+            return False
+        os.close(fd)
+        entry[0] = fresh
+    return True
 
 
 def lock_state():
@@ -1151,7 +1190,7 @@ def main():
             while not STOP and time.monotonic() < end:
                 time.sleep(min(1.0, max(0.0, end - time.monotonic())))
     finally:
-        if not (A.once or A.dry_run) and (state.get('paused') or state.get('unlink_pending')):
+        if not (A.once or A.dry_run or LOCK_LOST[0]) and (state.get('paused') or state.get('unlink_pending')):
             # orderly exit never leaves sessions waiting; a restart re-enters the pause from the first fresh reading of the cache
             try:
                 if state.get('paused'):
@@ -1165,6 +1204,7 @@ def main():
                 # the unpaused state could not be written, or the first removal failed: the sessions are still released (a restart
                 # reads a stored pause and keeps it only while it lasts)
                 log('RESUMED (guard stopping, state not saved): pause file removed' if state.get('paused') else 'RESUMED (guard stopping, second try): pause file removed')
+    return 1 if LOCK_LOST[0] else 0
 
 
 if __name__ == '__main__':

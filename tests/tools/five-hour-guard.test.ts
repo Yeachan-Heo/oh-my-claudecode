@@ -2724,6 +2724,38 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(g); }
   });
 
+  it('lock files that were removed and created again under a running guard are locked again by it, and a guard that finds another one on the new files stops without publishing or removing a pause', async () => {
+    const f = fixture('lock-files-replaced', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const locks = [`${f.state}.lock`, `${f.pause}.lock`];
+    const replace = () => { for (const lock of locks) { rmSync(lock); writeFileSync(lock, '', 'utf8'); } };
+    const first = startGuard(f);
+    let second: Proc | undefined;
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start of the first guard');
+      // nobody else is there: the guard takes the new files and goes on, here into a pause
+      replace();
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => existsSync(f.pause) && readJson(f.pause).pid === first.child.pid, 20000, 'the pause of the first guard');
+      expect(first.exited, 'the first guard keeps running').toBe(false);
+      // the first guard cannot look while it is stopped: another guard takes the new files and goes on with the pause
+      first.child.kill('SIGSTOP');
+      replace();
+      second = startGuard(f);
+      await waitFor(() => existsSync(f.pause) && readJson(f.pause).pid === second?.child.pid, 20000, 'the pause of the second guard');
+      first.child.kill('SIGCONT');
+      await Promise.race([first.done, sleep(10000)]);
+      expect(first.exited, 'the first guard stopped').toBe(true);
+      expect(first.code, 'it exits with an error, so that a service manager starts it again').toBe(1);
+      expect(readText(f.log)).toMatch(/ERROR: a lock file of this guard was removed or replaced and another guard holds the new one/);
+      await sleep(600);
+      expect(readJson(f.pause).pid, 'the pause of the second guard is still there, not removed by the first').toBe(second.child.pid);
+    } finally {
+      await stopGuard(first);
+      if (second) await stopGuard(second);
+    }
+  });
+
   it('a timeout that is NaN or Infinity (raw tokens that Python reads and standard JSON does not) is a wiring problem, like a missing one', () => {
     const f = fixture('wiring-timeout-nonfinite', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
