@@ -1235,13 +1235,23 @@ function getClaudeMdVersion() {
     const content = readFileSync(claudeMdPath, 'utf-8');
     let version = extractOmcVersion(content);
     if (!version) {
-      // The file-split layout keeps the marker in the companion file that CLAUDE.md references (or CLAUDE-omc.md), as the doctor reads it.
-      const companion = content.match(/CLAUDE-[^ )]*[.]md/)?.[0] ?? 'CLAUDE-omc.md';
-      try {
-        // Only a regular file is opened: reading a FIFO or a device would wait for a writer and hold the whole hook.
-        const companionPath = join(configDir, companion);
-        if (statSync(companionPath).isFile()) version = extractOmcVersion(readFileSync(companionPath, 'utf-8'));
-      } catch { /* no companion */ }
+      // The file-split layout keeps the marker in a companion file, found as the doctor finds it: the CLAUDE-*.md file that CLAUDE.md
+      // references, otherwise CLAUDE-omc.md and then every other CLAUDE-*.md in name order; the first marker decides.
+      const referenced = content.match(/CLAUDE-[^ )]*[.]md/)?.[0];
+      let names = [referenced];
+      if (!referenced) {
+        names = ['CLAUDE-omc.md'];
+        try { names.push(...readdirSync(configDir).filter(name => /^CLAUDE-.*[.]md(?![^])/i.test(name)).sort()); } catch { /* no directory listing */ }
+      }
+      for (const name of new Set(names)) {
+        try {
+          // Only a regular file is opened: reading a FIFO or a device would wait for a writer and hold the whole hook.
+          const companionPath = join(configDir, name);
+          if (!statSync(companionPath).isFile()) continue;
+          version = extractOmcVersion(readFileSync(companionPath, 'utf-8'));
+        } catch { /* not there, or not readable */ }
+        if (version) break;
+      }
     }
     return version || 'unknown';  // File exists but no marker = 'unknown'
   } catch { return null; }

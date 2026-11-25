@@ -1628,6 +1628,18 @@ ${'- oversized startup guidance\n'.repeat(700)}
       expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
     });
 
+    // Without a reference the doctor scans CLAUDE-omc.md and then every other CLAUDE-*.md in name order, and SessionStart does the same, so the
+    // verdict of the doctor and the drift of the session agree; a FIFO among them is skipped, not read.
+    it.skipIf(process.platform === 'win32')('finds the marker in another CLAUDE-*.md when CLAUDE.md has no reference, and skips a FIFO among them', () => {
+      const found = runDriftSession(undefined, { 'CLAUDE.md': '# no marker\n', 'CLAUDE-custom.md': '<!-- OMC:VERSION:4.15.4 -->\n' }, ['CLAUDE-a.md']);
+      expect(found).not.toContain('CLAUDE.md instructions');
+    });
+
+    it('does not scan other CLAUDE-*.md files when CLAUDE.md references one', () => {
+      const combined = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-empty.md\n', 'CLAUDE-empty.md': '# no marker\n', 'CLAUDE-custom.md': '<!-- OMC:VERSION:4.15.4 -->\n' });
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
     it('does not report CLAUDE.md drift when claudeMdEnabled is false', () => {
       const combined = runDriftSession(false);
       expect(combined).not.toContain('CLAUDE.md instructions');
