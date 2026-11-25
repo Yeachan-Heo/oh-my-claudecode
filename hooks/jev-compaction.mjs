@@ -2207,7 +2207,8 @@ function shortText(c) {
     const body = /<result>([\s\S]*?)(?:<\/result>|$)/.exec(c.res.text);
     // The summary stays a <summary> field, after the source: the next compaction reads it from there (noteSummary), not the first line it finds, which is the source.
     const summary = c.summary ? `<summary>${c.summary}</summary>\n` : '';
-    const kept = `${summary}${body ? body[1].slice(0, SHORT_CHARS) : c.res.text.slice(0, SHORT_CHARS)}`;
+    // The kept text stays in a <result> field, as in the notification it was cut from: a later cut of the copy finds it there and keeps it (the rest of the copy is its framing).
+    const kept = `${summary}<result>${body ? body[1].slice(0, SHORT_CHARS) : c.res.text.slice(0, SHORT_CHARS)}</result>`;
     // The source stays in the copy (the task ids and output files of the notification, the first few): the next compaction ties it to its call by them.
     const source = sourceFields(noteHeads(c.res.text).join('\n'), 8).map(([tag, value]) => `<${tag}>${value}</${tag}>\n`).join('');
     return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${source}${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]\n</task-notification>`;

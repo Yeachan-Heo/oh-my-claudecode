@@ -731,3 +731,34 @@ describe('rows that open like a trace of the module (the stages\' trace prefixes
     });
   }
 });
+
+describe('a shortened notification that the next compaction shortens again', () => {
+  const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '64', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
+  const many = Array.from({ length: 200 }, (_, k) => `The coordinator sent a message while you were working:\nd${k}`);
+  const END = '\n</task-notification>';
+  // The notification with the 200 deliveries after its row is shortened (the copy frees their blocks); its row in the list of the next compaction is the copy.
+  const shorten = async (rowOf, text) => {
+    const w = talk(30);
+    const list = [...w.slice(0, 3), ...LAUNCH, rowOf, ...w.slice(3)];
+    const run = await compactRun(env, list, { tokens: 110000, deliver: { [list.indexOf(rowOf)]: many }, score: 3 });
+    const copy = run.out.messages.find((m) => (m.text || '').includes('[notification shortened at compaction'));
+    expect(run.record, text).toMatchObject({ result: 'jev', notifications: 1, kept_short: 1 });
+    return { run, copy: copy && row(copy.text.slice(0, copy.text.indexOf(END) + END.length), { handle: 'n2' }) };
+  };
+
+  it('the second short copy keeps the report that the first one kept, not the framing of the first copy', async () => {
+    const report = `RETAINED-START ${'r'.repeat(250)} RETAINED-END ${'w'.repeat(9000)}`;
+    const kept = report.slice(0, 300);
+    const first = await shorten(row(note('Status: registry', report), { handle: 'n1' }), 'first');
+    expect(first.copy.text).toContain(kept);
+    expect(isNotification(first.copy)).toBe(true);
+    const second = await shorten(first.copy, 'second');
+    expect(second.copy.text).toContain(kept);
+    expect(second.copy.text).toContain('<summary>Agent "Status: registry" finished</summary>');
+    expect(second.copy.text).toContain('<task-id>a1b2c3</task-id>');
+    expect(isNotification(second.copy)).toBe(true);
+    // A third round keeps it too.
+    const third = await shorten(second.copy, 'third');
+    expect(third.copy.text).toContain(kept);
+  });
+});

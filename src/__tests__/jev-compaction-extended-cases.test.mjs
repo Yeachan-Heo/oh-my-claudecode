@@ -1091,9 +1091,9 @@ describe('a shortened notification is still a notification at the next compactio
     const first = await compactRun(env, w, { event: { trigger: 'auto' }, usage: estimateUsage(w), score: byMarker });
     const short = first.out.messages.find((m) => m.role === 'user' && /notification shortened at compaction/.test(m.text || ''));
     expect(short).toBeTruthy();
-    // Short: the marker, the source (task id), the summary as its own field, 300 characters of the result and the note inside the notification's tag, and nothing else.
-    expect(short.text.startsWith('[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<task-id>a1b2c3</task-id>\n<summary>Agent "Important" finished</summary>\nREPORT-TEXT IMPORTANT ')).toBe(true);
-    expect(short.text.endsWith('\n</task-notification>')).toBe(true);
+    // Short: the marker, the source (task id), the summary as its own field, 300 characters of the result in a <result> field and the note inside the notification's tag, and nothing else.
+    expect(short.text.startsWith('[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<task-id>a1b2c3</task-id>\n<summary>Agent "Important" finished</summary>\n<result>REPORT-TEXT IMPORTANT ')).toBe(true);
+    expect(short.text).toMatch(/<\/result>\n\[notification shortened at compaction: kept 300 of \d+ chars\]\n<\/task-notification>$/);
     expect(short.text.length).toBeLessThan(600);
     expect(isNotification(short)).toBe(true);
     // The source of the notification stays in the short copy: its task id, so that the next compaction ties it to its call again.
