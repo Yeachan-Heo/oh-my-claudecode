@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, lstatSync, lutimesSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { blockOf, commands, GUIDE_GUARD, ageVersions, runBlock, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { blockOf, commands, GUIDE_GUARD, ageVersions, runBlock, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { deadPid, ownHost, publishOwn, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (occupancy, links, platforms)', { timeout: 120_000 }, () => {
@@ -601,22 +601,23 @@ fs.lstatSync = function (target, ...rest) {
   if (text.endsWith(path.sep + 'package.json') && (text.startsWith(process.env.WALK_DIR + path.sep) || text.startsWith(process.env.BACKUPS + path.sep)) && ++walks === Number(process.env.PUBLISH_AT)) {
     const dir = path.join(process.env.CLAUDE_CONFIG_DIR, '.omc', 'cache-occupancy');
     fs.mkdirSync(dir, { recursive: true });
-    const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.WALK_DIR, host: process.env.OWN_HOST, updatedAt: new Date().toISOString() });
+    const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.RECORD_ROOT || process.env.WALK_DIR, host: process.env.OWN_HOST, updatedAt: new Date().toISOString() });
     fs.writeFileSync(path.join(dir, crypto.createHash('sha256').update(record).digest('hex') + '.json'), record);
     if (process.env.RETAKE && !fs.existsSync(process.env.WALK_DIR)) fs.mkdirSync(process.env.WALK_DIR);
   }
   return real.call(this, target, ...rest);
 };
 `;
-  const publishAt = (command: string, at: number, retake = false) => {
+  const publishAt = (command: string, at: number, retake = false, alias: 'none' | 'fold' | 'plain' = 'none') => {
     const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
     try {
       writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
       ageVersions(cache);
       const preload = path.join(dir, 'publish.cjs');
       writeFileSync(preload, publishDuring);
-      const env = { PUBLISH_AT: String(at), WALK_DIR: path.join(cache, '5.8.0'), BACKUPS: backupDir(dir), OWN_HOST: ownHost(), ...(retake ? { RETAKE: '1' } : {}) };
-      const result = runCommand(command, dir, { env, preloads: [preload] });
+      // alias: the record names the version in another letter case; 'fold' plays a volume that ignores letter case, 'plain' leaves the volume as it is.
+      const env = { PUBLISH_AT: String(at), WALK_DIR: path.join(cache, '5.8.0'), BACKUPS: backupDir(dir), OWN_HOST: ownHost(), ...(retake ? { RETAKE: '1' } : {}), ...(alias === 'none' ? {} : { RECORD_ROOT: upperBelow(dir, path.join(cache, '5.8.0')) }) };
+      const result = runCommand(command, dir, { env, preloads: [...(alias === 'fold' ? [writeCaseFoldPreload(dir)] : []), preload] });
       return { status: result.status, versions: digitVersions(cache), moved: movedAside(dir), said: /could not be put back|stays in/.test(result.stdout) };
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -627,6 +628,16 @@ fs.lstatSync = function (target, ...rest) {
       // Walks 1 and 2 are before the move, walk 3 is the one after it; there is no walk 4, so the version is moved there.
       for (const at of [1, 2, 3]) expect({ command, at, ...publishAt(command, at) }).toEqual({ command, at, status: 0, versions: '5.8.0,5.9.0', moved: 0, said: false });
       expect({ command, at: 4, ...publishAt(command, 4) }).toEqual({ command, at: 4, status: 0, versions: '5.9.0', moved: 1, said: false });
+    }
+  });
+
+  // After the move the original spelling of the version names nothing, so a record that spells it in another letter case cannot be resolved by
+  // identity any more: on a volume that ignores letter case it is the same directory and keeps the version, where the volume tells the names
+  // apart it names nothing here and the version is moved.
+  test('a record published after the last scan that spells the version in another letter case keeps it on a volume that ignores letter case', () => {
+    for (const command of commands) {
+      expect({ command, ...publishAt(command, 3, false, 'fold') }).toEqual({ command, status: 0, versions: '5.8.0,5.9.0', moved: 0, said: false });
+      if (!folds) expect({ command, ...publishAt(command, 3, false, 'plain') }).toEqual({ command, status: 0, versions: '5.9.0', moved: 1, said: false });
     }
   });
 

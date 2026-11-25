@@ -1126,11 +1126,11 @@ const newestChange = (root) => {
 };
 
 // == protection ==
-// protectionOf(dir, versions) reads every source of protection again and returns { unreadable, reason, noIdentity,
+// protectionOf(dir, versions, foldCase) reads every source of protection again and returns { unreadable, reason, noIdentity,
 // pinned, kept }: unreadable (with the reason, when the registry names one) and noIdentity stop the command, pinned
 // are the versions the registry pins (or a path of a pin reaches), kept are all protected versions. dir is the cache
-// directory and versions the version directory names in it.
-const protectionOf = (dir, versions) => {
+// directory and versions the version directory names in it. foldCase is explained at isUnderLowercase.
+const protectionOf = (dir, versions, foldCase = false) => {
   let unreadable = false;
   let unmapped = '';
   // A path that goes through a link and then .. names the parent of the link target on the file system and the
@@ -1164,9 +1164,10 @@ const protectionOf = (dir, versions) => {
     parent = path.resolve(parent);
     return target === parent || target.startsWith(parent + path.sep);
   };
-  // win32 only: the SessionStart publisher stores the plugin root of a record in lower case.
+  // win32 only: the SessionStart publisher stores the plugin root of a record in lower case. foldCase asks for the same comparison elsewhere:
+  // the read made after a version was moved, on a volume that ignores letter case, where no identity can resolve another spelling any more.
   const isUnderLowercase = (target, parent) => {
-    if (process.platform != 'win32') return false;
+    if (process.platform != 'win32' && !foldCase) return false;
     target = path.resolve(target).toLowerCase();
     parent = path.resolve(parent).toLowerCase();
     return target === parent || target.startsWith(parent + path.sep);
@@ -1516,12 +1517,16 @@ const cacheRepair = (kind) => {
               // update changes dates, a session that starts publishes a record and changes none). So the version is moved first and both are read
               // once more with it out of the cache, the dates first and the protection last; one that shows use is put back where it was.
               const original = path.join(dir, name);
+              // Whether the volume ignores letter case here: the cache directory spelled in upper case names the same directory. Read before the move,
+              // while the version still has an identity to compare.
+              const alias = path.join(path.dirname(dir), path.basename(dir).toUpperCase(), name);
+              const foldCase = !!identity(original) && identity(alias) == identity(original);
               fs.renameSync(original, backup);
               // A destination that was redirected in that instant no longer holds the copy at this path: there is nothing to read or to put back, and
               // the check of the destination before the next move stops the run.
               let back = taken(backup) && !settled(name, backup);
               if (!back && taken(backup)) {
-                const after = protectionOf(dir, versions);
+                const after = protectionOf(dir, versions, foldCase);
                 if (after.unreadable || after.noIdentity || !after.pinned.length || after.kept.includes(name)) {
                   skipped++;
                   back = true;
