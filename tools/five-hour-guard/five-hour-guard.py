@@ -344,7 +344,7 @@ def command_programs(command, depth=0, own=False):
     """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
     shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
     (its first operand: not an option, and for a Python not the value of -W, -X or -Q, for Node not the value of -r or --require; the options are read up to it, not after it; none when it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
-    the script of an interpreter behind a command that is not one (nice python3 audit) and a bare word behind it that the PATH of the command resolves (timeout 5 audit), any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
+    the file that `.` or `source` runs, the script of an interpreter behind a command that is not one (nice python3 audit) and a bare word behind it that the PATH of the command resolves (timeout 5 audit), any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
     longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
     and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out, apart from a wrapper with an executable file in front of the hook; the other simple
     commands of such a handler are read, also one that only has the name of the hook among its arguments."""
@@ -405,7 +405,7 @@ def command_programs(command, depth=0, own=False):
         search_path = ENTRY.command_path(words)   # a PATH given before the command word (PATH=dir cmd, env PATH=dir cmd) is where the command word is looked up
         candidates = [(words[i], True)]
         if not takes_code:   # with code on the command line the operands are its arguments
-            if INTERPRETER_NAME.fullmatch(base) and operands:
+            if (INTERPRETER_NAME.fullmatch(base) or base in ('.', 'source')) and operands:   # `. file` and `source file` run the file in the current shell
                 candidates.append((operands[0], False))
             candidates += [(w, False) for w in operands if w.lower().endswith(SCRIPT_SUFFIXES)]
         if not INTERPRETER_NAME.fullmatch(base):   # a command that runs the command after its own options (nice, timeout, sudo, xargs): an interpreter behind it runs its script
