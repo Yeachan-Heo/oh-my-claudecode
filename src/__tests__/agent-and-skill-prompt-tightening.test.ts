@@ -268,11 +268,11 @@ describe('omc-doctor skill', () => {
     expect(lines.filter((l) => l.includes('rmSync('))).toEqual([]);
     const moves = lines.flatMap((l, i) => (l.includes('renameSync(') ? [i] : []));
     expect(moves).toHaveLength(1);
-    // The move follows guard clauses, and the closest `if` above it is the check of the protection read again just
-    // before the move.
+    // The move follows guard clauses, and the closest `if` above it is the check of the protection read once more right
+    // before the move (after the last check of the dates).
     for (const move of moves) {
       const guard = lines.slice(0, move).reverse().find((l) => /^\s*if \(/.test(l)) ?? '';
-      expect({ line: move + 1, guard: guard.trim() }).toEqual({ line: move + 1, guard: expect.stringContaining('again.kept.includes(name)') });
+      expect({ line: move + 1, guard: guard.trim() }).toEqual({ line: move + 1, guard: expect.stringContaining('last.kept.includes(name)') });
     }
   });
 

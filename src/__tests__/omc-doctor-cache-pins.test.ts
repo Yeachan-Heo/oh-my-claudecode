@@ -78,6 +78,35 @@ fs.readdirSync = function (target, ...rest) {
     }
   });
 
+  // A session that publishes its occupancy record after the last protection read of the loop but before the rename still keeps the version: the
+  // protection is read once more after the last modification-date check, right before the rename. The record appears right after the third read of
+  // the occupancy directory (the check of every cache, the read at the start of the move, and the read just before the move).
+  test('a version that a session starts to occupy after the read before the move is left alone', () => {
+    const publish = `const fs = require('fs'); const path = require('path'); const real = fs.readdirSync; let reads = 0;
+fs.readdirSync = function (target, ...rest) {
+  const names = real.call(this, target, ...rest);
+  if (String(target).endsWith('cache-occupancy') && ++reads === 3) {
+    const stat = fs.readFileSync('/proc/self/stat', 'utf8');
+    const start = stat.substring(stat.lastIndexOf(')') + 2).split(' ')[19];
+    fs.writeFileSync(path.join(String(target), 'a'.repeat(64) + '.json'), JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: start, pluginRoot: process.env.HELD_DIR, updatedAt: new Date().toISOString() }));
+  }
+  return names;
+};
+`;
+    for (const command of commands) {
+      const { dir, cache } = makeConfigDir(['5.8.0', '5.9.0'], '5.9.0');
+      try {
+        mkdirSync(path.join(dir, '.omc', 'cache-occupancy'), { recursive: true });
+        const preload = path.join(dir, 'publish-during-move.cjs');
+        writeFileSync(preload, publish);
+        const result = runCommand(command, dir, { preloads: [preload], env: { HELD_DIR: path.join(cache, '5.8.0') }, timeout: 20_000 });
+        expect({ command, status: result.status, versions: digitVersions(cache), moved: movedAside(dir), skipped: /Skipped 1 version/.test(result.stdout) }).toEqual({ command, status: 0, versions: '5.8.0,5.9.0', moved: 0, skipped: true });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   describe('a version whose existing children are being refreshed is left alone', () => {
     const FRESH_LIMIT = 10 * 60_000;
     // Builds the configuration directory, adds the files to the unpinned version 5.9.0, ages everything an hour

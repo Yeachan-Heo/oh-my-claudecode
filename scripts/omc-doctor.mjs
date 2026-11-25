@@ -1459,8 +1459,15 @@ const cacheRepair = (kind) => {
           if (again.unreadable || again.noIdentity || !again.pinned.length || again.kept.includes(name)) {
             skipped++;
           } else if (settled(name)) {
-            fs.renameSync(path.join(dir, name), backup);
-            moved++;
+            // The protection is read once more after the last date check, right before the rename: a session that started to occupy the
+            // version in the meantime does not change its dates, so only this read can see it.
+            const last = protectionOf(dir, versions);
+            if (last.unreadable || last.noIdentity || !last.pinned.length || last.kept.includes(name)) {
+              skipped++;
+            } else {
+              fs.renameSync(path.join(dir, name), backup);
+              moved++;
+            }
           }
         });
         console.log(lead + 'Moved', moved, 'unprotected version(s) to', backups + (redirected ? ' (really ' + target.place + ')' : '') + messages.movedEnd);
