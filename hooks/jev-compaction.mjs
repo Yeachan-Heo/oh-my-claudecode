@@ -80,8 +80,8 @@
  *   flagged isMeta, or one that opens with a prefix of HOOK_ROW_PREFIXES or OMC_JEV_COMPACT_HOOK_ROW_PREFIXES), lies before the last
  *   KEEP_LAST messages and the open tool loop, and holds no image or file block (the API form of the conversation has to be available to tell);
  * - it names no secret or private path and masking leaves it unchanged (it goes neither to Jev nor to a file otherwise);
- * - it carries none of the user's own style as OMC_JEV_COMPACT_OWNER_MARKERS describes it (comma separated regular expression
- *   sources; empty by default, so no tag is held back by it; one that repeats a group holding a repeat is ignored, see repeatsRepeat);
+ * - it carries none of the user's own style as OMC_JEV_COMPACT_OWNER_MARKERS describes it (comma separated texts looked for as they
+ *   stand, in any case; empty by default, so no tag is held back by it);
  * - Jev, who gets the whole tag (one request per tag, at most PASTE_MAX_ASKS of the largest, so every removed character was
  *   read), says yes with a probability of PASTE_YES (OMC_JEV_COMPACT_PASTE_YES) or more to "is all of it pasted material, none of it the user's own writing"
  *   (the requests start after the scoring ones and count against OMC_JEV_MAX_REQUESTS, the breaker and OMC_JEV_MAX_RPM);
@@ -816,7 +816,7 @@ export async function readConfig($) {
     pasteMinChars: positiveInt(env.OMC_JEV_COMPACT_PASTE_MIN_CHARS, PASTE_MIN_CHARS),
     pasteMaxChars: positiveInt(env.OMC_JEV_COMPACT_PASTE_MAX_CHARS, PASTE_MAX_CHARS),
     pasteYes: fraction(env.OMC_JEV_COMPACT_PASTE_YES, PASTE_YES, 0.01, 1),
-    ownerMarkers: ownerMarkerPatterns(env.OMC_JEV_COMPACT_OWNER_MARKERS),
+    ownerMarkers: ownerMarkerTexts(env.OMC_JEV_COMPACT_OWNER_MARKERS),
     // Row prefixes of the paste and reply stages: the built-in ones, then the comma separated list of OMC_JEV_COMPACT_HOOK_ROW_PREFIXES.
     hookRowPrefixes: [...HOOK_ROW_PREFIXES, ...String(env.OMC_JEV_COMPACT_HOOK_ROW_PREFIXES ?? '').split(',').map((x) => x.trim()).filter(Boolean)],
     replies,
@@ -3303,117 +3303,20 @@ export function pasteTags(text) {
   return tags;
 }
 
-// Whether a regular expression source can take more than quadratic time on a text that nearly matches. A synchronous test cannot be stopped by the compaction's
-// deadline, and a hooks module may import only plain files of its plugin, so this is read from the source here and not by a package. Two shapes are refused:
-// - a group repeated (`*`, `+`, `{n,}`, or `{n,m}` with m above 1) that holds a repeat, an optional part or an alternative: `(a+)+$`, `(a|a)*$`, `(a?){30}a{30}`;
-// - two repeats that stand next to each other (nothing between them but optional parts) and match some of the same characters: `a*a*$`, `.*.*.*x`, `\w+\w+`, `a*b?a*$`.
-// What is left is a repeat of a character or class that no other repeat touches (`\s+\w+`, `\w+\.\w+`, `[ ]<-+[ ]`) or a group that is not repeated (`(foo|bar)baz`).
-// Characters tell whether two atoms overlap: the PROBES that an atom matches (an atom no probe matches, such as a group, may overlap anything).
-const PROBES = [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-.:,;@/\\<>()[]{}!?#$%^&*+=~|"\'`\t\n', '\u00e9', '\u00df', '\u0105', '\u4e2d', '\u{1f600}'];
-const probesOf = (atom) => { try { const re = new RegExp(`^(?:${atom})$`, 'iu'); return PROBES.filter((c) => re.test(c)).join(''); } catch { return ''; } };
-const sharesProbe = (x, y) => !x || !y || [...x].some((c) => y.includes(c));
-function repeatsRepeat(source) {
-  const text = String(source);
-  const open = /\((?:\?(?:[:=!]|<[=!]|<[^>]*>))?/y;
-  const counted = /\{(\d+)(?:,(\d*))?\}/y;
-  const frames = [{ rep: false, alt: [] }]; // the groups that are open; `rep`: a repeat, an optional part or an alternative stands in it
-  let atom; // the atom just read, until the next character says how often it stands: its text, and the group that closed when it is one
-  let chain = []; // the probes of the repeats that stand next to each other, up to the atom that is read now
-  const skip = (from, close) => { const at = text.indexOf(close, from); return at < 0 ? text.length : at + 1; };
-  // The atom with its repeat (`min` to `max` times): true when it is a repeat that overlaps one next to it.
-  const stand = (a, min, max) => {
-    const repeated = max > 1;
-    if (min === 0 && !repeated) return false; // an optional single character stands between nothing
-    if (!repeated && !chain.length) return false;
-    const probes = probesOf(a.text);
-    if (repeated && chain.some((x) => sharesProbe(x, probes))) return true;
-    if (min >= 1) chain = repeated ? [probes] : chain.some((x) => sharesProbe(x, probes)) ? chain : []; // a character that no repeat touches stands between them
-    else chain.push(probes);
-    return false;
-  };
-  for (let i = 0; i < text.length;) {
-    const c = text[i];
-    let min;
-    let max;
-    let end = i + 1;
-    if (c === '*') { min = 0; max = Infinity; } else if (c === '+') { min = 1; max = Infinity; } else if (c === '?') { min = 0; max = 1; } else if (c === '{') {
-      counted.lastIndex = i;
-      const m = counted.exec(text);
-      if (m) { min = Number(m[1]); max = m[2] === undefined ? min : m[2] === '' ? Infinity : Number(m[2]); end = counted.lastIndex; }
-    }
-    if (max !== undefined) {
-      if (text[end] === '?') end++; // a lazy repeat
-      if (atom?.group?.rep && max > 1) return true;
-      frames[frames.length - 1].rep = true;
-      if (atom?.group && min === 0) chain = [...atom.group.chain, ...chain]; // a group that may be left out: what stood before it stands next to what follows
-      if (atom && stand(atom, min, max)) return true;
-      atom = undefined;
-      i = end;
-      continue;
-    }
-    if (atom) stand(atom, 1, 1);
-    atom = undefined;
-    if (c === '\\') {
-      const next = text[i + 1];
-      end = (next === 'p' || next === 'P' || next === 'u') && text[i + 2] === '{' ? skip(i + 2, '}') : next === 'k' && text[i + 2] === '<' ? skip(i + 2, '>') : i + 2;
-      if (next !== 'b' && next !== 'B') atom = { text: text.slice(i, end) };
-    } else if (c === '[') {
-      let j = i + 1;
-      while (j < text.length && text[j] !== ']') j += text[j] === '\\' ? 2 : 1;
-      end = j + 1;
-      atom = { text: text.slice(i, end) };
-    } else if (c === '(') {
-      open.lastIndex = i;
-      open.test(text);
-      end = open.lastIndex;
-      frames.push({ rep: false, alt: [], chain: [...chain] });
-    } else if (c === ')') {
-      if (frames.length > 1) { const group = frames.pop(); frames[frames.length - 1].rep ||= group.rep; chain = [...chain, ...group.alt]; atom = { text: '', group }; }
-    } else if (c === '|') {
-      const frame = frames[frames.length - 1];
-      frame.rep = true;
-      frame.alt.push(...chain); // what the alternative that ends here leaves standing next to what follows the group
-      chain = [...(frame.chain ?? [])];
-    } else if (c !== '^' && c !== '$') {
-      atom = { text: c };
-    }
-    i = end;
-  }
-  return false;
-}
-
 /**
- * OMC_JEV_COMPACT_OWNER_MARKERS: regular expression sources separated by commas (a comma inside `{}` or `[]` does not separate), each compiled with the flags `imu`. A source that is not a valid expression, or that repeats a group holding a repeat, an optional part or an alternative (the shapes that take exponential time on a text that nearly matches), is ignored. Unset or empty: no patterns.
+ * OMC_JEV_COMPACT_OWNER_MARKERS: pieces of the user's own style as plain text, separated by commas (a comma cannot be part of a marker), each trimmed and lower-cased; empty ones are left out.
+ * A marker is looked for as it stands and in any case: no sign in it has a meaning of its own (`^`, `$`, `*`, `(` are signs like any other), and no expression is built from the value,
+ * so no marker can hold the hook up on a long pasted tag.
  */
-export function ownerMarkerPatterns(raw) {
-  const sources = [];
-  let current = '';
-  let braces = 0;
-  let brackets = 0;
-  const text = String(raw ?? '');
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === '\\' && i + 1 < text.length) { current += c + text[++i]; continue; }
-    if (c === '[') brackets++;
-    else if (c === ']' && brackets) brackets--;
-    else if (c === '{' && !brackets) braces++;
-    else if (c === '}' && !brackets && braces) braces--;
-    if (c === ',' && !braces && !brackets) { sources.push(current); current = ''; } else current += c;
-  }
-  sources.push(current);
-  const patterns = [];
-  for (const source of sources.map((x) => x.trim()).filter(Boolean)) {
-    try {
-      const pattern = new RegExp(source, 'imu');
-      if (!repeatsRepeat(source)) patterns.push(pattern); // one that repeats a repeat is ignored: it could stall the hook on a pasted tag
-    } catch { /* an invalid pattern is ignored */ }
-  }
-  return patterns;
+export function ownerMarkerTexts(raw) {
+  return String(raw ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 }
 
-/** Whether a text carries the user's own style as the configured patterns describe it; with no patterns it never does. */
-export function ownerMarked(text, patterns) {
-  return patterns.some((pattern) => pattern.test(text));
+/** Whether a text carries the user's own style as the configured markers describe it; with no markers it never does. */
+export function ownerMarked(text, markers) {
+  if (!markers.length) return false;
+  const lower = text.toLowerCase();
+  return markers.some((marker) => lower.includes(marker));
 }
 
 // A `<` in an excerpt is written as the JSON unicode escape of `<`, so a tag inside the excerpt is no tag when the next compaction looks for tags.
