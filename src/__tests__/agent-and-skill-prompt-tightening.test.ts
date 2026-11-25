@@ -88,8 +88,8 @@ describe('git-master agent prompt', () => {
     expect(text).not.toContain('Never rebase main/master.');
   });
 
-  test('the protected category names main, master and the release branches, and allows no rewrite and no exception', () => {
-    for (const branch of ['`main`', '`master`', '`release/<version>`', '`hotfix/<version>`']) expect(protectedLine).toContain(branch);
+  test('the protected category names main, master, dev and the release branches, and allows no rewrite and no exception', () => {
+    for (const branch of ['`main`', '`master`', '`dev`', '`release/<version>`', '`hotfix/<version>`']) expect(protectedLine).toContain(branch);
     expect(protectedLine).toContain('whatever the request and the exception (the autosquash exception included)');
     for (const verb of ['rebase', 'amend', 'reset the branch', 'filter', 'force-push', 'delete']) expect(protectedLine).toContain(verb);
     expect(protectedLine).not.toMatch(/\b(unless|except when|only when|explicit(ly)?)\b/);
@@ -97,7 +97,7 @@ describe('git-master agent prompt', () => {
   });
 
   test('no exception or permission in the prompt reaches a protected branch', () => {
-    const protectedNames = ['main', 'master', 'release/', 'hotfix/'];
+    const protectedNames = ['main', 'master', '`dev`', 'release/', 'hotfix/'];
     const GRANT = /\bexception\b|explicitly asks|\ballowed\b|--autosquash/;
     const grants = text.split('\n').filter((l) => l !== protectedLine && GRANT.test(l));
     expect(grants.length).toBeGreaterThan(0);
