@@ -87,6 +87,32 @@ def skip_wrappers(words):
     return i
 
 
+def expand_split_strings(words):
+    """The words of a simple command with the string of every `env -S STRING` (also `-SSTRING`, `--split-string STRING`, `--split-string=STRING`,
+    which GNU env takes abbreviated) replaced by the words it splits into, which is what env runs: in `env -S 'printf %s' PATH` the command is
+    printf and PATH is its argument. A string that cannot be split runs nothing: no words are left of the command."""
+    for _ in range(8):
+        end = skip_wrappers(words)
+        for k in range(min(end, len(words))):
+            word, eq, value = words[k].partition('=')
+            if words[k] in ('-S', '--split-string') and k + 1 < end:
+                string, stop = words[k + 1], k + 2
+            elif eq and word.startswith('--s') and '--split-string'.startswith(word):
+                string, stop = value, k + 1
+            elif words[k][:2] == '-S' and len(words[k]) > 2:
+                string, stop = words[k][2:], k + 1
+            else:
+                continue
+            try:
+                words = words[:k] + shlex.split(string) + words[stop:]
+            except ValueError:
+                return []
+            break
+        else:
+            return words
+    return words
+
+
 def command_path(words):
     """The PATH that the NAME=VALUE assignments before the command word of a simple command (also after env) give it, variables such as
     $PATH expanded as for the other words, the last one wins; None without one: the command word is then looked up on the PATH of the
@@ -143,6 +169,7 @@ def command_hook(words):
     """(hook, launcher) when the simple command `words` runs the hook of this guard, else None: the command word (after the wrappers) is
     the hook itself, or it is a Python or the command carries --pause-file and the first argument that is no option or operand is the
     hook. A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
+    words = expand_split_strings(words)
     operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
     first = skip_wrappers(words)
     if first >= len(words) or first in operands:
