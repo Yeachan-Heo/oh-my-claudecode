@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getGlobalOmcStatePath } from '../../utils/paths.js';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
 
 export interface InvocationConfig {
@@ -203,7 +203,7 @@ export function getInvocationStats(state: AutoInvokeState): {
  * Save invocation history to disk for analytics
  */
 export function saveInvocationHistory(state: AutoInvokeState): void {
-  const historyDir = path.join(os.homedir(), '.omc', 'analytics', 'invocations');
+  const historyDir = getGlobalOmcStatePath('analytics', 'invocations');
   const historyFile = path.join(historyDir, `${state.sessionId}.json`);
 
   // Use atomic write to prevent corruption from concurrent sessions (Bug #11 fix)
@@ -221,13 +221,7 @@ export function saveInvocationHistory(state: AutoInvokeState): void {
  * Load invocation history from disk
  */
 export function loadInvocationHistory(sessionId: string): AutoInvokeState | null {
-  const historyFile = path.join(
-    os.homedir(),
-    '.omc',
-    'analytics',
-    'invocations',
-    `${sessionId}.json`
-  );
+  const historyFile = getGlobalOmcStatePath('analytics', 'invocations', `${sessionId}.json`);
 
   try {
     if (!fs.existsSync(historyFile)) {
@@ -258,7 +252,7 @@ export function getAggregatedStats(): {
   successRate: number;
   topSkills: Array<{ skillId: string; skillName: string; count: number; successRate: number }>;
 } {
-  const historyDir = path.join(os.homedir(), '.omc', 'analytics', 'invocations');
+  const historyDir = getGlobalOmcStatePath('analytics', 'invocations');
 
   try {
     if (!fs.existsSync(historyDir)) {
