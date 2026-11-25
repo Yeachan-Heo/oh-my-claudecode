@@ -214,7 +214,7 @@ export function readOccupiedPluginRoots(configDir, options = {}) {
     }
     try { record = JSON.parse(content); } catch { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     const age = Date.now() - Date.parse(record?.updatedAt);
-    if (record?.version !== 1 || !Number.isSafeInteger(record?.pid) || !record?.processStartIdentity || !record?.pluginRoot || !Number.isFinite(Date.parse(record?.updatedAt)) || age < -300000 || (!isForeignOwner(record) && !alive(record.pid))) {
+    if (record?.version !== 1 || !Number.isSafeInteger(record?.pid) || !record?.processStartIdentity || !record?.pluginRoot || !Number.isFinite(Date.parse(record?.updatedAt)) || (age < -300000 && !isForeignOwner(record)) || (!isForeignOwner(record) && !alive(record.pid))) {
       try { unlinkSync(path); } catch {}
       continue;
     }

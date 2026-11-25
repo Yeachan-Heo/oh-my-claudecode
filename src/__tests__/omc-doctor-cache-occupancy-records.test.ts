@@ -18,6 +18,7 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     { label: 'live process, record 30 days old (no expiry by age)', write: (d, r) => writeRecord(d, r, { updatedAt: minutes(-30 * 24 * 60) }), expected: 'kept' },
     { label: 'live process, record dated 4 minutes ahead (within the clock tolerance)', write: (d, r) => writeRecord(d, r, { updatedAt: minutes(4) }), expected: 'kept' },
     { label: 'record dated 6 minutes ahead', write: (d, r) => writeRecord(d, r, { updatedAt: minutes(6) }), expected: 'moved' },
+    { label: 'record of another host dated 10 minutes ahead (the clock of that host is not judged here)', write: (d, r) => writeRecord(d, r, { host: 'another-machine|id|pid:[4026539999]', updatedAt: minutes(10) }), expected: 'kept' },
     { label: 'process that no longer exists', write: (d, r) => writeRecord(d, r, { pid: deadPid() }), expected: 'moved' },
     { label: 'process that does not exist here, record of another host or PID namespace (it cannot be judged by a local probe)', write: (d, r) => writeRecord(d, r, { pid: deadPid(), host: 'another-machine|pid:[4026539999]' }), expected: 'kept' },
     { label: 'process that no longer exists, record without a plugin root (proven gone is enough, it cannot block)', write: (d, r) => writeRecord(d, r, { pid: deadPid(), pluginRoot: undefined }), expected: 'moved' },

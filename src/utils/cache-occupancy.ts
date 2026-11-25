@@ -231,7 +231,8 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), option
     try { record = JSON.parse(content); } catch { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     if (!validRecord(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     const age = now - Date.parse(record.updatedAt);
-    if (age < -5 * 60 * 1000) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
+    // The clock of another host is not judged here: a record of another place cannot be told invalid by its date.
+    if (age < -5 * 60 * 1000 && !isForeignOwner(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     if (!isForeignOwner(record) && !processAlive(record.pid)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     records.push({ path, record });
   }

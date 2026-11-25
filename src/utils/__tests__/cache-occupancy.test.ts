@@ -113,6 +113,28 @@ describe('cache occupancy registry', () => {
     });
   });
 
+  // The clock of another host is not judged: a record of another place dated more than 5 minutes ahead is kept, one of this place is not.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps a record of another host dated ten minutes ahead, and drops the same record of this host, for %s', async (_name, path) => {
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    const root = join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.4.1');
+    const ahead = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const answers: Record<string, boolean> = {};
+    for (const [label, fields] of [['another host', { host: 'another-machine|id|pid:[4026539999]' }], ['no host field', {}]] as [string, Record<string, unknown>][]) {
+      const file = join(registry, `${'b'.repeat(64)}.json`);
+      writeFileSync(file, JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: 'start', pluginRoot: root, updatedAt: ahead, ...fields }));
+      read(dir);
+      answers[label] = existsSync(file);
+      rmSync(file, { force: true });
+    }
+    expect(answers).toEqual({ 'another host': true, 'no host field': false });
+  });
+
   // Two machines can report the same host name and the same PID namespace text; only the machine id tells them apart.
   it.each([
     ['typescript', null],

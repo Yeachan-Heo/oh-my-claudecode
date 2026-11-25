@@ -1053,7 +1053,8 @@ const placeId = () => {
 };
 const isForeignOwner = (record) => typeof record?.host === 'string' && record.host !== '' && (machineId() === '' || record.host !== placeId());
 // A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time
-// differs from the recorded one, or the record is dated more than 5 minutes in the future.
+// differs from the recorded one, or the record is dated more than 5 minutes in the future (not for a record of another place, whose clock this
+// system cannot judge).
 const ownerGone = (record) => {
   // A record of another host or PID namespace cannot be judged by a local probe (isForeignOwner, as the runtime reader treats it).
   if (Number.isSafeInteger(record.pid) && record.pid > 0 && !isForeignOwner(record)) {
@@ -1072,7 +1073,8 @@ const ownerGone = (record) => {
       if (start && start != record.processStartIdentity) return true;
     }
   }
-  return typeof record.updatedAt == 'string' && Date.parse(record.updatedAt) - Date.now() > 300000;
+  // The clock of another host is not judged here: a record of another place is not ignored for its date.
+  return typeof record.updatedAt == 'string' && Date.parse(record.updatedAt) - Date.now() > 300000 && !isForeignOwner(record);
 };
 
 // == modification dates ==
