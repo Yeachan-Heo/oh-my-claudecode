@@ -287,6 +287,8 @@ MAX_COMMAND_PROGRAMS = 64
 PUNCTUATION = '();<>|&\n'
 INTERPRETER_NAME = re.compile(r'(python|pypy|node|nodejs|deno|bun|ruby|perl|php|lua|pwsh|powershell|tsx|ts-node|sh|bash|zsh|dash|ksh|ash|fish)[\d.]*(\.exe)?')
 SHELL_NAME = re.compile(r'(sh|bash|zsh|dash|ksh|ash|fish)(\.exe)?')
+NODE_NAME = re.compile(r'(node|nodejs)(\.exe)?')
+NODE_VALUE_OPTIONS = ('-r', '--require', '--import', '--loader', '--experimental-loader', '-C', '--conditions')   # the options of Node that take the next word as their value, a module or a condition (node --help)
 SCRIPT_SUFFIXES = ('.py', '.pyw', '.sh', '.bash', '.zsh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl', '.php', '.lua', '.ps1', '.bat', '.cmd')
 
 
@@ -322,16 +324,16 @@ def executable_file(word):
 def interpreter_arguments(base, arguments):
     """(whether the interpreter `base` is given code on its command line, its operands) for its `arguments`: the options are read only up to
     the first operand, which is the script (python3 /opt/audit -c config passes -c to the script), and the value of an option that takes
-    one (-W and -X of a Python, -o and -O of a shell) is no operand. Code is given with -e, -m or a letter c in a group of short options."""
+    one (-W and -X of a Python, -o and -O of a shell, -r and --require of Node) is no operand. Code is given with -e, -m or a letter c in a group of short options."""
     options, operands, value = [], [], False
-    python, shell = re.fullmatch(ENTRY.PYTHON_NAME, base) is not None, SHELL_NAME.fullmatch(base) is not None
+    python, shell, node = re.fullmatch(ENTRY.PYTHON_NAME, base) is not None, SHELL_NAME.fullmatch(base) is not None, NODE_NAME.fullmatch(base) is not None
     for w in arguments:
         if value:
             value = False   # the value of the option before it, not the script
         elif w.startswith('-') or (shell and w in ('+o', '+O')):
             if not operands:
                 options.append(w)
-                value = (python and w in ENTRY.PYTHON_VALUE_OPTIONS) or (shell and w in ('-o', '+o', '-O', '+O'))
+                value = (python and w in ENTRY.PYTHON_VALUE_OPTIONS) or (shell and w in ('-o', '+o', '-O', '+O')) or (node and w in NODE_VALUE_OPTIONS)
         else:
             operands.append(w)
     takes_code = any(o in ('-e', '-m') or ('c' in o[1:] and o[1:].isalpha()) for o in options if not o.startswith('--'))
@@ -341,7 +343,7 @@ def interpreter_arguments(base, arguments):
 def command_programs(command, depth=0, own=False):
     """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
     shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
-    (its first operand: not an option, and for a Python not the value of -W, -X or -Q; the options are read up to it, not after it; none when it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
+    (its first operand: not an option, and for a Python not the value of -W, -X or -Q, for Node not the value of -r or --require; the options are read up to it, not after it; none when it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
     the script of an interpreter behind a command that is not one (nice python3 audit), any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
     longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
     and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out; the other simple

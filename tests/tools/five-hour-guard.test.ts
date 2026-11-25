@@ -1444,6 +1444,25 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('the script of Node is the first operand after the options that take a value (-r, --require, --import): node --require preload audit names audit, a file with no suffix and no execute bit', () => {
+    const forms = [(audit: string) => `node --require /tmp/preload.js ${audit}`, (audit: string) => `node -r /tmp/preload.js ${audit}`, (audit: string) => `node --import /tmp/hooks.mjs -r /tmp/p.js ${audit}`,
+      (audit: string) => `nodejs --experimental-loader /tmp/loader.mjs ${audit}`, (audit: string) => `node -C development ${audit}`, (audit: string) => `node --require=/tmp/preload.js ${audit}`];
+    for (const [k, build] of forms.entries()) {
+      const f = fixture(`node-option-values-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const audit = join(f.dir, 'audit');   // no suffix and no execute bit: only its place after the options makes it the script
+      writeFileSync(audit, '# a program of another tool\n', 'utf8');
+      const command = build(audit);
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      expect(readText(audit), `${command}: the program is intact`).toBe('# a program of another tool\n');
+      expect(existsSync(f.pause), `${command}: no pause was published`).toBe(false);
+    }
+  });
+
   it('the options of an interpreter end at its script: python3 audit -c config passes -c to the script, so audit (no suffix, no execute bit) is still a program of another hook; a shell still reads -c behind -o NAME', () => {
     const forms = [(audit: string) => `${PYBIN} ${audit} -c config`, (audit: string) => `${PYBIN} -I ${audit} -e x`, (audit: string) => `${PYBIN} -W ignore ${audit} -m mod`,
       (audit: string) => `sh ${audit} -c x`, (audit: string) => `node ${audit} -e x`, (audit: string) => `bash -o pipefail -c 'python3 ${audit}'`, (audit: string) => `bash -O extglob -c 'python3 ${audit}'`];
