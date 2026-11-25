@@ -9093,10 +9093,6 @@ var init_ssrf_guard = __esm({
 });
 
 // src/config/models.ts
-function isTruthyProviderFlag(value) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
-}
 function readEnvValue(key) {
   const value = process.env[key]?.trim();
   return value || void 0;
@@ -9174,7 +9170,7 @@ function hasBedrockModelId(modelIds) {
   return false;
 }
 function isBedrock() {
-  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) {
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") {
     return true;
   }
   return hasBedrockModelId(getProviderDetectionModelEnvValues());
@@ -9192,7 +9188,7 @@ function isProviderSpecificModelId(modelId) {
   return false;
 }
 function isVertexAI() {
-  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) {
+  if (process.env.CLAUDE_CODE_USE_VERTEX === "1") {
     return true;
   }
   return hasVertexModelId(getProviderDetectionModelEnvValues());
@@ -9213,10 +9209,10 @@ function shouldAutoForceInherit() {
   if (process.env.OMC_ROUTING_FORCE_INHERIT === "true") {
     return true;
   }
-  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) {
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") {
     return true;
   }
-  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) {
+  if (process.env.CLAUDE_CODE_USE_VERTEX === "1") {
     return true;
   }
   const directModelValues = getDirectProviderDetectionModelEnvValues();
@@ -10603,21 +10599,8 @@ function claudeStartupDialogIn(tail, captured) {
   }
   return footer ? "claude_fullscreen_renderer" : "claude_startup_dialog_unidentified";
 }
-function claudeTrustDialogDrawing(lines) {
-  const question = lines.findLastIndex((_, index) => claudeTrustQuestionStartsAt(lines, index));
-  if (question < 0) return false;
-  const below = lines.slice(question + 1);
-  if (below.some((line) => /^(?:❯\s*)?Yes,\s*(?:proceed|I trust this folder)\b/i.test(line))) return false;
-  const prompt = below.findLastIndex((line) => PANE_PATTERNS.claude.idlePromptLine.test(line));
-  if (prompt < 0) return false;
-  const drawn = squeeze(below[prompt].replace(PANE_PATTERNS.claude.idlePromptLine, ""));
-  const after = below.slice(prompt + 1);
-  const startsYes = (text) => CLAUDE_TRUST_CHOICES.some((choice) => choice.startsWith(text));
-  if ("No,exit".startsWith(drawn)) return after.length === 0 || after.length === 1 && startsYes(squeeze(after[0]));
-  return after.length === 0 && /^(?:❯\s*)?No,\s*exit$/i.test(below[prompt - 1] ?? "") && startsYes(drawn);
-}
 function detectClaudeStartupDialog(captured) {
-  return claudeStartupDialogIn(claudeDialogTail(captured), captured) ?? (claudeTrustDialogDrawing(paneLines(captured)) ? "claude_startup_dialog_unidentified" : null);
+  return claudeStartupDialogIn(claudeDialogTail(captured), captured);
 }
 function detectTrustPrompt(lines, kinds) {
   const tail = lines.slice(-12);
@@ -10859,12 +10842,10 @@ __export(tmux_session_exports, {
   observeTeamSessionTargetPresence: () => observeTeamSessionTargetPresence,
   observeTmuxServerIdentity: () => observeTmuxServerIdentity,
   paneCopyModeObservation: () => paneCopyModeObservation,
-  paneCurrentCommandLooksReady: () => paneCurrentCommandLooksReady,
   paneHasActiveTask: () => paneHasActiveTask,
   paneHasTrustPrompt: () => paneHasTrustPrompt,
   paneLooksReady: () => paneLooksReady,
   powershellQuote: () => powershellQuote,
-  privateTmuxSocketDirectory: () => privateTmuxSocketDirectory,
   probeStartupPaneActivity: () => probeStartupPaneActivity,
   proveWorkerPaneOwnership: () => proveWorkerPaneOwnership,
   providerForTeamTarget: () => providerForTeamTarget,
@@ -10924,11 +10905,8 @@ function buildDetachedTmuxServerKeepaliveArgs(socketPath) {
     "off"
   ];
 }
-function privateTmuxSocketDirectory() {
-  return process.platform === "darwin" || process.platform === "linux" ? "/tmp" : tmpdir3();
-}
 function buildPrivateTmuxSocketPath() {
-  const socketDirectory = privateTmuxSocketDirectory();
+  const socketDirectory = process.platform === "darwin" || process.platform === "linux" ? "/tmp" : tmpdir3();
   const socketPath = join20(
     socketDirectory,
     `o-${process.pid.toString(36)}-${Date.now().toString(36)}-${randomUUID13().slice(0, 8)}.sock`

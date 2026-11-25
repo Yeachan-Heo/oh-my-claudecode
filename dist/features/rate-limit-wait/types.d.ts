@@ -48,10 +48,6 @@ export interface TmuxPane {
     windowName: string;
     /** Pane index within window */
     paneIndex: number;
-    /** Incarnation of the tmux server (pid and start time), set only by a listing that asks for it */
-    server?: string;
-    /** Private tmux endpoint (`-S` path) of the server that lists the pane; undefined for the default server */
-    socket?: string;
     /** Pane title (if set) */
     title?: string;
     /** Whether this pane is currently active */

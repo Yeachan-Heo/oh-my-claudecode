@@ -8,8 +8,6 @@
  * the directory with directory-FD-relative operations, failing closed on any escape or
  * on platforms without that primitive.
  */
-/** Accepted run ids: shared by run containment, `omc graph gc` and `omc graph status`. */
-export declare const RUN_ID_PATTERN: RegExp;
 /**
  * Open or create one directory component below an already-open directory.
  * Both the mkdir and the subsequent open are anchored at the parent FD, so a

@@ -76,10 +76,10 @@ export declare function atomicWriteSync(filePath: string, content: string, hooks
  * Uses temp file + atomic rename pattern with fsync for durability.
  *
  * @param filePath Target file path
- * @param content String content to write, or bytes that are written as they are
+ * @param content String content to write
  * @throws Error if write operation fails
  */
-export declare function atomicWriteFileSync(filePath: string, content: string | Uint8Array, hooks?: AtomicWriteHooks, operations?: AtomicWriteOperations): void;
+export declare function atomicWriteFileSync(filePath: string, content: string, hooks?: AtomicWriteHooks, operations?: AtomicWriteOperations): void;
 /**
  * Write JSON data atomically to a file (synchronous version).
  * Uses temp file + atomic rename pattern with fsync for durability.

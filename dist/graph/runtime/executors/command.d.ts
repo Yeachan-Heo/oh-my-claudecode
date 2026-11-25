@@ -14,14 +14,6 @@
  */
 import type { ExecutableKind, NodeExecutionContext, NodeExecutionOutput, NodeExecutor } from "../types.js";
 /**
- * Installs SIGINT and SIGTERM handlers for one graph run. Returns the
- * AbortSignal the runner observes, or undefined while the switch is off.
- * On the first signal the active command children get SIGTERM, then SIGKILL
- * after KILL_ESCALATION_MS, and the process exits once they have closed
- * (130 for SIGINT, 143 for SIGTERM).
- */
-export declare function installGraphSignalCleanup(): AbortSignal | undefined;
-/**
  * Output shape for command attempts. Extends the frozen
  * NodeExecutionOutput with the idempotency key computed for idempotent
  * effect policies (structurally compatible; see team-lead note).

@@ -1,30 +1,6 @@
 // The tmux mock behind readiness-trace.harness.test.ts. readiness-diff.mjs copies
 // it into the base checkout with the harness, so it imports nothing.
 export const PANE_ID = '%2';
-// Plays screens from `start`. Each key is charged to the screen the last
-// capture returned, the one the code under test decided on.
-export function scriptedPane(screens, start) {
-    let shown = start;
-    let lastReturned = null;
-    const partial = { keys: 0, captures: 0 };
-    return {
-        send: keys => {
-            if (lastReturned?.partial)
-                partial.keys++;
-            const next = keys.length === 1 ? screens[shown][keys[0]] : undefined;
-            if (next)
-                shown = next;
-        },
-        capture: () => {
-            lastReturned = screens[shown];
-            if (lastReturned.partial)
-                partial.captures++;
-            shown = lastReturned.next ?? shown;
-            return lastReturned.frame;
-        },
-        partial: () => ({ ...partial }),
-    };
-}
 export const trace = {
     frame: '',
     pane: null,

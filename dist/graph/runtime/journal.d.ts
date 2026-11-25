@@ -15,14 +15,6 @@ import type { Journal, JournalAppendRecord, JournalRecord } from "./types.js";
  * this digest binds the runtime-only epoch to the exact committed record.
  */
 export declare function computeJournalFingerprint(record: JournalAppendRecord): string;
-/** Envelope validation for one parsed record; returns an error message or null. */
-export declare function envelopeError(value: unknown): string | null;
-/**
- * Parses the text of a journal file into its records, with the checks `readAll` makes: every line complete and valid
- * JSON with a well-formed envelope, and seq 0, 1, 2, ... without a gap. Throws JournalCorruptionError counting every bad
- * line, and an incomplete last line as one more. Text that is empty gives no records. `filePath` is named in the error.
- */
-export declare function parseJournalText(content: string, filePath: string): readonly JournalRecord[];
 export declare class FileJournal implements Journal {
     private readonly runsRoot;
     private readonly runId?;

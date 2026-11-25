@@ -29,7 +29,7 @@ export function computeJournalFingerprint(record) {
         .digest("hex");
 }
 /** Envelope validation for one parsed record; returns an error message or null. */
-export function envelopeError(value) {
+function envelopeError(value) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
         return "record is not an object";
     }
@@ -58,56 +58,6 @@ export function envelopeError(value) {
         return "journal_fingerprint must be a lowercase sha256 hex digest";
     }
     return null;
-}
-/**
- * Parses the text of a journal file into its records, with the checks `readAll` makes: every line complete and valid
- * JSON with a well-formed envelope, and seq 0, 1, 2, ... without a gap. Throws JournalCorruptionError counting every bad
- * line, and an incomplete last line as one more. Text that is empty gives no records. `filePath` is named in the error.
- */
-export function parseJournalText(content, filePath) {
-    if (content.length === 0) {
-        return [];
-    }
-    const lines = content.split("\n");
-    const tailIsIncomplete = lines[lines.length - 1] !== "";
-    // Complete lines are everything before the final split element (which is
-    // "" for a well-formed file, or the partial tail being dropped).
-    const bodyLines = lines.slice(0, -1);
-    // Count ALL bad lines (interior + incomplete tail) before throwing once.
-    let badCount = tailIsIncomplete ? 1 : 0;
-    const records = [];
-    let prevSeq = -1;
-    for (const line of bodyLines) {
-        let failure = null;
-        let parsed;
-        try {
-            parsed = JSON.parse(line);
-        }
-        catch {
-            failure = "line is not valid JSON";
-        }
-        if (failure === null) {
-            failure = envelopeError(parsed);
-        }
-        if (failure === null) {
-            const record = parsed;
-            const expectedSeq = prevSeq + 1;
-            if (record.seq !== expectedSeq) {
-                failure = `seq ${record.seq} does not continue from ${prevSeq}`;
-            }
-            else {
-                prevSeq = record.seq;
-                records.push(record);
-            }
-        }
-        if (failure !== null) {
-            badCount += 1;
-        }
-    }
-    if (badCount > 0) {
-        throw new JournalCorruptionError(`journal ${filePath} has ${badCount} corrupt or incomplete record(s)`, badCount);
-    }
-    return records;
 }
 export class FileJournal {
     runsRoot;
@@ -216,7 +166,49 @@ export class FileJournal {
             }
             throw error;
         }
-        return parseJournalText(content, filePath);
+        if (content.length === 0) {
+            return [];
+        }
+        const lines = content.split("\n");
+        const tailIsIncomplete = lines[lines.length - 1] !== "";
+        // Complete lines are everything before the final split element (which is
+        // "" for a well-formed file, or the partial tail being dropped).
+        const bodyLines = lines.slice(0, -1);
+        // Count ALL bad lines (interior + incomplete tail) before throwing once.
+        let badCount = tailIsIncomplete ? 1 : 0;
+        const records = [];
+        let prevSeq = -1;
+        for (const line of bodyLines) {
+            let failure = null;
+            let parsed;
+            try {
+                parsed = JSON.parse(line);
+            }
+            catch {
+                failure = "line is not valid JSON";
+            }
+            if (failure === null) {
+                failure = envelopeError(parsed);
+            }
+            if (failure === null) {
+                const record = parsed;
+                const expectedSeq = prevSeq + 1;
+                if (record.seq !== expectedSeq) {
+                    failure = `seq ${record.seq} does not continue from ${prevSeq}`;
+                }
+                else {
+                    prevSeq = record.seq;
+                    records.push(record);
+                }
+            }
+            if (failure !== null) {
+                badCount += 1;
+            }
+        }
+        if (badCount > 0) {
+            throw new JournalCorruptionError(`journal ${filePath} has ${badCount} corrupt or incomplete record(s)`, badCount);
+        }
+        return records;
     }
 }
 //# sourceMappingURL=journal.js.map

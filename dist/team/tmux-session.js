@@ -60,12 +60,6 @@ export function buildDetachedTmuxServerKeepaliveArgs(socketPath) {
         "off",
     ];
 }
-/** Where private tmux endpoints are created. */
-export function privateTmuxSocketDirectory() {
-    return process.platform === "darwin" || process.platform === "linux"
-        ? "/tmp"
-        : tmpdir();
-}
 /**
  * Keep private tmux endpoint names below Darwin's Unix-domain socket limit.
  * `/tmp` is deliberately used on Darwin/Linux instead of potentially long
@@ -73,7 +67,9 @@ export function privateTmuxSocketDirectory() {
  * mistaken for this invocation.
  */
 export function buildPrivateTmuxSocketPath() {
-    const socketDirectory = privateTmuxSocketDirectory();
+    const socketDirectory = process.platform === "darwin" || process.platform === "linux"
+        ? "/tmp"
+        : tmpdir();
     const socketPath = join(socketDirectory, `o-${process.pid.toString(36)}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}.sock`);
     // Darwin's sockaddr_un path budget is 104 bytes including the terminator.
     // Keep a hard byte bound rather than relying on JavaScript code-unit length.
@@ -1411,7 +1407,7 @@ export function redactBoundedDiagnostic(error, maxLength = 240) {
 function logWorkerSpawnDiagnostic(message) {
     process.stderr.write(`[team/tmux-session] ${message}\n`);
 }
-export function paneCurrentCommandLooksReady(command) {
+function paneCurrentCommandLooksReady(command) {
     const normalized = basename(command.replace(/\\/g, "/"))
         .replace(/\.(exe|cmd|bat)$/i, "")
         .toLowerCase();

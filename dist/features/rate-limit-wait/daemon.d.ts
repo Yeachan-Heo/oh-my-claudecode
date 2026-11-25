@@ -13,11 +13,6 @@
  */
 import { DaemonState, DaemonConfig, DaemonResponse } from './types.js';
 /**
- * Create a minimal environment for daemon child processes.
- * Only includes allowlisted variables to prevent credential leakage.
- */
-export declare function createMinimalDaemonEnv(): NodeJS.ProcessEnv;
-/**
  * Read daemon state from disk
  */
 export declare function readDaemonState(config?: DaemonConfig): DaemonState | null;

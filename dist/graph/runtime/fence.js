@@ -102,22 +102,7 @@ export class FileOwnershipFence {
         return this.handle;
     }
     async acquire() {
-        return this.acquireSync();
-    }
-    /**
-     * Synchronous form of acquire() for offline maintenance such as `omc graph gc`: the protocol is the same
-     * and all of its work is synchronous.
-     */
-    acquireSync() {
         return withContainedOperations(this.runDir(), (operations) => this.acquireAt(operations));
-    }
-    /**
-     * Closes the descriptor of the held lock and leaves the lock file and the epoch sidecar alone. For a
-     * caller that has moved the whole run directory away while holding the lock, where release() could no
-     * longer find the lock by its path.
-     */
-    closeHeldDescriptor() {
-        this.clearHeld();
     }
     acquireAt(operations) {
         const lockPath = LOCK_FILE_NAME;
@@ -253,10 +238,6 @@ export class FileOwnershipFence {
         }
     }
     async release(epoch) {
-        return this.releaseSync(epoch);
-    }
-    /** Synchronous form of release(), the counterpart of acquireSync(). */
-    releaseSync(epoch) {
         return withContainedOperations(this.runDir(), (operations) => this.releaseAt(epoch, operations));
     }
     releaseAt(epoch, operations) {

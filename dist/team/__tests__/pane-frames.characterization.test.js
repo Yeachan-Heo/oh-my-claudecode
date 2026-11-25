@@ -48,8 +48,6 @@ const TABLE = {
     'claude/2.1.330/bypass-permissions-body-partial.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
     'claude/2.1.330/bypass-permissions-no-choices.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
     'claude/2.1.330/bypass-permissions.txt': { ready: true, busy: false, trust: null, state: 'idle' },
-    'claude/2.1.330/trust-60col.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
-    'claude/2.1.330/trust-80col.txt': { ready: true, busy: false, trust: 'claude_directory', known_wrong: true, reason: TRUST_READY, state: 'trust:claude_directory' },
     'claude/2.1.330/trust-body-partial.txt': { ready: false, busy: false, trust: null, state: 'unknown' },
     'claude/2.1.330/trust-no-choice-partial.txt': { ready: true, busy: false, trust: null, known_wrong: true, reason: TRUST_MID_DRAW, state: 'idle', state_wrong: TRUST_MID_DRAW },
     'claude/2.1.330/trust-yes-choice-partial.txt': { ready: true, busy: false, trust: null, known_wrong: true, reason: TRUST_MID_DRAW, state: 'idle', state_wrong: TRUST_MID_DRAW },

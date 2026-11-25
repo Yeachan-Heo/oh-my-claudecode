@@ -20,8 +20,6 @@ export interface TmuxServerIdentityDependencies {
 }
 /** Build the initial empty-server keepalive command queue. */
 export declare function buildDetachedTmuxServerKeepaliveArgs(socketPath: string): string[];
-/** Where private tmux endpoints are created. */
-export declare function privateTmuxSocketDirectory(): string;
 /**
  * Keep private tmux endpoint names below Darwin's Unix-domain socket limit.
  * `/tmp` is deliberately used on Darwin/Linux instead of potentially long
@@ -245,7 +243,6 @@ export declare function resolveSupportedShellAffinity(shellPath?: string): Worke
  */
 export declare function buildWorkerLaunchSpec(shellPath?: string): WorkerLaunchSpec;
 export declare function redactBoundedDiagnostic(error: unknown, maxLength?: number): string;
-export declare function paneCurrentCommandLooksReady(command: string): boolean;
 export interface WaitForShellReadyOptions {
     timeoutMs?: number;
     pollIntervalMs?: number;

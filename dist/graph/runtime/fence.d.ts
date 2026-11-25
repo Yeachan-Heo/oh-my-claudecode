@@ -49,23 +49,10 @@ export declare class FileOwnershipFence implements OwnershipFence {
     constructor(runsRoot: string, runId?: string, options?: FileOwnershipFenceOptions, runDirHandle?: RunDirHandle);
     private runDir;
     acquire(): Promise<FenceAcquireResult>;
-    /**
-     * Synchronous form of acquire() for offline maintenance such as `omc graph gc`: the protocol is the same
-     * and all of its work is synchronous.
-     */
-    acquireSync(): FenceAcquireResult;
-    /**
-     * Closes the descriptor of the held lock and leaves the lock file and the epoch sidecar alone. For a
-     * caller that has moved the whole run directory away while holding the lock, where release() could no
-     * longer find the lock by its path.
-     */
-    closeHeldDescriptor(): void;
     private acquireAt;
     assertEpoch(epoch: number): void;
     private assertEpochAt;
     release(epoch: number): Promise<boolean>;
-    /** Synchronous form of release(), the counterpart of acquireSync(). */
-    releaseSync(epoch: number): boolean;
     private releaseAt;
     /**
      * Single O_EXCL creation attempt. Returns the open fd on success, null on

@@ -19,12 +19,6 @@ export declare function isTmuxAvailable(): boolean;
  */
 export declare function isInsideTmux(): boolean;
 /**
- * With `withServer`, every line also carries the server's pid and start time, and each pane gets them as `server`: a
- * pane id is unique only within one run of the tmux server. A listing whose lines do not all carry that value is
- * reported as unreadable (null), because the caller asked for a binding it could then not make.
- */
-export declare function listTmuxPanesStrict(withServer?: boolean): TmuxPane[] | null;
-/**
  * List all tmux panes across all sessions.
  */
 export declare function listTmuxPanes(): TmuxPane[];
@@ -74,18 +68,6 @@ export declare function revalidateBlockedPanes(trackedPanes: BlockedPane[], line
  */
 export declare function sendResumeSequence(paneId: string): boolean;
 /**
- * What happened to text typed into a pane: it went in with its Enter (`delivered`), nothing was sent and the same
- * call can safely be repeated (`not_attempted`), or part of it may have gone in or the outcome is not known
- * (`unconfirmed`: the text was typed and the Enter failed, or a call timed out or died).
- */
-export type PaneSendOutcome = 'delivered' | 'not_attempted' | 'unconfirmed';
-/**
- * Send custom text to a tmux pane and report all three outcomes (see PaneSendOutcome). The text and the Enter
- * are two tmux calls, so a failure of the second leaves the text typed in the pane: that is `unconfirmed`, never
- * `not_attempted`.
- */
-export declare function sendToPaneOutcome(paneId: string, text: string, pressEnter?: boolean, socket?: string, server?: string): PaneSendOutcome;
-/**
  * Send custom text to a tmux pane
  */
 export declare function sendToPane(paneId: string, text: string, pressEnter?: boolean): boolean;
@@ -126,15 +108,4 @@ export declare function sendHerdrResumeSequence(paneId: string): Promise<boolean
  * Get a summary of blocked panes for display
  */
 export declare function formatBlockedPanesSummary(blockedPanes: BlockedPane[]): string;
-/**
- * tmux adapter for the opt-in worker panel quota wait (OMC_PANEL_QUOTA_WAIT=1).
- * Strict capture: a pane that cannot be read is skipped, not treated as an empty screen.
- */
-export declare const panelQuotaTmux: {
-    listPanes: () => TmuxPane[] | null;
-    capture: (pane: TmuxPane, lines: number) => string | null;
-    sendContinue: (pane: TmuxPane) => PaneSendOutcome;
-    providerRunning: (pane: TmuxPane) => boolean | null;
-    providerIdentity: (pane: TmuxPane) => string | null;
-};
 //# sourceMappingURL=tmux-detector.d.ts.map

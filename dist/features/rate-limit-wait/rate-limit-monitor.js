@@ -6,17 +6,6 @@
  */
 import { getUsage } from '../../hud/usage-api.js';
 import { readStdinCache } from '../../hud/stdin.js';
-import { readProviderQuota } from './panel-quota-wait.js';
-/**
- * Provider quota reading for the opt-in worker panel quota wait (OMC_PANEL_QUOTA_WAIT=1).
- * Used in place of the Claude account usage by the panel pass; the pass calls it only while the switch is on.
- */
-export async function checkPanelQuotaStatus() {
-    // With the switch off nothing is read and no request is sent.
-    if (process.env.OMC_PANEL_QUOTA_WAIT !== '1')
-        return null;
-    return readProviderQuota(process.env);
-}
 /** Threshold percentage for considering rate limited */
 const RATE_LIMIT_THRESHOLD = 100;
 /**

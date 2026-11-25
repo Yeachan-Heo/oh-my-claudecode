@@ -5,12 +5,6 @@
  * Uses the OAuth API to check utilization percentages.
  */
 import type { RateLimitStatus } from './types.js';
-import { type QuotaReading } from './panel-quota-wait.js';
-/**
- * Provider quota reading for the opt-in worker panel quota wait (OMC_PANEL_QUOTA_WAIT=1).
- * Used in place of the Claude account usage by the panel pass; the pass calls it only while the switch is on.
- */
-export declare function checkPanelQuotaStatus(): Promise<QuotaReading | null>;
 /**
  * Check current rate limit status using the OAuth API
  *

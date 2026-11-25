@@ -13,7 +13,6 @@ export interface ActionRunResult {
     code: string;
     completed: boolean;
 }
-export declare function runnerEnvironment(context: ActionRunContext): NodeJS.ProcessEnv;
 /** Each deferred action runs in its own detached process group. The manifest remains the only authority for claim/result transitions. */
 export declare function runSessionEndAction(context: ActionRunContext, _execute: () => Promise<void>): Promise<ActionRunResult>;
 //# sourceMappingURL=action-runner.d.ts.map
