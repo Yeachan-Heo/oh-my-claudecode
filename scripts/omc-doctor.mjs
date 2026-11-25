@@ -1323,9 +1323,27 @@ const backupPlace = (registry) => {
   } catch (error) {
     // No readable cache root: the cache commands report that themselves.
   }
+  // A version directory may be a link out of the cache too: the tree it leads to is a tree of its own. A link that leads nowhere (a loop,
+  // a target that is gone) has no tree, and the entry is moved aside like any unused one.
+  const versionTrees = [];
+  for (const space of new Set(namespaces)) {
+    try {
+      for (const name of fs.readdirSync(space)) {
+        const entry = path.join(space, name);
+        try {
+          if (fs.lstatSync(entry).isSymbolicLink() && fs.statSync(entry).isDirectory()) versionTrees.push(entry);
+        } catch (error) {
+          // No tree to compare.
+        }
+      }
+    } catch (error) {
+      // Not a readable directory: the cache commands report that themselves.
+    }
+  }
   const trees = [
     ['the plugin cache', cacheRoot],
     ...[...new Set(namespaces)].map((tree) => ['the plugin cache', tree]),
+    ...[...new Set(versionTrees)].map((tree) => ['the plugin cache', tree]),
     ['the marketplace clones', path.join(configDir, 'plugins', 'marketplaces')],
     ['the occupancy records', occupancyDir],
     ...roots.flatMap(bothForms).map((root) => ['the plugin root', root]),

@@ -281,6 +281,27 @@ fs.lstatSync = function (target, ...rest) {
     }
   });
 
+  // A version directory that is itself a link out of the cache (a pin by version alone, no install path, no root variable naming the target)
+  // has its tree somewhere else: a destination inside that tree is as unsafe as one inside the cache, since the next same-version install clears it.
+  test('a version directory that is a link out of the cache is a tree of its own, and a backup directory inside it is refused', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.9.0']);
+      try {
+        const outside = path.join(dir, 'elsewhere', 'omc-5.8.0');
+        mkdirSync(path.join(outside, 'skill-bodies', 'omc-doctor'), { recursive: true });
+        writeFileSync(path.join(outside, 'package.json'), JSON.stringify({ version: '5.8.0' }));
+        link(outside, path.join(cache, '5.8.0'));
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
+        link(path.join(outside, 'skill-bodies', 'omc-doctor'), path.join(dir, 'plugins', 'backups'));
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, refused: REFUSED.test(result.stdout), cache: readdirSync(cache).sort(), landed: readdirSync(path.join(outside, 'skill-bodies', 'omc-doctor')) })
+          .toEqual({ command, status: 1, refused: true, cache: ['5.8.0', '5.9.0'], landed: [] });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('a link that leads outside every tree still works, and the Moved line names the real directory; no link says nothing of the kind', () => {
     for (const command of commands) {
       for (const via of ['plugins/backups', 'plugins/backups/oh-my-claudecode', 'none'] as const) {
