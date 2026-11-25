@@ -1532,6 +1532,33 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a wrapper written with a path (/usr/bin/env, /usr/bin/nohup, /usr/bin/time) is a wrapper all the same: the script behind it is a program of the command, and so is the wrapper itself', () => {
+    // [the wrapper that the command starts with, the command]
+    const forms: Array<[string, (wrapper: string, audit: string) => string]> = [['env', (w, a) => `${w}/env python3 ${a}`], ['env', (w, a) => `${w}/env -i FOO=1 python3 ${a}`],
+      ['nohup', (w, a) => `${w}/nohup python3 ${a}`], ['time', (w, a) => `${w}/time -p python3 ${a}`], ['command', (w, a) => `${w}/command -p python3 ${a}`],
+      ['exec', (w, a) => `${w}/exec python3 ${a}`], ['env', (w, a) => `FOO=1 ${w}/env ${w}/nohup python3 ${a}`]];
+    for (const [k, [first, form]] of forms.entries()) {
+      for (const target of ['audit', 'wrapper']) {
+        const f = fixture(`path-wrapper-${k}-${target}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+        const bin = join(f.dir, 'bin');
+        mkdirSync(bin);
+        for (const name of ['env', 'nohup', 'time', 'command', 'exec']) writeFileSync(join(bin, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+        const audit = join(f.dir, 'audit');   // no suffix and no execute bit: a program only as the script of the interpreter that the wrapper runs
+        writeFileSync(audit, 'print("audit")\n', { mode: 0o644 });
+        const forbidden = target === 'audit' ? audit : join(bin, first);
+        const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+        writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: form(bin, audit) }] }] } }), 'utf8');
+        writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: forbidden, log_file: f.log, settings_file: f.settings }), 'utf8');
+        const before = readText(forbidden);
+        const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+        expect(r.status, `${form('DIR', 'AUDIT')} (${target}): ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${form('DIR', 'AUDIT')} (${target})`).toContain(`"state_file" (${forbidden}) and "program of another hook" (${forbidden}) are the same file`);
+        expect(readText(forbidden), `${form('DIR', 'AUDIT')} (${target}): the program is intact`).toBe(before);
+        expect(existsSync(f.pause), `${form('DIR', 'AUDIT')} (${target}): no pause was published`).toBe(false);
+      }
+    }
+  });
+
   it('a program behind the options of env, exec, command and time, and behind the separators, groups, keywords and wrappers of a shell command, is found', () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);

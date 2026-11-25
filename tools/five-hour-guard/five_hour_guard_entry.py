@@ -58,16 +58,16 @@ def entry_command(pause_file, hook, python, hook_log=None):
 
 
 def skip_wrappers(words):
-    """The index of the command word in the words of a simple command: after the wrappers (exec, env, command, nohup, time), their options
+    """The index of the command word in the words of a simple command: after the wrappers (exec, env, command, nohup, time, also written with a path), their options
     (`env -i`, `env -u NAME`, `exec -a NAME`, a lone `--` ends the options) and the NAME=VALUE assignments. A word that starts with `-` is
     an option only after a wrapper, so a command word is never taken for one."""
     i, wrapper = 0, None
     while i < len(words):
         word = words[i]
-        if word in WRAPPERS:
-            wrapper = word
-        elif re.match(r'[A-Za-z_]\w*=', word):
+        if re.match(r'[A-Za-z_]\w*=', word):
             pass
+        elif os.path.basename(word) in WRAPPERS:   # by the name of the command: /usr/bin/env is env (the path stays a program of the command, see executable_file)
+            wrapper = os.path.basename(word)
         elif wrapper and word == '--':
             wrapper = None
         elif wrapper and len(word) > 1 and word[0] == '-':
