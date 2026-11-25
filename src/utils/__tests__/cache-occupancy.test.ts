@@ -128,6 +128,32 @@ describe('cache occupancy registry', () => {
     });
   });
 
+  // The syntax of a root is read before it is resolved: a Windows path is relative to a POSIX reader, and a reader whose working directory lies in the
+  // cache would map it underneath the cache and take it for a root of this system.
+  it.skipIf(process.platform === 'win32').each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('reports the registry unavailable for a record of another host with a root in another path syntax, whatever the working directory, for %s', async (_name, path) => {
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    const cache = join(dir, 'plugins', 'cache');
+    mkdirSync(join(cache, 'omc', 'oh-my-claudecode'), { recursive: true });
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(cache);
+    try {
+      const answers: Record<string, boolean> = {};
+      for (const root of ['C:\\Users\\b\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\4.4.1', '\\\\server\\share\\4.4.1', 'omc/oh-my-claudecode/4.4.1']) {
+        for (const name of readdirSync(registry)) rmSync(join(registry, name));
+        writeFileSync(join(registry, `${'a'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: 'start', pluginRoot: root, host: 'another-machine|id|pid:[4026539999]', updatedAt: new Date().toISOString() }));
+        answers[root] = read(dir).unavailable;
+      }
+      expect(Object.values(answers)).toEqual([true, true, true]);
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
   // The clock of another host is not judged: a record of another place or of none dated more than 5 minutes ahead is kept, one of this place is not.
   it.each([
     ['typescript', null],

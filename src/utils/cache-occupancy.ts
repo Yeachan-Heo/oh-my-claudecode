@@ -3,7 +3,7 @@ import { hostname, networkInterfaces } from 'os';
 import { mkdir, writeFile, rename, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'node:child_process';
-import { dirname, join, resolve, sep } from 'path';
+import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { getClaudeConfigDir } from './config-dir.js';
 
 const REGISTRY_VERSION = 1;
@@ -192,6 +192,8 @@ function runsThroughDanglingLink(path: string): boolean {
 // unavailable while such a record exists, as in scripts/lib/cache-occupancy.mjs.
 function isUnmappableForeignRoot(record: CacheOccupancyRecord, configDir: string): boolean {
   if (!isForeignOwner(record)) return false;
+  // A root that is no absolute path here (another platform's syntax, such as C:\... on POSIX, or a relative one) would be resolved against the working directory, which can lie in the cache.
+  if (typeof record.pluginRoot !== 'string' || !isAbsolute(record.pluginRoot)) return true;
   const cache = pathIdentity(join(configDir, 'plugins', 'cache'));
   const root = pathIdentity(record.pluginRoot);
   return root !== cache && !root.startsWith(cache + sep);

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
 import { hostname, networkInterfaces } from 'os';
-import { dirname, join, resolve, sep } from 'path';
+import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
 
@@ -181,6 +181,8 @@ function runsThroughDanglingLink(path) {
 // (nothing is cleaned or relinked) while such a record exists, as scripts/omc-doctor.mjs stops the repair commands.
 function isUnmappableForeignRoot(record, configDir) {
   if (!isForeignOwner(record)) return false;
+  // A root that is no absolute path here (another platform's syntax, such as C:\... on POSIX, or a relative one) would be resolved against the working directory, which can lie in the cache.
+  if (typeof record.pluginRoot !== 'string' || !isAbsolute(record.pluginRoot)) return true;
   const cache = pathIdentity(join(configDir, 'plugins', 'cache'));
   const root = pathIdentity(record.pluginRoot);
   return root !== cache && !root.startsWith(cache + sep);
