@@ -317,6 +317,7 @@ missed, and the price is false alarms: a command that only names the file as a p
 after `=` (`--output=guard.log`, `FOO=guard.log cmd`), inside a quoted word (`sh -c 'echo guard.log'`), or as the text after
 `printf` or `env --help`, is refused like a program would be. Then the guard does not start (a path named at the start, exit 2)
 or stops writing to that file and logs the collision with the name of the file and "program of another hook".
+Only the files that the guard writes are protected this way: the state, pause and log files and the lock files of the state and pause files. The settings file, the configuration file and the usage cache (with its lock), which many hooks name and the guard only reads, do not stop the guard when the command of another hook names them.
 
 The way out is to give the guard paths of its own that no other hook command names: set `state_file`, `pause_file` and `log_file` in
 the configuration file to files with names used by nothing else (for example `guard-own.state`, `guard-own.pause` and

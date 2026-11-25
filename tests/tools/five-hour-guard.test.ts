@@ -1582,6 +1582,32 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(own('guard-own.log')), 'the guard ran').toMatch(/guard start/);
   });
 
+  it('a command of another hook that names the settings file, the configuration file or the usage cache does not stop the guard, and one that names the state, pause or log file or the lock of the state or pause file still does', () => {
+    for (const [name, key] of [['settings', 'settings_file'], ['configuration', 'configuration'], ['cache', 'usage_cache'], ['cache lock', 'usage_cache_lock']] as const) {
+      const f = fixture(`read-only-named-${key}`, { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+      const named = { settings_file: f.settings, configuration: f.cfg, usage_cache: f.cache, usage_cache_lock: `${f.cache}.lock` }[key];
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `jq . ${named}` }, { type: 'command', command: `cat --number=${named}` }] }] },
+        statusLine: { type: 'command', command: `sh -c 'wc -c ${named}'` } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${name} named by another hook: ${r.stdout}${r.stderr}`).toBe(0);
+      expect(r.stderr, name).not.toMatch(/program of another hook/);
+      expect(r.stdout, name).not.toMatch(/program of another hook/);
+      expect(readText(f.log), `${name}: the guard ran`).toMatch(/guard start/);
+    }
+    for (const [name, key] of [['state', 'state_file'], ['pause', 'pause_file'], ['log', 'log_file'], ['state lock', 'state_lock'], ['pause lock', 'pause_lock']] as const) {
+      const f = fixture(`written-named-${key}`, { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+      const named = { state_file: f.state, pause_file: f.pause, log_file: f.log, state_lock: `${f.state}.lock`, pause_lock: `${f.pause}.lock` }[key];
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `jq . ${named}` }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${name} named by another hook: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, name).toContain(`"program of another hook" (${named}) are the same file`);
+    }
+  });
+
   it('the options of an interpreter end at its script: python3 audit -c config passes -c to the script, so audit (no suffix, no execute bit) is still a program of another hook; a shell still reads -c behind -o NAME', () => {
     const forms = [(audit: string) => `${PYBIN} ${audit} -c config`, (audit: string) => `${PYBIN} -I ${audit} -e x`, (audit: string) => `${PYBIN} -W ignore ${audit} -m mod`,
       (audit: string) => `sh ${audit} -c x`, (audit: string) => `node ${audit} -e x`, (audit: string) => `bash -o pipefail -c 'python3 ${audit}'`, (audit: string) => `bash -O extglob -c 'python3 ${audit}'`];

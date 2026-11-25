@@ -199,6 +199,7 @@ def same_file(a, b):
 HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}
 OTHER_PROGRAM = 'program of another hook'   # a file that a command of any other hook (or the status line) in settings.json runs
 PROGRAM_LABELS = HOOK_PROGRAMS | {OTHER_PROGRAM, 'guard script', 'settings tool script', 'entry module'}
+READ_ONLY_LABELS = {'configuration file', 'usage_cache', 'usage_cache lock', 'settings_file'}   # files the guard only reads (many hooks name them): a command of another hook that names one is no collision
 PROTECTED_LABELS = {'registered hook', 'registered interpreter', OTHER_PROGRAM}   # the programs that no write of the guard may replace
 
 
@@ -209,8 +210,8 @@ def may_be_one_file(la, pa, lb, pb):
     and a program of another hook entry that is one of those programs."""
     if {la, lb} == {'hook_log_file', 'registered hook log'}:
         return True
-    if OTHER_PROGRAM in (la, lb):   # the interpreter or script of another hook can be one of ours; what it may not be is a file the guard writes
-        return (lb if la == OTHER_PROGRAM else la) in PROGRAM_LABELS
+    if OTHER_PROGRAM in (la, lb):   # the interpreter or script of another hook can be one of ours; what it may not be is a file the guard writes (state, pause, log and their locks: not the files it only reads)
+        return (lb if la == OTHER_PROGRAM else la) in PROGRAM_LABELS | READ_ONLY_LABELS
     if la in ('hook script', 'registered hook') and lb in ('hook script', 'registered hook'):
         return True
     if la == lb == 'registered interpreter':
