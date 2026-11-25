@@ -3,8 +3,8 @@
 
 Mechanism: at the threshold the guard writes a pause file; the PreToolUse hook (five-hour-guard-hook.py, registered once
 in settings.json by five-hour-guard-settings.py) makes every tool call of every session wait while that file says
-"paused". Sessions stay alive and keep their id and their connections; a session stops spending after at most one more
-model response. At the reset time plus a margin the guard deletes the pause file and every waiting session continues
+"paused". Sessions stay alive and keep their id and their connections; a session that calls a tool stops spending at that call,
+after at most one more model response (an answer without a tool call is not held: no PreToolUse event fires for it). At the reset time plus a margin the guard deletes the pause file and every waiting session continues
 exactly where it stopped.
 
 Safety: the pause file carries `valid_until` (rewritten every tick); when the guard dies the hook lets sessions go within

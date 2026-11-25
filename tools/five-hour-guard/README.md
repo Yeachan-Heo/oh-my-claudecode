@@ -6,8 +6,9 @@ limits shown (`elements.rateLimits` is not `false`) or a running `omc wait`.** W
 holds nothing; it says so in its log (`WARNING`, see "Input: the usage cache"). When the five-hour usage window reaches a
 threshold (97 % by default), every tool call of every session that loads the hook waits until the window resets, plus a margin (see "Which sessions load
 the hook"). Nothing is
-denied and no signal is sent to any process: the sessions stay alive, keep their id and their connections, and stop
-spending after at most one more model response. When the window resets, the waiting tool calls continue exactly where
+denied and no signal is sent to any process: the sessions stay alive, keep their id and their connections, and a session that calls a tool stops spending at that call, after at
+most one more model response (a prompt that Claude answers without calling a tool is not held: the hook runs before tool calls, `PreToolUse`, and no
+event of that kind fires for such an answer). When the window resets, the waiting tool calls continue exactly where
 they stopped.
 
 It is not part of the plugin. Nothing in `hooks/hooks.json` or in the hook set of the plugin changes, no service is
@@ -297,8 +298,9 @@ The guard writes the state file (unpaused) first and removes the pause file afte
 
 - The percentage comes from the cache, which is as fresh as the status line or the `omc wait` daemon makes it: a pause
   can start up to a poll interval and a check interval late, and the window can reach the limit before the guard acts.
-- A session stops spending after at most one more model response: the hook is asked before a tool call, not before a
-  request.
+- A session stops spending at its next tool call, after at most one more model response: the hook is asked before a tool call, not before a
+  request, so a prompt that Claude answers without calling a tool is not held (no `PreToolUse` event fires for it). The guard does not hold
+  the prompt of the user either: a hook on `UserPromptSubmit` would keep every prompt unsent for as long as it waits.
 - The pause ends at the reset time plus `--margin`, or earlier when the cache shows a lower percentage. A cache that is
   stale at that moment ends the pause at `resume_at` (fail-open).
 - Not checked: whether the OMC status line keeps refreshing the usage cache while every session waits in the hook. The
