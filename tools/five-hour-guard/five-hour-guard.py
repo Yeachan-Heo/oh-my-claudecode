@@ -287,7 +287,6 @@ MAX_COMMAND_PROGRAMS = 64
 PUNCTUATION = '();<>|&\n'
 INTERPRETER_NAME = re.compile(r'(python|pypy|node|nodejs|deno|bun|ruby|perl|php|lua|pwsh|powershell|tsx|ts-node|sh|bash|zsh|dash|ksh|ash|fish)[\d.]*(\.exe)?')
 SHELL_NAME = re.compile(r'(sh|bash|zsh|dash|ksh|ash|fish)(\.exe)?')
-PYTHON_VALUE_OPTIONS = ('-W', '-X', '-Q', '--check-hash-based-pycs')   # the options of a Python that take the next word as their value (python3 --help)
 SCRIPT_SUFFIXES = ('.py', '.pyw', '.sh', '.bash', '.zsh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl', '.php', '.lua', '.ps1', '.bat', '.cmd')
 
 
@@ -381,7 +380,7 @@ def command_programs(command, depth=0, own=False):
             if value:
                 value = False   # the value of the option before it, not the script
             elif w.startswith('-'):
-                value = not operands and w in PYTHON_VALUE_OPTIONS and re.fullmatch(ENTRY.PYTHON_NAME, base) is not None
+                value = not operands and w in ENTRY.PYTHON_VALUE_OPTIONS and re.fullmatch(ENTRY.PYTHON_NAME, base) is not None
             else:
                 operands.append(w)
         search_path = ENTRY.command_path(words)   # a PATH given before the command word (PATH=dir cmd, env PATH=dir cmd) is where the command word is looked up

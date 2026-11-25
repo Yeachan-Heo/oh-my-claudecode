@@ -575,6 +575,31 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
   });
 
+  it('a Python that is given option values before the hook (-W ignore, -X dev, -Q, --check-hash-based-pycs) runs the hook behind them: check reports it and remove takes it away; a script in front of the hook file still makes it data', () => {
+    const forms = (hook: string, pause: string) => [`${quote(PYBIN)} -W ignore ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -X dev ${hook} --pause-file ${pause}`,
+      `${quote(PYBIN)} -W ignore -X dev -I ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -Q new ${hook} --pause-file ${pause}`,
+      `${quote(PYBIN)} --check-hash-based-pycs always ${hook} --pause-file ${pause}`, `exec ${quote(PYBIN)} -I -W error ${hook} --pause-file ${pause}`,
+      `[ -f ${pause} ] || exit 0; env FOO=1 ${quote(PYBIN)} -X importtime ${hook} --pause-file ${pause}`];
+    for (const k of forms('', '').keys()) {
+      const f = fixture(`settings-python-values-${k}`);
+      const doc = base();
+      const before = JSON.stringify(doc.hooks.PreToolUse);
+      const command = forms(quote(HOOK), quote(f.pause))[k];
+      doc.hooks.PreToolUse.push({ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] } as never);
+      write(f, doc);
+      expect(tool(f, 'check').status, `${command}: the hook behind the option values is found`).toBe(0);
+      const rm = tool(f, 'remove');
+      expect(rm.status, rm.stderr).toBe(0);
+      expect(JSON.stringify(readJson(f.settings).hooks.PreToolUse), `${k}: remove took the handler`).toBe(before);
+    }
+    const g = fixture('settings-python-values-data');
+    const foreign = [`${quote(PYBIN)} -W ignore /x/audit.py ${HOOK} --pause-file /tmp/p`, `${quote(PYBIN)} /x/audit.py -W ignore ${HOOK} --pause-file /tmp/p`].map((command) => ({ type: 'command', command }));
+    write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+    expect(tool(g, 'check').status, 'a script in front of the hook file: the hook file is data').toBe(1);
+    expect(tool(g, 'remove').status).toBe(0);
+    expect(readJson(g.settings).hooks.PreToolUse, 'remove takes nothing of it').toEqual([{ matcher: '*', hooks: foreign }]);
+  });
+
   it('command -v and command -V only describe the word after them: a handler that does so with the hook file is not our hook, command -p and command alone run it', () => {
     const f = fixture('settings-command-v');
     const hook = '/opt/five-hour-guard-hook.py';

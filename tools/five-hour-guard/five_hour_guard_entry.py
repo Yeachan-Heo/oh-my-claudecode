@@ -16,6 +16,7 @@ PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BAS
 # is one of these is not the program: skip_wrappers() steps over it, its options and the NAME=VALUE assignments.
 WRAPPERS = {'exec': ('-a',), 'env': ('-u', '--unset', '-C', '--chdir', '-S', '--split-string'), 'command': (), 'nohup': (),
             'time': ('-f', '--format', '-o', '--output')}
+PYTHON_VALUE_OPTIONS = ('-W', '-X', '-Q', '--check-hash-based-pycs')   # the options of a Python that take the next word as their value (python3 --help)
 SEPARATORS = ';&|\n'   # the characters of the operators that end a simple command (the parentheses and the redirections are not read here)
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
 
@@ -130,8 +131,10 @@ def command_hook(words):
         return None
     if MARK in os.path.basename(words[first]):
         return words[first], words[first]   # run directly: the script itself is the program
-    if re.fullmatch(PYTHON_NAME, os.path.basename(words[first]).lower()) or '--pause-file' in words:
-        args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
+    python = re.fullmatch(PYTHON_NAME, os.path.basename(words[first]).lower()) is not None
+    if python or '--pause-file' in words:
+        values = {i + 1 for i in range(first + 1, len(words)) if python and words[i] in PYTHON_VALUE_OPTIONS}   # -W ignore: `ignore` is no script
+        args = [i for i in range(first + 1, len(words)) if i not in operands and i not in values and not words[i].startswith('-')]
         if args and MARK in os.path.basename(words[args[0]]):
             return words[args[0]], words[first]   # the program that is asked to run the hook
     return None
