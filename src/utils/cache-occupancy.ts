@@ -100,12 +100,13 @@ export function getCacheOccupancyDir(configDir = getClaudeConfigDir()): string {
   return join(configDir, '.omc', 'cache-occupancy');
 }
 
-function recordName(pluginRoot: string, pid: number, identity: string): string {
-  return `${createHash('sha256').update(`${pluginRoot}\0${pid}\0${identity}`).digest('hex')}.json`;
+// The place of the owner is part of the name, as in scripts/lib/cache-occupancy.mjs: a record made without it has the older name and is still read.
+function recordName(pluginRoot: string, pid: number, identity: string, host: string): string {
+  return `${createHash('sha256').update(`${pluginRoot}\0${pid}\0${identity}\0${host}`).digest('hex')}.json`;
 }
 
-function recordPath(pluginRoot: string, pid: number, identity: string, configDir?: string): string {
-  return join(getCacheOccupancyDir(configDir), recordName(pluginRoot, pid, identity));
+function recordPath(pluginRoot: string, pid: number, identity: string, host: string, configDir?: string): string {
+  return join(getCacheOccupancyDir(configDir), recordName(pluginRoot, pid, identity, host));
 }
 
 export async function publishCacheOccupancy(pluginRoot: string, configDir?: string, precomputedIdentity?: string): Promise<boolean> {
@@ -116,15 +117,16 @@ export async function publishCacheOccupancy(pluginRoot: string, configDir?: stri
   // PowerShell spawn instead of paying for two hosts on one startup path.
   const identity = precomputedIdentity ?? processStartIdentity(process.pid);
   if (!identity) return false;
+  const host = placeId();
   const record: CacheOccupancyRecord = {
     version: REGISTRY_VERSION,
     pid: process.pid,
     processStartIdentity: identity,
     pluginRoot: normalizedRoot,
-    host: placeId(),
+    host,
     updatedAt: new Date().toISOString(),
   };
-  const target = recordPath(normalizedRoot, process.pid, identity, configDir);
+  const target = recordPath(normalizedRoot, process.pid, identity, host, configDir);
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await mkdir(getCacheOccupancyDir(configDir), { recursive: true, mode: 0o700 });

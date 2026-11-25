@@ -9,6 +9,8 @@ import { processStartIdentities, publishCacheOccupancy, readOccupiedPluginRoots 
 
 const readFailures = vi.hoisted(() => new Map<string, string>());
 const lstatFailures = vi.hoisted(() => new Map<string, string>());
+// What the machine id file holds while a test plays another machine; empty reads the real file.
+const machineId = vi.hoisted(() => ({ value: '' }));
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -21,6 +23,7 @@ vi.mock('fs', async () => {
     readFileSync: vi.fn((...args: Parameters<typeof actual.readFileSync>) => {
       const code = readFailures.get(String(args[0]));
       if (code) throw Object.assign(new Error(code), { code });
+      if (machineId.value && String(args[0]) === '/etc/machine-id') return `${machineId.value}\n`;
       return actual.readFileSync(...args);
     }),
   };
@@ -95,6 +98,28 @@ describe('cache occupancy registry', () => {
 
     expect(read(dir).roots).toEqual(new Set([root]));
     expect(existsSync(file)).toBe(true);
+  });
+
+  // The place of the owner is part of the name of its record: two sessions of a shared profile that have the same root, the same PID (of
+  // their own PID table) and the same start identity must not write the same file, or the later one replaces the record of the first.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps one record for each of two owners that differ only in the machine, for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    try {
+      for (const id of ['id-of-machine-a', 'id-of-machine-b']) {
+        machineId.value = id;
+        expect(await (path ? publish(root, dir, process.pid, 'same-start') : publish(root, dir, 'same-start'))).toBe(true);
+      }
+    } finally {
+      machineId.value = '';
+    }
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    expect(readdirSync(registry).filter((name) => name.endsWith('.json'))).toHaveLength(2);
   });
 
   it.each([

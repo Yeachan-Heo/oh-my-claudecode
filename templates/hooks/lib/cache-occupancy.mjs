@@ -115,7 +115,9 @@ function alive(pid) {
 }
 
 function registryDir(configDir) { return join(configDir, '.omc', 'cache-occupancy'); }
-function fileName(root, pid, start) { return `${createHash('sha256').update(`${root}\0${pid}\0${start}`).digest('hex')}.json`; }
+// The place of the owner is part of the name: two owners on a shared profile can have the same root, PID and start identity (a PID of each machine's own table).
+// A record made without the place has the older name; readers take every name of this form, so it is still read.
+function fileName(root, pid, start, place) { return `${createHash('sha256').update(`${root}\0${pid}\0${start}\0${place}`).digest('hex')}.json`; }
 
 // Issue #3995: on win32 every identity probe is a PowerShell host (~1.6-2.0s),
 // so SessionStart must not need two. publishCacheOccupancy() accepts an
@@ -131,11 +133,12 @@ export function publishCacheOccupancy(pluginRoot, configDir, pid = process.ppid,
     : precomputedIdentity === null ? null : identity(pid, probeTimeoutMs);
   if (!root || !start) return false;
   const dir = registryDir(configDir);
-  const target = join(dir, fileName(root, pid, start));
+  const host = placeId();
+  const target = join(dir, fileName(root, pid, start, host));
   const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(temp, JSON.stringify({ version: 1, pid, processStartIdentity: start, pluginRoot: root, host: placeId(), updatedAt: new Date().toISOString() }), { mode: 0o600 });
+    writeFileSync(temp, JSON.stringify({ version: 1, pid, processStartIdentity: start, pluginRoot: root, host, updatedAt: new Date().toISOString() }), { mode: 0o600 });
     renameSync(temp, target);
     return true;
   } catch { try { unlinkSync(temp); } catch {} return false; }
