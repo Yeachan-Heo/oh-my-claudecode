@@ -59,6 +59,10 @@ describe('hook allow path — isSubagentSafeModelId(model) === true', () => {
     expect(isSubagentSafeModelId('ap.anthropic.claude-sonnet-4-6-v1:0')).toBe(true);
   });
 
+  it('allows apac. regional Bedrock profile', () => {
+    expect(isSubagentSafeModelId('apac.anthropic.claude-sonnet-4-6-v1:0')).toBe(true);
+  });
+
   it('allows Bedrock ARN inference-profile format', () => {
     expect(isSubagentSafeModelId(
       'arn:aws:bedrock:us-east-2:123456789012:inference-profile/global.anthropic.claude-opus-4-6-v1:0'
