@@ -11,6 +11,12 @@ const readFailures = vi.hoisted(() => new Map<string, string>());
 const lstatFailures = vi.hoisted(() => new Map<string, string>());
 // What the machine id file holds while a test plays another machine; empty reads the real file.
 const machineId = vi.hoisted(() => ({ value: '' }));
+// The network interfaces a test plays; undefined reads the real ones.
+const interfaces = vi.hoisted(() => ({ value: undefined as Record<string, unknown[]> | undefined }));
+vi.mock('os', async () => {
+  const actual = await vi.importActual<typeof import('os')>('os');
+  return { ...actual, networkInterfaces: () => (interfaces.value ?? actual.networkInterfaces()) as ReturnType<typeof actual.networkInterfaces> };
+});
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -98,6 +104,41 @@ describe('cache occupancy registry', () => {
 
     expect(read(dir).roots).toEqual(new Set([root]));
     expect(existsSync(file)).toBe(true);
+  });
+
+  // Where no machine id file can be read (Windows, macOS) the hardware addresses of the interfaces name the machine; where there are none the
+  // machine is unknown, and a record is then never judged by a local probe either.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps the record of an owner that cannot be told from this machine without a machine id file, for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    const card = (mac: string) => ({ eth0: [{ mac, internal: false }] });
+    readFailures.set('/etc/machine-id', 'ENOENT');
+    readFailures.set('/var/lib/dbus/machine-id', 'ENOENT');
+    try {
+      interfaces.value = card('aa:aa:aa:aa:aa:aa');
+      expect(await (path ? publish(root, dir, process.pid, 'same-start') : publish(root, dir, 'same-start'))).toBe(true);
+      const registry = join(dir, '.omc', 'cache-occupancy');
+      const file = join(registry, readdirSync(registry)[0]);
+      writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), pid: spawnSync(process.execPath, ['-e', '']).pid }));
+      const answers: Record<string, boolean> = {};
+      for (const [label, seen] of [['other address', card('bb:bb:bb:bb:bb:bb')], ['no address', { lo: [{ mac: '00:00:00:00:00:00', internal: true }] }], ['same address', card('aa:aa:aa:aa:aa:aa')]] as [string, Record<string, unknown[]>][]) {
+        interfaces.value = seen;
+        read(dir);
+        answers[label] = existsSync(file);
+        if (!existsSync(file)) break;
+      }
+      // Only the machine that is the owner's own proves the owner gone (the last case removes the record of the exited process).
+      expect(answers).toEqual({ 'other address': true, 'no address': true, 'same address': false });
+    } finally {
+      interfaces.value = undefined;
+      readFailures.clear();
+    }
   });
 
   // The place of the owner is part of the name of its record: two sessions of a shared profile that have the same root, the same PID (of

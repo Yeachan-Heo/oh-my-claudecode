@@ -1023,9 +1023,9 @@ const readRegistry = () => {
 };
 
 // == occupancy records ==
-// Where this process runs, and whether a record names another place (copies of placeId and isForeignOwner of scripts/lib/cache-occupancy.mjs,
+// Where this process runs, and whether a record names another place (copies of machineId, placeId and isForeignOwner of scripts/lib/cache-occupancy.mjs,
 // because this script is plain Node with no import of the plugin's files; omc-doctor-cache-occupancy-records.test.ts runs both and compares).
-const placeId = () => {
+const machineId = () => {
   let machine = '';
   for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
     try {
@@ -1033,13 +1033,23 @@ const placeId = () => {
     } catch {}
     if (machine) break;
   }
+  if (!machine) {
+    try {
+      const macs = Object.values(os.networkInterfaces()).flat().filter((item) => item && !item.internal && item.mac && item.mac !== '00:00:00:00:00:00').map((item) => item.mac);
+      if (macs.length) machine = 'mac:' + [...new Set(macs)].sort().join(',');
+    } catch {}
+  }
+  return machine;
+};
+const placeId = () => {
+  const machine = machineId();
   let namespace = '';
   try {
     namespace = fs.readlinkSync('/proc/self/ns/pid');
   } catch {}
   return os.hostname() + '|' + machine + '|' + namespace;
 };
-const isForeignOwner = (record) => typeof record?.host === 'string' && record.host !== '' && record.host !== placeId();
+const isForeignOwner = (record) => typeof record?.host === 'string' && record.host !== '' && (machineId() === '' || record.host !== placeId());
 // A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time
 // differs from the recorded one, or the record is dated more than 5 minutes in the future.
 const ownerGone = (record) => {

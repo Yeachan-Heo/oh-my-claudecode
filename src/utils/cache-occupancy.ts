@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync } from 'fs';
-import { hostname } from 'os';
+import { hostname, networkInterfaces } from 'os';
 import { mkdir, writeFile, rename, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'node:child_process';
@@ -70,20 +70,32 @@ function processAlive(pid: number): boolean {
 
 // Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; empty where there is none)
 // and, on Linux, the PID namespace; the same text as scripts/lib/cache-occupancy.mjs, where the reason is given. A record that names another
-// place belongs to an owner this machine cannot probe, so a local process probe never proves it gone.
-function placeId(): string {
+// place belongs to an owner this machine cannot probe, so a local process probe never proves it gone; the same when this machine
+// cannot name itself (no machine id file and no network interface address: the machine id is empty).
+function machineId(): string {
   let machine = '';
   for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
     try { machine = readFileSync(file, 'utf8').trim(); } catch { /* no such file */ }
     if (machine) break;
   }
+  if (!machine) {
+    try {
+      const macs = Object.values(networkInterfaces()).flat().filter((item) => item && !item.internal && item.mac && item.mac !== '00:00:00:00:00:00').map((item) => item!.mac);
+      if (macs.length) machine = `mac:${[...new Set(macs)].sort().join(',')}`;
+    } catch { /* no interfaces */ }
+  }
+  return machine;
+}
+
+function placeId(): string {
+  const machine = machineId();
   let namespace = '';
   try { namespace = readlinkSync('/proc/self/ns/pid'); } catch { /* not Linux, or not readable */ }
   return `${hostname()}|${machine}|${namespace}`;
 }
 
 function isForeignOwner(record: CacheOccupancyRecord): boolean {
-  return typeof record.host === 'string' && record.host !== '' && record.host !== placeId();
+  return typeof record.host === 'string' && record.host !== '' && (machineId() === '' || record.host !== placeId());
 }
 
 export interface CacheOccupancyRecord {
