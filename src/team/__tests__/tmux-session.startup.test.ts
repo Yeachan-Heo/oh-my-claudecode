@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -68,7 +68,19 @@ const tmuxState = vi.hoisted(() => ({
   paneRoots: [] as Array<{ pid: number; dead: boolean }>,
   afterEnter: null as ((attempt: WorkerLaunchAttempt) => Promise<void>) | null,
   onKillPane: null as (() => void) | null,
+  // Called with the launch command text when it is sent to the pane.
+  onLaunchSend: null as ((command: string) => void) | null,
 }));
+
+const providerEventsState = vi.hoisted(() => ({ delayMs: 0 }));
+vi.mock('../provider-events.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../provider-events.js')>();
+  const ensureProviderEventsLog: typeof actual.ensureProviderEventsLog = async (...args) => {
+    if (providerEventsState.delayMs > 0) await new Promise(resolve => setTimeout(resolve, providerEventsState.delayMs));
+    return actual.ensureProviderEventsLog(...args);
+  };
+  return { ...actual, ensureProviderEventsLog };
+});
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../cli/tmux-utils.js')>();
@@ -209,6 +221,7 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
             const commandText = syntheticArgs[syntheticArgs.indexOf('-l') + 1] ?? '';
             const descriptorMatch = commandText.match(/OMC_WORKER_LAUNCH_SPEC_FILE='([^']+)'/);
             if (descriptorMatch) {
+              tmuxState.onLaunchSend?.(commandText);
               const spec = JSON.parse(await readFile(descriptorMatch[1], 'utf8'));
               tmuxState.activeAttempt = {
                 schema_version: spec.schema_version,
@@ -362,6 +375,8 @@ beforeEach(() => {
   tmuxState.paneRoots = [];
   tmuxState.afterEnter = null;
   tmuxState.onKillPane = null;
+  tmuxState.onLaunchSend = null;
+  providerEventsState.delayMs = 0;
   originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   processMocks.isProcessIdentityLive.mockResolvedValue('live');
 });
@@ -1986,6 +2001,13 @@ describe('worker pane startup safety', () => {
     cwd = await createFixture('omc-startup-provider-events-');
     process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
     processMocks.isProcessIdentityLive.mockResolvedValue('dead');
+    const log = join(getOmcRoot(cwd), 'state', 'team', 'startup-team', 'workers', 'worker-1', 'provider-events.jsonl');
+    // A slow disk: a launch that does not wait for the log is sent before it exists.
+    providerEventsState.delayMs = 200;
+    const logAtLaunchSend: Array<string | null> = [];
+    tmuxState.onLaunchSend = () => {
+      logAtLaunchSend.push(existsSync(log) ? readFileSync(log, 'utf8') : null);
+    };
 
     await expect(spawnOwnedWorkerInPane('startup:0', ownership(), {
       teamName: 'startup-team',
@@ -2001,10 +2023,32 @@ describe('worker pane startup safety', () => {
       launchContext: { kind: 'initial' },
     })).rejects.toThrow('worker_launch_cleanup_unverified');
 
-    const log = join(getOmcRoot(cwd), 'state', 'team', 'startup-team', 'workers', 'worker-1', 'provider-events.jsonl');
+    expect(logAtLaunchSend).toEqual(['']);
     expect(lstatSync(log).isFile()).toBe(true);
     expect(readFileSync(log, 'utf8')).toBe('');
     delete process.env.OMC_TEAM_START_ACK_TIMEOUT_MS;
+  });
+
+  strictTmuxIt('creates no provider event log for a codex worker', async () => {
+    cwd = await createFixture('omc-startup-provider-events-codex-');
+    const { attempt } = await spawnOwnedWorkerInPane('startup:0', ownership(), {
+      teamName: 'startup-team',
+      workerName: 'worker-1',
+      instanceId: randomUUID(),
+      envVars: {},
+      launchArgs: ['--version'],
+      launchBinary: '/usr/bin/codex',
+      cwd,
+      provider: 'codex',
+      launchBootstrapPath: '/runtime-cli.js',
+      launchStateCwd: cwd,
+      launchContext: { kind: 'initial' },
+    });
+
+    expect(JSON.parse(await readFile(attempt.decisionPath, 'utf8'))).toMatchObject({ decision: 'accepted' });
+    const workerDir = join(getOmcRoot(cwd), 'state', 'team', 'startup-team', 'workers', 'worker-1');
+    expect(lstatSync(workerDir).isDirectory()).toBe(true);
+    expect(existsSync(join(workerDir, 'provider-events.jsonl'))).toBe(false);
   });
 
   // The log is display-only, so a launch must go on without it.

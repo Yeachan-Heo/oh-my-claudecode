@@ -285,6 +285,14 @@ describe('readiness-diff set r6', () => {
     expect(runR6(r6Trace(r6Case(4_000, [2_000])))).toMatch(/RESULT PASS$/);
   });
 
+  it('reads a case without recorded nudges as no nudge on either side', () => {
+    const { nudges: _nudges, ...unrecorded } = r6Case(4_000, []);
+    const run = (base: TraceCase, head: TraceCase) =>
+      summarize({ set: 'r6', baseSha: 'base', headSha: 'head', base: r6Trace(base, ['tmux-session']), head: r6Trace(head) });
+    expect(run(unrecorded, r6Case(4_000, []))).toMatch(/RESULT PASS$/);
+    expect(run(r6Case(4_000, []), unrecorded)).toMatch(/RESULT PASS$/);
+  });
+
   it('fails when head waits longer than base', () => {
     const summary = runR6(r6Trace(r6Case(4_250, [2_000])));
     expect(summary).toContain(`failure: ${IDLE} r6 wait_ms differs from base`);

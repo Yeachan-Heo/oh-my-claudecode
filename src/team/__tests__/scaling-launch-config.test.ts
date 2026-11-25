@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve } from 'path';
@@ -462,6 +462,54 @@ describe('scaleUp launch config', () => {
     } else {
       expect(existsSync(settingsPath)).toBe(false);
     }
+  });
+
+  it('launches a claude scale-up worker under an absolute configured team root as the config records it', async () => {
+    modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--dangerously-skip-permissions']);
+    // The storage anchor may be a symlink, so the recorded root can name the canonical one through it.
+    const canonicalRoot = teamStateRoot(cwd, 'demo-team');
+    const alias = join(cwd, '.omc-state-alias');
+    await symlink(process.env.OMC_STATE_DIR!, alias, 'junction');
+    process.env.OMC_STATE_DIR = alias;
+    config = makeConfig();
+    const recordedRoot = config.team_state_root!;
+    expect(recordedRoot).not.toBe(canonicalRoot);
+    expect(await realpath(recordedRoot)).toBe(canonicalRoot);
+
+    const result = await scaleUp(
+      'demo-team',
+      1,
+      'claude',
+      [{ subject: 'demo', description: 'demo task' }],
+      cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({ ok: true, newWorkerCount: 1 });
+    const launch = tmuxSessionMocks.spawnOwnedWorkerInPane.mock.calls[0]?.[2] as unknown as
+      { launchArgs: string[]; envVars: Record<string, string> };
+    expect(launch.launchArgs.slice(-2)).toEqual(['--settings', join(recordedRoot, 'provider-event-hooks.json')]);
+    expect(launch.envVars.OMC_TEAM_STATE_ROOT).toBe(recordedRoot);
+  });
+
+  it('rolls back a claude scale-up whose hook settings cannot be written', async () => {
+    modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--dangerously-skip-permissions']);
+    // A directory in its place: the settings rename fails.
+    const settingsPath = join(teamStateRoot(cwd, 'demo-team'), 'provider-event-hooks.json');
+    await mkdir(settingsPath);
+
+    const result = await scaleUp(
+      'demo-team',
+      1,
+      'claude',
+      [{ subject: 'demo', description: 'demo task' }],
+      cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Failed strict provider argv construction for worker-1 (claude)') });
+    expect(tmuxSessionMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    expect(monitorMocks.currentConfig).toMatchObject({ worker_count: 0, workers: [] });
   });
 
   it('launches a claude scale-up worker under the absolute team root when the config records it relative and the caller runs elsewhere', async () => {

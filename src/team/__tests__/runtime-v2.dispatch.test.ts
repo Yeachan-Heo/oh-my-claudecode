@@ -1440,6 +1440,25 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.createTeamSession).not.toHaveBeenCalled();
   });
 
+  it('starts no worker when the claude hook settings cannot be written', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-hook-settings-failure-');
+    const settingsPath = join(absPath(cwd, TeamPaths.root('dispatch-team')), 'provider-event-hooks.json');
+    atomicWriteControl.failCanonicalPath = settingsPath;
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'No settings', description: 'Must not launch with a missing settings file.' }],
+      cwd,
+    })).rejects.toThrow('injected_task_publication_interruption');
+
+    await expect(lstat(settingsPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(mocks.createTeamSession).not.toHaveBeenCalled();
+    expect(mocks.spawnWorkerInPane).not.toHaveBeenCalled();
+  });
+
   it('persists dependencies and leaves dependent tasks out of startup dispatch', async () => {
     cwd = await mkdtempFixture('omc-runtime-v2-dependencies-');
     const { startTeamV2 } = await import('../runtime-v2.js');

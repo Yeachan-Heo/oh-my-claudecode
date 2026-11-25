@@ -1,16 +1,20 @@
 // The provider-event reader and hook check the path again after the open: a
 // leaf or worker directory swapped between the open and that check must not be
 // read from or written to. These tests swap them right after the real open.
+// The log initializer is tested here too: what it opens, refuses and closes.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { closeSync, constants, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, constants, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, writeSync, type Stats } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const swap = vi.hoisted(() => ({
+  beforeOpen: null as null | ((path: string) => void),
   afterOpen: null as null | ((path: string) => void),
+  // Rewrites what an open handle (handle.stat()) or a path (lstat()) reports.
+  statAs: null as null | ((path: string, stats: Stats) => Stats),
   // Event files that opened, how many of them closed, and whether close should fail.
   opened: [] as string[],
   closed: 0,
@@ -20,10 +24,16 @@ const swap = vi.hoisted(() => ({
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const open: typeof actual.open = async (...args) => {
-    const handle = await actual.open(...args);
     const path = String(args[0]);
+    if (path.endsWith('provider-events.jsonl')) swap.beforeOpen?.(path);
+    const handle = await actual.open(...args);
     if (path.endsWith('provider-events.jsonl')) {
       swap.opened.push(path);
+      const stat = handle.stat.bind(handle) as () => Promise<Stats>;
+      handle.stat = (async () => {
+        const stats = await stat();
+        return swap.statAs ? swap.statAs('<handle>', stats) : stats;
+      }) as typeof handle.stat;
       const close = handle.close.bind(handle);
       handle.close = async () => {
         await close();
@@ -34,10 +44,14 @@ vi.mock('node:fs/promises', async importOriginal => {
     }
     return handle;
   };
-  return { ...actual, open, default: { ...actual, open } };
+  const lstat = (async (path: string) => {
+    const stats = await actual.lstat(path);
+    return swap.statAs ? swap.statAs(path, stats) : stats;
+  }) as typeof actual.lstat;
+  return { ...actual, open, lstat, default: { ...actual, open, lstat } };
 });
 
-import { readLatestProviderEvent } from '../provider-events.js';
+import { ensureProviderEventsLog, readLatestProviderEvent } from '../provider-events.js';
 
 const HOOK = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs');
 const EVENT_LINE = `${JSON.stringify({ v: 1, event: 'Stop', at: 7, attempt: 'a1' })}\n`;
@@ -99,6 +113,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   });
   afterEach(() => {
     swap.afterOpen = null;
+    swap.statAs = null;
     swap.opened = [];
     swap.closed = 0;
     swap.failClose = false;
@@ -134,6 +149,24 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     writeFileSync(path, EVENT_LINE);
     swap.afterOpen = opened => SWAPS.teamRoot(opened);
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+  });
+
+  // A filesystem may give a new symlink the inode number the removed directory had.
+  it('reader returns none when the symlink that replaces the worker directory reuses its inode number', async () => {
+    writeFileSync(path, EVENT_LINE);
+    const { ino } = lstatSync(workerDir);
+    swap.afterOpen = opened => SWAPS.parentSameLeaf(opened);
+    swap.statAs = (named, stats) => (named === workerDir ? Object.assign(stats, { ino }) : stats);
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+    expect(lstatSync(workerDir).isSymbolicLink()).toBe(true);
+  });
+
+  // Inode numbers are unique only within one device.
+  it('reader returns none when the opened file has the same inode number on another device', async () => {
+    writeFileSync(path, EVENT_LINE);
+    swap.statAs = (named, stats) => (named === '<handle>' ? Object.assign(stats, { dev: stats.dev + 1 }) : stats);
+    expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toEqual({ event: 'none' });
+    expect(swap.opened).toEqual([path]);
   });
 
   it('reader still reads the file when nothing is swapped', async () => {
@@ -178,30 +211,44 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   });
 
   // The hook runs as its own process, so a preload wraps fs/promises.open there.
-  const runHook = (kind: keyof typeof SWAPS | 'parentBeforeOpen' | 'none') => {
+  const runHook = (kind: keyof typeof SWAPS | 'parentBeforeOpen' | 'parentReusedInode' | 'otherDevice' | 'none') => {
     // The launch creates the log; the hook only appends.
-    writeFileSync(path, '');
+    if (!lstatSync(path, { throwIfNoEntry: false })) writeFileSync(path, '');
     const preload = join(root, 'swap-preload.mjs');
     writeFileSync(preload, [
       "import fsp from 'node:fs/promises';",
-      "import { existsSync, linkSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';",
+      "import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';",
       "import { dirname, join } from 'node:path';",
       "import { syncBuiltinESMExports } from 'node:module';",
       'const real = fsp.open;',
+      'const realLstat = fsp.lstat;',
+      'let reused;',
+      // One line per successful open of the log and per close of it.
+      `const note = text => appendFileSync(${JSON.stringify(join(outside, 'handles.log'))}, text);`,
       `const kind = ${JSON.stringify(kind)};`,
       `const outside = ${JSON.stringify(outside)};`,
       'fsp.open = async (...args) => {',
       '  const path = String(args[0]);',
       "  if (kind === 'parentBeforeOpen' && path.endsWith('provider-events.jsonl')) { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(outside, dir); }",
       '  const handle = await real(...args);',
+      "  if (kind === 'otherDevice' && path.endsWith('provider-events.jsonl')) { const stat = handle.stat.bind(handle); handle.stat = async () => { const stats = await stat(); stats.dev += 1; return stats; }; }",
       "  if (path.endsWith('provider-events.jsonl')) {",
+      "    note('open\\n');",
+      '    const close = handle.close.bind(handle);',
+      "    handle.close = async () => { await close(); note('close\\n'); };",
       "    if (kind === 'leaf') { renameSync(path, `${path}.moved`); writeFileSync(path, ''); }",
       "    if (kind === 'parent') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(outside, dir); }",
       "    if (kind === 'parentSameLeaf') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); symlinkSync(`${dir}.moved`, dir); }",
       "    if (kind === 'parentHardLink') { const dir = dirname(path); renameSync(dir, `${dir}.moved`); mkdirSync(dir); linkSync(join(`${dir}.moved`, 'provider-events.jsonl'), path); }",
       "    if (kind === 'teamRoot') { const dir = dirname(dirname(dirname(path))); renameSync(dir, `${dir}.moved`); symlinkSync(`${dir}.moved`, dir); }",
+      "    if (kind === 'parentReusedInode') { const dir = dirname(path); reused = { dir, ino: lstatSync(dir).ino }; renameSync(dir, `${dir}.moved`); symlinkSync(`${dir}.moved`, dir); }",
       '  }',
       '  return handle;',
+      '};',
+      'fsp.lstat = async (path) => {',
+      '  const stats = await realLstat(path);',
+      '  if (path === reused?.dir) stats.ino = reused.ino;',
+      '  return stats;',
       '};',
       'syncBuiltinESMExports();',
     ].join('\n'));
@@ -217,6 +264,26 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
   };
+
+  const hookHandles = () => (existsSync(join(outside, 'handles.log')) ? readFileSync(join(outside, 'handles.log'), 'utf8') : '');
+
+  it('hook opens nothing through a symlinked worker directory', () => {
+    rmSync(workerDir, { recursive: true });
+    symlinkSync(outside, workerDir);
+    expectSilentExit(runHook('none'));
+    expect(hookHandles()).toBe('');
+  });
+
+  it('hook opens nothing through a symlinked leaf', () => {
+    symlinkSync(join(outside, 'provider-events.jsonl'), path);
+    expectSilentExit(runHook('none'));
+    expect(hookHandles()).toBe('');
+  });
+
+  it.each(['none', 'leaf'] as const)('hook closes the file it opened (swap: %s)', kind => {
+    expectSilentExit(runHook(kind));
+    expect(hookHandles()).toBe('open\nclose\n');
+  });
 
   it('hook appends nothing when the leaf is replaced after the open', () => {
     expectSilentExit(runHook('leaf'));
@@ -251,6 +318,17 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
     expect(readFileSync(path, 'utf8')).toBe('');
   });
 
+  it('hook appends nothing when the symlink that replaces the worker directory reuses its inode number', () => {
+    expectSilentExit(runHook('parentReusedInode'));
+    expect(lstatSync(workerDir).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(`${workerDir}.moved`, 'provider-events.jsonl'), 'utf8')).toBe('');
+  });
+
+  it('hook appends nothing when the opened file has the same inode number on another device', () => {
+    expectSilentExit(runHook('otherDevice'));
+    expect(readFileSync(path, 'utf8')).toBe('');
+  });
+
   it('hook appends nothing when the team root becomes a symlink after the open', () => {
     expectSilentExit(runHook('teamRoot'));
     expect(readFileSync(join(`${root}.moved`, 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')).toBe('');
@@ -272,5 +350,76 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
   it('hook appends one line through the same preload when nothing is swapped', () => {
     expectSilentExit(runHook('none'));
     expect(readFileSync(path, 'utf8')).toMatch(/^\{"v":1,"event":"Stop","at":\d+,"attempt":"a1"\}\n$/);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('ensureProviderEventsLog around its open', () => {
+  const inheritedStateDir = process.env.OMC_STATE_DIR;
+  let base = '';
+  let outside = '';
+  let workerDir = '';
+  let path = '';
+  beforeEach(() => {
+    // State for cwd `base` resolves to <base>/.omc: a repository, and no centralized state dir.
+    delete process.env.OMC_STATE_DIR;
+    base = realpathSync(mkdtempSync(join(tmpdir(), 'provider-events-log-open-')));
+    execFileSync('git', ['init', '-q', base]);
+    outside = mkdtempSync(join(tmpdir(), 'provider-events-log-open-outside-'));
+    workerDir = join(base, '.omc', 'state', 'team', 'demo', 'workers', 'worker-1');
+    path = join(workerDir, 'provider-events.jsonl');
+    mkdirSync(workerDir, { recursive: true });
+  });
+  afterEach(() => {
+    swap.beforeOpen = null;
+    swap.opened = [];
+    swap.closed = 0;
+    if (inheritedStateDir === undefined) delete process.env.OMC_STATE_DIR;
+    else process.env.OMC_STATE_DIR = inheritedStateDir;
+    rmSync(base, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('opens and closes the log once', async () => {
+    await ensureProviderEventsLog(base, 'demo', 'worker-1');
+    expect(swap.opened).toEqual([path]);
+    expect(swap.closed).toBe(1);
+  });
+
+  it('touches nothing on Windows, where O_NOFOLLOW cannot refuse a symlinked leaf', async () => {
+    // Off Windows the path check rejects worker-2, so resolving for it means no check ran either.
+    symlinkSync(outside, join(dirname(workerDir), 'worker-2'));
+    await expect(ensureProviderEventsLog(base, 'demo', 'worker-2')).rejects.toThrow('team_instance_path_symlink');
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    try {
+      await expect(ensureProviderEventsLog(base, 'demo', 'worker-1')).resolves.toBeUndefined();
+      await expect(ensureProviderEventsLog(base, 'demo', 'worker-2')).resolves.toBeUndefined();
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+    expect(swap.opened).toEqual([]);
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(join(outside, 'provider-events.jsonl'))).toBe(false);
+  });
+
+  it('refuses a FIFO that has a reader and closes it', async () => {
+    execFileSync('mkfifo', [path]);
+    // With a reader the non-blocking write open succeeds, so only the file type can refuse it.
+    const reader = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      await expect(ensureProviderEventsLog(base, 'demo', 'worker-1')).rejects.toThrow('provider_events_log_not_a_file');
+      expect(swap.opened).toEqual([path]);
+      // End of file: no writer is left. A writer still open would make this read fail with EAGAIN.
+      expect(readSync(reader, Buffer.alloc(1))).toBe(0);
+    } finally {
+      closeSync(reader);
+    }
+  });
+
+  it('creates nothing outside the team when the leaf becomes a symlink right before the open', async () => {
+    swap.beforeOpen = opened => symlinkSync(join(outside, 'created.jsonl'), opened);
+    await expect(ensureProviderEventsLog(base, 'demo', 'worker-1')).rejects.toMatchObject({ code: 'ELOOP' });
+    expect(swap.opened).toEqual([]);
+    expect(existsSync(join(outside, 'created.jsonl'))).toBe(false);
   });
 });

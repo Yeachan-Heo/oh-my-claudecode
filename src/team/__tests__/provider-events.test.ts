@@ -16,15 +16,16 @@ import {
 
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
 
-// The team root and its state/ and state/team/ parents lie below the storage
-// anchor, where assertTeamStatePathSafe() refuses a symlink. Builds
+// The team root, its state/ and state/team/ parents and its workers/ lie below
+// the storage anchor, where assertTeamStatePathSafe() refuses a symlink. Builds
 // <base>/.omc/state/team/demo with `component` a symlink into `outside`, which
 // holds workers/worker-1/provider-events.jsonl; returns the team root.
 const TEAM_PATH = ['state', 'team', 'demo'] as const;
-function linkTeamPathComponent(base: string, outside: string, component: (typeof TEAM_PATH)[number], content: string): string {
-  const at = TEAM_PATH.indexOf(component);
-  const realParent = join(base, '.omc', ...TEAM_PATH.slice(0, at));
-  const workerDir = join(outside, ...TEAM_PATH.slice(at), 'workers', 'worker-1');
+const WORKERS_PATH = [...TEAM_PATH, 'workers'] as const;
+function linkTeamPathComponent(base: string, outside: string, component: (typeof WORKERS_PATH)[number], content: string): string {
+  const at = WORKERS_PATH.indexOf(component);
+  const realParent = join(base, '.omc', ...WORKERS_PATH.slice(0, at));
+  const workerDir = join(outside, ...WORKERS_PATH.slice(at), 'worker-1');
   mkdirSync(realParent, { recursive: true });
   mkdirSync(workerDir, { recursive: true });
   writeFileSync(join(workerDir, 'provider-events.jsonl'), content);
@@ -158,7 +159,7 @@ describe.skipIf(process.platform === 'win32')('readLatestProviderEvent', () => {
     }
   });
 
-  it.each(TEAM_PATH)('returns none when the %s directory above the worker is a symlink', async component => {
+  it.each(WORKERS_PATH)('returns none when the %s directory above the worker is a symlink', async component => {
     const outside = mkdtempSync(join(tmpdir(), 'provider-events-outside-'));
     try {
       const teamRoot = linkTeamPathComponent(join(base, 'linked'), outside, component, line({ v: 1, event: 'Stop', at: 7, attempt: 'a1' }));
@@ -277,6 +278,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
     mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
     await ensureProviderEventsLog(base, 'demo', 'worker-1');
     const env = { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' };
+    const startedAt = Date.now();
     for (const event of ['SessionStart', 'UserPromptSubmit', 'StopFailure']) {
       const result = run(await hookCommand(event), env);
       expect(result.status).toBe(0);
@@ -290,7 +292,8 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       expect(Object.keys(record)).toEqual(['v', 'event', 'at', 'attempt']);
       expect(record.v).toBe(1);
       expect(record.attempt).toBe('a1');
-      expect(typeof record.at).toBe('number');
+      expect(record.at).toBeGreaterThanOrEqual(startedAt);
+      expect(record.at).toBeLessThanOrEqual(Date.now());
     }
     // An API error ends the turn with StopFailure and no Stop (E0 scenario 4).
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toMatchObject({ event: 'StopFailure' });
@@ -324,7 +327,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
     }
   });
 
-  it.each(TEAM_PATH)('does not write when the %s directory above the worker is a symlink', async component => {
+  it.each(WORKERS_PATH)('does not write when the %s directory above the worker is a symlink', async component => {
     const outside = mkdtempSync(join(tmpdir(), 'provider-event-hook-outside-'));
     try {
       const command = await hookCommand('Stop');
@@ -333,7 +336,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toBe('');
       expect(result.stderr).toBe('');
-      expect(readFileSync(join(outside, ...TEAM_PATH.slice(TEAM_PATH.indexOf(component)), 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8')).toBe('');
+      expect(readFileSync(join(outside, ...WORKERS_PATH.slice(WORKERS_PATH.indexOf(component)), 'worker-1', 'provider-events.jsonl'), 'utf8')).toBe('');
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
@@ -434,9 +437,9 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
     expect(existsSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'))).toBe(false);
   });
 
-  it('writes nothing for a bad event name, a missing attempt or state root, or an unsafe worker name', () => {
+  it('writes nothing for a bad event name, a missing attempt, state root or worker, or an unsafe worker name', () => {
     const hook = join(__dirname, '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs');
-    for (const worker of ['worker-1', 'w..1']) {
+    for (const worker of ['worker-1', 'w..1', '-w1', 'w 1']) {
       mkdirSync(join(root, 'workers', worker), { recursive: true });
       writeFileSync(join(root, 'workers', worker, 'provider-events.jsonl'), '');
     }
@@ -448,9 +451,14 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       { event: 'Stop', env: { ...good, OMC_WORKER_LAUNCH_ATTEMPT_ID: '' } },
       // Run from the team root, so a relative fallback would land on workers/worker-1.
       { event: 'Stop', env: { ...good, OMC_TEAM_STATE_ROOT: '' } },
+      { event: 'Stop', env: { OMC_TEAM_STATE_ROOT: root, OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' } },
       // An empty worker name would put the file in workers/ itself.
       { event: 'Stop', env: { ...good, OMC_TEAM_WORKER: 'demo/' } },
       { event: 'Stop', env: { ...good, OMC_TEAM_WORKER: 'demo/w..1' } },
+      // So would a worker named `.`, which starts with no letter or digit.
+      { event: 'Stop', env: { ...good, OMC_TEAM_WORKER: 'demo/.' } },
+      { event: 'Stop', env: { ...good, OMC_TEAM_WORKER: 'demo/-w1' } },
+      { event: 'Stop', env: { ...good, OMC_TEAM_WORKER: 'demo/w 1' } },
     ];
     for (const { event, env } of cases) {
       const result = spawnSync(process.execPath, [hook, event], {
@@ -460,7 +468,7 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
       });
       expect({ event, env, status: result.status, stdout: result.stdout, stderr: result.stderr })
         .toEqual({ event, env, status: 0, stdout: '', stderr: '' });
-      for (const worker of ['', 'worker-1', 'w..1']) {
+      for (const worker of ['', 'worker-1', 'w..1', '-w1', 'w 1']) {
         expect({ event, env, written: readFileSync(join(root, 'workers', worker, 'provider-events.jsonl'), 'utf8') })
           .toEqual({ event, env, written: '' });
       }
