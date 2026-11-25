@@ -1989,6 +1989,28 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readJson(f.state).paused, 'the pause itself is over').toBe(false);
   });
 
+  it('a file kept aside by one removal is never replaced by the quarantine of a later one: the name it is moved to is new every time', () => {
+    const f = fixture('quarantine-names', {});
+    // first removal: a foreign file takes the place after the last look, and another one is at the path again when the first is to be put back,
+    // so the first is kept under its quarantine name; second removal: an ordinary one, in the same process
+    const driver = ['import os, runpy, sys, time', 'guard, pause = sys.argv[1], sys.argv[2]', 'sys.argv = [guard] + sys.argv[3:]',
+      'g = runpy.run_path(guard, run_name="guard_functions")', 'real_lstat, real_rename, looks = os.lstat, os.rename, []',
+      'def swap(path, *args, **kw):', '    found = real_lstat(path, *args, **kw)',
+      '    if str(path) == pause and sys._getframe(1).f_code.co_name == "unpublish":', '        looks.append(1)',
+      '        if len(looks) == 2:', '            open(pause + ".x", "w").write("foreign one\\n")', '            os.replace(pause + ".x", pause)',
+      '    return found',
+      'def occupy(src, dst, *args, **kw):', '    real_rename(src, dst, *args, **kw)', '    if str(src) == pause and len(looks) == 2:', '        open(pause, "w").write("foreign two\\n")',
+      'os.lstat, os.rename = swap, occupy', 'state = {"since": time.time(), "resume_at": time.time() + 60}',
+      'g["publish"](state)', 'g["unpublish"]()', 'os.remove(pause)', 'g["publish"](state)', 'g["unpublish"]()'].join('\n');
+    const r = runPyCode(driver, [GUARD, f.pause, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout, 'the first file is reported as kept').toMatch(/is not a pause file of this guard and is kept as .*\.gone/);
+    const kept = readdirSync(f.dir).filter((n) => n.endsWith('.gone'));
+    expect(kept, 'the file kept by the first removal is still there').toHaveLength(1);
+    expect(readText(join(f.dir, kept[0])), 'with its content').toBe('foreign one\n');
+    expect(existsSync(f.pause), 'the second removal removed its pause').toBe(false);
+  });
+
   it('where hard links are not supported a file that appears at pause_file is still never replaced, and without one the pause is published with nothing left behind', () => {
     const driver = ['import errno, os, runpy, sys', 'target = sys.argv[1]', 'foreign = sys.argv[2] == "1"',
       'def nolink(a, b, *args, **kw):', '    if foreign and b == target: open(b, "w").write("late foreign file\\n")', '    raise OSError(errno.EPERM, "Operation not permitted")',

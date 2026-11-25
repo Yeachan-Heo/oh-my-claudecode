@@ -864,7 +864,7 @@ def unpublish(strict=False):
         log(f'cannot remove pause file: {e!r}')
         return False
     if ours:
-        gone = f'{PAUSE_FILE}.{os.getpid()}.gone'
+        gone = f'{PAUSE_FILE}.{os.getpid()}.{os.urandom(6).hex()}.gone'   # a name no earlier file has: the rename must not replace a file that was kept under one
         try:
             os.rename(PAUSE_FILE, gone)
             ours = file_identity(os.lstat(gone)) == file_identity(before)
