@@ -1619,6 +1619,59 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a word of the command of another hook with *, ? or [ is every file that the shell expands it to: such a file is never a file the guard writes, at the start and after a settings rewrite, and a pattern that matches too many files is not read to its end', async () => {
+    const f = fixture('foreign-glob', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const script = join(hooks, 'only-hook.py');
+    writeFileSync(script, '# the one script that the pattern matches\n', 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const pattern of [`${hooks}/*.py`, `${hooks}/only-hook.p?`, `${hooks}/only-[h]ook.py`]) {
+      writeFileSync(f.settings, settings(`${PYBIN} ${pattern}`), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${pattern} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${pattern} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${pattern} as ${key}: the program is intact`).toBe('# the one script that the pattern matches\n');
+      }
+    }
+    // a pattern that matches no file, or only files that the guard never writes, is no collision
+    writeFileSync(f.settings, settings(`grep x ${hooks}/*.log ${hooks}/none-*.py`), 'utf8');
+    const quiet = start({});
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+
+    // a pattern that matches more than 4096 files is not read to its end
+    const many = join(f.dir, 'many');
+    mkdirSync(many);
+    for (let i = 0; i < 4100; i++) writeFileSync(join(many, `f${i}`), '', 'utf8');
+    writeFileSync(f.settings, settings(`cat ${many}/*`), 'utf8');
+    const cut = start({ state_file: join(f.dir, 'elsewhere.state') });
+    expect(cut.status, `${cut.stdout.slice(0, 300)}${cut.stderr.slice(0, 300)}`).toBe(2);
+    expect(cut.stderr).toMatch(/too many files to scan/);
+
+    // a settings rewrite after the start: the pattern now matches the log file
+    const logPath = join(hooks, 'late-log.py');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours] } }), 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: logPath, settings_file: f.settings }), 'utf8');
+    const program = '# a hook of another tool\nprint("audit")\n';
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(logPath)), 20000, 'the start in the log');
+      writeFileSync(f.settings, settings(`${PYBIN} ${hooks}/late-*.py`), 'utf8');
+      writeFileSync(logPath, program, 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*program of another hook .*late-log\.py is the log_file of this guard/.test(g.out), 20000, 'the refusal of the pause');
+      await sleep(800);
+    } finally { await stopGuard(g); }
+    expect(readText(logPath), 'the program of the other hook is intact').toBe(program);
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [

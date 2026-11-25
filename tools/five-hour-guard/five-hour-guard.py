@@ -28,7 +28,7 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, json, math, os, shlex, signal, stat, sys, time
+import argparse, datetime, glob, itertools, json, math, os, shlex, signal, stat, sys, time
 
 try:
     import fcntl
@@ -287,18 +287,24 @@ class ScanIncomplete(Exception):
 
 def word_files(word, directories):
     """The files a word of a command can be: a word with a directory part is that path as written (with ~ and variables of this process
-    expanded); a word without one is the file of that name in each of `directories` (the working directory first, then the PATH) where there is one."""
+    expanded); a word without one is the file of that name in each of `directories` (the working directory first, then the PATH) where there is one.
+    A word with `*`, `?` or `[` is also every file that the shell would expand it to (glob, at most MAX_COMMAND_PROGRAMS + 1 results: more is
+    ScanIncomplete in the caller), as the word with a directory part or in each of `directories`."""
     word = os.path.expanduser(os.path.expandvars(word))
     if not word or len(word) > MAX_PATH_CHARS or '\0' in word:
         return []
+    pattern = any(c in word for c in '*?[')
+    cap = MAX_COMMAND_PROGRAMS + 1
     if os.sep in word or (os.altsep and os.altsep in word):
-        return [word]
+        return [word] + (list(itertools.islice(glob.iglob(word), cap)) if pattern else [])
     found = []
     for directory in directories:
         try:
             path = os.path.join(directory, word)
             if os.path.lexists(path):
                 found.append(path)
+            if pattern:
+                found += list(itertools.islice(glob.iglob(path), cap))
         except (OSError, ValueError):
             pass
     return found
@@ -370,8 +376,8 @@ def command_programs(command, exclude=None, depth=0):
                 for path in word_files(piece, directories):
                     if path not in found:
                         found.append(path)
-        if len(found) > MAX_COMMAND_PROGRAMS:
-            raise ScanIncomplete('command names too many files to scan')
+                if len(found) > MAX_COMMAND_PROGRAMS:
+                    raise ScanIncomplete('command names too many files to scan')
     return found
 
 
