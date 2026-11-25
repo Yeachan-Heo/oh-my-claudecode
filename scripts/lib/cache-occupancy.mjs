@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
-import { hostname, networkInterfaces } from 'os';
+import { hostname, type as osType } from 'os';
 import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
@@ -90,27 +90,21 @@ function identities(pids, probeTimeoutMs = 3000) {
   }
   return result;
 }
-// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; else the hardware addresses
-// of the network interfaces; empty where there is none)
+// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; else the operating system name)
 // and, on Linux, the PID namespace. Two machines can report the same host name and the same namespace text, so the machine id tells them
 // apart. A profile shared over NFS or mounted into a container holds records of owners that this machine cannot probe, so a record that
 // names another place is never judged by a local process probe. A record made before the machine id was added has the other format and
 // is taken for another place (kept, never judged by a local probe).
-// Where no machine id file can be read (Windows, macOS), the hardware addresses of the network interfaces stand in for it; where there
-// are none either, the machine is unknown (empty) and a record is then never judged by a local probe (see isForeignOwner).
+// Where no machine id file can be read (Windows, macOS), the host name and the operating system name stand alone: they do not change when a network
+// adapter comes or goes (a hardware address set would, and the records of the same machine would then look foreign for good), at the cost
+// that two machines of one operating system and one host name on a shared profile are taken for one.
 function machineId() {
   let machine = '';
   for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
     try { machine = readFileSync(file, 'utf8').trim(); } catch {}
     if (machine) break;
   }
-  if (!machine) {
-    try {
-      const macs = Object.values(networkInterfaces()).flat().filter((item) => item && !item.internal && item.mac && item.mac !== '00:00:00:00:00:00').map((item) => item.mac);
-      if (macs.length) machine = `mac:${[...new Set(macs)].sort().join(',')}`;
-    } catch {}
-  }
-  return machine;
+  return machine || `system:${osType()}`;
 }
 function placeId() {
   const machine = machineId();
@@ -120,9 +114,8 @@ function placeId() {
 }
 // Only a record that names this very place is local. A record without the field (made by the previous publisher, possibly on another machine
 // of a shared profile during a rolling update) has an unknown origin and is foreign: never judged by a local probe, never removed as gone.
-// When this machine cannot name itself, no record can be compared with it, so every record is foreign.
 export function isForeignOwner(record) {
-  return typeof record?.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
+  return typeof record?.host !== 'string' || record.host === '' || record.host !== placeId();
 }
 function alive(pid) {
   try { process.kill(pid, 0); return true; }

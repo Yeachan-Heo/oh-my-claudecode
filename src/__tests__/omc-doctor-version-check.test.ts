@@ -241,9 +241,8 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(code.match(/\.sort\(compareVersions\)/g)).toHaveLength(3);
     expect(code.match(/\.sort\(runtimeSemverCompare\)/g)).toHaveLength(1);
     // Across the script three more sorts have no comparator, and none of them orders versions: the CLAUDE-*.md file names of
-    // Step 4, the marketplace names the cache commands go through (by name, not by the order of the registry) and the hardware addresses
-    // that name this machine in an occupancy record.
-    expect(codeOf().match(/\.sort\(\)/g)).toHaveLength(3);
+    // Step 4 and the marketplace names the cache commands go through (by name, not by the order of the registry).
+    expect(codeOf().match(/\.sort\(\)/g)).toHaveLength(2);
     expect(scriptSection('Step 4')).toContain('.sort()');
   });
 

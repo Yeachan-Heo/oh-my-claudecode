@@ -197,13 +197,13 @@ describe('cache occupancy registry', () => {
     expect(existsSync(file)).toBe(true);
   });
 
-  // Where no machine id file can be read (Windows, macOS) the hardware addresses of the interfaces name the machine; where there are none the
-  // machine is unknown, and a record is then never judged by a local probe either.
+  // Where no machine id file can be read (Windows, macOS) the place is named by the operating system and the host name, not by the network adapters:
+  // a VPN, a dock or a virtual card that comes or goes does not turn the records of this machine into those of another one.
   it.each([
     ['typescript', null],
     ['script', '../../../scripts/lib/cache-occupancy.mjs'],
     ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
-  ])('keeps the record of an owner that cannot be told from this machine without a machine id file, for %s', async (_name, path) => {
+  ])('keeps the place of its owner when a network adapter comes or goes without a machine id file, for %s', async (_name, path) => {
     const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
     const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
     const root = join(dir, 'plugins', '1.0.0');
@@ -216,16 +216,12 @@ describe('cache occupancy registry', () => {
       expect(await (path ? publish(root, dir, process.pid, 'same-start') : publish(root, dir, 'same-start'))).toBe(true);
       const registry = join(dir, '.omc', 'cache-occupancy');
       const file = join(registry, readdirSync(registry)[0]);
-      writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), pid: spawnSync(process.execPath, ['-e', '']).pid }));
-      const answers: Record<string, boolean> = {};
-      for (const [label, seen] of [['other address', card('bb:bb:bb:bb:bb:bb')], ['no address', { lo: [{ mac: '00:00:00:00:00:00', internal: true }] }], ['same address', card('aa:aa:aa:aa:aa:aa')]] as [string, Record<string, unknown[]>][]) {
-        interfaces.value = seen;
-        read(dir);
-        answers[label] = existsSync(file);
-        if (!existsSync(file)) break;
-      }
-      // Only the machine that is the owner's own proves the owner gone (the last case removes the record of the exited process).
-      expect(answers).toEqual({ 'other address': true, 'no address': true, 'same address': false });
+      const published = JSON.parse(readFileSync(file, 'utf8')) as { host: string };
+      writeFileSync(file, JSON.stringify({ ...published, pid: spawnSync(process.execPath, ['-e', '']).pid }));
+      // Another adapter, then none at all: the owner is judged by a local probe (it has exited), so the record goes.
+      interfaces.value = { lo: [{ mac: '00:00:00:00:00:00', internal: true }], eth1: [{ mac: 'bb:bb:bb:bb:bb:bb', internal: false }, { mac: 'cc:cc:cc:cc:cc:cc', internal: false }] };
+      read(dir);
+      expect({ host: published.host.includes('aa:aa'), kept: existsSync(file) }).toEqual({ host: false, kept: false });
     } finally {
       interfaces.value = undefined;
       readFailures.clear();

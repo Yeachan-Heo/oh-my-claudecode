@@ -1048,13 +1048,7 @@ const machineId = () => {
     } catch {}
     if (machine) break;
   }
-  if (!machine) {
-    try {
-      const macs = Object.values(os.networkInterfaces()).flat().filter((item) => item && !item.internal && item.mac && item.mac !== '00:00:00:00:00:00').map((item) => item.mac);
-      if (macs.length) machine = 'mac:' + [...new Set(macs)].sort().join(',');
-    } catch {}
-  }
-  return machine;
+  return machine || 'system:' + os.type();
 };
 const placeId = () => {
   const machine = machineId();
@@ -1064,7 +1058,7 @@ const placeId = () => {
   } catch {}
   return os.hostname() + '|' + machine + '|' + namespace;
 };
-const isForeignOwner = (record) => typeof record?.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
+const isForeignOwner = (record) => typeof record?.host !== 'string' || record.host === '' || record.host !== placeId();
 // A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time
 // differs from the recorded one, or the record is dated more than 5 minutes in the future (not for a record of another place, whose clock this
 // system cannot judge).

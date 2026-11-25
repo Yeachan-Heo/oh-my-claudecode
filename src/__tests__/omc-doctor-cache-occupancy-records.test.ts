@@ -42,35 +42,34 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     const lib = readFileSync(path.join(ROOT, 'scripts', 'lib', 'cache-occupancy.mjs'), 'utf8');
     const libSource = lib.slice(lib.indexOf('function machineId()'), lib.indexOf('function alive(')).replace('export function', 'function');
     const doctorSource = scriptText.slice(scriptText.indexOf('const machineId = '), scriptText.indexOf('// A record is ignored only when')).replace(/^const (\w+) = /gm, 'var $1 = ');
-    const records = [{}, { host: '' }, { host: 5 }, { host: null }, { host: 'machine-a' }, { host: 'machine-a|pid:[1]' }, { host: 'machine-a|id-1|pid:[1]' }, { host: 'machine-a|id-2|pid:[1]' }, { host: 'machine-a|id-1|' }, { host: 'machine-a||' }, { host: 'machine-b|id-1|pid:[2]' }, { host: 'machine-b||pid:[2]' }, { host: 'machine-a|mac:aa:aa:aa:aa:aa:aa|' }, { host: 'machine-a|mac:aa:aa:aa:aa:aa:aa,bb:bb:bb:bb:bb:bb|pid:[1]' }, undefined];
-    // The machine id comes from the first readable of two files; a place has none where neither can be read.
+    const records = [{}, { host: '' }, { host: 5 }, { host: null }, { host: 'machine-a' }, { host: 'machine-a|pid:[1]' }, { host: 'machine-a|id-1|pid:[1]' }, { host: 'machine-a|id-2|pid:[1]' }, { host: 'machine-a|id-1|' }, { host: 'machine-a||' }, { host: 'machine-b|id-1|pid:[2]' }, { host: 'machine-b||pid:[2]' }, { host: 'machine-a|system:Linux|' }, { host: 'machine-a|system:Windows_NT|pid:[1]' }, undefined];
+    // The machine id comes from the first readable of two files; where neither can be read the operating system name stands in (the network adapters play no part).
     for (const place of [{ host: 'machine-a', files: {}, namespace: '', macs: [] as string[] }, { host: 'machine-a', files: { '/etc/machine-id': 'id-1\n' }, namespace: 'pid:[1]', macs: [] as string[] }, { host: 'machine-a', files: { '/var/lib/dbus/machine-id': 'id-2' }, namespace: 'pid:[1]', macs: [] as string[] }, { host: 'machine-a', files: { '/etc/machine-id': 'id-1', '/var/lib/dbus/machine-id': 'id-2' }, namespace: '', macs: [] as string[] }, { host: 'machine-b', files: {}, namespace: 'pid:[2]', macs: [] as string[] } , { host: 'machine-a', files: {}, namespace: '', macs: ['aa:aa:aa:aa:aa:aa'] }, { host: 'machine-a', files: {}, namespace: 'pid:[1]', macs: ['bb:bb:bb:bb:bb:bb', 'aa:aa:aa:aa:aa:aa'] }]) {
       const readFileSync = (file: string) => { const text = (place.files as Record<string, string>)[file]; if (text === undefined) throw new Error('no such file'); return text; };
-      const networkInterfaces = () => place.macs.length ? { eth0: place.macs.map((mac) => ({ mac, internal: false })) } : { lo: [{ mac: '00:00:00:00:00:00', internal: true }] };
-      const sandbox = { readFileSync, networkInterfaces, readlinkSync: () => { if (!place.namespace) throw new Error('not linux'); return place.namespace; }, hostname: () => place.host };
+      const sandbox = { readFileSync, osType: () => 'Linux', readlinkSync: () => { if (!place.namespace) throw new Error('not linux'); return place.namespace; }, hostname: () => place.host };
       const fromLib = vm.runInNewContext(`${libSource}\nrecords => records.map(isForeignOwner)`, sandbox) as (records: unknown[]) => boolean[];
-      const fromDoctor = vm.runInNewContext(`${doctorSource}\nrecords => records.map(isForeignOwner)`, { fs: { readFileSync, readlinkSync: sandbox.readlinkSync }, os: { hostname: sandbox.hostname, networkInterfaces } }) as (records: unknown[]) => boolean[];
+      const fromDoctor = vm.runInNewContext(`${doctorSource}\nrecords => records.map(isForeignOwner)`, { fs: { readFileSync, readlinkSync: sandbox.readlinkSync }, os: { hostname: sandbox.hostname, type: sandbox.osType } }) as (records: unknown[]) => boolean[];
       expect({ place, doctor: fromDoctor(records) }).toEqual({ place, doctor: fromLib(records) });
     }
   });
 
   // Two machines on a shared profile can report the same host name and the same PID namespace text (the namespace of init is the same everywhere
   // on Linux); a record of one, read on the other, must still be foreign, or the local "no such process" would prove its owner gone.
-  test('a record of a machine with the same host name and PID namespace text but another machine id (or other hardware addresses) is foreign, in the runtime helper and in the doctor', () => {
+  test('a record of a machine with the same host name and PID namespace text but another machine id is foreign, and the network adapters do not change the place, in the runtime helper and in the doctor', () => {
     const lib = readFileSync(path.join(ROOT, 'scripts', 'lib', 'cache-occupancy.mjs'), 'utf8');
     const libSource = lib.slice(lib.indexOf('function machineId()'), lib.indexOf('function alive(')).replace('export function', 'function');
     const doctorSource = scriptText.slice(scriptText.indexOf('const machineId = '), scriptText.indexOf('// A record is ignored only when')).replace(/^const (\w+) = /gm, 'var $1 = ');
-    // A machine without a machine id file (Windows, macOS) is told apart by the hardware addresses of its interfaces; with neither it cannot be told at all.
+    // A machine without a machine id file (Windows, macOS) is named by its operating system and host name; its network adapters play no part.
     const machine = (id: string, macs: string[] = []) => {
       const readFileSync = (file: string) => { if (file !== '/etc/machine-id' || !id) throw new Error('no such file'); return `${id}\n`; };
       const networkInterfaces = () => (macs.length ? { eth0: macs.map((mac) => ({ mac, internal: false })) } : {});
+      const osType = () => 'Linux';
       const readlinkSync = () => 'pid:[4026531836]';
       const hostname = () => 'build-host';
-      return { lib: { readFileSync, readlinkSync, hostname, networkInterfaces }, doctor: { fs: { readFileSync, readlinkSync }, os: { hostname, networkInterfaces } } };
+      return { lib: { readFileSync, readlinkSync, hostname, networkInterfaces, osType }, doctor: { fs: { readFileSync, readlinkSync }, os: { hostname, networkInterfaces, type: osType } } };
     };
     const pairs = {
       'another machine id': [machine('id-of-machine-a'), machine('id-of-machine-b')],
-      'no machine id file, other hardware addresses': [machine('', ['aa:aa:aa:aa:aa:aa']), machine('', ['bb:bb:bb:bb:bb:bb'])],
     } as const;
     for (const [label, [a, b]] of Object.entries(pairs)) {
       for (const side of ['lib', 'doctor'] as const) {
@@ -81,14 +80,17 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
         expect({ label, side, onA: foreignOn(a, fromA), onB: foreignOn(b, fromA) }).toEqual({ label, side, onA: false, onB: true });
       }
     }
-    // A machine that cannot name itself (no machine id file, no interface address) compares with nothing: every record is foreign to it. A record without the
-    // field (the previous publisher) has an unknown origin and is foreign on every machine.
-    const nameless = machine('');
+    // Without a machine id file the place does not depend on the network adapters: a machine that gains or loses one still knows its own records
+    // (a hardware address set would make them foreign for good). A record without the field (the previous publisher) has an unknown origin and is foreign.
+    const before = machine('', ['aa:aa:aa:aa:aa:aa']);
+    const after = machine('', ['bb:bb:bb:bb:bb:bb', 'cc:cc:cc:cc:cc:cc']);
+    const none = machine('');
     for (const side of ['lib', 'doctor'] as const) {
       const source = side === 'lib' ? libSource : doctorSource;
-      const foreignOn = (m: typeof nameless, record: unknown) => vm.runInNewContext(`${source}\nisForeignOwner(record)`, { ...m[side], record }) as boolean;
-      const own = { host: vm.runInNewContext(`${source}\nplaceId()`, nameless[side]) as string };
-      expect({ side, own: foreignOn(nameless, own), other: foreignOn(nameless, { host: 'build-host|id|pid:[4026531836]' }), noField: foreignOn(nameless, {}) }).toEqual({ side, own: true, other: true, noField: true });
+      const run = (m: typeof before, text: string, record?: unknown) => vm.runInNewContext(`${source}\n${text}`, { ...m[side], record });
+      const own = { host: run(before, 'placeId()') as string };
+      expect({ side, same: run(after, 'isForeignOwner(record)', own), none: run(none, 'isForeignOwner(record)', own), noField: run(before, 'isForeignOwner(record)', {}) })
+        .toEqual({ side, same: false, none: false, noField: true });
     }
   });
 
