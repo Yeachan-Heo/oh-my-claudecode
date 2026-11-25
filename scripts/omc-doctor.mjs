@@ -1445,13 +1445,13 @@ const cacheRepair = (kind) => {
         const redirected = target.place != path.join(realPath(path.dirname(path.dirname(backups))), 'backups', 'oh-my-claudecode');
         moveStarted = true;
         fs.mkdirSync(target.place, { recursive: true });
-        // Whether a version may be moved by its modification dates: counts what it leaves alone and answers false then. Asked three times, first
-        // for the choice, again after the protection read before the last one, and once more after the last read of the protection, right before the
-        // rename, because an update may touch it between.
-        const settled = (name) => {
+        // Whether a version may be moved by its modification dates: counts what it leaves alone and answers false then. Asked for the choice, again
+        // after the protection read before the last one, and once more on the version in the backup after the move (`at` names where it lies), because an
+        // update may touch it between.
+        const settled = (name, at = path.join(dir, name)) => {
           let newest;
           try {
-            newest = newestChange(path.join(dir, name));
+            newest = newestChange(at);
           } catch (error) {
             unjudged++;
             return false;
@@ -1491,10 +1491,28 @@ const cacheRepair = (kind) => {
             const last = protectionOf(dir, versions);
             if (last.unreadable || last.noIdentity || !last.pinned.length || last.kept.includes(name)) {
               skipped++;
-            } else if (settled(name)) {
-              // The read above takes its time: an update that touched the version during it is seen only by this last date check.
-              fs.renameSync(path.join(dir, name), backup);
-              moved++;
+            } else {
+              // Two signals, the dates and the protection, cannot be read in one instant, and each read leaves a window for the other one (an
+              // update changes dates, a session that starts publishes a record and changes none). So the version is moved first and both are read
+              // once more with it out of the cache, the dates first and the protection last; one that shows use is put back where it was.
+              const original = path.join(dir, name);
+              fs.renameSync(original, backup);
+              // A destination that was redirected in that instant no longer holds the copy at this path: there is nothing to read or to put back, and
+              // the check of the destination before the next move stops the run.
+              let back = taken(backup) && !settled(name, backup);
+              if (!back && taken(backup)) {
+                const after = protectionOf(dir, versions);
+                if (after.unreadable || after.noIdentity || !after.pinned.length || after.kept.includes(name)) {
+                  skipped++;
+                  back = true;
+                }
+              }
+              if (back) {
+                if (taken(original)) throw new Error('version ' + name + ' showed use right after it was moved and ' + original + ' exists again, so it could not be put back and stays in ' + backup);
+                fs.renameSync(backup, original);
+              } else {
+                moved++;
+              }
             }
           }
         });

@@ -555,22 +555,22 @@ fs.mkdirSync = function (target, ...rest) {
     }
   });
 
-  // The dates of a version are judged before the last read of the protection, which walks the registry and the occupancy records and takes its time:
-  // an update that touches the version during that walk is seen only by a date check right before the rename. The touch is played at the n-th read of
-  // the occupancy directory, for every read of the run, so that the one that is the last pass of the protection is among them.
+  // The reads of the protection walk the registry and the occupancy records and take their time: an update that touches the version during any of
+  // them is seen by a date check that follows it, the last one being the check on the version already moved to the backup. The touch is played at the
+  // n-th read of the occupancy directory, for every read of the run.
   test('a version that an update touches during any read of the protection, the last one included, is left in place', () => {
     const touch = `const fs = require('fs'), path = require('path'); const real = fs.readdirSync; let reads = 0;
 fs.readdirSync = function (target, ...rest) {
   const names = real.call(this, target, ...rest);
   if (String(target).endsWith('cache-occupancy') && ++reads === Number(process.env.TOUCH_AT)) {
     const now = new Date();
-    fs.utimesSync(path.join(process.env.TOUCH_DIR, 'package.json'), now, now);
+    try { fs.utimesSync(path.join(process.env.TOUCH_DIR, 'package.json'), now, now); } catch { /* the version is already in the backup: an update would write a new directory */ }
   }
   return names;
 };
 `;
     for (const command of commands) {
-      for (const at of [1, 2, 3, 4, 5]) {
+      for (const at of [1, 2, 3, 4, 5, 6]) {
         const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
@@ -580,14 +580,59 @@ fs.readdirSync = function (target, ...rest) {
           writeFileSync(preload, touch);
           const result = runCommand(command, dir, { env: { TOUCH_AT: String(at), TOUCH_DIR: path.join(cache, '5.8.0') }, preloads: [preload] });
           expect(result.status).toBe(0);
-          // Read 5 does not exist: nothing touches the version and it moves, which shows that the reads before it are the ones that count.
+          // Reads 5 and 6 come after the move (the version is in the backup and an update would write a new directory), and the version stays moved.
           expect({ command, at, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual(
-            at === 5 ? { command, at, versions: '5.9.0', moved: 1 } : { command, at, versions: '5.8.0,5.9.0', moved: 0 },
+            at >= 5 ? { command, at, versions: '5.9.0', moved: 1 } : { command, at, versions: '5.8.0,5.9.0', moved: 0 },
           );
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }
       }
+    }
+  });
+
+  // The other direction: a session publishes its record while the dates are walked, after the protection was read, and a publication changes no date.
+  // The version is moved first and both signals are read once more with it out of the cache; one that shows use is put back. The record is
+  // published during the n-th walk of the version (before and after the move), for every walk of the run; where the original place is taken
+  // again at that moment the version cannot be put back, stays in the backup and the command says so.
+  const publishDuring = `const fs = require('fs'), path = require('path'), crypto = require('crypto'); const real = fs.lstatSync; let walks = 0;
+fs.lstatSync = function (target, ...rest) {
+  const text = String(target);
+  if (text.endsWith(path.sep + 'package.json') && (text.startsWith(process.env.WALK_DIR + path.sep) || text.startsWith(process.env.BACKUPS + path.sep)) && ++walks === Number(process.env.PUBLISH_AT)) {
+    const dir = path.join(process.env.CLAUDE_CONFIG_DIR, '.omc', 'cache-occupancy');
+    fs.mkdirSync(dir, { recursive: true });
+    const record = JSON.stringify({ version: 1, pid: process.pid, pluginRoot: process.env.WALK_DIR, host: process.env.OWN_HOST, updatedAt: new Date().toISOString() });
+    fs.writeFileSync(path.join(dir, crypto.createHash('sha256').update(record).digest('hex') + '.json'), record);
+    if (process.env.RETAKE && !fs.existsSync(process.env.WALK_DIR)) fs.mkdirSync(process.env.WALK_DIR);
+  }
+  return real.call(this, target, ...rest);
+};
+`;
+  const publishAt = (command: string, at: number, retake = false) => {
+    const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+    try {
+      writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
+      ageVersions(cache);
+      const preload = path.join(dir, 'publish.cjs');
+      writeFileSync(preload, publishDuring);
+      const env = { PUBLISH_AT: String(at), WALK_DIR: path.join(cache, '5.8.0'), BACKUPS: backupDir(dir), OWN_HOST: ownHost(), ...(retake ? { RETAKE: '1' } : {}) };
+      const result = runCommand(command, dir, { env, preloads: [preload] });
+      return { status: result.status, versions: digitVersions(cache), moved: movedAside(dir), said: /could not be put back|stays in/.test(result.stdout) };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  test('a record published during any date walk, the last one included, keeps the version', () => {
+    for (const command of commands) {
+      // Walks 1 and 2 are before the move, walk 3 is the one after it; there is no walk 4, so the version is moved there.
+      for (const at of [1, 2, 3]) expect({ command, at, ...publishAt(command, at) }).toEqual({ command, at, status: 0, versions: '5.8.0,5.9.0', moved: 0, said: false });
+      expect({ command, at: 4, ...publishAt(command, 4) }).toEqual({ command, at: 4, status: 0, versions: '5.9.0', moved: 1, said: false });
+    }
+  });
+
+  test('a version that shows use after the move and whose place is taken again stays in the backup, and the command says so', () => {
+    for (const command of commands) {
+      expect({ command, ...publishAt(command, 3, true) }).toEqual({ command, status: 1, versions: '5.8.0,5.9.0', moved: 1, said: true });
     }
   });
 
