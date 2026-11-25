@@ -115,7 +115,7 @@ nothing and the hook lets everything through:
 The guard does not stay silent about it: at start, and then at most once per `--warn-every` seconds (600) for each kind of
 problem, it logs a `WARNING` when the cache does not exist (`cache-missing`), cannot be read (`cache-unreadable`), is
 older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-percent`), or shows a percentage that is not a percentage (`cache-invalid-percent`: not a JSON number, not finite, below 0 or above 100), a timestamp more than two minutes ahead (`cache-future`), a high percentage with no reset time
-(`reset-missing`) or a reset time that is not believed (`reset-too-far`). Read the log once after you start the guard.
+(`reset-missing`) or a reset time that is not believed (`reset-too-far`). OMC rewrites the cache in place, so a read that finds an empty or half-written document is repeated up to 5 times, 0.1 s apart, before the cache counts as unreadable. Read the log once after you start the guard.
 
 ## Requirements and platforms
 

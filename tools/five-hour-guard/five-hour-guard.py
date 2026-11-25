@@ -657,14 +657,30 @@ def warn_data(kind, text):
     log(f'WARNING ({kind}): {text}')
 
 
+CACHE_READ_TRIES = 5     # OMC refreshes the cache by truncating it in place and writing it again: a read in between sees an empty or half-written document
+CACHE_RETRY_S = 0.1
+
+
+def load_cache():
+    """The cache document. A document that cannot be decoded is read again a few times (the writer is done within a moment); the last
+    failure is raised. A file that is missing or cannot be opened is not repeated."""
+    for attempt in range(CACHE_READ_TRIES):
+        try:
+            with open(CACHE) as f:
+                return json.load(f)
+        except ValueError:
+            if attempt == CACHE_READ_TRIES - 1:
+                raise
+            time.sleep(CACHE_RETRY_S)
+
+
 def read_cache():
     """(percent, reset_epoch, age_s, problem); percent is None when there is none. problem is None or (kind, text). Never raises.
 
     A refresh that was rate limited or failed rewrites the entry with a fresh `timestamp` but keeps the data of the last
     successful fetch (`lastSuccessAt`): the age of the data is then the age of that fetch, not of the rewrite."""
     try:
-        with open(CACHE) as f:
-            d = json.load(f)
+        d = load_cache()
         copy_of_old_data = bool(d.get('error') or d.get('rateLimited'))
         seen_ms = d.get('lastSuccessAt') if copy_of_old_data else d.get('timestamp')
         age = time.time() - (seen_ms / 1000 if type(seen_ms) in (int, float) and math.isfinite(seen_ms) else 0)   # text, a boolean or infinity is not a time: the entry is stale

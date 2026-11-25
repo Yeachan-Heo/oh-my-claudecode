@@ -57,6 +57,19 @@ const WHICH_FAILS_DRIVER = [
 ].join('\n');
 // the guard runs in another working directory (a relative path of a settings entry is read from it)
 const CHDIR_DRIVER = ['import os, runpy, sys', 'os.chdir(sys.argv[1])', 'sys.argv = sys.argv[2:]', "runpy.run_path(sys.argv[0], run_name='__main__')"].join('\n');
+// the first reads of the usage cache from the given time on (argv: cache, time, count) see what a refresh of OMC shows in the middle: an empty file, then half a document
+const TORN_CACHE_DRIVER = [
+  'import builtins, io, runpy, sys, time',
+  'real, cache, since, torn = builtins.open, sys.argv[1], float(sys.argv[2]), [int(sys.argv[3])]',
+  'def spy(path, *args, **kw):',
+  '    if str(path) == cache and time.time() >= since and torn[0] > 0:',
+  '        torn[0] -= 1',
+  '        return io.StringIO("" if torn[0] % 2 else \'{"timestamp": 17\')',
+  '    return real(path, *args, **kw)',
+  'builtins.open = spy',
+  'sys.argv = sys.argv[4:]',
+  "runpy.run_path(sys.argv[0], run_name='__main__')",
+].join('\n');
 const FAST = ['--interval', '0.2', '--heartbeat', '5', '--margin', '1'];
 const guardArgs = (f: Fixture, extra: string[] = []) => ['--config', f.cfg, ...FAST, ...extra];
 const startGuard = (f: Fixture, extra: string[] = []) => spawnPy(GUARD, guardArgs(f, extra));
@@ -396,6 +409,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       await waitFor(() => /reset slipped/.test(readText(short.log)), 20000, 'slip line');
       expect(readText(short.log), 'a pause that stays within the timeout is not reported').not.toMatch(/minimum timeout/);
     } finally { await stopGuard(g2); }
+  });
+
+  it('a read of the usage cache that catches a refresh in the middle (an empty or a half-written document) is repeated: the tick that ends a pause does not take it for stale data and release the calls', async () => {
+    const f = fixture('torn-read', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const resumeAt = now() + 2;
+    writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 60, resume_at: resumeAt }), 'utf8');
+    const g = spawnPyCode(TORN_CACHE_DRIVER, [f.cache, String(resumeAt), '3', GUARD, ...guardArgs(f)]);
+    try {
+      await waitFor(() => /reset slipped|RESUMED/.test(readText(f.log)), 20000, 'the tick after the resume time');
+      expect(readText(f.log), 'the pause is extended: the reading is still high with a later reset').toMatch(/reset slipped: 5h still 98\.0 %/);
+      expect(readText(f.log)).not.toMatch(/RESUMED|fail-open/);
+      expect(existsSync(f.pause), 'the pause file is still there').toBe(true);
+    } finally { await stopGuard(g); }
+
+    // a cache that stays unreadable is not waited for for ever: the reads stop and the entry is stale as before
+    const bad = fixture('torn-read-permanent', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const badResume = now() + 2;
+    writeFileSync(bad.state, JSON.stringify({ paused: true, since: now() - 60, resume_at: badResume }), 'utf8');
+    const gb = spawnPyCode(TORN_CACHE_DRIVER, [bad.cache, String(badResume), '1000', GUARD, ...guardArgs(bad)]);
+    try {
+      await waitFor(() => /RESUMED \(reset time reached \(cache stale, fail-open\)\)/.test(readText(bad.log)), 30000, 'the release on an unreadable cache');
+      expect(readText(bad.log)).toMatch(/WARNING \(cache-unreadable\)/);
+    } finally { await stopGuard(gb); }
   });
 
   it('resumes early when a fresh cache shows less than threshold - 10 percent', async () => {
