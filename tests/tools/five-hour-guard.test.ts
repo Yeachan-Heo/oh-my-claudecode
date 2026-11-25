@@ -1717,6 +1717,32 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
   });
 
+  it('a guard that starts while settings.json cannot be read writes nothing until one read of it succeeds, and a missing settings.json is a read that succeeded', async () => {
+    const f = fixture('no-scan-yet', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const script = join(f.dir, 'audit.py');
+    const program = '# a hook of another tool\nprint("audit")\n';
+    writeFileSync(script, program, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: script, log_file: f.log, settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, '{"hooks": {"PreToolUse": [', 'utf8');
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /ERROR: tick failed.*cannot be read and no earlier read of it succeeded/.test(g.out), 20000, 'the refusal of the pause');
+      await sleep(800);
+      expect(g.out, 'the unreadable file is reported as before').toMatch(/WARNING \(start\): cannot read the hook entries/);
+      expect(readText(script), 'the program of the hook is intact').toBe(program);
+      expect(existsSync(f.pause), 'no pause was published').toBe(false);
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours] } }), 'utf8');
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause after a read that succeeded');
+    } finally { await stopGuard(g); }
+
+    const missing = fixture('no-settings-file', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    rmSync(missing.settings, { force: true });
+    writeFileSync(missing.cfg, JSON.stringify({ usage_cache: missing.cache, pause_file: missing.pause, state_file: missing.state, log_file: missing.log, settings_file: missing.settings }), 'utf8');
+    guardOnce(missing);
+    expect(readJson(missing.pause).paused, 'no settings.json names no hook: the pause is published').toBe(true);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [

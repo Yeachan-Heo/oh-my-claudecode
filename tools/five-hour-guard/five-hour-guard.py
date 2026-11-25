@@ -413,6 +413,8 @@ def other_commands(data, ours):
 
 LAST_SCAN = [[]]   # what every readable settings.json gave since the start: neither a file that cannot be read (a rewrite in progress, a broken edit) nor a rewrite that removes an entry lifts the protection
 
+SCANNED = [False]   # whether settings.json was read to its end (or was not there) at least once since the start: until then nothing is known of the hooks that a session may have loaded, so nothing is written
+
 
 LOG_LOOK_S = 1.0
 LOG_LOOK = [None, False]   # [time.monotonic() of the last look, whether the log file was a program of a registered entry then]
@@ -447,6 +449,7 @@ def registered_runtime_files():
         with open(SETTINGS or default_settings()) as f:
             data = json.load(f)
         entries = command_hooks(data.get('hooks', {}).get('PreToolUse', []))
+        SCANNED[0] = True   # the document was read and has the shape of a settings file: what the scan below finds is what it holds
         generated = [t for t in command_tokens(ENTRY.entry_command(PAUSE_FILE, BUNDLED_HOOK, sys.executable, hook_log_setting())) if t[:1] not in PUNCTUATION or not t]
         if entries:
             found += [('registered hook', BUNDLED_HOOK), ('registered interpreter', sys.executable)]
@@ -469,7 +472,8 @@ def registered_runtime_files():
                 found.append((UNSCANNED, f'{e}: {command[:60]}'))
             except Exception:
                 continue   # one command that cannot be read must not hide the others
-    except Exception:
+    except Exception as e:
+        SCANNED[0] = SCANNED[0] or isinstance(e, FileNotFoundError)   # no settings.json is a file without hooks; one that cannot be read is not known
         return list(LAST_SCAN[0])
     if any(x not in LAST_SCAN[0] for x in found):
         LOG_LOOK[0] = None   # a program that no earlier scan found: the look at the log, made before and kept for a second, did not know it
@@ -611,6 +615,8 @@ def refuse_program_overwrite(*paths):
     for label, text in scanned:
         if label == UNSCANNED:   # what the command names is not known, so a file of the guard may be among it
             raise OSError(f'{text}... in {SETTINGS or default_settings()} is not read to its end, so the guard cannot tell whether it names {paths[0] if paths else "a file of the guard"}: nothing is written (shorten the command or remove the hook)')
+    if not SCANNED[0]:   # a session that loaded settings.json before it was damaged still runs its hooks, and none of them is known
+        raise OSError(f'{SETTINGS or default_settings()} cannot be read and no earlier read of it succeeded, so the guard cannot tell whether a hook of it runs {paths[0] if paths else "a file of the guard"}: nothing is written until it can be read')
     programs = [(label, program) for label, program in scanned if label in PROTECTED_LABELS]
     for path in paths:
         for label, program in programs:
