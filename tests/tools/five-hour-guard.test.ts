@@ -1882,6 +1882,41 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
   });
 
+  it('nested default-value parameters are filled in to the end, however deep, and parameters that refer to each other in a cycle are a command that is not read to its end', () => {
+    const f = fixture('foreign-nested-parameters', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const script = join(hooks, 'audit');
+    const text = '# the script that the command runs\n';
+    writeFileSync(script, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const nested = (depth: number) => Array.from({ length: depth }, (_, i) => '${FHG_N' + i + ':-').join('') + hooks + '}'.repeat(depth);
+    for (const depth of [4, 6, 12]) {
+      writeFileSync(f.settings, settings(`python3 "${nested(depth)}/audit"`), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${depth} levels as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${depth} levels as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${depth} levels as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a name with no value and no word is no reason to refuse: it stays as written
+    writeFileSync(f.settings, settings('python3 "$FHG_NOBODY_SETS_THIS/audit"'), 'utf8');
+    const quiet = start({ state_file: script });
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+    // parameters that refer to each other never reach an end: the command is not read to its end, so the guard does not start
+    writeFileSync(f.settings, settings('FHG_X=$FHG_Y; FHG_Y=$FHG_X; python3 "$FHG_X/audit"'), 'utf8');
+    const cycle = start({ state_file: script });
+    expect(cycle.status, `${cycle.stdout}${cycle.stderr}`).toBe(2);
+    expect(cycle.stderr).toMatch(/is not read to its end/);
+    expect(readText(script), 'the program is intact').toBe(text);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [

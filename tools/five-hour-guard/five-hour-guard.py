@@ -343,13 +343,22 @@ def command_tokens(command):
 PARAMETER = re.compile(r'\$(?:(\w+)|\{(\w+)(?:(:?[-=+])([^{}]*))?\})')   # $NAME, ${NAME}, ${NAME:-word} (also -, =, :=, + and :+)
 
 
+def own_value(name, value):
+    """The value assigned to NAME with the references to NAME itself (`PATH=dir:$PATH`) replaced by the value that the guard has, else by the
+    default word, else by nothing: they name the value before the assignment, so they are no cycle."""
+    return PARAMETER.sub(lambda m: (os.environ.get(name) or m.group(4) or '') if (m.group(1) or m.group(2)) == name else m.group(0), value)
+
+
 def parameter_variants(piece, assigned):
     """The piece filled in every way its parameters can be: `$NAME` and `${NAME}` with each value that the command assigns to NAME and the
     one that the guard has (a name that has none stays as written); `${NAME:-word}`, `-`, `:=` and `=` with those values and with the word;
     `${NAME:+word}` and `+` with the word and with nothing. Which way the shell takes is not decided. A word that holds a parameter is filled
-    in innermost first, in three passes. More than MAX_COMMAND_PROGRAMS variants is ScanIncomplete."""
+    in innermost first, pass after pass until a pass changes nothing (a name with no value and no word stays as written, so that is where it
+    ends). A chain of parameters ends within the `$` of the word plus the names that the command assigns; a pass beyond that is a cycle
+    (`A=$B B=$A`) or an expansion that does not end. More than MAX_COMMAND_PROGRAMS variants, a text longer than MAX_COMMAND_CHARS or no
+    end of the passes is ScanIncomplete."""
     variants = [piece]
-    for _ in range(3):
+    for _ in range(piece.count('$') + len(assigned) + 2):
         grown = []
         for text in variants:
             matches = list(PARAMETER.finditer(text))
@@ -365,12 +374,12 @@ def parameter_variants(piece, assigned):
                     last = m.end()
                 grown.append(''.join(parts) + text[last:])
         grown = list(dict.fromkeys(grown))
-        if len(grown) > MAX_COMMAND_PROGRAMS:
+        if len(grown) > MAX_COMMAND_PROGRAMS or any(len(text) > MAX_COMMAND_CHARS for text in grown):
             raise ScanIncomplete('command has too many ways to fill in its variables to scan')
         if grown == variants:
-            break
+            return variants
         variants = grown
-    return variants
+    raise ScanIncomplete('variables of the command refer to each other in a cycle or nest too deeply to scan')
 
 
 def word_pieces(word, assigned):
@@ -411,12 +420,12 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
             words.append(token)
     simple.append(words)
     found = []
-    assigned = {n: list(v) for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
+    assigned = {n: [own_value(n, x) for x in v] for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
     for words in simple:
         for word in words:
             name, equals, value = word.partition('=')
-            if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) and value not in assigned.setdefault(name, []):
-                assigned[name].append(value)
+            if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) and own_value(name, value) not in assigned.setdefault(name, []):
+                assigned[name].append(own_value(name, value))
     named = list(inherited)   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR) and of the command it is quoted in: the shell may run a later word from there
     for words in simple:
         for word in words:
