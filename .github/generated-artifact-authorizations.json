@@ -79741,24 +79741,6 @@
         },
         {
           "status": "modified",
-          "filename": "bridge/runtime-cli.cjs",
-          "sha": "0a5e95f31b066666297b22c79a1adc98eb1e2ae9",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "bridge/team-mcp.cjs",
-          "sha": "2c0fb8c03ab1f3cf23ce28cac06ba04f89ed8ccb",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "bridge/team.js",
-          "sha": "e62b33d53e5b93a63e4d5a1a1c65c97a69cde854",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
           "filename": "dist/hooks/agent-usage-reminder/constants.d.ts",
           "sha": "e75b3cb32ac711f8a9a1c3d7b9c5771e9d8bd40a",
           "previousFilename": null
