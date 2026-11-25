@@ -325,6 +325,8 @@ the configuration file to files with names used by nothing else (for example `gu
 `guard-own.log` in a directory of the guard), and register the hook entry with `add` for that pause file. The alarm ends at the next
 tick.
 
+A command with a command substitution (a dollar sign and a parenthesis, or a backtick, outside single quotes and not after a backslash; `$((...))`, an arithmetic expansion, is not one) is refused too: the guard does not start and does not write, as for a command that is not read to its end. This is the only exception to the rule that a variable that nobody knows is no reason to refuse and stays as written. The result of a program cannot be known or modelled, so a file of the guard that such a result names would be replaced without a warning, while an ordinary variable that the guard does not know is left as it is, because hooks often use variables that the guard cannot know. The refusal does not depend on the paths of the guard, so own files do not end it: the way out is to remove the substitution from the command of the hook (compute the path in a script, or write it out). The same holds for the text of a quoted word that is read as a command (`sh -c '...'`), also where it is single-quoted in the command around it and has a blank.
+
 ## Relation to `omc wait`
 
 `omc wait` (`src/features/rate-limit-wait/`) works after the limit is reached: it reads the same usage values, treats

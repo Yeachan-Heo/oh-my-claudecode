@@ -380,6 +380,37 @@ def strip_comments(command):
     return ''.join(out)
 
 
+def has_substitution(command):
+    """Whether the text has a command substitution, `$(...)` (not `$((`, an arithmetic expansion) or a backtick, that a shell would run: outside
+    single quotes (also those of `$'...'`, where a backslash escapes) and not after a backslash. The result of a program cannot be known or
+    modelled, so the file that it names is not found by reading the words."""
+    quote, i = None, 0
+    while i < len(command):
+        c = command[i]
+        if quote:
+            if c == '\\' and quote == "$'":
+                i += 1
+            elif c == quote[-1]:
+                quote = None
+            elif quote == '"' and c == '\\':
+                i += 1
+            elif quote == '"' and (c == '`' or command.startswith('$(', i) and not command.startswith('$((', i)):
+                return True
+        elif c == '\\':
+            i += 1
+        elif c == "'":
+            quote = "'"
+        elif c == '"':
+            quote = '"'
+        elif command.startswith("$'", i):
+            quote = "$'"
+            i += 1
+        elif c == '`' or command.startswith('$(', i) and not command.startswith('$((', i):
+            return True
+        i += 1
+    return False
+
+
 def command_tokens(command, quoted=False):
     """The words and the operators of a command as the shell splits them (shlex), None for a command with a NUL character or one that cannot be
     parsed. Raises ScanIncomplete past MAX_COMMAND_CHARS or MAX_COMMAND_WORDS: a prefix would pass for the whole command."""
@@ -553,6 +584,8 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
     two levels) raises ScanIncomplete: a prefix would pass for the whole command. A word longer than MAX_PATH_CHARS names no file and is skipped. `exclude`: a list of words that are not
     candidates, each once (the words of the entry that this guard generates, see registered_runtime_files)."""
     exclude = [] if exclude is None else exclude
+    if has_substitution(command if depth > 0 else strip_comments(command)):   # at depth 0 a comment is no command (as in command_tokens); a quoted command is read as it is
+        raise ScanIncomplete('command has a command substitution, whose result cannot be known')
     tokens = command_tokens(command, depth > 0)
     if tokens is None:
         return []   # a command with a NUL character (no process can be started with one in its arguments) or one the shell cannot parse runs nothing

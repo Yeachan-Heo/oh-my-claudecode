@@ -2182,6 +2182,46 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start({ state_file: join(hooks, 'audit') }).status, 'an unknown name in a pattern').toBe(0);
   });
 
+  it('a command substitution in the command of another hook (a dollar and a parenthesis, or a backtick, outside single quotes) is a command that is not read to its end: the guard refuses to start; text that is no substitution is read as before', () => {
+    const f = fixture('foreign-substitution', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, '# the script that the command runs\n', 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, key: string) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: audit }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const sh = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout;
+    expect(sh(`printf %s "$(printf ${hooks}/%s audit)"`), 'a substitution that makes the script').toBe(audit);
+    expect(sh('printf %s \'$(x)\' "\\$(x)" $((1+2))'), 'no substitution in single quotes, after a backslash, in arithmetic').toBe('$(x)$(x)3');
+    // refused, whichever file is meant: the result of the program is not known
+    const substitutions = [
+      `python3 "$(printf ${hooks}/%s audit)"`, `python3 $(printf ${hooks}/%s audit)`, 'python3 "`printf ' + hooks + '/%s audit`"', 'python3 `printf ' + hooks + '/%s audit`',
+      `sh -c 'python3 "$(printf ${hooks}/%s audit)"'`, `true; python3 "a$(x)b"`, `python3 $'a' "$(x)"`, `true # note\npython3 "$(x)"`,
+    ];
+    for (const command of substitutions) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, key);
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+      }
+    }
+    // read as before: no substitution
+    const plain = [`python3 '$(x)'`, 'python3 "\\$(x)"', 'python3 $((1+2))', 'python3 "$((1+2))"', 'python3 $FHG_NOBODY ${FHG_NOBODY:-x}', "python3 '`x`'", 'python3 \\`x', 'true # $(x)', "python3 $'$(x)'"];
+    for (const command of plain) {
+      const r = start(command, 'state_file');
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+    // and a file that a plain command names is still protected
+    const named = start(`python3 ${audit} '$(x)'`, 'state_file');
+    expect(named.status, 'the file is named beside the single-quoted text').toBe(2);
+    expect(named.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+  });
+
   it('a quoted word that starts with an operator character is a word and a file name (python3 \';audit\', \'&&audit\', \'|audit\', \'>audit\'); a real operator, quoted or not, is no file', () => {
     const f = fixture('foreign-operator-words', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
@@ -2402,7 +2442,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);
     const syntax = ['true && AUDIT', 'false || AUDIT', 'echo x | AUDIT', 'true; AUDIT', 'true;AUDIT', 'AUDIT &', 'true & AUDIT', '(AUDIT)', 'AUDIT > AUDIT.out 2>&1', "sh -c 'AUDIT'", 'bash -lc "AUDIT"',
-      'echo $(AUDIT)', "env -S 'AUDIT --flag'", "env -S 'env -i AUDIT'", "env --split-string 'AUDIT --flag'", "env --split-string='AUDIT --flag'", "env -S'AUDIT --flag'",
+      "env -S 'AUDIT --flag'", "env -S 'env -i AUDIT'", "env --split-string 'AUDIT --flag'", "env --split-string='AUDIT --flag'", "env -S'AUDIT --flag'",
       "env --split='AUDIT --flag'", "env -i --split-string='env -S\"AUDIT\"'", 'if true; then AUDIT; fi', 'if false; then true; elif true; then AUDIT; fi', 'while true; do AUDIT; done',
       'case x in x) AUDIT;; esac', '{ AUDIT; }', '! AUDIT', 'sudo AUDIT', 'nice -n 5 AUDIT', 'timeout 5 AUDIT', 'xargs AUDIT', 'echo x | xargs -n1 AUDIT', 'env -iu X AUDIT'].map((form) => (audit: string) => form.replaceAll('AUDIT', audit));
     for (const [k, build] of [...wrappers, ...syntax].entries()) {
