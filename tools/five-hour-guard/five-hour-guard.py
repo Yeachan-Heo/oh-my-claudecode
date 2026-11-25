@@ -437,7 +437,7 @@ def command_tokens(command, quoted=False):
     return tokens
 
 
-PARAMETER = re.compile(r'\$(?:(\w+)|\{(\w+)(?:(:?[-=+?]|%%?|##?)([^{}]*))?\})')   # $NAME, ${NAME}, ${NAME:-word} (also -, =, :=, +, :+, ?, :?, % and %%, # and ##)
+PARAMETER = re.compile(r'\$(?:(\w+)|\{(\w+)(?:(:?[-=+?]|%%?|##?)([^{}]*))?\}|\{#(\w+)\})')   # $NAME, ${NAME}, ${NAME:-word} (also -, =, :=, +, :+, ?, :?, % and %%, # and ##), ${#NAME}
 
 
 def own_value(name, value):
@@ -463,7 +463,7 @@ def trimmed_values(values, operator, pattern):
 def parameter_variants(piece, assigned):
     """The piece filled in every way its parameters can be: `$NAME` and `${NAME}` with each value that the command assigns to NAME and the
     one that the guard has (a name that has none stays as written); `${NAME:-word}`, `-`, `:=` and `=` with those values and with the word;
-    `${NAME:+word}` and `+` with the word and with nothing; `${NAME%pattern}` and the other trimming forms with the cuts that each filled-in pattern makes. Which way the shell takes is not decided. A word that holds a parameter is filled
+    `${NAME:+word}` and `+` with the word and with nothing; `${#NAME}` with the length of each of those values; `${NAME%pattern}` and the other trimming forms with the cuts that each filled-in pattern makes. Which way the shell takes is not decided. A word that holds a parameter is filled
     in innermost first, pass after pass until a pass changes nothing (a name with no value and no word stays as written, so that is where it
     ends). A chain of parameters ends within the `$` of the word plus the names that the command assigns; a pass beyond that is a cycle
     (`A=$B B=$A`) or an expansion that does not end. More than MAX_COMMAND_PROGRAMS variants, a text longer than MAX_COMMAND_CHARS or no
@@ -475,9 +475,11 @@ def parameter_variants(piece, assigned):
             matches = list(PARAMETER.finditer(text))
             options = []
             for m in matches:
-                name, operator, word = m.group(1) or m.group(2), m.group(3), m.group(4)
+                name, operator, word = m.group(1) or m.group(2) or m.group(5), m.group(3), m.group(4)
                 values = assigned.get(name, []) + ([os.environ[name]] if name in os.environ else [])
-                if operator in ('+', ':+'):
+                if m.group(5):   # ${#NAME}: the length of each value that NAME can have (a name without a value stays as written)
+                    options.append(list(dict.fromkeys(str(len(v)) for v in values)) or [m.group(0)])
+                elif operator in ('+', ':+'):
                     options.append([word, ''])
                 elif operator in ('%', '%%', '#', '##'):
                     cuts = [cut for pattern in (parameter_variants(word, assigned) if '$' in word else [word]) for cut in trimmed_values(values, operator, pattern)]   # the pattern is filled in as any word is, then cuts

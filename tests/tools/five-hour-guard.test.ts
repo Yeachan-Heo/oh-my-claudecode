@@ -2348,6 +2348,40 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start(`cd ${hooks}; python3 ';'`, join(other, ';')).status, 'a directory that the command does not name').toBe(0);
   });
 
+  it('the length of a parameter (${#NAME}) is filled in with the length of each value that NAME can have: from the command, from the env of settings.json; a name with no value stays as written and is no reason to refuse', () => {
+    const f = fixture('foreign-parameter-length', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, file: string, env: Record<string, string> = {}) => {
+      writeFileSync(f.settings, JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: file, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    // [the assignment before the word, the word, the file it makes, the env of settings.json]; what the shell makes of each is asked of sh below
+    const cases: Array<[string, string, string, Record<string, string>]> = [
+      ['X=ab', 'X', 'audit2', {}], ['X=abc', 'X', 'audit3', {}], ['', 'FHG_LEN', 'audit4', { FHG_LEN: 'abcd' }],
+    ];
+    for (const [assign, name, file, env] of cases) {
+      const word = `${hooks}/audit\${#${name}}`;
+      const made = spawnSync('/bin/sh', ['-c', `${assign || 'true'}; printf %s "${word}"`], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...env } }).stdout;
+      expect(made, `what sh makes of ${word}`).toBe(`${hooks}/${file}`);
+      const script = join(hooks, file);
+      writeFileSync(script, text, 'utf8');
+      for (const command of [`${assign ? `${assign}; ` : ''}python3 "${word}"`, `${assign ? `${assign} ` : ''}python3 ${word}`]) {
+        const r = start(command, script, env);
+        expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, command).toContain(`"state_file" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${command}: the program is intact`).toBe(text);
+      }
+    }
+    // a length that no value has names another file; a name without a value stays as written
+    expect(start(`X=ab; python3 "${hooks}/audit\${#X}"`, join(hooks, 'audit3')).status, 'another length').toBe(0);
+    writeFileSync(join(hooks, 'audit0'), text, 'utf8');
+    expect(start(`python3 "${hooks}/audit\${#FHG_NOBODY}"`, join(hooks, 'audit0')).status, 'a name that is not set').toBe(0);
+  });
+
   it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {
     const f = fixture('foreign-comments', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
