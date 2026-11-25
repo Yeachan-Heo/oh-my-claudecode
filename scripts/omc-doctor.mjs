@@ -1466,14 +1466,15 @@ const leadable = (dir, name) => {
 };
 
 // A version that was moved away leaves a link at its name: a session that picked the root of that version before the move and
-// publishes its record only after the last read of the records still opens it. The link leads to the newest version that is still
-// a real directory of the cache and can be led to (leadable), the way the cleanup of SessionStart makes it (a relative link; a junction
-// with an absolute target on Windows). With no such version nothing is left. Returns true when the link could not be made.
-const redirectFailed = (dir, original) => {
+// publishes its record only after the last read of the records still opens it. Every link leads to the one version `target` that this command
+// does not move: the newest protected version of the cache that can be led to (leadable), chosen once before the first move. A link to a version
+// that is moved later would make the links a chain, and a path through a long chain fails (ELOOP). The link is made the way the cleanup of
+// SessionStart makes it (a relative link; a junction with an absolute target on Windows). With no target nothing is left. Returns true when
+// the link could not be made.
+const redirectFailed = (dir, original, target) => {
   try {
-    const newest = versionDirs(dir).sort(compareVersions).reverse().find((name) => leadable(dir, name));
     const windows = process.platform == 'win32';
-    if (newest) fs.symlinkSync(windows ? path.join(dir, newest) : newest, original, windows ? 'junction' : undefined);
+    if (target) fs.symlinkSync(windows ? path.join(dir, target) : target, original, windows ? 'junction' : undefined);
     return false;
   } catch {
     return true;
@@ -1555,6 +1556,8 @@ const cacheRepair = (kind) => {
           }
           return true;
         };
+        // The version every link of this run leads to: protected, so that this run never moves it, and one a session can open.
+        const redirectTo = [...state.kept].sort(compareVersions).reverse().find((name) => leadable(dir, name));
         free.forEach((name) => {
           if (!settled(name)) return;
           // A backup goes to a destination that does not exist yet: a rename would replace an empty directory or a file
@@ -1613,7 +1616,7 @@ const cacheRepair = (kind) => {
               } else {
                 moved++;
                 // After the last read, so that a record published after it finds the path open: the link does not depend on that read seeing the record.
-                if (wasDirectory && redirectFailed(dir, original)) unlinked++;
+                if (wasDirectory && redirectFailed(dir, original, redirectTo)) unlinked++;
               }
             }
           }

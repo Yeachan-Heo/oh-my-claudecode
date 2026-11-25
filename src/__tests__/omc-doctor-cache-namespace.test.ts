@@ -62,11 +62,11 @@ describe('omc-doctor: the script holds one definition of a version name and of t
   test('the version-name test is defined once and excludes a relink recovery directory', () => {
     const definitions = scriptText.split('\n').filter((line) => line.startsWith('const isVersionDir'));
     expect(definitions).toEqual([String.raw`const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);`]);
-    // Step 1 (highestCached, which the npm channel and Step 4 use), Step 6, the function both cache commands share and the choice of the
-    // version a moved one is replaced by list version directories through versionDirs, the one place that applies it (and requires a
-    // directory), and nothing else lists them.
+    // Step 1 (highestCached, which the npm channel and Step 4 use), Step 6 and the function both cache commands share list version
+    // directories through versionDirs, the one place that applies it (and requires a directory), and nothing else lists them (the version
+    // a moved one is replaced by is chosen from the protected versions that function has read).
     expect(scriptText.split('.filter(isVersionDir)').length - 1).toBe(1);
-    expect(scriptText.split('versionDirs(').length - 1).toBe(4);
+    expect(scriptText.split('versionDirs(').length - 1).toBe(3);
   });
 
   test('no command filters a cache listing by its own copy of the digit test', () => {

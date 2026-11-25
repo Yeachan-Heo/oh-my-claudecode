@@ -27,7 +27,7 @@ describe('omc-doctor: the version fields of the registry entries of OMC are vali
       // The entry checks of Step 1 and of the cache commands, and the cache listings of every command.
       for (const section of ['Step 1: helpers', 'repair registry']) expect({ section, uses: scriptSection(section).includes('semver(') }).toEqual({ section, uses: true });
       expect(codeOf().split('.filter(isVersionDir)').length - 1).toBe(1);
-      expect(codeOf().split('versionDirs(').length - 1).toBe(4);
+      expect(codeOf().split('versionDirs(').length - 1).toBe(3);
     });
   });
 

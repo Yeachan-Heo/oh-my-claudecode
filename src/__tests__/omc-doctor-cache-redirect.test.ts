@@ -4,7 +4,7 @@ import path from 'node:path';
 import { backupDir, CACHE_VERSIONS, commands, digitEntries, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { ownHost, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 
-// A version that a repair command moves away leaves a link at its name, to the newest version that is still a real directory of the cache (the
+// A version that a repair command moves away leaves a link at its name, to the newest protected version that is a real directory of the cache, the same one for every link (the
 // way the cleanup of SessionStart replaces an old version): a session that picked the root of that version before the move and publishes its
 // record only after the last read of the records is not seen by that read, but its root still opens.
 describe('omc-doctor cache commands: a link at the place of a moved version', { timeout: 120_000 }, () => {
@@ -167,6 +167,49 @@ fs.readdirSync = function (target, ...rest) {
         expect(result.stdout).not.toMatch(/Left no link/);
       } finally {
         clean(dir);
+      }
+    }
+  });
+
+  // Every link leads to one version that the command does not move: a link to the next free version would be moved later and would turn the links into a
+  // chain, which the file system gives up on after 40 steps (ELOOP), so a session that publishes late could not open its root. The versions are moved in
+  // the order the directory is listed, which the file system decides, so the order is set here: newest first (where the chain is longest) and oldest first.
+  test('with a low pin and many free versions every link leads to the pinned version, none leads to another link, and every root opens', () => {
+    const listing = `const fs = require('fs'), path = require('path'); const real = fs.readdirSync;
+fs.readdirSync = function (target, ...rest) {
+  const names = real.call(this, target, ...rest);
+  if (!String(target).endsWith(path.join('cache', 'omc', 'oh-my-claudecode'))) return names;
+  return names.slice().sort((a, b) => (parseInt(a, 10) - parseInt(b, 10)) * (process.env.CACHE_ORDER === 'newest' ? -1 : 1));
+};
+`;
+    const open = (at: string) => {
+      try {
+        readFileSync(path.join(at, 'package.json'), 'utf8');
+        return 'opens';
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code ?? 'fails';
+      }
+    };
+    const next = (at: string) => path.resolve(path.dirname(at), readlinkSync(at));
+    const names = Array.from({ length: 45 }, (_, index) => `${index + 1}.0.0`);
+    for (const command of commands) {
+      for (const [pin, order] of [['1.0.0', 'newest'], ['1.0.0', 'oldest'], ['46.0.0', 'newest']]) {
+        const { dir, cache } = makeCache(pin == '46.0.0' ? [...names, pin] : names);
+        try {
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: pin }] });
+          const preload = preloadOf(dir, 'listing-order.cjs', listing);
+          const result = runCommand(command, dir, { preloads: [preload], env: { CACHE_ORDER: order }, timeout: 90_000 });
+          const free = names.filter((name) => name != pin);
+          const placed = (name: string) => path.join(cache, name);
+          const at = { command, pin, order };
+          expect({ ...at, status: result.status, moved: movedAside(dir), says: result.stdout.includes('Moved ' + free.length + ' unprotected version') }).toEqual({ ...at, status: 0, moved: free.length, says: true });
+          expect({ ...at, opens: free.filter((name) => open(placed(name)) != 'opens').map((name) => name + ':' + open(placed(name))) }).toEqual({ ...at, opens: [] });
+          expect({ ...at, links: free.filter((name) => !isLink(placed(name))) }).toEqual({ ...at, links: [] });
+          expect({ ...at, chained: free.filter((name) => isLink(next(placed(name)))) }).toEqual({ ...at, chained: [] });
+          expect({ ...at, astray: free.filter((name) => leadsTo(placed(name)) != realpathSync(placed(pin))) }).toEqual({ ...at, astray: [] });
+        } finally {
+          clean(dir);
+        }
       }
     }
   });
