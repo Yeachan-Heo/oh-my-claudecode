@@ -865,8 +865,8 @@ const claudeMdVersion = () => {
     const raw = loadedPackageVersion(loadedRoot);
     pluginVersion = raw ? shownVersion(raw) : '(unknown)';
     notString = !!raw && typeof raw != 'string';
-  } else if (running.length) {
-    // The runtime (getPluginVersion) scans the omc cache whatever registry key records the root, once the root is spelled inside it
+  } else if (running.length || (!!loadedRoot && lexicallyManaged(loadedRoot))) {
+    // The runtime (getPluginVersion) scans the omc cache whatever registry key records the root (or none does), once the root is spelled inside it
     // (that is what makes it managed), and keeps the raw package version of the root it loaded unless a complete cached version is newer
     // in its own order: a managed root refreshed in place may hold a package version other than its directory name, and that root is no
     // cached version by its name.

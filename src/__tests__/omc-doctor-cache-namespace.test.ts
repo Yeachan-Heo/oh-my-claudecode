@@ -216,12 +216,14 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
             expect({ label, platform, out: claudeMd(dir, '5.8.4', platform).slice(2) }).toEqual({ label, platform, out: ['Latest cached plugin version: (unknown)', expect.stringMatching(/^VERSION CHECK SKIPPED: .*plugin-dir/)] });
             continue;
           }
-          expect({ label, platform, out: claudeMd(dir, '5.8.4', platform) }).toEqual({
+          // No root that an entry holds (the session sets none): the marketplace of the registry names the cache. A root in the omc cache would be read as the runtime reads it, through the omc cache.
+          const noRoot = { CLAUDE_PLUGIN_ROOT: '' };
+          expect({ label, platform, out: claudeMdAt(dir, '5.8.4', platform, noRoot) }).toEqual({
             label,
             platform,
-            out: ['CLAUDE.md OMC version: 5.8.4', `OMC version source: ${path.join(dir, 'CLAUDE.md')}`, 'Latest cached plugin version: 5.8.4', 'VERSION MATCH: CLAUDE and plugin cache are aligned'],
+            out: ['Latest cached plugin version: 5.8.4', 'VERSION MATCH: CLAUDE and plugin cache are aligned'],
           });
-          expect({ label, platform, drift: claudeMd(dir, '5.7.0', platform).slice(2) }).toEqual({ label, platform, drift: ['Latest cached plugin version: 5.8.4', 'VERSION DRIFT: CLAUDE.md and plugin versions differ'] });
+          expect({ label, platform, drift: claudeMdAt(dir, '5.7.0', platform, noRoot) }).toEqual({ label, platform, drift: ['Latest cached plugin version: 5.8.4', 'VERSION DRIFT: CLAUDE.md and plugin versions differ'] });
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }
@@ -273,7 +275,8 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
         addCache(dir, ['5.7.0'], 'omc');
         if (label == 'both caches') addCache(dir, ['5.8.4'], 'oh-my-claudecode');
         writeRegistry(dir, registry(order));
-        expect({ order, label, latest: claudeMd(dir, '5.8.4')[2] }).toEqual({ order, label, latest: `Latest cached plugin version: ${expected}` });
+        // No root that an entry holds (the session sets none), so the last supported ID whose cache holds a version names it.
+        expect({ order, label, latest: claudeMdAt(dir, '5.8.4', process.platform, { CLAUDE_PLUGIN_ROOT: '' })[0] }).toEqual({ order, label, latest: `Latest cached plugin version: ${expected}` });
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

@@ -89,15 +89,16 @@ export const blockOf = (command: string): string => {
 // `env` says otherwise.
 export function runBlock(command: string, configDir: string, options: { env?: Record<string, string>; cwd?: string; timeout?: number } = {}) {
   // The locator needs a plugin root that holds the script, and the version check reads the package of that root like the runtime does: this
-  // checkout (outside every cache) would be a --plugin-dir session. So the version check gets, as its root, a link to this checkout that lies
-  // in the omc cache of the configuration directory, the place a real session runs from (a junction on Windows, which needs no privilege; a plain link elsewhere).
+  // checkout (outside every cache) would be a --plugin-dir session. So the version check gets, as its root, a directory in the omc cache of the
+  // configuration directory, the place a real session runs from, that holds only a link to the scripts of this checkout (a junction on Windows, which
+  // needs no privilege; a plain link elsewhere) and no package.json, so the cached versions name the version, as for a root that carries no package.
   let root = ROOT;
   let linked = false;
   if (command === CLAUDE_MD_VERSION && options.env?.CLAUDE_PLUGIN_ROOT === undefined) {
     root = path.join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', 'block-root');
-    mkdirSync(path.dirname(root), { recursive: true });
     if (!existsSync(root)) {
-      symlinkSync(ROOT, root, 'junction');
+      mkdirSync(root, { recursive: true });
+      symlinkSync(path.join(ROOT, 'scripts'), path.join(root, 'scripts'), 'junction');
       linked = true;
     }
   }
@@ -116,7 +117,7 @@ export function runBlock(command: string, configDir: string, options: { env?: Re
     },
   });
   // The link is the fixture's own: it is not left in the cache the test goes on to read or clean.
-  if (linked) rmSync(root, { force: true });
+  if (linked) rmSync(root, { recursive: true, force: true });
   return result;
 }
 
