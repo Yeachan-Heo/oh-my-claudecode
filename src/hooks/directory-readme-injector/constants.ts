@@ -13,6 +13,11 @@ export function getReadmeInjectorStoragePath(): string {
   return getGlobalOmcStatePath('directory-readme');
 }
 
+/**
+ * @deprecated Use getReadmeInjectorStoragePath() instead
+ */
+export const README_INJECTOR_STORAGE = getReadmeInjectorStoragePath();
+
 /** README filename to search for */
 export const README_FILENAME = 'README.md';
 

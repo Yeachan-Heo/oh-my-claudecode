@@ -13,6 +13,11 @@ export function getRulesInjectorStoragePath(): string {
   return getGlobalOmcStatePath('rules-injector');
 }
 
+/**
+ * @deprecated Use getRulesInjectorStoragePath() instead
+ */
+export const RULES_INJECTOR_STORAGE = getRulesInjectorStoragePath();
+
 /** Project marker files that indicate a project root */
 export const PROJECT_MARKERS = [
   '.git',

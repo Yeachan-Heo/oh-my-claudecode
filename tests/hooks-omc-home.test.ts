@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
 import { homedir } from 'os';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 
 // Import the functions we're testing
@@ -20,12 +20,12 @@ import { getGlobalOmcStatePath } from '../src/utils/paths.js';
 import { saveInjectedPaths, loadInjectedPaths } from '../src/hooks/directory-readme-injector/storage.js';
 import { saveInjectedRules, loadInjectedRules } from '../src/hooks/rules-injector/storage.js';
 import { saveAgentUsageState, loadAgentUsageState } from '../src/hooks/agent-usage-reminder/storage.js';
-import { saveInvocationHistory, loadInvocationHistory } from '../src/hooks/learner/auto-invoke.js';
+import { loadAllSkills } from '../src/hooks/learner/loader.js';
+import { RULES_INJECTOR_STORAGE, README_INJECTOR_STORAGE } from '../src/index.js';
 
 describe('Hooks OMC_HOME Support (#5141)', () => {
   let tempOmcHome: string;
   let originalOmcHome: string | undefined;
-  let originalHome: string | undefined;
 
   beforeEach(() => {
     // Save original environment
@@ -245,15 +245,35 @@ describe('Hooks OMC_HOME Support (#5141)', () => {
 
 describe('Legacy ~/.omc/skills support when OMC_HOME is unset', () => {
   let originalOmcHome: string | undefined;
+  let originalHome: string | undefined;
+  let tempHome: string;
 
   beforeEach(() => {
     originalOmcHome = process.env.OMC_HOME;
+    originalHome = process.env.HOME;
     delete process.env.OMC_HOME;
+    
+    // Create a temporary HOME with .omc/skills
+    tempHome = join(tmpdir(), `test-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tempHome, { recursive: true });
   });
 
   afterEach(() => {
     if (originalOmcHome !== undefined) {
       process.env.OMC_HOME = originalOmcHome;
+    } else {
+      delete process.env.OMC_HOME;
+    }
+    
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    
+    // Clean up temp HOME
+    if (tempHome && existsSync(tempHome)) {
+      rmSync(tempHome, { recursive: true, force: true });
     }
   });
 
@@ -271,5 +291,67 @@ describe('Legacy ~/.omc/skills support when OMC_HOME is unset', () => {
     
     // At least one candidate should reference a reasonable location
     expect(candidates.some(c => c.includes('.omc') || c.includes('omc'))).toBe(true);
+  });
+
+  it('should find skill in legacy ~/.omc/skills when OMC_HOME is unset', () => {
+    // Create a skill in the legacy location
+    const legacySkillsDir = join(tempHome, '.omc', 'skills');
+    mkdirSync(legacySkillsDir, { recursive: true });
+    
+    const skillContent = `---
+id: test-legacy-skill
+name: Test Legacy Skill
+description: A test skill
+triggers:
+  - legacy test
+source: project
+---
+
+# Legacy Skill
+`;
+    writeFileSync(join(legacySkillsDir, 'test-skill.md'), skillContent, 'utf-8');
+    
+    // Temporarily set HOME to our temp home
+    const originalHomeValue = process.env.HOME;
+    process.env.HOME = tempHome;
+    
+    try {
+      // Load skills (should find the legacy skill)
+      const skills = loadAllSkills(null);
+      const hasLegacySkill = skills.some(s => s.metadata.id === 'test-legacy-skill');
+      
+      expect(hasLegacySkill).toBe(true);
+    } finally {
+      // Restore HOME
+      if (originalHomeValue !== undefined) {
+        process.env.HOME = originalHomeValue;
+      } else {
+        delete process.env.HOME;
+      }
+    }
+  });
+});
+
+describe('Deprecated exports for storage paths', () => {
+  it('RULES_INJECTOR_STORAGE should be exported from src/index.ts', () => {
+    expect(RULES_INJECTOR_STORAGE).toBeDefined();
+    expect(typeof RULES_INJECTOR_STORAGE).toBe('string');
+    expect(RULES_INJECTOR_STORAGE.length).toBeGreaterThan(0);
+  });
+
+  it('README_INJECTOR_STORAGE should be exported from src/index.ts', () => {
+    expect(README_INJECTOR_STORAGE).toBeDefined();
+    expect(typeof README_INJECTOR_STORAGE).toBe('string');
+    expect(README_INJECTOR_STORAGE.length).toBeGreaterThan(0);
+  });
+
+  it('RULES_INJECTOR_STORAGE should equal getRulesInjectorStoragePath()', () => {
+    const pathFromGetter = getRulesInjectorStoragePath();
+    expect(RULES_INJECTOR_STORAGE).toBe(pathFromGetter);
+  });
+
+  it('README_INJECTOR_STORAGE should equal getReadmeInjectorStoragePath()', () => {
+    const pathFromGetter = getReadmeInjectorStoragePath();
+    expect(README_INJECTOR_STORAGE).toBe(pathFromGetter);
   });
 });
