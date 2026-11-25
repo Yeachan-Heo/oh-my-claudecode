@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { commands, digitVersions, makeCache, PLUGIN_ID, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, digitVersions, makeCache, PLUGIN_ID, read, runCommand, scriptText, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 // The setup of the installer removes whole directories of the standalone skills of the profile (the ones that duplicate a
 // skill of the plugin, and the stale ones it created itself), so a recovery copy kept under <config>/skills would go
@@ -93,5 +93,59 @@ describe.runIf(posix)('omc-doctor: the backup directory is kept out of the stand
         rmSync(dir, { recursive: true, force: true });
       }
     }
+  });
+});
+
+// The launcher of the CLI replaces <config>/.omc-launch at every launch: the old one moves to a .prev sibling that is deleted at once, and an
+// unfinished .next sibling is deleted too, so a recovery copy under any of the three would be gone with them. The script imports nothing from
+// src/, so it writes the name itself; the launcher is the one source, read here as text.
+const launcher = read('src/cli/launch.ts');
+const LAUNCH = /const OMC_RUNTIME_DIRNAME = '([^']+)';/.exec(launcher)?.[1] ?? '';
+const LAUNCH_DIRS = [LAUNCH, `${LAUNCH}.prev`, `${LAUNCH}.next`];
+const REFUSED_LAUNCH = /Nothing moved: the backup directory \S+ (?:\(really \S+\) )?(?:is, or lies inside,|contains) the launch directory of the profile \(/;
+
+describe.runIf(posix)('omc-doctor: the backup directory is kept out of the launch directory of the profile', { timeout: 180_000 }, () => {
+  test.each(LAUNCH_DIRS.map((name) => [name]))('both cache commands refuse, with exit code 1, a named tree and nothing moved, when plugins/backups leads into %s', (name) => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        const recovery = path.join(dir, name, 'recovery');
+        mkdirSync(recovery, { recursive: true });
+        link(recovery, path.join(dir, 'plugins', 'backups'));
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, refused: REFUSED_LAUNCH.test(result.stdout), cache: digitVersions(cache), landed: readdirSync(recovery) })
+          .toEqual({ command, status: 1, refused: true, cache: ALL, landed: [] });
+        expect(result.stdout).not.toMatch(/Moved \d/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // Control: launch directories that exist are no reason to refuse; a backup directory outside them keeps working.
+  test.each([['the default backup directory', ''], ['a link to a directory outside them', 'elsewhere']])('both cache commands move the free versions as before, with %s and all three launch directories present', (_name, where) => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        for (const name of LAUNCH_DIRS) mkdirSync(path.join(dir, name, 'recovery'), { recursive: true });
+        if (where) {
+          mkdirSync(path.join(dir, where, 'recovery'), { recursive: true });
+          link(path.join(dir, where, 'recovery'), path.join(dir, 'plugins', 'backups'));
+        }
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, moved: /Moved 2/.test(result.stdout), cache: digitVersions(cache) }).toEqual({ command, status: 0, moved: true, cache: '5.8.0' });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // The name and the two siblings are the launcher's: the script has to list the names the launcher uses.
+  test('the script names the three directories the launcher writes, as the launcher spells them', () => {
+    expect(LAUNCH).not.toBe('');
+    expect(launcher).toContain('join(baseConfigDir, OMC_RUNTIME_DIRNAME)');
+    expect(launcher).toContain('`${runtimeConfigDir}.prev`');
+    expect(launcher).toContain('`${runtimeConfigDir}.next`');
+    for (const name of LAUNCH_DIRS) expect(scriptText).toContain(`'${name}'`);
   });
 });
