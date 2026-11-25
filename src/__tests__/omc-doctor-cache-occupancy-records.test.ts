@@ -91,6 +91,8 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
 
   // A profile mounted under another path on the other host: the root of its record is spelled as that host sees it, so it names no version here.
   // The version it holds cannot be told, so nothing is moved while such a record exists; the same path inside a cache protects as before.
+  // On a Windows host a rooted POSIX path of a record is already foreign to the host (foreignToHost, asked in a test below), so the command stops there with the
+  // general message and never reaches the check of the roots; nothing is moved either way, and only the message differs.
   test('a record of another host whose plugin root lies in no cache of this system stops both commands before anything is moved', () => {
     for (const command of commands) {
       for (const root of ['/Users/b/.claude/plugins/cache/omc/oh-my-claudecode/5.8.0', 'relative-to-nothing/5.8.0']) {
@@ -100,7 +102,7 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
           const file = writeRecord(dir, root, { pid: deadPid(), host: 'another-machine|id|pid:[4026539999]' });
           const result = runCommand(command, dir);
           expect({ command, root, status: result.status, versions: digitVersions(cache), moved: movedAside(dir), said: /lies in no cache of this system/.test(result.stdout), record: existsSync(file) })
-            .toEqual({ command, root, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0, said: root.startsWith('/'), record: true });
+            .toEqual({ command, root, status: 1, versions: '5.8.0,5.8.1,5.9.0', moved: 0, said: root.startsWith('/') && process.platform !== 'win32', record: true });
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }
