@@ -1231,7 +1231,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(state), 'still intact').toBe('the program\n');
   });
 
-  it('the temporary file of a write (the state path, the pid of the guard and .tmp) that a settings rewrite after the start made a registered hook is not removed or replaced: the write is refused', async () => {
+  it('a file at the old predictable temporary name of a write (the state path, the pid of the guard and .tmp), here the registered hook, is neither removed nor replaced: the write is made under a name of its own', async () => {
     const f = fixture('program-is-temp-file', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const state = join(f.dir, 'five-hour-guard-hook.py.state');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');
@@ -1240,17 +1240,30 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const hookText = readFileSync(HOOK, 'utf8');
     const g = startGuard(f);
     const temp = `${state}.${g.child.pid}.tmp`;
+    let published: unknown = null;
     try {
       await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
-      writeFileSync(f.settings, entry(temp), 'utf8');   // the registered hook is now the temporary file of the state write
+      writeFileSync(f.settings, entry(temp), 'utf8');   // the registered hook is now the old temporary name of the state write
       writeFileSync(temp, hookText, 'utf8');            // and a real hook is installed there
       writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
-      await waitFor(() => /ERROR: tick failed.*is .*five-hour-guard-hook\.py\.state\.\d+\.tmp, a file this guard writes/.test(readText(f.log)) || !existsSync(temp), 20000, 'the refusal');
-      await sleep(600);
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      published = readJson(f.pause).paused;
     } finally { await stopGuard(g); }
-    expect(readText(f.log), 'the write was refused').toMatch(/ERROR: tick failed.*the registered hook .*five-hour-guard-hook\.py\.state\.\d+\.tmp is .*\.tmp, a file this guard writes/);
+    expect(readText(f.log), 'the write was not refused').not.toMatch(/ERROR: tick failed/);
     expect(readText(temp), 'the hook is intact').toBe(hookText);
-    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+    expect(published, 'the pause was published').toBe(true);
+  });
+
+  it('a file that is at the path a temporary file used to have (the pid and .tmp) is never removed by a write: the write goes to a name of its own', () => {
+    const f = fixture('tmp-occupied', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const foreign = [`${f.pause}.4242.tmp`, `${f.state}.4242.tmp`];
+    for (const path of foreign) writeFileSync(path, 'a file of another process\n', 'utf8');
+    const code = ['import os, runpy, sys', 'os.getpid = lambda: 4242', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    for (const path of foreign) expect(readText(path), `${path} is untouched`).toBe('a file of another process\n');
+    expect(readJson(f.pause).paused, 'the pause was written').toBe(true);
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp') && !foreign.some((x) => x.endsWith(n))), 'no temporary file of the guard is left').toEqual([]);
   });
 
   it('a program that the command of another hook, of another event or of the status line runs is never a file the guard writes: refused at the start, and not appended to after a settings rewrite', async () => {

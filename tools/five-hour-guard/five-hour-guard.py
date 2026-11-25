@@ -647,12 +647,8 @@ def write_json(path, obj, no_clobber=False, replaces=None):
     the validation) is kept and the write fails; a file that is gone is written again."""
     if A.dry_run:
         return
-    tmp = f'{path}.{os.getpid()}.tmp'
-    refuse_program_overwrite(path, tmp)   # the leftover of the temporary file that is removed below is not a program of an entry either
-    try:
-        os.unlink(tmp)   # a leftover of a crashed run, or a link somebody put there: the link itself goes, never what it points to
-    except FileNotFoundError:
-        pass
+    tmp = f'{path}.{os.getpid()}.{os.urandom(8).hex()}.tmp'   # a name that no other process can have made: nothing is removed to make room for it
+    refuse_program_overwrite(path)
     # exclusive and without following links: another account that can write to the directory cannot redirect the write
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644)
     try:
