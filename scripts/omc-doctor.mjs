@@ -1437,6 +1437,24 @@ const REPAIR_MESSAGES = {
   },
 };
 
+// A version that was moved away leaves a link at its name: a session that picked the root of that version before the move and
+// publishes its record only after the last read of the records still opens it. The link leads to the newest version that is still
+// a real directory of the cache, the way the cleanup of SessionStart makes it (a relative link; a junction with an absolute target
+// on Windows). With no such version nothing is left. Returns true when the link could not be made.
+const redirectFailed = (dir, original) => {
+  try {
+    let newest = '';
+    for (const name of versionDirs(dir)) {
+      if (fs.lstatSync(path.join(dir, name)).isDirectory() && (!newest || compareVersions(name, newest) > 0)) newest = name;
+    }
+    const windows = process.platform == 'win32';
+    if (newest) fs.symlinkSync(windows ? path.join(dir, newest) : newest, original, windows ? 'junction' : undefined);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
 // Moves the cached versions that nothing protects to plugins/backups. kind is outdated or stale.
 const cacheRepair = (kind) => {
   const messages = REPAIR_MESSAGES[kind];
@@ -1450,6 +1468,7 @@ const cacheRepair = (kind) => {
     let fresh = 0;
     let future = 0;
     let unjudged = 0;
+    let unlinked = 0;
     try {
       const versions = versionDirs(dir);
       const state = protectionOf(dir, versions);
@@ -1545,6 +1564,13 @@ const cacheRepair = (kind) => {
               // while the version still has an identity to compare.
               const alias = path.join(path.dirname(dir), path.basename(dir).toUpperCase(), name);
               const foldCase = !!identity(original) && identity(alias) == identity(original);
+              // Only a real directory leaves a link behind: moving a link away (one of SessionStart) must not leave another for every run.
+              let wasDirectory;
+              try {
+                wasDirectory = fs.lstatSync(original).isDirectory();
+              } catch {
+                wasDirectory = false;
+              }
               fs.renameSync(original, backup);
               // A destination that was redirected in that instant no longer holds the copy at this path: there is nothing to read or to put back, and
               // the check of the destination before the next move stops the run.
@@ -1561,11 +1587,14 @@ const cacheRepair = (kind) => {
                 fs.renameSync(backup, original);
               } else {
                 moved++;
+                // After the last read, so that a record published after it finds the path open: the link does not depend on that read seeing the record.
+                if (wasDirectory && redirectFailed(dir, original)) unlinked++;
               }
             }
           }
         });
         console.log(lead + 'Moved', moved, 'unprotected version(s) to', backups + (redirected ? ' (really ' + target.place + ')' : '') + messages.movedEnd);
+        if (unlinked) console.log(lead + 'Left no link at the place of', unlinked, 'moved version(s) (it could not be made): a session that still runs from one of them has to be restarted');
         if (skipped) console.log(lead + 'Skipped', skipped, 'version(s) that became protected or unreadable just before the move');
         if (unjudged) {
           console.log(lead + 'Could not judge', unjudged, 'version(s) (more than 20000 entries, or an entry could not be read), so they were left in place');

@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { lutimesSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { commands, ageVersions, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, ageVersions, runCommand, digitEntries, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, upperBelow, volumeFoldsCase, writeCaseFoldPreload, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { ownHost } from './helpers/omc-doctor-occupancy-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (identity of paths)', { timeout: 120_000 }, () => {
@@ -110,7 +110,7 @@ describe('omc-doctor cache commands on a synthetic config directory (identity of
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
           writeRecord(dir, upperBelow(dir, path.join(cache, '5.9.1')));
           const result = runCommand(command, dir, { preloads: [writeCaseFoldPreload(dir)] });
-          expect({ status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.8.0,5.9.0,5.9.1', moved: 1 });
+          expect({ status: result.status, versions: digitEntries(cache), moved: movedAside(dir) }).toEqual({ status: 0, versions: '5.1.0,5.8.0,5.9.0,5.9.1', moved: 1 });
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

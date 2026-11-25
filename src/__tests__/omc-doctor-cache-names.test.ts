@@ -54,7 +54,8 @@ describe('omc-doctor: a cache directory that is no semantic version takes no par
             writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0' }] });
             expect({ label, count: runCommand(CACHE_VERSIONS, dir).stdout.trim() }).toEqual({ label, count: '2 version(s): 5.7.0, 5.8.0' });
             const result = runCommand(command, dir, { timeout: 20_000 });
-            expect({ label, command, status: result.status, left: readdirSync(cache).filter((name) => !name.endsWith('.target')).sort(), moved: movedAside(dir) }).toEqual({ label, command, status: 0, left: ['5.8.0', '5.9.0'], moved: 1 });
+            // 5.7.0 is the link that the moved version leaves; the entry 5.9.0 that is no directory stays as it was.
+            expect({ label, command, status: result.status, left: readdirSync(cache).filter((name) => !name.endsWith('.target')).sort(), moved: movedAside(dir) }).toEqual({ label, command, status: 0, left: ['5.7.0', '5.8.0', '5.9.0'], moved: 1 });
           } finally {
             rmSync(dir, { recursive: true, force: true });
           }

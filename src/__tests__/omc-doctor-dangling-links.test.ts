@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { backupDir, CACHE_VERSIONS, CLAUDE_MD_OPTOUT, commands, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { backupDir, CACHE_VERSIONS, CLAUDE_MD_OPTOUT, commands, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry, realEntries } from './helpers/omc-doctor-cache-fixture.js';
 import { step1 } from './helpers/omc-doctor-step1.js';
 
 // A path that does not exist and a link that points at nothing both fail a read with ENOENT, but only the first one is
@@ -64,7 +64,7 @@ describe.skipIf(!posix)('omc-doctor: a link that points at nothing is not an abs
           make(dir);
           const result = runCommand(command, dir, { timeout: 20_000 });
           expect({ command, status: result.status, moved: result.stdout.includes('Moved 1 unprotected version(s)') }).toEqual({ command, status: 0, moved: true });
-          expect(readdirSync(cache)).toEqual(['5.8.0']);
+          expect(realEntries(cache)).toEqual(['5.8.0']);
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

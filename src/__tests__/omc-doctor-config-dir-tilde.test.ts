@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, backupDir, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_OPTOUT, CLAUDE_MD_VERSION, codeOf, commands, flatCode, PLUGIN_ID, runBlock, scriptSection, SCRIPT, scriptText, STEP1, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, backupDir, bashBlocks, CACHE_VERSIONS, CLAUDE_MD_OPTOUT, CLAUDE_MD_VERSION, codeOf, commands, flatCode, PLUGIN_ID, runBlock, scriptSection, SCRIPT, scriptText, STEP1, writeRegistry, realEntries } from './helpers/omc-doctor-cache-fixture.js';
 
 // CLAUDE_CONFIG_DIR may hold a literal home path (`~`, `~/x`, `~\x`), for example from a settings env block; the
 // runtime expands it (scripts/lib/config-dir.mjs). Every command of the omc-doctor script and every shell block of the
@@ -120,7 +120,7 @@ describe('omc-doctor: a config directory given as a home path reaches the real d
           profile(dir);
           const out = runNode(w, command, configured, platform);
           expect(out).toContain('Moved 1 unprotected version(s)');
-          expect(readdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode'))).toEqual(['5.8.0']);
+          expect(realEntries(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode'))).toEqual(['5.8.0']);
           expect(readdirSync(backupDir(dir))).toHaveLength(1);
           rmSync(path.join(dir, 'plugins', 'backups'), { recursive: true, force: true });
         }
@@ -144,7 +144,7 @@ describe('omc-doctor: a config directory given as a home path reaches the real d
         for (const command of commands) {
           profile(dir);
           expect(runNode(w, command, configured)).toContain('Moved 1 unprotected version(s)');
-          expect(readdirSync(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode'))).toEqual(['5.8.0']);
+          expect(realEntries(path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode'))).toEqual(['5.8.0']);
           rmSync(path.join(dir, 'plugins', 'backups'), { recursive: true, force: true });
         }
       }

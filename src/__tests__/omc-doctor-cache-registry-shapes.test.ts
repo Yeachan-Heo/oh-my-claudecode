@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { commands, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, runCommand, digitVersions, backupDir, movedAside, PLUGIN_ID, makeCache, writeRegistryFile, writeRegistry, realEntries } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (registry shapes, occupancy records, failed moves)', { timeout: 120_000 }, () => {
   test('a registry of an unsupported shape moves nothing and says it could not be read completely', () => {
@@ -259,7 +259,7 @@ fs.renameSync = function (...args) {
           const result = runCommand(command, dir, { preloads: [preload], env: { RENAME_FAIL_AT: String(failAt), RENAME_FAIL_CODE: code } });
           const moved = failAt - 1;
           const inBackup = readdirSync(backupDir(dir)).map((n) => n.replace(/-\d+$/, '')).sort();
-          const inCache = readdirSync(cache).filter((n) => /^\d/.test(n)).sort();
+          const inCache = realEntries(cache).filter((n) => /^\d/.test(n)).sort();
           expect({ failAt, code, status: result.status, moved: inBackup.length }).toEqual({ failAt, code, status: 1, moved });
           expect([...inBackup, ...inCache].sort()).toEqual(all);
           expect(inCache).toEqual(expect.arrayContaining(['5.8.0', '5.9.0']));

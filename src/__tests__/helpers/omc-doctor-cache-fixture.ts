@@ -121,7 +121,13 @@ export function runBlock(command: string, configDir: string, options: { env?: Re
   return result;
 }
 
-export const digitVersions = (cache: string) => readdirSync(cache).filter((n) => /^\d/.test(n)).sort().join(',');
+// Every entry of the cache that starts with a digit, links included.
+export const digitEntries = (cache: string) => readdirSync(cache).filter((n) => /^\d/.test(n)).sort().join(',');
+// The versions left in the cache as real directories: a link at the name of a version that a repair command moved away is the redirect the
+// command leaves there (omc-doctor-cache-redirect.test.ts), not a version that stayed.
+export const digitVersions = (cache: string) => readdirSync(cache).filter((n) => /^\d/.test(n) && !lstatSync(path.join(cache, n)).isSymbolicLink()).sort().join(',');
+// The entries of a cache directory that are not links: what stayed there as itself, not the redirect a repair command leaves at the name of a moved version.
+export const realEntries = (dir: string) => readdirSync(dir).filter((n) => !lstatSync(path.join(dir, n)).isSymbolicLink());
 export const backupDir = (dir: string) => path.join(dir, 'plugins', 'backups', 'oh-my-claudecode');
 export const movedAside = (dir: string) => (existsSync(backupDir(dir)) ? readdirSync(backupDir(dir)).length : 0);
 

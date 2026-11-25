@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { addCache, backupDir, CACHE_VERSIONS, CLAUDE_MD_VERSION, codeOf, commands, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, backupDir, CACHE_VERSIONS, CLAUDE_MD_VERSION, codeOf, commands, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, scriptSection, scriptText, writeRegistry, realEntries } from './helpers/omc-doctor-cache-fixture.js';
 import { step1 } from './helpers/omc-doctor-step1.js';
 
 // Step 4 prints the highest cached plugin version and compares it with the CLAUDE.md marker; Step 6 counts the cached versions.
@@ -62,10 +62,11 @@ describe('omc-doctor: the script holds one definition of a version name and of t
   test('the version-name test is defined once and excludes a relink recovery directory', () => {
     const definitions = scriptText.split('\n').filter((line) => line.startsWith('const isVersionDir'));
     expect(definitions).toEqual([String.raw`const isVersionDir = (name) => semver(name) == name && !/[.]omc-stale-[0-9]+(?![^])/.test(name);`]);
-    // Step 1 (highestCached, which the npm channel and Step 4 use), Step 6 and the function both cache commands share
-    // list version directories through versionDirs, the one place that applies it (and requires a directory), and nothing else lists them.
+    // Step 1 (highestCached, which the npm channel and Step 4 use), Step 6, the function both cache commands share and the choice of the
+    // version a moved one is replaced by list version directories through versionDirs, the one place that applies it (and requires a
+    // directory), and nothing else lists them.
     expect(scriptText.split('.filter(isVersionDir)').length - 1).toBe(1);
-    expect(scriptText.split('versionDirs(').length - 1).toBe(3);
+    expect(scriptText.split('versionDirs(').length - 1).toBe(4);
   });
 
   test('no command filters a cache listing by its own copy of the digit test', () => {
@@ -97,7 +98,7 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
           const result = runCommand(command, dir, { preloads: [reportAs(dir, platform)] });
-          expect({ platform, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) })
+          expect({ platform, status: result.status, left: realEntries(cache).sort(), moved: movedAside(dir) })
             .toEqual({ platform, status: 0, left: ['5.7.0-beta.1.omc-stale-4242', '5.7.0.omc-stale-4242', '5.9.0'], moved: 1 });
           expect(readdirSync(backupDir(dir))[0]).toMatch(/^5\.8\.0-/);
           expect(result.stdout).not.toContain('omc-stale');
@@ -140,7 +141,7 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
         try {
           writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
           const result = runCommand(command, dir, { preloads: [reportAs(dir, platform)] });
-          expect({ platform, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) })
+          expect({ platform, status: result.status, left: realEntries(cache).sort(), moved: movedAside(dir) })
             .toEqual({ platform, status: 0, left: ['5.3.0-beta.1.omc-stale-0', '5.3.0.omc-stale-0', '5.4.0-beta.1.omc-stale-7', '5.4.0.omc-stale-7', '5.9.0'], moved: 4 });
         } finally {
           rmSync(dir, { recursive: true, force: true });

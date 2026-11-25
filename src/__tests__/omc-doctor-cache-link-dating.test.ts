@@ -72,7 +72,9 @@ describe('omc-doctor: a version directory that is a link is dated by the link it
         date(path.join(cache, '5.7.0'), THRESHOLD + 60_000);
       });
       try {
-        expect(aged.left).toEqual(['5.9.0']);
+        // The moved real directory 5.8.0 leaves a link to 5.9.0 in its place; the old link 5.7.0 is moved as a link and leaves none.
+        expect(aged.left).toEqual(['5.8.0', '5.9.0']);
+        expect(lstatSync(path.join(aged.cache, '5.8.0')).isSymbolicLink()).toBe(true);
         expect(aged.moved).toEqual(['5.7.0', '5.8.0']);
         const backup = readdirSync(backupDir(aged.dir)).find((n) => n.startsWith('5.7.0-')) ?? '';
         expect(lstatSync(path.join(backupDir(aged.dir), backup)).isSymbolicLink()).toBe(true);

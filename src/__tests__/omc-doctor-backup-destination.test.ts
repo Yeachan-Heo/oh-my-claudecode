@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { addCache, ageVersions, backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, ageVersions, backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, realEntries, runBlock, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 // Where a version is moved aside is as much a part of "reversible and outside the cache" as the version that is moved: a
 // link in the way of the backup directory (plugins/backups, or its child oh-my-claudecode) may lead into a cached
@@ -264,7 +264,7 @@ describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and 
         writeFileSync(path.join(dir, 'plugins', 'cache', 'stray-file'), 'not a namespace');
         writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] });
         const result = runCommand(command, dir, { timeout: 20_000 });
-        expect({ command, status: result.status, cache: readdirSync(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, cache: ['5.9.0'], moved: 1 });
+        expect({ command, status: result.status, cache: realEntries(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, cache: ['5.9.0'], moved: 1 });
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -452,7 +452,7 @@ fs.lstatSync = function (target, ...rest) {
         mkdirSync(saved, { recursive: true });
         link(saved, path.join(dir, 'plugins', 'backups'));
         const result = runCommand(command, dir, { timeout: 20_000 });
-        expect({ command, status: result.status, cache: readdirSync(cache).sort(), moved: movedAside(dir), bodies: readdirSync(outside) })
+        expect({ command, status: result.status, cache: realEntries(cache).sort(), moved: movedAside(dir), bodies: readdirSync(outside) })
           .toEqual({ command, status: 0, cache: ['5.9.0'], moved: 1, bodies: [] });
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -470,7 +470,7 @@ fs.lstatSync = function (target, ...rest) {
           if (via != 'none') link(vault, path.join(dir, via));
           const result = runCommand(command, dir, { timeout: 20_000 });
           expect({ command, via, status: result.status }).toEqual({ command, via, status: 0 });
-          expect(readdirSync(cache).sort()).toEqual(['5.8.0']);
+          expect(realEntries(cache).sort()).toEqual(['5.8.0']);
           const real = via == 'plugins/backups' ? path.join(realpathSync(vault), 'oh-my-claudecode') : via == 'none' ? backupDir(dir) : realpathSync(vault);
           const held = readdirSync(real).map((name) => name.replace(/-\d+$/, '')).sort();
           expect({ command, via, held }).toEqual({ command, via, held: ['5.7.0', '5.9.0'] });
@@ -498,7 +498,7 @@ fs.lstatSync = function (target, ...rest) {
             if (linked) link(inside, path.join(dir, 'plugins', 'backups'));
             const result = runCommand(command, dir, { preloads: [platformPreload(dir, platform)], env: { CLAUDE_PLUGIN_ROOT: dir }, timeout: 20_000 });
             const tree = REFUSED.exec(result.stdout)?.[1];
-            expect({ command, platform, linked, status: result.status, tree, left: readdirSync(cache).sort() }).toEqual(
+            expect({ command, platform, linked, status: result.status, tree, left: realEntries(cache).sort() }).toEqual(
               linked ? { command, platform, linked, status: 1, tree: 'the plugin cache', left: ALL } : { command, platform, linked, status: 0, tree: undefined, left: ['5.8.0'] },
             );
           } finally {
@@ -526,7 +526,7 @@ fs.lstatSync = function (target, ...rest) {
         mkdirSync(bodies, { recursive: true });
         if (redirected) link(bodies, path.join(real, '.claude', 'plugins', 'backups'));
         const result = runCommand(command, path.join(root, '.claude'), { env: { OMC_PLUGIN_ROOT: root }, timeout: 20_000 });
-        expect({ command, mode, status: result.status, tree: REFUSED.exec(result.stdout)?.[1], left: readdirSync(cache).sort(), landed: readdirSync(bodies) }).toEqual(
+        expect({ command, mode, status: result.status, tree: REFUSED.exec(result.stdout)?.[1], left: realEntries(cache).sort(), landed: readdirSync(bodies) }).toEqual(
           redirected ? { command, mode, status: 1, tree: 'the plugin root', left: ALL, landed: [] } : { command, mode, status: 0, tree: undefined, left: ['5.8.0'], landed: [] },
         );
       } finally {
@@ -554,7 +554,7 @@ fs.renameSync = function (...args) {
         const from = path.join(dir, 'plugins', 'backups');
         const result = runCommand(command, dir, { preloads: [preload], env: { SWAP_FROM: from, SWAP_TO: inside }, timeout: 20_000 });
         expect({ command, status: result.status, failed: /Cache move failed \(1 moved before the error\): the backup directory changed or overlaps a cache tree now/.test(result.stdout) }).toEqual({ command, status: 1, failed: true });
-        expect(readdirSync(cache).sort()).toHaveLength(2);
+        expect(realEntries(cache).sort()).toHaveLength(2);
         expect(readdirSync(inside)).toEqual([]);
         expect(readdirSync(path.join(from + '.moved', 'oh-my-claudecode'))).toHaveLength(1);
       } finally {
@@ -582,7 +582,7 @@ fs.renameSync = function (...args) {
         const next = JSON.stringify({ version: 2, plugins: { [PLUGIN_ID]: [{ scope: 'user', version: '5.8.0', installPath: path.join(cache, '5.8.0') }], 'other-plugin@market': [{ scope: 'user', installPath: backupDir(dir) }] } });
         const result = runCommand(command, dir, { preloads: [preload], env: { REGISTRY_FILE: path.join(dir, 'plugins', 'installed_plugins.json'), REGISTRY_NEXT: next }, timeout: 20_000 });
         expect({ command, status: result.status, failed: /Cache move failed \(1 moved before the error\)/.test(result.stdout) }).toEqual({ command, status: 1, failed: true });
-        expect(readdirSync(cache).sort()).toHaveLength(2);
+        expect(realEntries(cache).sort()).toHaveLength(2);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -702,7 +702,7 @@ describe.skipIf(!posix)('omc-doctor: a path that only starts like a tree is not 
       const root = lookalike(dir);
       try {
         const result = runCommand(command, dir, { env: { OMC_PLUGIN_ROOT: root }, timeout: 20_000 });
-        expect({ command, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, left: ['5.8.0'], moved: 2 });
+        expect({ command, status: result.status, left: realEntries(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, left: ['5.8.0'], moved: 2 });
         expect(result.stdout).not.toMatch(REFUSED);
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -733,7 +733,7 @@ describe.skipIf(!posix)('omc-doctor: a path that only starts like a tree is not 
       try {
         symlinkSync(dir, via);
         const result = runCommand(command, via, { timeout: 20_000 });
-        expect({ command, status: result.status, left: readdirSync(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, left: ['5.8.0'], moved: 2 });
+        expect({ command, status: result.status, left: realEntries(cache).sort(), moved: movedAside(dir) }).toEqual({ command, status: 0, left: ['5.8.0'], moved: 2 });
         expect(result.stdout).toContain(`Moved 2 unprotected version(s) to ${path.join(via, 'plugins', 'backups', 'oh-my-claudecode')}`);
         expect(result.stdout).not.toContain('(really');
       } finally {
