@@ -925,9 +925,18 @@ def unpublish(strict=False):
             else:
                 try:
                     os.link(gone, PAUSE_FILE)
+                except OSError as e:   # FileExistsError: another file is there again; any other error: no hard links on this file system
+                    back = False
+                    if not isinstance(e, FileExistsError) and not os.path.lexists(PAUSE_FILE):
+                        try:
+                            os.rename(gone, PAUSE_FILE)   # the name is free: the file goes back by a rename (a file that comes in this very instant would be replaced, which no call here prevents)
+                            back = True
+                        except OSError:
+                            pass
+                    if not back:   # the one that was moved aside is kept under its new name, and the log says so
+                        log(f'the file that was at {PAUSE_FILE} is not a pause file of this guard and is kept as {gone}')
+                else:
                     os.unlink(gone)
-                except FileExistsError:   # another file is there again: the one that was moved aside is kept under its new name
-                    log(f'the file that was at {PAUSE_FILE} is not a pause file of this guard and is kept as {gone}')
         except FileNotFoundError:
             pass
         except Exception as e:

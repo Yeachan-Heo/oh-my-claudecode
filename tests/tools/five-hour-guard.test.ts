@@ -2354,6 +2354,40 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
   });
 
+  it('where hard links are not supported a foreign file that was moved aside by the removal of a pause is put back by a rename when the name is free, and kept under its new name when it is not or the rename fails', () => {
+    // the foreign file takes the place after the last look of unpublish(), as in the test of the swap; the other runs put another file at the path after the move aside, or refuse the rename back
+    const driver = ['import errno, os, runpy, sys', 'real_lstat, real_rename, pause, mode, looks = os.lstat, os.rename, sys.argv[1], sys.argv[2], []',
+      'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',
+      'def swap(path, *args, **kw):', '    found = real_lstat(path, *args, **kw)',
+      '    if str(path) == pause and sys._getframe(1).f_code.co_name == "unpublish":', '        looks.append(1)',
+      '        if len(looks) == 2:', '            open(pause + ".foreign", "w").write("foreign one\\n")', '            os.replace(pause + ".foreign", pause)',
+      '    return found',
+      'def moved(src, dst, *args, **kw):', '    if mode == "refused" and str(dst) == pause and str(src).endswith(".gone"):', '        raise OSError(errno.EACCES, "Permission denied")',
+      '    real_rename(src, dst, *args, **kw)',
+      '    if mode == "occupied" and str(src) == pause and str(dst).endswith(".gone"):', '        open(pause, "w").write("foreign two\\n")',
+      'os.link, os.lstat, os.rename = nolink, swap, moved', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    for (const mode of ['free', 'occupied', 'refused']) {
+      const f = fixture(`no-link-unlink-swap-${mode}`, { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+      writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
+      writePause(f, { pid: deadPid() });
+      const r = runPyCode(driver, [f.pause, mode, GUARD, ...guardArgs(f, ['--once'])]);
+      const kept = readdirSync(f.dir).filter((n) => n.endsWith('.gone'));
+      expect(r.status, `${mode}: ${r.stdout}${r.stderr}`).toBe(0);
+      if (mode === 'free') {
+        expect(r.stdout, 'it is told that the file is not a pause of this guard').toMatch(/is not a pause file of this guard any more: left alone/);
+        expect(readText(f.pause), 'the foreign file is where it was').toBe('foreign one\n');
+        expect(kept, 'nothing is left aside').toEqual([]);
+      } else {
+        expect(r.stdout, `${mode}: the file that was moved aside is reported as kept`).toMatch(/is not a pause file of this guard and is kept as .*\.gone/);
+        expect(kept, `${mode}: the file that was moved aside is still there`).toHaveLength(1);
+        expect(readText(join(f.dir, kept[0])), `${mode}: with its content`).toBe('foreign one\n');
+        if (mode === 'occupied') expect(readText(f.pause), 'the file that is at the path is not replaced').toBe('foreign two\n');
+        else expect(existsSync(f.pause), 'the path stays empty').toBe(false);
+      }
+      expect(readJson(f.state).paused, `${mode}: the pause itself is over`).toBe(false);
+    }
+  });
+
   it('a link at pause_file that appeared after the start is never replaced, also when its target holds a valid pause document', async () => {
     const f = fixture('link-valid-target', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const target = join(f.dir, 'target-pause.json');
