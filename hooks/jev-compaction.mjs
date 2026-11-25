@@ -2602,7 +2602,7 @@ function itemTokens(c, rates = DEFAULT_RATES) {
   const cost = (text) => RATE_OUT * text.length + RATE_NON_ASCII * nonAscii(text);
   const full = call + cost(c.res.text || '') + RATE_IMAGE * imagesOf(c.res);
   const short = c.resultChars > SHORT_CHARS ? call + cost(shortText(c)) : full;
-  return { full, short, trace: RATE_TRACE * c.trace.length, drop: 0 };
+  return { full, short, trace: RATE_TRACE * c.trace.length, drop: 0, call };
 }
 
 // The shape of the list. listTokens charges a block RATE_BLOCK and a message RATE_MESSAGE once (nothing for a message that holds no block), and the costs of a
@@ -2613,8 +2613,9 @@ function itemTokens(c, rates = DEFAULT_RATES) {
 // as listTokens counts the list build writes. The messages are the host's: an assistant message is the rows of one group (groupsOf), a user message a run of user
 // rows; the rows from `keepFrom` on keep their handles and stay as they are. `rows` are the rows build is given (a row of the trim that goes whole has `trimDrop`),
 // `queued` the deliveries after each row. Not counted: two user messages that a removed assistant message leaves side by side and the host joins (RATE_MESSAGE
-// less, at most 41 tokens each).
-const messageTokens = (blocks, rates) => (blocks > 0 ? Math.max(0, blocks * rates.RATE_BLOCK + RATE_MESSAGE) : 0);
+// less, at most 41 tokens each). A message costs zero at least (listTokens), its text and its overhead together, so what its structure adds to the text `tok` is
+// no less than -tok; at the default rates it is never negative and the text is not needed (Infinity).
+const messageTokens = (blocks, tok, rates) => (blocks > 0 ? Math.max(-tok, blocks * rates.RATE_BLOCK + RATE_MESSAGE) : 0);
 export function shapeOf(messages, candidates, { rows = messages, group, keepFrom, queued = new Map(), rates = DEFAULT_RATES }) {
   const queuedAt = (i) => (queued.get(i) || []).length;
   const callsAt = (m) => (m.toolUses || []).length;
@@ -2623,6 +2624,14 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
   const blocksAt = (i) => {
     const m = messages[i];
     return (m.text ? 1 : 0) + callsAt(m) + resultsAt(m) + queuedAt(i) + (m.role === 'assistant' && !m.text && !callsAt(m) ? 1 : 0);
+  };
+  // Only with a block rate under -RATE_MESSAGE can a message cost less than its text, and only then is its text needed: that of its rows as listTokens counts it (the
+  // block rate that cancels the constant of the message leaves the text alone).
+  const floored = rates.RATE_BLOCK + RATE_MESSAGE < 0;
+  const textOf = (role, idx) => {
+    if (!floored) return Infinity;
+    const content = idx.flatMap((i) => rowsAsApi([messages[i]])[0].content);
+    return content.length ? listTokens([{ role, content }], { ...rates, RATE_BLOCK: -RATE_MESSAGE / content.length }) : 0;
   };
   const noteAt = new Set(candidates.filter((c) => c.note).map((c) => c.resIdx));
   const textRow = new Set(messages.flatMap((m, i) => (resultsAt(m) && m.toolResults.every(textOnlyResult) ? [i] : [])));
@@ -2633,8 +2642,9 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
   messages.forEach((m, i) => {
     if (m.role === 'assistant') {
       run = undefined;
-      if (!assistants.has(group[i])) assistants.set(group[i], { before: 0, text: false, calls: 0, first: i });
+      if (!assistants.has(group[i])) assistants.set(group[i], { before: 0, text: false, calls: 0, first: i, idx: [] });
       const u = assistants.get(group[i]);
+      u.idx.push(i);
       u.before += blocksAt(i);
       u.text ||= Boolean(m.text);
       u.calls += callsAt(m);
@@ -2645,16 +2655,22 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     run.rows.push(i);
     runOf.set(i, run);
   });
-  const orig = [...assistants.values(), ...runs].reduce((s, u) => s + messageTokens(u.before, rates), 0);
+  for (const u of assistants.values()) u.tok = textOf('assistant', u.idx);
+  for (const r of runs) r.tok = textOf('user', r.rows);
+  const orig = [...assistants.values(), ...runs].reduce((s, u) => s + messageTokens(u.before, u.tok, rates), 0);
   // The blocks a user row holds once build has written it. A row of results is rebuilt when a candidate in it changes or all its results are text (a row that is
-  // neither keeps its handle), with its text and deliveries as one block; a notification row by its keep decision: a trace or a short copy is one block, a drop only the deliveries.
+  // neither keeps its handle), with its text and deliveries as one block, also from `keepFrom` on; a notification row by its keep decision: a trace or a short copy is
+  // one block, a drop only the deliveries.
   const rowNow = (i, st) => {
     const m = messages[i];
-    if (i >= keepFrom) return blocksAt(i);
-    if (rows[i].trimDrop === true) return 0;
-    if (noteAt.has(i)) return st.keep === 'full' ? blocksAt(i) : st.keep === 'drop' ? Math.min(1, queuedAt(i)) : 1;
-    if (!resultsAt(m) || (st.changed === 0 && !textRow.has(i))) return blocksAt(i);
-    return (m.text || queuedAt(i) ? 1 : 0) + st.left;
+    if (i < keepFrom) {
+      if (rows[i].trimDrop === true) return 0;
+      if (noteAt.has(i)) return st.keep === 'full' ? blocksAt(i) : st.keep === 'drop' ? Math.min(1, queuedAt(i)) : 1;
+    }
+    // No row from keepFrom on is cut (the candidates are before it), so a row of text results there is rebuilt as it stands.
+    const cut = i < keepFrom;
+    if (!resultsAt(m) || ((!cut || st.changed === 0) && !textRow.has(i))) return blocksAt(i);
+    return (m.text || queuedAt(i) ? 1 : 0) + (cut ? st.left : resultsAt(m));
   };
   // A tracker follows the keep decisions as they are made (set) and says what they take off the list's overhead in tokens: `removed` all of it, `gain` what the
   // decisions add to what build does whatever is decided.
@@ -2664,8 +2680,9 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     for (const r of runs) for (const i of r.rows) if (noteAt.has(i) || resultsAt(messages[i])) state.set(i, { left: resultsAt(messages[i]), changed: 0, keep: 'full', now: 0 });
     const nowOf = (s) => (s.first >= keepFrom ? s.before : (s.text || s.traces > 0 ? 1 : 0) + s.calls);
     const runN = new Map();
+    const runT = new Map(runs.map((r) => [r, r.tok]));
     let total = 0;
-    for (const s of asst.values()) total += messageTokens(nowOf(s), rates);
+    for (const s of asst.values()) total += messageTokens(nowOf(s), s.tok, rates);
     for (const r of runs) {
       let n = 0;
       for (const i of r.rows) {
@@ -2675,39 +2692,51 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
         n += now;
       }
       runN.set(r, n);
-      total += messageTokens(n, rates);
+      total += messageTokens(n, r.tok, rates);
     }
     const base = orig - total;
-    const reread = (i) => {
+    // `dText`: the change of the text of the row's message (the zero floor of a message).
+    const reread = (i, dText) => {
       const st = state.get(i);
       const r = runOf.get(i);
       const now = rowNow(i, st);
-      total -= messageTokens(runN.get(r), rates);
+      total -= messageTokens(runN.get(r), runT.get(r), rates);
       runN.set(r, runN.get(r) + now - st.now);
+      runT.set(r, runT.get(r) + dText);
       st.now = now;
-      total += messageTokens(runN.get(r), rates);
+      total += messageTokens(runN.get(r), runT.get(r), rates);
     };
     const gone = (keep) => (keep === 'trace' || keep === 'drop' ? 1 : 0);
+    // What the decision `keep` on `c` leaves of its text in the message of its call (the call, or its trace) and in the message of its result (the rest of its cost).
+    const leaves = (c, keep) => {
+      if (!floored) return [0, 0];
+      const t = itemTokens(c, rates);
+      const inCall = c.note ? 0 : keep === 'trace' ? t.trace : keep === 'drop' ? 0 : t.call;
+      return [inCall, t[keep] - inCall];
+    };
     const decided = new Map();
     return {
       set(c, keep) {
         const was = decided.get(c) ?? 'full';
         if (was === keep) return;
         decided.set(c, keep);
+        const [callNow, resultNow] = leaves(c, keep);
+        const [callWas, resultWas] = leaves(c, was);
         if (c.note) {
           const st = state.get(c.resIdx);
-          if (st) { st.keep = keep; reread(c.resIdx); }
+          if (st) { st.keep = keep; reread(c.resIdx, resultNow - resultWas); }
           return;
         }
         const s = asst.get(group[c.useIdx]);
         if (s) {
-          total -= messageTokens(nowOf(s), rates);
+          total -= messageTokens(nowOf(s), s.tok, rates);
           s.calls -= gone(keep) - gone(was);
           s.traces += Number(keep === 'trace') - Number(was === 'trace');
-          total += messageTokens(nowOf(s), rates);
+          s.tok += callNow - callWas;
+          total += messageTokens(nowOf(s), s.tok, rates);
         }
         const st = state.get(c.resIdx);
-        if (st) { st.left -= gone(keep) - gone(was); st.changed += Number(keep !== 'full') - Number(was !== 'full'); reread(c.resIdx); }
+        if (st) { st.left -= gone(keep) - gone(was); st.changed += Number(keep !== 'full') - Number(was !== 'full'); reread(c.resIdx, resultNow - resultWas); }
       },
       removed: () => orig - total,
       gain: () => orig - total - base,

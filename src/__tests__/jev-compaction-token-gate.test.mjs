@@ -304,6 +304,75 @@ describe('parallel calls: the predictions count the blocks and messages that bui
   });
 });
 
+describe('the prediction is the list that is installed: the rows of the tail that build rebuilds and the zero floor of a message', () => {
+  // 210 steps of a call and a result of `chars` characters; the conversation ends inside its tool loop (no answer after the last result), so the last call and its result
+  // are the tail. The row of results of the tail is rebuilt from its text (all its results are text), and the `delivered` messages that came after it, which the host
+  // holds as blocks of their own, become one block of that row. `block` is the RATE_BLOCK override (none: the default 45.4).
+  async function runOf({ block, chars, delivered = 0 }) {
+    const rows = session(210, { shot: () => false, chars }).slice(0, -2);
+    const after = delivered ? { t210: Array.from({ length: delivered }, (_, k) => `The coordinator sent a message while you were working:\nn${k}`) } : undefined;
+    const raw = block === undefined ? undefined : JSON.stringify({ RATE_BLOCK: block });
+    const rates = ratesFrom(raw);
+    const counted = Math.round(listTokens(apiOf(rows, after), rates));
+    const env = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', ...(raw ? { OMC_JEV_COMPACT_RATES: raw } : {}) };
+    const { record, out } = await compactRun(env, rows, { tokens: counted, trigger: 'manual', after });
+    return { record, out, counted, installed: listTokens(apiOf(out.messages), rates) };
+  }
+  // The prediction and the tokens after are the estimate of the list that is installed, within the line break before each trace that the prediction leaves out
+  // (under a token for each). A cascade that stops at the first step that reaches its target leaves the prediction just under it.
+  function expectInstalled({ record, counted, installed }, label) {
+    expect(record.result, label).toBe('jev');
+    const slack = 0.6 * record.traced + 2;
+    expect(Math.abs(record.tokens_after_pred - installed), `${label} pred`).toBeLessThanOrEqual(slack);
+    expect(Math.abs(record.tokens_after - installed), `${label} after`).toBeLessThanOrEqual(slack);
+    if (record.cascade_pass === 'short_or_trace') {
+      expect(record.tokens_after_pred, label).toBeLessThanOrEqual(record.cascade_target_tokens);
+      expect(record.tokens_after_pred, label).toBeGreaterThan(record.cascade_target_tokens - 400);
+      expect(1 - installed / counted, `${label} reduction of the installed list`).toBeGreaterThanOrEqual(0.3);
+    }
+  }
+
+  it('the messages delivered after the last result of an open tool loop are one block of the row build rebuilds: the cascade does not trace more results for their blocks', async () => {
+    // 200 deliveries are 200 blocks in the host's list and one block in the installed one (about 9 000 tokens of overhead). A prediction that kept them as 200 blocks
+    // would start 9 000 tokens too high and trace results the target does not need.
+    const run = await runOf({ chars: 600, delivered: 200 });
+    expectInstalled(run, 'default rates');
+    const tail = run.out.messages.at(-1);
+    expect(tail.toolResults).toHaveLength(1);
+    expect(tail.text).toContain('n199');
+  });
+
+  it('the zero floor is on the whole cost of a message, text and structure: with RATE_BLOCK 1 the plan does not give back more than rebuilding removes', async () => {
+    // A message of one block adds 1 - 40.5 tokens to its text, and a result of 600 characters keeps that sum above zero, so the 39.5 tokens are taken off the message
+    // as they stand; a structure cut at zero on its own leaves them in. 210 such results went 49 400 -> 33 800 in the prediction and 35 100 in the installed list.
+    const run = await runOf({ block: 1, chars: 600 });
+    expect(run.counted).toBeGreaterThan(49000);
+    expectInstalled(run, 'RATE_BLOCK 1');
+  });
+
+  it('the same for results so short that a message costs nothing: the list that is left is what the plan says, not none', async () => {
+    // 210 results of 120 characters, all traced (a manual compaction of a list under the target): the trace lines of an assistant message are about as many tokens as the
+    // constant of its message takes off, so some of the messages that are left cost zero, and the others what their text and their block cost.
+    const run = await runOf({ block: 1, chars: 120 });
+    expect(run.record.cascade_pass).toBe('manual');
+    expect(run.installed).toBeGreaterThan(250);
+    expectInstalled(run, 'RATE_BLOCK 1, short results');
+  });
+
+  const CASES = [
+    { chars: 120, label: 'short results' },
+    { chars: 600, label: 'results of 600 characters' },
+    { chars: 600, delivered: 200, label: 'results of 600 characters, 200 deliveries after the last' },
+  ];
+  for (const block of [undefined, 1, 20, 40, 45.4]) {
+    for (const c of CASES) {
+      it(`the prediction is the installed list with RATE_BLOCK ${block ?? 'at its default'}: ${c.label}`, async () => {
+        expectInstalled(await runOf({ block, chars: c.chars, delivered: c.delivered }), `${block} ${c.label}`);
+      });
+    }
+  }
+});
+
 describe('a session of screenshots and the own threshold (OMC_JEV_COMPACT_AT_PERCENT)', () => {
   const OWN = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60' };
 

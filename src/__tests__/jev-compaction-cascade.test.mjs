@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, cascade, cutInTokens, floorPrediction, manualPlan, ratesFrom, register, scoreQuestion, shapeOf } from '../../hooks/jev-compaction.mjs';
+import { QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, cascade, cutInTokens, floorPrediction, listTokens, manualPlan, ratesFrom, register, scoreQuestion, shapeOf } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
@@ -560,6 +560,38 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     const [first, second] = [candidates.filter((c) => c.resIdx === 2), candidates.filter((c) => c.resIdx === 5)];
     expect(shape.shed(second, 'drop')).toBeCloseTo(0, 6);
     expect(shape.shed(first, 'drop')).toBeCloseTo(2 * msg(5), 6);
+  });
+
+  it('a row of text results from keepFrom on is rebuilt by build, and the messages delivered after it become one block of it', () => {
+    const { rows, group, candidates } = parallel(2, 5);
+    // 4 messages came after the results of the second batch (row 5): the host holds them as blocks of their own, build writes them into the text of the row.
+    const queued = new Map([[5, ['a', 'b', 'c', 'd']]]);
+    const shape = shapeOf(rows, candidates.filter((c) => c.resIdx === 2), { group, keepFrom: 4, queued });
+    // The row has 5 results and 4 deliveries (9 blocks) in the host's list and 5 results and one text block (6) in the built one, whatever is decided.
+    expect(shape.tracker().removed()).toBeCloseTo(msg(9) - msg(6), 6);
+    // Rows that keep their handle (a result that is no text) get their deliveries back from the host as they were.
+    const image = rows.map((m, i) => (i === 5 ? { ...m, toolResults: m.toolResults.map((r, k) => (k === 0 ? { ...r, result: [{ type: 'image' }] } : r)) } : m));
+    expect(shapeOf(image, [], { group, keepFrom: 4, queued }).tracker().removed()).toBeCloseTo(0, 6);
+  });
+
+  it('with a low block rate the floor of a message is on its text and its blocks together: a message that costs nothing is taken off the list as nothing', () => {
+    const [call, text] = ['cat notes-a.txt', `RESULT-a ${'x'.repeat(300)}`];
+    const use = { tool_use_id: 'a', tool: 'Bash', input: { command: call } };
+    const rows = [{ role: 'user', text: 'Task.', toolUses: [] }, { role: 'assistant', text: 'Step 1.', toolUses: [use] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text, isError: false }] }, { role: 'assistant', text: 'Done.', toolUses: [] }];
+    const group = [-1, 0, -1, 1];
+    const before = [{ role: 'user', content: 'Task.' }, { role: 'assistant', content: [{ type: 'text', text: 'Step 1.' }, { type: 'tool_use', id: 'a', name: 'Bash', input: { command: call } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: text }] }, { role: 'assistant', content: 'Done.' }];
+    // With the call and its result dropped, the assistant keeps its text and the message of the result is gone.
+    const after = [{ role: 'user', content: 'Task.' }, { role: 'assistant', content: 'Step 1.' }, { role: 'assistant', content: 'Done.' }];
+    for (const raw of [undefined, '{"RATE_BLOCK":1}', '{"RATE_BLOCK":20}', '{"RATE_BLOCK":40}']) {
+      const rates = ratesFrom(raw);
+      const candidates = [{ ...item('a', { resIdx: 2, chars: 300 }), useIdx: 1 }];
+      const shape = shapeOf(rows, candidates, { group, keepFrom: rows.length, rates });
+      // At RATE_BLOCK 1 the assistant message (a short text and a call) costs nothing, and at 20 it costs nothing once the call is gone: the text of the call is no
+      // part of what the list loses then.
+      expect(floorPrediction(candidates, listTokens(before, rates), rates, shape), String(raw)).toBeCloseTo(listTokens(after, rates), 6);
+    }
   });
 
   it('a row of thinking is dropped and the rows of one message are one: the overhead build takes off whatever is decided (`removed`) is apart from what the decisions take (`gain`)', () => {
