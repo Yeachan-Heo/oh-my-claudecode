@@ -208,7 +208,8 @@ def without_ours(group):
 
 
 def read_settings():
-    """(raw bytes, snapshot, mode) of settings.json, or (None, None, None) when it does not exist."""
+    """(raw bytes, snapshot, mode) of settings.json, or (None, None, None) when it does not exist. The snapshot is what the final comparison
+    looks at: the bytes, the modification time and the mode (a chmod changes neither of the first two, and the write would undo it)."""
     try:
         with open(SETTINGS, 'rb') as f:
             raw = f.read()
@@ -217,7 +218,7 @@ def read_settings():
         return None, None, None
     except Exception as e:
         fail(f'cannot read {SETTINGS}: {e!r}')
-    return raw, (raw, st.st_mtime_ns), st.st_mode & 0o7777
+    return raw, (raw, st.st_mtime_ns, st.st_mode & 0o7777), st.st_mode & 0o7777
 
 
 def write_private(path, data, mode, mtime_ns=None):

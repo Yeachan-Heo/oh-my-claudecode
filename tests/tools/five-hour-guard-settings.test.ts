@@ -15,7 +15,7 @@ afterAll(cleanup);
 
 // Another program writes settings.json between the read of the tool and its replace: the wrapper acts when the tool creates its
 // temporary file (mode backup: when it creates the backup). Modes: content (changed, modification time put back), mtime (only the
-// modification time moves), always, backup (as content, but at the creation of the backup).
+// modification time moves), chmod (only the mode is tightened to 0600), always, backup (as content, but at the creation of the backup).
 const RACE_DRIVER = [
   'import json, os, runpy, sys',
   'mode, settings = sys.argv[1], sys.argv[2]',
@@ -29,6 +29,8 @@ const RACE_DRIVER = [
   '            st = os.stat(settings)',
   "            if mode == 'mtime':",
   '                os.utime(settings, ns=(st.st_atime_ns, st.st_mtime_ns + 5000000000))',
+  "            elif mode == 'chmod':",
+  '                os.chmod(settings, 0o600)',
   '            else:',
   '                data = json.load(open(settings))',
   "                data['other_writer_%d' % count[0]] = True",
@@ -238,6 +240,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readText(a.f.settings)).not.toContain('five-hour-guard-hook');
     expect(readdirSync(a.f.dir).some((n) => n.endsWith('.tmp')), 'no temporary file left').toBe(false);
     expect(backups(a.f), 'no backup of a file that was not replaced').toHaveLength(0);
+  });
+
+  it('a mode that another program changes while the tool works is kept: the snapshot holds the mode, so the file is read again instead of replaced with the old mode', () => {
+    const f = fixture('settings-race-chmod');
+    write(f, base());
+    chmodSync(f.settings, 0o644);
+    // the other program tightens the mode when the tool has made its temporary file: the bytes and the modification time stay as they were
+    const r = runPyCode(RACE_DRIVER, ['chmod', f.settings, SETTINGS_TOOL, 'add', '--settings', f.settings, '--pause-file', f.pause, '--hook-log', f.hookLog, '--hook', HOOK, '--python', PYBIN]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr, 'the change is seen').toMatch(/changed while it was being updated, reading it again/);
+    expect(statSync(f.settings).mode & 0o777, 'the tightened mode is kept').toBe(0o600);
+    expect(readJson(f.settings).hooks.PreToolUse.at(-1).hooks[0].command, 'and our entry is added').toBe(entryCommand(f));
+    expect(backups(f)).toHaveLength(1);
+    expect(statSync(join(f.dir, backups(f)[0])).mode & 0o777, 'the backup has the mode of the file it copies').toBe(0o600);
   });
 
   it('a write that lands while the backup is being made is not lost: the comparison runs after the backup, right before the replace', () => {

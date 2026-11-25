@@ -185,7 +185,7 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    entry has a `timeout` of 21600 s (`--timeout`, a finite number of at least 21600: a shorter one is refused, since Claude Code would cancel the hook during a long pause and the tool call would go on, and so is an integer too large for a float), longer than any window. A `settings.json` that is a symbolic link is
    written through: the file it points to is replaced, the link stays a link (the backup sits next to the link). When
    another program writes `settings.json` while the tool works (also while the backup is made), the tool reads it again
-   once and then gives up (exit 2, nothing written). A write inside the instant between its last comparison and the
+   once and then gives up (exit 2, nothing written); a change of the content, of the modification time or of the file mode counts, so a mode that another program tightened is kept. A write inside the instant between its last comparison and the
    rename cannot be told apart by any tool, since a rename has no compare-and-swap; run `check` after `add` to see the
    result. Without a `settings.json`, `add` creates it (the
    directory has to exist; mode 0600), `remove` has nothing to do and `check` reports "not installed" (exit 1). The
