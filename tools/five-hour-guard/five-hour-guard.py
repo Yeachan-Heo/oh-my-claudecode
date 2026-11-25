@@ -929,6 +929,10 @@ def unpublish(strict=False):
     except Exception as e:
         log(f'cannot remove pause file: {e!r}')
         return False
+    owner = live_owner() if ours else None   # no lock: the shape does not say whose pause it is, a live process with a current heartbeat that is not this one published it
+    if owner is not None:
+        log(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: left alone')
+        return True
     if ours:
         gone = f'{PAUSE_FILE}.{os.getpid()}.{os.urandom(6).hex()}.gone'   # a name no earlier file has: the rename must not replace a file that was kept under one
         try:

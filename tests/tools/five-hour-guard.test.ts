@@ -894,6 +894,28 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(existsSync(a.pause), 'stopping the first guard removes its pause').toBe(false);
   });
 
+  it('where no lock is available two guards that cross their first publication leave the pause of the winner in force when the loser stops: the cleanup of the loser does not remove a pause that a live process published', async () => {
+    // the loser has stored its pause and finds the winner's file at the moment it links its own into place (the driver writes it there)
+    const driver = [
+      'import os, runpy, sys', 'sys.modules["fcntl"] = None', 'sys.modules["msvcrt"] = None',
+      'real, target, text = os.link, os.path.abspath(sys.argv[1]), sys.argv[2]',
+      'def link(src, dst, *a, **k):', '    if os.path.abspath(str(dst)) == target and not os.path.lexists(target):',
+      '        with open(target, "w") as f: f.write(text)', '    return real(src, dst, *a, **k)',
+      'os.link = link', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('nolock-crossing', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const winner = JSON.stringify(pauseDoc({ pid: process.pid, valid_until: now() + 3600 }));   // the process of this test: alive, with a current heartbeat
+    const loser = spawnPyCode(driver, [f.pause, winner, GUARD, ...guardArgs(f)]);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeCache(f, { pct: 99, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /appeared meanwhile/.test(readText(f.log)), 20000, 'the loser finds the file of the winner at its link');
+      expect(readJson(f.state).paused, 'the loser has stored a pause').toBe(true);
+      expect(readJson(f.pause).pid, 'the pause file is the winner\'s').toBe(process.pid);
+    } finally { await stopGuard(loser); }
+    expect(existsSync(f.pause), 'stopping the loser leaves the pause of the winner in force').toBe(true);
+    expect(readJson(f.pause).pid, 'it is still the winner\'s').toBe(process.pid);
+  });
+
   it('a file that appears at pause_file after the start check is never removed as a leftover: exit 2, the file is kept', () => {
     // the driver puts the file in place when the guard first reads its state file, which is after the checks of the start and before the removal of a leftover
     const driver = ['import builtins, os, runpy, sys', 'real, target, text = builtins.open, sys.argv[1], sys.argv[2]', 'done = []',
