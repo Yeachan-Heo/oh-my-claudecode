@@ -304,11 +304,25 @@ def program_path(word, command_word):
     return word if os.path.isfile(word) else None
 
 
+def executable_file(word):
+    """Whether a word names (as written, ~ and variables of this process expanded) a regular file with an execute bit. Such a word can be
+    what a command runs wherever it stands: behind if, then, do, !, sudo, nice, timeout, xargs, or an option with a glued value. A file with
+    no execute bit named as plain data (tail -n 5 guard.log) is not a program."""
+    path = os.path.expanduser(os.path.expandvars(word))
+    if not path or len(path) > MAX_PATH_CHARS or '\0' in path:
+        return False
+    try:
+        mode = os.stat(path).st_mode
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISREG(mode) and bool(mode & 0o111)
+
+
 def command_programs(command, depth=0, own=False):
     """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
     shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
-    (its first argument, unless it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep)
-    and any argument that is named like a script. Wrong or hostile text gives what could be read and never an error: a command that is
+    (its first argument, unless it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
+    any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
     longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
     and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out; the other simple
     commands of such a handler are read, also one that only has the name of the hook among its arguments."""
@@ -366,6 +380,7 @@ def command_programs(command, depth=0, own=False):
             if INTERPRETER_NAME.fullmatch(base) and operands:
                 candidates.append((operands[0], False))
             candidates += [(w, False) for w in operands if w.lower().endswith(SCRIPT_SUFFIXES)]
+        candidates += [(w, False) for w in words if executable_file(w)]   # the syntax around a command is not parsed: a word that names a file that can be run is a program wherever it stands
         if takes_code and depth < 2 and SHELL_NAME.fullmatch(base):
             for k in range(i + 1, len(words) - 1):
                 if words[k].startswith('-') and not words[k].startswith('--') and 'c' in words[k][1:]:

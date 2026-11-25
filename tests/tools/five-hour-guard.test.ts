@@ -1290,12 +1290,13 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a program behind the options of env, exec, command and time, and behind the separators, groups and redirections of a shell command, is found', () => {
+  it('a program behind the options of env, exec, command and time, and behind the separators, groups, keywords and wrappers of a shell command, is found', () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);
     const syntax = ['true && AUDIT', 'false || AUDIT', 'echo x | AUDIT', 'true; AUDIT', 'true;AUDIT', 'AUDIT &', 'true & AUDIT', '(AUDIT)', 'AUDIT > AUDIT.out 2>&1', "sh -c 'AUDIT'", 'bash -lc "AUDIT"',
       'echo $(AUDIT)', "env -S 'AUDIT --flag'", "env -S 'env -i AUDIT'", "env --split-string 'AUDIT --flag'", "env --split-string='AUDIT --flag'", "env -S'AUDIT --flag'",
-      "env --split='AUDIT --flag'", "env -i --split-string='env -S\"AUDIT\"'"].map((form) => (audit: string) => form.replaceAll('AUDIT', audit));
+      "env --split='AUDIT --flag'", "env -i --split-string='env -S\"AUDIT\"'", 'if true; then AUDIT; fi', 'if false; then true; elif true; then AUDIT; fi', 'while true; do AUDIT; done',
+      'case x in x) AUDIT;; esac', '{ AUDIT; }', '! AUDIT', 'sudo AUDIT', 'nice -n 5 AUDIT', 'timeout 5 AUDIT', 'xargs AUDIT', 'echo x | xargs -n1 AUDIT', 'env -iu X AUDIT'].map((form) => (audit: string) => form.replaceAll('AUDIT', audit));
     for (const [k, build] of [...wrappers, ...syntax].entries()) {
       const f = fixture(`wrapper-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
       const audit = join(f.dir, 'audit');
