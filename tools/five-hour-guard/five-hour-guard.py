@@ -197,6 +197,7 @@ def same_file(a, b):
 
 
 HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}
+UNSCANNED = 'command that cannot be read to its end'   # the entry for a command of another hook that a limit of command_programs cut short: the guard writes nothing while it is there
 OTHER_PROGRAM = 'program of another hook'   # a file that a command of any other hook (or the status line) in settings.json runs
 PROGRAM_LABELS = HOOK_PROGRAMS | {OTHER_PROGRAM, 'guard script', 'settings tool script', 'entry module'}
 READ_ONLY_LABELS = {'configuration file', 'usage_cache', 'usage_cache lock', 'settings_file'}   # files the guard only reads (many hooks name them): a command of another hook that names one is no collision
@@ -288,6 +289,11 @@ MAX_COMMAND_PROGRAMS = 4096
 PUNCTUATION = '();<>|&\n'
 
 
+class ScanIncomplete(Exception):
+    """A command that command_programs cannot read to its end (a limit was reached): what it names may be a file of the guard, so the
+    guard writes nothing while it stands in settings.json (see UNSCANNED)."""
+
+
 def word_files(word, directories):
     """The files a word of a command can be: a word with a directory part is that path as written (with ~ and variables of this process
     expanded); a word without one is the file of that name in each of `directories` (the working directory first, then the PATH) where there is one."""
@@ -314,19 +320,24 @@ def command_programs(command, exclude=(), depth=0):
     stands for that path, a word without one for the file of that name in the working directory of the guard and in each directory of the
     PATH of its simple command (an assignment PATH=dir in front of the command, else the PATH of the guard). The rule is deliberately wide:
     a word that is no program at all (an argument, an option value) is a file the guard then does not write, and no program is missed by
-    not being recognised. Wrong or hostile text gives what could be read and never an error: a command that is longer than MAX_COMMAND_CHARS,
-    has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words. `exclude`: words that are not
+    not being recognised. A command with a NUL character or one that the shell cannot parse runs nothing and gives none. A command that a limit cuts
+    short (more than MAX_COMMAND_CHARS characters, MAX_COMMAND_WORDS words or MAX_COMMAND_PROGRAMS files, or quoted commands nested deeper than
+    two levels) raises ScanIncomplete: a prefix would pass for the whole command. A word longer than MAX_PATH_CHARS names no file and is skipped. `exclude`: words that are not
     candidates (the files that the registered entry of this guard names itself, see registered_runtime_files)."""
-    if not isinstance(command, str) or len(command) > MAX_COMMAND_CHARS or '\0' in command:
-        return []
+    if not isinstance(command, str) or '\0' in command:
+        return []   # no process can be started with a NUL character in its arguments
+    if len(command) > MAX_COMMAND_CHARS:
+        raise ScanIncomplete('command too long to scan')
     try:
         lex = shlex.shlex(ENTRY.strip_comments(command), posix=True, punctuation_chars=PUNCTUATION)
         lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''
         tokens = []
         for token in lex:
             tokens.append(token)
-            if len(tokens) >= MAX_COMMAND_WORDS:
-                break
+            if len(tokens) > MAX_COMMAND_WORDS:
+                raise ScanIncomplete('command has too many words to scan')
+    except ScanIncomplete:
+        raise
     except Exception:
         return []   # a command the shell cannot parse runs nothing
     simple, words = [], []
@@ -348,7 +359,9 @@ def command_programs(command, exclude=(), depth=0):
         for word in words:
             if word in exclude:
                 continue
-            if depth < 2 and any(c.isspace() for c in word):
+            if any(c.isspace() for c in word):
+                if depth >= 2:
+                    raise ScanIncomplete('quoted commands nested too deeply to scan')
                 found += [t for t in command_programs(word, exclude, depth + 1) if t not in found]
             pieces = [word]
             if '=' in word:
@@ -359,8 +372,8 @@ def command_programs(command, exclude=(), depth=0):
                 for path in word_files(piece, directories):
                     if path not in found:
                         found.append(path)
-        if len(found) >= MAX_COMMAND_PROGRAMS:
-            return found[:MAX_COMMAND_PROGRAMS]
+        if len(found) > MAX_COMMAND_PROGRAMS:
+            raise ScanIncomplete('command names too many files to scan')
     return found
 
 
@@ -413,6 +426,8 @@ def registered_runtime_files():
                 pass
             try:   # a command that runs before or after the hook in the same handler is a program of another hook too
                 companions += [(OTHER_PROGRAM, t) for t in command_programs(handler['command'], named)]
+            except ScanIncomplete as e:
+                companions.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
             except Exception:
                 pass
             if not parsed:
@@ -431,6 +446,8 @@ def registered_runtime_files():
         for command in other_commands(data, ours):
             try:
                 found += [(OTHER_PROGRAM, t) for t in command_programs(command)]
+            except ScanIncomplete as e:
+                found.append((UNSCANNED, f'{e}: {command[:60]}'))
             except Exception:
                 continue   # one command that cannot be read must not hide the others
     except Exception:
@@ -463,6 +480,9 @@ def own_files():
     return [('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
             ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('entry module', os.path.join(HERE, 'five_hour_guard_entry.py'))]
 
+for _label, _text in registered_runtime_files():
+    if _label == UNSCANNED:
+        fail(f'{_text}... in {SETTINGS or default_settings()} is not read to its end, so the guard cannot tell whether it names a file of the guard: shorten the command or remove the hook')
 check_distinct([*configured_files(), *registered_runtime_files(),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
@@ -540,7 +560,7 @@ def log_is_program():
             blocked = False   # a look that fails never costs the log
         LOG_LOOK[:] = [now, blocked]
         if blocked:
-            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard)', flush=True)
+            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard; a command there that is not read to its end blocks the log too)', flush=True)
     return LOG_LOOK[1]
 
 
@@ -563,7 +583,11 @@ def refuse_program_overwrite(*paths):
     """A hook, interpreter or launcher that a registered entry names, or a program that another hook entry runs, is never replaced by a
     write of the guard: settings.json can be rewritten at any moment, so this is looked at at every write (the entry into a pause, each
     renewal and the end of a pause). One look at settings.json serves all the paths of one write."""
-    programs = [(label, program) for label, program in registered_runtime_files() if label in PROTECTED_LABELS]
+    scanned = registered_runtime_files()
+    for label, text in scanned:
+        if label == UNSCANNED:   # what the command names is not known, so a file of the guard may be among it
+            raise OSError(f'{text}... in {SETTINGS or default_settings()} is not read to its end, so the guard cannot tell whether it names {paths[0] if paths else "a file of the guard"}: nothing is written (shorten the command or remove the hook)')
+    programs = [(label, program) for label, program in scanned if label in PROTECTED_LABELS]
     for path in paths:
         for label, program in programs:
             if same_file(program, path):
@@ -926,6 +950,7 @@ def enter_pause(state, pct, reset_ts):
         check_pause_path()   # before anything is stored: a pause that cannot be published must not be remembered
         for label, path, out_label in program_collisions():
             raise OSError(f'the {label} {path} is the {out_label} of this guard: a pause would replace the program, so none is stored ({fix_hint(label)})')
+        refuse_program_overwrite(*[x for x in (STATE, PAUSE_FILE) if x])   # also a command that is not read to its end: no pause is remembered that cannot be written
     state.update(paused=True, since=time.time(), resume_at=reset_ts + A.margin)
     log(f'THRESHOLD: 5h {pct} %, reset {ts(reset_ts)}; pause until {ts(state["resume_at"])}')
     hook_check('pause start')

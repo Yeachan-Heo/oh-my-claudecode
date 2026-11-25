@@ -1360,21 +1360,18 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
     const hostile = [
       `echo 'unbalanced ${'x'.repeat(50)}`,
-      `python3 ${'a;'.repeat(30000)}`,
-      'x'.repeat(70000),
       '('.repeat(40000),
       `python${'.'.repeat(30000)}x /tmp/a.py`,
       'a\u0000b',
-      Array.from({ length: 5000 }, (_, i) => `/tmp/script-${i}.py`).join(' '),
       `${'bash -c "'.repeat(5)}x${'"'.repeat(5)}`,
       `echo ${'\\'.repeat(5000)}`,
-      `${'$(python3 '.repeat(2000)}`,
       '\u202e\ud83d\ude00 emoji > /tmp/out <<EOF 2>&1 &',
       '',
       '   ',
       ';;; && || | & ( ) < >',
       `echo '' "" '' ${PYBIN} '' ''`,
     ];
+    const overLimit = [`python3 ${'a;'.repeat(30000)}`, 'x'.repeat(70000), Array.from({ length: 5000 }, (_, i) => `/tmp/script-${i}.py`).join(' '), `${'$(python3 '.repeat(2000)}`];   // a command that a limit cuts short is not read to its end: the guard refuses (see the test of the limits)
     const handlers = hostile.map((command) => ({ type: 'command', command }));
     const settings = {
       hooks: {
@@ -1397,6 +1394,14 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(refused.stderr, 'the program that comes after the hostile handlers is still protected').toMatch(/"log_file" .* and "program of another hook" \(.*later-hook\.py\) are the same file/);
     expect(refused.stderr).not.toMatch(/Traceback/);
     expect(readText(victim), 'the program is intact').toBe('# a hook of another tool\n');
+    for (const command of overLimit) {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'x', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      const cut = start(f.log);
+      expect(cut.status, `a command over a limit is refused: ${cut.stdout}${cut.stderr}`).toBe(2);
+      expect(cut.stderr).toMatch(/not read to its end/);
+      expect(cut.stderr).not.toMatch(/Traceback/);
+    }
+    writeFileSync(f.settings, JSON.stringify(settings), 'utf8');
     const ok = start(f.log);
     expect(ok.status, `${ok.stdout}${ok.stderr}`).toBe(0);
     expect(ok.stderr).not.toMatch(/Traceback/);
@@ -1606,6 +1611,46 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.status, `${name} named by another hook: ${r.stdout}${r.stderr}`).toBe(2);
       expect(r.stderr, name).toContain(`"program of another hook" (${named}) are the same file`);
     }
+  });
+
+  it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
+    const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
+    const cases: Array<[string, (audit: string) => string, RegExp]> = [
+      ['words', (audit) => `env ${words(4100)} ${audit}`, /too many words to scan/],
+      ['characters', (audit) => `echo ${'x'.repeat(66000)} ${audit}`, /command too long to scan/],
+      ['files', (audit) => `echo ${Array.from({ length: 2100 }, (_, i) => `x=/n/${i}`).join(' ')} ${audit}`, /too many files to scan/],
+      ['nesting', (audit) => `sh -c "sh -c 'sh -c \\"echo ${audit}\\"'"`, /nested too deeply to scan/],
+    ];
+    for (const [name, build, why] of cases) {
+      const f = fixture(`scan-limit-${name}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const audit = join(f.dir, 'audit');
+      writeFileSync(audit, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: build(audit) }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${name}: ${r.stdout.slice(0, 300)}${r.stderr.slice(0, 300)}`).toBe(2);
+      expect(r.stderr, name).toMatch(why);
+      expect(readText(audit), `${name}: the file is intact`).toBe('#!/bin/sh\nexit 0\n');
+      expect(existsSync(f.pause), `${name}: no pause was published`).toBe(false);
+    }
+  });
+
+  it('a command that grows past a limit after the start stops every write of the guard, and a command that stays within the limits does not', () => {
+    const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
+    const f = fixture('scan-limit-after-start', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, settings(`env ${words(4000)} true`), 'utf8');   // within the limit: the guard pauses
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status).toBe(0);
+    expect(readJson(f.pause).paused, 'a command of 4001 words is read to its end').toBe(true);
+    rmSync(f.pause);
+    writeFileSync(f.state, JSON.stringify({ v: 1 }), 'utf8');
+    writeFileSync(f.settings, settings(`env ${words(4100)} true`), 'utf8');
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/too many words to scan/);
   });
 
   it('the options of an interpreter end at its script: python3 audit -c config passes -c to the script, so audit (no suffix, no execute bit) is still a program of another hook; a shell still reads -c behind -o NAME', () => {
