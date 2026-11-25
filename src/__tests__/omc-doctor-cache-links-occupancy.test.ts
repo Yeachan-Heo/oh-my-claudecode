@@ -446,7 +446,8 @@ fs.readlinkSync = function () { const e = new Error('injected readlink failure')
     const cases: Array<{ label: string; env: (cache: string) => Record<string, string>; expected: 'moved 1' | 'nothing moved' }> = [
       { label: 'CLAUDE_PLUGIN_ROOT', env: (c) => ({ CLAUDE_PLUGIN_ROOT: path.join(c, '5.9.0') }), expected: 'moved 1' },
       { label: 'OMC_PLUGIN_ROOT', env: (c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0', 'scripts') }), expected: 'moved 1' },
-      { label: 'the same directory in both, with padding', env: (c) => ({ OMC_PLUGIN_ROOT: ` ${path.join(c, '5.9.0')} `, CLAUDE_PLUGIN_ROOT: path.join(c, '5.9.0') }), expected: 'moved 1' },
+      // The path is kept as written, so a padded one is a relative path (it starts with a space) that cannot protect a version reliably.
+      { label: 'the same directory in both, one padded with spaces', env: (c) => ({ OMC_PLUGIN_ROOT: ` ${path.join(c, '5.9.0')} `, CLAUDE_PLUGIN_ROOT: path.join(c, '5.9.0') }), expected: 'nothing moved' },
       { label: 'two different directories', env: (c) => ({ OMC_PLUGIN_ROOT: path.join(c, '5.9.0'), CLAUDE_PLUGIN_ROOT: path.join(c, '5.8.0') }), expected: 'nothing moved' },
     ];
     for (const command of commands) {

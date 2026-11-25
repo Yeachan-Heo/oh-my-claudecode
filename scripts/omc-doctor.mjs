@@ -50,6 +50,8 @@ const marketplaceOf = (id) => {
   const lower = id.toLowerCase();
   return lower.includes('@') ? lower.slice(lower.indexOf('@') + 1) : 'omc';
 };
+// A plugin root variable as it was set: a value of nothing but white space names no root, any other is kept exactly (a directory name may end in a space).
+const rootOf = (value) => (value && value.trim() ? value : '');
 // The plugin cache directory of a marketplace.
 const cacheDirOf = (market) => path.join(configDir, 'plugins', 'cache', market, 'oh-my-claudecode');
 
@@ -492,7 +494,7 @@ const entryInstallPaths = (market, entry) =>
 // root; the difference is deliberate, a marketplace install must not be reported as a checkout.
 const pluginRoots = () =>
   [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT]
-    .map((root) => (root || '').trim())
+    .map(rootOf)
     .filter(Boolean)
     .filter(isDirectory);
 // The entries of a plugin ID that the session runs: those whose install (entryInstallPaths) holds one of the existing
@@ -550,7 +552,7 @@ const STEP1_BLIND =
 const step1 = () => {
   const { unreadable, malformed, ambiguous, supported } = readChannelRegistry();
   const roots = pluginRoots();
-  const explicitRoot = (process.env.OMC_PLUGIN_ROOT || '').trim();
+  const explicitRoot = rootOf(process.env.OMC_PLUGIN_ROOT);
   // A loaded checkout: an existing OMC_PLUGIN_ROOT answers before the registry, whatever the registry holds, unless
   // it is the install a supported entry pins (its installPath, or the cache directory its version names), or the
   // registry cannot be read completely and the root lies inside the plugin cache. Whether it is one of those can be
@@ -803,7 +805,7 @@ const claudeMdVersion = () => {
   // read may hold the newest version, so no version is named while either is unreadable.
   const registryUnusable = registry.unreadable || (registry.supported.length > 0 ? registry.malformed : registry.ambiguous);
   // The checkout Step 1 reports as plugin-dir: an existing OMC_PLUGIN_ROOT that is no install a supported entry names.
-  const explicitRoot = (process.env.OMC_PLUGIN_ROOT || '').trim();
+  const explicitRoot = rootOf(process.env.OMC_PLUGIN_ROOT);
   // With no supported plugin ID in the registry a CLAUDE_PLUGIN_ROOT alone is the plugin-dir checkout too (Step 1), and the runtime
   // reads its package, so no cache beside it is a reference.
   const claudeOnly = !registry.supported.length && !explicitRoot && roots.length > 0;
@@ -817,7 +819,7 @@ const claudeMdVersion = () => {
     return /\/plugins\/cache\/omc\/oh-my-claudecode\/\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(text.replace(/\\/g, '/'));
   };
   // The runtime reads CLAUDE_PLUGIN_ROOT alone, so that root decides (the other one only where it is absent).
-  const claudeRoot = (process.env.CLAUDE_PLUGIN_ROOT || '').trim();
+  const claudeRoot = rootOf(process.env.CLAUDE_PLUGIN_ROOT);
   const loadedRoot = claudeRoot && isDirectory(claudeRoot) ? claudeRoot : roots[0];
   const external = running.length == 1 && !lexicallyManaged(loadedRoot);
   const sameRoots = roots.length > 1 ? askSame(roots[0], roots[1]) : 'yes';
@@ -1143,7 +1145,7 @@ const protectionOf = (dir, versions) => {
   const realDir = chainOf(dir).pop();
   // The plugin root variables: two different existing directories cannot be told apart from a conflict.
   const rootVars = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT]
-    .map((root) => (root || '').trim())
+    .map(rootOf)
     .filter(Boolean);
   if (
     rootVars.length > 1 &&
@@ -1309,7 +1311,7 @@ const backupPlace = (registry) => {
   const installPaths = [...registry.pins.map((entry) => entry.installPath), ...registry.other]
     .filter((target) => typeof target == 'string' && target.trim())
     .map((target) => target.trim());
-  const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT].map((root) => (root || '').trim()).filter(Boolean);
+  const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT].map(rootOf).filter(Boolean);
   // A cache namespace (or the plugin directory in it) may be a link out of plugins/cache: its versions then lie
   // elsewhere, so each one is a tree of its own, resolved by the comparisons below.
   const namespaces = [...new Set([...registry.ids.map(marketplaceOf), 'omc'])].map(cacheDirOf);

@@ -42,6 +42,21 @@ describe('omc-doctor: an explicit OMC_PLUGIN_ROOT inside plugins/cache', { timeo
     }
   });
 
+  // omc --plugin-dir './checkout ' names a directory whose name ends in a space; the path is kept as written, a value of white space only names no root.
+  test('a plugin root whose directory name ends in a space is the checkout as written', () => {
+    for (const name of ['checkout ', ' checkout']) {
+      let root = '';
+      const out = step1({
+        cache: { omc: ['5.7.0'] },
+        env: (dir) => ({ OMC_PLUGIN_ROOT: (root = makeRoot(dir, name, { 'package.json': { version: '6.1.0' } })) }),
+      });
+      expect({ name, out }).toEqual({
+        name,
+        out: { 'Plugin root': root, Channel: 'plugin-dir', Installed: '6.1.0', Latest: '(unavailable) (a --plugin-dir checkout has no update channel)', Updater: updater },
+      });
+    }
+  });
+
   // The registry cannot be read, so the cache directory cannot be told from the pinned install: the channel is unknown, not
   // a guess. Without any registry file there is nothing to tell it from, and the explicit root is the checkout.
   test('a root inside plugins/cache with a registry that cannot be read is unknown, with no registry at all it is the checkout', () => {

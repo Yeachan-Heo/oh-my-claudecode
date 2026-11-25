@@ -218,6 +218,7 @@ describe.skipIf(!posix)('omc-doctor: the locator line finds the script, or says 
     try {
       const first = stub(base, 'first', 'first');
       const second = stub(base, 'second', 'second');
+      const spaced = stub(base, 'checkout ', 'spaced');
       const bare = path.join(base, 'bare');
       mkdirSync(bare);
       const gone = path.join(base, 'gone');
@@ -228,7 +229,10 @@ describe.skipIf(!posix)('omc-doctor: the locator line finds the script, or says 
         ['CLAUDE_PLUGIN_ROOT does not exist', { CLAUDE_PLUGIN_ROOT: gone, OMC_PLUGIN_ROOT: second }, 'second'],
         ['OMC_PLUGIN_ROOT does not exist beside a live CLAUDE_PLUGIN_ROOT', { CLAUDE_PLUGIN_ROOT: first, OMC_PLUGIN_ROOT: gone }, 'first'],
         ['only CLAUDE_PLUGIN_ROOT is set', { CLAUDE_PLUGIN_ROOT: first, OMC_PLUGIN_ROOT: '' }, 'first'],
-        ['surrounding spaces are ignored', { CLAUDE_PLUGIN_ROOT: `  ${first}  `, OMC_PLUGIN_ROOT: '' }, 'first'],
+        // The path is used as written: a directory name may end in a space (omc --plugin-dir './checkout '), and a padded path names no directory.
+        ['a directory whose name ends in a space is found as written', { CLAUDE_PLUGIN_ROOT: spaced, OMC_PLUGIN_ROOT: second }, 'spaced'],
+        ['a path padded with spaces names no directory', { CLAUDE_PLUGIN_ROOT: `  ${first}  `, OMC_PLUGIN_ROOT: second }, 'second'],
+        ['a value of nothing but white space names no root', { CLAUDE_PLUGIN_ROOT: ' \t ', OMC_PLUGIN_ROOT: second }, 'second'],
       ];
       for (const [label, env, marker] of cases) {
         for (const command of ['claude-md-optout', 'cache-outdated']) {
