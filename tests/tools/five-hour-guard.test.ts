@@ -2196,7 +2196,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     };
     const sh = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout;
     expect(sh(`printf %s "$(printf ${hooks}/%s audit)"`), 'a substitution that makes the script').toBe(audit);
-    expect(sh('printf %s \'$(x)\' "\\$(x)" $((1+2))'), 'no substitution in single quotes, after a backslash, in arithmetic').toBe('$(x)$(x)3');
+    expect(sh('printf %s \'$(x)\' "\\$(x)" $((1+2))'), 'no substitution in single quotes, after a backslash, in arithmetic').toBe('$(x)$(x)3');   // (the arithmetic is the shell's; the guard refuses it below)
     // refused, whichever file is meant: the result of the program is not known
     const substitutions = [
       `python3 "$(printf ${hooks}/%s audit)"`, `python3 $(printf ${hooks}/%s audit)`, 'python3 "`printf ' + hooks + '/%s audit`"', 'python3 `printf ' + hooks + '/%s audit`',
@@ -2211,7 +2211,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
     }
     // read as before: no substitution
-    const plain = [`python3 '$(x)'`, 'python3 "\\$(x)"', 'python3 $((1+2))', 'python3 "$((1+2))"', 'python3 $FHG_NOBODY ${FHG_NOBODY:-x}', "python3 '`x`'", 'python3 \\`x', 'true # $(x)', "python3 $'$(x)'"];
+    const plain = [`python3 '$(x)'`, 'python3 "\\$(x)"', 'python3 "\\$((1+1))"', "python3 '$((1+1))'", 'python3 $FHG_NOBODY ${FHG_NOBODY:-x}', "python3 '`x`'", 'python3 \\`x', 'true # $(x)', "python3 $'$(x)'"];
     for (const command of plain) {
       const r = start(command, 'state_file');
       expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
@@ -2220,6 +2220,32 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const named = start(`python3 ${audit} '$(x)'`, 'state_file');
     expect(named.status, 'the file is named beside the single-quoted text').toBe(2);
     expect(named.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+  });
+
+  it('an arithmetic expansion in the command of another hook ($((...)) and $[...]) names a file like a substitution does, so the command is not read to its end: the guard refuses to start; single quotes and a backslash keep it text', () => {
+    const f = fixture('foreign-arithmetic', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, file: string) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: file, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const a2 = join(hooks, 'a2');
+    writeFileSync(a2, '# the script that the command runs\n', 'utf8');
+    expect(spawnSync('sh', ['-c', `printf %s "${hooks}/a$((1+1))"`], { encoding: 'utf8' }).stdout, 'what the shell makes of the word').toBe(a2);
+    expect(spawnSync('bash', ['-c', `printf %s "${hooks}/a$[1+1]"`], { encoding: 'utf8' }).stdout, 'the old form of Bash').toBe(a2);
+    for (const command of [`python3 "${hooks}/a$((1+1))"`, `python3 ${hooks}/a$((1+1))`, `python3 "${hooks}/a$[1+1]"`, `sh -c 'python3 "${hooks}/a$((1+1))"'`, `true; python3 "a$((2-1))b"`]) {
+      const r = start(command, a2);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(command)).toMatch(/not read to its end/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+    for (const command of [`python3 '${hooks}/a$((1+1))'`, `python3 "${hooks}/a\\$((1+1))"`, `python3 '$[1+1]'`, `python3 "${hooks}/a$FHG_NOBODY"`, 'python3 "$ [1] $"']) {
+      const r = start(command, a2);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
   });
 
   it('a quoted word that starts with an operator character is a word and a file name (python3 \';audit\', \'&&audit\', \'|audit\', \'>audit\'); a real operator, quoted or not, is no file', () => {

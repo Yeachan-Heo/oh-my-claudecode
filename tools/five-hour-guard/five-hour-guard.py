@@ -381,7 +381,7 @@ def strip_comments(command):
 
 
 def has_substitution(command):
-    """Whether the text has a command substitution, `$(...)` (not `$((`, an arithmetic expansion) or a backtick, that a shell would run: outside
+    """Whether the text has a command substitution `$(...)`, an arithmetic expansion `$((...))` or `$[...]`, or a backtick, that a shell would run: outside
     single quotes (also those of `$'...'`, where a backslash escapes) and not after a backslash. The result of a program cannot be known or
     modelled, so the file that it names is not found by reading the words."""
     quote, i = None, 0
@@ -394,7 +394,7 @@ def has_substitution(command):
                 quote = None
             elif quote == '"' and c == '\\':
                 i += 1
-            elif quote == '"' and (c == '`' or command.startswith('$(', i) and not command.startswith('$((', i)):
+            elif quote == '"' and (c == '`' or command.startswith(('$(', '$['), i)):
                 return True
         elif c == '\\':
             i += 1
@@ -405,7 +405,7 @@ def has_substitution(command):
         elif command.startswith("$'", i):
             quote = "$'"
             i += 1
-        elif c == '`' or command.startswith('$(', i) and not command.startswith('$((', i):
+        elif c == '`' or command.startswith(('$(', '$['), i):
             return True
         i += 1
     return False
