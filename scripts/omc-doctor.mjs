@@ -116,6 +116,47 @@ const compareVersions = (a, b) => {
   return a < b ? -1 : a > b ? 1 : 0;
 };
 
+// == runtime order of cached versions ==
+// getLatestPluginCacheVersion in scripts/session-start.mjs picks the version SessionStart compares with the CLAUDE.md marker: the names of
+// the omc cache that are digits.digits.digits with an optional -prerelease, whose package.json names exactly that name, sorted with its
+// semverCompare (which says 0 for a name its parser rejects, so the result depends on the order of the listing) and the last one taken.
+// The doctor repeats that rule exactly where it names that version (Step 4): parseSemver and semverCompare below are copies, and
+// src/__tests__/omc-doctor-runtime-parity.test.ts runs both on the same cache and requires the same answer.
+function runtimeParseSemver(version) {
+  if (typeof version !== 'string') return null;
+  const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/);
+  if (!match) return null;
+  return {
+    core: match.slice(1, 4).map(Number),
+    prerelease: match[4]?.split('.') ?? [],
+  };
+}
+
+function runtimeSemverCompare(a, b) {
+  const pa = runtimeParseSemver(a);
+  const pb = runtimeParseSemver(b);
+  if (!pa || !pb) return 0;
+  for (let i = 0; i < 3; i++) {
+    if (pa.core[i] !== pb.core[i]) return pa.core[i] - pb.core[i];
+  }
+  if (pa.prerelease.length === 0 || pb.prerelease.length === 0) {
+    return pb.prerelease.length - pa.prerelease.length;
+  }
+  for (let i = 0; i < Math.max(pa.prerelease.length, pb.prerelease.length); i++) {
+    const aPart = pa.prerelease[i];
+    const bPart = pb.prerelease[i];
+    if (aPart === undefined) return -1;
+    if (bPart === undefined) return 1;
+    if (aPart === bPart) continue;
+    const aNumeric = /^\d+$/.test(aPart);
+    const bNumeric = /^\d+$/.test(bPart);
+    if (aNumeric && bNumeric) return Number(aPart) - Number(bPart);
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return aPart.localeCompare(bPart);
+  }
+  return 0;
+}
+
 // == read file ==
 // Reads a regular file only: a FIFO or another special file is never opened, so a read cannot hang.
 const readFile = (file) => {
@@ -273,22 +314,27 @@ const registryMarketplaces = () => {
 // cannot be read.
 // complete: only a directory whose package.json names exactly that version counts, as the runtime counts a cached version
 // (getLatestPluginCacheVersion): a half-written directory is no version there.
-// The directory names the runtime counts as cached versions (getLatestPluginCacheVersion): digits.digits.digits with an optional
-// -prerelease, no build metadata; the doctor uses this filter where it names the version to compare with a marker, and still leaves
-// out a recovery directory of an interrupted relink (a copy that is no installed version).
+// complete is the runtime rule, getLatestPluginCacheVersion, applied exactly (see runtime order of cached versions): the names it counts,
+// the package.json that must name that name, its ordering and its choice of the last one.
 const RUNTIME_CACHE_NAME = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
 const highestCached = (dir, complete = false) => {
   try {
-    const listed = complete ? fs.readdirSync(dir).filter((name) => RUNTIME_CACHE_NAME.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name)) : versionDirs(dir);
-    const names = listed.sort(compareVersions);
     if (complete) {
-      for (let i = names.length - 1; i >= 0; i--) {
-        try {
-          if (readJson([dir, names[i], 'package.json'].join(path.sep)).version === names[i]) return names[i];
-        } catch {}
-      }
-      return '';
+      const versions = fs
+        .readdirSync(dir)
+        .filter((name) => RUNTIME_CACHE_NAME.test(name))
+        .filter((name) => {
+          try {
+            return readJson([dir, name, 'package.json'].join(path.sep)).version === name;
+          } catch {
+            return false;
+          }
+        })
+        .sort(runtimeSemverCompare)
+        .reverse();
+      return versions[0] || '';
     }
+    const names = versionDirs(dir).sort(compareVersions);
     return names.length ? names[names.length - 1] : '';
   } catch (error) {
     return absent(error, dir) ? '' : null;
@@ -805,17 +851,20 @@ const claudeMdVersion = () => {
     pluginVersion = raw ? shownVersion(raw) : '(unknown)';
     notString = !!raw && typeof raw != 'string';
   } else if (running.length) {
-    const latest = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '';
-    // The runtime (getPluginVersion) keeps the raw package version of the root it loaded unless a complete cached version is
-    // newer: a managed root refreshed in place may hold a package version other than its directory name, and that root is no
+    // The runtime (getPluginVersion) scans the omc cache whatever registry key records the root, once the root is spelled inside it
+    // (that is what makes it managed), and keeps the raw package version of the root it loaded unless a complete cached version is newer
+    // in its own order: a managed root refreshed in place may hold a package version other than its directory name, and that root is no
     // cached version by its name.
+    const latest = latestIn('omc') || '';
     const loaded = loadedPackageVersion(loadedRoot);
-    if (loaded && !(latest && typeof loaded == 'string' && semver(loaded) && !sameVersion(latest, loaded) && compareVersions(latest, loaded) > 0)) {
+    if (latest && (!loaded || runtimeSemverCompare(latest, loaded) > 0)) {
+      pluginVersion = latest;
+    } else if (loaded) {
       pluginVersion = shownVersion(loaded);
       notString = typeof loaded != 'string';
       literal = true;
     } else {
-      pluginVersion = latest || '(none)';
+      pluginVersion = '(none)';
     }
   } else {
     for (const market of markets) pluginVersion = latestIn(market) || pluginVersion;
@@ -1325,22 +1374,28 @@ const cacheRepair = (kind) => {
         const redirected = target.place != path.join(realPath(path.dirname(path.dirname(backups))), 'backups', 'oh-my-claudecode');
         moveStarted = true;
         fs.mkdirSync(target.place, { recursive: true });
-        free.forEach((name) => {
+        // Whether a version may be moved by its modification dates: counts what it leaves alone and answers false then. Asked twice, first
+        // for the choice and again after the last read of the protection, right before the rename, because an update may touch it between.
+        const settled = (name) => {
           let newest;
           try {
             newest = newestChange(path.join(dir, name));
           } catch (error) {
             unjudged++;
-            return;
+            return false;
           }
           if (newest - Date.now() > FUTURE_MS) {
             future++;
-            return;
+            return false;
           }
           if (Date.now() - newest < FRESH_MS) {
             fresh++;
-            return;
+            return false;
           }
+          return true;
+        };
+        free.forEach((name) => {
+          if (!settled(name)) return;
           // A backup goes to a destination that does not exist yet: a rename would replace an empty directory or a file
           // of that name, and the cleanup that keeps old versions aside must never erase an earlier copy.
           const backup = path.join(target.place, (market == 'omc' ? '' : market + '-') + name + '-' + Date.now());
@@ -1358,10 +1413,10 @@ const cacheRepair = (kind) => {
           const again = protectionOf(dir, versions);
           if (again.unreadable || again.noIdentity || !again.pinned.length || again.kept.includes(name)) {
             skipped++;
-            return;
+          } else if (settled(name)) {
+            fs.renameSync(path.join(dir, name), backup);
+            moved++;
           }
-          fs.renameSync(path.join(dir, name), backup);
-          moved++;
         });
         console.log(lead + 'Moved', moved, 'unprotected version(s) to', backups + (redirected ? ' (really ' + target.place + ')' : '') + messages.movedEnd);
         if (skipped) console.log(lead + 'Skipped', skipped, 'version(s) that became protected or unreadable just before the move');

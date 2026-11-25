@@ -56,6 +56,28 @@ describe('omc-doctor cache commands on a synthetic config directory (pins, regis
   // `force`); that changes the file only, not the date of the directory itself or of any level above it. The commands
   // therefore date a version by the newest of the directory and every entry below it, at any depth, at most 20000 of
   // them (a real cached version holds about 9000).
+  // The freshness of a version is judged again after the last read of the protection, right before the rename: an update that touches the
+  // version while that last read runs (here at the second read of the occupancy directory, the one of the final recheck) keeps it in place.
+  test('a version modified while the final protection is read is left alone', () => {
+    const touch = `const fs = require('fs'); const real = fs.readdirSync; let reads = 0;
+fs.readdirSync = function (target, ...rest) {
+  if (String(target).endsWith('cache-occupancy') && ++reads === 2) { const now = new Date(); fs.utimesSync(process.env.TOUCH_DIR, now, now); }
+  return real.call(this, target, ...rest);
+};
+`;
+    for (const command of commands) {
+      const { dir, cache } = makeConfigDir(['5.8.0', '5.9.0'], '5.9.0');
+      try {
+        const preload = path.join(dir, 'touch-during-recheck.cjs');
+        writeFileSync(preload, touch);
+        const result = runCommand(command, dir, { preloads: [preload], env: { TOUCH_DIR: path.join(cache, '5.8.0') }, timeout: 20_000 });
+        expect({ command, status: result.status, versions: digitVersions(cache), moved: movedAside(dir), left: /Left 1 version\(s\) modified in the last 10 minutes/.test(result.stdout) }).toEqual({ command, status: 0, versions: '5.8.0,5.9.0', moved: 0, left: true });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   describe('a version whose existing children are being refreshed is left alone', () => {
     const FRESH_LIMIT = 10 * 60_000;
     // Builds the configuration directory, adds the files to the unpinned version 5.9.0, ages everything an hour

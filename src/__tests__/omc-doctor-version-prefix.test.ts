@@ -135,11 +135,12 @@ describe('omc-doctor: a leading v is ignored wherever a version is compared or n
       expect(scriptSection('protection')).toContain('dropV(version)');
     });
 
-    test('Step 4 orders versions with the comparator of Step 1', () => {
+    test('Step 4 orders versions with the function of Step 1 (the runtime comparison for the newest cached version)', () => {
       expect(scriptSection('version order')).toContain('dropV(name)');
       expect(scriptText.split('const compareVersions = ')).toHaveLength(2);
-      expect(scriptSection('Step 4')).toContain('.sort(compareVersions)');
+      expect(scriptSection('Step 4')).toContain('latestIn(');
       expect(scriptSection('Step 1: helpers')).toContain('.sort(compareVersions)');
+      expect(scriptSection('Step 1: helpers')).toContain('.sort(runtimeSemverCompare)');
     });
 
     test('the version of a marketplace clone is read with the same function', () => {

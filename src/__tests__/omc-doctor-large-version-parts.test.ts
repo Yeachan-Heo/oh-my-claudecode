@@ -27,9 +27,10 @@ describe('omc-doctor: numeric parts of a version are ordered as digit strings of
       expect(orderSection).not.toMatch(/Number|parseInt|parseFloat|BigInt|\+x|\+y|x - y/);
       // Step 1 (the highest of the cache and of the entries) and Step 4 (the newest cached version) both order with it.
       expect(scriptText.split('.sort(compareVersions)').length - 1).toBeGreaterThanOrEqual(3);
-      expect(scriptText).toContain('const names = listed.sort(compareVersions);');
+      expect(scriptText).toContain('versionDirs(dir).sort(compareVersions);');
       // The only number conversions in the whole script are the process id checks of the two registry commands.
-      const conversions = [...scriptText.matchAll(/\b(?:Number|parseInt|parseFloat|BigInt)\b[.(]?\w*/g)].map((m) => m[0]).filter((c) => c !== 'Number.isSafeInteger');
+      // (Step 4 repeats the runtime's own comparison, which converts parts to numbers: the section runtime order of cached versions.)
+      const conversions = [...scriptText.replace(scriptSection('runtime order of cached versions'), '').matchAll(/\b(?:Number|parseInt|parseFloat|BigInt)\b[.(]?\w*/g)].map((m) => m[0]).filter((c) => c !== 'Number.isSafeInteger');
       expect(conversions).toEqual([]);
     });
   });
@@ -129,7 +130,9 @@ describe('omc-doctor: numeric parts of a version are ordered as digit strings of
       expect(registry.Installed).toBe('5.9.0-beta.2');
     });
 
-    test.skipIf(!posix)('Step 4 names the highest cached version of such names', () => {
+    // Step 4 names what the runtime names (its comparison converts the parts to numbers, so parts beyond 2^53 may compare equal and the listing
+    // decides): omc-doctor-runtime-parity.test.ts compares the two on such names; here the answer has to be one of the two.
+    test.skipIf(!posix)('Step 4 names one of the cached versions of such names, as the runtime does', () => {
       for (const [low, high] of cores.slice(0, 4)) {
         const { dir } = makeCache([low, high]);
         try {
@@ -138,7 +141,7 @@ describe('omc-doctor: numeric parts of a version are ordered as digit strings of
           // The shell block of the skill, so it runs through bash.
           const run = runBlock(CLAUDE_MD_VERSION, dir, { timeout: 20_000 });
           expect(run.error).toBeUndefined();
-          expect({ low: low.slice(0, 40), line: run.stdout.split('\n').find((l) => l.startsWith('Latest cached plugin version:')) }).toEqual({ low: low.slice(0, 40), line: `Latest cached plugin version: ${high}` });
+          expect({ low: low.slice(0, 40), line: [`Latest cached plugin version: ${low}`, `Latest cached plugin version: ${high}`].includes(run.stdout.split('\n').find((l) => l.startsWith('Latest cached plugin version:')) ?? '') }).toEqual({ low: low.slice(0, 40), line: true });
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

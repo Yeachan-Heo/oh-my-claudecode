@@ -168,8 +168,11 @@ describe('omc-doctor: a recovery directory of an interrupted cache relink is not
 
   test.skipIf(process.platform === 'win32')('Step 4 does not name it as the newest version', () => {
     for (const platform of PLATFORMS) {
-      const { dir } = makeCache(['5.8.0', '5.9.0.omc-stale-12', '5.9.0-beta.1.omc-stale-12']);
+      const { dir, cache } = makeCache(['5.8.0', '5.9.0.omc-stale-12', '5.9.0-beta.1.omc-stale-12']);
       try {
+        // A recovery copy keeps the package.json of the version it was made from, so it never names its own directory (the runtime counts
+        // a directory only when it does).
+        writeFileSync(path.join(cache, '5.9.0-beta.1.omc-stale-12', 'package.json'), JSON.stringify({ version: '5.9.0-beta.1' }));
         writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '0.0.1' }] });
         expect({ platform, out: claudeMd(dir, '5.8.0', platform)[2] }).toEqual({ platform, out: 'Latest cached plugin version: 5.8.0' });
       } finally {
@@ -537,6 +540,22 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
           } finally {
             rmSync(dir, { recursive: true, force: true });
           }
+        }
+      }
+    });
+
+    // getLatestPluginCacheVersion always scans the omc cache, and a root spelled inside it is managed whichever registry key records it.
+    test.skipIf(process.platform === 'win32')('a managed root recorded under another marketplace key is compared with the omc cache', () => {
+      for (const key of [OWN, BARE]) {
+        const dir = fresh();
+        try {
+          const cache = addCache(dir, [OLD, NEW], 'omc');
+          addCache(dir, ['6.0.0'], 'oh-my-claudecode');
+          const root = path.join(cache, OLD);
+          writeRegistry(dir, { [key]: [{ scope: 'user', version: OLD, installPath: root }] });
+          expect({ key, out: claudeMdAt(dir, NEW, 'linux', { CLAUDE_PLUGIN_ROOT: root }) }).toEqual({ key, out: [`Latest cached plugin version: ${NEW}`, MATCH] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
         }
       }
     });

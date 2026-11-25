@@ -211,7 +211,7 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     expect(comparator).toContain('const compareVersions = ');
     expect(scriptText.split('const compareVersions = ')).toHaveLength(2);
     // Step 4 reads the highest cached version of a marketplace through the function Step 1 uses for the npm channel.
-    expect(scriptSection('Step 1: helpers')).toContain('const names = listed.sort(compareVersions);');
+    expect(scriptSection('Step 1: helpers')).toContain('versionDirs(dir).sort(compareVersions);');
     expect(scriptSection('Step 4')).toContain('highestCached(cacheDirOf(');
     for (const prefix of prefixes) {
       const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-version-'));
@@ -234,11 +234,12 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
 
   test('no version in the skill is ordered as text', () => {
     expect(text + guideText).not.toContain('localeCompare');
-    // Step 1 sorts versions in exactly three places (the highest cached version, the versions the registry records, the
-    // versions an entry names twice), and all use the comparator.
+    // Step 1 sorts versions in exactly four places (the highest cached version, which Step 4 uses with the runtime's order, the versions the
+    // registry records, the versions an entry names twice), and all use a comparator.
     const code = codeOf([scriptSection('Step 1: helpers'), scriptSection('Step 1: the install channel')].join('\n'));
-    expect(code.match(/\.sort\(/g)).toHaveLength(3);
+    expect(code.match(/\.sort\(/g)).toHaveLength(4);
     expect(code.match(/\.sort\(compareVersions\)/g)).toHaveLength(3);
+    expect(code.match(/\.sort\(runtimeSemverCompare\)/g)).toHaveLength(1);
     // Across the script two more sorts have no comparator, and none of them orders versions: the CLAUDE-*.md file names of
     // Step 4 and the marketplace names the cache commands go through (by name, not by the order of the registry).
     expect(codeOf().match(/\.sort\(\)/g)).toHaveLength(2);
