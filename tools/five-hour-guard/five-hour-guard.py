@@ -1352,22 +1352,30 @@ def lock_one(path, what):
 def keep_locks():
     """True when every lock file still is the file this guard holds the lock on. Cleanup or another process can remove or replace one
     while the guard runs; the lock then excludes nobody, so the file now at the path is locked again. False (and LOCK_LOST) when another
-    guard holds it: this one must stop and publish or remove no pause. OSError when the path cannot be opened now (its directory is
-    gone): the caller fails like a write that fails, and the next tick tries again."""
+    guard holds it: this one must stop and publish or remove no pause. Every lock is looked at, also after one that cannot be looked at;
+    OSError when one could not be and no other guard holds another (its directory is gone): the caller fails like a write that fails, and the
+    next tick tries again."""
+    failure = None
     for entry in LOCK_FDS:
         fd, path = entry
         try:
-            held, named = os.fstat(fd), os.lstat(path)
-            if (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino):
-                continue
-        except FileNotFoundError:
-            pass
-        fresh = take_lock(path)
+            try:
+                held, named = os.fstat(fd), os.lstat(path)
+                if (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino):
+                    continue
+            except FileNotFoundError:
+                pass
+            fresh = take_lock(path)
+        except OSError as e:   # this lock cannot be looked at: the others are still looked at, one of them may be another guard's
+            failure = failure or e
+            continue
         if fresh is None:
             LOCK_LOST[0] = True
             return False
         os.close(fd)
         entry[0] = fresh
+    if failure is not None:
+        raise failure
     return True
 
 

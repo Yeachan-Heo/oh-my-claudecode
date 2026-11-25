@@ -3416,6 +3416,52 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a guard that gets SIGTERM while one of its lock files cannot be looked at still looks at the others: the pause of the guard that holds a new lock is kept, and without another guard the pause is taken down as before', async () => {
+    const f = fixture('lock-directory-gone-signal', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const config = (cfg: string, state: string) => writeFileSync(cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const stateDir = join(f.dir, 'state-of-a');
+    const cfgB = join(f.dir, 'config-b.json');
+    mkdirSync(stateDir);
+    config(f.cfg, join(stateDir, 'state.json'));
+    config(cfgB, f.state);   // another state file, the same pause file: one pause lock for both
+    const first = startGuard(f);
+    let second: Proc | undefined;
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start of the first guard');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => existsSync(f.pause) && readJson(f.pause).pid === first.child.pid, 20000, 'the pause of the first guard');
+      first.child.kill('SIGSTOP');
+      rmSync(stateDir, { recursive: true });   // its first lock cannot be looked at now
+      rmSync(`${f.pause}.lock`);
+      second = startGuard({ ...f, cfg: cfgB });
+      await waitFor(() => existsSync(f.pause) && readJson(f.pause).pid === second?.child.pid, 20000, 'the pause of the second guard');
+      first.child.kill('SIGTERM');
+      first.child.kill('SIGCONT');
+      await Promise.race([first.done, sleep(10000)]);
+      expect(first.exited, 'the first guard stopped').toBe(true);
+      expect(first.code, 'it exits with an error, so that a service manager starts it again').toBe(1);
+      expect(readText(f.log)).toMatch(/ERROR: a lock file of this guard was removed or replaced and another guard holds the new one/);
+      expect(readJson(f.pause).pid, 'the pause of the second guard is still there, not removed by the first').toBe(second.child.pid);
+    } finally {
+      await stopGuard(first);
+      if (second) await stopGuard(second);
+    }
+    // alone, with its state directory gone, the guard takes its pause down on SIGTERM (the sessions do not wait for the end of it)
+    const g = fixture('lock-directory-gone-alone', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(g.dir, 'state-of-a');
+    mkdirSync(dir);
+    writeFileSync(g.cfg, JSON.stringify({ usage_cache: g.cache, pause_file: g.pause, state_file: join(dir, 'state.json'), log_file: g.log, settings_file: g.settings }), 'utf8');
+    const alone = startGuard(g);
+    try {
+      await waitFor(() => existsSync(g.pause) && readJson(g.pause).pid === alone.child.pid, 20000, 'the pause of the single guard');
+      rmSync(dir, { recursive: true });
+      alone.child.kill('SIGTERM');
+      await Promise.race([alone.done, sleep(10000)]);
+      expect(alone.exited, 'the single guard stopped').toBe(true);
+      expect(existsSync(g.pause), 'its pause is taken down').toBe(false);
+    } finally { await stopGuard(alone); }
+  });
+
   it('a timeout that is NaN or Infinity (raw tokens that Python reads and standard JSON does not) is a wiring problem, like a missing one', () => {
     const f = fixture('wiring-timeout-nonfinite', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
