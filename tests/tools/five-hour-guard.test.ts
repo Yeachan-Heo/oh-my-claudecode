@@ -115,6 +115,8 @@ describe('python3 for the five-hour guard tests', () => {
   });
 });
 
+const HAS_BASH = spawnSync('bash', ['-c', 'true']).status === 0;
+
 describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('pauses at 97 %, not at 96.9 %, not on a stale cache or a reset time already past; --dry-run writes nothing', () => {
     const resetMs = Date.now() + HOUR_MS;
@@ -2416,6 +2418,41 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
     // a name with no value stays as written and no refusal comes of it
     expect(start('PATH=$FHG_NOBODY/bin:/usr/bin audit', inHomeBin).status, 'a name that nobody sets').toBe(0);
+  });
+
+  it.skipIf(!HAS_BASH)('a Bash quote $\'...\' (and $"...") in the command of another hook is read as the text that Bash makes of it: hex, octal and Unicode escapes, a newline, an apostrophe, an unknown escape; quotes of other kinds are not decoded (needs bash: skipped where it is missing)', () => {
+    const f = fixture('foreign-ansi-c', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, file: string, key = 'state_file') => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: file }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    // [the word as written, the file name that Bash makes of it (below the directory of the hooks)]
+    const words: Array<[string, string]> = [
+      [`$'${hooks}/a\\x75dit'`, 'audit'], [`$'${hooks}/a\\165dit'`, 'audit'], [`$'${hooks}/caf\\u00e9'`, 'caf\u00e9'], [`$'${hooks}/caf\\xc3\\xa9'`, 'caf\u00e9'],
+      [`$'${hooks}/a\\nb'`, 'a\nb'], [`$'${hooks}/it\\'s'`, "it's"], [`$'${hooks}/a\\qb'`, 'a\\qb'], [`$"${hooks}/audit"`, 'audit'],
+    ];
+    for (const [word, name] of words) {
+      const made = spawnSync('bash', ['-c', `printf %s ${word}`], { encoding: 'utf8' }).stdout;
+      expect(made, `what Bash makes of ${word}`).toBe(`${hooks}/${name}`);
+      const script = join(hooks, name);
+      writeFileSync(script, text, 'utf8');
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(`python3 ${word}`, script, key);
+        expect(r.status, `${word} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${word} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${word} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // not decoded: single quotes, double quotes, an escaped dollar sign, and a plain variable
+    const audit = join(hooks, 'audit');
+    for (const command of [`python3 '$a\\x75dit'`, `python3 "$'${hooks}/a\\x75dit'"`, `python3 \\$'${hooks}/a\\x75dit'`, `python3 $FHG_NOBODY'${hooks}/a\\x75dit'`]) {
+      expect(start(command, audit).status, command).toBe(0);
+    }
   });
 
   it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {

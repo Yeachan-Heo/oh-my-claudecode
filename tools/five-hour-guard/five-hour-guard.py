@@ -412,6 +412,74 @@ def has_substitution(command):
     return False
 
 
+ANSI_C_SINGLE = {'a': '\a', 'b': '\b', 'e': '\x1b', 'E': '\x1b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v', '\\': '\\', "'": "'", '"': '"', '?': '?'}
+
+
+ANSI_C_NUMBER = re.compile(r'\\(?:x([0-9a-fA-F]{1,2})|([0-7]{1,3})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8}))')
+
+
+def decode_ansi_c(command):
+    """The command with each Bash quote `$'...'` replaced by its text, decoded as Bash does and quoted as plain text (`$'/dir/a\\x75dit'` is
+    `/dir/audit`), and the `$` of `$"..."` dropped (the same word in the C locale), outside single and double quotes and not after a backslash. The
+    escapes are `\\a \\b \\e \\E \\f \\n \\r \\t \\v`, a backslash, `'`, `"`, `?`, `\\nnn` (octal, up to three digits), `\\xHH`, `\\uHHHH` and `\\UHHHHHHHH`;
+    any other sequence stays with its backslash, and a decoded NUL ends the text, as in Bash. A quote that is not closed stays as written."""
+    if "$'" not in command and '$"' not in command:
+        return command
+    out, quote, i = [], None, 0
+    while i < len(command):
+        c = command[i]
+        if quote:
+            out.append(c)
+            if c == '\\' and quote == '"' and i + 1 < len(command):
+                i += 1
+                out.append(command[i])
+            elif c == quote:
+                quote = None
+        elif c == '\\' and i + 1 < len(command):
+            out.append(command[i:i + 2])
+            i += 1
+        elif c in '\'"':
+            quote = c
+            out.append(c)
+        elif command.startswith('$"', i):
+            quote = '"'
+            out.append('"')
+            i += 1
+        elif command.startswith("$'", i):
+            raw, k, ended = bytearray(), i + 2, False
+            while k < len(command):
+                d = command[k]
+                if d == "'":
+                    ended = True
+                    break
+                m = ANSI_C_NUMBER.match(command, k) if d == '\\' else None
+                if m:
+                    if m.group(1) or m.group(2):
+                        raw.append(int(m.group(1) or m.group(2), 16 if m.group(1) else 8) & 0xFF)
+                    else:
+                        try:
+                            raw += chr(int(m.group(3) or m.group(4), 16)).encode('utf-8')
+                        except (ValueError, OverflowError):
+                            raw += m.group(0).encode('utf-8')
+                    k = m.end()
+                elif d == '\\' and k + 1 < len(command):
+                    e = command[k + 1]
+                    raw += (ANSI_C_SINGLE[e] if e in ANSI_C_SINGLE else d + e).encode('utf-8')
+                    k += 2
+                else:
+                    raw += d.encode('utf-8')
+                    k += 1
+            if not ended:
+                out.append(command[i:])
+                break
+            out.append(shlex.quote(raw.split(b'\0')[0].decode('utf-8', 'surrogateescape')))
+            i = k
+        else:
+            out.append(c)
+        i += 1
+    return ''.join(out)
+
+
 def command_tokens(command, quoted=False):
     """The words and the operators of a command as the shell splits them (shlex), None for a command with a NUL character or one that cannot be
     parsed. Raises ScanIncomplete past MAX_COMMAND_CHARS or MAX_COMMAND_WORDS: a prefix would pass for the whole command."""
@@ -420,20 +488,25 @@ def command_tokens(command, quoted=False):
     if len(command) > MAX_COMMAND_CHARS:
         raise ScanIncomplete('command too long to scan')
     command = re.sub(r'(?<!\\)((?:\\\\)*)\\\n', r'\1', command)   # a backslash and the newline after it (not an escaped backslash) are removed before the words are split, as the shell does
-    if not quoted:   # the text of a quoted word is not told apart from data (`echo "a #b file"`), so no comment is removed from it
-        command = strip_comments(command)
-    try:
-        lex = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
-        lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''
-        tokens = []
-        for token in lex:
-            tokens.append(token)
-            if len(tokens) > MAX_COMMAND_WORDS:
-                raise ScanIncomplete('command has too many words to scan')
-    except ScanIncomplete:
-        raise
-    except Exception:
-        return None
+    tokens = None
+    for text in dict.fromkeys([decode_ansi_c(command), command]):   # the command with its `$'...'` decoded first, then as written: a shell that has no such quote (dash) reads `$` and the text
+        if not quoted:   # the text of a quoted word is not told apart from data (`echo "a #b file"`), so no comment is removed from it
+            text = strip_comments(text)
+        try:
+            lex = shlex.shlex(text, posix=True, punctuation_chars=PUNCTUATION)
+            lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''
+            found = []
+            for token in lex:
+                found.append(token)
+                if len(found) > MAX_COMMAND_WORDS:
+                    raise ScanIncomplete('command has too many words to scan')
+        except ScanIncomplete:
+            raise
+        except Exception:
+            if tokens is None:
+                return None   # (the command that cannot be read when it is decoded is not read at all)
+            continue
+        tokens = found if tokens is None else tokens + [t for t in found if t not in tokens]
     return tokens
 
 
