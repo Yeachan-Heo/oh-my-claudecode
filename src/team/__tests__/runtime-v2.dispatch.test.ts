@@ -68,7 +68,7 @@ vi.mock('node:fs/promises', importOriginal => mockFsPromises(importOriginal));
 vi.mock('fs/promises', importOriginal => mockFsPromises(importOriginal));
 
 import { enqueueDispatchRequest, listDispatchRequests, transitionDispatchRequest } from '../dispatch-queue.js';
-import { readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
+import { canonicalRecoveryPayloadHash, readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
 import { hashTaskRecoveryCheckpointPayload, taskRecoveryClaimTokenHash } from '../task-recovery-checkpoint.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import { createTeamInstanceBinding, reserveTeamInstance } from '../team-instance.js';
@@ -4235,6 +4235,89 @@ describe('runtime v2 startup inbox dispatch', () => {
       expect.any(Function),
     );
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+  });
+
+  it('ends a later recovery at the owner deadline when the not-ready replacement could not be proven gone', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-owner-idle-unproven-');
+    mocks.autoStartupEvidence = false;
+    const fixture = await seedOwnerRecoveryFixture('codex', 'idle-unproven');
+    configureOwnerPaneLifecycle();
+    const launchActual = await vi.importActual<typeof import('../worker-launch-ack.js')>('../worker-launch-ack.js');
+    mocks.waitForStartupPaneReady.mockImplementationOnce(async (context) => {
+      // Persist the replacement's launch record, which an unproven teardown leaves behind.
+      const { active_recovery, workers } = JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
+      await launchActual.prepareWorkerLaunchAttempt({
+        cwd,
+        teamName: fixture.teamName,
+        workerName: 'worker-1',
+        instanceId: ORIGINAL_INSTANCE_ID,
+        paneId: context.ownership.paneId,
+        provider: 'codex',
+        runtimeCliPath: '/runtime-cli.cjs',
+        context: {
+          kind: 'recovery',
+          recovery_id: active_recovery.recovery_id,
+          replacement_generation: workers[0].replacement_generation,
+          pane_attempt_id: workers[0].pane_attempt_id,
+        },
+      });
+      return { ok: false, reason: 'selector_persistent' };
+    });
+    launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementation(async (
+      attempt: DurableWorkerLaunchAttempt,
+      _reason: string,
+      cleanup: () => Promise<boolean>,
+    ) => attempt.pane_id === '%2' ? false : cleanup());
+    launchMocks.observeWorkerLaunchProvider.mockImplementation(async (attempt: WorkerLaunchProviderObservationInput) =>
+      attempt.attempt_id === fixture.launchAttemptId ? 'dead' : 'unknown');
+    const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+    const recover = (requestId: string) => executeRecoverDeadWorkerV2Owner({
+      teamName: fixture.teamName, cwd, workerName: 'worker-1', requestId, instanceId: fixture.instanceId,
+    });
+    const readConfig = async () => JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
+
+    await expect(recover(fixture.requestId)).resolves.toMatchObject({ outcome: 'failed', error: 'worker_startup_not_ready' });
+    expect((await readConfig()).active_recovery).toBeUndefined();
+
+    const requestId = 'owner-codex-idle-unproven-later-request';
+    const recoveryId = 'owner-codex-idle-unproven-later-recovery';
+    const payload = {
+      operation: 'recover-worker' as const,
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+      teamName: fixture.teamName,
+      workerName: 'worker-1',
+      instanceId: ORIGINAL_INSTANCE_ID,
+    };
+    const writeIntent = async (ageMs: number) => {
+      const path = absPath(cwd, TeamPaths.recoveryIntent(fixture.teamName, recoveryId));
+      await mkdir(join(path, '..'), { recursive: true });
+      await writeFile(path, JSON.stringify({
+        schema_version: 1,
+        kind: 'recover-worker',
+        request_id: requestId,
+        recovery_id: recoveryId,
+        operation: payload.operation,
+        workspace_hash: payload.workspaceHash,
+        payload_hash: canonicalRecoveryPayloadHash(payload),
+        team_name: payload.teamName,
+        worker_name: payload.workerName,
+        instance_id: payload.instanceId,
+        created_at: new Date(Date.now() - ageMs).toISOString(),
+      }), 'utf8');
+    };
+    reserveRecoveryRequest(cwd, requestId, payload, recoveryId);
+
+    await writeIntent(0);
+    await expect(recover(requestId)).resolves.toMatchObject({ outcome: 'failed', error: 'worker_liveness_unknown' });
+    expect((await readConfig()).active_recovery).toMatchObject({ recovery_id: recoveryId });
+
+    // What the earlier recovery left behind belongs to that recovery, so it
+    // must not hold this one, and with it shutdown, past the deadline.
+    await writeIntent(301_000);
+    await expect(recover(requestId)).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+    expect(readRecoveryOutcome(cwd, requestId)).toMatchObject({ kind: 'final', outcome: 'failed' });
+    expect((await readConfig()).active_recovery).toBeUndefined();
+    expect((await readConfig()).workers[0]).toMatchObject({ pane_id: '%2', recovery_id: fixture.recoveryId });
   });
 
   it('requeues the selected task through an exact read when a sibling corrupts after inventory', async () => {
