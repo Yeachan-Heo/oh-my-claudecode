@@ -395,7 +395,8 @@ def parameter_variants(piece, assigned):
 
 
 def word_pieces(word, assigned):
-    """The word, and the parts of it that can be a file name too, each also filled in with the values of its parameters (parameter_variants).
+    """The word, and the parts of it that can be a file name too, each also filled in with the values of its parameters (parameter_variants), a
+    filled-in value also split at its blanks.
     `assigned`: {name: [values]} that the command assigns (NAME=value words, in any order, none expanded by another)."""
     pieces = [word]
     if '=' in word:
@@ -403,7 +404,11 @@ def word_pieces(word, assigned):
     if word[:1] == '-' and word[1:2] not in ('-', '') and len(word) > 2:
         pieces.append(word[2:])   # -SFILE, -oFILE: the value of a short option glued to it
     if '$' in word:
-        pieces += [v for piece in pieces[:] for v in parameter_variants(piece, assigned)]
+        for piece in pieces[:]:
+            for variant in parameter_variants(piece, assigned):
+                pieces.append(variant)
+                if variant != piece:
+                    pieces += variant.split()   # a value with blanks that the shell splits into words (an unquoted $NAME): each word of it is a piece too, whether or not the expansion was quoted
     return list(dict.fromkeys(pieces))
 
 
