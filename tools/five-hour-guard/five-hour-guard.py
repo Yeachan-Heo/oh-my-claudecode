@@ -28,7 +28,7 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, json, math, os, re, shlex, shutil, signal, stat, sys, time
+import argparse, datetime, json, math, os, shlex, signal, stat, sys, time
 
 try:
     import fcntl
@@ -197,11 +197,12 @@ def same_file(a, b):
 
 
 HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}
+ENTRY_FILE = 'file named by the hook entry'   # a word of the command of the hook entry in settings.json that the entry the guard generates does not have (another hook, interpreter or log path)
 UNSCANNED = 'command that cannot be read to its end'   # the entry for a command of another hook that a limit of command_programs cut short: the guard writes nothing while it is there
 OTHER_PROGRAM = 'program of another hook'   # a file that a command of any other hook (or the status line) in settings.json runs
 PROGRAM_LABELS = HOOK_PROGRAMS | {OTHER_PROGRAM, 'guard script', 'settings tool script', 'entry module'}
 READ_ONLY_LABELS = {'configuration file', 'usage_cache', 'usage_cache lock', 'settings_file'}   # files the guard only reads (many hooks name them): a command of another hook that names one is no collision
-PROTECTED_LABELS = {'registered hook', 'registered interpreter', OTHER_PROGRAM}   # the programs that no write of the guard may replace
+PROTECTED_LABELS = {'registered hook', 'registered interpreter', OTHER_PROGRAM, ENTRY_FILE}   # the programs that no write of the guard may replace
 
 
 def may_be_one_file(la, pa, lb, pb):
@@ -209,10 +210,10 @@ def may_be_one_file(la, pa, lb, pb):
     an interpreter that two entries name, a hook that is run directly and so is its own launcher (the same path in both places: a
     hook that is a link to the interpreter is not), the hook log of the configuration that is the log of the entry,
     and a program of another hook entry that is one of those programs."""
-    if {la, lb} == {'hook_log_file', 'registered hook log'}:
-        return True
     if OTHER_PROGRAM in (la, lb):   # the interpreter or script of another hook can be one of ours; what it may not be is a file the guard writes (state, pause, log and their locks: not the files it only reads)
         return (lb if la == OTHER_PROGRAM else la) in PROGRAM_LABELS | READ_ONLY_LABELS
+    if ENTRY_FILE in (la, lb):   # a word of the entry beyond the generated ones (the hook, interpreter, log, pause file) may be the same file as another one of them; it may not be a file of the guard
+        return (lb if la == ENTRY_FILE else la) == ENTRY_FILE
     if la in ('hook script', 'registered hook') and lb in ('hook script', 'registered hook'):
         return True
     if la == lb == 'registered interpreter':
@@ -256,29 +257,16 @@ def load_entry_module():
 
 
 ENTRY = load_entry_module()
-entry_parts = ENTRY.entry_parts
+BUNDLED_HOOK = os.path.join(HERE, HOOK_NAME)
 
 
 def command_hooks(groups):
-    """The command handlers of PreToolUse groups that run our hook: [(group, handler command)]. A command that names the hook file
-    only as an operand (an option value, an argument of another program) is not ours; one that cannot be parsed is kept, so that
-    hook_check can say so."""
-    found = []   # (group, handler)
+    """The command handlers of PreToolUse groups that are the hook entry of this guard (ENTRY.is_entry): [(group, handler)]."""
+    found = []
     for g in groups if isinstance(groups, list) else []:
         if not isinstance(g, dict) or not isinstance(g.get('hooks', []), list):
             continue   # not a group of Claude Code: skipped here, so that the entries after it are still seen
-        for h in g.get('hooks', []):
-            if not isinstance(h, dict):
-                continue
-            command = h.get('command')
-            if h.get('type') != 'command' or not isinstance(command, str) or HOOK_NAME not in command:
-                continue
-            try:
-                if not entry_parts(command)[0]:
-                    continue
-            except ValueError:
-                pass
-            found.append((g, h))
+        found += [(g, h) for h in g.get('hooks', []) if ENTRY.is_entry(h, BUNDLED_HOOK)]
     return found
 
 
@@ -313,23 +301,15 @@ def word_files(word, directories):
     return found
 
 
-def command_programs(command, exclude=(), depth=0):
-    """The files that a shell command of a hook that is not ours may run or read, the same for every command and without knowing what any
-    word means (nothing is run, nothing is expanded by a shell): every word of the command, each word that is a quoted command (it holds a
-    blank: the words of an argument of -c or -S, two levels deep), the part of a word after its first `=` and the part after a short option that is glued to its value (`-SFILE`). A word with a directory part
-    stands for that path, a word without one for the file of that name in the working directory of the guard and in each directory of the
-    PATH of its simple command (an assignment PATH=dir in front of the command, else the PATH of the guard). The rule is deliberately wide:
-    a word that is no program at all (an argument, an option value) is a file the guard then does not write, and no program is missed by
-    not being recognised. A command with a NUL character or one that the shell cannot parse runs nothing and gives none. A command that a limit cuts
-    short (more than MAX_COMMAND_CHARS characters, MAX_COMMAND_WORDS words or MAX_COMMAND_PROGRAMS files, or quoted commands nested deeper than
-    two levels) raises ScanIncomplete: a prefix would pass for the whole command. A word longer than MAX_PATH_CHARS names no file and is skipped. `exclude`: words that are not
-    candidates (the files that the registered entry of this guard names itself, see registered_runtime_files)."""
+def command_tokens(command):
+    """The words and the operators of a command as the shell splits them (shlex), None for a command with a NUL character or one that cannot be
+    parsed. Raises ScanIncomplete past MAX_COMMAND_CHARS or MAX_COMMAND_WORDS: a prefix would pass for the whole command."""
     if not isinstance(command, str) or '\0' in command:
-        return []   # no process can be started with a NUL character in its arguments
+        return None
     if len(command) > MAX_COMMAND_CHARS:
         raise ScanIncomplete('command too long to scan')
     try:
-        lex = shlex.shlex(ENTRY.strip_comments(command), posix=True, punctuation_chars=PUNCTUATION)
+        lex = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
         lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''
         tokens = []
         for token in lex:
@@ -339,7 +319,25 @@ def command_programs(command, exclude=(), depth=0):
     except ScanIncomplete:
         raise
     except Exception:
-        return []   # a command the shell cannot parse runs nothing
+        return None
+    return tokens
+
+
+def command_programs(command, exclude=None, depth=0):
+    """The files that a shell command of a hook that is not ours may run or read, the same for every command and without knowing what any
+    word means (nothing is run, nothing is expanded by a shell): every word of the command, each word that is a quoted command (it holds a
+    blank: the words of an argument of -c or -S, two levels deep), the part of a word after its first `=` and the part after a short option that is glued to its value (`-SFILE`). A word with a directory part
+    stands for that path, a word without one for the file of that name in the working directory of the guard and in each directory of the
+    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered). The rule is deliberately wide:
+    a word that is no program at all (an argument, an option value) is a file the guard then does not write, and no program is missed by
+    not being recognised. A command with a NUL character or one that the shell cannot parse runs nothing and gives none. A command that a limit cuts
+    short (more than MAX_COMMAND_CHARS characters, MAX_COMMAND_WORDS words or MAX_COMMAND_PROGRAMS files, or quoted commands nested deeper than
+    two levels) raises ScanIncomplete: a prefix would pass for the whole command. A word longer than MAX_PATH_CHARS names no file and is skipped. `exclude`: a list of words that are not
+    candidates, each once (the words of the entry that this guard generates, see registered_runtime_files)."""
+    exclude = [] if exclude is None else exclude
+    tokens = command_tokens(command)
+    if tokens is None:
+        return []   # a command with a NUL character (no process can be started with one in its arguments) or one the shell cannot parse runs nothing
     simple, words = [], []
     for token in tokens:
         if token and token[0] in PUNCTUATION:   # (an empty string is a word: '')
@@ -351,13 +349,10 @@ def command_programs(command, exclude=(), depth=0):
     simple.append(words)
     found = []
     for words in simple:
-        try:
-            search_path = ENTRY.command_path(words)
-        except Exception:
-            search_path = None
-        directories = [''] + (search_path if search_path is not None else os.environ.get('PATH', os.defpath)).split(os.pathsep)
+        directories = [''] + os.environ.get('PATH', os.defpath).split(os.pathsep) + [d for w in words if w.startswith('PATH=') for d in w[5:].split(os.pathsep)]   # a PATH=dir word adds its directories for every word of the simple command
         for word in words:
             if word in exclude:
+                exclude.remove(word)   # one occurrence of a word of the generated entry is that word of the entry, not a file it names besides
                 continue
             if any(c.isspace() for c in word):
                 if depth >= 2:
@@ -379,7 +374,7 @@ def command_programs(command, exclude=(), depth=0):
 
 def other_commands(data, ours):
     """The commands of every command handler in settings.json (all hook events, and the status line) except the handlers `ours` (ids of
-    the handlers of the hook entry of this guard, which entry_parts reads)."""
+    the handlers of the hook entry of this guard)."""
     found = []
     events = data.get('hooks')
     for groups in events.values() if isinstance(events, dict) else []:
@@ -402,46 +397,36 @@ LOG_LOOK_S = 1.0
 LOG_LOOK = [None, False]   # [time.monotonic() of the last look, whether the log file was a program of a registered entry then]
 
 
+def hook_log_setting():
+    """hook_log_file of the configuration (the log of the hook entry), or None."""
+    v = CFG.get('hook_log_file')
+    return v if isinstance(v, str) and v and '\0' not in v else None
+
+
 def registered_runtime_files():
-    """The hook script and the interpreter that the hook entry in settings.json names (they can be anywhere: `add --hook` takes
-    any path), and the programs that the commands of every other hook and of the status line run (command_programs: a hook of another
-    tool is as much a file the guard must not replace as ours). A relative hook, or an interpreter given with a directory part, is taken
-    as the file it names from the working directory of the guard: a session resolves it from its own directory, which cannot be known
-    here, so this is the conservative reading for the collision checks. An interpreter given by its bare name is looked up on the PATH of
-    the guard, as the wiring check does, a launcher on the PATH its entry gives it (else on that of the guard), and the file found is the one that counts. Best effort: the programs found by every
-    scan since the start stay in the list (the unreadable file gives only those): a rewrite in progress or a broken edit does not open
-    them to a write, and a session that loaded an entry keeps running its program after a rewrite removed it, until it is restarted;
-    hook_check says that the file cannot be read."""
-    found, companions = [], []   # the programs of the entries first: a collision is reported with the label of the entry
+    """The files that the hook entry in settings.json names besides the ones the guard generates itself (an entry written with `--hook`,
+    `--python` or `--hook-log` of other paths: ENTRY_FILE, which may not be a file of the guard), the hook script and the interpreter
+    the guard generates for it, and the programs that the commands of every other hook and of the status line run (command_programs: a hook
+    of another tool is as much a file the guard must not replace as ours). The entry is not analysed: every word of its command that
+    the generated entry does not have is a file it may name. Best effort: the programs found by every scan since the start stay in
+    the list (the unreadable file gives only those): a rewrite in progress or a broken edit does not open them to a write, and a
+    session that loaded an entry keeps running its program after a rewrite removed it, until it is restarted; hook_check says that the
+    file cannot be read."""
+    found = []   # the files of the entries first: a collision is reported with the label of the entry
     try:
         with open(SETTINGS or default_settings()) as f:
             data = json.load(f)
         entries = command_hooks(data.get('hooks', {}).get('PreToolUse', []))
+        generated = [t for t in command_tokens(ENTRY.entry_command(PAUSE_FILE, BUNDLED_HOOK, sys.executable, hook_log_setting())) if t[:1] not in PUNCTUATION or not t]
+        if entries:
+            found += [('registered hook', BUNDLED_HOOK), ('registered interpreter', sys.executable)]
         for _group, handler in entries:
-            named, parsed = (), False
-            try:   # one handler that cannot be parsed must not hide the ones after it
-                hooks, interpreters, logs, pauses, tests, launchers, paths = ENTRY.read_entry(handler['command'])
-                named, parsed = {*hooks, *interpreters, *logs, *pauses, *tests, *launchers}, True   # what the entry names itself by role is not a program of another hook
-            except Exception:
-                pass
-            try:   # a command that runs before or after the hook in the same handler is a program of another hook too
-                companions += [(OTHER_PROGRAM, t) for t in command_programs(handler['command'], named)]
+            try:   # one handler that cannot be read must not hide the ones after it
+                found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated))]
             except ScanIncomplete as e:
-                companions.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
+                found.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
             except Exception:
                 pass
-            if not parsed:
-                continue
-            found += [('registered hook', t) for t in hooks]
-            for t, search_path in [(x, None) for x in interpreters] + list(zip(launchers, paths)):   # a launcher is looked up on the PATH its entry gives it
-                try:
-                    program = t if os.path.dirname(t) else shutil.which(t, path=search_path)
-                except Exception:
-                    program = None   # one name that cannot be looked up must not hide the others
-                if program:
-                    found.append(('registered interpreter', program))
-            found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
-        found += companions
         ours = {id(h) for _g, h in entries}
         for command in other_commands(data, ours):
             try:
@@ -565,7 +550,7 @@ def log_is_program():
             blocked = False   # a look that fails never costs the log
         LOG_LOOK[:] = [now, blocked]
         if blocked:
-            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs, or a command there is not read to its end: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard)', flush=True)
+            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard; a command there that is not read to its end blocks the log too)', flush=True)
     return LOG_LOOK[1]
 
 
@@ -749,12 +734,6 @@ def read_cache():
     return pct, reset_ts, age, problem
 
 
-def hook_log_setting():
-    """hook_log_file of the configuration (the log of the hook entry), or None."""
-    v = CFG.get('hook_log_file')
-    return v if isinstance(v, str) and v and '\0' not in v else None
-
-
 LAST_WIRING_CHECK = [None]   # time.monotonic() of the last hook_check
 
 
@@ -792,52 +771,19 @@ def check_wiring(where):
     runtime = configured_files()
     registered = registered_runtime_files()
     for la, pa, lb, pb in collisions(runtime + registered):
-        if 'registered hook log' in (la, lb) or not ({la, lb} & PROTECTED_LABELS):
-            continue   # the log of an entry is reported below, with its own sentence; two configured files were refused at the start
+        if not ({la, lb} & PROTECTED_LABELS):
+            continue   # two configured files were refused at the start
         program, other = ((la, pa), (lb, pb)) if la in PROTECTED_LABELS and lb not in PROTECTED_LABELS else ((lb, pb), (la, pa))
         if program[0] == OTHER_PROGRAM:
             log(f'WARNING ({where}): the {program[0]} {program[1]} (run by a command in {SETTINGS}) is the {other[0]} of this guard ({other[1]}): every write of the guard to that file is refused, so the guard stores no pause (check the configured paths)')
-            continue
-        log(f'WARNING ({where}): the {program[0]} {program[1]} is the {other[0]} of this guard ({other[1]}): the entry would not run the hook, or a write of the guard would replace the program, so a pause would hold no session. Run five-hour-guard-settings.py add again')
-    programs = []   # the programs of every recognised entry: a log of one entry can be the program of another
+        elif program[0] == ENTRY_FILE:
+            log(f'WARNING ({where}): the hook entry in {SETTINGS} names {program[1]}, which is the {other[0]} of this guard ({other[1]}): the hook would append to it or a write of the guard would replace it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
+        else:
+            log(f'WARNING ({where}): the {program[0]} {program[1]} is the {other[0]} of this guard ({other[1]}): a write of the guard would replace the program, so a pause would hold no session. Run five-hour-guard-settings.py add again')
+    expected = ENTRY.entry_command(PAUSE_FILE, BUNDLED_HOOK, sys.executable, hook_log_setting())
     for command in ours:
-        try:
-            hooks, interpreters, _logs, _pauses, _tests, launchers = entry_parts(command)
-        except ValueError:
-            continue   # reported below
-        programs += [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters + launchers]
-    programs += [x for x in registered if x[0] == OTHER_PROGRAM]
-    for command in ours:
-        try:
-            hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
-            aliased = [(log_path, label) for log_path in logs for label, path in runtime + programs if path and same_file(log_path, path)]
-            for log_path, label in aliased:
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} logs to {log_path}, which is the {label} of this guard: the hook would append its log lines to it (a pause file would stop being one, so a pause would hold no session). Run five-hour-guard-settings.py add again')
-            expected = ENTRY.expected_command(command, PAUSE_FILE, hook_log_setting(), copy_log=not aliased)
-        except ValueError:
-            log(f'WARNING ({where}): the hook entry command {command!r} in {SETTINGS} cannot be parsed (unbalanced quote or NUL character): the shell would fail on it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
-            continue
         if command != expected:   # one rule instead of a check per field: whatever differs from the generated entry may let calls through
             log(f'WARNING ({where}): the hook entry in {SETTINGS} is not the entry this guard generates for its pause file {PAUSE_FILE}; a difference can let every call through during a pause. Replace its command with this one (or run five-hour-guard-settings.py add): {expected}')
-        for path in hooks + [x for x in launchers if x not in hooks]:   # what the entry runs must exist as a regular file, by an absolute path (a hook runs in the working directory of a session)
-            if not os.path.isabs(path):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} uses the relative path {path}: it is resolved in the working directory of each session, so a pause would hold no session')
-        for path in logs:   # the hook appends to it: from a session in another directory it can be any file there, the hook itself included
-            if not os.path.isabs(path):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} logs to the relative path {path}: it is resolved in the working directory of each session, where it can be a file of the project or the hook itself, so the hook would append its log lines to it. Run five-hour-guard-settings.py add again')
-        for path in hooks:
-            if not os.path.isfile(path):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which does not exist: the shell guard of the entry lets every call through, so a pause would hold no session')
-            elif not os.access(path, os.R_OK):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} names {path}, which is not readable: the shell guard of the entry lets every call through, so a pause would hold no session')
-        for launcher in launchers:
-            if launcher in hooks:
-                continue   # run directly: the drift warning above covers it
-            path = launcher if os.path.isabs(launcher) else shutil.which(launcher)
-            if not re.fullmatch(ENTRY.PYTHON_NAME, os.path.basename(launcher).lower()):
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which is not a Python: it would not run the hook, so a pause would hold no session')
-            elif not path or not os.path.isfile(path) or not os.access(path, os.X_OK):   # isfile: a searchable directory passes `[ -x ]` and still cannot be run
-                log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
 
 
 def live_owner():
@@ -855,14 +801,12 @@ def live_owner():
 
 
 def hook_log_collisions():
-    """[(hook log, label, path)]: the --log of a registered entry (a settings rewrite after the start can make it that) that is a file of the
-    guard or a program: for every call it holds the hook appends a line to its log, which would end a pause (the pause file stops being one),
-    destroy the state or the usage cache, or corrupt the program. The start refuses these pairs (check_distinct); this is the same
-    look after the start. The files of the guard come first in a label, as in the wiring check."""
-    registered = registered_runtime_files()
-    others = [x for x in configured_files() + registered if x[0] != 'registered hook log']
-    return [(log_path, label, path) for log_label, log_path in registered if log_label == 'registered hook log'
-            for label, path in others if path and same_file(log_path, path)]
+    """[(file named by the hook entry, label, path)]: a file that the registered entry names (its hook log, hook or interpreter: a settings
+    rewrite after the start can make it that) and that is a file of the guard or a program. For every call it holds the hook appends a
+    line to its log, which would end a pause (the pause file stops being one), destroy the state or the usage cache, or corrupt the
+    program. The start refuses these pairs (check_distinct); this is the same look after the start."""
+    return [(pa if la == ENTRY_FILE else pb, lb if la == ENTRY_FILE else la, pb if la == ENTRY_FILE else pa)
+            for la, pa, lb, pb in collisions(configured_files() + registered_runtime_files()) if ENTRY_FILE in (la, lb)]
 
 
 def check_pause_path():
@@ -874,7 +818,7 @@ def check_pause_path():
     for log_path, label, _path in hook_log_collisions()[:1]:
         if LAST_WIRING_CHECK[0] is None or time.monotonic() - LAST_WIRING_CHECK[0] >= A.warn_every:
             hook_check('pause refused')   # the wiring check names every file the hook log is, as it does when a pause begins
-        raise OSError(f'the hook entry in {SETTINGS or default_settings()} logs to {log_path}, which is the {label} of this guard: the hook would append its log lines to it, so no pause is published or renewed (run five-hour-guard-settings.py add again)')
+        raise OSError(f'the hook entry in {SETTINGS or default_settings()} names {log_path}, which is the {label} of this guard: the hook would append its log lines to it or a write would replace it, so no pause is published or renewed (run five-hour-guard-settings.py add again)')
     try:
         seen = os.lstat(PAUSE_FILE)
     except (OSError, ValueError):

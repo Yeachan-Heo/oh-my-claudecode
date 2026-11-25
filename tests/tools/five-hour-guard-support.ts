@@ -209,5 +209,5 @@ export const shellQuote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s
 /** The hook entry command as `add` writes it, built here from the inputs (not by the code under test). */
 export function generatedCommand(pause: string, hook: string, python: string, hookLog?: string): string {
   const q = shellQuote;
-  return `[ -f ${q(pause)} ] && [ -f ${q(hook)} ] && [ -r ${q(hook)} ] && [ -x ${q(python)} ] || exit 0; exec ${q(python)} -I ${q(hook)} --pause-file ${q(pause)}` + (hookLog ? ` --log ${q(hookLog)}` : '');
+  return `[ -f ${q(pause)} ] && [ -f ${q(hook)} ] && [ -r ${q(hook)} ] && [ -x ${q(python)} ] || exit 0; exec ${q(python)} -I ${q(hook)} --pause-file ${q(pause)}` + (hookLog ? ` --log ${q(hookLog)}` : '') + ' # five-hour-guard-entry';
 }

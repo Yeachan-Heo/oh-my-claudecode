@@ -79,7 +79,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     runSync(SETTINGS_TOOL, [action, '--settings', f.settings, '--pause-file', f.pause, '--hook-log', f.hookLog, '--hook', HOOK, '--python', PYBIN, ...extra]);
   const backups = (f: Fixture) => readdirSync(f.dir).filter((n) => n.startsWith('settings.json.before-five-hour-guard-'));
   const entryCommand = (f: Fixture, python = PYBIN) =>
-    `[ -f ${quote(f.pause)} ] && [ -f ${quote(HOOK)} ] && [ -r ${quote(HOOK)} ] && [ -x ${quote(python)} ] || exit 0; exec ${quote(python)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)} --log ${quote(f.hookLog)}`;
+    `[ -f ${quote(f.pause)} ] && [ -f ${quote(HOOK)} ] && [ -r ${quote(HOOK)} ] && [ -x ${quote(python)} ] || exit 0; exec ${quote(python)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)} --log ${quote(f.hookLog)} # five-hour-guard-entry`;
   const write = (f: Fixture, doc: unknown) => writeFileSync(f.settings, JSON.stringify(doc, null, 2) + '\n', 'utf8');
 
   it('check, add, add again, remove: backup, atomic replace, rest of the file unchanged', () => {
@@ -121,12 +121,12 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
   it('an entry with another hook path is replaced in place, in one write, between the entries around it', () => {
     const f = fixture('settings-moved');
     const doc = base();
-    const old = { matcher: '*', hooks: [{ type: 'command', command: '[ -f /p ] || exit 0; exec python3 -I /old/dir/five-hour-guard-hook.py --pause-file /p', timeout: 21600 }] };
+    const old = { matcher: '*', hooks: [{ type: 'command', command: '[ -f /p ] || exit 0; exec python3 -I /old/dir/five-hour-guard-hook.py --pause-file /p # five-hour-guard-entry', timeout: 21600 }] };
     doc.hooks.PreToolUse.splice(1, 0, old as never); // between two other entries: the position matters
     doc.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/last.py' }] } as never);
     write(f, doc);
 
-    expect(tool(f, 'check').status, 'the old entry is ours: it is found by the hook file name').toBe(0);
+    expect(tool(f, 'check').status, 'the old entry is ours: it is found by its marker').toBe(0);
     const r = tool(f, 'add');
     expect(r.status, r.stderr).toBe(0);
     const pre = readJson(f.settings).hooks.PreToolUse;
@@ -192,7 +192,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
 
   it('a foreign hook that shares a group with ours survives add and remove', () => {
     const f = fixture('settings-mixed');
-    write(f, { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }, { type: 'command', command: 'exec /usr/bin/python3 -I /old/five-hour-guard-hook.py --pause-file /old/pause.json' }] }] } });
+    write(f, { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/foreign-audit.py' }, { type: 'command', command: 'exec /usr/bin/python3 -I /old/five-hour-guard-hook.py --pause-file /old/pause.json # five-hour-guard-entry' }] }] } });
     expect(tool(f, 'add').status).toBe(0);
     const pre = readJson(f.settings).hooks.PreToolUse;
     expect(pre).toHaveLength(2);
@@ -351,22 +351,16 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(actions).toEqual(['add', 'check']);
   });
 
-  it('add refuses a hook file whose name is not the one the entry is recognised by, so every accepted entry can be checked and removed', () => {
+  it('a hook file with any name is accepted: the entry carries the marker, so check finds it and remove takes it away', () => {
     const f = fixture('settings-renamed-hook');
     const original = JSON.stringify(base(), null, 2) + '\n';
     writeFileSync(f.settings, original, 'utf8');
     const renamed = join(f.dir, 'hold.py');
     copyFileSync(HOOK, renamed);
     const r = tool(f, 'add', ['--hook', renamed]);
-    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
-    expect(r.stderr).toMatch(/file name .* five-hour-guard-hook\.py/);
-    expect(readText(f.settings), 'nothing written').toBe(original);
-    expect(backups(f), 'no backup either').toHaveLength(0);
-    const copy = join(f.dir, 'opt', 'five-hour-guard-hook.py');
-    mkdirSync(join(f.dir, 'opt'));
-    copyFileSync(HOOK, copy);
-    expect(tool(f, 'add', ['--hook', copy]).status, 'the same file name in another directory is accepted').toBe(0);
-    expect(tool(f, 'check').status, 'and found by check').toBe(0);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse[1].hooks[0].command).toMatch(/hold\.py .* # five-hour-guard-entry$/);
+    expect(tool(f, 'check').status, 'found by check, which was not given this hook').toBe(0);
     expect(tool(f, 'remove').stdout, 'and removed').toMatch(/remove: done/);
     expect(readJson(f.settings).hooks.PreToolUse, 'nothing of ours is left').toEqual(base().hooks.PreToolUse);
   });
@@ -517,6 +511,61 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readText(f.settings)).toBe(original);
   });
 
+  it('an entry written by an earlier version of add (no marker, the exact path of the hook in the command) is found by check and remove, and add replaces it in place: no second entry', () => {
+    const forms = {
+      'the form of the previous head, with the checks of the hook and the interpreter': (f: Fixture) => `[ -f ${quote(f.pause)} ] && [ -f ${quote(HOOK)} ] && [ -r ${quote(HOOK)} ] && [ -x ${quote(PYBIN)} ] || exit 0; exec ${quote(PYBIN)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)} --log ${quote(f.hookLog)}`,
+      'the older form, on one line, without those checks': (f: Fixture) => `[ -f ${quote(f.pause)} ] && [ -f ${quote(HOOK)} ] || exit 0; exec ${quote(PYBIN)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)} --log ${quote(f.hookLog)}`,
+    };
+    for (const [name, build] of Object.entries(forms)) {
+      const f = fixture('settings-old-entry');
+      const doc = base();
+      doc.hooks.PreToolUse.splice(1, 0, { matcher: '*', hooks: [{ type: 'command', command: '/x/first-in-group.py' }, { type: 'command', command: build(f), timeout: 21600 }] } as never);
+      doc.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/last.py' }] } as never);
+      write(f, doc);
+      const check = tool(f, 'check');
+      expect(check.status, `${name}: check finds it: ${check.stdout}${check.stderr}`).toBe(0);
+      expect(check.stdout, name).toMatch(/1 entry\/entries/);
+      const add = tool(f, 'add');
+      expect(add.status, `${name}: ${add.stderr}`).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre, `${name}: replaced in place, not appended`).toHaveLength(4);
+      expect(pre[1].hooks[0].command, `${name}: the new form takes the place of the old one`).toBe(entryCommand(f));
+      expect(pre[2], `${name}: the other handler of the group stays, in a group of its own`).toEqual({ matcher: '*', hooks: [{ type: 'command', command: '/x/first-in-group.py' }] });
+      expect(pre[3].hooks[0].command, name).toBe('/x/last.py');
+      expect(tool(f, 'check').stdout, `${name}: after add there is one entry`).toMatch(/1 entry\/entries/);
+      const again = tool(f, 'add');
+      expect(again.stdout, name).toMatch(/already registered, nothing to do/);
+      const old = fixture('settings-old-entry-remove');
+      write(old, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: build(old), timeout: 21600 }] }] } });
+      expect(tool(old, 'remove').stdout, name).toMatch(/remove: done/);
+      expect(readJson(old.settings).hooks ?? {}, `${name}: nothing of ours is left`).toEqual({});
+    }
+  });
+
+  it('a handler of another tool is not our entry: one with a similar file name, or with the hook file after node --check, python3 --version, bash -n or printf, is left alone by add and remove, and check warns that no entry has the marker', () => {
+    const f = fixture('settings-foreign-forms');
+    const foreign = [
+      `node --check ${HOOK}.js --pause-file /tmp/p`,
+      'node --check /opt/a-five-hour-guard-hook.py.js --pause-file /tmp/p',
+      'python3 --version /opt/other/five-hour-guard-hook.py',
+      'bash -n /opt/other/five-hour-guard-hook.py',
+      'printf /opt/other/five-hour-guard-hook.py --pause-file p',
+    ];
+    const doc = { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign.map((command) => ({ type: 'command', command })) }] } };
+    write(f, doc);
+    const check = tool(f, 'check');
+    expect(check.status, 'check: not installed').toBe(1);
+    expect(check.stdout, 'check warns and gives the entry to paste').toMatch(/no marker '# five-hour-guard-entry'.*paste this entry/);
+    expect(tool(f, 'remove').stdout, 'remove leaves them').toMatch(/nothing to do/);
+    const add = tool(f, 'add');
+    expect(add.status, add.stderr).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'add appends its own entry').toHaveLength(2);
+    expect(pre[0], 'the handlers of the other tool are as they were').toEqual(doc.hooks.PreToolUse[0]);
+    expect(tool(f, 'remove').stdout).toMatch(/remove: done/);
+    expect(readJson(f.settings).hooks.PreToolUse, 'and still there after remove').toEqual(doc.hooks.PreToolUse);
+  });
+
   it('a handler that is not a command is not our hook: check does not report it, add registers a real entry next to it', () => {
     const f = fixture('settings-handler-type');
     write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'prompt', command: 'x /old/five-hour-guard-hook.py' }] }] } });
@@ -526,256 +575,6 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(pre).toHaveLength(2);
     expect(pre[0].hooks[0].type, 'the other handler stays as it was').toBe('prompt');
     expect(tool(f, 'check').status).toBe(0);
-  });
-
-  it('a Python is recognised by its whole file name: python, python3, python3.12, pythonw.exe, pypy3 and py run our hook when they are given it, python-audit and the like do not', () => {
-    for (const [name, ours] of [['python', true], ['python3', true], ['python3.12', true], ['pythonw', true], ['pythonw.exe', true], ['python.exe', true], ['pypy', true], ['pypy3', true], ['py', true],
-      ['/usr/bin/python3', true], ['python-audit', false], ['python3-audit', false], ['pythonista', false], ['pypy-audit', false], ['pyaudit', false], ['/opt/python-audit', false]] as const) {
-      const f = fixture(`settings-python-name-${name.replace(/\W/g, '_')}`);
-      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `${name} /opt/five-hour-guard-hook.py` }] }] } });
-      expect(tool(f, 'check').status, `${name} /opt/five-hour-guard-hook.py: ${ours ? 'our hook' : 'a command that has the hook file as data'}`).toBe(ours ? 0 : 1);
-    }
-  });
-
-  it('a command that only names the hook file as data is not our hook: check does not report it, add and remove leave it alone', () => {
-    const f = fixture('settings-foreign-operand');
-    const foreign = [
-      '/x/foreign-audit.py /opt/five-hour-guard-hook.py',
-      '/opt/python-audit /tmp/five-hour-guard-hook.py',
-      'pypy-audit /tmp/five-hour-guard-hook.py',
-      'grep -c five-hour-guard-hook.py /var/log/audit.log',
-      'python3 /x/audit.py --target /opt/five-hour-guard-hook.py',
-      'exec /bin/true --pause-file /opt/five-hour-guard-hook.py.pause',
-      '[ -f /opt/five-hour-guard-hook.py ] || exit 0; /x/other.sh',
-    ].map((command) => ({ type: 'command', command }));
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them is our hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-  });
-
-  it('text after an unquoted shell comment is no part of the command: a command that has the hook only in a comment is not our hook, check does not report it, add and remove leave it alone', () => {
-    const f = fixture('settings-comment');
-    const foreign = [
-      'echo audit; # /opt/five-hour-guard-hook.py --pause-file /tmp/pause',
-      'echo audit;#/opt/five-hour-guard-hook.py',
-      'echo audit;\n# /opt/five-hour-guard-hook.py --pause-file /tmp/pause',
-    ].map((command) => ({ type: 'command', command }));
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them is our hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-  });
-
-  it('a backslash and newline are removed before a comment is read: a `#` after one starts a comment, so a command that has the hook only after it is not our hook, and one that continues its line runs the hook', () => {
-    const f = fixture('settings-continuation-comment');
-    const hook = '/opt/five-hour-guard-hook.py';
-    const foreign = [`echo \\\n#${hook} --pause-file /tmp/pause`, `echo audit \\\n  #${hook} --pause-file /tmp/pause`, `echo audit; \\\n# ${hook} --pause-file /tmp/pause`,
-      `echo audit \\\n\\\n#${hook} --pause-file /tmp/pause`].map((command) => ({ type: 'command', command }));
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them is our hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-    const g = fixture('settings-continuation-run');
-    write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `${quote(PYBIN)} \\\n${hook} --pause-file /tmp/p`, timeout: 21600 }] }] } });
-    expect(tool(g, 'check').status, 'a continued line is one command: it runs the hook').toBe(0);
-  });
-
-  it('env, nohup and time with --help or --version print and run nothing: a handler that has the hook file after them is not our hook, the same wrappers with other options run it', () => {
-    const f = fixture('settings-info-modes');
-    const hook = '/opt/five-hour-guard-hook.py';
-    const foreign = [`env --help ${hook} --pause-file /tmp/p`, `env --version ${hook} --pause-file /tmp/p`, `env -i --help ${hook} --pause-file /tmp/p`, `/usr/bin/env --help ${hook} --pause-file /tmp/p`,
-      `FOO=1 env --version ${hook} --pause-file /tmp/p`, `nohup --help ${hook} --pause-file /tmp/p`, `nohup --version ${hook} --pause-file /tmp/p`, `time --help ${hook} --pause-file /tmp/p`,
-      `/usr/bin/time --version ${hook} --pause-file /tmp/p`, `exec env --help python3 ${hook} --pause-file /tmp/p`].map((command) => ({ type: 'command', command }));
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-    for (const [k, command] of [`env -i ${hook} --pause-file /tmp/p`, `env --ignore-environment python3 ${hook} --pause-file /tmp/p`, `nohup ${hook} --pause-file /tmp/p`, `time -p ${hook} --pause-file /tmp/p`,
-      `env --debug ${hook} --pause-file /tmp/p`].entries()) {
-      const g = fixture(`settings-info-run-${k}`);
-      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
-      expect(tool(g, 'check').status, `${command}: it runs the hook`).toBe(0);
-    }
-  });
-
-  it('the string of env -S is the command that env runs: the words after it are its arguments, so a handler that has the hook file after env -S printf is not our hook, and env -S python3 hook is', () => {
-    const f = fixture('settings-env-split');
-    const hook = '/opt/five-hour-guard-hook.py';
-    const foreign = [`env -S 'printf %s' ${hook} --pause-file /tmp/p`, `env --split-string 'printf %s' ${hook} --pause-file /tmp/p`, `env --split-string='printf %s' ${hook} --pause-file /tmp/p`,
-      `env -S'printf %s' ${hook} --pause-file /tmp/p`, `env -i -S 'printf %s' ${hook} --pause-file /tmp/p`, `env -S 'env -i printf %s' ${hook} --pause-file /tmp/p`].map((command) => ({ type: 'command', command }));
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-    for (const [k, command] of [`env -S 'python3 -I' ${hook} --pause-file /tmp/p`, `env -S'python3 -I' ${hook} --pause-file /tmp/p`, `env -S 'python3 -I ${hook}' --pause-file /tmp/p`, `env -S '-i' ${hook} --pause-file /tmp/p`,
-      `env -S '' ${hook} --pause-file /tmp/p`].entries()) {
-      const g = fixture(`settings-env-split-run-${k}`);
-      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
-      expect(tool(g, 'check').status, `${command}: it runs the hook`).toBe(0);
-    }
-  });
-
-  it('python3 with -h, -?, --help, -V or --version prints and exits before it runs a script: a handler that has the hook file after it is not our hook, the same options after the hook are its arguments', () => {
-    const f = fixture('settings-python-info');
-    const hook = '/opt/five-hour-guard-hook.py';
-    const foreign = ['--help', '-h', '-V', '-VV', '--version', '-I --help', '-W ignore -h'].map((o) => ({ type: 'command', command: `${quote(PYBIN)} ${o} ${hook} --pause-file /tmp/p` }));
-    foreign.push({ type: 'command', command: `exec env ${quote(PYBIN)} --help ${hook} --pause-file /tmp/p` });
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-    for (const [k, command] of [`${quote(PYBIN)} ${hook} --pause-file /tmp/p --help`, `${quote(PYBIN)} -I ${hook} -h --pause-file /tmp/p`, `${quote(PYBIN)} -W --help ${hook} --pause-file /tmp/p`].entries()) {
-      const g = fixture(`settings-python-info-run-${k}`);
-      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
-      expect(tool(g, 'check').status, `${command}: it runs the hook`).toBe(0);
-    }
-  });
-
-  it('a lone - is the script operand of a Python (it runs stdin) and ends its options: a handler that has the hook file after python3 - is not our hook', () => {
-    const f = fixture('settings-python-stdin');
-    const hook = '/opt/five-hour-guard-hook.py';
-    const foreign = ['-', '-I -', '-W ignore -'].map((o) => ({ type: 'command', command: `${quote(PYBIN)} ${o} ${hook} --pause-file /tmp/p` }));
-    foreign.push({ type: 'command', command: `exec env ${quote(PYBIN)} - ${hook} --pause-file /tmp/p` });
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-    const g = fixture('settings-python-dash-after');
-    write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `${quote(PYBIN)} -I ${hook} - --pause-file /tmp/p`, timeout: 21600 }] }] } });
-    expect(tool(g, 'check').status, 'a dash after the hook is its argument: the hook runs').toBe(0);
-  });
-
-  it('a command that only carries --pause-file is not the hook: printf, echo and the like print the path, so a handler that has the hook file after them is not our hook (check, add and remove leave it alone)', () => {
-    const f = fixture('settings-print-launcher');
-    const hook = '/opt/five-hour-guard-hook.py';
-    const printfPath = spawnSync('sh', ['-c', 'command -v printf'], { encoding: 'utf8' }).stdout.trim();   // the utility that the PATH gives, written with its path
-    const foreign = ['printf', ...(printfPath.startsWith('/') ? [printfPath] : []), 'echo', 'printf %s', 'cat', 'ls -l', 'exec printf', 'env -i printf'].map((c) => ({ type: 'command', command: `${c} ${hook} --pause-file /tmp/p` }));
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-    for (const [k, command] of ['node', 'nodejs18', 'bash', '/bin/sh', 'ruby', 'env -i bash', `${process.execPath}`].map((c) => `${c} ${hook} --pause-file /tmp/p`).entries()) {
-      const g = fixture(`settings-print-launcher-run-${k}`);
-      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
-      expect(tool(g, 'check').status, `${command}: an interpreter or a launcher of the user runs the hook`).toBe(0);
-    }
-  });
-
-  it('an interpreter that is asked for help, its version or a syntax check ends without running a script: a handler that has the hook file after node --check, bash -n, perl -v and the like is not our hook (check, add, remove)', () => {
-    const hook = '/opt/five-hour-guard-hook.py';
-    const modes = ['node --check', 'node -c', 'nodejs --version', 'bash -n', 'bash --version', 'bash -D', 'sh -n', 'dash -n', 'zsh -n', 'ksh -n', 'fish --no-execute', 'perl -v', 'perl -h', 'ruby -c', 'ruby --version',
-      'php -l', 'php --version', 'deno --version', 'bun --version', 'env -i node --check', 'exec bash -n'];
-    for (const [k, mode] of modes.entries()) {
-      const f = fixture(`settings-no-run-${k}`);
-      const foreign = [{ type: 'command', command: `${mode} ${hook} --pause-file /tmp/p` }];
-      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-      expect(tool(f, 'check').status, `${mode}: not our hook`).toBe(1);
-      expect(tool(f, 'add').status, mode).toBe(0);
-      const pre = readJson(f.settings).hooks.PreToolUse;
-      expect(pre, `${mode}: the foreign group stays whole, ours is next to it`).toHaveLength(2);
-      expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => h.command === foreign[0].command), `${mode}: the handler is kept`).toHaveLength(1);
-      expect(tool(f, 'remove').status, mode).toBe(0);
-      expect(readJson(f.settings).hooks.PreToolUse, `${mode}: remove takes only our hook`).toEqual([{ matcher: '*', hooks: foreign }]);
-    }
-    for (const [k, command] of ['node --no-warnings', 'bash -e', 'sh -e', 'perl -w', 'node', 'bash', 'perl', 'ruby', 'php'].map((c) => `${c} ${hook} --pause-file /tmp/p`).entries()) {
-      const g = fixture(`settings-no-run-ok-${k}`);
-      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
-      expect(tool(g, 'check').status, `${command}: the interpreter runs the hook`).toBe(0);
-    }
-  });
-
-  it('a Python that is given option values before the hook (-W ignore, -X dev, -Q, --check-hash-based-pycs) runs the hook behind them: check reports it and remove takes it away; a script in front of the hook file still makes it data', () => {
-    const forms = (hook: string, pause: string) => [`${quote(PYBIN)} -W ignore ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -X dev ${hook} --pause-file ${pause}`,
-      `${quote(PYBIN)} -W ignore -X dev -I ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -Q new ${hook} --pause-file ${pause}`,
-      `${quote(PYBIN)} --check-hash-based-pycs always ${hook} --pause-file ${pause}`, `exec ${quote(PYBIN)} -I -W error ${hook} --pause-file ${pause}`,
-      `[ -f ${pause} ] || exit 0; env FOO=1 ${quote(PYBIN)} -X importtime ${hook} --pause-file ${pause}`];
-    for (const k of forms('', '').keys()) {
-      const f = fixture(`settings-python-values-${k}`);
-      const doc = base();
-      const before = JSON.stringify(doc.hooks.PreToolUse);
-      const command = forms(quote(HOOK), quote(f.pause))[k];
-      doc.hooks.PreToolUse.push({ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] } as never);
-      write(f, doc);
-      expect(tool(f, 'check').status, `${command}: the hook behind the option values is found`).toBe(0);
-      const rm = tool(f, 'remove');
-      expect(rm.status, rm.stderr).toBe(0);
-      expect(JSON.stringify(readJson(f.settings).hooks.PreToolUse), `${k}: remove took the handler`).toBe(before);
-    }
-    const g = fixture('settings-python-values-data');
-    const foreign = [`${quote(PYBIN)} -W ignore /x/audit.py ${HOOK} --pause-file /tmp/p`, `${quote(PYBIN)} /x/audit.py -W ignore ${HOOK} --pause-file /tmp/p`].map((command) => ({ type: 'command', command }));
-    write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(g, 'check').status, 'a script in front of the hook file: the hook file is data').toBe(1);
-    expect(tool(g, 'remove').status).toBe(0);
-    expect(readJson(g.settings).hooks.PreToolUse, 'remove takes nothing of it').toEqual([{ matcher: '*', hooks: foreign }]);
-  });
-
-  it('command -v and command -V only describe the word after them: a handler that does so with the hook file is not our hook, command -p and command alone run it', () => {
-    const f = fixture('settings-command-v');
-    const hook = '/opt/five-hour-guard-hook.py';
-    const foreign = [`command -v ${hook}`, `command -V ${hook}`, `command -pv ${hook}`, `command -p -v ${hook}`, `command -vp ${hook}`, `command -v -- ${hook}`,
-      `command -v python3 ${hook} --pause-file /tmp/p`, `FOO=1 command -V ${hook} --pause-file /tmp/p`, `command -v ${hook}; command -v ${hook}`].map((command) => ({ type: 'command', command }));
-    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
-    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
-    expect(tool(f, 'add').status).toBe(0);
-    const pre = readJson(f.settings).hooks.PreToolUse;
-    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
-    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
-    expect(tool(f, 'remove').status).toBe(0);
-    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
-    for (const [k, command] of [`command ${hook} --pause-file /tmp/p`, `command -p ${hook} --pause-file /tmp/p`, `command -p python3 ${hook} --pause-file /tmp/p`, `exec command -- ${hook} --pause-file /tmp/p`].entries()) {
-      const g = fixture(`settings-command-run-${k}`);
-      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
-      expect(tool(g, 'check').status, `${command}: it runs the hook`).toBe(0);
-    }
-  });
-
-  it('a command that runs the hook after a newline, a glued && or || with a newline, or a lone & is our hook: check reports it and remove takes it away', () => {
-    const forms = (command: string) => [`true\n${command}`, `true;\n${command}`, `true &&\n${command}`, `false ||\n${command}`, `true &\n${command}`, `true & ${command}`, `echo a | cat\n\n${command}`];
-    for (const k of forms('').keys()) {
-      const f = fixture(`settings-newline-${k}`);
-      const doc = base();
-      const before = JSON.stringify(doc.hooks.PreToolUse);
-      const command = forms(`${quote(PYBIN)} -I ${quote(HOOK)} --pause-file ${quote(f.pause)}`)[k];   // no ; of its own: the form is what separates it from `true`
-      doc.hooks.PreToolUse.push({ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] } as never);
-      write(f, doc);
-      expect(tool(f, 'check').status, `${JSON.stringify(command.slice(0, 40))}: the hook the shell runs is found`).toBe(0);
-      const rm = tool(f, 'remove');
-      expect(rm.status, rm.stderr).toBe(0);
-      expect(JSON.stringify(readJson(f.settings).hooks.PreToolUse), `${k}: remove took the handler`).toBe(before);
-    }
   });
 
   it('add refuses a pause file that is the default usage cache or its lock when the configuration names no usage_cache', () => {
@@ -926,13 +725,12 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     const f = fixture('settings-roundtrip-guard', { cache: { pct: 50, resetMs: Date.now() + 3600e3 } });
     const dir = join(f.dir, "it's here");
     mkdirSync(dir);
-    const hook = join(dir, 'five-hour-guard-hook.py');
-    copyFileSync(HOOK, hook);
+    for (const script of ['five-hour-guard-hook.py', 'five-hour-guard.py', 'five-hour-guard-settings.py', 'five_hour_guard_entry.py']) copyFileSync(join(dirname(HOOK), script), join(dir, script));   // the entry the guard generates names the hook next to it
     writeFileSync(f.settings, JSON.stringify(base(), null, 2) + '\n', 'utf8');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, hook_log_file: f.hookLog }), 'utf8');
-    const added = runSync(SETTINGS_TOOL, ['add', '--config', f.cfg, '--hook', hook, '--python', PYBIN]);
+    const added = runSync(join(dir, 'five-hour-guard-settings.py'), ['add', '--config', f.cfg, '--python', PYBIN]);
     expect(added.status, `${added.stdout}${added.stderr}`).toBe(0);
-    const g = runSync(GUARD_SCRIPT, ['--config', f.cfg, '--once']);
+    const g = runSync(join(dir, 'five-hour-guard.py'), ['--config', f.cfg, '--once']);
     expect(g.status, `${g.stdout}${g.stderr}`).toBe(0);
     expect(g.stdout, 'the entry that add wrote').not.toMatch(/WARNING/);
   });

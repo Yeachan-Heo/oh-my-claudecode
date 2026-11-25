@@ -1,43 +1,15 @@
-"""The hook entry of the five-hour limit guard: the one definition of the command that is registered in settings.json and of how a
-registered command is read. Loaded by five-hour-guard.py (drift check) and five-hour-guard-settings.py (add, check, remove, probe)
-from the directory the scripts are in; it is not run by itself and the hook script does not need it."""
-import math, os, re, shlex, shutil, sys
+"""The hook entry of the five-hour limit guard: the one definition of the command that is registered in settings.json and of how that
+entry is recognised there (by ENTRY_MARKER, a fixed text at the end of its command, or by the exact path of the hook: no command is analysed). Loaded by five-hour-guard.py
+(drift check) and five-hour-guard-settings.py (add, check, remove, probe) from the directory the scripts are in; it is not run by itself
+and the hook script does not need it."""
+import math, re, shlex
 
 MARK = 'five-hour-guard-hook.py'
-OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
-PYTHON_NAME = r'(python|pythonw|pypy|py)[\d.]*(\.exe)?'   # the whole basename (python, python3, python3.12, pythonw.exe, pypy3, py): python-audit is no Python
-# The names of the programs that run their first operand as a script (an interpreter or a shell), whole basename, a version and .exe allowed.
-INTERPRETER_NAME = r'(python|pypy|node|nodejs|deno|bun|ruby|perl|php|lua|pwsh|powershell|tsx|ts-node|sh|bash|zsh|dash|ksh|ash|fish)[\d.]*(\.exe)?'
-# The variables with which the hook decides that a session does not draw on the subscription window (foreign_provider() of
-# five-hour-guard-hook.py, which imports nothing and so keeps its own copy of this list): the probe of `add` runs without them.
+ENTRY_MARKER = '# five-hour-guard-entry'   # a comment to the shell, last in the command of the entry that `add` writes: the entry is the handler whose command holds this text
 PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
                      'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL', 'OMC_MODEL_MEDIUM', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
                      'ANTHROPIC_DEFAULT_SONNET_MODEL', 'OMC_MODEL_HIGH', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
                      'OMC_MODEL_LOW', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL')
-# Commands that run the command that follows them, with the options that take the next word as their value. A command word that
-# is one of these is not the program: skip_wrappers() steps over it, its options and the NAME=VALUE assignments.
-WRAPPERS = {'exec': ('-a',), 'env': ('-u', '--unset', '-C', '--chdir', '-S', '--split-string'), 'command': (), 'nohup': (),
-            'time': ('-f', '--format', '-o', '--output')}
-INFO_WRAPPERS = ('env', 'nohup', 'time')   # the wrappers of WRAPPERS that print their help or version and exit with --help or --version, and then run nothing
-INFO_OPTIONS = ('--help', '--version')
-# The options after which an interpreter ends without running the script that follows (help, version, syntax check): the whole basename of the
-# interpreter, then the options. From the help of the interpreters and each one run on a file that leaves a trace when it runs. node, bash, sh,
-# dash and perl were run here; ruby, php, deno, bun, zsh, ksh and fish were not installed and are taken from their documentation. Not in it,
-# because the script (or a BEGIN block of it) still runs: perl -c, ruby -v, lua -v, python -c and every shell option that runs commands.
-NO_RUN_OPTIONS = [
-    (PYTHON_NAME, ('-h', '-?', '--help', '-V', '-VV', '--version')),
-    (r'(node|nodejs)(\.exe)?', ('-c', '--check', '-h', '--help', '-v', '--version')),
-    (r'bash(\.exe)?', ('-n', '--help', '--version', '-D', '--dump-strings', '--dump-po-strings')),
-    (r'(sh|dash|ash|zsh|ksh)(\.exe)?', ('-n', '--help', '--version')),
-    (r'fish(\.exe)?', ('-n', '--no-execute', '-h', '--help', '-v', '--version')),
-    (r'perl[\d.]*', ('-v', '-V', '-h')),
-    (r'ruby[\d.]*', ('-c', '--version', '-h', '--help')),
-    (r'php[\d.]*', ('-l', '-v', '--version', '-h', '--help', '-?')),
-    (r'deno', ('-h', '--help', '-V', '--version')),
-    (r'bun', ('-h', '--help', '-v', '--version')),
-]
-PYTHON_VALUE_OPTIONS = ('-W', '-X', '-Q', '--check-hash-based-pycs')   # the options of a Python that take the next word as their value (python3 --help)
-SEPARATORS = ';&|\n'   # the characters of the operators that end a simple command (the parentheses and the redirections are not read here)
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
 
 
@@ -75,215 +47,14 @@ def entry_command(pause_file, hook, python, hook_log=None):
     Linux and macOS, Git Bash on Windows."""
     q = shlex.quote
     cmd = f'[ -f {q(pause_file)} ] && [ -f {q(hook)} ] && [ -r {q(hook)} ] && [ -x {q(python)} ] || exit 0; exec {q(python)} -I {q(hook)} --pause-file {q(pause_file)}'
-    return cmd + (f' --log {q(hook_log)}' if hook_log else '')
+    return cmd + (f' --log {q(hook_log)}' if hook_log else '') + f' {ENTRY_MARKER}'
 
 
-def skip_wrappers(words):
-    """The index of the command word in the words of a simple command: after the wrappers (exec, env, command, nohup, time, also written with a path), their options
-    (`env -i`, `env -u NAME`, `exec -a NAME`, a lone `--` ends the options) and the NAME=VALUE assignments. A word that starts with `-` is
-    an option only after a wrapper, so a command word is never taken for one. `command -v` and `command -V`, and `--help` and `--version` of
-    env, nohup and time, run nothing: the index is then the number of words (no command word)."""
-    i, wrapper = 0, None
-    while i < len(words):
-        word = words[i]
-        if re.match(r'[A-Za-z_]\w*=', word):
-            pass
-        elif os.path.basename(word) in WRAPPERS:   # by the name of the command: /usr/bin/env is env (the path stays a program of the command for the guard, which counts every word)
-            wrapper = os.path.basename(word)
-        elif wrapper and word == '--':
-            wrapper = None
-        elif wrapper and len(word) > 1 and word[0] == '-':
-            if wrapper == 'command' and set(word[1:]) <= set('pVv') and set(word[1:]) & set('vV'):
-                return len(words)   # command -v and -V (alone or with -p) only describe what follows: no command is run
-            if word in INFO_OPTIONS and wrapper in INFO_WRAPPERS:
-                return len(words)   # env --help, nohup --version and the like print and exit: no command is run
-            i += 2 if word in WRAPPERS[wrapper] else 1   # the value of -u, -C, -S and the like is the next word
-            continue
-        else:
-            break
-        i += 1
-    return i
-
-
-def expand_split_strings(words):
-    """The words of a simple command with the string of every `env -S STRING` (also `-SSTRING`, `--split-string STRING`, `--split-string=STRING`,
-    which GNU env takes abbreviated) replaced by the words it splits into, which is what env runs: in `env -S 'printf %s' PATH` the command is
-    printf and PATH is its argument. A string that cannot be split runs nothing: no words are left of the command."""
-    for _ in range(8):
-        end = skip_wrappers(words)
-        for k in range(min(end, len(words))):
-            word, eq, value = words[k].partition('=')
-            if words[k] in ('-S', '--split-string') and k + 1 < end:
-                string, stop = words[k + 1], k + 2
-            elif eq and word.startswith('--s') and '--split-string'.startswith(word):
-                string, stop = value, k + 1
-            elif words[k][:2] == '-S' and len(words[k]) > 2:
-                string, stop = words[k][2:], k + 1
-            else:
-                continue
-            try:
-                words = words[:k] + shlex.split(string) + words[stop:]
-            except ValueError:
-                return []
-            break
-        else:
-            return words
-    return words
-
-
-def command_path(words):
-    """The PATH that the NAME=VALUE assignments before the command word of a simple command (also after env) give it, variables such as
-    $PATH expanded as for the other words, the last one wins; None without one: the command word is then looked up on the PATH of the
-    process that asks. The assignments in front of everything else are expanded in the order of the shell, each one with the ones before
-    it (`PATH=/opt/hooks PATH=$PATH:/usr/bin cmd` looks cmd up in /opt/hooks too); the words after a wrapper (`env PATH=... cmd`) are
-    expanded by the shell before the wrapper runs, with the environment of the process that asks."""
-    path, environment, leading = None, dict(os.environ), True
-    for word in words[:skip_wrappers(words)]:
-        assignment = re.match(r'([A-Za-z_]\w*)=(.*)', word, re.DOTALL)
-        if not assignment:
-            leading = False   # a wrapper: what follows is expanded before it runs
-            continue
-        name, value = assignment.groups()
-        value = re.sub(r'\$(\w+|\{[^}]*\})', lambda m: (environment if leading else os.environ).get(m.group(1).strip('{}'), m.group(0)), value)
-        if leading:
-            environment[name] = value
-        if name == 'PATH':
-            path = value
-    return path
-
-
-def strip_comments(command):
-    """The command without its shell comments, the one place that says what a comment is (the readers of a command in the guard and in
-    this module call it before they split the text): an unquoted `#` that starts a word (at the start, after a blank or one of ; & | ( ) < >)
-    comments out the rest of the line, the newline that ends it stays; a backslash and newline (a line continuation, outside single
-    quotes) are removed before that, as the shell does; a `#` inside a word (`a#b`, `${#x}`), in quotes or after a
-    backslash is text. The shell is the POSIX sh that the hook entry needs (Git Bash on Windows); a cmd.exe command has no such comment."""
-    out, i, n, quote, word_start = [], 0, len(command), None, True
-    while i < n:
-        c = command[i]
-        if quote is None and c == '#' and word_start:
-            while i < n and command[i] != '\n':
-                i += 1
-            continue
-        if c == '\\' and quote != "'" and command[i + 1:i + 2] == '\n':   # a line continuation is removed first: the `#` after it is read as if the lines were one
-            i += 2
-            continue
-        if c == '\\' and quote != "'" and i + 1 < n:   # the escaped character is text, and so is what follows it in the word
-            out.append(command[i:i + 2])
-            i += 2
-            word_start = False
-            continue
-        if quote is None and c in '\'"':
-            quote = c
-        elif c == quote:
-            quote = None
-        out.append(c)
-        i += 1
-        word_start = quote is None and c in ' \t\r\n;&|()<>'
-    return ''.join(out)
-
-
-def runs_script(word):
-    """Whether the command word `word` is a program that runs its first operand as a script and can launch the hook when the command carries
-    --pause-file: an interpreter or a shell by name, or a launcher written with a directory part (a program of the user, which can have any
-    name) that is not the system utility of that name on the PATH. A bare name that is no interpreter (`printf`, `echo`) and a path to such a
-    utility (`/usr/bin/printf`) only print or read the operand."""
-    base = os.path.basename(word)
-    if re.fullmatch(INTERPRETER_NAME, base.lower()):
-        return True
-    if os.sep not in word and not (os.altsep and os.altsep in word):
+def is_entry(handler, hook):
+    """Whether a hook handler is the entry of this guard: a command handler whose command holds ENTRY_MARKER (what `add` writes now) or
+    the exact path `hook` of the hook script, as a whole path (not the start of a longer file name such as hook.py.js): the entries
+    that earlier versions of `add` wrote have no marker, and their command holds the path of the hook."""
+    command = handler.get('command') if isinstance(handler, dict) else None
+    if not isinstance(command, str) or handler.get('type') != 'command':
         return False
-    on_path = shutil.which(base)
-    try:
-        return not (on_path and os.path.samefile(on_path, os.path.expanduser(word)))
-    except (OSError, ValueError):
-        return True
-
-
-def no_run_options(program):
-    """The options of the interpreter `program` (a command word) that end it without running a script, () for any other program."""
-    base = os.path.basename(program).lower()
-    for name, options in NO_RUN_OPTIONS:
-        if re.fullmatch(name, base):
-            return options
-    return ()
-
-
-def command_hook(words):
-    """(hook, launcher) when the simple command `words` runs the hook of this guard, else None: the command word (after the wrappers) is
-    the hook itself, or it is a Python (or another launcher that runs its first operand, when the command carries --pause-file, see runs_script) and the first argument that is no option or operand is the
-    hook (and the interpreter is not asked to end without running it: help, version, syntax check, see NO_RUN_OPTIONS; a Python is not given a lone `-`, which runs stdin). A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
-    words = expand_split_strings(words)
-    operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
-    first = skip_wrappers(words)
-    if first >= len(words) or first in operands:
-        return None
-    if MARK in os.path.basename(words[first]):
-        return words[first], words[first]   # run directly: the script itself is the program
-    python = re.fullmatch(PYTHON_NAME, os.path.basename(words[first]).lower()) is not None
-    if python or ('--pause-file' in words and runs_script(words[first])):   # printf hook --pause-file only prints the path
-        values = {i + 1 for i in range(first + 1, len(words)) if python and words[i] in PYTHON_VALUE_OPTIONS}   # -W ignore: `ignore` is no script
-        args = [i for i in range(first + 1, len(words)) if i not in operands and i not in values and (not words[i].startswith('-') or (python and words[i] == '-'))]   # a lone - is the script operand of a Python (stdin)
-        ends = no_run_options(words[first])
-        if any(words[i] in ends and i not in values for i in range(first + 1, args[0] if args else len(words))):
-            return None   # python3 --help <hook>, node --check <hook>: the interpreter ends without running the script
-        if args and MARK in os.path.basename(words[args[0]]):
-            return words[args[0]], words[first]   # the program that is asked to run the hook
-    return None
-
-
-def entry_parts(command):
-    """read_entry() without the PATH of each launcher."""
-    return read_entry(command)[:6]
-
-
-def read_entry(command):
-    """(hook scripts, interpreter files, log files, pause files, preflight files, launchers, the PATH of each launcher) that a hook entry
-    command names, by the option or position they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their
-    file names say, and neither is an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file
-    as data). The hook script is the command word of a simple command, or the first argument after it when the command word is a Python or, with --pause-file, another launcher (runs_script).
-    The PATH of a launcher is the one that command_path() reads from its simple command (None without a PATH assignment). Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
-    lex = shlex.shlex(strip_comments(command), posix=True, punctuation_chars=SEPARATORS)   # the separators are told from quoted text: a quoted path may end in `;`
-    lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''   # a newline ends a command, as ; does
-    tokens = list(lex)
-    if any('\0' in t for t in tokens):
-        raise ValueError('NUL character in the command')
-    simple, current = [], []
-    for t in tokens:
-        if t and not t.strip(SEPARATORS):   # one token of operators: ; & && || | and newlines, also written together (`&&` and a newline)
-            simple.append(current)
-            current = []
-        else:
-            current.append(t)
-    simple.append(current)
-    hooks, launchers, paths, found = [], [], [], {o: [] for o in OPERAND_OPTIONS}
-    for words in simple:
-        operands = {i + 1: t for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
-        for i, option in operands.items():
-            found[option].append(words[i])
-        hook = command_hook(words)
-        if hook:
-            hooks.append(hook[0])
-            launchers.append(hook[1])
-            paths.append(command_path(words))
-    return hooks, found['-x'], found['--log'], found['--pause-file'], found['-f'], launchers, paths
-
-
-def is_python_file(path):
-    """An absolute path of a regular executable file with the name of a Python: what the entry can use as its interpreter."""
-    return os.path.isabs(path) and re.fullmatch(PYTHON_NAME, os.path.basename(path).lower()) is not None and os.path.isfile(path) and os.access(path, os.X_OK)
-
-
-def expected_command(command, pause_file, hook_log=None, copy_log=True):
-    """The entry the guard would register for a registered command, ready to paste: the pause file of the guard, the hook and the
-    interpreter of the command when they are usable (an absolute path of a regular file; the interpreter also executable and named
-    like a Python), else the hook next to this module and the interpreter that runs the guard, and, unless the configuration names
-    one and copy_log, the hook log of the command when it is an absolute path (a relative one is resolved in the working directory of
-    each session, where it can be any file, the hook itself included, so it is never copied). None when the command names no hook.
-    Raises ValueError as entry_parts does."""
-    hooks, interpreters, logs, _pauses, _tests, launchers = entry_parts(command)
-    if not hooks:
-        return None
-    hook = next((x for x in hooks if os.path.isabs(x) and os.path.isfile(x)), os.path.join(os.path.dirname(os.path.abspath(__file__)), MARK))
-    python = next((x for x in [y for y in launchers if y not in hooks] + interpreters if is_python_file(x)), sys.executable)
-    return entry_command(pause_file, hook, python, hook_log or (logs[0] if logs and copy_log and os.path.isabs(logs[0]) else None))
+    return ENTRY_MARKER in command or re.search(r'(?<![\w.~/-])' + re.escape(hook) + r'(?![\w./-])', command) is not None
