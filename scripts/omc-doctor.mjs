@@ -1101,6 +1101,7 @@ const newestChange = (root) => {
 // directory and versions the version directory names in it.
 const protectionOf = (dir, versions) => {
   let unreadable = false;
+  let unmapped = '';
   // A path that goes through a link and then .. names the parent of the link target on the file system and the
   // parent of the link as text. The chain reads it the first way, the runtime folds an occupancy record the second
   // way, so every path that protects is read both ways, like a record.
@@ -1172,6 +1173,7 @@ const protectionOf = (dir, versions) => {
   }
   // The plugin roots of the records of running sessions.
   const held = [];
+  const foreignRoots = [];
   for (const name of names) {
     if (name.length == 69 && /^[a-f0-9]{64}[.]json/.test(name)) {
       const file = path.join(occupancyDir, name);
@@ -1186,6 +1188,7 @@ const protectionOf = (dir, versions) => {
         }
         if (ownerGone(record)) continue;
         if (typeof record.pluginRoot != 'string' || !record.pluginRoot.trim()) throw 0;
+        if (isForeignOwner(record)) foreignRoots.push(record.pluginRoot);
         held.push(record.pluginRoot, path.resolve(record.pluginRoot));
       } catch (error) {
         if (!absent(error, file)) unreadable = true;
@@ -1209,6 +1212,14 @@ const protectionOf = (dir, versions) => {
       }
     }
     if (pin.installPath != undefined) pinPaths.push(...bothForms(pin.installPath.trim()));
+  }
+  // The plugin root of a record of another host is spelled as that host sees it, and a profile can be mounted under another path there. One
+  // that does not lie in a cache of this system cannot be mapped to a version here, so nothing is moved while such a record is held.
+  const insideCache = (target) => spaces.some((space) => [space, chainOf(space).pop()].some((parent) => [target, ...chainOf(target)].some((one) => isUnder(one, parent))));
+  const stray = foreignRoots.find((root) => !insideCache(root));
+  if (stray !== undefined) {
+    unreadable = true;
+    unmapped = 'an occupancy record of another host or PID namespace has the plugin root ' + JSON.stringify(stray) + ', which lies in no cache of this system (the profile may be mounted under another path there), so the version it holds cannot be told; delete the record from ' + occupancyDir + ' once that session has ended';
   }
   const pinChains = pinPaths.flatMap(chainOf);
   const otherChains = [...registry.other.flatMap(bothForms), ...held, ...rootVars.flatMap(bothForms)].flatMap(chainOf);
@@ -1264,7 +1275,7 @@ const protectionOf = (dir, versions) => {
         isHeld = false;
       }
     });
-  return { unreadable, reason: registry.unreadable ? registry.reason : '', noIdentity, pinned, kept };
+  return { unreadable, reason: registry.unreadable ? registry.reason : unmapped, noIdentity, pinned, kept };
 };
 
 // == backup destination ==
