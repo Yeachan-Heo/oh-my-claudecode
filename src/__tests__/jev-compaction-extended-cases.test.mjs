@@ -825,38 +825,43 @@ describe('own request: a cut under 30 % is answered with a skip', () => {
     expect(own.some((r) => r.result === 'rejected' && r.reason === 'cut_below_host_min')).toBe(true);
   });
 
+  // The own request that ends under 30 %: the cut at 119 750 tokens (a threshold of 55 % of the window, which starts at 110 000).
+  const SKIPPED = { ...OWN_ON, OMC_JEV_COMPACT_AT_PERCENT: '55' };
+
   it('after a skip the next request waits for 10 % of the window of growth from the skipped one, neither five turns nor a smaller growth is enough', async () => {
-    const e = await ownEnv(OWN_ON, 120_500, markedSteps(40));
+    const e = await ownEnv(SKIPPED, 119_750, markedSteps(40));
     await e.turn();
     expect(e.state.compact).toBe(1);
+    expect(typeof e.state.answers[0].skip).toBe('string');
     for (let i = 0; i < 12; i++) await e.turn();
     expect(e.state.compact).toBe(1);
-    e.state.tokens = 120_500 + 0.09 * 200_000;
+    e.state.tokens = 119_750 + 0.09 * 200_000;
     for (let i = 0; i < 6; i++) await e.turn();
     expect(e.state.compact).toBe(1);
-    e.state.tokens = 120_500 + 0.11 * 200_000;
+    e.state.tokens = 119_750 + 0.11 * 200_000;
     await e.turn();
     expect(e.state.compact).toBe(2);
   });
 
   it('without the switch the own request with the same cut is finished by Jev, without a skip', async () => {
-    const e = await ownEnv({}, 120_500, markedSteps(40));
+    const e = await ownEnv({ OMC_JEV_COMPACT_AT_PERCENT: '55' }, 119_750, markedSteps(40));
     await e.turn();
     expect(e.state.compact === 1 && e.state.answers[0]?.messages?.length > 0 && e.state.hostSummary === 0).toBe(true);
   });
 
-  it('the own request at 120 500 tokens: the cascade ends at 84 922 tokens, a cut of 29.5 %, so the request is skipped', async () => {
-    // The cascade stops at the first step that reaches the 85 000 target, and one step is the saving of one result, so the wording of the trace decides where it
-    // lands: a longer trace wording gives a different figure (a trace line 19 characters longer, a shortened-result note 2 characters longer and result markers
-    // 2 and 3 characters longer give 83 471 tokens, a cut of 30.7 %, and no skip). A difference of wording, not of logic.
-    const e = await ownEnv(OWN_ON, 120_500, markedSteps(40));
+  it('the own request at 119 750 tokens: the cascade ends at 84 859 tokens, a cut of 29.1 %, so the request is skipped', async () => {
+    // The cascade stops at the first step that reaches the 85 000 target, and one step is the saving of one result (the text of the call and the result, and the
+    // block of the call and the message of the result that go with it), so the wording of the trace and the overhead of a block decide where it lands: a longer
+    // trace wording gives a different figure, and so does the overhead that the traces take off the list (at 120 000 tokens the same session ends at 83 466, a
+    // cut of 30.4 %, and no skip). A difference of wording and of rates, not of logic.
+    const e = await ownEnv(SKIPPED, 119_750, markedSteps(40));
     await e.turn(); await e.turn();
     const rec = e.records().filter((r) => r.event === 'compact');
     expect(e.state.compact).toBe(1);
     expect(e.state.hostSummary).toBe(0);
     expect(typeof e.state.answers[0].skip).toBe('string');
     expect(rec).toHaveLength(1);
-    expect(rec[0]).toMatchObject({ reason: 'cut_below_host_min_skipped', cascade_target_tokens: 85000, cascade_pass: 'short_or_trace', tokens_after_pred: 84922 });
+    expect(rec[0]).toMatchObject({ reason: 'cut_below_host_min_skipped', cascade_target_tokens: 85000, cascade_pass: 'short_or_trace', tokens_after_pred: 84859 });
   });
 
   it('the own request above the tokens where the target of 85 000 is a cut of 30 % (121 429 and more) is finished by Jev without a skip, a cut just above 30 %', async () => {
@@ -972,7 +977,7 @@ describe('the prediction of the stages that move text', () => {
     return m.map((x, i) => Object.freeze({ ...x, handle: `h${i}` }));
   }
 
-  it('the tokens the prediction takes off for the trim and the files are 0.43 per character of the frame plus 0.455 per moved character less 0.58 per character of the traces', async () => {
+  it('the tokens the prediction takes off for the trim and the files are 0.43 per character of the frame plus 0.455 per moved character less 0.58 per character of the traces, and the message of each row the trim removes', async () => {
     const msgs = reportsOnly();
     const off = await compactRun(TARGET, msgs);
     const on = await compactRun({ ...TARGET, OMC_JEV_COMPACT_AGENT_TRIM: '1', OMC_JEV_COMPACT_AGENT_STATES: STATES }, msgs);
@@ -980,7 +985,10 @@ describe('the prediction of the stages that move text', () => {
     expect(on.record.result).toBe('jev');
     const frame = on.record.agent_trim?.chars ?? 0;
     const st = on.record.agent_messages;
-    const expected = 0.43 * frame + (st && !st.error && st.mode === 'active' ? 0.455 * st.moved_chars - 0.58 * st.trace_chars : 0);
+    // A row the trim removes whole is a user message of one block: 45.4 tokens of block less the message constant 40.5.
+    const rows = on.record.agent_trim?.rows_dropped ?? 0;
+    expect(rows).toBeGreaterThan(0);
+    const expected = 0.43 * frame + rows * (45.4 - 40.5) + (st && !st.error && st.mode === 'active' ? 0.455 * st.moved_chars - 0.58 * st.trace_chars : 0);
     expect(frame).toBeGreaterThan(0);
     expect(Math.abs(off.record.tokens_after_pred - on.record.tokens_after_pred - expected), `off ${off.record.tokens_after_pred}, on ${on.record.tokens_after_pred}, expected ${expected}`).toBeLessThanOrEqual(1);
   });
@@ -1147,8 +1155,9 @@ describe('own request: the floor check does not stand in for the plan when a sta
     expect(await requests({ OMC_JEV_COMPACT_LONG_REPLIES: 'shadow', OMC_JEV_COMPACT_PASTES: 'shadow' }, 150_000, markedSteps(12, 400))).toBe(0);
   });
 
-  it('the floor check reads the configured rates: thirty results of 3 800 characters at 165 000 tokens make no request at the default rates and one at RATE_OUT 1', async () => {
-    const messages = markedSteps(30, 3800);
+  it('the floor check reads the configured rates: thirty results of 3 700 characters at 165 000 tokens make no request at the default rates and one at RATE_OUT 1', async () => {
+    // 28 of them are before the tail; each gives back about 1 730 tokens with its call and the overhead of its block and message, 48 500 of the 49 500 that 30 % asks.
+    const messages = markedSteps(30, 3700);
     expect(await requests({}, 165_000, messages)).toBe(0);
     expect(await requests({ OMC_JEV_COMPACT_RATES: '{"RATE_OUT":1}' }, 165_000, messages)).toBeGreaterThanOrEqual(1);
   });

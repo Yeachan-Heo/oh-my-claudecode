@@ -251,11 +251,22 @@ describe('the envelopes of the deliveries after a notification', () => {
     expect(whole.record).toMatchObject({ result: 'jev', notifications: 1, queued_carried: 0 });
     expect(whole.out.messages.some((m) => m.handle === 'n1')).toBe(true);
     for (const key of ['tokens_after_pred', 'tokens_after']) expect(whole.record[key], key).toBe(none.record[key]);
-    // The same notification traced is rebuilt, and its envelopes are in the row: the prediction and the record rise by their tokens.
+    // The same notification traced is rebuilt, and its envelopes are in the row: the prediction and the record rise by their tokens. The 40 deliveries become one
+    // block of the row's text, and each block gone takes its overhead (RATE_BLOCK 45.4) off the list, so the rise is the envelopes less 40 blocks.
     const traced = await compactRun(env, messages(), { tokens: 30000, deliver: deliver(5), score: 0 });
     const tracedNone = await compactRun(env, messages(), { tokens: 30000, score: 0 });
     expect(traced.record.queued_carried).toBeGreaterThan(0);
-    for (const key of ['tokens_after_pred', 'tokens_after']) expect(traced.record[key], key).toBeGreaterThan(tracedNone.record[key]);
+    const carried = traced.out.messages.find((m) => /^\[compacted\] background task notification/.test(m.text || ''));
+    expect(carried).toBeTruthy();
+    const trace = carried.text.slice(0, carried.text.indexOf('\n'));
+    const wrapper = carried.text.length - trace.length - words.reduce((n, b) => n + b.length, 0);
+    expect(wrapper).toBeGreaterThan(40 * 20);
+    const extra = 0.363 * wrapper - 40 * 45.4;
+    for (const key of ['tokens_after_pred', 'tokens_after']) {
+      const grew = traced.record[key] - tracedNone.record[key];
+      expect(grew, key).toBeGreaterThan(extra - 2);
+      expect(grew, key).toBeLessThan(extra + 8);
+    }
   });
 });
 
@@ -310,7 +321,8 @@ describe('the envelopes of the deliveries after a notification: the rows that bu
     const trace = carried.text.slice(0, carried.text.indexOf('\n'));
     const wrapper = carried.text.length - trace.length - enveloped.reduce((n, b) => n + b.length, 0);
     expect(wrapper).toBeGreaterThan(60 * 20);
-    const extra = 0.363 * wrapper;
+    // The 60 delivered blocks become one block of the replacement row's text, and each block gone takes its overhead (RATE_BLOCK 45.4) off the list.
+    const extra = 0.363 * wrapper - 60 * 45.4;
     for (const key of ['tokens_after_pred', 'tokens_after']) {
       const grew = run.record[key] - none.record[key];
       expect(grew, key).toBeGreaterThan(extra - 2);

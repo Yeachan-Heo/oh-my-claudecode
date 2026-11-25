@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, cascade, floorPrediction, manualPlan, ratesFrom, register, scoreQuestion } from '../../hooks/jev-compaction.mjs';
+import { QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, cascade, cutInTokens, floorPrediction, manualPlan, ratesFrom, register, scoreQuestion, shapeOf } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
@@ -489,5 +489,139 @@ describe('own threshold skip (OMC_JEV_COMPACT_OWN_THRESHOLD)', () => {
     const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'plugin', messages }), async () => ({ messages: [] }));
     expect(out).toHaveProperty('messages');
     expect(out).not.toHaveProperty('skip');
+  });
+});
+
+describe('the blocks and messages of the list in the predictions (shapeOf)', () => {
+  // A message of n blocks costs n * 45.4 - 40.5 tokens at the default rates (RATE_BLOCK and the negative constant of a message), and nothing when it holds no block.
+  const msg = (n) => (n > 0 ? n * 45.4 - 40.5 : 0);
+  /** A first user row, `batches` of parallel calls (a row of `size` calls without text, the row of their results and the answer after them), and a last request with its answer. */
+  function parallel(batches, size, { chars = 4000 } = {}) {
+    const rows = [{ role: 'user', text: 'Task.', toolUses: [] }];
+    const group = [-1];
+    for (let b = 0; b < batches; b++) {
+      const ids = Array.from({ length: size }, (_, k) => `b${b}-${k}`);
+      rows.push({ role: 'assistant', text: '', toolUses: ids.map((id) => ({ tool_use_id: id, tool: 'Bash', input: { command: `cat notes-${id}.txt` } })) });
+      group.push(2 * b);
+      rows.push({ role: 'user', text: '', toolUses: [], toolResults: ids.map((id) => ({ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(chars)}`, isError: false })) });
+      group.push(-1);
+      rows.push({ role: 'assistant', text: `Batch ${b} read.`, toolUses: [] });
+      group.push(2 * b + 1);
+    }
+    rows.push({ role: 'user', text: 'Sum up.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] });
+    group.push(-1, 2 * batches);
+    const candidates = [];
+    rows.forEach((m, i) => (m.toolResults || []).forEach((r, k) => candidates.push({ ...item(`${i}-${k}`, { score: 0, resIdx: i, chars }), id: r.tool_use_id, useIdx: i - 1 })));
+    return { rows, group, candidates, shape: shapeOf(rows, candidates, { group, keepFrom: rows.length }) };
+  }
+
+  it('the traces of the calls of one message come into one text block and the message of their results is gone: each call and each result takes its block', () => {
+    const { candidates, shape } = parallel(1, 25);
+    // Before: 25 calls in one message, 25 results in one. After the traces: one text block, no message of results.
+    expect(shape.shed(candidates, 'trace')).toBeCloseTo(msg(25) - msg(1) + msg(25), 6);
+    // After the drop: both messages are gone.
+    expect(shape.shed(candidates, 'drop')).toBeCloseTo(2 * msg(25), 6);
+    // A short copy keeps the call and the result in their blocks; nothing is decided: nothing is taken off.
+    expect(shape.shed(candidates, 'short')).toBeCloseTo(0, 6);
+    expect(shape.shed([], 'trace')).toBeCloseTo(0, 6);
+  });
+
+  it('a result decided again counts as decided last: a trace that is dropped later is a drop, and a trace taken back leaves nothing', () => {
+    const { candidates, shape } = parallel(1, 25);
+    const stepped = shape.tracker();
+    for (const c of candidates) stepped.set(c, 'trace');
+    expect(stepped.removed()).toBeCloseTo(shape.shed(candidates, 'trace'), 6);
+    for (const c of candidates) stepped.set(c, 'drop');
+    expect(stepped.removed()).toBeCloseTo(shape.shed(candidates, 'drop'), 6);
+    for (const c of candidates) stepped.set(c, 'full');
+    expect(stepped.removed()).toBeCloseTo(0, 6);
+  });
+
+  it('a message that keeps a block keeps its constant: ten results of twenty-five traced take ten blocks of the results and nine of the calls (the first trace is the text block)', () => {
+    const { candidates, shape } = parallel(1, 25);
+    expect(shape.shed(candidates.slice(0, 10), 'trace')).toBeCloseTo(msg(25) - msg(15) + (msg(25) - msg(16)), 6);
+  });
+
+  it('a result and its call in a message of their own take the call block (the text of the step stays) and the whole message of the result', () => {
+    const rows = [{ role: 'user', text: 'Task.', toolUses: [] }, { role: 'assistant', text: 'Step 1.', toolUses: [{ tool_use_id: 'a', tool: 'Bash', input: { command: 'cat a' } }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: 'out', isError: false }] }, { role: 'user', text: 'Last.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] }];
+    const group = [-1, 0, -1, -1, 1];
+    const candidates = [{ ...item('a', { resIdx: 2 }), useIdx: 1 }];
+    const shape = shapeOf(rows, candidates, { group, keepFrom: rows.length });
+    // The user row of the result and the user row after it are one message of the host: the result row's block comes off it, the message stays.
+    expect(shape.shed(candidates, 'trace')).toBeCloseTo(msg(2) - msg(2 - 1) + (msg(2) - msg(1)), 6);
+    expect(shape.shed(candidates, 'drop')).toBeCloseTo((msg(2) - msg(1)) + (msg(2) - msg(1)), 6);
+  });
+
+  it('rows from keepFrom on keep their handles and stay as they are', () => {
+    const { rows, group, candidates } = parallel(2, 5);
+    const shape = shapeOf(rows, candidates, { group, keepFrom: 4 });
+    // Only the first batch (rows 1 to 3) is rebuilt: the candidates of the second (rows 4 and 5) change nothing.
+    const [first, second] = [candidates.filter((c) => c.resIdx === 2), candidates.filter((c) => c.resIdx === 5)];
+    expect(shape.shed(second, 'drop')).toBeCloseTo(0, 6);
+    expect(shape.shed(first, 'drop')).toBeCloseTo(2 * msg(5), 6);
+  });
+
+  it('a row of thinking is dropped and the rows of one message are one: the overhead build takes off whatever is decided (`removed`) is apart from what the decisions take (`gain`)', () => {
+    const rows = [{ role: 'user', text: 'Task.', toolUses: [] }, { role: 'assistant', text: '', toolUses: [] }, { role: 'assistant', text: 'Look.', toolUses: [] },
+      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a', tool: 'Bash', input: { command: 'cat a' } }] }, { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: 'out', isError: false }] },
+      { role: 'user', text: 'Last.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] }];
+    const group = [-1, 0, 0, 0, -1, -1, 1];
+    const candidates = [{ ...item('a', { resIdx: 4 }), useIdx: 3 }];
+    const shape = shapeOf(rows, candidates, { group, keepFrom: rows.length });
+    const none = shape.tracker();
+    // The thinking block is gone: three blocks (thinking, text, call) become two (text, call).
+    expect(none.removed()).toBeCloseTo(msg(3) - msg(2), 6);
+    expect(none.gain()).toBeCloseTo(0, 6);
+    const traced = shape.tracker();
+    traced.set(candidates[0], 'trace');
+    expect(traced.gain()).toBeCloseTo(msg(2) - msg(1) + (msg(2) - msg(1)), 6);
+    expect(traced.removed() - traced.gain()).toBeCloseTo(none.removed(), 6);
+  });
+
+  it('the deliveries after a row are one block of the rebuilt row: the blocks of the rest are given back', () => {
+    const rows = [{ role: 'user', text: 'Task.', toolUses: [] }, { role: 'assistant', text: 'Step.', toolUses: [{ tool_use_id: 'a', tool: 'Bash', input: { command: 'cat a' } }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: 'out', isError: false }] }, { role: 'assistant', text: 'Next.', toolUses: [] }, { role: 'user', text: 'Last.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] }];
+    const group = [-1, 0, -1, 1, -1, 2];
+    const candidates = [{ ...item('a', { resIdx: 2 }), useIdx: 1 }];
+    const queued = new Map([[2, ['d1', 'd2', 'd3']]]);
+    const shape = shapeOf(rows, candidates, { group, keepFrom: rows.length, queued });
+    // The row of the result holds the result and three deliveries (4 blocks): rebuilt, it holds their one text and the result (2 blocks); traced, the one text (1).
+    expect(shape.tracker().removed()).toBeCloseTo(msg(4) - msg(2), 6);
+    expect(shape.shed(candidates, 'trace')).toBeCloseTo(msg(4) - msg(1) + (msg(2) - msg(1)), 6);
+  });
+
+  it('a notification row replaced by a trace is one block as before, and one removed leaves only its deliveries; a row the agent trim removes is gone', () => {
+    const rows = [{ role: 'user', text: 'Task.', toolUses: [] }, { role: 'assistant', text: 'Hello.', toolUses: [] }, { role: 'user', text: 'NOTE', toolUses: [] }, { role: 'assistant', text: 'Next.', toolUses: [] },
+      { role: 'user', text: 'IDLE', toolUses: [] }, { role: 'assistant', text: 'Next.', toolUses: [] }, { role: 'user', text: 'Last.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] }];
+    const group = [-1, 0, -1, 1, -1, 2, -1, 3];
+    const note = { ...item('note', { resIdx: 2 }), note: true, useIdx: -1 };
+    const shape = shapeOf(rows, [note], { group, keepFrom: rows.length, queued: new Map([[2, ['d1', 'd2']]]) });
+    // The row holds its text and two deliveries (3 blocks): a trace or a short copy carries them in one text, a drop leaves the deliveries in one text too.
+    expect(shape.shed([note], 'trace')).toBeCloseTo(msg(3) - msg(1), 6);
+    expect(shape.shed([note], 'drop')).toBeCloseTo(msg(3) - msg(1), 6);
+    const alone = shapeOf(rows, [{ ...note, resIdx: 2 }], { group, keepFrom: rows.length });
+    expect(alone.shed([note], 'trace')).toBeCloseTo(0, 6);
+    expect(alone.shed([note], 'drop')).toBeCloseTo(msg(1), 6);
+    const trimmed = shapeOf(rows, [], { rows: rows.map((m, i) => (i === 4 ? { ...m, trimDrop: true } : m)), group, keepFrom: rows.length });
+    expect(trimmed.tracker().removed()).toBeCloseTo(msg(1), 6);
+  });
+
+  it('the floor, the manual plan, the cascade and the gate count the overhead on top of the costs of the candidates, from the one shape', () => {
+    const { rows, candidates, shape } = parallel(1, 25);
+    const drop = shape.shed(candidates, 'drop');
+    const trace = shape.shed(candidates, 'trace');
+    expect(drop).toBeGreaterThan(2000);
+    expect(floorPrediction(candidates, 100000) - floorPrediction(candidates, 100000, undefined, shape)).toBeCloseTo(drop, 6);
+    expect(Math.abs(manualPlan(candidates, 100000).predicted - manualPlan(candidates, 100000, undefined, shape).predicted - trace)).toBeLessThan(1);
+    expect(cutInTokens(candidates, rows, undefined, 0, undefined, 0, shape).removable - cutInTokens(candidates, rows, undefined).removable).toBeCloseTo(trace, 6);
+    // The target is under what the traces reach with the costs alone (about 15 300 tokens of 60 000), above what they reach with the overhead (about 13 100).
+    const bare = cascade(candidates, 60000, 14000);
+    expect(bare.pass).toBe('drop');
+    expect(bare.predicted).toBeGreaterThan(14000);
+    const counted = cascade(candidates, 60000, 14000, undefined, shape);
+    expect(counted.pass).toBe('short_or_trace');
+    expect(counted.predicted).toBeLessThanOrEqual(14000);
+    expect(candidates.some((c) => c.keep === 'drop')).toBe(false);
   });
 });

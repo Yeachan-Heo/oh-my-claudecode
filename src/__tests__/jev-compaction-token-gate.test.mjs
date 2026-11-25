@@ -77,6 +77,21 @@ function session(n, { shot = () => true, chars = 50, said = (i) => `Step ${i}.` 
   return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
 }
 
+/**
+ * `batches` of `size` parallel calls: a row of the assistant with all the calls (no text), one row with all their results, then a last request with its answer. A result
+ * is `chars` characters.
+ */
+function parallelSession(batches, size, { chars = 300 } = {}) {
+  const m = [{ role: 'user', text: 'Task: read the notes.', toolUses: [] }];
+  for (let b = 0; b < batches; b++) {
+    const ids = Array.from({ length: size }, (_, k) => `t${b}-${k}`);
+    m.push({ role: 'assistant', text: '', toolUses: ids.map((id) => ({ tool_use_id: id, tool: 'Bash', input: { command: `cat ${id}.txt` } })) });
+    m.push({ role: 'user', text: '', toolUses: [], toolResults: ids.map((id) => ({ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(chars)}`, isError: false })) });
+  }
+  m.push({ role: 'user', text: 'Good, now sum up the results.', toolUses: [] }, { role: 'assistant', text: 'Summary: done.', toolUses: [] });
+  return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+}
+
 // The compaction through register(on): the record, the scoring requests and what the host gets back. `form: false` leaves the API form out (the host answers rows).
 async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after } = {}) {
   const fake = fakeDollar({ env, usage: usageOf(tokens), messages, api: form ? apiOf(messages, after) : undefined });
@@ -111,9 +126,11 @@ describe('a session of screenshots in the compaction (the character gate in toke
     // The characters say 0; the tokens say the share the images are of the list.
     expect(record.max_reduction_tokens).toBeGreaterThan(0.85);
     expect(record.max_reduction_tokens).toBeLessThan(1);
-    // The floor is the 190 000 tokens less every result with its call (an image 2348 tokens, a call about 13).
-    expect(record.floor_pred).toBeGreaterThan(190000 - 78 * 2400);
-    expect(record.floor_pred).toBeLessThan(190000 - 78 * 2348);
+    // The floor is the 190 000 tokens less every result with its call (an image 2348 tokens, a call about 13) and the overhead that goes with them in the list: the
+    // block of the call (45.4, its message keeps the text of the step) and the message of the result (one block, 45.4 less the message constant 40.5).
+    const overhead = 45.4 + (45.4 - 40.5);
+    expect(record.floor_pred).toBeGreaterThan(190000 - 78 * (2348 + 20 + overhead));
+    expect(record.floor_pred).toBeLessThan(190000 - 78 * (2348 + overhead));
     expect(record.tokens_after_pred).toBeLessThan(record.cascade_target_tokens);
     expect(requests).toHaveLength(0);
     const traces = out.messages.filter((m) => (m.text || '').includes('[compacted] Screenshot('));
@@ -151,12 +168,23 @@ describe('a session of screenshots in the compaction (the character gate in toke
   const note = (k) => `The coordinator sent a message while you were working:\nn${k}`;
   const deliveries = { t10: Array.from({ length: 4000 }, (_, k) => note(k)) };
 
+  // build carries the deliveries of a row as one block, so each delivery merged takes its block (RATE_BLOCK) off the list, which is more than its envelope costs.
+  // A block of 1 token leaves the envelopes the larger part of what the deliveries change, which is what these cases show.
+  const FEW_BLOCK_TOKENS = { ...TARGET_20, OMC_JEV_COMPACT_RATES: '{"RATE_BLOCK":1}' };
+  const manyDeliveries = { t10: Array.from({ length: 8000 }, (_, k) => note(k)) };
+
   it('the messages delivered during the tool turn are in the list and their envelopes come off what can be cut: many short ones leave the screenshots too small a share', async () => {
-    const plain = await compactRun(TARGET_20, shots());
+    const plain = await compactRun(FEW_BLOCK_TOKENS, shots());
     expect(plain.record.max_reduction_tokens).toBeGreaterThan(0.85);
-    const run = await compactRun(TARGET_20, shots(), { after: deliveries });
-    expect(run.record).toMatchObject({ result: 'fallback', reason: 'too_few_results', queued_other: 4000 });
+    const run = await compactRun(FEW_BLOCK_TOKENS, shots(), { after: manyDeliveries });
+    expect(run.record).toMatchObject({ result: 'fallback', reason: 'too_few_results', queued_other: 8000 });
     expect(run.record.max_reduction_tokens).toBeLessThan(0.3);
+  });
+
+  it('the blocks of the deliveries that build carries as one are part of what the compaction gives back: with the usual block overhead the same deliveries do not leave too small a share', async () => {
+    const run = await compactRun(TARGET_20, shots(), { after: deliveries });
+    expect(run.record).toMatchObject({ result: 'jev', queued_other: 4000 });
+    expect(run.record.max_reduction_tokens).toBeGreaterThan(0.3);
   });
 
   it('a session that passes the character gate is decided as before in token mode: the token measure is not read', async () => {
@@ -188,12 +216,58 @@ describe('the prediction counts the envelopes build adds to the rows it rebuilds
     expect(row).toBeTruthy();
     const wrapper = row.text.length - DELIVERED.length - row.text.slice(0, row.text.indexOf('<system-reminder')).length;
     expect(wrapper).toBeGreaterThan(20);
-    const extra = 0.363 * wrapper;
+    // The delivery stands in the message of the result: when the result goes, that message stays with the delivery's block, so the message constant (-40.5) is
+    // not taken off as it is with the whole message gone in the plain run.
+    const extra = 0.363 * wrapper - 40.5;
     for (const key of ['floor_pred', 'tokens_after_pred', 'tokens_after']) {
       const grew = run.record[key] - plain.record[key];
       expect(grew, key).toBeGreaterThan(extra - 2);
       expect(grew, key).toBeLessThan(extra + 8);
     }
+  });
+});
+
+describe('parallel calls: the predictions count the blocks and messages that build removes or merges', () => {
+  // 20 batches of 25 calls. 450 of the 500 results are before the tail (the last six messages), and each is 300 characters. The host's count is the estimate of the
+  // list itself, so the prediction can be held to the estimate of the list that is installed.
+  const ENV = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
+  const rows = parallelSession(20, 25);
+  const counted = Math.round(listTokens(apiOf(rows)));
+
+  it('the cascade stops at traces, and the floor and the tokens after are the estimate of the list that is installed', async () => {
+    const { record, out } = await compactRun(ENV, rows, { tokens: counted, trigger: 'manual' });
+    expect(record).toMatchObject({ result: 'jev', candidates: 450, cascade_pass: 'short_or_trace', cascade_dropped: 0, tokens_before: counted });
+    // A trace stands in the list with the line break before it, which the prediction leaves out: under a token for each.
+    const slack = 0.6 * record.traced + 2;
+    const installed = listTokens(apiOf(out.messages));
+    expect(Math.abs(record.tokens_after_pred - installed)).toBeLessThanOrEqual(slack);
+    expect(Math.abs(record.tokens_after - installed)).toBeLessThanOrEqual(slack);
+    // It stops at the first step that reaches the target: a result more kept whole would leave it above (a step is about 200 tokens).
+    expect(record.tokens_after_pred).toBeLessThanOrEqual(record.cascade_target_tokens);
+    expect(record.tokens_after_pred).toBeGreaterThan(record.cascade_target_tokens - 300);
+    expect(record.kept_full).toBeGreaterThan(0);
+    // The floor is the list without any of the 450 results and the calls of them: the tail from row 37 on and the first request.
+    expect(Math.abs(record.floor_pred - listTokens(apiOf([rows[0], ...rows.slice(37)])))).toBeLessThanOrEqual(2);
+    // The calls that stay are those of the results kept whole and the 50 of the tail.
+    expect(out.messages.reduce((n, m) => n + (m.toolUses || []).length, 0)).toBe(record.kept_full + 50);
+  });
+
+  it('the gate on characters counts them too: results that give back almost nothing in text, with 25 calls to a message, are worth a compaction', async () => {
+    // A result of 50 characters is about as long as its trace (61), so the characters (21 %) and the text of the tokens (about 6 of the 130 of each result with its
+    // call) are under the bound, and the 45.4 tokens of the block of each call and of each result are what the compaction gives back.
+    const small = parallelSession(20, 25, { chars: 36 });
+    const { record } = await compactRun(ENV, small, { tokens: Math.round(listTokens(apiOf(small))), trigger: 'manual' });
+    expect(record.max_reduction).toBeLessThan(0.3);
+    expect(record.max_reduction_tokens).toBeGreaterThan(0.3);
+    expect(record.result).toBe('jev');
+  });
+
+  it('the preflight of the own threshold counts them too: its floor veto lets a session through when the overhead of the blocks is what makes the cut', async () => {
+    // The 450 results of 50 characters with their calls are about 19 000 tokens of text, under the 30 % of 150 000 (45 000) that the veto asks; with the blocks of
+    // their calls and results (and the messages of the results) they give back about 39 000 more.
+    const small = parallelSession(20, 25, { chars: 36 });
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60', OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_OWN_THRESHOLD: 'active' };
+    expect((await ownRun(env, small, { tokens: 150000 })).asked).toHaveLength(1);
   });
 });
 
@@ -221,8 +295,9 @@ describe('a session of screenshots and the own threshold (OMC_JEV_COMPACT_AT_PER
   });
 
   it('the preflight takes the envelopes build adds off what can be cut: many short deliveries leave the screenshots too small a share to ask', async () => {
-    const after = { t10: Array.from({ length: 4000 }, (_, k) => `The coordinator sent a message while you were working:\nn${k}`) };
-    expect((await ownRun({ ...OWN, OMC_JEV_COMPACT_TARGET_PERCENT: '20' }, session(80), { after })).asked).toHaveLength(0);
+    // A block of 1 token: the deliveries become one block, and with the usual 45.4 tokens a block that would give back more than their envelopes cost.
+    const after = { t10: Array.from({ length: 8000 }, (_, k) => `The coordinator sent a message while you were working:\nn${k}`) };
+    expect((await ownRun({ ...OWN, OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_RATES: '{"RATE_BLOCK":1}' }, session(80), { after })).asked).toHaveLength(0);
   });
 
   it('with the cascade, a few screenshots in a session of text are still too little to ask', async () => {

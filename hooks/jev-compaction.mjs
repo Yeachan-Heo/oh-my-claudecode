@@ -132,7 +132,7 @@
  * else the model's window; the threshold is that window less HOST_BUFFER. With the switch on, the own
  * threshold reads the same window. The tokens before are the host's usage in the main loop, else an
  * estimate of the API form by class (listTokens, RATE_* constants); the tokens after are predicted from the
- * removed text by the same rates. OMC_JEV_COMPACT_MAX_WINDOW_TOKENS (positive integer, unset: no cap) caps the
+ * removed text and from the blocks and messages that go with it (shapeOf) by the same rates. OMC_JEV_COMPACT_MAX_WINDOW_TOKENS (positive integer, unset: no cap) caps the
  * kept target at that window divided by 1 + PREDICTION_SHORTFALL (tokenCeiling). The rates and PREDICTION_SHORTFALL come from one measurement of
  * one model on one host; OMC_JEV_COMPACT_RATES (a JSON object of rate name to number) overrides them one by one (ratesFrom). These figures go to the
  * compaction record only (target_tokens, target_tokens_capped, tokens_before, tokens_after, window, threshold,
@@ -2355,15 +2355,18 @@ function findCandidates(messages, privatePaths, notifications = false) {
 // not counted in the floor.
 const isForced = (c) => c.secret || !c.textOnly;
 const isPinned = (c, rates = DEFAULT_RATES) => !isForced(c) && (c.task || itemTokens(c, rates).full - itemTokens(c, rates).trace <= 0);
-export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES) {
+export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES, shape = undefined) {
   const costs = new Map(candidates.map((c) => [c, itemTokens(c, rates)]));
+  // The blocks and messages the decisions take off the list come on top of the candidates' costs (shapeOf).
+  const overhead = shape?.tracker();
   const saved = (c, keep) => {
     const t = costs.get(c);
     return keep === 'short' ? t.full - t.short : keep === 'trace' ? t.full - t.trace : keep === 'drop' ? t.full - t.drop : 0;
   };
   let removed = 0;
-  const setKeep = (c, keep) => { removed += saved(c, keep) - saved(c, c.keep ?? 'full'); c.keep = keep; };
-  const reached = () => tokensBefore - removed <= target;
+  const setKeep = (c, keep) => { removed += saved(c, keep) - saved(c, c.keep ?? 'full'); overhead?.set(c, keep); c.keep = keep; };
+  const left = () => tokensBefore - removed - (overhead?.removed() ?? 0);
+  const reached = () => left() <= target;
   for (const c of candidates) c.keep = 'full';
   let pass = 'forced';
   for (const c of candidates) if (isForced(c)) setKeep(c, 'trace');
@@ -2390,27 +2393,30 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES)
       setKeep(c, 'drop');
     }
   }
-  return { pass, target, predicted: Math.max(0, Math.round(tokensBefore - removed)) };
+  return { pass, target, predicted: Math.max(0, Math.round(left())) };
 }
 
 // The floor of the cascade: the predicted tokens when every removable result (every candidate but the pinned ones) is gone with its call.
-export function floorPrediction(candidates, tokensBefore, rates = DEFAULT_RATES) {
-  return tokensBefore - candidates.reduce((s, c) => s + (isPinned(c, rates) ? 0 : itemTokens(c, rates).full - itemTokens(c, rates).drop), 0);
+export function floorPrediction(candidates, tokensBefore, rates = DEFAULT_RATES, shape = undefined) {
+  const free = candidates.filter((c) => !isPinned(c, rates));
+  return tokensBefore - free.reduce((s, c) => s + itemTokens(c, rates).full - itemTokens(c, rates).drop, 0) - (shape ? shape.shed(free, 'drop') : 0);
 }
 
 // A manual compaction at or below the usual target: only the scores decide. Every forced result goes to a trace, and so does every free result
 // Jev scored under SHORT_COPY_MIN_SCORE; the rest stays whole. Returns the prediction after the removal (no pass beyond it).
-export function manualPlan(candidates, tokensBefore, rates = DEFAULT_RATES) {
+export function manualPlan(candidates, tokensBefore, rates = DEFAULT_RATES, shape = undefined) {
   let removed = 0;
+  const overhead = shape?.tracker();
   for (const c of candidates) {
     c.keep = 'full';
     if (isForced(c) || (!isPinned(c, rates) && c.score < SHORT_COPY_MIN_SCORE)) {
       c.keep = 'trace';
+      overhead?.set(c, 'trace');
       const t = itemTokens(c, rates);
       removed += t.full - t.trace;
     }
   }
-  return { pass: 'manual', predicted: Math.max(0, Math.round(tokensBefore - removed)) };
+  return { pass: 'manual', predicted: Math.max(0, Math.round(tokensBefore - removed - (overhead?.removed() ?? 0))) };
 }
 
 const removableChars = (candidates) => candidates.reduce((s, c) => s + Math.max(0, c.fullCost - c.traceCost - (c.envelope || 0)), 0);
@@ -2583,21 +2589,144 @@ function itemTokens(c, rates = DEFAULT_RATES) {
   return { full, short, trace: RATE_TRACE * c.trace.length, drop: 0 };
 }
 
+// The shape of the list. listTokens charges a block RATE_BLOCK and a message RATE_MESSAGE once (nothing for a message that holds no block), and the costs of a
+// candidate (itemTokens) leave both out; build changes them: a call or a result taken from a row takes its block, the traces of an assistant message come into
+// the one text block that holds its text, a message left with no block is gone, a row of thinking is dropped, a row removed by the agent trim is gone, and the
+// deliveries after a row become one block of its text. Parallel calls make this the larger part of what a cut gives back (a message of 25 calls costs 25 blocks,
+// its traces one). So the floor, the cascade, the manual plan, the gates of cutInTokens and the accounting take it from here, in one place, and predict the list
+// as listTokens counts the list build writes. The messages are the host's: an assistant message is the rows of one group (groupsOf), a user message a run of user
+// rows; the rows from `keepFrom` on keep their handles and stay as they are. `rows` are the rows build is given (a row of the trim that goes whole has `trimDrop`),
+// `queued` the deliveries after each row. Not counted: two user messages that a removed assistant message leaves side by side and the host joins (RATE_MESSAGE
+// less, at most 41 tokens each).
+const messageTokens = (blocks, rates) => (blocks > 0 ? Math.max(0, blocks * rates.RATE_BLOCK + RATE_MESSAGE) : 0);
+export function shapeOf(messages, candidates, { rows = messages, group, keepFrom, queued = new Map(), rates = DEFAULT_RATES }) {
+  const queuedAt = (i) => (queued.get(i) || []).length;
+  const callsAt = (m) => (m.toolUses || []).length;
+  const resultsAt = (m) => (m.toolResults || []).length;
+  // The blocks of a row as the host holds it: its text, its calls and results, the deliveries after it, and the block of thinking that an assistant row with neither text nor call stands for.
+  const blocksAt = (i) => {
+    const m = messages[i];
+    return (m.text ? 1 : 0) + callsAt(m) + resultsAt(m) + queuedAt(i) + (m.role === 'assistant' && !m.text && !callsAt(m) ? 1 : 0);
+  };
+  const noteAt = new Set(candidates.filter((c) => c.note).map((c) => c.resIdx));
+  const textRow = new Set(messages.flatMap((m, i) => (resultsAt(m) && m.toolResults.every(textOnlyResult) ? [i] : [])));
+  const assistants = new Map();
+  const runs = [];
+  const runOf = new Map();
+  let run;
+  messages.forEach((m, i) => {
+    if (m.role === 'assistant') {
+      run = undefined;
+      if (!assistants.has(group[i])) assistants.set(group[i], { before: 0, text: false, calls: 0, first: i });
+      const u = assistants.get(group[i]);
+      u.before += blocksAt(i);
+      u.text ||= Boolean(m.text);
+      u.calls += callsAt(m);
+      return;
+    }
+    if (!run) runs.push((run = { before: 0, rows: [] }));
+    run.before += blocksAt(i);
+    run.rows.push(i);
+    runOf.set(i, run);
+  });
+  const orig = [...assistants.values(), ...runs].reduce((s, u) => s + messageTokens(u.before, rates), 0);
+  // The blocks a user row holds once build has written it. A row of results is rebuilt when a candidate in it changes or all its results are text (a row that is
+  // neither keeps its handle), with its text and deliveries as one block; a notification row by its keep decision: a trace or a short copy is one block, a drop only the deliveries.
+  const rowNow = (i, st) => {
+    const m = messages[i];
+    if (i >= keepFrom) return blocksAt(i);
+    if (rows[i].trimDrop === true) return 0;
+    if (noteAt.has(i)) return st.keep === 'full' ? blocksAt(i) : st.keep === 'drop' ? Math.min(1, queuedAt(i)) : 1;
+    if (!resultsAt(m) || (st.changed === 0 && !textRow.has(i))) return blocksAt(i);
+    return (m.text || queuedAt(i) ? 1 : 0) + st.left;
+  };
+  // A tracker follows the keep decisions as they are made (set) and says what they take off the list's overhead in tokens: `removed` all of it, `gain` what the
+  // decisions add to what build does whatever is decided.
+  const tracker = () => {
+    const asst = new Map([...assistants].map(([g, u]) => [g, { ...u, traces: 0 }]));
+    const state = new Map();
+    for (const r of runs) for (const i of r.rows) if (noteAt.has(i) || resultsAt(messages[i])) state.set(i, { left: resultsAt(messages[i]), changed: 0, keep: 'full', now: 0 });
+    const nowOf = (s) => (s.first >= keepFrom ? s.before : (s.text || s.traces > 0 ? 1 : 0) + s.calls);
+    const runN = new Map();
+    let total = 0;
+    for (const s of asst.values()) total += messageTokens(nowOf(s), rates);
+    for (const r of runs) {
+      let n = 0;
+      for (const i of r.rows) {
+        const st = state.get(i);
+        const now = rowNow(i, st);
+        if (st) st.now = now;
+        n += now;
+      }
+      runN.set(r, n);
+      total += messageTokens(n, rates);
+    }
+    const base = orig - total;
+    const reread = (i) => {
+      const st = state.get(i);
+      const r = runOf.get(i);
+      const now = rowNow(i, st);
+      total -= messageTokens(runN.get(r), rates);
+      runN.set(r, runN.get(r) + now - st.now);
+      st.now = now;
+      total += messageTokens(runN.get(r), rates);
+    };
+    const gone = (keep) => (keep === 'trace' || keep === 'drop' ? 1 : 0);
+    const decided = new Map();
+    return {
+      set(c, keep) {
+        const was = decided.get(c) ?? 'full';
+        if (was === keep) return;
+        decided.set(c, keep);
+        if (c.note) {
+          const st = state.get(c.resIdx);
+          if (st) { st.keep = keep; reread(c.resIdx); }
+          return;
+        }
+        const s = asst.get(group[c.useIdx]);
+        if (s) {
+          total -= messageTokens(nowOf(s), rates);
+          s.calls -= gone(keep) - gone(was);
+          s.traces += Number(keep === 'trace') - Number(was === 'trace');
+          total += messageTokens(nowOf(s), rates);
+        }
+        const st = state.get(c.resIdx);
+        if (st) { st.left -= gone(keep) - gone(was); st.changed += Number(keep !== 'full') - Number(was !== 'full'); reread(c.resIdx); }
+      },
+      removed: () => orig - total,
+      gain: () => orig - total - base,
+    };
+  };
+  return {
+    tracker,
+    // The overhead taken off the list when each of `list` is decided as `keep` (a keep, or a function of the candidate), the rest as it stands.
+    shed(list, keep, gain = false) {
+      const t = tracker();
+      for (const c of list) t.set(c, typeof keep === 'function' ? keep(c) : keep);
+      return gain ? t.gain() : t.removed();
+    },
+  };
+}
+
 // What a compaction could cut, in tokens, for the two gates that decide on characters (the `too_few_results` gate of decide and the preflight of the own
 // threshold). The characters of a call's input and of a result's text leave out what costs tokens without being text, an image, so with the token cascade
 // (OMC_JEV_COMPACT_TARGET_PERCENT) a session that fails the gate on characters is measured here, and it passes when this reaches the same bound: `removable` is
-// what every result that is no pinned one gives back when it goes to its trace (as in the floor), less the tokens of `envelopes` (the characters build adds, of the
-// reminder class), and `listed` the tokens of the list it is a share of (the API form, else the rows with their images). `textTokens`: what the text stages take off
+// what every result that is no pinned one gives back when it goes to its trace (as in the floor) with the blocks and messages that go with it (`shape`, shapeOf),
+// less the tokens of `envelopes` (the characters build adds, of the reminder class), and `listed` the tokens of the list it is a share of (the API form, else the rows with their images). `textTokens`: what the text stages take off
 // that the cascade plans before Jev is asked (the agent trim and the reports moved to files), which the compaction counts as a cut of its own. Nothing that saves a
 // token, in a candidate or in a text stage: nothing is counted.
-export function cutInTokens(candidates, messages, api, envelopes = 0, rates = DEFAULT_RATES, textTokens = 0) {
+export function cutInTokens(candidates, messages, api, envelopes = 0, rates = DEFAULT_RATES, textTokens = 0, shape = undefined) {
   let removable = Math.max(0, textTokens);
+  const free = [];
   for (const c of candidates) {
     if (isPinned(c, rates)) continue;
+    free.push(c);
     const t = itemTokens(c, rates);
     removable += Math.max(0, t.full - t.trace);
   }
   if (removable <= 0) return { removable: 0, listed: 0 };
+  // The blocks and messages those results take with them (the shape of the list) are part of what they give back.
+  if (shape) removable += shape.shed(free, 'trace', true);
   return { removable: removable - rates.RATE_NOTE * envelopes, listed: listTokens(api ?? rowsAsApi(messages), rates) };
 }
 // The bound of the gates in tokens: MIN_REDUCTION of the list, and `minGain` tokens (the own threshold's OWN_MIN_GAIN of the window; none for decide).
@@ -2617,8 +2746,9 @@ function tokensBeforeOf(e, cfg, messages, api, detail, usage) {
 // the prefix plus the estimate of the API form) and after (the tokens before less what the keep decisions of allocate remove), the target and its
 // ceiling. Read-only: the cut itself stays with allocate.
 // The host reads (`known` when the caller made them already, with `win`, the window the cascade planned with, which then stands in the record) and the settings read stay within `deadline`, the compaction's own: once it has passed the
-// estimate of the API form and no window stand in the record. `installedStageTokens`: what the text stages that installed took off.
-async function tokenAccounting($, e, cfg, messages, api, candidates, installedStageTokens, deadline, known = {}) {
+// estimate of the API form and no window stand in the record. `installedStageTokens`: what the text stages that installed took off. `shape` (shapeOf): the blocks
+// and messages that the keep decisions take off the list, as in the cascade.
+async function tokenAccounting($, e, cfg, messages, api, candidates, installedStageTokens, deadline, known = {}, shape = undefined) {
   const detail = 'detail' in known ? known.detail : await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
   const usage = 'usage' in known ? known.usage : await hostValue($, () => $.session.usage(), deadline);
   const win = known.win ?? await resolveWindow($, cfg, detail, usage, deadline);
@@ -2630,6 +2760,7 @@ async function tokenAccounting($, e, cfg, messages, api, candidates, installedSt
     const t = itemTokens(c, cfg.rates);
     removed += t.full - (c.keep === 'drop' ? t.drop : c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
   }
+  if (shape) removed += shape.shed(candidates, (c) => c.keep ?? 'full');
   const target = Math.floor(cfg.target * tokensBefore);
   const ceiling = tokenCeiling(cfg.maxWindowTokens, cfg.rates);
   return {
@@ -4076,6 +4207,8 @@ async function decide($, e, cfg, record, started) {
   const stage = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline, takeAgentChecks(record.session_id, cfg));
   if (stage.stats) record.agent_trim = stage.stats;
   const { trimmed, trimTokens, opts: agentOpts, plan: planAgents } = stage;
+  // The blocks and messages that the keep decisions take off the list, which the predictions in tokens count with the costs of the candidates (shapeOf).
+  const shape = cfg.targetPercent !== undefined || cfg.tokenAccounting ? shapeOf(messages, candidates, { rows: trimmed, group, keepFrom, queued, rates: cfg.rates }) : undefined;
   const movedTokens = (st) => movedTokensOf(st, cfg.rates);
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) {
@@ -4084,7 +4217,7 @@ async function decide($, e, cfg, record, started) {
     // The text the agent stage takes off (the trim, and with the stage active the reports it moves to files) is part of the cut: a session of reports that no
     // result of its own would carry is for the plan below, which counts the stage, and not for the summary.
     const stageTokens = cfg.targetPercent === undefined ? 0 : await agentStageTokens(cfg, stage);
-    const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens);
+    const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens, shape);
     if (cut) record.max_reduction_tokens = cut.listed ? Math.round((cut.removable / cut.listed) * 1000) / 1000 : 0;
     if (!cut || !worthInTokens(cut)) return { fallback: 'too_few_results' };
   }
@@ -4130,7 +4263,7 @@ async function decide($, e, cfg, record, started) {
         agentsFloor = Math.max(0, movedTokens(planned.stats));
         record.floor_agents_tokens = Math.round(agentsFloor);
       }
-      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor + envelopeTokens, cfg.rates);
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor + envelopeTokens, cfg.rates, shape);
       record.floor_pred = Math.max(0, Math.round(floor));
       if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
@@ -4281,9 +4414,9 @@ async function decide($, e, cfg, record, started) {
     const base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens;
     let plan;
     if (manual) {
-      plan = manualPlan(candidates, base, cfg.rates);
-      if (plan.predicted > target) plan = cascade(candidates, base, target, cfg.rates);
-    } else plan = cascade(candidates, base, target, cfg.rates);
+      plan = manualPlan(candidates, base, cfg.rates, shape);
+      if (plan.predicted > target) plan = cascade(candidates, base, target, cfg.rates, shape);
+    } else plan = cascade(candidates, base, target, cfg.rates, shape);
     Object.assign(record, { cut: plan.pass === 'manual' ? 'manual_scores' : 'cascade', cascade_pass: plan.pass, cascade_target_tokens: target, cascade_predicted_tokens: plan.predicted, tokens_after_pred: plan.predicted, cascade_tokens_source: tokens.source, cascade_dropped: candidates.filter((c) => c.keep === 'drop').length });
     // Host handoff: a manual or automatic compaction that removes less than HOST_MIN_CUT of the tokens is left to the host's summary (the record
     // keeps the numbers). The module's own requests and other mods' plugin compactions are not handled here.
@@ -4336,7 +4469,7 @@ async function decide($, e, cfg, record, started) {
   });
   // What the installed text stages took off, with or without the cascade: a stage that moved nothing (shadow, writes that failed, or a fallback) counts for nothing.
   const installedTokens = trimTokens + agentTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0);
-  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known));
+  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known, shape));
   if (agentMoved.size) record.agent_messages.installed = true;
   if (pastesInstalled) pasted.stats.installed = true;
   if (repliesInstalled) record.replies.installed = true;
@@ -4462,12 +4595,18 @@ async function ownThreshold($, e, next) {
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
+    // The blocks and messages that the cuts take off the list count with the costs of the candidates, as in decide (shapeOf): from the rows first, and from the API form once it is read.
+    const shapeIn = (apiForm, rows) => {
+      const group = groupsOf(messages, apiForm);
+      return shapeOf(messages, candidates, { group, keepFrom: openLoopStart(messages, group), queued: rows, rates: cfg.rates });
+    };
+    let shape = cfg.targetPercent === undefined ? undefined : shapeIn(undefined, new Map());
     // Only with the token cascade, which is where decide answers a request with that skip: without it nothing can follow, and the character gate is the only veto.
     // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores. The floor counts
     // results only, so with a stage on that takes text off as well (agent trim, long replies, pasted text) it is no proof: decide holds the request to the same
     // bound with the text of those stages in its plan, and answers it with a skip.
     const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active';
-    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
+    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates, shape) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     let removable = removableChars(candidates);
     let envelopes = 0;
     let api;
@@ -4476,7 +4615,7 @@ async function ownThreshold($, e, next) {
     const stageCounts = cfg.targetPercent !== undefined && cfg.agentTrim;
     // With the token cascade a session that fails the characters is measured in tokens (cutInTokens): an image has no characters and costs thousands of tokens.
     const tooSmall = () => (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window)
-      && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens), OWN_MIN_GAIN * window));
+      && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens, shape), OWN_MIN_GAIN * window));
     // The delivered messages can only make this worse (they add to `before`, their envelopes come off
     // `removable`), so a transcript that fails here needs no API read, which may hold the turn for HOST_MS. With the agent stage on it is read all the same: the
     // stage is planned from the API form and may carry the cut that the results do not.
@@ -4494,6 +4633,7 @@ async function ownThreshold($, e, next) {
       envelopes = envelopeChars(messages, delivered.rows, candidates);
       removable = removableChars(candidates) - envelopes;
     }
+    if (shape) shape = shapeIn(api, delivered ? delivered.rows : new Map());
     // Only a session that the results alone do not carry needs the stage's scans: the compaction it asks for makes them otherwise.
     if (stageCounts && api && tooSmall()) {
       // The rows that keep their handles, as decide finds them; without the API form that holds their calls there is no stage.
