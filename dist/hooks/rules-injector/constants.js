@@ -5,11 +5,15 @@
  *
  * Ported from oh-my-opencode's rules-injector hook.
  */
-import { join } from 'path';
-import { homedir } from 'os';
-/** Storage directory for rules injector state */
-export const OMC_STORAGE_DIR = join(homedir(), '.omc');
-export const RULES_INJECTOR_STORAGE = join(OMC_STORAGE_DIR, 'rules-injector');
+import { getGlobalOmcStatePath } from '../../utils/paths.js';
+/** Get storage directory path for rules injector state */
+export function getRulesInjectorStoragePath() {
+    return getGlobalOmcStatePath('rules-injector');
+}
+/**
+ * @deprecated Use getRulesInjectorStoragePath() instead
+ */
+export const RULES_INJECTOR_STORAGE = getRulesInjectorStoragePath();
 /** Project marker files that indicate a project root */
 export const PROJECT_MARKERS = [
     '.git',

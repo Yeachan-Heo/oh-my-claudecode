@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getGlobalOmcStatePath, getGlobalOmcStateCandidates, getLegacyOmcPath } from '../../utils/paths.js';
 import { atomicWriteJson } from '../../lib/atomic-write.js';
 const DEFAULT_CONFIG = {
     enabled: true,
@@ -137,7 +137,7 @@ export function getInvocationStats(state) {
  * Save invocation history to disk for analytics
  */
 export function saveInvocationHistory(state) {
-    const historyDir = path.join(os.homedir(), '.omc', 'analytics', 'invocations');
+    const historyDir = getGlobalOmcStatePath('analytics', 'invocations');
     const historyFile = path.join(historyDir, `${state.sessionId}.json`);
     // Use atomic write to prevent corruption from concurrent sessions (Bug #11 fix)
     atomicWriteJson(historyFile, {
@@ -150,23 +150,37 @@ export function saveInvocationHistory(state) {
     });
 }
 /**
+ * Directories that may hold invocation history, newest location first: the state root
+ * (OMC_HOME or XDG), its legacy ~/.omc/state form, and ~/.omc/analytics/invocations,
+ * where releases before #5141 wrote it.
+ */
+function invocationHistoryDirs() {
+    return [...new Set([
+            ...getGlobalOmcStateCandidates('analytics', 'invocations'),
+            getLegacyOmcPath('analytics', 'invocations'),
+        ])];
+}
+/**
  * Load invocation history from disk
  */
 export function loadInvocationHistory(sessionId) {
-    const historyFile = path.join(os.homedir(), '.omc', 'analytics', 'invocations', `${sessionId}.json`);
+    const historyFileCandidates = invocationHistoryDirs().map((dir) => path.join(dir, `${sessionId}.json`));
     try {
-        if (!fs.existsSync(historyFile)) {
-            return null;
+        // Try each candidate path, taking the first one that exists
+        for (const historyFile of historyFileCandidates) {
+            if (fs.existsSync(historyFile)) {
+                const data = JSON.parse(fs.readFileSync(historyFile, 'utf-8'));
+                return {
+                    sessionId: data.sessionId,
+                    config: data.config,
+                    invocations: data.invocations,
+                    lastInvokeTime: data.invocations.length > 0
+                        ? Math.max(...data.invocations.map((inv) => inv.timestamp))
+                        : 0,
+                };
+            }
         }
-        const data = JSON.parse(fs.readFileSync(historyFile, 'utf-8'));
-        return {
-            sessionId: data.sessionId,
-            config: data.config,
-            invocations: data.invocations,
-            lastInvokeTime: data.invocations.length > 0
-                ? Math.max(...data.invocations.map((inv) => inv.timestamp))
-                : 0,
-        };
+        return null;
     }
     catch (error) {
         console.error('[auto-invoke] Failed to load invocation history:', error);
@@ -177,9 +191,19 @@ export function loadInvocationHistory(sessionId) {
  * Get aggregated invocation analytics across all sessions
  */
 export function getAggregatedStats() {
-    const historyDir = path.join(os.homedir(), '.omc', 'analytics', 'invocations');
     try {
-        if (!fs.existsSync(historyDir)) {
+        // Read every history directory; a session file in a newer location wins over the same
+        // session in an older one, so history written before the move is still counted.
+        const sessionFiles = new Map();
+        for (const dir of invocationHistoryDirs()) {
+            if (!fs.existsSync(dir))
+                continue;
+            for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.json'))) {
+                if (!sessionFiles.has(file))
+                    sessionFiles.set(file, path.join(dir, file));
+            }
+        }
+        if (sessionFiles.size === 0) {
             return {
                 totalSessions: 0,
                 totalInvocations: 0,
@@ -187,11 +211,11 @@ export function getAggregatedStats() {
                 topSkills: [],
             };
         }
-        const files = fs.readdirSync(historyDir).filter(f => f.endsWith('.json'));
+        const files = [...sessionFiles.values()];
         const allInvocations = [];
         const skillStats = new Map();
         for (const file of files) {
-            const data = JSON.parse(fs.readFileSync(path.join(historyDir, file), 'utf-8'));
+            const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
             allInvocations.push(...data.invocations);
             for (const inv of data.invocations) {
                 const existing = skillStats.get(inv.skillId) || { name: inv.skillName, total: 0, successful: 0 };

@@ -7,12 +7,12 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, } from 'node:fs';
 import { join } from 'node:path';
-import { README_INJECTOR_STORAGE } from './constants.js';
+import { getReadmeInjectorStoragePath } from './constants.js';
 /**
  * Get storage file path for a session.
  */
 function getStoragePath(sessionID) {
-    return join(README_INJECTOR_STORAGE, `${sessionID}.json`);
+    return join(getReadmeInjectorStoragePath(), `${sessionID}.json`);
 }
 /**
  * Load set of injected directory paths for a session.
@@ -34,8 +34,9 @@ export function loadInjectedPaths(sessionID) {
  * Save set of injected directory paths for a session.
  */
 export function saveInjectedPaths(sessionID, paths) {
-    if (!existsSync(README_INJECTOR_STORAGE)) {
-        mkdirSync(README_INJECTOR_STORAGE, { recursive: true });
+    const storagePath = getReadmeInjectorStoragePath();
+    if (!existsSync(storagePath)) {
+        mkdirSync(storagePath, { recursive: true });
     }
     const data = {
         sessionID,

@@ -37,7 +37,7 @@ export {
 createThinkModeHook, detectThinkKeyword, detectUltrathinkKeyword, extractPromptText as extractThinkPromptText, removeCodeBlocks as removeThinkCodeBlocks, getHighVariant, isAlreadyHighVariant, getThinkingConfig, getClaudeThinkingConfig, clearThinkModeState, getThinkModeState, isThinkModeActive, processThinkMode, shouldActivateThinkMode, shouldActivateUltrathink, THINKING_CONFIGS } from './think-mode/index.js';
 export { 
 // Rules Injector
-createRulesInjectorHook, getRulesForPath, findProjectRoot, findRuleFiles, parseRuleFrontmatter, shouldApplyRule, createContentHash, isDuplicateByRealPath, isDuplicateByContentHash, loadInjectedRules, saveInjectedRules, clearInjectedRules, RULES_INJECTOR_STORAGE, PROJECT_MARKERS, PROJECT_RULE_SUBDIRS, PROJECT_RULE_FILES, RULE_EXTENSIONS, TRACKED_TOOLS } from './rules-injector/index.js';
+createRulesInjectorHook, getRulesForPath, findProjectRoot, findRuleFiles, parseRuleFrontmatter, shouldApplyRule, createContentHash, isDuplicateByRealPath, isDuplicateByContentHash, loadInjectedRules, saveInjectedRules, clearInjectedRules, getRulesInjectorStoragePath, RULES_INJECTOR_STORAGE, PROJECT_MARKERS, PROJECT_RULE_SUBDIRS, PROJECT_RULE_FILES, RULE_EXTENSIONS, TRACKED_TOOLS } from './rules-injector/index.js';
 export { 
 // OMC Orchestrator
 createOmcOrchestratorHook, isAllowedPath, isWriteEditTool, getGitDiffStats, formatFileChanges, buildVerificationReminder, buildOrchestratorReminder, buildBoulderContinuation, checkBoulderContinuation, processOrchestratorPreTool, processOrchestratorPostTool, HOOK_NAME as OMC_ORCHESTRATOR_HOOK_NAME, ALLOWED_PATH_PREFIX, WRITE_EDIT_TOOLS, DIRECT_WORK_REMINDER, ORCHESTRATOR_DELEGATION_REQUIRED, BOULDER_CONTINUATION_PROMPT, VERIFICATION_REMINDER, SINGLE_TASK_DIRECTIVE } from './omc-orchestrator/index.js';
@@ -68,7 +68,7 @@ export {
 createBackgroundNotificationHook, processBackgroundNotification, processBackgroundNotificationHook, checkBackgroundNotifications, handleBackgroundEvent, HOOK_NAME as BACKGROUND_NOTIFICATION_HOOK_NAME } from './background-notification/index.js';
 export { 
 // Directory README / AGENTS.md Injector
-createDirectoryReadmeInjectorHook, getReadmesForPath, loadInjectedPaths, saveInjectedPaths, clearInjectedPaths, README_INJECTOR_STORAGE, README_FILENAME, AGENTS_FILENAME, CONTEXT_FILENAMES, TRACKED_TOOLS as README_TRACKED_TOOLS } from './directory-readme-injector/index.js';
+createDirectoryReadmeInjectorHook, getReadmesForPath, loadInjectedPaths, saveInjectedPaths, clearInjectedPaths, getReadmeInjectorStoragePath, README_INJECTOR_STORAGE, README_FILENAME, AGENTS_FILENAME, CONTEXT_FILENAMES, TRACKED_TOOLS as README_TRACKED_TOOLS } from './directory-readme-injector/index.js';
 export { 
 // Empty Message Sanitizer
 createEmptyMessageSanitizerHook, sanitizeMessages, sanitizeMessage, hasTextContent, isToolPart, hasValidContent, PLACEHOLDER_TEXT, TOOL_PART_TYPES, HOOK_NAME as EMPTY_MESSAGE_SANITIZER_HOOK_NAME, DEBUG_PREFIX as EMPTY_MESSAGE_SANITIZER_DEBUG_PREFIX, ERROR_PATTERNS as EMPTY_MESSAGE_SANITIZER_ERROR_PATTERNS } from './empty-message-sanitizer/index.js';

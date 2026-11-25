@@ -3,7 +3,15 @@
  */
 /** User-level skills directory (read by skill-injector.mjs hook) */
 export declare const USER_SKILLS_DIR: string;
-/** Global skills directory (new preferred location: ~/.omc/skills) */
+/** Get global skills directory path (writes go to this, reads check candidates) */
+export declare function getGlobalSkillsDirPath(): string;
+/** Get candidate paths for reading global skills (supports legacy ~/.omc/skills) */
+export declare function getGlobalSkillsDirCandidates(): string[];
+/**
+ * Legacy export for backward compatibility in tests.
+ * Use getGlobalSkillsDirPath() for writes and getGlobalSkillsDirCandidates() for reads.
+ * @deprecated Use getGlobalSkillsDirPath() or getGlobalSkillsDirCandidates() instead
+ */
 export declare const GLOBAL_SKILLS_DIR: string;
 /** Project-level skills subdirectory */
 export declare const PROJECT_SKILLS_SUBDIR: ".omc/skills";

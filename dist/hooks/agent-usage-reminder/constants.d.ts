@@ -5,9 +5,8 @@
  *
  * Ported from oh-my-opencode's agent-usage-reminder hook.
  */
-/** Storage directory for agent usage reminder state */
-export declare const OMC_STORAGE_DIR: string;
-export declare const AGENT_USAGE_REMINDER_STORAGE: string;
+/** Get storage directory path for agent usage reminder state */
+export declare function getAgentUsageReminderStoragePath(): string;
 /** All tool names normalized to lowercase for case-insensitive matching */
 export declare const TARGET_TOOLS: Set<string>;
 /** Agent tools that indicate agent usage */

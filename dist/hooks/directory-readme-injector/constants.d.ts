@@ -5,8 +5,11 @@
  *
  * Ported from oh-my-opencode's directory-readme-injector hook.
  */
-/** Storage directory for directory-readme-injector state */
-export declare const OMC_STORAGE_DIR: string;
+/** Get storage directory path for directory-readme-injector state */
+export declare function getReadmeInjectorStoragePath(): string;
+/**
+ * @deprecated Use getReadmeInjectorStoragePath() instead
+ */
 export declare const README_INJECTOR_STORAGE: string;
 /** README filename to search for */
 export declare const README_FILENAME = "README.md";

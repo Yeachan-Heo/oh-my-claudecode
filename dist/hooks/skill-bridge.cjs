@@ -34,9 +34,9 @@ __export(bridge_exports, {
   parseSkillFile: () => parseSkillFile
 });
 module.exports = __toCommonJS(bridge_exports);
-var import_fs2 = require("fs");
-var import_path3 = require("path");
-var import_os3 = require("os");
+var import_fs5 = require("fs");
+var import_path6 = require("path");
+var import_os4 = require("os");
 
 // src/lib/worktree-paths.ts
 var import_crypto = require("crypto");
@@ -1186,16 +1186,84 @@ function expandTriggers(triggersLower) {
   return Array.from(expanded);
 }
 
+// src/utils/paths.ts
+var import_path5 = require("path");
+var import_fs4 = require("fs");
+var import_os3 = require("os");
+
+// src/utils/cache-occupancy.ts
+var import_fs2 = require("fs");
+var import_promises = require("fs/promises");
+var import_crypto2 = require("crypto");
+var import_path3 = require("path");
+
+// src/utils/plugin-cache-validation.ts
+var import_path4 = require("path");
+var import_fs3 = require("fs");
+var PLUGIN_ROOT_REQUIREMENTS = [(0, import_path4.join)("hooks", "hooks.json"), (0, import_path4.join)("scripts", "run.cjs"), "scripts"];
+
+// src/utils/paths.ts
+function getConfigDir() {
+  if (process.platform === "win32") {
+    return process.env.APPDATA || (0, import_path5.join)((0, import_os3.homedir)(), "AppData", "Roaming");
+  }
+  return process.env.XDG_CONFIG_HOME || (0, import_path5.join)((0, import_os3.homedir)(), ".config");
+}
+function prefersXdgOmcDirs() {
+  return process.platform !== "win32" && process.platform !== "darwin";
+}
+function getUserHomeDir() {
+  if (process.platform === "win32") {
+    return process.env.USERPROFILE || process.env.HOME || (0, import_os3.homedir)();
+  }
+  return process.env.HOME || (0, import_os3.homedir)();
+}
+function getLegacyOmcDir() {
+  return (0, import_path5.join)(getUserHomeDir(), ".omc");
+}
+function getGlobalOmcConfigRoot() {
+  const explicitRoot = process.env.OMC_HOME?.trim();
+  if (explicitRoot) {
+    return explicitRoot;
+  }
+  if (prefersXdgOmcDirs()) {
+    return (0, import_path5.join)(getConfigDir(), "omc");
+  }
+  return getLegacyOmcDir();
+}
+function getGlobalOmcConfigPath(...segments) {
+  return (0, import_path5.join)(getGlobalOmcConfigRoot(), ...segments);
+}
+function getLegacyOmcPath(...segments) {
+  return (0, import_path5.join)(getLegacyOmcDir(), ...segments);
+}
+function dedupePaths(paths) {
+  return [...new Set(paths)];
+}
+function getGlobalOmcConfigCandidates(...segments) {
+  if (process.env.OMC_HOME?.trim()) {
+    return [getGlobalOmcConfigPath(...segments)];
+  }
+  return dedupePaths([
+    getGlobalOmcConfigPath(...segments),
+    getLegacyOmcPath(...segments)
+  ]);
+}
+var OCCUPIED_CODES = new Set(
+  process.platform === "win32" ? ["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR", "EPERM", "EACCES"] : ["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR"]
+);
+var STALE_THRESHOLD_MS = 10 * 60 * 1e3;
+
 // src/hooks/learner/bridge.ts
-var USER_SKILLS_DIR = (0, import_path3.join)(
-  (0, import_os3.homedir)(),
+var USER_SKILLS_DIR = (0, import_path6.join)(
+  (0, import_os4.homedir)(),
   ".claude",
   "skills",
   "omc-learned"
 );
-var GLOBAL_SKILLS_DIR = (0, import_path3.join)((0, import_os3.homedir)(), ".omc", "skills");
+var GLOBAL_SKILLS_DIR = getGlobalOmcConfigPath("skills");
 var PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;
-var PROJECT_AGENT_SKILLS_SUBDIR = (0, import_path3.join)(".agents", "skills");
+var PROJECT_AGENT_SKILLS_SUBDIR = (0, import_path6.join)(".agents", "skills");
 var SKILL_EXTENSION = ".md";
 var SESSION_TTL_MS = 60 * 60 * 1e3;
 var MAX_RECURSION_DEPTH = 10;
@@ -1235,12 +1303,12 @@ function getSkillMetadataCache(projectRoot) {
   const skills = [];
   for (const candidate of candidates) {
     try {
-      const content = (0, import_fs2.readFileSync)(candidate.path, "utf-8");
+      const content = (0, import_fs5.readFileSync)(candidate.path, "utf-8");
       const parsed = parseSkillFile(content);
       if (!parsed) continue;
       const triggers = (parsed.metadata.triggers ?? []).map((trigger) => trigger.trim()).filter(Boolean);
       if (triggers.length === 0) continue;
-      const name = parsed.metadata.name || (0, import_path3.basename)(candidate.path, SKILL_EXTENSION);
+      const name = parsed.metadata.name || (0, import_path6.basename)(candidate.path, SKILL_EXTENSION);
       skills.push({
         path: candidate.path,
         name,
@@ -1273,13 +1341,13 @@ function summarizeSkillContent(content) {
   return (firstUsefulLine || content.replace(/\s+/g, " ").trim()).slice(0, 240);
 }
 function getStateFilePath(projectRoot) {
-  return (0, import_path3.join)(getOmcRoot(projectRoot), "state", "skill-sessions.json");
+  return (0, import_path6.join)(getOmcRoot(projectRoot), "state", "skill-sessions.json");
 }
 function readSessionState(projectRoot) {
   const stateFile = getStateFilePath(projectRoot);
   try {
-    if ((0, import_fs2.existsSync)(stateFile)) {
-      const content = (0, import_fs2.readFileSync)(stateFile, "utf-8");
+    if ((0, import_fs5.existsSync)(stateFile)) {
+      const content = (0, import_fs5.readFileSync)(stateFile, "utf-8");
       return JSON.parse(content);
     }
   } catch {
@@ -1289,8 +1357,8 @@ function readSessionState(projectRoot) {
 function writeSessionState(projectRoot, state) {
   const stateFile = getStateFilePath(projectRoot);
   try {
-    (0, import_fs2.mkdirSync)((0, import_path3.dirname)(stateFile), { recursive: true });
-    (0, import_fs2.writeFileSync)(stateFile, JSON.stringify(state, null, 2), "utf-8");
+    (0, import_fs5.mkdirSync)((0, import_path6.dirname)(stateFile), { recursive: true });
+    (0, import_fs5.writeFileSync)(stateFile, JSON.stringify(state, null, 2), "utf-8");
   } catch {
   }
 }
@@ -1319,12 +1387,12 @@ function markSkillsInjected(sessionId, paths, projectRoot) {
   writeSessionState(projectRoot, state);
 }
 function findSkillFilesRecursive(dir, results, depth = 0) {
-  if (!(0, import_fs2.existsSync)(dir)) return;
+  if (!(0, import_fs5.existsSync)(dir)) return;
   if (depth > MAX_RECURSION_DEPTH) return;
   try {
-    const entries = (0, import_fs2.readdirSync)(dir, { withFileTypes: true });
+    const entries = (0, import_fs5.readdirSync)(dir, { withFileTypes: true });
     for (const entry of entries) {
-      const fullPath = (0, import_path3.join)(dir, entry.name);
+      const fullPath = (0, import_path6.join)(dir, entry.name);
       if (entry.isDirectory()) {
         findSkillFilesRecursive(fullPath, results, depth + 1);
       } else if (entry.isFile() && entry.name.endsWith(SKILL_EXTENSION)) {
@@ -1336,7 +1404,7 @@ function findSkillFilesRecursive(dir, results, depth = 0) {
 }
 function safeRealpathSync(filePath) {
   try {
-    return (0, import_fs2.realpathSync)(filePath);
+    return (0, import_fs5.realpathSync)(filePath);
   } catch {
     return filePath;
   }
@@ -1352,8 +1420,8 @@ function findSkillFiles(projectRoot, options) {
   const scope = options?.scope ?? "all";
   if (scope === "project" || scope === "all") {
     const projectSkillDirs = [
-      (0, import_path3.join)(projectRoot, PROJECT_SKILLS_SUBDIR),
-      (0, import_path3.join)(projectRoot, PROJECT_AGENT_SKILLS_SUBDIR)
+      (0, import_path6.join)(projectRoot, PROJECT_SKILLS_SUBDIR),
+      (0, import_path6.join)(projectRoot, PROJECT_AGENT_SKILLS_SUBDIR)
     ];
     for (const projectSkillsDir of projectSkillDirs) {
       const projectFiles = [];
@@ -1373,7 +1441,8 @@ function findSkillFiles(projectRoot, options) {
     }
   }
   if (scope === "user" || scope === "all") {
-    const userDirs = [GLOBAL_SKILLS_DIR, USER_SKILLS_DIR];
+    const globalSkillsCandidates = getGlobalOmcConfigCandidates("skills");
+    const userDirs = [...globalSkillsCandidates, USER_SKILLS_DIR];
     for (const userDir of userDirs) {
       const userFiles = [];
       findSkillFilesRecursive(userDir, userFiles);

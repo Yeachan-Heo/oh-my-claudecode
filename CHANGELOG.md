@@ -1,3 +1,19 @@
+# oh-my-claudecode v5.8.10: Maintenance release with hook storage and documentation improvements
+
+## Release Notes
+
+v5.8.10 is a maintenance patch that improves hook storage resolution and documentation clarity. Key improvements include proper OMC_HOME/XDG path handling in hook storage and removal of stale Windows compatibility notes.
+
+### Features
+
+- **docs(ask): remove stale Windows guard note for antigravity** (#5146) — clarifies Windows compatibility expectations
+
+### Bug Fixes
+
+- **fix(hooks): resolve hook storage via OMC_HOME/XDG path helpers** (#5141) (#5144) — ensures hook storage respects OMC_HOME and XDG environment paths
+
+---
+
 # oh-my-claudecode v5.8.9: Maintenance release with provider parsing, trust dialog, and graph improvements
 
 ## Release Notes
