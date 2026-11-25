@@ -431,7 +431,7 @@ def trimmed_values(values, operator, pattern):
 def parameter_variants(piece, assigned):
     """The piece filled in every way its parameters can be: `$NAME` and `${NAME}` with each value that the command assigns to NAME and the
     one that the guard has (a name that has none stays as written); `${NAME:-word}`, `-`, `:=` and `=` with those values and with the word;
-    `${NAME:+word}` and `+` with the word and with nothing. Which way the shell takes is not decided. A word that holds a parameter is filled
+    `${NAME:+word}` and `+` with the word and with nothing; `${NAME%pattern}` and the other trimming forms with the cuts that each filled-in pattern makes. Which way the shell takes is not decided. A word that holds a parameter is filled
     in innermost first, pass after pass until a pass changes nothing (a name with no value and no word stays as written, so that is where it
     ends). A chain of parameters ends within the `$` of the word plus the names that the command assigns; a pass beyond that is a cycle
     (`A=$B B=$A`) or an expansion that does not end. More than MAX_COMMAND_PROGRAMS variants, a text longer than MAX_COMMAND_CHARS or no
@@ -448,7 +448,8 @@ def parameter_variants(piece, assigned):
                 if operator in ('+', ':+'):
                     options.append([word, ''])
                 elif operator in ('%', '%%', '#', '##'):
-                    options.append(trimmed_values(values, operator, word) or [m.group(0)])
+                    cuts = [cut for pattern in (parameter_variants(word, assigned) if '$' in word else [word]) for cut in trimmed_values(values, operator, pattern)]   # the pattern is filled in as any word is, then cuts
+                    options.append(list(dict.fromkeys(cuts)) or [m.group(0)])
                 else:   # ${NAME?word} gives the value or ends the command: nothing is left to run, so the text stays as written
                     options.append((values + [word] if operator in ('-', ':-', '=', ':=') else values) or [m.group(0)])
             for choice in itertools.islice(itertools.product(*options), MAX_COMMAND_PROGRAMS + 1):
