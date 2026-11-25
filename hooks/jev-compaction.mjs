@@ -1397,11 +1397,16 @@ function backgroundOutputFiles(messages, privatePaths) {
   // The same by the id of the task, which a notification names in <task-id> (a notification need not name a file): the ids of the calls on a secret path (`secret`), of the
   // prose calls naming one (`held`) and of all (`known`).
   const ids = { secret: new Set(), held: new Set(), known: new Set() };
+  // A call that reads the output file of an earlier one takes its secrecy (findCandidates holds its result the same way), and so do its own task and output file: the
+  // chain of tasks is as secret as its first link. The indexes of the files so far (each file indexed once as it comes), read in the order of the calls.
+  const secretFiles = fileIndex(out.secret);
+  const heldFiles = fileIndex(out.held);
   for (const m of messages) {
     if (m.role !== 'assistant') continue;
     for (const u of m.toolUses || []) {
       if (u.input?.run_in_background !== true || !results.has(u.tool_use_id)) continue;
-      const list = touchesSecretPath(u.tool, u.input, privatePaths) ? out.secret : PROSE_TOOLS.has(u.tool) && anySecretPath(u.input, privatePaths) ? out.held : undefined;
+      const list = touchesSecretPath(u.tool, u.input, privatePaths) || readsFile(u.input, secretFiles) ? out.secret
+        : (PROSE_TOOLS.has(u.tool) && anySecretPath(u.input, privatePaths)) || readsFile(u.input, heldFiles) ? out.held : undefined;
       const head = results.get(u.tool_use_id).slice(0, OUTPUT_SCAN_CHARS);
       const named = [...head.matchAll(TASK_ID_IN_RESULT)].map((m) => m[1]);
       for (const id of named) { ids.known.add(id); (list === out.secret ? ids.secret : list === out.held ? ids.held : ids.known).add(id); }
@@ -1409,11 +1414,14 @@ function backgroundOutputFiles(messages, privatePaths) {
         const file = outputFileOf(w);
         if (!file) continue;
         const name = file.slice(file.lastIndexOf('/') + 1);
-        for (const f of name.length >= 6 ? [file, name] : [file]) { known.add(f); list?.add(f); }
+        for (const f of name.length >= 6 ? [file, name] : [file]) {
+          known.add(f);
+          if (list && !list.has(f)) { list.add(f); indexFile(list === out.secret ? secretFiles : heldFiles, f); }
+        }
       }
     }
   }
-  return { secret: fileIndex(out.secret), held: fileIndex(out.held), known, ids };
+  return { secret: secretFiles, held: heldFiles, known, ids };
 }
 // The id of a background task in the result of the call that started it ("with ID: bkxqmzpw", "agentId: a1b2c3").
 const TASK_ID_IN_RESULT = /\b(?:agentId|task_id|taskId|ID|id)\s*[:=]\s*["']?([\w-]{4,64})/g;
@@ -1494,20 +1502,21 @@ function readsUnknownOutput(input, known) {
 // characters of the input, so each string is read once however many files there are. A file that does not end with a
 // name character is searched for whole.
 const FILE_NAME_CHAR = /[a-z0-9_.-]/;
-function fileIndex(files) {
-  const byRun = new Map();
-  const other = [];
-  for (const f of files) {
-    let k = f.length;
-    while (k > 0 && FILE_NAME_CHAR.test(f[k - 1])) k--;
-    if (k === f.length) other.push(f);
-    else {
-      const run = f.slice(k);
-      if (byRun.has(run)) byRun.get(run).push(f);
-      else byRun.set(run, [f]);
-    }
+function indexFile(index, f) {
+  let k = f.length;
+  while (k > 0 && FILE_NAME_CHAR.test(f[k - 1])) k--;
+  if (k === f.length) index.other.push(f);
+  else {
+    const run = f.slice(k);
+    if (index.byRun.has(run)) index.byRun.get(run).push(f);
+    else index.byRun.set(run, [f]);
   }
-  return { byRun, other, size: files.size };
+  index.size++;
+}
+function fileIndex(files) {
+  const index = { byRun: new Map(), other: [], size: 0 };
+  for (const f of files) indexFile(index, f);
+  return index;
 }
 function readsFile(input, files) {
   if (!files.size) return false;

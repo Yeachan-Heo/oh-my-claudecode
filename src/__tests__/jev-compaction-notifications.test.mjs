@@ -340,6 +340,43 @@ describe('a notification of a task whose call is still there, and the files its 
   }
 });
 
+describe('a notification of a background task that reads the output file of a task on a secret path', () => {
+  const file = (task) => `/tmp/work/tasks/${task}.output`;
+  const start = (id, tool, input) => ({ role: 'assistant', text: 'Starting.', toolUses: [{ tool_use_id: id, tool, input: { ...input, run_in_background: true } }] });
+  const launched = (id, task) => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `Async task launched. ID: ${task}. Output is being written to: ${file(task)}`, isError: false }] });
+  const reads = (k) => [
+    { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: `rd${k}`, tool: 'Bash', input: { command: 'cat a.txt' } }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `rd${k}`, text: `Filler ${k} ${'f'.repeat(7000)}`, isError: false }] },
+  ];
+  const report = (task, body) => row(`<task-notification>\n<task-id>${task}</task-id>\n<output-file>${file(task)}</output-file>\n<summary>Task done</summary>\n<result>${body} ${'s'.repeat(7000)}</result>\n</task-notification>`);
+  // Links: the first task runs on a secret path; each next one is an Agent whose prompt reads the output file of the one before it (`reader`: the file it reads).
+  const chain = (links, firstRead) => {
+    const tasks = ['bk7x2mq9', 'ag1b2c3d', 'ag4e5f6g'].slice(0, links + 1);
+    const rows = [start('c0', 'Bash', { command: 'cat ~/.ssh/id_rsa' }), launched('c0', tasks[0])];
+    for (let k = 1; k <= links; k++) rows.push(start(`c${k}`, 'Agent', { prompt: `Summarize ${k === 1 ? firstRead ?? file(tasks[0]) : file(tasks[k - 1])} for the report.` }), launched(`c${k}`, tasks[k]));
+    return { rows, last: tasks[links] };
+  };
+
+  for (const links of [1, 2]) {
+    it(`is traced and never sent to Jev: ${links === 1 ? 'an Agent that reads the file' : 'an Agent that reads the file of an Agent that reads the file'}`, async () => {
+      const { rows, last } = chain(links);
+      const w = talk(30);
+      const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...rows, ...[1, 2, 3].flatMap(reads), report(last, 'SECRETBODY'), ...w.slice(3)]);
+      expect(run.record).toMatchObject({ result: 'jev', notifications: 1 });
+      expect(run.bodies.join('')).not.toContain('SECRETBODY');
+      expect(JSON.stringify(run.out.messages)).not.toContain('SECRETBODY');
+    });
+  }
+
+  it('is scored as any other when the Agent reads a file of its own, whatever the first task was', async () => {
+    const { rows, last } = chain(1, '/tmp/work/notes.txt');
+    const w = talk(30);
+    const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...rows, ...[1, 2, 3].flatMap(reads), report(last, 'PLAINBODY'), ...w.slice(3)]);
+    expect(run.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
+    expect(run.bodies.join('')).toContain('PLAINBODY');
+  });
+});
+
 describe('the envelopes of the deliveries after a notification', () => {
   const words = Array.from({ length: 40 }, (_, k) => `The coordinator sent a message while you were working:\nd${k}`);
   const deliver = (i) => ({ [i]: words });
