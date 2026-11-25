@@ -68,8 +68,12 @@ psm_create_tmux_session() {
 #   - a path relative to the worktree root (e.g. .psm/review.md), or
 #   - a literal prompt string to send after Claude boots.
 #
-# Passes --dangerously-skip-permissions so the session does not stall on
-# directory-trust or repeated tool-approval prompts (issue #2508).
+# By default, launches as plain `claude` with standard directory-trust and
+# tool-approval prompts (more secure against prompt injection).
+# Set PSM_SKIP_PERMISSIONS=1 to pass --dangerously-skip-permissions (bypasses
+# both directory-trust and per-tool approval prompts). This may cause unattended
+# sessions to block indefinitely if the directory is untrusted or tools require
+# approval (issue #2508). Only use this flag in a trusted directory context.
 # Set PSM_CLAUDE_STARTUP_DELAY (default: 5s) to tune literal-prompt delivery.
 psm_launch_claude() {
     local session_name
@@ -81,10 +85,14 @@ psm_launch_claude() {
         return 1
     fi
 
-    # --dangerously-skip-permissions bypasses both the directory-trust prompt and
-    # every per-tool approval prompt. Without this flag, unattended PSM sessions
-    # can block indefinitely on the first tool call (issue #2508).
-    tmux send-keys -t "$session_name" "claude --dangerously-skip-permissions" Enter
+    # Launch with --dangerously-skip-permissions only if PSM_SKIP_PERMISSIONS=1.
+    # Default is to launch plain `claude` for security against prompt injection.
+    local claude_cmd="claude"
+    if [[ "${PSM_SKIP_PERMISSIONS:-0}" == "1" ]]; then
+        claude_cmd="claude --dangerously-skip-permissions"
+    fi
+
+    tmux send-keys -t "$session_name" "$claude_cmd" Enter
 
     if [[ -n "$initial_context" ]]; then
         local session_path=""
@@ -111,6 +119,10 @@ psm_launch_claude() {
 # Render a PSM template file by substituting {{KEY}} placeholders.
 # Usage: psm_render_template <template_file> [KEY=VALUE ...]
 # Outputs rendered content to stdout; returns 1 if template not found.
+# 
+# Prevents prompt injection by neutralizing any '--- END UNTRUSTED DATA ---'
+# delimiters inside substituted values: they are escaped to '---ESCAPED_END---'
+# so attacker-supplied content cannot close the wrapper prematurely.
 psm_render_template() {
     local template_file="$1"
     shift
@@ -126,6 +138,8 @@ psm_render_template() {
     for assignment in "$@"; do
         local key="${assignment%%=*}"
         local value="${assignment#*=}"
+        # Escape closing delimiter in the value to prevent injection
+        value="${value//--- END UNTRUSTED DATA ---/---ESCAPED_END---}"
         # Bash parameter expansion handles multiline values safely
         content="${content//\{\{${key}\}\}/$value}"
     done
