@@ -638,7 +638,7 @@ OMC puede opcionalmente orquestar proveedores de IA externos para validación cr
 | [Codex CLI](https://github.com/openai/codex)                            | `npm install -g @openai/codex`                               | Validación de arquitectura, verificación cruzada de código                |
 | [Grok Build](https://build.grok.com)                                    | Descarga desde build.grok.com (`grok` en `~/.grok/bin/grok`) | Revisión de código, verificación cruzada de análisis                      |
 
-> **Migrando desde Gemini CLI:** Según el anuncio de Google, el Gemini CLI está siendo sustituido por el Antigravity CLI (`agy`); consulta la [documentación oficial de Antigravity](https://antigravity.google). Usa `omc team N:antigravity` y `omc ask antigravity` donde antes usabas `gemini`. El soporte sin interfaz de `agy` en Windows es desconocido/no probado — informa de los problemas en el repositorio original.
+> **Migrando desde Gemini CLI:** Según el anuncio de Google, el Gemini CLI está siendo sustituido por el Antigravity CLI (`agy`); consulta la [documentación oficial de Antigravity](https://antigravity.google). Usa `omc team N:antigravity` y `omc ask antigravity` donde antes usabas `gemini`. El modo sin interfaz de `agy` es compatible con macOS, Linux y Windows.
 
 **Costo:** 3 planes Pro (Claude + Antigravity/Gemini + ChatGPT) cubren todo por ~$60/mes.
 

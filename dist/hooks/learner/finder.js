@@ -6,7 +6,7 @@
  */
 import { existsSync, readdirSync, realpathSync, mkdirSync } from 'fs';
 import { join, normalize, sep } from 'path';
-import { USER_SKILLS_DIR, PROJECT_SKILLS_SUBDIR, PROJECT_AGENT_SKILLS_SUBDIR, SKILL_EXTENSION, DEBUG_ENABLED, GLOBAL_SKILLS_DIR, MAX_RECURSION_DEPTH } from './constants.js';
+import { USER_SKILLS_DIR, PROJECT_SKILLS_SUBDIR, PROJECT_AGENT_SKILLS_SUBDIR, SKILL_EXTENSION, DEBUG_ENABLED, getGlobalSkillsDirCandidates, MAX_RECURSION_DEPTH } from './constants.js';
 /**
  * Recursively find all skill files in a directory.
  */
@@ -94,7 +94,7 @@ export function findSkillFiles(projectRoot, options) {
     }
     // 2. Search user-level skills from both directories (if scope allows)
     if (scope === 'user' || scope === 'all') {
-        const userDirs = [GLOBAL_SKILLS_DIR, USER_SKILLS_DIR];
+        const userDirs = [...getGlobalSkillsDirCandidates(), USER_SKILLS_DIR];
         for (const userDir of userDirs) {
             const userFiles = [];
             findSkillFilesRecursive(userDir, userFiles);

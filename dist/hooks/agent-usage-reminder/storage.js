@@ -7,9 +7,9 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, } from 'fs';
 import { join } from 'path';
-import { AGENT_USAGE_REMINDER_STORAGE } from './constants.js';
+import { getAgentUsageReminderStoragePath } from './constants.js';
 function getStoragePath(sessionID) {
-    return join(AGENT_USAGE_REMINDER_STORAGE, `${sessionID}.json`);
+    return join(getAgentUsageReminderStoragePath(), `${sessionID}.json`);
 }
 export function loadAgentUsageState(sessionID) {
     const filePath = getStoragePath(sessionID);
@@ -24,8 +24,9 @@ export function loadAgentUsageState(sessionID) {
     }
 }
 export function saveAgentUsageState(state) {
-    if (!existsSync(AGENT_USAGE_REMINDER_STORAGE)) {
-        mkdirSync(AGENT_USAGE_REMINDER_STORAGE, { recursive: true });
+    const storagePath = getAgentUsageReminderStoragePath();
+    if (!existsSync(storagePath)) {
+        mkdirSync(storagePath, { recursive: true });
     }
     const filePath = getStoragePath(state.sessionID);
     writeFileSync(filePath, JSON.stringify(state, null, 2));

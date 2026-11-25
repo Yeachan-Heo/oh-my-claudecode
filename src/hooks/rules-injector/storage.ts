@@ -14,14 +14,14 @@ import {
   unlinkSync,
 } from 'fs';
 import { join } from 'path';
-import { RULES_INJECTOR_STORAGE } from './constants.js';
+import { getRulesInjectorStoragePath } from './constants.js';
 import type { InjectedRulesData } from './types.js';
 
 /**
  * Get storage path for a session.
  */
 function getStoragePath(sessionId: string): string {
-  return join(RULES_INJECTOR_STORAGE, `${sessionId}.json`);
+  return join(getRulesInjectorStoragePath(), `${sessionId}.json`);
 }
 
 /**
@@ -55,8 +55,9 @@ export function saveInjectedRules(
   sessionId: string,
   data: { contentHashes: Set<string>; realPaths: Set<string> }
 ): void {
-  if (!existsSync(RULES_INJECTOR_STORAGE)) {
-    mkdirSync(RULES_INJECTOR_STORAGE, { recursive: true });
+  const storagePath = getRulesInjectorStoragePath();
+  if (!existsSync(storagePath)) {
+    mkdirSync(storagePath, { recursive: true });
   }
 
   const storageData: InjectedRulesData = {

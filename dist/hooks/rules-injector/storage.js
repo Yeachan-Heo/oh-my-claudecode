@@ -7,12 +7,12 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, } from 'fs';
 import { join } from 'path';
-import { RULES_INJECTOR_STORAGE } from './constants.js';
+import { getRulesInjectorStoragePath } from './constants.js';
 /**
  * Get storage path for a session.
  */
 function getStoragePath(sessionId) {
-    return join(RULES_INJECTOR_STORAGE, `${sessionId}.json`);
+    return join(getRulesInjectorStoragePath(), `${sessionId}.json`);
 }
 /**
  * Load injected rules for a session.
@@ -38,8 +38,9 @@ export function loadInjectedRules(sessionId) {
  * Save injected rules for a session.
  */
 export function saveInjectedRules(sessionId, data) {
-    if (!existsSync(RULES_INJECTOR_STORAGE)) {
-        mkdirSync(RULES_INJECTOR_STORAGE, { recursive: true });
+    const storagePath = getRulesInjectorStoragePath();
+    if (!existsSync(storagePath)) {
+        mkdirSync(storagePath, { recursive: true });
     }
     const storageData = {
         sessionId,

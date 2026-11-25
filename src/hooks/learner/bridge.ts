@@ -22,6 +22,7 @@ import { OmcPaths, getOmcRoot } from "../../lib/worktree-paths.js";
 import { parseYamlMetadata } from "./parser.js";
 import { expandTriggers } from "./transliteration-map.js";
 import { stripLeadingUtf8Bom } from "../../utils/frontmatter.js";
+import { getGlobalOmcConfigPath, getGlobalOmcConfigCandidates } from "../../utils/paths.js";
 
 // Re-export constants
 export const USER_SKILLS_DIR = join(
@@ -30,7 +31,8 @@ export const USER_SKILLS_DIR = join(
   "skills",
   "omc-learned",
 );
-export const GLOBAL_SKILLS_DIR = join(homedir(), ".omc", "skills");
+// GLOBAL_SKILLS_DIR now respects OMC_HOME via getGlobalOmcConfigPath
+export const GLOBAL_SKILLS_DIR = getGlobalOmcConfigPath("skills");
 export const PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;
 export const PROJECT_AGENT_SKILLS_SUBDIR = join(".agents", "skills");
 export const SKILL_EXTENSION = ".md";
@@ -422,7 +424,9 @@ export function findSkillFiles(
 
   // 2. Search user-level skills from both directories (lower priority)
   if (scope === "user" || scope === "all") {
-    const userDirs = [GLOBAL_SKILLS_DIR, USER_SKILLS_DIR];
+    // Check all candidates for global skills (respects OMC_HOME and legacy paths)
+    const globalSkillsCandidates = getGlobalOmcConfigCandidates("skills");
+    const userDirs = [...globalSkillsCandidates, USER_SKILLS_DIR];
     for (const userDir of userDirs) {
       const userFiles: string[] = [];
       findSkillFilesRecursive(userDir, userFiles);
