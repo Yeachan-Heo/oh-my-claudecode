@@ -251,6 +251,11 @@ describe.skipIf(process.platform === 'win32')('omc-doctor: Step 4 names the vers
       { label: 'two exact markers in two files: the first file decides', files: { 'CLAUDE.md': `${exact('5.7.0')}\nsee CLAUDE-omc.md\n`, 'CLAUDE-omc.md': exact('5.8.0') }, runtime: '5.7.0', doctor: '5.7.0' },
       { label: 'two exact markers in two companions: the first in name order decides', files: { 'CLAUDE.md': 'nothing\n', 'CLAUDE-a.md': exact('5.7.0'), 'CLAUDE-b.md': exact('5.8.0') }, runtime: '5.7.0', doctor: '5.7.0' },
       { label: 'a variant before the exact marker in one file', files: { 'CLAUDE.md': `${VARIANT}\n${exact('5.8.0')}\n` }, runtime: '5.8.0', doctor: '5.8.0' },
+      // Every reference of CLAUDE.md to a companion is read in order, a name ends at white space or a closing parenthesis (never at a line break inside it), and the first marker decides.
+      { label: 'two references: the first to a companion with no marker, the second to the one with the exact marker', files: { 'CLAUDE.md': 'see CLAUDE-notes.md and CLAUDE-omc.md\n', 'CLAUDE-notes.md': 'nothing\n', 'CLAUDE-omc.md': exact('5.8.0') }, runtime: '5.8.0', doctor: '5.8.0' },
+      { label: 'two references on lines next to each other are two names: the first is not there, the second holds the marker', files: { 'CLAUDE.md': '@CLAUDE-notes.md\n@CLAUDE-omc.md\n', 'CLAUDE-omc.md': exact('5.8.0') }, runtime: '5.8.0', doctor: '5.8.0' },
+      { label: 'two references, both with an exact marker: the first reference decides', files: { 'CLAUDE.md': 'see CLAUDE-b.md and CLAUDE-a.md\n', 'CLAUDE-a.md': exact('5.7.0'), 'CLAUDE-b.md': exact('5.8.0') }, runtime: '5.8.0', doctor: '5.8.0' },
+      { label: 'a reference to a companion that is not there: the other companions are not scanned', files: { 'CLAUDE.md': 'see CLAUDE-gone.md\n', 'CLAUDE-omc.md': exact('5.8.0') }, runtime: 'unknown', doctor: '(missing marker)' },
       { label: 'a variant in CLAUDE.md and no companion: the runtime has no marker, the doctor shows the variant it cannot read as drift', files: { 'CLAUDE.md': VARIANT }, runtime: 'unknown', doctor: '5.7.0' },
       { label: 'a variant in the only companion: the runtime has no marker, the doctor shows the variant', files: { 'CLAUDE.md': 'nothing\n', 'CLAUDE-omc.md': VARIANT }, runtime: 'unknown', doctor: '5.7.0' },
     ];

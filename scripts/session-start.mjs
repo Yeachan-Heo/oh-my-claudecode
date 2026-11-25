@@ -1235,11 +1235,12 @@ function getClaudeMdVersion() {
     const content = readFileSync(claudeMdPath, 'utf-8');
     let version = extractOmcVersion(content);
     if (!version) {
-      // The file-split layout keeps the marker in a companion file, found as the doctor finds it: the CLAUDE-*.md file that CLAUDE.md
-      // references, otherwise CLAUDE-omc.md and then every other CLAUDE-*.md in name order; the first marker decides.
-      const referenced = content.match(/CLAUDE-[^ )]*[.]md/)?.[0];
-      let names = [referenced];
-      if (!referenced) {
+      // The file-split layout keeps the marker in a companion file, found as the doctor finds it: the CLAUDE-*.md files that CLAUDE.md
+      // references (every name bounded by white space or a closing parenthesis, in order), otherwise CLAUDE-omc.md and then every other
+      // CLAUDE-*.md in name order; the first marker decides.
+      const referenced = content.match(/CLAUDE-[^\s)]*[.]md/g) || [];
+      let names = referenced;
+      if (!referenced.length) {
         names = ['CLAUDE-omc.md'];
         try { names.push(...readdirSync(configDir).filter(name => /^CLAUDE-.*[.]md(?![^])/i.test(name)).sort()); } catch { /* no directory listing */ }
       }

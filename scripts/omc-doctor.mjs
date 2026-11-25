@@ -744,18 +744,19 @@ const claudeMdVersion = () => {
       return false;
     }
   };
-  // The candidate files, in order: CLAUDE.md, the CLAUDE-*.md file it references, otherwise CLAUDE-omc.md and then every
-  // CLAUDE-*.md of the config directory in name order. CLAUDE-omc.md is the name the runtime opens (the file system decides
-  // about letter case: on a volume that ignores it, Claude-Omc.md is that file), and the scan matches names in either case.
+  // The candidate files, in order: CLAUDE.md, the CLAUDE-*.md files it references (every name bounded by white space or a closing
+  // parenthesis, in order, each once), otherwise CLAUDE-omc.md and then every CLAUDE-*.md of the config directory in name order.
+  // CLAUDE-omc.md is the name the runtime opens (the file system decides about letter case: on a volume that ignores it, Claude-Omc.md
+  // is that file), and the scan matches names in either case.
   const base = path.join(configDir, 'CLAUDE.md');
   let baseContent = '';
   try {
     baseContent = readFile(base);
   } catch {}
   const candidates = [base];
-  const referenced = baseContent.match(/CLAUDE-[^ )]*[.]md/);
-  if (referenced) {
-    candidates.push(path.join(configDir, referenced[0]));
+  const referenced = [...new Set(baseContent.match(/CLAUDE-[^\s)]*[.]md/g) ?? [])];
+  if (referenced.length) {
+    for (const name of referenced) candidates.push(path.join(configDir, name));
   } else {
     const defaultCompanion = path.join(configDir, 'CLAUDE-omc.md');
     if (isCompanion(defaultCompanion)) candidates.push(defaultCompanion);
