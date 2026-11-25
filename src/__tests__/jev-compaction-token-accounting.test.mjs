@@ -188,6 +188,24 @@ describe('token accounting: prefix and estimate', () => {
       .toBeCloseTo(0.363 * 4 + 2 * (45.4 - 40.5 / 2), 6);
   });
 
+  it('prices the text that stays in a row beside a trace of the module by whose it is: the trace line does not make it the user\'s words', () => {
+    const block = 45.4 - 40.5;
+    const coordinator = `<system-reminder id="jev-1">\nThe coordinator sent a message while you were working:\n${'c'.repeat(5000)}\n</system-reminder id="jev-1">`;
+    const traces = [
+      '[compacted] background task notification (Agent "x" finished) - 900 chars removed',
+      '[agent message moved at compaction, not from the user: /spool/a.txt (900 chars, 900 bytes); from lead]',
+      '[reply moved at compaction: 900 chars, full text in /spool/b.txt; start: "a"; end: "b"]',
+    ];
+    for (const trace of traces) {
+      // The trace line at the trace rate; the delivered text of someone else after it at the rate of a reminder, as it was before the trace stood in front of it.
+      const text = `${trace}\n${coordinator}`;
+      expect(listTokens([{ role: 'user', content: [{ type: 'text', text }] }]), trace).toBeCloseTo(0.58 * trace.length + 0.363 * (1 + coordinator.length) + block, 6);
+      // The words of the user after a trace line stay their own.
+      const words = `${trace}\nPlease review the files.`;
+      expect(listTokens([{ role: 'user', content: [{ type: 'text', text: words }] }]), trace).toBeCloseTo(0.58 * trace.length + 0.287 * (1 + 'Please review the files.'.length) + block, 6);
+    }
+  });
+
   it('adds RATE_NON_ASCII for each non-ASCII character', () => {
     const block = 45.4 - 40.5;
     expect(listTokens([{ role: 'user', content: 'é' }])).toBeCloseTo(0.287 * 1 + 3.72 + block, 6);

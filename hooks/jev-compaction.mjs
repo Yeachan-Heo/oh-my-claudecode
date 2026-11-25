@@ -2598,7 +2598,8 @@ export function listTokens(api, rates = DEFAULT_RATES) {
         const lines = t.replace(TRACE_LINE, (x) => { inTraces += x.length; return ''; });
         const rest = withoutPasteMarks(lines);
         inTraces += lines.length - rest.length;
-        const rate = a.role === 'assistant' ? RATE_ATXT : hasResult || !userWords({ role: 'user', text: t }).length ? RATE_NOTE : RATE_OWN;
+        // Whose the text is, is read from what stands outside the trace lines: a trace of the module at the start of a row does not make the text after it the user's own.
+        const rate = a.role === 'assistant' ? RATE_ATXT : hasResult || !userWords({ role: 'user', text: lines }).length ? RATE_NOTE : RATE_OWN;
         tok += RATE_TRACE * inTraces + rate * rest.length + RATE_NON_ASCII * nonAscii(rest) + over;
       } else if (b.type === 'tool_use') {
         const json = inputJson(b.input);
@@ -2622,7 +2623,10 @@ export function listTokens(api, rates = DEFAULT_RATES) {
 // RATE_NOTE and the words of the user alone at RATE_OWN (a text that is not theirs stays at RATE_NOTE).
 function besideResultGap(texts, rates) {
   let gap = 0;
-  for (const t of texts) if (userWords({ role: 'user', text: t }).length) gap += (rates.RATE_NOTE - rates.RATE_OWN) * withoutPasteMarks(t.replace(TRACE_LINE, '')).length;
+  for (const t of texts) {
+    const lines = t.replace(TRACE_LINE, '');
+    if (userWords({ role: 'user', text: lines }).length) gap += (rates.RATE_NOTE - rates.RATE_OWN) * withoutPasteMarks(lines).length;
+  }
   return gap;
 }
 

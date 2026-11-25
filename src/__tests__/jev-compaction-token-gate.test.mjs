@@ -451,6 +451,66 @@ describe('the text beside a result: the words of the user that no result stands 
   }
 });
 
+describe('a notification traced with the deliveries of a coordinator: the trace line does not make the text that stays the words of the user', () => {
+  // listTokens counts a text that is not the user's at the rate of a reminder (0.363 a character) and the words of the user alone at their own (0.287). A row that
+  // opens with the trace of the module is not the user's writing, so the deliveries of the coordinator that the trace row carries stay at the rate they had.
+  const ENV = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '64' };
+  const DELIVERIES = 20;
+  const EACH = 3550;
+  const note = { role: 'user', text: `[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\n<task-notification>\n<task-id>b2</task-id>\n<status>completed</status>\n<summary>Agent finished</summary>\n<result>NOTE-REPORT ${'n'.repeat(4000)}</result>\n</task-notification>`, toolUses: [] };
+  const score = (text) => (text.includes('NOTE-REPORT') || text.startsWith('RESULT-10 ') ? 0 : 3);
+  // 30 steps of text results; the notification row stands right after the first row, in a message that holds no result, or right after the row of the result of step 10,
+  // which Jev scores low as it does the notification. The deliveries of the coordinator are blocks of the API form only, after the notification.
+  const fixture = (where) => {
+    const steps = session(30, { shot: () => false, chars: 4000 });
+    const at = steps.findIndex((m) => (m.toolResults || []).some((r) => r.tool_use_id === 't10'));
+    const rows = where === 'no result' ? [steps[0], note, ...steps.slice(1)] : [...steps.slice(0, at + 1), note, ...steps.slice(at + 1)];
+    const frozen = Object.freeze(rows.map((m, k) => Object.freeze({ ...m, handle: `h${k}` })));
+    const api = apiOf(frozen);
+    const target = api.find((a) => a.role === 'user' && a.content.some((b) => b.type === 'text' && b.text.includes('<task-notification>')));
+    for (let k = 0; k < DELIVERIES; k++) target.content.push({ type: 'text', text: `The coordinator sent a message while you were working:\nCOORD-${k} ${'c'.repeat(EACH)}` });
+    return { rows: frozen, api };
+  };
+
+  for (const [label, where] of [['in a message that holds no result', 'no result'], ['in the message of a result that goes too', 'with a result']]) {
+    it(`the prediction is the installed list: ${label}`, async () => {
+      const { rows, api } = fixture(where);
+      const { record, out } = await compactRun(ENV, rows, { tokens: Math.round(listTokens(api)), trigger: 'manual', api, score });
+      expect(record).toMatchObject({ result: 'jev', notifications: 1 });
+      const carried = out.messages.find((m) => (m.text || '').startsWith('[compacted] background task notification'));
+      expect(carried.text).toContain(`COORD-${DELIVERIES - 1} `);
+      const installed = listTokens(apiOf(out.messages));
+      // The text of the coordinator stays at 0.363 a character: 71 000 characters at the rate of the user's words would be 5 396 tokens less than the prediction.
+      const slack = 0.6 * record.traced + 2;
+      expect(Math.abs(record.tokens_after_pred - installed), `pred ${record.tokens_after_pred}, installed ${installed}`).toBeLessThanOrEqual(slack);
+      expect(Math.abs(record.tokens_after - installed), `after ${record.tokens_after}, installed ${installed}`).toBeLessThanOrEqual(slack);
+    });
+  }
+
+  it('a trace row of an earlier compaction with the deliveries it carried, beside a result that goes: they cost the same before and after, so the cascade cuts as without them', async () => {
+    // The row of the trace is no notification any more and stands in the message of the result of step 10, which Jev scores low. The coordinator's text beside it is a delivered
+    // message at 0.363 a character whether the result is there or not; counted as the user's words once the result is gone, it would give 5 396 tokens back that it does not.
+    const envelope = (k) => `<system-reminder id="jev-${k + 1}">\nThe coordinator sent a message while you were working:\nCOORD-${k} ${'c'.repeat(EACH)}\n</system-reminder id="jev-${k + 1}">`;
+    const run = async (deliveries) => {
+      const steps = session(30, { shot: () => false, chars: 4000 });
+      const at = steps.findIndex((m) => (m.toolResults || []).some((r) => r.tool_use_id === 't10'));
+      const trace = { role: 'user', text: `[compacted] background task notification (Agent "x" finished) - 4000 chars removed\n${Array.from({ length: deliveries }, (_, k) => envelope(k)).join('\n')}`.trim(), toolUses: [] };
+      const rows = Object.freeze([...steps.slice(0, at + 1), trace, ...steps.slice(at + 1)].map((m, k) => Object.freeze({ ...m, handle: `h${k}` })));
+      const res = await compactRun(ENV, rows, { tokens: 110000, trigger: 'manual', score: (text) => (text.startsWith('RESULT-10 ') ? 0 : 3) });
+      return { ...res, saved: listTokens(apiOf(rows)) - listTokens(apiOf(res.out.messages)) };
+    };
+    const without = await run(0);
+    const withDeliveries = await run(DELIVERIES);
+    // Without the deliveries the trace of the result of step 10 gives back too little for the target of 106 462, and results scored needed are shortened.
+    expect(without.record).toMatchObject({ result: 'jev', cascade_pass: 'short_or_trace', traced: 1 });
+    expect(without.record.kept_short).toBeGreaterThan(0);
+    expect(withDeliveries.record).toMatchObject({ result: 'jev', cascade_pass: 'short_or_trace', traced: 1, kept_short: without.record.kept_short });
+    expect(Math.abs(withDeliveries.record.tokens_after_pred - without.record.tokens_after_pred)).toBeLessThanOrEqual(1);
+    // The prediction takes off what the installed list loses.
+    expect(Math.abs(110000 - withDeliveries.record.tokens_after_pred - withDeliveries.saved)).toBeLessThanOrEqual(0.6 * withDeliveries.record.traced + 2 + 0.6 * withDeliveries.record.kept_short);
+  });
+});
+
 describe('a session of screenshots and the own threshold (OMC_JEV_COMPACT_AT_PERCENT)', () => {
   const OWN = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60' };
 
