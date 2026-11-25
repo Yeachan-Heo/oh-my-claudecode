@@ -615,6 +615,17 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readText(f.settings), 'nothing written').toBe(original);
   });
 
+  it('the probe runs without the variables that mark a session as another provider: a model id of Bedrock or Vertex, or a provider flag, in the environment of the tool does not make the hook let the probe through', () => {
+    const f = fixture('settings-probe-provider-env');
+    const original = JSON.stringify(base(), null, 2) + '\n';
+    for (const [key, value] of [['CLAUDE_MODEL', 'us.anthropic.claude-sonnet-4-6-v1:0'], ['ANTHROPIC_MODEL', 'vertex_ai/claude-sonnet-4-6'],
+      ['CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'global.anthropic.claude-opus-4-8-v1:0'], ['CLAUDE_CODE_USE_VERTEX', 'true']]) {
+      writeFileSync(f.settings, original, 'utf8');
+      const r = runSync(SETTINGS_TOOL, ['add', '--settings', f.settings, '--pause-file', f.pause, '--hook-log', f.hookLog, '--hook', HOOK, '--python', PYBIN], { env: { ...ENV, [key]: value } });
+      expect(r.status, `${key}=${value}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('add keeps the probe pause in place: a hook that holds for a moment and then lets go by itself is refused', () => {
     const f = fixture('settings-probe-early-exit');
     const hook = join(f.dir, 'early', 'five-hour-guard-hook.py');

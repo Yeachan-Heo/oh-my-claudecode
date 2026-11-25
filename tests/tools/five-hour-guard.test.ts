@@ -972,6 +972,78 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(state), 'still intact').toBe('the program\n');
   });
 
+  it('nothing is appended to a log_file that a settings rewrite after the start made a registered hook: the notice goes to stdout, and the next tick looks again', async () => {
+    const f = fixture('log-is-program', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const logPath = join(f.dir, 'five-hour-guard-hook.py.log');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: logPath, settings_file: f.settings }), 'utf8');
+    const entry = (hook: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, hook, PYBIN), timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entry(HOOK), 'utf8');
+    const hookText = readFileSync(HOOK, 'utf8');
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(logPath)), 20000, 'the start in the log (an unregistered log file is appended to)');
+      writeFileSync(f.settings, entry(logPath), 'utf8');   // the registered hook is now the log path
+      writeFileSync(logPath, hookText, 'utf8');            // and a real hook is installed there
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed/.test(g.out), 20000, 'the refusal of the pause');
+      await sleep(800);   // a few more ticks, each with its own ERROR line
+    } finally { await stopGuard(g); }
+    expect(g.out, 'the notice is on stdout').toMatch(/the log file .*five-hour-guard-hook\.py\.log is a program that a registered hook entry names: nothing is appended to it/);
+    expect(g.out.match(/ERROR: tick failed/g)?.length ?? 0, 'the failing ticks went on').toBeGreaterThan(1);
+    expect(readText(logPath), 'the hook is intact').toBe(hookText);
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
+  it('a launcher given by its bare name counts as the file the PATH of the guard resolves it to: a state file that is that program is not replaced, after a settings rewrite or at the start', async () => {
+    const f = fixture('bare-launcher-is-state', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const bin = join(f.dir, 'bin');
+    mkdirSync(bin);
+    const state = join(bin, 'python3');
+    writeFileSync(state, 'the program\n', 'utf8');
+    chmodSync(state, 0o755);
+    const env = { ...ENV, PATH: `${bin}:${process.env.PATH}` };
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (python: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, python), timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entry(PYBIN), 'utf8');
+    const g = spawnPy(GUARD, guardArgs(f), { env });
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeFileSync(f.settings, entry('python3'), 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*is the state_file of this guard/.test(readText(f.log)) || readText(state) !== 'the program\n', 20000, 'the refusal');
+      await sleep(600);
+    } finally { await stopGuard(g); }
+    expect(readText(f.log), 'the pause was refused').toMatch(/ERROR: tick failed.*registered interpreter .*bin\/python3 is the state_file of this guard/);
+    expect(readText(state), 'the program is intact').toBe('the program\n');
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+    const again = runSync(GUARD, ['--config', f.cfg, '--once'], { env });   // the same settings at the start
+    expect(again.status, `${again.stdout}${again.stderr}`).toBe(2);
+    expect(again.stderr).toMatch(/are the same file/);
+    expect(readText(state), 'still intact').toBe('the program\n');
+  });
+
+  it('the temporary file of a write (the state path, the pid of the guard and .tmp) that a settings rewrite after the start made a registered hook is not removed or replaced: the write is refused', async () => {
+    const f = fixture('program-is-temp-file', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const state = join(f.dir, 'five-hour-guard-hook.py.state');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (hook: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, hook, PYBIN), timeout: 21600 }] }] } });
+    writeFileSync(f.settings, entry(HOOK), 'utf8');
+    const hookText = readFileSync(HOOK, 'utf8');
+    const g = startGuard(f);
+    const temp = `${state}.${g.child.pid}.tmp`;
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeFileSync(f.settings, entry(temp), 'utf8');   // the registered hook is now the temporary file of the state write
+      writeFileSync(temp, hookText, 'utf8');            // and a real hook is installed there
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed.*is .*five-hour-guard-hook\.py\.state\.\d+\.tmp, a file this guard writes/.test(readText(f.log)) || !existsSync(temp), 20000, 'the refusal');
+      await sleep(600);
+    } finally { await stopGuard(g); }
+    expect(readText(f.log), 'the write was refused').toMatch(/ERROR: tick failed.*the registered hook .*five-hour-guard-hook\.py\.state\.\d+\.tmp is .*\.tmp, a file this guard writes/);
+    expect(readText(temp), 'the hook is intact').toBe(hookText);
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
   it('a registered hook or launcher that a settings rewrite made the state file is reported at every wiring pass, and the pause that would replace it is refused', async () => {
     const rewrite = (f: Fixture, program: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, program, PYBIN), timeout: 21600 }] }] } }), 'utf8');
     const config = (f: Fixture, state: string) => writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: state, log_file: f.log, settings_file: f.settings }), 'utf8');
@@ -1828,12 +1900,51 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard hook', { timeout: 90000 }, () => 
     expect(await hookHeld(f, 'other0001', { env: { ...ENV, ANTHROPIC_BASE_URL: 'https://api.anthropic.com' } })).toBe(true);
   });
 
-  it('a Bedrock or Vertex session (routing flag, no base URL) passes; the flag set to anything but 1 does not exempt', async () => {
+  it('a Bedrock or Vertex session (routing flag, no base URL) passes; the flag set to anything but 1 or true does not exempt', async () => {
     const f = fixture('hook-cloud');
     writePause(f);
     expect(await hookPasses(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_BEDROCK: '1' } }), 'Bedrock flag passes').toBe(true);
     expect(await hookPasses(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_VERTEX: '1' } }), 'Vertex flag passes').toBe(true);
+    expect(await hookPasses(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_BEDROCK: 'true' } }), 'the flag as true passes').toBe(true);
+    expect(await hookPasses(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_VERTEX: ' TRUE ' } }), 'the flag as TRUE with blanks passes').toBe(true);
+    expect(await hookHeld(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_BEDROCK: 'yes', CLAUDE_CODE_USE_VERTEX: 'false' } }), 'other values hold').toBe(true);
     expect(await hookHeld(f, 'other0001', { env: { ...ENV, CLAUDE_CODE_USE_BEDROCK: '0', CLAUDE_CODE_USE_VERTEX: '' } }), 'flags that are off hold').toBe(true);
+  });
+
+  it('a Bedrock or Vertex session known only by its model variables passes (the provider rule of src/config/models.ts): the direct model decides, the tier models only when no direct model is set', async () => {
+    const f = fixture('hook-provider-model');
+    writePause(f);
+    const bedrock = 'us.anthropic.claude-sonnet-4-6-v1:0';
+    const passes: Array<[string, Record<string, string>]> = [
+      ['a Bedrock id in CLAUDE_MODEL', { CLAUDE_MODEL: bedrock }],
+      ['a Bedrock id in ANTHROPIC_MODEL', { ANTHROPIC_MODEL: 'global.anthropic.claude-sonnet-4-6-v1:0' }],
+      ['the region prefix eu', { CLAUDE_MODEL: 'eu.anthropic.claude-sonnet-4-6-v1:0' }],
+      ['the region prefix ap', { CLAUDE_MODEL: 'ap.anthropic.claude-sonnet-4-6-v1:0' }],
+      ['the region prefix apac', { CLAUDE_MODEL: 'apac.anthropic.claude-sonnet-4-6-v1:0' }],
+      ['no region prefix', { CLAUDE_MODEL: 'anthropic.claude-3-haiku-20240307-v1:0' }],
+      ['upper case', { CLAUDE_MODEL: 'US.ANTHROPIC.CLAUDE-SONNET-4-6-V1:0' }],
+      ['an inference profile ARN of a Claude model', { CLAUDE_MODEL: 'arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6-v1:0' }],
+      ['an application inference profile ARN in another partition', { ANTHROPIC_MODEL: 'arn:aws-us-gov:bedrock:us-gov-west-1:123456789012:application-inference-profile/claude-profile' }],
+      ['a Vertex id', { CLAUDE_MODEL: 'vertex_ai/claude-sonnet-4-6' }],
+      ['a Vertex id in upper case', { ANTHROPIC_MODEL: 'VERTEX_AI/claude-sonnet-4-6' }],
+      ['a blank CLAUDE_MODEL, the Bedrock id in ANTHROPIC_MODEL', { CLAUDE_MODEL: '   ', ANTHROPIC_MODEL: bedrock }],
+      ['an id with blanks around it', { CLAUDE_MODEL: `  ${bedrock}  ` }],
+      ['no direct model, the sonnet default of Claude Code is a Bedrock id', { ANTHROPIC_DEFAULT_SONNET_MODEL: bedrock }],
+      ['no direct model, OMC_MODEL_HIGH is a Vertex id', { OMC_MODEL_HIGH: 'vertex_ai/claude-opus-4-8' }],
+      ['no direct model, the Bedrock haiku variable', { CLAUDE_CODE_BEDROCK_HAIKU_MODEL: 'anthropic.claude-3-haiku-20240307-v1:0' }],
+      ['no direct model, medium is Claude and low is a Bedrock id', { OMC_MODEL_MEDIUM: 'claude-sonnet-5', OMC_MODEL_LOW: 'us.anthropic.claude-haiku-4-5-v1:0' }],
+    ];
+    for (const [name, env] of passes) expect(await hookPasses(f, 'other0001', { env: { ...ENV, ...env } }), `${name}: passes`).toBe(true);
+    const holds: Array<[string, Record<string, string>]> = [
+      ['a plain Claude id', { CLAUDE_MODEL: 'claude-sonnet-5' }],
+      ['a tier alias', { ANTHROPIC_MODEL: 'sonnet' }],
+      ['the direct model wins over a stale tier default', { CLAUDE_MODEL: 'claude-sonnet-5', ANTHROPIC_DEFAULT_SONNET_MODEL: bedrock }],
+      ['the first direct variable that is not blank wins', { CLAUDE_MODEL: 'claude-opus-4-8', ANTHROPIC_MODEL: bedrock }],
+      ['within one tier the first variable wins', { OMC_MODEL_MEDIUM: 'claude-sonnet-5', ANTHROPIC_DEFAULT_SONNET_MODEL: bedrock }],
+      ['an id that only contains the words', { CLAUDE_MODEL: 'my-anthropic.claude-gateway' }],
+      ['an ARN that is no inference profile', { CLAUDE_MODEL: 'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-haiku-20240307-v1:0' }],
+    ];
+    for (const [name, env] of holds) expect(await hookHeld(f, 'other0001', { env: { ...ENV, ...env } }), `${name}: held`).toBe(true);
   });
 
   it('the provider is decided by the host of the base URL: case, subdomains, a scheme-less value and look-alike hosts', async () => {

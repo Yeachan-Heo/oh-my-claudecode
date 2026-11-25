@@ -29,7 +29,11 @@ mkdirSync(HOME_DIR, { recursive: true });
 mkdirSync(CONFIG_DIR, { recursive: true });
 
 export const ENV: NodeJS.ProcessEnv = { ...process.env, HOME: HOME_DIR, USERPROFILE: HOME_DIR, CLAUDE_CONFIG_DIR: CONFIG_DIR };
-for (const key of ['OMC_FIVE_HOUR_GUARD_CONFIG', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) delete ENV[key];
+// everything the hook reads to tell that a session is not on the subscription (flags, keys, base URL, model variables): none of it may leak in from the shell that runs the tests
+export const PROVIDER_ENV = ['ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+  'CLAUDE_MODEL', 'ANTHROPIC_MODEL', 'OMC_MODEL_MEDIUM', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'OMC_MODEL_HIGH', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL', 'OMC_MODEL_LOW', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'];
+for (const key of ['OMC_FIVE_HOUR_GUARD_CONFIG', 'CLAUDE_CODE_OAUTH_TOKEN', ...PROVIDER_ENV]) delete ENV[key];
 
 export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 export const now = () => Date.now() / 1000;

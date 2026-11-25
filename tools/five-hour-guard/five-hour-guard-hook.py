@@ -15,7 +15,7 @@
 # configuration file (it runs on every tool call). Without --pause-file there is nothing to wait for: exit 0. --poll is the
 # time between two readings of the pause file while a call waits (2 s unless given); it is kept between MIN_POLL_S and MAX_POLL_S,
 # so that a hand-written value can neither spin a processor nor keep a call long after the pause has ended.
-import json, math, os, stat, sys, time
+import json, math, os, re, stat, sys, time
 from urllib.parse import urlparse
 
 DEADLINE_GRACE_S = 900       # never hold longer than this past the stored resume time
@@ -97,14 +97,59 @@ def log(msg):
         pass
 
 
+# The provider rule of src/config/models.ts (isBedrock, isVertexAI, getProviderDetectionModelEnvValues), kept here because this script
+# imports nothing: the flags accept 1 and true; a model id of Bedrock or Vertex is a provider signal where the flag was not passed on
+# to the process; the model is the direct CLAUDE_MODEL / ANTHROPIC_MODEL (the first that is not blank) and, only when neither is set,
+# the tier models of OMC and Claude Code (medium, high, low; the first that is set of each). The settings tool removes the same
+# variables from the environment of its probe (PROVIDER_ENV_KEYS in five_hour_guard_entry.py).
+DIRECT_MODEL_KEYS = ('CLAUDE_MODEL', 'ANTHROPIC_MODEL')
+TIER_MODEL_KEYS = (('OMC_MODEL_MEDIUM', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL'),
+                   ('OMC_MODEL_HIGH', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'),
+                   ('OMC_MODEL_LOW', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'))
+BEDROCK_MODEL_ID = re.compile(r'^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)', re.I)
+BEDROCK_ARN = re.compile(r'^arn:aws(-[^:]+)?:bedrock:', re.I)
+BEDROCK_PROFILE = re.compile(r':(inference-profile|application-inference-profile)/', re.I)
+
+
+def provider_flag(value):
+    return str(value or '').strip().lower() in ('1', 'true')
+
+
+def provider_model_ids():
+    """The model values the provider is read from (getProviderDetectionModelEnvValues): the direct model when one is set, else the tier models."""
+    env = os.environ
+    for key in DIRECT_MODEL_KEYS:
+        if env.get(key, '').strip():
+            return [env[key].strip()]
+    found = []
+    for keys in TIER_MODEL_KEYS:
+        for key in keys:
+            if env.get(key, '').strip():
+                found.append(env[key].strip())
+                break
+    return found
+
+
+def provider_model_id(model_id):
+    """A Bedrock model id (prefixed, or an inference-profile ARN of a Claude model) or a Vertex id (vertex_ai/...)."""
+    if BEDROCK_MODEL_ID.match(model_id):
+        return True
+    if BEDROCK_ARN.match(model_id) and BEDROCK_PROFILE.search(model_id) and 'claude' in model_id.lower():
+        return True
+    return model_id.lower().startswith('vertex_ai/')
+
+
 def foreign_provider():
     """Sessions that do not draw on the Anthropic subscription window are never held: they authenticate with an API key or
-    an auth token, route through Bedrock, Vertex or Foundry (flag set to 1), or use a base URL whose host is not
-    anthropic.com (the host is compared, not the text: `proxy-anthropic.com` is foreign, `API.ANTHROPIC.COM` is not)."""
+    an auth token, route through Bedrock, Vertex or Foundry (flag set, or a model id of Bedrock or Vertex in the model variables),
+    or use a base URL whose host is not anthropic.com (the host is compared, not the text: `proxy-anthropic.com` is foreign,
+    `API.ANTHROPIC.COM` is not)."""
     env = os.environ
     if any(env.get(k, '').strip() for k in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')):
         return True
-    if any(env.get(k) == '1' for k in ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')):
+    if any(provider_flag(env.get(k)) for k in ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')):
+        return True
+    if any(provider_model_id(m) for m in provider_model_ids()):
         return True
     base = env.get('ANTHROPIC_BASE_URL', '').strip()
     if not base:

@@ -275,8 +275,9 @@ def registered_runtime_files():
     """The hook script and the interpreter that the hook entry in settings.json names (they can be anywhere: `add --hook` takes
     any path). A relative hook, or an interpreter given with a directory part, is taken as the file it names from the working
     directory of the guard: a session resolves it from its own directory, which cannot be known here, so this is the conservative
-    reading for the collision checks (an interpreter given by its bare name is looked up on PATH and names no file). Best effort: an
-    unreadable settings file gives none (hook_check says so later)."""
+    reading for the collision checks. An interpreter or launcher given by its bare name is looked up on the PATH of the guard, as the
+    wiring check does, and the file found is the one that counts. Best effort: an unreadable settings file gives none (hook_check says
+    so later)."""
     found = []
     try:
         with open(SETTINGS or default_settings()) as f:
@@ -287,7 +288,13 @@ def registered_runtime_files():
             except Exception:
                 continue
             found += [('registered hook', t) for t in hooks]
-            found += [('registered interpreter', t) for t in interpreters + launchers if os.path.dirname(t)]
+            for t in interpreters + launchers:
+                try:
+                    program = t if os.path.dirname(t) else shutil.which(t)
+                except Exception:
+                    program = None   # one name that cannot be looked up must not hide the others
+                if program:
+                    found.append(('registered interpreter', program))
             found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
     except Exception:
         pass
@@ -359,12 +366,36 @@ def append_line(path, text):
         os.close(fd)
 
 
+LOG_LOOK_S = 1.0
+LOG_LOOK = [None, False]   # [time.monotonic() of the last look, whether the log file was a program of a registered entry then]
+
+
+def log_is_program():
+    """Whether log_file is a hook, interpreter or launcher that a registered entry names (settings.json can be rewritten after the
+    start): nothing is appended to a program. settings.json is read once per tick (safe_tick forgets the look) and at most once a
+    second outside a tick, not for every line. The notice goes to stdout only, never through log()."""
+    now = time.monotonic()
+    if LOG_LOOK[0] is None or now - LOG_LOOK[0] >= LOG_LOOK_S:
+        try:
+            refuse_program_overwrite(LOG)
+            blocked = False
+        except OSError:
+            blocked = True
+        except Exception:
+            blocked = False   # a look that fails never costs the log
+        LOG_LOOK[:] = [now, blocked]
+        if blocked:
+            print(f'{ts()} the log file {LOG} is a program that a registered hook entry names: nothing is appended to it (run five-hour-guard-settings.py add again, or change "log_file")', flush=True)
+    return LOG_LOOK[1]
+
+
 def log(msg):
     line = f'{ts()} {msg}'
     print(line, flush=True)
     if LOG and not A.dry_run:
         try:
-            append_line(LOG, line + '\n')
+            if not log_is_program():
+                append_line(LOG, line + '\n')
         except Exception:
             pass
 
@@ -384,6 +415,7 @@ def write_json(path, obj, no_clobber=False):
         return
     refuse_program_overwrite(path)
     tmp = f'{path}.{os.getpid()}.tmp'
+    refuse_program_overwrite(tmp)   # the leftover removed below is not a program of an entry either
     try:
         os.unlink(tmp)   # a leftover of a crashed run, or a link somebody put there: the link itself goes, never what it points to
     except FileNotFoundError:
@@ -704,6 +736,7 @@ def tick(state):
 def safe_tick(state):
     """One tick that never ends the process: a write that fails (the directory of the pause file is gone, the disk is full)
     is logged and the next tick tries again, with the state kept in memory."""
+    LOG_LOOK[0] = None   # settings.json may have been rewritten since the last tick: the log is looked at again
     try:
         tick(state)
         return True

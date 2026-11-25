@@ -142,8 +142,7 @@ def probe_hook(with_log=True):
     log is set), where the hold cannot be seen in a log and the process must simply keep running. Nothing is added to the command (the
     hook polls every 2 s, so the release can take that long), and only the paths of the pause and the log are the probe's own."""
     import tempfile
-    env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
-                                                           'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')}
+    env = {k: v for k, v in os.environ.items() if k not in ENTRY.PROVIDER_ENV_KEYS}   # a session of another provider is never held: the probe must not look like one
     with tempfile.TemporaryDirectory(prefix='five-hour-guard-probe-') as d:
         pause, log = os.path.join(d, 'pause.json'), os.path.join(d, 'hook.log')
         now = time.time()

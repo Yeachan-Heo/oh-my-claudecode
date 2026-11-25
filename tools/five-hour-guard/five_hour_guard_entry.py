@@ -6,6 +6,12 @@ import math, os, re, shlex, sys
 MARK = 'five-hour-guard-hook.py'
 OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
 PYTHON_NAME = r'(python|pypy|py$)'
+# The variables with which the hook decides that a session does not draw on the subscription window (foreign_provider() of
+# five-hour-guard-hook.py, which imports nothing and so keeps its own copy of this list): the probe of `add` runs without them.
+PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
+                     'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL', 'OMC_MODEL_MEDIUM', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
+                     'ANTHROPIC_DEFAULT_SONNET_MODEL', 'OMC_MODEL_HIGH', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
+                     'OMC_MODEL_LOW', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL')
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
 
 
