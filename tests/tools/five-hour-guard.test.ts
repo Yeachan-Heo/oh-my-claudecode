@@ -916,6 +916,35 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readJson(f.pause).pid, 'it is still the winner\'s').toBe(process.pid);
   });
 
+  it('the files that the guard reads are not read to their end: a pause file, a usage cache, a state file or a configuration larger than the limit is read like a document that cannot be decoded', () => {
+    const big = 'x'.repeat(1100000);   // more than the 1 MiB limit, a valid document otherwise
+    const f = fixture('oversized-documents', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    // a pause file of a dead guard is a leftover that the start removes; one over the limit is not a pause file of this guard, so it is kept and the start refuses
+    writePause(f, { pid: deadPid() });
+    expect(guardOnce(f).status).toBe(0);
+    expect(existsSync(f.pause), 'a pause file within the limit is a leftover and is removed').toBe(false);
+    writePause(f, { pid: deadPid(), exclude: [big] });
+    const size = readText(f.pause).length;
+    const refused = runSync(GUARD, ['--config', f.cfg, ...FAST, '--once']);
+    expect(refused.status, `${refused.stdout}${refused.stderr}`).toBe(2);
+    expect(refused.stderr).toMatch(/is not a pause file of this guard/);
+    expect(readText(f.pause).length, 'the file is untouched').toBe(size);
+    rmSync(f.pause, { force: true });
+    // a usage cache over the limit is an unreadable cache, a state file over the limit is no stored state
+    writeFileSync(f.cache, JSON.stringify({ ...f.cache, padding: big }), 'utf8');
+    expect(guardOnce(f).stdout).toMatch(/WARNING \(cache-unreadable\)/);
+    writeCache(f, { pct: 50, resetMs: Date.now() + HOUR_MS });
+    writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 10, resume_at: now() + 600, padding: big }), 'utf8');
+    guardOnce(f);
+    expect(existsSync(f.pause), 'a stored pause over the limit is not restored').toBe(false);
+    // a configuration over the limit is refused as a file that cannot be read
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, padding: big }), 'utf8');
+    const config = runSync(GUARD, ['--config', f.cfg, ...FAST, '--once']);
+    expect(config.status, `${config.stdout}${config.stderr}`).toBe(2);
+    expect(config.stderr).toMatch(/cannot read configuration/);
+  });
+
   it('a file that appears at pause_file after the start check is never removed as a leftover: exit 2, the file is kept', () => {
     // the driver puts the file in place when the guard first reads its state file, which is after the checks of the start and before the removal of a leftover
     const driver = ['import builtins, os, runpy, sys', 'real, target, text = builtins.open, sys.argv[1], sys.argv[2]', 'done = []',

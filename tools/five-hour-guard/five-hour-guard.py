@@ -107,12 +107,24 @@ if A.resume_below is not None and not 0 <= A.resume_below <= A.threshold:
     fail(f'--resume-below must be between 0 and the threshold ({A.threshold:g}) percent, not {A.resume_below:g}')
 
 
+MAX_JSON_BYTES = 1048576   # as in the hook: the documents the guard reads are a few KiB; a larger file is none of them and is not read in full
+
+
+def load_json(f):
+    """json.load of an open file, but a file larger than MAX_JSON_BYTES (a mistaken path, a file replaced by a huge one) is not read to its
+    end: it is a ValueError, as a document that cannot be decoded is."""
+    raw = f.read(MAX_JSON_BYTES + 1)
+    if len(raw) > MAX_JSON_BYTES:
+        raise ValueError(f'more than {MAX_JSON_BYTES} bytes')
+    return json.loads(raw)
+
+
 def load_config(path):
     if not path:
         return {}
     try:
         with open(path) as f:
-            cfg = json.load(f)
+            cfg = load_json(f)
     except Exception as e:
         fail(f'cannot read configuration {path}: {e!r}')
     if not isinstance(cfg, dict):
@@ -506,7 +518,7 @@ def registered_runtime_files():
     found = []   # the files of the entries first: a collision is reported with the label of the entry
     try:
         with open(SETTINGS or default_settings()) as f:
-            data = json.load(f)
+            data = load_json(f)
         entries = command_hooks(data.get('hooks', {}).get('PreToolUse', []))
         env = data.get('env')   # the top-level env of settings.json reaches the hook processes, not this one: its values are values of the parameters of the commands
         env = {k: [v] for k, v in env.items() if isinstance(k, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', k) and isinstance(v, str)} if isinstance(env, dict) else {}
@@ -752,7 +764,7 @@ def load_state():
     """The stored state, or a fresh one when the file is missing or does not have the shape this guard writes."""
     try:
         with open(STATE) as f:
-            st = json.load(f)
+            st = load_json(f)
         if st.get('paused') is not True:
             return {'paused': False}
         now = time.time()
@@ -791,7 +803,7 @@ def load_cache():
     for attempt in range(CACHE_READ_TRIES):
         try:
             with open(CACHE) as f:
-                return json.load(f)
+                return load_json(f)
         except ValueError:
             if attempt == CACHE_READ_TRIES - 1:
                 raise
@@ -853,7 +865,7 @@ def check_wiring(where):
     LAST_WIRING_CHECK[0] = time.monotonic()
     try:
         with open(SETTINGS) as f:
-            data = json.load(f)
+            data = load_json(f)
         groups = data.get('hooks', {}).get('PreToolUse', [])
         entries = command_hooks(groups)
         ours = [h['command'] for _g, h in entries]
@@ -894,7 +906,7 @@ def live_owner():
         return None
     try:
         with open(PAUSE_FILE) as f:
-            doc = json.load(f)
+            doc = load_json(f)
         owner, valid_until = doc.get('pid'), doc.get('valid_until') or 0
         return owner if owner != os.getpid() and valid_until > time.time() and pid_alive(owner) else None
     except Exception:
@@ -1120,7 +1132,7 @@ def is_guard_pause(path):
         with os.fdopen(fd) as f:
             if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
                 return False
-            d = json.load(f)
+            d = load_json(f)
         return (isinstance(d, dict) and d.get('v') == 2 and type(d.get('v')) is int and d.get('paused') is True and type(d.get('pid')) is int
                 and all(type(d.get(k)) in (int, float) and math.isfinite(d[k]) for k in ('since', 'resume_at', 'valid_until')))
     except Exception:
@@ -1216,7 +1228,7 @@ def test_pause():
     finally:
         try:
             with open(PAUSE_FILE) as f:
-                ours = json.load(f).get('pid') == os.getpid()
+                ours = load_json(f).get('pid') == os.getpid()
         except Exception:
             ours = False
         if ours:
