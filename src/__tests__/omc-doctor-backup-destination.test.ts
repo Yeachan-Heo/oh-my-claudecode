@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { addCache, backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, ageVersions, backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, runBlock, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 // Where a version is moved aside is as much a part of "reversible and outside the cache" as the version that is moved: a
 // link in the way of the backup directory (plugins/backups, or its child oh-my-claudecode) may lead into a cached
@@ -414,6 +414,48 @@ fs.lstatSync = function (target, ...rest) {
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }
+      }
+    }
+  });
+
+  // The installer's skill compaction (compactPluginSkillPayload) empties and rewrites <version>/skill-bodies/<skill> through a link, so the
+  // directory a skill-bodies link of a real cached version leads to is a tree of its own: the recovery copy must not be moved into it.
+  test('a skill-bodies directory of a real cached version that is a link out of the cache is a tree of its own, and a backup directory inside it is refused', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+      try {
+        const outside = path.join(dir, 'elsewhere', 'bodies');
+        mkdirSync(path.join(outside, 'omc-doctor'), { recursive: true });
+        link(outside, path.join(cache, '5.8.0', 'skill-bodies'));
+        ageVersions(cache);
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] });
+        link(path.join(outside, 'omc-doctor'), path.join(dir, 'plugins', 'backups'));
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, refused: REFUSED.test(result.stdout), cache: readdirSync(cache).sort(), landed: readdirSync(path.join(outside, 'omc-doctor')) })
+          .toEqual({ command, status: 1, refused: true, cache: ['5.8.0', '5.9.0'], landed: [] });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('a skill-bodies link out of the cache that the backup directory does not touch is no refusal: the cleanup goes on', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+      try {
+        const outside = path.join(dir, 'elsewhere', 'bodies');
+        mkdirSync(outside, { recursive: true });
+        link(outside, path.join(cache, '5.8.0', 'skill-bodies'));
+        ageVersions(cache);
+        writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] });
+        const saved = path.join(dir, 'elsewhere', 'saved');
+        mkdirSync(saved, { recursive: true });
+        link(saved, path.join(dir, 'plugins', 'backups'));
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, cache: readdirSync(cache).sort(), moved: movedAside(dir), bodies: readdirSync(outside) })
+          .toEqual({ command, status: 0, cache: ['5.9.0'], moved: 1, bodies: [] });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
       }
     }
   });

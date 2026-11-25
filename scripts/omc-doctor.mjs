@@ -1320,7 +1320,7 @@ const protectionOf = (dir, versions, foldCase = false) => {
 // its nearest existing parent and the rest of the name), and has to lie outside every tree below. backupPlace(registry)
 // answers { place, problem }: place is the real directory the moves go to, problem is empty when all is well and says
 // why nothing is moved otherwise. The trees: the plugin cache (the cache of every marketplace lies inside it), the
-// marketplace clones, every cache namespace (a link may take one out of the cache), the occupancy records, the plugin root variables and every installPath of the registry, each as
+// marketplace clones, every cache namespace (a link may take one out of the cache) and the directory a skill-bodies link of a version leads to, the occupancy records, the plugin root variables and every installPath of the registry, each as
 // written and as the file system reads it (a .. after a link). Both directions count (the destination inside a tree, a
 // tree inside the destination); a destination the configuration itself writes inside a tree (an active root that is the
 // configuration directory) is not an overlap that a link made. A destination that cannot be resolved (a link to nothing, a loop, no permission) or
@@ -1365,6 +1365,15 @@ const backupPlace = (registry) => {
           if (fs.lstatSync(entry).isSymbolicLink() && fs.statSync(entry).isDirectory()) versionTrees.push(entry);
         } catch (error) {
           // No tree to compare.
+        }
+        // The installer's skill compaction (compactPluginSkillPayload in src/installer/index.ts) removes and rewrites <version>/skill-bodies/<skill>
+        // through a link, so a skill-bodies link of a version (a real one too) is a tree of its own; its other writes through a link (the SKILL.md
+        // of each skill, the payload copy) only overwrite files and remove nothing.
+        try {
+          const bodies = path.join(entry, 'skill-bodies');
+          if (fs.lstatSync(bodies).isSymbolicLink() && fs.statSync(bodies).isDirectory()) versionTrees.push(bodies);
+        } catch {
+          // No skill-bodies, or none that leads to a directory: no tree to compare.
         }
       }
     } catch (error) {
