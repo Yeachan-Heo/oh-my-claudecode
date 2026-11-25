@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 DEADLINE_GRACE_S = 900       # never hold longer than this past the stored resume time
 MAX_VALID_AHEAD_S = 3600     # the guard renews valid_until every tick and sets it at most 1800 s ahead
 MAX_RESUME_AHEAD_S = 21600   # a window is 5 hours; the guard believes no reset time further than 5 h 15 min, plus a margin of at most 30 min
+MAX_PAUSE_BYTES = 1048576   # the pause document is about 200 bytes plus the exclude list, which the guard keeps under 64 KiB: a larger file is no pause, and is not read in full
 MIN_POLL_S = 0.1             # --poll 0 would spin a processor for the whole pause
 MAX_POLL_S = 5               # a call is released at most one poll after the pause file is removed or its valid_until has lapsed: --poll 3600 must not keep it for an hour
 
@@ -49,10 +50,13 @@ def pause_state():
         # opened without following a link, and the opened descriptor is checked: a regular file swapped for a link after the look above
         # is refused by the open (a FIFO is not waited for either: O_NONBLOCK), so the content read is that of a regular file
         fd = os.open(PAUSE_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
-        with os.fdopen(fd) as f:
+        with os.fdopen(fd, 'rb') as f:
             if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
                 return None
-            p = json.load(f)
+            raw = f.read(MAX_PAUSE_BYTES + 1)   # a regular file of any size (a mistaken path, a sparse file) is never read to its end
+            if len(raw) > MAX_PAUSE_BYTES:
+                return None
+            p = json.loads(raw)
     except Exception:
         return None
     now = time.time()

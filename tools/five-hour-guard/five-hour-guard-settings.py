@@ -46,11 +46,15 @@ def fail(msg):
     sys.exit(2)
 
 
+MAX_JSON_BYTES = 4 * 1024 * 1024   # settings.json and the configuration file are far smaller
 CFG = {}
 if A.config:
     try:
-        with open(A.config) as f:
-            CFG = json.load(f)
+        with open(A.config, 'rb') as f:
+            raw_config = f.read(MAX_JSON_BYTES + 1)   # a path replaced by a huge file is not read in full
+        if len(raw_config) > MAX_JSON_BYTES:
+            raise ValueError(f'the file is larger than {MAX_JSON_BYTES} bytes')
+        CFG = json.loads(raw_config)
         if not isinstance(CFG, dict):
             raise ValueError('not a JSON object')
     except Exception as e:
@@ -212,8 +216,10 @@ def read_settings():
     looks at: the bytes, the modification time and the mode (a chmod changes neither of the first two, and the write would undo it)."""
     try:
         with open(SETTINGS, 'rb') as f:
-            raw = f.read()
+            raw = f.read(MAX_JSON_BYTES + 1)
             st = os.fstat(f.fileno())
+        if len(raw) > MAX_JSON_BYTES:
+            fail(f'{SETTINGS} is larger than {MAX_JSON_BYTES} bytes: it is not read')
     except FileNotFoundError:
         return None, None, None
     except Exception as e:

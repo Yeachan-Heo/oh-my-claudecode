@@ -68,6 +68,7 @@ other's pause (the lock on the pause file stops the second one).
 | no pause file | the shell guard of the hook command exits 0 without starting Python (2 to 4 ms per tool call, measured on a loaded machine) |
 | `python3` or the hook file named in the entry is missing, or the hook file is not readable (Python would exit 2 on a script it cannot open) | the same shell guard exits 0 |
 | pause file is a symbolic link (whatever it points to: it could be the live pause of another guard), unreadable, not JSON, not an object, lacks a numeric `since` or an integer `pid` (the guard would not own it), or `paused` is not the JSON value `true` (`"false"`, `1` and `"true"` are not) | the tool call passes |
+| the pause file is larger than 1 MiB (the guard writes about 200 bytes plus `exclude`, which it keeps under 64 KiB; the hook reads at most 1 MiB plus one byte, so a mistaken path that holds a huge file does not stall the call) | the tool call passes |
 | `valid_until` or `resume_at` missing, not a JSON number (a string or a boolean is not one), NaN or infinite; `exclude` or `only` present and not a list of strings | the tool call passes |
 | `valid_until` in the past (the guard is dead: it renews the file every tick) | the tool call passes |
 | `valid_until` more than 3600 s ahead, or `resume_at` more than 21600 s ahead (the guard writes `valid_until` at most 1800 s ahead and believes no reset time further than 5 h 15 min, plus a margin of at most 1800 s) | the tool call passes |
@@ -307,6 +308,10 @@ The guard writes the state file (unpaused) first and removes the pause file afte
   early resume and the extension of a pause need a fresh cache; a running `omc wait` keeps it fresh in any case.
 - Only the Anthropic five-hour window is watched. The weekly limit is not.
 - The unit file is Linux only. The scripts were tested on Linux only.
+
+## File size limits
+
+The guard and the settings tool read no configuration file, usage cache, state file, pause file or `settings.json` larger than 4 MiB (they stop reading at that size, so a path replaced by a huge file cannot stall them or exhaust memory); the guard treats such a file like an unreadable one, and the settings tool refuses with exit 2. The guard refuses an `exclude` list longer than 64 KiB, so that the pause document stays far under the 1 MiB that the hook reads.
 
 ## False alarms
 

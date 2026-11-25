@@ -4,7 +4,7 @@
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, truncateSync, linkSync, lstatSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, SETTINGS_TOOL, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
@@ -1032,6 +1032,41 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await g.stop(); }
     expect(existsSync(f.pause), 'the pause file is removed although the state could not be written').toBe(false);
     expect(readText(f.log)).toMatch(/RESUMED \(guard stopping, state not saved\)/);
+  });
+
+  it('the hook reads a pause document of at most 1 MiB and lets the call pass when the file is larger, a sparse one included, without reading it to the end', async () => {
+    const f = fixture('hook-size', {});
+    const doc = JSON.stringify(pauseDoc({ pid: process.pid }));
+    writeFileSync(f.pause, doc + ' '.repeat(512 * 1024), 'utf8');
+    expect(await hookHeld(f, 'size-under'), 'a valid document of 512 KiB holds').toBe(true);
+    writeFileSync(f.pause, doc + ' '.repeat(2 * 1024 * 1024), 'utf8');
+    expect(await hookPasses(f, 'size-over'), 'the same valid document padded past 1 MiB is no pause').toBe(true);
+    writeFileSync(f.pause, doc, 'utf8');
+    truncateSync(f.pause, 512 * 1024 * 1024);
+    const started = Date.now();
+    expect(await hookPasses(f, 'size-sparse'), 'a sparse file of 512 MiB is no pause').toBe(true);
+    expect(Date.now() - started, 'and it is not read to the end').toBeLessThan(10000);
+  });
+
+  it('the guard and the settings tool read no configuration, settings or usage cache file larger than 4 MiB', () => {
+    const f = fixture('read-size', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const pad = ' '.repeat(5 * 1024 * 1024);
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }) + pad, 'utf8');
+    const guard = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(guard.status, `guard configuration: ${guard.stdout}${guard.stderr}`).toBe(2);
+    expect(guard.stderr).toMatch(/larger than 4194304 bytes/);
+    const tool = runSync(SETTINGS_TOOL, ['check', '--config', f.cfg, '--settings', f.settings]);
+    expect(tool.status, `settings tool configuration: ${tool.stdout}${tool.stderr}`).toBe(2);
+    expect(tool.stderr).toMatch(/larger than 4194304 bytes/);
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: {} }) + pad, 'utf8');
+    const settings = runSync(SETTINGS_TOOL, ['check', '--settings', f.settings, '--pause-file', f.pause, '--hook', HOOK, '--python', PYBIN]);
+    expect(settings.status, `settings file: ${settings.stdout}${settings.stderr}`).toBe(2);
+    expect(settings.stderr).toMatch(/larger than 4194304 bytes/);
+    writeFileSync(f.settings, JSON.stringify({ hooks: {} }), 'utf8');
+    writeFileSync(f.cache, JSON.stringify({ timestamp: Date.now(), data: { fiveHourPercent: 99, fiveHourResetsAt: new Date(Date.now() + HOUR_MS).toISOString() } }) + pad, 'utf8');
+    const cache = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(existsSync(f.pause), `an oversized usage cache is no reading: ${cache.stdout}${cache.stderr}`).toBe(false);
   });
 
   it('the hook takes as a pause only what the guard would own: a regular file with v 2, paused true, numeric since, resume_at and valid_until and an integer pid', async () => {
