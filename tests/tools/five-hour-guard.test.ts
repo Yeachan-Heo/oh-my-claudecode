@@ -1048,27 +1048,6 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(Date.now() - started, 'and it is not read to the end').toBeLessThan(10000);
   });
 
-  it('the guard and the settings tool read no configuration, settings or usage cache file larger than 4 MiB', () => {
-    const f = fixture('read-size', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
-    const pad = ' '.repeat(5 * 1024 * 1024);
-    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }) + pad, 'utf8');
-    const guard = runSync(GUARD, ['--config', f.cfg, '--once']);
-    expect(guard.status, `guard configuration: ${guard.stdout}${guard.stderr}`).toBe(2);
-    expect(guard.stderr).toMatch(/larger than 4194304 bytes/);
-    const tool = runSync(SETTINGS_TOOL, ['check', '--config', f.cfg, '--settings', f.settings]);
-    expect(tool.status, `settings tool configuration: ${tool.stdout}${tool.stderr}`).toBe(2);
-    expect(tool.stderr).toMatch(/larger than 4194304 bytes/);
-    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    writeFileSync(f.settings, JSON.stringify({ hooks: {} }) + pad, 'utf8');
-    const settings = runSync(SETTINGS_TOOL, ['check', '--settings', f.settings, '--pause-file', f.pause, '--hook', HOOK, '--python', PYBIN]);
-    expect(settings.status, `settings file: ${settings.stdout}${settings.stderr}`).toBe(2);
-    expect(settings.stderr).toMatch(/larger than 4194304 bytes/);
-    writeFileSync(f.settings, JSON.stringify({ hooks: {} }), 'utf8');
-    writeFileSync(f.cache, JSON.stringify({ timestamp: Date.now(), data: { fiveHourPercent: 99, fiveHourResetsAt: new Date(Date.now() + HOUR_MS).toISOString() } }) + pad, 'utf8');
-    const cache = runSync(GUARD, ['--config', f.cfg, '--once']);
-    expect(existsSync(f.pause), `an oversized usage cache is no reading: ${cache.stdout}${cache.stderr}`).toBe(false);
-  });
-
   it('the hook takes as a pause only what the guard would own: a regular file with v 2, paused true, numeric since, resume_at and valid_until and an integer pid', async () => {
     const f = fixture('hook-signature', {});
     const doc = () => pauseDoc({ pid: process.pid });

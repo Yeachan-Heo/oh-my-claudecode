@@ -309,10 +309,6 @@ The guard writes the state file (unpaused) first and removes the pause file afte
 - Only the Anthropic five-hour window is watched. The weekly limit is not.
 - The unit file is Linux only. The scripts were tested on Linux only.
 
-## File size limits
-
-The guard and the settings tool read no configuration file, usage cache, state file, pause file or `settings.json` larger than 4 MiB (they stop reading at that size, so a path replaced by a huge file cannot stall them or exhaust memory); the guard treats such a file like an unreadable one, and the settings tool refuses with exit 2. The guard refuses an `exclude` list longer than 64 KiB, so that the pause document stays far under the 1 MiB that the hook reads.
-
 ## False alarms
 
 The guard refuses to write its state, pause or log file when any word of the command of another hook (any event, or the status
