@@ -259,9 +259,12 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), option
     ? options.identities
     : processStartIdentities([...records.filter(({ record }) => !isForeignOwner(record)).map(({ record }) => record.pid), ...(options.includePids ?? [])]);
   for (const { path, record } of records) {
-    const currentIdentity = process.platform === 'win32'
-      ? currentIdentities.get(record.pid)
-      : processStartIdentity(record.pid);
+    // A record of another host or PID namespace is not probed: no local probe can judge its owner (the readers of the helper ask only for the others).
+    const currentIdentity = isForeignOwner(record)
+      ? null
+      : process.platform === 'win32'
+        ? currentIdentities.get(record.pid)
+        : processStartIdentity(record.pid);
     if (currentIdentity && currentIdentity !== record.processStartIdentity && !isForeignOwner(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     // A live process whose identity cannot be read (including EPERM) is retained
     // conservatively; only a proven-dead PID or proven mismatch self-invalidates.
