@@ -60,7 +60,8 @@ def entry_command(pause_file, hook, python, hook_log=None):
 def skip_wrappers(words):
     """The index of the command word in the words of a simple command: after the wrappers (exec, env, command, nohup, time, also written with a path), their options
     (`env -i`, `env -u NAME`, `exec -a NAME`, a lone `--` ends the options) and the NAME=VALUE assignments. A word that starts with `-` is
-    an option only after a wrapper, so a command word is never taken for one."""
+    an option only after a wrapper, so a command word is never taken for one. `command -v` and `command -V` run nothing: the index is
+    then the number of words (no command word)."""
     i, wrapper = 0, None
     while i < len(words):
         word = words[i]
@@ -71,6 +72,8 @@ def skip_wrappers(words):
         elif wrapper and word == '--':
             wrapper = None
         elif wrapper and len(word) > 1 and word[0] == '-':
+            if wrapper == 'command' and set(word[1:]) <= set('pVv') and set(word[1:]) & set('vV'):
+                return len(words)   # command -v and -V (alone or with -p) only describe what follows: no command is run
             i += 2 if word in WRAPPERS[wrapper] else 1   # the value of -u, -C, -S and the like is the next word
             continue
         else:

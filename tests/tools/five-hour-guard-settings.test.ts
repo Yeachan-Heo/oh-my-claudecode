@@ -575,6 +575,26 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
   });
 
+  it('command -v and command -V only describe the word after them: a handler that does so with the hook file is not our hook, command -p and command alone run it', () => {
+    const f = fixture('settings-command-v');
+    const hook = '/opt/five-hour-guard-hook.py';
+    const foreign = [`command -v ${hook}`, `command -V ${hook}`, `command -pv ${hook}`, `command -p -v ${hook}`, `command -vp ${hook}`, `command -v -- ${hook}`,
+      `command -v python3 ${hook} --pause-file /tmp/p`, `FOO=1 command -V ${hook} --pause-file /tmp/p`, `command -v ${hook}; command -v ${hook}`].map((command) => ({ type: 'command', command }));
+    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
+    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
+    for (const [k, command] of [`command ${hook} --pause-file /tmp/p`, `command -p ${hook} --pause-file /tmp/p`, `command -p python3 ${hook} --pause-file /tmp/p`, `exec command -- ${hook} --pause-file /tmp/p`].entries()) {
+      const g = fixture(`settings-command-run-${k}`);
+      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      expect(tool(g, 'check').status, `${command}: it runs the hook`).toBe(0);
+    }
+  });
+
   it('a command that runs the hook after a newline, a glued && or || with a newline, or a lone & is our hook: check reports it and remove takes it away', () => {
     const forms = (command: string) => [`true\n${command}`, `true;\n${command}`, `true &&\n${command}`, `false ||\n${command}`, `true &\n${command}`, `true & ${command}`, `echo a | cat\n\n${command}`];
     for (const k of forms('').keys()) {
