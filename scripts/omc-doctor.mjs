@@ -383,12 +383,15 @@ const hasManifest = (dir) =>
     }
   });
 // The version a registry entry names through its installPath: the last component when it is a version directory
-// name, else the manifest under it. '' without an installPath, null when the version found is not a semver.
+// name, else the manifest under it. The path as written is read first (installForms), and the spelling without the padding only
+// where the path as written names nothing. '' without an installPath, null when the version found is not a semver.
 const installPathVersion = (entry) => {
-  const installPath = typeof entry.installPath == 'string' ? entry.installPath.trim() : '';
-  if (!installPath) return '';
-  const last = installPath.split(/[\\/]+/).filter(Boolean).pop() || '';
-  return (isVersionDir(last) && semver(last)) || manifestVersion(installPath);
+  for (const installPath of installForms(entry.installPath)) {
+    const last = installPath.split(/[\\/]+/).filter(Boolean).pop() || '';
+    const version = (isVersionDir(last) && semver(last)) || manifestVersion(installPath);
+    if (version !== '') return version;
+  }
+  return '';
 };
 // The versions an entry names: its own version and the version its installPath names (installPathVersion), the ones that
 // are semantic versions. The two of one entry have to agree; where they do not and no manifest settles it, Step 1 does
@@ -486,13 +489,11 @@ const versionDirPaths = (market, version) =>
 const entryInstallPaths = (market, entry) =>
   [
     ...(typeof entry?.installPath == 'string' && entry.installPath.trim()
-      ? [entry.installPath]
+      ? installForms(entry.installPath)
       : typeof entry?.version == 'string' && entry.version.trim()
         ? versionDirPaths(market, entry.version.trim())
         : []),
-  ]
-    .filter((target) => typeof target == 'string' && target.trim())
-    .map((target) => target.trim());
+  ].filter((target) => typeof target == 'string' && target.trim());
 // The plugin root variables that name an existing directory, OMC_PLUGIN_ROOT (--plugin-dir) first. CLAUDE_PLUGIN_ROOT is
 // only a locator in Step 1: Claude Code sets it for marketplace installs too, so it names a checkout only when the
 // registry holds no supported plugin ID. The installer's resolver also counts a lone CLAUDE_PLUGIN_ROOT as an explicit

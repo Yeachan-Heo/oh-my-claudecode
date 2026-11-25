@@ -144,6 +144,25 @@ describe('omc-doctor Step 1 derives the plugin ID, channel and latest version fr
     }
   }, 120_000);
 
+  // A directory or a link whose name ends in a space is a real install: its path is read as written, and only where that names nothing is
+  // the spelling without the padding tried (the padded Windows spelling above).
+  test('an installPath whose last component ends in a space names the version of the manifest there, as a directory and as a link', () => {
+    if (process.platform === 'win32') return;
+    for (const kind of ['directory', 'link']) {
+      const out = step1({
+        plugins: (dir) => {
+          const installPath = path.join(dir, 'plugins', 'checkout ');
+          const real = kind === 'link' ? path.join(dir, 'plugins', 'real-checkout') : installPath;
+          mkdirSync(real, { recursive: true });
+          writeFileSync(path.join(real, 'package.json'), JSON.stringify({ version: '5.8.0' }));
+          if (kind === 'link') symlinkSync(real, installPath);
+          return { 'oh-my-claudecode@omc': [{ scope: 'user', installPath }] };
+        },
+      });
+      expect({ kind, Channel: out.Channel, Installed: out.Installed }).toEqual({ kind, Channel: 'marketplace omc', Installed: '5.8.0' });
+    }
+  });
+
   test('an installPath that names no version and has no metadata falls back to the cache of the marketplace', () => {
     const out = step1({ plugins: { 'oh-my-claudecode@omc': [{ installPath: '/nowhere/current' }] }, cache: { omc: ['5.7.0', '5.8.0'] } });
     expect(out.Installed).toBe('5.8.0');

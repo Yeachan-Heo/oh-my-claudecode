@@ -57,6 +57,21 @@ describe('omc-doctor: an explicit OMC_PLUGIN_ROOT inside plugins/cache', { timeo
     }
   });
 
+  // The registry names the install by a path whose directory name ends in a space and the variable names the same directory as written:
+  // that is the registry install, not a checkout of its own (the entry's path is compared as written, not as its padding-free sibling).
+  test('a registry install whose directory name ends in a space is the install when the variable names it as written, not a checkout', () => {
+    if (process.platform === 'win32') return;
+    const out = step1({
+      plugins: (dir) => {
+        makeRoot(dir, path.join('plugins', 'checkout '), { 'package.json': { version: '5.8.0' } });
+        return { 'oh-my-claudecode@omc': [{ scope: 'user', installPath: path.join(dir, 'plugins', 'checkout ') }] };
+      },
+      clone: { omc: '6.0.0' },
+      env: (dir) => ({ OMC_PLUGIN_ROOT: path.join(dir, 'plugins', 'checkout ') }),
+    });
+    expect({ Channel: out.Channel, Installed: out.Installed }).toEqual({ Channel: 'marketplace omc', Installed: '5.8.0' });
+  });
+
   // The registry cannot be read, so the cache directory cannot be told from the pinned install: the channel is unknown, not
   // a guess. Without any registry file there is nothing to tell it from, and the explicit root is the checkout.
   test('a root inside plugins/cache with a registry that cannot be read is unknown, with no registry at all it is the checkout', () => {
