@@ -653,16 +653,21 @@ fs.lstatSync = function (target, ...rest) {
   return real.call(this, target, ...rest);
 };
 `;
-  const registryAt = (command: string, kind: 'installPath of another plugin' | 'pin by path', spelling: 'as written' | 'upper case' | 'elsewhere', volume: 'fold' | 'plain') => {
-    const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+  const registryAt = (command: string, kind: 'installPath of another plugin' | 'pin by path' | 'pin by version', spelling: 'as written' | 'upper case' | 'elsewhere', volume: 'fold' | 'plain') => {
+    // A version that has letters, so that another letter case spells it differently.
+    const old = kind === 'pin by version' ? '5.8.0-rc1' : '5.8.0';
+    const { dir, cache } = makeCache([old, '5.9.0']);
     try {
       writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
       ageVersions(cache);
-      const named = spelling === 'as written' ? path.join(cache, '5.8.0') : spelling === 'upper case' ? upperBelow(dir, path.join(cache, '5.8.0')) : path.join(dir, 'elsewhere');
+      const version = spelling === 'as written' ? old : spelling === 'upper case' ? old.toUpperCase() : '4.0.0';
+      const named = spelling === 'as written' ? path.join(cache, old) : spelling === 'upper case' ? upperBelow(dir, path.join(cache, old)) : path.join(dir, 'elsewhere');
       const after =
-        kind === 'pin by path'
-          ? { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }, { scope: 'user', installPath: named }] }
-          : { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }], 'other-plugin@market': [{ scope: 'user', installPath: named }] };
+        kind === 'pin by version'
+          ? { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }, { scope: 'user', version }] }
+          : kind === 'pin by path'
+            ? { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }, { scope: 'user', installPath: named }] }
+            : { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }], 'other-plugin@market': [{ scope: 'user', installPath: named }] };
       const preload = path.join(dir, 'registry-after-move.cjs');
       writeFileSync(preload, registryAfterMove);
       const env = { BACKUPS: backupDir(dir), REGISTRY_AFTER: JSON.stringify({ version: 2, plugins: after }) };
@@ -672,25 +677,24 @@ fs.lstatSync = function (target, ...rest) {
       rmSync(dir, { recursive: true, force: true });
     }
   };
-  const kept = { status: 0, versions: '5.8.0,5.9.0', moved: 0, skipped: true };
+  // A pin by version alone names the directory by its name in the cache of every marketplace; the directory is gone after the move, so a name
+  // in another letter case than the directory is found only by its folded text.
+  const kinds = ['installPath of another plugin', 'pin by path', 'pin by version'] as const;
+  const kept = (kind: string) => ({ status: 0, versions: kind === 'pin by version' ? '5.8.0-rc1,5.9.0' : '5.8.0,5.9.0', moved: 0, skipped: true });
   const movedOn = { status: 0, versions: '5.9.0', moved: 1, skipped: false };
-  test('an installPath of another plugin written right after the move that spells the version in another letter case keeps it on a volume that ignores letter case', () => {
+  test('a registry entry written right after the move that spells the version in another letter case keeps it on a volume that ignores letter case: an installPath of another plugin, a pin by path alone, a pin by version alone', () => {
     for (const command of commands) {
-      expect({ command, ...registryAt(command, 'installPath of another plugin', 'upper case', 'fold') }).toEqual({ command, ...kept });
-      if (!folds) expect({ command, ...registryAt(command, 'installPath of another plugin', 'upper case', 'plain') }).toEqual({ command, ...movedOn });
+      for (const kind of kinds) {
+        expect({ command, kind, ...registryAt(command, kind, 'upper case', 'fold') }).toEqual({ command, kind, ...kept(kind) });
+        if (!folds) expect({ command, kind, ...registryAt(command, kind, 'upper case', 'plain') }).toEqual({ command, kind, ...movedOn });
+      }
     }
   });
-  test('a pin by path alone written right after the move that spells the version in another letter case keeps it on a volume that ignores letter case', () => {
+  test('a registry entry written right after the move keeps the version when it spells the path as written and moves it when it names nothing of the cache', () => {
     for (const command of commands) {
-      expect({ command, ...registryAt(command, 'pin by path', 'upper case', 'fold') }).toEqual({ command, ...kept });
-      if (!folds) expect({ command, ...registryAt(command, 'pin by path', 'upper case', 'plain') }).toEqual({ command, ...movedOn });
-    }
-  });
-  test('a registry entry written right after the move keeps the version when it spells the path as written and moves it when the path names nothing of the cache', () => {
-    for (const command of commands) {
-      for (const kind of ['installPath of another plugin', 'pin by path'] as const) {
+      for (const kind of kinds) {
         for (const volume of ['fold', 'plain'] as const) {
-          expect({ command, kind, volume, ...registryAt(command, kind, 'as written', volume) }).toEqual({ command, kind, volume, ...kept });
+          expect({ command, kind, volume, ...registryAt(command, kind, 'as written', volume) }).toEqual({ command, kind, volume, ...kept(kind) });
           expect({ command, kind, volume, ...registryAt(command, kind, 'elsewhere', volume) }).toEqual({ command, kind, volume, ...movedOn });
         }
       }

@@ -1245,7 +1245,8 @@ const protectionOf = (dir, versions, foldCase = false) => {
         const listed = space == dir && versions.find((x) => x === name);
         const written = space + path.sep + name;
         if (listed) pinPaths.push(path.join(dir, listed));
-        else if (identityOf(written) || lacksIdentity(written)) pinPaths.push(written);
+        // After a move on a volume that ignores letter case the directory is gone, and the name of a pin in another letter case is read by its folded text.
+        else if (identityOf(written) || lacksIdentity(written) || foldCase) pinPaths.push(written);
       }
     }
     pinPaths.push(...installForms(pin.installPath).flatMap(bothForms));
