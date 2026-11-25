@@ -283,71 +283,39 @@ def command_hooks(groups):
 MAX_COMMAND_CHARS = 65536   # a longer command is not read (the command of a hook is a few hundred characters)
 MAX_PATH_CHARS = 4096
 MAX_COMMAND_WORDS = 4096
-MAX_COMMAND_PROGRAMS = 64
+MAX_COMMAND_PROGRAMS = 4096
 PUNCTUATION = '();<>|&\n'
-INTERPRETER_NAME = re.compile(r'(python|pypy|node|nodejs|deno|bun|ruby|perl|php|lua|pwsh|powershell|tsx|ts-node|sh|bash|zsh|dash|ksh|ash|fish)[\d.]*(\.exe)?')
-SHELL_NAME = re.compile(r'(sh|bash|zsh|dash|ksh|ash|fish)(\.exe)?')
-NODE_NAME = re.compile(r'(node|nodejs)(\.exe)?')
-NODE_VALUE_OPTIONS = ('-r', '--require', '--import', '--loader', '--experimental-loader', '-C', '--conditions')   # the options of Node that take the next word as their value, a module or a condition (node --help)
-SCRIPT_SUFFIXES = ('.py', '.pyw', '.sh', '.bash', '.zsh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl', '.php', '.lua', '.ps1', '.bat', '.cmd')
 
 
-def program_path(word, command_word, search_path=None):
-    """The file a word of a command names, or None: a word with a directory part as written (with ~ and variables of this process expanded),
-    the command word without one as the PATH of the command resolves it (`search_path`, from an assignment before the command word; else
-    the PATH of the guard, as the wiring check does), any other bare word only when such a file is there (an option value or a plain
-    argument names no program)."""
+def word_files(word, directories):
+    """The files a word of a command can be: a word with a directory part is that path as written (with ~ and variables of this process
+    expanded); a word without one is the file of that name in each of `directories` (the working directory first, then the PATH) where there is one."""
     word = os.path.expanduser(os.path.expandvars(word))
     if not word or len(word) > MAX_PATH_CHARS or '\0' in word:
-        return None
+        return []
     if os.sep in word or (os.altsep and os.altsep in word):
-        return word
-    if command_word:
-        return shutil.which(word, path=search_path)
-    return word if os.path.isfile(word) else None
+        return [word]
+    found = []
+    for directory in directories:
+        try:
+            path = os.path.join(directory, word)
+            if os.path.lexists(path):
+                found.append(path)
+        except (OSError, ValueError):
+            pass
+    return found
 
 
-def executable_file(word):
-    """Whether a word names (as written, ~ and variables of this process expanded) a regular file with an execute bit. Such a word can be
-    what a command runs wherever it stands: behind if, then, do, !, sudo, nice, timeout, xargs, or an option with a glued value. A file with
-    no execute bit named as plain data (tail -n 5 guard.log) is not a program."""
-    path = os.path.expanduser(os.path.expandvars(word))
-    if not path or len(path) > MAX_PATH_CHARS or '\0' in path:
-        return False
-    try:
-        mode = os.stat(path).st_mode
-    except (OSError, ValueError):
-        return False
-    return stat.S_ISREG(mode) and bool(mode & 0o111)
-
-
-def interpreter_arguments(base, arguments):
-    """(whether the interpreter `base` is given code on its command line, its operands) for its `arguments`: the options are read only up to
-    the first operand, which is the script (python3 /opt/audit -c config passes -c to the script), and the value of an option that takes
-    one (-W and -X of a Python, -o and -O of a shell, -r and --require of Node) is no operand. Code is given with -e, -m or a letter c in a group of short options."""
-    options, operands, value = [], [], False
-    python, shell, node = re.fullmatch(ENTRY.PYTHON_NAME, base) is not None, SHELL_NAME.fullmatch(base) is not None, NODE_NAME.fullmatch(base) is not None
-    for w in arguments:
-        if value:
-            value = False   # the value of the option before it, not the script
-        elif w.startswith('-') or (shell and w in ('+o', '+O')):
-            if not operands:
-                options.append(w)
-                value = (python and w in ENTRY.PYTHON_VALUE_OPTIONS) or (shell and w in ('-o', '+o', '-O', '+O')) or (node and w in NODE_VALUE_OPTIONS)
-        else:
-            operands.append(w)
-    takes_code = any(o in ('-e', '-m') or ('c' in o[1:] and o[1:].isalpha()) for o in options if not o.startswith('--'))
-    return takes_code, operands
-
-
-def command_programs(command, depth=0, own=False):
-    """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
-    shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
-    (its first operand: not an option, and for a Python not the value of -W, -X or -Q, for Node not the value of -r or --require; the options are read up to it, not after it; none when it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep),
-    the file that `.` or `source` runs, the script of an interpreter behind a command that is not one (nice python3 audit) and a bare word behind it that the PATH of the command resolves (timeout 5 audit), any argument that is named like a script, and any word at all that names an executable file (see executable_file). Wrong or hostile text gives what could be read and never an error: a command that is
-    longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
-    and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out, apart from a wrapper with an executable file in front of the hook; the other simple
-    commands of such a handler are read, also one that only has the name of the hook among its arguments."""
+def command_programs(command, exclude=(), depth=0):
+    """The files that a shell command of a hook that is not ours may run or read, the same for every command and without knowing what any
+    word means (nothing is run, nothing is expanded by a shell): every word of the command, each word that is a quoted command (it holds a
+    blank: the words of an argument of -c or -S, two levels deep), the part of a word after its first `=` and the part after a short option that is glued to its value (`-SFILE`). A word with a directory part
+    stands for that path, a word without one for the file of that name in the working directory of the guard and in each directory of the
+    PATH of its simple command (an assignment PATH=dir in front of the command, else the PATH of the guard). The rule is deliberately wide:
+    a word that is no program at all (an argument, an option value) is a file the guard then does not write, and no program is missed by
+    not being recognised. Wrong or hostile text gives what could be read and never an error: a command that is longer than MAX_COMMAND_CHARS,
+    has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words. `exclude`: words that are not
+    candidates (the files that the registered entry of this guard names itself, see registered_runtime_files)."""
     if not isinstance(command, str) or len(command) > MAX_COMMAND_CHARS or '\0' in command:
         return []
     try:
@@ -360,14 +328,10 @@ def command_programs(command, depth=0, own=False):
                 break
     except Exception:
         return []   # a command the shell cannot parse runs nothing
-    simple, words, redirect = [], [], False
+    simple, words = [], []
     for token in tokens:
-        if redirect:
-            redirect = False   # the file of a redirection is no program
-        elif token and token[0] in PUNCTUATION:   # (an empty string is a word: '')
-            if '<' in token or '>' in token:
-                redirect = True
-            else:
+        if token and token[0] in PUNCTUATION:   # (an empty string is a word: '')
+            if '<' not in token and '>' not in token:   # the file of a redirection is a word like any other
                 simple.append(words)
                 words = []
         else:
@@ -375,62 +339,27 @@ def command_programs(command, depth=0, own=False):
     simple.append(words)
     found = []
     for words in simple:
-        if own and ENTRY.command_hook(words):   # the hook and its interpreter are read by the entry; a wrapper in front of them (/opt/env python3 hook) is a program the entry needs too
-            for w in words[:ENTRY.skip_wrappers(words)]:
-                try:
-                    path = program_path(w, False) if os.path.basename(w) in ENTRY.WRAPPERS and executable_file(w) else None
-                except Exception:
-                    path = None
-                if path and path not in found:
-                    found.append(path)
-            continue
-        i = ENTRY.skip_wrappers(words)
-        if depth < 2:   # env -S 'command': the string is a command (-S STRING, -SSTRING, --split-string STRING, --split-string=STRING, which GNU env also takes abbreviated)
-            for k in range(min(i, len(words))):
-                name, eq, value = words[k].partition('=')
-                if eq and name.startswith('--s') and '--split-string'.startswith(name):
-                    string = value
-                elif words[k] in ('-S', '--split-string') and k + 1 < i:
-                    string = words[k + 1]
-                elif words[k][:2] == '-S' and len(words[k]) > 2:
-                    string = words[k][2:]
-                else:
-                    continue
-                found += command_programs(string, depth + 1, own)
-        if i >= len(words):
-            continue
-        base = os.path.basename(words[i]).lower()
-        arguments = words[i + 1:]
-        takes_code, operands = interpreter_arguments(base, arguments)
-        search_path = ENTRY.command_path(words)   # a PATH given before the command word (PATH=dir cmd, env PATH=dir cmd) is where the command word is looked up
-        candidates = [(words[i], True)]
-        if not takes_code:   # with code on the command line the operands are its arguments
-            if (INTERPRETER_NAME.fullmatch(base) or base in ('.', 'source')) and operands:   # `. file` and `source file` run the file in the current shell
-                candidates.append((operands[0], False))
-            candidates += [(w, False) for w in operands if w.lower().endswith(SCRIPT_SUFFIXES)]
-        if not INTERPRETER_NAME.fullmatch(base):   # a command that runs the command after its own options (nice, timeout, sudo, xargs): an interpreter behind it runs its script
-            for k in range(i + 1, len(words)):
-                interpreter = os.path.basename(words[k]).lower()
-                if INTERPRETER_NAME.fullmatch(interpreter):
-                    behind_code, behind = interpreter_arguments(interpreter, words[k + 1:])
-                    if behind and not behind_code:
-                        candidates.append((behind[0], False))
-            candidates += [(w, True) for w in words[i + 1:] if w and not w.startswith('-') and os.sep not in w]   # nice, timeout, sudo, xargs run a bare word as a command: it is looked up on the PATH of the command
-        candidates += [(w, False) for w in words if executable_file(w)]   # the syntax around a command is not parsed: a word that names a file that can be run is a program wherever it stands
-        if takes_code and depth < 2 and SHELL_NAME.fullmatch(base):
-            for k in range(i + 1, len(words) - 1):
-                if words[k].startswith('-') and not words[k].startswith('--') and 'c' in words[k][1:]:
-                    found += command_programs(words[k + 1], depth + 1, own)
-                    break
-        for word, command_word in candidates:
-            try:
-                path = program_path(word, command_word, search_path)
-            except Exception:
-                path = None   # one word that cannot be resolved must not hide the others
-            if path and path not in found:
-                found.append(path)
-            if len(found) >= MAX_COMMAND_PROGRAMS:
-                return found
+        try:
+            search_path = ENTRY.command_path(words)
+        except Exception:
+            search_path = None
+        directories = [''] + (search_path if search_path is not None else os.environ.get('PATH', os.defpath)).split(os.pathsep)
+        for word in words:
+            if word in exclude:
+                continue
+            if depth < 2 and any(c.isspace() for c in word):
+                found += [t for t in command_programs(word, exclude, depth + 1) if t not in found]
+            pieces = [word]
+            if '=' in word:
+                pieces.append(word.partition('=')[2])   # --log=FILE, NAME=FILE
+            if word[:1] == '-' and word[1:2] not in ('-', '') and len(word) > 2:
+                pieces.append(word[2:])   # -SFILE, -oFILE: the value of a short option glued to it
+            for piece in pieces:
+                for path in word_files(piece, directories):
+                    if path not in found:
+                        found.append(path)
+        if len(found) >= MAX_COMMAND_PROGRAMS:
+            return found[:MAX_COMMAND_PROGRAMS]
     return found
 
 
@@ -475,13 +404,17 @@ def registered_runtime_files():
             data = json.load(f)
         entries = command_hooks(data.get('hooks', {}).get('PreToolUse', []))
         for _group, handler in entries:
-            try:   # a command that runs before or after the hook in the same handler is a program of another hook too
-                companions += [(OTHER_PROGRAM, t) for t in command_programs(handler['command'], own=True)]
+            named, parsed = (), False
+            try:   # one handler that cannot be parsed must not hide the ones after it
+                hooks, interpreters, logs, pauses, tests, launchers, paths = ENTRY.read_entry(handler['command'])
+                named, parsed = {*hooks, *interpreters, *logs, *pauses, *tests, *launchers}, True   # what the entry names itself by role is not a program of another hook
             except Exception:
                 pass
-            try:   # one handler that cannot be parsed must not hide the ones after it
-                hooks, interpreters, logs, _pauses, _tests, launchers, paths = ENTRY.read_entry(handler['command'])
+            try:   # a command that runs before or after the hook in the same handler is a program of another hook too
+                companions += [(OTHER_PROGRAM, t) for t in command_programs(handler['command'], named)]
             except Exception:
+                pass
+            if not parsed:
                 continue
             found += [('registered hook', t) for t in hooks]
             for t, search_path in [(x, None) for x in interpreters] + list(zip(launchers, paths)):   # a launcher is looked up on the PATH its entry gives it

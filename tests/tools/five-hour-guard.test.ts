@@ -1294,12 +1294,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(path), `${name} as ${key}: the program is intact`).toBe(`# the program ${name}\n`);
       }
     }
-    // the same interpreter as ours, the scripts of the guard itself, and the log as data (an argument of a program that is no interpreter, or of a script) are no collision
-    writeFileSync(join(tools, 'reader.py'), '# reads a log\n', 'utf8');
+    // the same interpreter as ours and the scripts of the guard itself are no collision
     writeFileSync(f.settings, JSON.stringify({
       hooks: {
-        PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `${PYBIN} ${scripts.audit}` }, { type: 'command', command: `${PYBIN} ${SETTINGS_TOOL} check` },
-          { type: 'command', command: `tail -n 5 ${f.log}` }, { type: 'command', command: `${PYBIN} ${join(tools, 'reader.py')} ${f.log} ${f.state}` }] }],
+        PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `${PYBIN} ${scripts.audit}` }, { type: 'command', command: `${PYBIN} ${SETTINGS_TOOL} check` }] }],
       },
     }), 'utf8');
     const quiet = start({});
@@ -1531,6 +1529,59 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('every word of the command of another hook is a file the guard does not write: php -c ini audit and PATH=dir . audit name /opt/audit and the audit in dir, whatever the program does with them', () => {
+    const forms: Array<[(dir: string, audit: string) => string, boolean]> = [[(_dir, audit) => `php -c /tmp/php.ini ${audit}`, false], [(_dir, audit) => `php -d display_errors=1 -f ${audit} -- arg`, false],
+      [(dir) => `PATH=${dir} . audit`, false], [(dir) => `PATH=${dir}:/usr/bin source audit`, false], [() => `. audit`, true], [(dir) => `PATH=${dir} nice -n 5 audit`, false]];
+    for (const [k, [form, onGuardPath]] of forms.entries()) {
+      const f = fixture(`every-word-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const bin = join(f.dir, 'hooks');
+      mkdirSync(bin);
+      const audit = join(bin, 'audit');   // no suffix and no execute bit: nothing but the rule that every word counts finds it
+      writeFileSync(audit, '# a program of another tool\n', 'utf8');
+      const command = form(bin, audit);
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once'], onGuardPath ? { env: { ...ENV, PATH: `${bin}:${process.env.PATH}` } } : {});
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      expect(readText(audit), `${command}: the file is intact`).toBe('# a program of another tool\n');
+      expect(existsSync(f.pause), `${command}: no pause was published`).toBe(false);
+    }
+  });
+
+  it('false alarm: a file of the guard that another hook names as a plain argument, as the value after =, or inside a quoted word is refused like a program; a state_file that no other command names ends the alarm', () => {
+    const f = fixture('false-alarm', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+    const forms: Array<[string, (path: string) => string]> = [['a plain argument of tail', (p) => `tail -n 5 ${p}`], ['an argument of a script', (p) => `${PYBIN} /x/reader.py ${p} /tmp/other`],
+      ['the value after =', (p) => `audit --output=${p}`], ['an assignment', (p) => `FOO=${p} audit`], ['a quoted word', (p) => `sh -c 'echo ${p} done'`], ['a word of a quoted string', (p) => `echo "${p} and more"`],
+      ['a glued option value', (p) => `audit -o${p}`], ['text after env --help', (p) => `env --help ${p}`], ['printf', (p) => `printf ${p} --pause-file /tmp/p`], ['an operand of --pause-file', (p) => `exec /bin/true --pause-file ${p}`]];
+    for (const key of ['state_file', 'pause_file', 'log_file']) {
+      for (const [name, form] of forms) {
+        const g = fixture(`false-alarm-${key}-${name.replaceAll(' ', '-')}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+        const mine = join(g.dir, 'named.json');
+        writeFileSync(g.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(g.pause, HOOK, PYBIN), timeout: 21600 }] },
+          { matcher: 'Bash', hooks: [{ type: 'command', command: form(mine) }] }] } }), 'utf8');
+        writeFileSync(g.cfg, JSON.stringify({ usage_cache: g.cache, pause_file: g.pause, state_file: g.state, log_file: g.log, settings_file: g.settings, [key]: mine }), 'utf8');
+        const r = runSync(GUARD, ['--config', g.cfg, '--once']);
+        expect(r.status, `${key} named as ${name}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${key} named as ${name}`).toContain(`"${key}" (${mine}) and "program of another hook" (${mine}) are the same file`);
+        expect(existsSync(mine), `${key} named as ${name}: nothing was written`).toBe(false);
+      }
+    }
+    // the way out that the README gives: paths of its own, which no other command names
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] },
+      { matcher: 'Bash', hooks: [{ type: 'command', command: `tail -n 5 ${f.state}` }, { type: 'command', command: `audit --output=${f.log} ${f.pause}` }] }] } }), 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'the paths are named by another command: refused').toBe(2);
+    const own = (name: string) => join(f.dir, name);
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: own('guard-own.pause'), state_file: own('guard-own.state'), log_file: own('guard-own.log'), settings_file: f.settings }), 'utf8');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(own('guard-own.pause'), HOOK, PYBIN), timeout: 21600 }] },
+      { matcher: 'Bash', hooks: [{ type: 'command', command: `tail -n 5 ${f.state}` }, { type: 'command', command: `audit --output=${f.log} ${f.pause}` }] }] } }), 'utf8');
+    const ok = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(ok.status, `${ok.stdout}${ok.stderr}`).toBe(0);
+    expect(readText(own('guard-own.log')), 'the guard ran').toMatch(/guard start/);
+  });
+
   it('the options of an interpreter end at its script: python3 audit -c config passes -c to the script, so audit (no suffix, no execute bit) is still a program of another hook; a shell still reads -c behind -o NAME', () => {
     const forms = [(audit: string) => `${PYBIN} ${audit} -c config`, (audit: string) => `${PYBIN} -I ${audit} -e x`, (audit: string) => `${PYBIN} -W ignore ${audit} -m mod`,
       (audit: string) => `sh ${audit} -c x`, (audit: string) => `node ${audit} -e x`, (audit: string) => `bash -o pipefail -c 'python3 ${audit}'`, (audit: string) => `bash -O extglob -c 'python3 ${audit}'`];
@@ -1568,13 +1619,15 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(existsSync(f.pause), `${command}: no pause was published`).toBe(false);
     }
     const f = fixture('behind-command-code', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
-    const data = join(f.dir, 'data');   // an argument of code given on the command line is data
+    const data = join(f.dir, 'data');   // an argument of code given on the command line: no program, but the guard does not tell, so it is a false alarm
     writeFileSync(data, 'data\n', 'utf8');
     const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
     writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `nice ${PYBIN} -c 'pass' ${data}` }] }] } }), 'utf8');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: data, log_file: f.log, settings_file: f.settings }), 'utf8');
     const r = runSync(GUARD, ['--config', f.cfg, '--once']);
-    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain(`"state_file" (${data}) and "program of another hook" (${data}) are the same file`);
+    expect(readText(data), 'the file is intact').toBe('data\n');
   });
 
   it('a command word is looked up on the PATH that the command gives it: PATH=dir audit, env PATH=dir audit and a PATH among other assignments name the program in dir, which the guard does not replace', () => {
@@ -2098,7 +2151,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const f = fixture('operand-only', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const pause = join(f.dir, 'five-hour-guard-hook.py.pause');
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
-    for (const command of [`exec /bin/true --pause-file ${pause}`, `/x/foreign-audit.py ${HOOK}`, `python3 /x/audit.py --target ${HOOK}`, `grep -c five-hour-guard-hook.py /var/log/audit.log`]) {
+    for (const command of [`/x/foreign-audit.py ${HOOK}`, `python3 /x/audit.py --target ${HOOK}`, `grep -c five-hour-guard-hook.py /var/log/audit.log`]) {
       writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
       expect(guardOnce(f).stdout, command).toMatch(/WARNING \(start\): hook five-hour-guard-hook\.py is NOT registered/);
     }
