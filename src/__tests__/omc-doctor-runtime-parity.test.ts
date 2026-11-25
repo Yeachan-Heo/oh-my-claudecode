@@ -38,11 +38,12 @@ function runtimeVersion(configDir: string, root: string, order: string[]): unkno
   return vm.runInNewContext(`${FUNCTIONS.map(source).join('\n')}\ngetPluginVersion()`, sandbox);
 }
 
+// Names of cache directories, among them one with a letter outside ASCII (written as an escape) and ones with trailing characters.
 const NAMES = [
   '5.9.0', '5.9.1', '5.10.0', '6.0.0-beta.1', '6.0.0-beta.2', '6.0.0-rc.1', '5.9.0+build', '5.9.0-beta.1+exp', '5.10.0-..', '5.10.0-',
   '5.10.0-a..b', '5.10.0-.a', '01.2.3', '5.09.0', '5.9.00', 'v5.9.0', '5.9', '5.9.0.0', '5.9.0-beta..1', '7.0.0-0', '7.0.0-alpha', '7.0.0-alpha.1',
   '7.0.0-1', '99999999999999999999.0.0', '5.99999999999999999999.0', '5.9.0.omc-stale-1', '5.9.0-beta.1.omc-stale-1', '1e3', '5.9.0 ', '5.9.0-Beta',
-  '5.9.0-b_1', '5.9.0-é', '0.0.1', '0.0.0', '10.0.0-0.3.7', '6.0.0-x.7.z.92', '6.0.0-x-y-z.--', '6.1.0+0.build', '6.2.0-alpha+001', '8.0.0--',
+  '5.9.0-b_1', '5.9.0-\u00e9', '0.0.1', '0.0.0', '10.0.0-0.3.7', '6.0.0-x.7.z.92', '6.0.0-x-y-z.--', '6.1.0+0.build', '6.2.0-alpha+001', '8.0.0--',
   '8.0.0-.', '5.8.0-rc.1', '5.8.1', '5.9.0-', '5.9.0+',
 ];
 const LOADED = '5.8.0';
