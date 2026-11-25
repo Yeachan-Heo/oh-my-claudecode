@@ -111,8 +111,8 @@ async function renameWithRetry(
   }
 }
 
-function writeAllSync(fd: number, content: string, label: string): void {
-  const bytes = Buffer.from(content, "utf-8");
+function writeAllSync(fd: number, content: string | Uint8Array, label: string): void {
+  const bytes = typeof content === "string" ? Buffer.from(content, "utf-8") : Buffer.from(content);
   let offset = 0;
   while (offset < bytes.length) {
     const written = fsSync.writeSync(fd, bytes, offset, bytes.length - offset);
@@ -446,12 +446,12 @@ export function atomicWriteSync(
  * Uses temp file + atomic rename pattern with fsync for durability.
  *
  * @param filePath Target file path
- * @param content String content to write
+ * @param content String content to write, or bytes that are written as they are
  * @throws Error if write operation fails
  */
 export function atomicWriteFileSync(
   filePath: string,
-  content: string,
+  content: string | Uint8Array,
   hooks?: AtomicWriteHooks,
   operations?: AtomicWriteOperations,
 ): void {
