@@ -154,4 +154,28 @@ describe.skipIf(process.platform === 'win32')('omc-doctor: Step 4 names the vers
       },
     ]);
   });
+
+  // Outside the omc cache the runtime reads the package of the loaded root whatever the registry says; a root that no entry holds is classified so too.
+  test('a loaded root outside omc is read through its own package, with or without a matching registry entry', () => {
+    compareWithRuntime([
+      {
+        label: 'a root outside omc whose registry entry moved on to a newer version',
+        build: (dir) => {
+          const cache = path.join(dir, 'plugins', 'cache', 'oh-my-claudecode', 'oh-my-claudecode');
+          makeVersion(cache, '5.8.0', '5.8.0');
+          makeVersion(cache, '5.9.0', '5.9.0');
+          return { root: path.join(cache, '5.8.0'), registry: { 'oh-my-claudecode@oh-my-claudecode': [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] } };
+        },
+      },
+      {
+        label: 'a root in the omc cache, a newer version cached',
+        build: (dir) => {
+          const cache = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+          makeVersion(cache, '5.8.0', '5.8.0');
+          makeVersion(cache, '5.9.0', '5.9.0');
+          return { root: path.join(cache, '5.8.0'), registry: { 'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0', installPath: path.join(cache, '5.8.0') }] } };
+        },
+      },
+    ]);
+  });
 });
