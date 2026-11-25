@@ -451,6 +451,23 @@ describe('the envelopes of the deliveries after a notification', () => {
       expect(grew, key).toBeLessThan(extra + 8);
     }
   });
+
+  it('with the token cascade a short copy is chosen when the blocks of the deliveries that it frees pay for the envelopes it adds, though its text alone costs more than the notification', async () => {
+    const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '64', OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
+    const many = Array.from({ length: 200 }, (_, k) => `The coordinator sent a message while you were working:\nd${k}`);
+    const report = row(note('Status: registry', `Report ${'r'.repeat(5000)}`), { handle: 'n1' });
+    const w = talk(30);
+    const list = [...w.slice(0, 3), ...LAUNCH, report, ...w.slice(3)];
+    const run = await compactRun(env, list, { tokens: 110000, deliver: { [list.indexOf(report)]: many }, score: 3 });
+    expect(run.record).toMatchObject({ result: 'jev', notifications: 1, cascade_pass: 'short_or_trace', kept_short: 1, traced: 0 });
+    // The target is below the tokens before and the short copy reaches it: the notification is not traced for the tokens it would give back beyond it.
+    expect(run.record.cascade_target_tokens).toBeLessThan(110000);
+    expect(run.record.tokens_after_pred).toBeLessThanOrEqual(run.record.cascade_target_tokens);
+    const kept = run.out.messages.find((m) => (m.text || '').includes('[notification shortened at compaction'));
+    expect(kept).toBeTruthy();
+    expect(kept.text).toContain('The coordinator sent a message while you were working');
+    expect(run.out.messages.some((m) => /^\[compacted\] background task notification/.test(m.text || ''))).toBe(false);
+  });
 });
 
 describe('the envelopes of the deliveries after a notification: the rows that build writes', () => {

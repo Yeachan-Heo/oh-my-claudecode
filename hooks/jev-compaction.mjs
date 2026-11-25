@@ -2437,7 +2437,13 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES,
     for (const c of free) {
       if (reached()) break;
       if (c.score < SHORT_COPY_MIN_SCORE) setKeep(c, 'trace');
-      else if (costs.get(c).short < costs.get(c).full) setKeep(c, 'short');
+      else if (c.resultChars > SHORT_CHARS) {
+        // The short copy stays when the decision takes tokens off the list as a whole, its text and the blocks it frees together: a notification rebuilt as a short copy
+        // brings the envelopes of its deliveries, which cost more than its text may save, and frees their blocks.
+        const before = left();
+        setKeep(c, 'short');
+        if (left() >= before) setKeep(c, 'full');
+      }
     }
   }
   if (!reached()) {
