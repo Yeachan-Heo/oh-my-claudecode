@@ -694,6 +694,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('an interpreter that is asked for help, its version or a syntax check ends without running a script: a handler that has the hook file after node --check, bash -n, perl -v and the like is not our hook (check, add, remove)', () => {
+    const hook = '/opt/five-hour-guard-hook.py';
+    const modes = ['node --check', 'node -c', 'nodejs --version', 'bash -n', 'bash --version', 'bash -D', 'sh -n', 'dash -n', 'zsh -n', 'ksh -n', 'fish --no-execute', 'perl -v', 'perl -h', 'ruby -c', 'ruby --version',
+      'php -l', 'php --version', 'deno --version', 'bun --version', 'env -i node --check', 'exec bash -n'];
+    for (const [k, mode] of modes.entries()) {
+      const f = fixture(`settings-no-run-${k}`);
+      const foreign = [{ type: 'command', command: `${mode} ${hook} --pause-file /tmp/p` }];
+      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+      expect(tool(f, 'check').status, `${mode}: not our hook`).toBe(1);
+      expect(tool(f, 'add').status, mode).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre, `${mode}: the foreign group stays whole, ours is next to it`).toHaveLength(2);
+      expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => h.command === foreign[0].command), `${mode}: the handler is kept`).toHaveLength(1);
+      expect(tool(f, 'remove').status, mode).toBe(0);
+      expect(readJson(f.settings).hooks.PreToolUse, `${mode}: remove takes only our hook`).toEqual([{ matcher: '*', hooks: foreign }]);
+    }
+    for (const [k, command] of ['node --no-warnings', 'bash -e', 'sh -e', 'perl -w', 'node', 'bash', 'perl', 'ruby', 'php'].map((c) => `${c} ${hook} --pause-file /tmp/p`).entries()) {
+      const g = fixture(`settings-no-run-ok-${k}`);
+      write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      expect(tool(g, 'check').status, `${command}: the interpreter runs the hook`).toBe(0);
+    }
+  });
+
   it('a Python that is given option values before the hook (-W ignore, -X dev, -Q, --check-hash-based-pycs) runs the hook behind them: check reports it and remove takes it away; a script in front of the hook file still makes it data', () => {
     const forms = (hook: string, pause: string) => [`${quote(PYBIN)} -W ignore ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -X dev ${hook} --pause-file ${pause}`,
       `${quote(PYBIN)} -W ignore -X dev -I ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -Q new ${hook} --pause-file ${pause}`,

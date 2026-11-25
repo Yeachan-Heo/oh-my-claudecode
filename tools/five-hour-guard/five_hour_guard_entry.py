@@ -20,7 +20,22 @@ WRAPPERS = {'exec': ('-a',), 'env': ('-u', '--unset', '-C', '--chdir', '-S', '--
             'time': ('-f', '--format', '-o', '--output')}
 INFO_WRAPPERS = ('env', 'nohup', 'time')   # the wrappers of WRAPPERS that print their help or version and exit with --help or --version, and then run nothing
 INFO_OPTIONS = ('--help', '--version')
-PYTHON_INFO_OPTIONS = ('-h', '-?', '--help', '-V', '-VV', '--version')   # the options of a Python that print and exit before it runs a script (python3 --help)
+# The options after which an interpreter ends without running the script that follows (help, version, syntax check): the whole basename of the
+# interpreter, then the options. From the help of the interpreters and each one run on a file that leaves a trace when it runs. node, bash, sh,
+# dash and perl were run here; ruby, php, deno, bun, zsh, ksh and fish were not installed and are taken from their documentation. Not in it,
+# because the script (or a BEGIN block of it) still runs: perl -c, ruby -v, lua -v, python -c and every shell option that runs commands.
+NO_RUN_OPTIONS = [
+    (PYTHON_NAME, ('-h', '-?', '--help', '-V', '-VV', '--version')),
+    (r'(node|nodejs)(\.exe)?', ('-c', '--check', '-h', '--help', '-v', '--version')),
+    (r'bash(\.exe)?', ('-n', '--help', '--version', '-D', '--dump-strings', '--dump-po-strings')),
+    (r'(sh|dash|ash|zsh|ksh)(\.exe)?', ('-n', '--help', '--version')),
+    (r'fish(\.exe)?', ('-n', '--no-execute', '-h', '--help', '-v', '--version')),
+    (r'perl[\d.]*', ('-v', '-V', '-h')),
+    (r'ruby[\d.]*', ('-c', '--version', '-h', '--help')),
+    (r'php[\d.]*', ('-l', '-v', '--version', '-h', '--help', '-?')),
+    (r'deno', ('-h', '--help', '-V', '--version')),
+    (r'bun', ('-h', '--help', '-v', '--version')),
+]
 PYTHON_VALUE_OPTIONS = ('-W', '-X', '-Q', '--check-hash-based-pycs')   # the options of a Python that take the next word as their value (python3 --help)
 SEPARATORS = ';&|\n'   # the characters of the operators that end a simple command (the parentheses and the redirections are not read here)
 MIN_TIMEOUT_S = 21600   # the longest pause the guard writes is about 20700 s (a reset time at most 5 h 15 min ahead plus a margin of at most 30 min)
@@ -185,10 +200,19 @@ def runs_script(word):
         return True
 
 
+def no_run_options(program):
+    """The options of the interpreter `program` (a command word) that end it without running a script, () for any other program."""
+    base = os.path.basename(program).lower()
+    for name, options in NO_RUN_OPTIONS:
+        if re.fullmatch(name, base):
+            return options
+    return ()
+
+
 def command_hook(words):
     """(hook, launcher) when the simple command `words` runs the hook of this guard, else None: the command word (after the wrappers) is
     the hook itself, or it is a Python (or another launcher that runs its first operand, when the command carries --pause-file, see runs_script) and the first argument that is no option or operand is the
-    hook (and the Python is not asked to print its help or version instead, or to run stdin with a lone `-`). A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
+    hook (and the interpreter is not asked to end without running it: help, version, syntax check, see NO_RUN_OPTIONS; a Python is not given a lone `-`, which runs stdin). A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
     words = expand_split_strings(words)
     operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
     first = skip_wrappers(words)
@@ -200,8 +224,9 @@ def command_hook(words):
     if python or ('--pause-file' in words and runs_script(words[first])):   # printf hook --pause-file only prints the path
         values = {i + 1 for i in range(first + 1, len(words)) if python and words[i] in PYTHON_VALUE_OPTIONS}   # -W ignore: `ignore` is no script
         args = [i for i in range(first + 1, len(words)) if i not in operands and i not in values and (not words[i].startswith('-') or (python and words[i] == '-'))]   # a lone - is the script operand of a Python (stdin)
-        if python and any(words[i] in PYTHON_INFO_OPTIONS and i not in values for i in range(first + 1, args[0] if args else len(words))):
-            return None   # python3 --help <hook>: Python prints its help and exits, the hook is not run
+        ends = no_run_options(words[first])
+        if any(words[i] in ends and i not in values for i in range(first + 1, args[0] if args else len(words))):
+            return None   # python3 --help <hook>, node --check <hook>: the interpreter ends without running the script
         if args and MARK in os.path.basename(words[args[0]]):
             return words[args[0]], words[first]   # the program that is asked to run the hook
     return None
