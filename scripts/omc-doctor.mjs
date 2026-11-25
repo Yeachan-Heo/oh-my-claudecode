@@ -1345,9 +1345,10 @@ const REPAIR_MESSAGES = {
 const cacheRepair = (kind) => {
   const messages = REPAIR_MESSAGES[kind];
   // One cache directory: print what is protected, move the free versions to the backup directory. Returns true when
-  // the whole command has to stop.
+  // the whole command has to stop. With check set it only reads and judges (the cache, its protection, the backup
+  // directory) and moves and prints nothing but a refusal, so that every cache is judged before any is touched.
   let moveStarted = false;
-  const cleanCache = (market, dir, lead) => {
+  const cleanCache = (market, dir, lead, check) => {
     let moved = 0;
     let skipped = 0;
     let fresh = 0;
@@ -1365,7 +1366,7 @@ const cacheRepair = (kind) => {
         return true;
       }
       const free = versions.filter((name) => !state.kept.includes(name));
-      if (state.kept.length) {
+      if (state.kept.length && !check) {
         console.log(lead + 'Kept protected cache versions (pinned in installed_plugins.json or in use by a running session):', state.kept.join(', '));
       }
       if (state.pinned.length && free.length) {
@@ -1389,6 +1390,7 @@ const cacheRepair = (kind) => {
           refuse(lead + 'Nothing moved: the backup directory ' + backups + (target.place == path.resolve(backups) ? '' : ' (really ' + target.place + ')') + ' is on another file system than the cache ' + dir + ', and a version cannot be moved across file systems; point plugins/backups at a directory on the cache file system, then run this again');
           return true;
         }
+        if (check) return false;
         const redirected = target.place != path.join(realPath(path.dirname(path.dirname(backups))), 'backups', 'oh-my-claudecode');
         moveStarted = true;
         fs.mkdirSync(target.place, { recursive: true });
@@ -1447,7 +1449,7 @@ const cacheRepair = (kind) => {
         if (future) {
           console.log(lead + 'Left', future, 'version(s) alone that have a modification date more than 5 minutes in the future (a wrong clock, or files extracted from an archive): check the dates, then run this again');
         }
-      } else {
+      } else if (!check) {
         console.log(lead + (state.pinned.length ? messages.allProtected : messages.noPin));
       }
     } catch (error) {
@@ -1485,8 +1487,12 @@ const cacheRepair = (kind) => {
   if (!caches.length) caches.push([markets[0], cacheDirOf(markets[0])]);
   if (registry.unreadable) refuse(stopUnreadable(registry.reason));
   else {
-    for (const [market, dir] of caches) {
-      if (cleanCache(market, dir, caches.length > 1 ? market + ': ' : '')) break;
+    // A cache that cannot be read or judged stops the command before the first move from any of them, not after the caches before it.
+    const lead = (market) => (caches.length > 1 ? market + ': ' : '');
+    if (!caches.some(([market, dir]) => cleanCache(market, dir, lead(market), true))) {
+      for (const [market, dir] of caches) {
+        if (cleanCache(market, dir, lead(market))) break;
+      }
     }
   }
   if (messages.footer) console.log(messages.footer);

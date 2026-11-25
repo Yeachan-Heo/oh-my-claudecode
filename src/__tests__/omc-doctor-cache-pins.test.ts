@@ -326,10 +326,9 @@ for (const name of ['statSync', 'readdirSync']) {
     });
 
     // A cache directory whose `stat` fails is still a cache directory: it must not drop out of the list, or the other
-    // marketplace would be cleaned while nothing says that this one was never looked at. The caches go by the name of
-    // the marketplace (oh-my-claudecode before omc), not by the order of the registry keys: a refusal ends the run, so what
-    // was cleaned before it must not depend on that order.
-    test('with two marketplaces, an unreadable cache directory is reported and stops the run instead of being skipped, whatever the order of the registry', () => {
+    // marketplace would be cleaned while nothing says that this one was never looked at. Every cache is read before the first move, so
+    // one that cannot be read moves nothing from the other, whichever of them comes first by name and whatever the order of the registry keys.
+    test('with two marketplaces, an unreadable cache directory is reported and stops the run before anything is moved, whatever the order of the registry', () => {
       const entries: Record<string, unknown> = { 'oh-my-claudecode@omc': [{ version: '5.9.0' }], 'oh-my-claudecode@oh-my-claudecode': [{ version: '5.8.0' }] };
       for (const command of commands) {
         for (const keys of [Object.keys(entries), Object.keys(entries).reverse()]) {
@@ -341,15 +340,10 @@ for (const name of ['statSync', 'readdirSync']) {
               const broken = fails === 'omc' ? cache : other;
               const rules = (['statSync', 'readdirSync'] as const).map((fn) => ({ fn, path: broken, code: 'EACCES' }));
               const result = runCommand(command, dir, { preloads: [failing(dir, rules)] });
-              // The marketplace that comes first by name is cleaned before the one that fails after it, and nothing follows one that fails first.
-              const cleaned = fails === 'omc';
               expect({ keys, fails, status: result.status, first: digitVersions(cache), second: digitVersions(other), moved: movedAside(dir) })
-                .toEqual({ keys, fails, status: 1, first: '5.8.0,5.9.0', second: cleaned ? '5.8.0' : '5.7.0,5.8.0', moved: cleaned ? 1 : 0 });
-              // After a move the failure is reported as a failed move (the count is the one of the cache that failed).
-              if (cleaned) expect(result.stdout).toMatch(/^omc: Cache move failed \(0 moved before the error\): EACCES/m);
-              else expect(result.stdout).toContain(`oh-my-claudecode: Nothing moved: could not read ${broken} (EACCES)`);
-              expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean/);
-              expect({ keys, fails, moved: /Moved/.test(result.stdout) }).toEqual({ keys, fails, moved: cleaned });
+                .toEqual({ keys, fails, status: 1, first: '5.8.0,5.9.0', second: '5.7.0,5.8.0', moved: 0 });
+              expect(result.stdout).toContain(`${fails}: Nothing moved: could not read ${broken} (EACCES)`);
+              expect(result.stdout).not.toMatch(/No plugin cache found|No cache to clean|Moved|Cache move failed/);
             } finally {
               rmSync(dir, { recursive: true, force: true });
             }

@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { commands, runCommand, digitVersions, movedAside, makeCache, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { commands, runCommand, digitVersions, movedAside, makeCache, addCache, writeRegistryFile, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 describe('omc-doctor cache commands on a synthetic config directory (the order of the checks)', { timeout: 120_000 }, () => {
   // The result must not depend on the order in which the registry, the namespace and the cache are looked at: a registry
@@ -92,5 +92,43 @@ describe('omc-doctor cache commands on a synthetic config directory (the order o
         }
       }
     });
+  });
+
+  // The cache of every namespace the registry names is read, with its protection, before the first version is moved: a later cache that
+  // cannot be read (here its expected directory is a regular file) means nothing is moved from an earlier one that can.
+  test('a cache that cannot be read in a later namespace stops the command before a version of an earlier namespace is moved', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.7.0', '5.8.0'], 'oh-my-claudecode');
+      try {
+        const other = path.join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        mkdirSync(path.dirname(other), { recursive: true });
+        writeFileSync(other, 'not a directory');
+        writeRegistry(dir, {
+          'oh-my-claudecode@oh-my-claudecode': [{ scope: 'user', version: '5.8.0' }],
+          'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0' }],
+        });
+        const result = runCommand(command, dir);
+        expect({ command, status: result.status, versions: digitVersions(cache), moved: movedAside(dir), said: /Nothing moved: could not read .*ENOTDIR/.test(result.stdout + result.stderr) }).toEqual({ command, status: 1, versions: '5.7.0,5.8.0', moved: 0, said: true });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('every namespace the registry names is still cleaned when all of their caches can be read', () => {
+    for (const command of commands) {
+      const { dir, cache } = makeCache(['5.7.0', '5.8.0'], 'oh-my-claudecode');
+      try {
+        const other = addCache(dir, ['5.7.0', '5.8.0'], 'omc');
+        writeRegistry(dir, {
+          'oh-my-claudecode@oh-my-claudecode': [{ scope: 'user', version: '5.8.0' }],
+          'oh-my-claudecode@omc': [{ scope: 'user', version: '5.8.0' }],
+        });
+        const result = runCommand(command, dir);
+        expect({ command, status: result.status, versions: [digitVersions(cache), digitVersions(other)], moved: movedAside(dir) }).toEqual({ command, status: 0, versions: ['5.8.0', '5.8.0'], moved: 2 });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
   });
 });

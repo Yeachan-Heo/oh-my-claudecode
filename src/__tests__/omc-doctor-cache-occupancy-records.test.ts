@@ -51,6 +51,29 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     }
   });
 
+  // Two machines on a shared profile can report the same host name and the same PID namespace text (the namespace of init is the same everywhere
+  // on Linux); a record of one, read on the other, must still be foreign, or the local "no such process" would prove its owner gone.
+  test('a record of a machine with the same host name and PID namespace text but another machine id is foreign, in the runtime helper and in the doctor', () => {
+    const lib = readFileSync(path.join(ROOT, 'scripts', 'lib', 'cache-occupancy.mjs'), 'utf8');
+    const libSource = lib.slice(lib.indexOf('function placeId()'), lib.indexOf('function alive(')).replace('export function', 'function');
+    const doctorSource = scriptText.slice(scriptText.indexOf('const placeId = '), scriptText.indexOf('// A record is ignored only when')).replace(/^const (\w+) = /gm, 'var $1 = ');
+    const machine = (id: string) => {
+      const readFileSync = (file: string) => { if (file !== '/etc/machine-id') throw new Error('no such file'); return `${id}\n`; };
+      const readlinkSync = () => 'pid:[4026531836]';
+      const hostname = () => 'build-host';
+      return { lib: { readFileSync, readlinkSync, hostname }, doctor: { fs: { readFileSync, readlinkSync }, os: { hostname } } };
+    };
+    const a = machine('id-of-machine-a');
+    const b = machine('id-of-machine-b');
+    for (const side of ['lib', 'doctor'] as const) {
+      const source = side === 'lib' ? libSource : doctorSource;
+      const placeOf = (m: typeof a) => vm.runInNewContext(`${source}\nplaceId()`, m[side]) as string;
+      const foreignOn = (m: typeof a, record: unknown) => vm.runInNewContext(`${source}\nisForeignOwner(record)`, { ...m[side], record }) as boolean;
+      const fromA = { host: placeOf(a) };
+      expect({ side, onA: foreignOn(a, fromA), onB: foreignOn(b, fromA) }).toEqual({ side, onA: false, onB: true });
+    }
+  });
+
   test('an occupancy record protects a version only while its owner is not proven gone, and the commands never delete a record', () => {
     for (const command of commands) {
       for (const { label, write, expected, eperm } of occupancyCases) {
