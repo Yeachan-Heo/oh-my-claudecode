@@ -1419,6 +1419,27 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a command word is looked up on the PATH that the command gives it: PATH=dir audit, env PATH=dir audit and a PATH among other assignments name the program in dir, which the guard does not replace', () => {
+    // the last form finds the program only through $PATH, which is the PATH of the guard (it is put in front of the PATH of the guard here)
+    const forms: Array<(dir: string) => string> = [(dir) => `PATH=${dir} audit`, (dir) => `env PATH=${dir} audit`, (dir) => `FOO=1 PATH=${dir}:/usr/bin audit`,
+      (dir) => `PATH=${dir}:$PATH audit`, (dir) => `exec env -i PATH=${dir} audit`, () => 'PATH=$PATH:/nonexistent audit'];
+    for (const [k, form] of forms.entries()) {
+      const f = fixture(`inline-path-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      const bin = join(f.dir, 'hooks');
+      mkdirSync(bin);
+      const audit = join(bin, 'audit');   // not on the PATH of the guard: only the PATH of the command finds it
+      writeFileSync(audit, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: form(bin) }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const r = runSync(GUARD, ['--config', f.cfg, '--once'], k === forms.length - 1 ? { env: { ...ENV, PATH: `${bin}:${process.env.PATH}` } } : {});
+      expect(r.status, `${form('DIR')}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, form('DIR')).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      expect(readText(audit), `${form('DIR')}: the program is intact`).toBe('#!/bin/sh\nexit 0\n');
+      expect(existsSync(f.pause), `${form('DIR')}: no pause was published`).toBe(false);
+    }
+  });
+
   it('a program behind the options of env, exec, command and time, and behind the separators, groups, keywords and wrappers of a shell command, is found', () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);

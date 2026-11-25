@@ -291,17 +291,18 @@ PYTHON_VALUE_OPTIONS = ('-W', '-X', '-Q', '--check-hash-based-pycs')   # the opt
 SCRIPT_SUFFIXES = ('.py', '.pyw', '.sh', '.bash', '.zsh', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl', '.php', '.lua', '.ps1', '.bat', '.cmd')
 
 
-def program_path(word, command_word):
+def program_path(word, command_word, search_path=None):
     """The file a word of a command names, or None: a word with a directory part as written (with ~ and variables of this process expanded),
-    the command word without one as the PATH of the guard resolves it (as the wiring check does), any other bare word only when such a
-    file is there (an option value or a plain argument names no program)."""
+    the command word without one as the PATH of the command resolves it (`search_path`, from an assignment before the command word; else
+    the PATH of the guard, as the wiring check does), any other bare word only when such a file is there (an option value or a plain
+    argument names no program)."""
     word = os.path.expanduser(os.path.expandvars(word))
     if not word or len(word) > MAX_PATH_CHARS or '\0' in word:
         return None
     if os.sep in word or (os.altsep and os.altsep in word):
         return word
     if command_word:
-        return shutil.which(word)
+        return shutil.which(word, path=search_path)
     return word if os.path.isfile(word) else None
 
 
@@ -383,6 +384,10 @@ def command_programs(command, depth=0, own=False):
                 value = not operands and w in PYTHON_VALUE_OPTIONS and re.fullmatch(ENTRY.PYTHON_NAME, base) is not None
             else:
                 operands.append(w)
+        search_path = None   # a PATH given before the command word (PATH=dir cmd, env PATH=dir cmd) is where the command word is looked up
+        for w in words[:i]:
+            if w.startswith('PATH='):
+                search_path = os.path.expandvars(w[5:])
         candidates = [(words[i], True)]
         if not takes_code:   # with code on the command line the operands are its arguments
             if INTERPRETER_NAME.fullmatch(base) and operands:
@@ -396,7 +401,7 @@ def command_programs(command, depth=0, own=False):
                     break
         for word, command_word in candidates:
             try:
-                path = program_path(word, command_word)
+                path = program_path(word, command_word, search_path)
             except Exception:
                 path = None   # one word that cannot be resolved must not hide the others
             if path and path not in found:
