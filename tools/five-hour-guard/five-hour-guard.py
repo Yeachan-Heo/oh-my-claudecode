@@ -28,7 +28,7 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
+import argparse, datetime, fnmatch, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
 
 try:
     import fcntl
@@ -352,13 +352,27 @@ def command_tokens(command):
     return tokens
 
 
-PARAMETER = re.compile(r'\$(?:(\w+)|\{(\w+)(?:(:?[-=+])([^{}]*))?\})')   # $NAME, ${NAME}, ${NAME:-word} (also -, =, :=, + and :+)
+PARAMETER = re.compile(r'\$(?:(\w+)|\{(\w+)(?:(:?[-=+?]|%%?|##?)([^{}]*))?\})')   # $NAME, ${NAME}, ${NAME:-word} (also -, =, :=, +, :+, ?, :?, % and %%, # and ##)
 
 
 def own_value(name, value):
     """The value assigned to NAME with the references to NAME itself (`PATH=dir:$PATH`) replaced by the value that the guard has, else by the
     default word, else by nothing: they name the value before the assignment, so they are no cycle."""
     return PARAMETER.sub(lambda m: (os.environ.get(name) or m.group(4) or '') if (m.group(1) or m.group(2)) == name else m.group(0), value)
+
+
+def trimmed_values(values, operator, pattern):
+    """Each value, and each cut of it that the pattern of `${NAME%pattern}`, `%%`, `#` or `##` can remove (from the end for `%`, from the start for
+    `#`; the shortest and the longest are not told apart, a shell pattern is matched as fnmatch matches it)."""
+    found = []
+    for value in values:
+        found.append(value)
+        for i in range(len(value) + 1):
+            if operator[0] == '%' and fnmatch.fnmatchcase(value[i:], pattern):
+                found.append(value[:i])
+            if operator[0] == '#' and fnmatch.fnmatchcase(value[:i], pattern):
+                found.append(value[i:])
+    return list(dict.fromkeys(found))
 
 
 def parameter_variants(piece, assigned):
@@ -378,7 +392,12 @@ def parameter_variants(piece, assigned):
             for m in matches:
                 name, operator, word = m.group(1) or m.group(2), m.group(3), m.group(4)
                 values = assigned.get(name, []) + ([os.environ[name]] if name in os.environ else [])
-                options.append([word, ''] if operator in ('+', ':+') else (values + [word] if operator else values) or [m.group(0)])
+                if operator in ('+', ':+'):
+                    options.append([word, ''])
+                elif operator in ('%', '%%', '#', '##'):
+                    options.append(trimmed_values(values, operator, word) or [m.group(0)])
+                else:   # ${NAME?word} gives the value or ends the command: nothing is left to run, so the text stays as written
+                    options.append((values + [word] if operator in ('-', ':-', '=', ':=') else values) or [m.group(0)])
             for choice in itertools.islice(itertools.product(*options), MAX_COMMAND_PROGRAMS + 1):
                 parts, last = [], 0
                 for m, value in zip(matches, choice):

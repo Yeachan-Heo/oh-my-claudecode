@@ -2103,6 +2103,46 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(long.stderr).toMatch(/is not read to its end/);
   });
 
+  it('the suffix and prefix operators of a parameter (%, %%, #, ##, with patterns) cut the value the way a shell does, and every cut that the pattern can make is a file the guard never writes: ${NAME?word} gives the value, an unset name stays as written', () => {
+    const f = fixture('foreign-trimmed-parameters', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(join(hooks, 'sub'), { recursive: true });
+    const text = '# the script that the command runs\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string, env: Record<string, string>) => JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    // [the value of FHG_A, the expression, the file it makes]; what a shell makes of each is asked of sh below
+    const cases: Array<[string, string, string]> = [
+      [`${hooks}/audit.py`, '${FHG_A%.py}', join(hooks, 'audit')], [`${hooks}/audit.tar.gz`, '${FHG_A%.*}', join(hooks, 'audit.tar')],
+      [`${hooks}/audit.tar.gz`, '${FHG_A%%.*}', join(hooks, 'audit')], [`${hooks}/audit`, '${FHG_A%.zzz}', join(hooks, 'audit')],
+      [`${hooks}/sub/audit`, '${FHG_A#*/hooks/}', join(hooks, 'sub', 'audit')], [`${hooks}/sub/audit`, '${FHG_A##*/}', join(hooks, 'audit')],
+      [`${hooks}/audit`, '${FHG_A?missing}', join(hooks, 'audit')], [`${hooks}/audit`, '${FHG_A:?missing}', join(hooks, 'audit')],
+    ];
+    for (const [value, expression, file] of cases) {
+      const sh = spawnSync('sh', ['-c', `FHG_A='${value}'; printf %s "${expression}"`], { encoding: 'utf8' });
+      const made = sh.stdout;
+      // the files that a shell makes: the whole path, or a bare word that a cd to the directory of the file resolves
+      expect(made === file || file === join(hooks, made), `sh makes ${made} of ${expression}`).toBe(true);
+      writeFileSync(file, text, 'utf8');
+      const command = made === file ? `python3 "${expression}"` : `cd ${hooks}; python3 "${expression}"`;
+      writeFileSync(f.settings, settings(command, { FHG_A: value }), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: file });
+        expect(r.status, `${expression} of ${value} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a cut that no pattern makes names nothing; a name nobody sets stays as written
+    writeFileSync(f.settings, settings('python3 "${FHG_A%.py}"', { FHG_A: `${hooks}/other.py` }), 'utf8');
+    expect(start({ state_file: join(hooks, 'audit') }).status, 'the cut names another file').toBe(0);
+    writeFileSync(f.settings, settings('python3 "${FHG_NOBODY%.py}" "${FHG_NOBODY#x}"', {}), 'utf8');
+    expect(start({ state_file: join(hooks, 'audit') }).status, 'a name that is not set').toBe(0);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
