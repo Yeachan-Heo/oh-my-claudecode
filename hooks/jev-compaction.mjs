@@ -1434,6 +1434,9 @@ function sourceUnknown(text, outputs) {
 // that no block follows (only its own line between them) is a notification without a task, so 'unknown' too: a row of envelopes may hold one next to a block.
 const NOTE_MARKER = DELIVERY_NOTES[0];
 const NOTE_BLOCK_OPEN = /<task-notification[\s>]/g;
+// What a notification block holds before its <summary> and its <result>: its own metadata (the task id, the output file, the status). The summary and the result are the
+// words of the task and may quote the source of another notification, so the source is read from here and nowhere else in the block.
+const noteHead = (block) => { const at = block.search(/<(?:summary|result)>/); return at < 0 ? block : block.slice(0, at); };
 function sourceByTask(text, outputs) {
   let worst = 'known';
   let at = 0;
@@ -1448,7 +1451,7 @@ function sourceByTask(text, outputs) {
     if (!open) break;
     const close = text.indexOf('</task-notification>', open.index);
     const end = close < 0 ? text.length : close + '</task-notification>'.length;
-    const block = text.slice(open.index, end);
+    const block = noteHead(text.slice(open.index, end));
     blocks++;
     at = end;
     // A block names one task, a shortened one (its ids are kept) may name several.
