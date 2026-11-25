@@ -498,6 +498,67 @@ describe('omc-doctor: Steps 4 and 6 follow the marketplace of the supported regi
       }
     });
 
+    // getLatestPluginCacheVersion (scripts/session-start.mjs) counts a cache directory only when its name is digits.digits.digits with an
+    // optional -prerelease (no build metadata) and its package.json names exactly that name; Step 4 names the same newest version.
+    test.skipIf(process.platform === 'win32')('Step 4 takes the newest cached version by the cache name rule of the runtime', () => {
+      const cases: Array<{ label: string; siblings: string[]; marker: string; latest: string; verdict: string }> = [
+        { label: 'build metadata is no cached version', siblings: ['5.9.0+build'], marker: OLD, latest: OLD, verdict: MATCH },
+        { label: 'build metadata beside a real older version', siblings: ['5.9.0+build', '5.8.5'], marker: '5.8.5', latest: '5.8.5', verdict: MATCH },
+        { label: 'a prerelease is a cached version', siblings: ['5.9.0-beta.1'], marker: '5.9.0-beta.1', latest: '5.9.0-beta.1', verdict: MATCH },
+      ];
+      for (const { label, siblings, marker, latest, verdict } of cases) {
+        const dir = fresh();
+        try {
+          const cache = addCache(dir, [OLD, ...siblings], 'omc');
+          const root = path.join(cache, OLD);
+          writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD, installPath: root }] });
+          expect({ label, out: claudeMdAt(dir, marker, 'linux', { CLAUDE_PLUGIN_ROOT: root }) }).toEqual({ label, out: [`Latest cached plugin version: ${latest}`, verdict] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    // getPluginVersion returns pkg?.version whatever its type; the marker is compared with it strictly, so a version that is no string
+    // (a damaged package.json) is never the marker and is reported as drift, not replaced by an older cached version.
+    test.skipIf(process.platform === 'win32')('a loaded package whose version is no string is drift against any marker, for a managed and for an external root', () => {
+      for (const raw of [580, { major: 5 }, true]) {
+        for (const kind of ['managed', 'external']) {
+          const dir = fresh();
+          try {
+            const cache = addCache(dir, ['5.7.0'], 'omc');
+            const root = kind == 'managed' ? path.join(cache, OLD) : path.join(dir, 'external');
+            mkdirSync(root, { recursive: true });
+            writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claudecode', version: raw }));
+            writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD, installPath: root }] });
+            for (const marker of ['5.7.0', OLD]) {
+              expect({ raw, kind, marker, out: claudeMdAt(dir, marker, 'linux', { CLAUDE_PLUGIN_ROOT: root }) }).toEqual({ raw, kind, marker, out: [`Latest cached plugin version: ${JSON.stringify(raw)}`, DRIFT] });
+            }
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+    });
+
+    // A falsy version in the loaded package (empty, null, false, 0) is no version at runtime (pkg?.version || null), so the cached versions
+    // decide, as for a package without a version.
+    test.skipIf(process.platform === 'win32')('a falsy version in the loaded package leaves the decision to the cached versions', () => {
+      for (const raw of ['', null, false, 0]) {
+        const dir = fresh();
+        try {
+          const cache = addCache(dir, ['5.7.0'], 'omc');
+          const root = path.join(cache, OLD);
+          mkdirSync(root, { recursive: true });
+          writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'oh-my-claudecode', version: raw }));
+          writeRegistry(dir, { [OMC]: [{ scope: 'user', version: OLD, installPath: root }] });
+          expect({ raw, out: claudeMdAt(dir, '5.7.0', 'linux', { CLAUDE_PLUGIN_ROOT: root }) }).toEqual({ raw, out: ['Latest cached plugin version: 5.7.0', MATCH] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
     // extractOmcVersion takes the first marker in the exact form wherever a variant spelling stands; the version shown and its exactness
     // belong to one match, so a variant that equals the cache cannot hide that the marker the runtime reads is another one.
     test.skipIf(process.platform === 'win32')('with several markers in one file the exact one decides, as in the runtime, wherever a variant stands', () => {

@@ -273,9 +273,14 @@ const registryMarketplaces = () => {
 // cannot be read.
 // complete: only a directory whose package.json names exactly that version counts, as the runtime counts a cached version
 // (getLatestPluginCacheVersion): a half-written directory is no version there.
+// The directory names the runtime counts as cached versions (getLatestPluginCacheVersion): digits.digits.digits with an optional
+// -prerelease, no build metadata; the doctor uses this filter where it names the version to compare with a marker, and still leaves
+// out a recovery directory of an interrupted relink (a copy that is no installed version).
+const RUNTIME_CACHE_NAME = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
 const highestCached = (dir, complete = false) => {
   try {
-    const names = versionDirs(dir).sort(compareVersions);
+    const listed = complete ? fs.readdirSync(dir).filter((name) => RUNTIME_CACHE_NAME.test(name) && !/[.]omc-stale-[0-9]+(?![^])/.test(name)) : versionDirs(dir);
+    const names = listed.sort(compareVersions);
     if (complete) {
       for (let i = names.length - 1; i >= 0; i--) {
         try {
@@ -301,6 +306,17 @@ const manifestVersion = (dir) => {
   }
   return '';
 };
+// The version getPluginVersion (scripts/session-start.mjs) takes from the package of the loaded root: pkg?.version when it is truthy,
+// whatever its type (a damaged package.json may hold a number or an object); '' for no package, an unreadable one or a falsy version.
+const loadedPackageVersion = (root) => {
+  try {
+    return readJson([root, 'package.json'].join(path.sep)).version || '';
+  } catch {
+    return '';
+  }
+};
+// How a version of any type is printed: a string as written, anything else as JSON.
+const shownVersion = (version) => (typeof version == 'string' ? version : JSON.stringify(version));
 // Whether a directory holds a manifest file (a regular file, as in readFile): one that names no usable version is
 // told apart from no manifest at all.
 // A manifest that is a link to nothing, or that cannot be read, is there and holds no usable version.
@@ -734,6 +750,9 @@ const claudeMdVersion = () => {
   let pluginVersion = '(none)';
   // The version of a package the runtime compares with the marker as written, not by its bare form.
   let literal = false;
+  // The package of the loaded root names a version that is no string: the runtime returns it as it is and its strict comparison with
+  // the marker (a string) always reports drift.
+  let notString = false;
   // A registry that cannot be used (as in Step 1) leaves open which marketplace the session runs, and a cache that cannot be
   // read may hold the newest version, so no version is named while either is unreadable.
   const registryUnusable = registry.unreadable || (registry.supported.length > 0 ? registry.malformed : registry.ambiguous);
@@ -782,24 +801,18 @@ const claudeMdVersion = () => {
     // The matched root lies outside the managed cache (a registered external install): the runtime reads the package of that root,
     // so its manifest names the version, not the highest cache beside it.
     // The runtime compares the raw version of that package with the marker (getPluginVersion), so it is kept as written.
-    try {
-      const raw = readJson([loadedRoot, 'package.json'].join(path.sep)).version;
-      pluginVersion = typeof raw == 'string' && raw.trim() ? raw : '(unknown)';
-    } catch {
-      pluginVersion = '(unknown)';
-    }
+    const raw = loadedPackageVersion(loadedRoot);
+    pluginVersion = raw ? shownVersion(raw) : '(unknown)';
+    notString = !!raw && typeof raw != 'string';
   } else if (running.length) {
     const latest = running.map(latestIn).filter(Boolean).sort(compareVersions).pop() || '';
     // The runtime (getPluginVersion) keeps the raw package version of the root it loaded unless a complete cached version is
     // newer: a managed root refreshed in place may hold a package version other than its directory name, and that root is no
     // cached version by its name.
-    let loaded = '';
-    try {
-      const raw = readJson([loadedRoot, 'package.json'].join(path.sep)).version;
-      if (typeof raw == 'string' && raw.trim()) loaded = raw;
-    } catch {}
-    if (loaded && !(latest && semver(loaded) && !sameVersion(latest, loaded) && compareVersions(latest, loaded) > 0)) {
-      pluginVersion = loaded;
+    const loaded = loadedPackageVersion(loadedRoot);
+    if (loaded && !(latest && typeof loaded == 'string' && semver(loaded) && !sameVersion(latest, loaded) && compareVersions(latest, loaded) > 0)) {
+      pluginVersion = shownVersion(loaded);
+      notString = typeof loaded != 'string';
       literal = true;
     } else {
       pluginVersion = latest || '(none)';
@@ -831,7 +844,7 @@ const claudeMdVersion = () => {
     console.log('VERSION CHECK SKIPPED: which plugin install the session runs is unknown (the file system gives no identity to a plugin root or an install path), so no cache is chosen');
   } else if (claudeVersion === '(missing)' || claudeVersion === '(missing marker)' || pluginVersion === '(none)') {
     console.log('VERSION CHECK SKIPPED: missing CLAUDE marker or plugin cache');
-  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion) && markerExact && (!(external || literal) || claudeVersion === pluginVersion)) {
+  } else if (dropV(claudeVersion) === dropV(pluginVersion) && /^\d/.test(claudeVersion) && markerExact && !notString && (!(external || literal) || claudeVersion === pluginVersion)) {
     console.log('VERSION MATCH: CLAUDE and plugin cache are aligned');
   } else {
     console.log('VERSION DRIFT: CLAUDE.md and plugin versions differ');
