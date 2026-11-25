@@ -92,6 +92,18 @@ function parallelSession(batches, size, { chars = 300 } = {}) {
   return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
 }
 
+/** `batches` of `size` parallel `Bash(pwd)` calls that each answer `ok`: the text of a call with its result is shorter than the line of its trace. */
+function pwdSession(batches, size) {
+  const m = [{ role: 'user', text: 'Task: where are we?', toolUses: [] }];
+  for (let b = 0; b < batches; b++) {
+    const ids = Array.from({ length: size }, (_, k) => `p${b}-${k}`);
+    m.push({ role: 'assistant', text: '', toolUses: ids.map((id) => ({ tool_use_id: id, tool: 'Bash', input: { command: 'pwd' } })) });
+    m.push({ role: 'user', text: '', toolUses: [], toolResults: ids.map((id) => ({ tool_use_id: id, text: 'ok', isError: false })) });
+  }
+  m.push({ role: 'user', text: 'Good, now sum up the results.', toolUses: [] }, { role: 'assistant', text: 'Summary: done.', toolUses: [] });
+  return m.map((x, k) => Object.freeze({ ...x, handle: `h${k}` }));
+}
+
 // The compaction through register(on): the record, the scoring requests and what the host gets back. `form: false` leaves the API form out (the host answers rows);
 // `api` is the API form the host answers instead of the one made from the rows; `tokens: null` is a host with no usage to give (the tokens before are estimated).
 async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after, api } = {}) {
@@ -196,9 +208,12 @@ describe('a session of screenshots in the compaction (the character gate in toke
     expect(record).not.toHaveProperty('max_reduction_tokens');
   });
 
-  it('a session with nothing to cut stays with the summary in token mode', async () => {
+  it('a session whose results are tiny stays with the summary in token mode when its cut cannot bring the host\'s tokens under the threshold', async () => {
+    // 30 results of about 10 characters: by the text alone nothing is worth a trace, but the blocks of their calls and results are (about 40 % of the list: the pinning
+    // counts them), and the list is far smaller than the 130 000 tokens the host counts, so the floor stays above the threshold.
     const { record } = await compactRun(TARGET_20, session(30, { shot: () => false, chars: 0 }), { tokens: 130000 });
-    expect(record).toMatchObject({ result: 'fallback', reason: 'too_few_results', max_reduction_tokens: 0 });
+    expect(record).toMatchObject({ result: 'fallback', reason: 'floor_above_threshold' });
+    expect(record.max_reduction_tokens).toBeGreaterThan(0.3);
   });
 });
 
@@ -261,6 +276,23 @@ describe('parallel calls: the predictions count the blocks and messages that bui
     expect(record.max_reduction).toBeLessThan(0.3);
     expect(record.max_reduction_tokens).toBeGreaterThan(0.3);
     expect(record.result).toBe('jev');
+  });
+
+  it('results that are shorter than their traces are not pinned when the blocks of their calls and results are what makes the cut: 30 batches of 25 `Bash(pwd)` answering `ok`', async () => {
+    // The text of a call with its result is about 13 tokens and its trace about 33, so by the text alone every result would stay whole and the floor would be none
+    // (`too_few_results`); the 45.4 tokens of the block of each call and of each result are what the compaction gives back (about 21 000 of the 75 000 tokens stay).
+    const rows = pwdSession(30, 25);
+    const counted = Math.round(listTokens(apiOf(rows)));
+    const { record, out } = await compactRun(ENV, rows, { tokens: counted, trigger: 'manual' });
+    expect(counted).toBeGreaterThan(70000);
+    expect(record.result).toBe('jev');
+    expect(record.max_reduction_tokens).toBeGreaterThan(0.5);
+    expect(record).toMatchObject({ cut: 'cascade', candidates: 700 }); // 50 of the 750 results are in the tail
+    expect(record.cascade_pass).not.toBe('forced');
+    expect(record.traced).toBeGreaterThan(0);
+    expect(record.tokens_after_pred).toBeLessThanOrEqual(record.cascade_target_tokens);
+    // The list that is installed is what the prediction says, within a token for each trace.
+    expect(Math.abs(record.tokens_after_pred - listTokens(apiOf(out.messages)))).toBeLessThanOrEqual(0.6 * record.traced + 2);
   });
 
   it('the preflight of the own threshold counts them too: its floor veto lets a session through when the overhead of the blocks is what makes the cut', async () => {

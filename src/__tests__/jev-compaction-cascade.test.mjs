@@ -607,6 +607,48 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     expect(trimmed.tracker().removed()).toBeCloseTo(msg(1), 6);
   });
 
+  it('a result whose trace is longer than its call and result is no pinned one when its blocks pay for the difference: the floor, the manual plan, the cascade and the gate count it', () => {
+    // 25 calls and results of a dozen characters: the text of each (about 25 tokens) is shorter than its trace (about 38), so by the text alone every one would stay whole; each
+    // takes its call block and its result block off the list, which is worth more (a message of 2 blocks is 50.3 tokens: the one block of the calls and the one of the results that come off last).
+    const text = () => parallel(1, 25, { chars: 0 });
+    const { rows, candidates, shape } = text();
+    expect(shape.marginal(candidates[0])).toBeCloseTo(msg(2), 6);
+    // Asking is no deciding: the shape is as it was, whichever result is asked in whatever order.
+    expect(shape.marginal(candidates[7])).toBeCloseTo(msg(2), 6);
+    expect(shape.marginal(candidates[0])).toBeCloseTo(msg(2), 6);
+    expect(shape.shed(candidates, 'trace')).toBeCloseTo(msg(25) - msg(1) + msg(25), 6);
+    // Without the shape the text decides, as before: nothing is removable, the floor is the list, the cascade has nothing to cut.
+    expect(floorPrediction(candidates, 100000)).toBe(100000);
+    expect(manualPlan(candidates, 100000).predicted).toBe(100000);
+    expect(cutInTokens(candidates, rows, undefined).removable).toBe(0);
+    expect(cascade(text().candidates, 60000, 59000)).toMatchObject({ pass: 'drop', predicted: 60000 });
+    // With it the blocks count: the floor is under the list less the overhead of the whole message, the plan traces them, the gate sees the cut, the cascade reaches its target.
+    expect(floorPrediction(candidates, 100000, undefined, shape)).toBeLessThan(100000 - shape.shed(candidates, 'drop'));
+    expect(manualPlan(candidates, 100000, undefined, shape).predicted).toBeLessThan(100000 - 1500);
+    const cut = cutInTokens(candidates, rows, undefined, 0, undefined, 0, shape);
+    expect(cut.removable).toBeGreaterThan(1500);
+    expect(cut.removable).toBeLessThan(shape.shed(candidates, 'trace'));
+    const fresh = text();
+    const run = cascade(fresh.candidates, 60000, 59000, undefined, fresh.shape);
+    expect(run.pass).toBe('short_or_trace');
+    expect(run.predicted).toBeLessThanOrEqual(59000);
+    expect(fresh.candidates.some((c) => c.keep === 'trace')).toBe(true);
+  });
+
+  it('a result stays pinned when its blocks do not pay for the difference, and a task call always does', () => {
+    // A trace of 400 characters (about 230 tokens) costs more than the blocks of its call and result give back (50.3).
+    const long = parallel(1, 25, { chars: 0 });
+    for (const c of long.candidates) c.trace = 't'.repeat(400);
+    expect(floorPrediction(long.candidates, 100000, undefined, long.shape)).toBe(100000);
+    expect(manualPlan(long.candidates, 100000, undefined, long.shape).predicted).toBe(100000);
+    expect(cutInTokens(long.candidates, long.rows, undefined, 0, undefined, 0, long.shape).removable).toBe(0);
+    expect(cascade(long.candidates, 60000, 59000, undefined, long.shape)).toMatchObject({ pass: 'drop', predicted: 60000 });
+    const tasks = parallel(1, 25, { chars: 0 });
+    for (const c of tasks.candidates) c.task = true;
+    expect(floorPrediction(tasks.candidates, 100000, undefined, tasks.shape)).toBe(100000);
+    expect(cutInTokens(tasks.candidates, tasks.rows, undefined, 0, undefined, 0, tasks.shape).removable).toBe(0);
+  });
+
   it('the floor, the manual plan, the cascade and the gate count the overhead on top of the costs of the candidates, from the one shape', () => {
     const { rows, candidates, shape } = parallel(1, 25);
     const drop = shape.shed(candidates, 'drop');

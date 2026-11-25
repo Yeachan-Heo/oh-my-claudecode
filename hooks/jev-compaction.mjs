@@ -2363,7 +2363,14 @@ function findCandidates(messages, privatePaths, notifications = false) {
 // A forced result (a secret, or a non-text result) goes to a trace first, whatever its score; a pinned one is never cut by the cascade and is
 // not counted in the floor.
 const isForced = (c) => c.secret || !c.textOnly;
-const isPinned = (c, rates = DEFAULT_RATES) => !isForced(c) && (c.task || itemTokens(c, rates).full - itemTokens(c, rates).trace <= 0);
+// A trace that is longer than its call and result is no saving by the text alone, but it takes the blocks of the call and of the result off the list (shapeOf: `marginal`):
+// such a result stays whole only when the blocks do not pay for the text either.
+const isPinned = (c, rates = DEFAULT_RATES, shape = undefined) => {
+  if (isForced(c)) return false;
+  if (c.task) return true;
+  const t = itemTokens(c, rates);
+  return t.full - t.trace + (shape?.marginal(c) ?? 0) <= 0;
+};
 export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES, shape = undefined) {
   const costs = new Map(candidates.map((c) => [c, itemTokens(c, rates)]));
   // The blocks and messages the decisions take off the list come on top of the candidates' costs (shapeOf).
@@ -2379,7 +2386,7 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES,
   for (const c of candidates) c.keep = 'full';
   let pass = 'forced';
   for (const c of candidates) if (isForced(c)) setKeep(c, 'trace');
-  const free = candidates.filter((c) => !isForced(c) && !isPinned(c, rates)).sort((a, b) => a.score - b.score || a.resIdx - b.resIdx);
+  const free = candidates.filter((c) => !isForced(c) && !isPinned(c, rates, shape)).sort((a, b) => a.score - b.score || a.resIdx - b.resIdx);
   if (!reached()) {
     pass = 'short_or_trace';
     for (const c of free) {
@@ -2407,7 +2414,7 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES,
 
 // The floor of the cascade: the predicted tokens when every removable result (every candidate but the pinned ones) is gone with its call.
 export function floorPrediction(candidates, tokensBefore, rates = DEFAULT_RATES, shape = undefined) {
-  const free = candidates.filter((c) => !isPinned(c, rates));
+  const free = candidates.filter((c) => !isPinned(c, rates, shape));
   return tokensBefore - free.reduce((s, c) => s + itemTokens(c, rates).full - itemTokens(c, rates).drop, 0) - (shape ? shape.shed(free, 'drop') : 0);
 }
 
@@ -2418,7 +2425,7 @@ export function manualPlan(candidates, tokensBefore, rates = DEFAULT_RATES, shap
   const overhead = shape?.tracker();
   for (const c of candidates) {
     c.keep = 'full';
-    if (isForced(c) || (!isPinned(c, rates) && c.score < SHORT_COPY_MIN_SCORE)) {
+    if (isForced(c) || (!isPinned(c, rates, shape) && c.score < SHORT_COPY_MIN_SCORE)) {
       c.keep = 'trace';
       overhead?.set(c, 'trace');
       const t = itemTokens(c, rates);
@@ -2706,8 +2713,21 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
       gain: () => orig - total - base,
     };
   };
+  let best; // a tracker with every candidate that can be cut (no task call) at its trace: what each one takes off the list at best, beside the others
+  const cut = new Set(candidates.filter((x) => !x.task));
   return {
     tracker,
+    // The overhead that tracing `c` takes off the list at best, with every other candidate that can be cut traced too (its call and its result take their blocks, and the
+    // blocks of the others are gone already; none for a candidate that is not in the list or is a task call); the tracker is put back as it was.
+    marginal(c) {
+      if (!cut.has(c)) return 0;
+      if (!best) { best = tracker(); for (const x of cut) best.set(x, 'trace'); }
+      const all = best.removed();
+      best.set(c, 'full');
+      const gain = all - best.removed();
+      best.set(c, 'trace');
+      return gain;
+    },
     // The overhead taken off the list when each of `list` is decided as `keep` (a keep, or a function of the candidate), the rest as it stands.
     shed(list, keep, gain = false) {
       const t = tracker();
@@ -2728,14 +2748,14 @@ export function cutInTokens(candidates, messages, api, envelopes = 0, rates = DE
   let removable = Math.max(0, textTokens);
   const free = [];
   for (const c of candidates) {
-    if (isPinned(c, rates)) continue;
+    if (isPinned(c, rates, shape)) continue;
     free.push(c);
     const t = itemTokens(c, rates);
-    removable += Math.max(0, t.full - t.trace);
+    removable += t.full - t.trace; // under 0 for a result that its blocks free (isPinned)
   }
-  if (removable <= 0) return { removable: 0, listed: 0 };
   // The blocks and messages those results take with them (the shape of the list) are part of what they give back.
   if (shape) removable += shape.shed(free, 'trace', true);
+  if (removable <= 0) return { removable: 0, listed: 0 };
   return { removable: removable - rates.RATE_NOTE * envelopes, listed: listTokens(api ?? rowsAsApi(messages), rates) };
 }
 // The bound of the gates in tokens: MIN_REDUCTION of the list, and `minGain` tokens (the own threshold's OWN_MIN_GAIN of the window; none for decide).
