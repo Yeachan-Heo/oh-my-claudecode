@@ -1359,7 +1359,9 @@ const backupPlace = (registry) => {
   if (!resolvable(backups)) return stop('the backup directory ' + backups + ' cannot be resolved (a link on the way to it points at nothing)');
   const bothForms = (target) => [...new Set([target, path.resolve(target)])];
   const installPaths = [...registry.pins.map((entry) => entry.installPath), ...registry.other].flatMap(installForms);
-  const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT].map(rootOf).filter(Boolean);
+  // The package this script runs from too: the locator of the skill falls back to the global npm package when the variables do not name it, and
+  // an update of that package replaces the whole tree, a copy kept inside it included.
+  const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT, path.dirname(path.dirname(fileURLToPath(import.meta.url)))].map(rootOf).filter(Boolean);
   // A cache namespace (or the plugin directory in it) may be a link out of plugins/cache: its versions then lie
   // elsewhere, so each one is a tree of its own, resolved by the comparisons below.
   const namespaces = [...new Set([...registry.ids.map(marketplaceOf), 'omc'])].map(cacheDirOf);

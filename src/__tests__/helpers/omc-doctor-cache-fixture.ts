@@ -60,9 +60,9 @@ export const bashBlocks = (text: string = skillText): string[] => [...text.match
 export const locatorLine = bashBlocks().flatMap((block) => block.split('\n')).find((line) => line.startsWith('S=; ')) ?? '';
 
 // Runs a command of the doctor script in a synthetic environment. Preload scripts (--require) change the process the
-// command runs in, e.g. to report another platform.
-export function runCommand(command: string, configDir: string, options: { env?: Record<string, string>; preloads?: string[]; timeout?: number; cwd?: string } = {}) {
-  return spawnSync(process.execPath, [...(options.preloads ?? []).flatMap((file) => ['--require', file]), SCRIPT, command], {
+// command runs in, e.g. to report another platform. `script` runs a copy of the script instead of this checkout's.
+export function runCommand(command: string, configDir: string, options: { env?: Record<string, string>; preloads?: string[]; timeout?: number; cwd?: string; script?: string } = {}) {
+  return spawnSync(process.execPath, [...(options.preloads ?? []).flatMap((file) => ['--require', file]), options.script ?? SCRIPT, command], {
     encoding: 'utf8',
     timeout: options.timeout,
     cwd: options.cwd,

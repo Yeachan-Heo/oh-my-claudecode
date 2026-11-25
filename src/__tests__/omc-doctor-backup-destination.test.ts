@@ -1,9 +1,9 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { addCache, ageVersions, backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, realEntries, runBlock, runCommand, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { addCache, ageVersions, backupDir, bashBlocks, commands, guideSection, makeCache, movedAside, PLUGIN_ID, realEntries, runBlock, runCommand, SCRIPT, skillText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
 // Where a version is moved aside is as much a part of "reversible and outside the cache" as the version that is moved: a
 // link in the way of the backup directory (plugins/backups, or its child oh-my-claudecode) may lead into a cached
@@ -586,6 +586,50 @@ fs.renameSync = function (...args) {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    }
+  });
+
+  // The npm package that the script runs from is a tree of its own, whatever the root variables name: the locator of the skill falls back to the global
+  // package, and an update of it replaces the whole tree, a copy kept inside it included. The script is run from a copy of the scripts directory.
+  test('a backup directory inside the npm package that the script runs from is refused, one outside it and a script in the cache are no refusal', () => {
+    const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+    const copyTo = (root: string) => {
+      cpSync(path.dirname(SCRIPT), path.join(root, 'scripts'), { recursive: true });
+      return path.join(root, 'scripts', 'omc-doctor.mjs');
+    };
+    try {
+      const pack = path.join(base, 'global', 'oh-my-claude-sisyphus');
+      const script = copyTo(pack);
+      const saved = path.join(pack, 'saved');
+      const other = path.join(base, 'other');
+      mkdirSync(saved);
+      mkdirSync(other);
+      for (const command of commands) {
+        for (const env of [{}, { CLAUDE_PLUGIN_ROOT: other }] as Array<Record<string, string>>) {
+          const { dir, cache } = profile();
+          try {
+            link(saved, path.join(dir, 'plugins', 'backups'));
+            const result = runCommand(command, dir, { script, env, timeout: 30_000 });
+            const at = { command, env: Object.keys(env).length };
+            expect({ ...at, status: result.status, tree: REFUSED.exec(result.stdout)?.[1], cache: readdirSync(cache).sort(), landed: readdirSync(saved) }).toEqual({ ...at, status: 1, tree: 'the plugin root', cache: ALL, landed: [] });
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+        const away = profile();
+        const cached = profile();
+        try {
+          ageVersions(cached.cache);
+          const inCache = copyTo(path.join(cached.cache, '5.8.0'));
+          expect({ command, away: runCommand(command, away.dir, { script, timeout: 30_000 }).stdout.includes('Moved 2 unprotected version'), moved: movedAside(away.dir) }).toEqual({ command, away: true, moved: 2 });
+          expect({ command, cached: runCommand(command, cached.dir, { script: inCache, timeout: 30_000 }).stdout.includes('Moved 2 unprotected version'), moved: movedAside(cached.dir) }).toEqual({ command, cached: true, moved: 2 });
+        } finally {
+          rmSync(away.dir, { recursive: true, force: true });
+          rmSync(cached.dir, { recursive: true, force: true });
+        }
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
     }
   });
 
