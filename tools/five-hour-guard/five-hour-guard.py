@@ -641,9 +641,18 @@ def write_json(path, obj, no_clobber=False, replaces=None):
                 # no hard links on this file system: the destination is reserved exclusively (a file that is there is kept and the write
                 # fails) and the rename goes over the reservation
                 try:
-                    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644))
+                    reservation = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644)
                 except FileExistsError:
                     raise OSError(f'the file {path} appeared meanwhile and is not replaced')
+                try:
+                    reserved = file_identity(os.fstat(reservation))
+                finally:
+                    os.close(reservation)
+                try:   # whoever may write to the directory can remove the reservation and put another file at the path: the rename must not replace that
+                    if file_identity(os.lstat(path)) != reserved:
+                        raise OSError(f'the file {path} appeared meanwhile and is not replaced')
+                except FileNotFoundError:
+                    pass   # nothing is there any more: the rename makes the file and replaces nothing
                 try:
                     os.replace(tmp, path)
                 except BaseException:

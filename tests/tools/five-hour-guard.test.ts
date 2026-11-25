@@ -2339,6 +2339,21 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readdirSync(clean.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
   });
 
+  it('where hard links are not supported a file that takes the place of the reservation of the destination, before the pause is moved over it, is kept: the write fails and nothing is lost', () => {
+    // the reservation (an empty file made exclusively) is removed and a foreign file put in its place right after it was made
+    const driver = ['import errno, os, runpy, sys', 'target, real = sys.argv[1], os.open',
+      'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',
+      'def swapped(path, flags, *args, **kw):', '    fd = real(path, flags, *args, **kw)',
+      '    if str(path) == target and flags & os.O_EXCL:', '        os.unlink(target)', '        open(target, "w").write("foreign file\\n")',
+      '    return fd',
+      'os.link, os.open = nolink, swapped', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('no-link-swapped-reservation', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*appeared meanwhile/);
+    expect(readText(f.pause), 'the foreign file that took the place of the reservation is not replaced').toBe('foreign file\n');
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+  });
+
   it('a link at pause_file that appeared after the start is never replaced, also when its target holds a valid pause document', async () => {
     const f = fixture('link-valid-target', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const target = join(f.dir, 'target-pause.json');
