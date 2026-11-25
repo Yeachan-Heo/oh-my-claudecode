@@ -14,11 +14,11 @@ import {
   unlinkSync,
 } from 'fs';
 import { join } from 'path';
-import { AGENT_USAGE_REMINDER_STORAGE } from './constants.js';
+import { getAgentUsageReminderStoragePath } from './constants.js';
 import type { AgentUsageState } from './types.js';
 
 function getStoragePath(sessionID: string): string {
-  return join(AGENT_USAGE_REMINDER_STORAGE, `${sessionID}.json`);
+  return join(getAgentUsageReminderStoragePath(), `${sessionID}.json`);
 }
 
 export function loadAgentUsageState(sessionID: string): AgentUsageState | null {
@@ -34,8 +34,9 @@ export function loadAgentUsageState(sessionID: string): AgentUsageState | null {
 }
 
 export function saveAgentUsageState(state: AgentUsageState): void {
-  if (!existsSync(AGENT_USAGE_REMINDER_STORAGE)) {
-    mkdirSync(AGENT_USAGE_REMINDER_STORAGE, { recursive: true });
+  const storagePath = getAgentUsageReminderStoragePath();
+  if (!existsSync(storagePath)) {
+    mkdirSync(storagePath, { recursive: true });
   }
 
   const filePath = getStoragePath(state.sessionID);

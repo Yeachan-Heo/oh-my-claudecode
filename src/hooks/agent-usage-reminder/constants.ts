@@ -6,15 +6,12 @@
  * Ported from oh-my-opencode's agent-usage-reminder hook.
  */
 
-import { join } from 'path';
-import { homedir } from 'os';
+import { getGlobalOmcStatePath } from '../../utils/paths.js';
 
-/** Storage directory for agent usage reminder state */
-export const OMC_STORAGE_DIR = join(homedir(), '.omc');
-export const AGENT_USAGE_REMINDER_STORAGE = join(
-  OMC_STORAGE_DIR,
-  'agent-usage-reminder',
-);
+/** Get storage directory path for agent usage reminder state */
+export function getAgentUsageReminderStoragePath(): string {
+  return getGlobalOmcStatePath('agent-usage-reminder');
+}
 
 /** All tool names normalized to lowercase for case-insensitive matching */
 export const TARGET_TOOLS = new Set([
