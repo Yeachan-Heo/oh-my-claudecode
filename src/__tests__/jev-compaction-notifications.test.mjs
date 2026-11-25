@@ -1,4 +1,4 @@
-/* global setTimeout, clearTimeout */
+/* global setTimeout, clearTimeout, performance */
 /**
  * Tests for hooks/jev-compaction.mjs background task notifications as candidates (OMC_JEV_COMPACT_NOTIFICATIONS): a notification row before the tail
  * is scored by Jev and kept, cut or removed with a trace. Without the variable the compaction is unchanged.
@@ -336,6 +336,30 @@ describe('a notification of a task whose call is still there, and the files its 
       expect(run.record).toMatchObject({ result: 'jev', notifications: 1, ...(c.held === undefined ? {} : { secret_held: c.held }) });
       expect(run.bodies.join('').includes('PLAINBODY'), c.name).toBe(c.sent);
       expect(JSON.stringify(run.out.messages).includes('PLAINBODY'), c.name).toBe(false);
+    });
+  }
+});
+
+describe('the fields of a notification are read in linear time: blank space, a tag that is never closed, many openers', () => {
+  const RUN = 10000;
+  const FIELDS = ['task-id', 'output-file', 'tool-use-id', 'status', 'summary', 'result'];
+  // One notification of the host's kind (it opens with the marker) whose field holds a run of blank space that is closed, never closed, followed by another tag, or
+  // opened over and over; the shortened copy of a notification (shortText) is made for each when the row is read, so a pattern that backtracks on the run shows here.
+  const shapes = (tag) => ({
+    'a run of blank space, never closed': `<${tag}>${' '.repeat(RUN)}\n</task-notification>`,
+    'a run of blank space, then another tag': `<${tag}>${' '.repeat(RUN)}<x>\n</task-notification>`,
+    'a run of blank space, closed': `<${tag}>${' '.repeat(RUN)}</${tag}>\n</task-notification>`,
+    'the opener repeated': `${`<${tag}> `.repeat(RUN / 5)}\n</task-notification>`,
+  });
+  for (const tag of FIELDS) {
+    it(`${tag}: the compaction of a row with such a field is not held up, and the notification is still a candidate`, async () => {
+      for (const [name, field] of Object.entries(shapes(tag))) {
+        const w = talk(30);
+        const t0 = performance.now();
+        const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...LAUNCH, row(`[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${field}`), ...w.slice(3)]);
+        expect(performance.now() - t0, `${tag}, ${name}`).toBeLessThan(2000);
+        expect(run.record, `${tag}, ${name}`).toMatchObject({ result: 'jev', notifications: 1 });
+      }
     });
   }
 });

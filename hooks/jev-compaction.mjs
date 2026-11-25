@@ -1446,6 +1446,23 @@ const NOTE_BLOCK_OPEN = /<task-notification[\s>]/g;
 // What a notification block holds before its <summary> and its <result>: its own metadata (the task id, the output file, the status). The summary and the result are the
 // words of the task and may quote the source of another notification, so the source is read from here and nowhere else in the block.
 const noteHead = (block) => { const at = block.search(/<(?:summary|result)>/); return at < 0 ? block : block.slice(0, at); };
+// The task ids and output files that a text names in their tags, as [tag, value] in order, at most `limit` of them: the value is what stands between the opening tag and
+// the closing one that follows without another tag between (blank space around it dropped, 1 to 200 characters). Read tag by tag, each stretch up to the next `<` once,
+// so that a long run of blank space or a tag that is never closed costs one pass over it (one pattern with a `\s*` on each side of a bounded value backtracks in time
+// quadratic in the run).
+function sourceFields(text, limit) {
+  const found = [];
+  const open = /<(task-id|output-file)>/g;
+  for (let m = open.exec(text); m && found.length < limit; m = open.exec(text)) {
+    const from = m.index + m[0].length;
+    const lt = text.indexOf('<', from);
+    const to = lt < 0 ? text.length : lt;
+    if (!text.startsWith(`</${m[1]}>`, to)) continue;
+    const value = text.slice(from, to).trim();
+    if (value && value.length <= 200) found.push([m[1], value]);
+  }
+  return found;
+}
 // The heads of the notification blocks of a text, in order (a block that is not closed runs to the end of the text).
 function noteHeads(text) {
   const heads = [];
@@ -2192,7 +2209,7 @@ function shortText(c) {
     const summary = c.summary ? `<summary>${c.summary}</summary>\n` : '';
     const kept = `${summary}${body ? body[1].slice(0, SHORT_CHARS) : c.res.text.slice(0, SHORT_CHARS)}`;
     // The source stays in the copy (the task ids and output files of the notification, the first few): the next compaction ties it to its call by them.
-    const source = [...noteHeads(c.res.text).join('\n').matchAll(/<(task-id|output-file)>\s*([^<]{1,200}?)\s*<\/\1>/g)].slice(0, 8).map((m) => `<${m[1]}>${m[2]}</${m[1]}>\n`).join('');
+    const source = sourceFields(noteHeads(c.res.text).join('\n'), 8).map(([tag, value]) => `<${tag}>${value}</${tag}>\n`).join('');
     return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${source}${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]\n</task-notification>`;
   }
   return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
