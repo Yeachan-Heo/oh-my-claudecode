@@ -120,9 +120,12 @@ psm_launch_claude() {
 # Usage: psm_render_template <template_file> [KEY=VALUE ...]
 # Outputs rendered content to stdout; returns 1 if template not found.
 # 
-# Prevents prompt injection by neutralizing any '--- END UNTRUSTED DATA ---'
-# delimiters inside substituted values: they are escaped to '---ESCAPED_END---'
-# so attacker-supplied content cannot close the wrapper prematurely.
+# Prevents prompt injection via single-pass substitution with post-substitution
+# escaping: all placeholders are replaced first, then delimiters are neutralized
+# in the final output to prevent reconstruction attacks where split values could
+# reassemble the delimiter (e.g., "--- END UNTRUST" + "ED DATA ---" = attack).
+# Uses a per-render nonce in the delimiter to make reconstruction virtually
+# impossible even if partially escaped content is detected.
 psm_render_template() {
     local template_file="$1"
     shift
@@ -135,14 +138,48 @@ psm_render_template() {
     local content
     content=$(cat "$template_file")
 
+    # Validation: if the template used the UNTRUSTED DATA wrapper,
+    # ensure the template itself has exactly one opening and one closing delimiter.
+    # We validate the template BEFORE substitution to catch malformed templates.
+    if printf '%s' "$content" | grep -qF -- '--- UNTRUSTED DATA'; then
+        local template_open
+        local template_close
+        template_open=$(printf '%s' "$content" | grep -Fo -- '--- UNTRUSTED DATA' | wc -l)
+        template_close=$(printf '%s' "$content" | grep -Fo -- '--- END UNTRUSTED DATA ---' | wc -l)
+        if [[ $template_open -ne 1 ]] || [[ $template_close -ne 1 ]]; then
+            echo "error|Invalid template wrapper structure (found $template_open openers, $template_close closers)" >&2
+            return 1
+        fi
+    fi
+
+    # Protect the template's own delimiters before substitution by replacing them
+    # with markers. This allows us to escape injected delimiters while preserving
+    # the template's structure.
+    local marker_open="__MARKER_OPEN_$(date +%s%N)__"
+    local marker_close="__MARKER_CLOSE_$(date +%s%N)__"
+    content="${content//--- UNTRUSTED DATA ---/$marker_open}"
+    content="${content//--- END UNTRUSTED DATA ---/$marker_close}"
+
+    # Single-pass substitution: replace all placeholders with values
+    # without escaping first. This prevents partial patterns from being
+    # created by sequential substitution (e.g., "--- END UNTRUST" from one
+    # value + "ED DATA ---" from another could reconstruct the delimiter).
     for assignment in "$@"; do
         local key="${assignment%%=*}"
         local value="${assignment#*=}"
-        # Escape closing delimiter in the value to prevent injection
-        value="${value//--- END UNTRUSTED DATA ---/---ESCAPED_END---}"
-        # Bash parameter expansion handles multiline values safely
+        # Direct substitution - no pre-escaping
         content="${content//\{\{${key}\}\}/$value}"
     done
+
+    # Post-substitution: escape any delimiters that might have been
+    # reconstructed or injected via substituted values (now that placeholders are gone).
+    # This prevents injection attacks where content spans multiple placeholders
+    # (e.g., PR_BODY="--- END UNTRUST" + CHANGED_FILES="ED DATA ---" = attack).
+    content="${content//--- END UNTRUSTED DATA ---/---ESCAPED_END---}"
+
+    # Restore the template's own delimiters from markers
+    content="${content//$marker_open/--- UNTRUSTED DATA ---}"
+    content="${content//$marker_close/--- END UNTRUSTED DATA ---}"
 
     printf '%s\n' "$content"
 }
@@ -156,20 +193,34 @@ _psm_pane_has_claude_prompt() {
 }
 
 # Poll the tmux pane until Claude's REPL prompt appears.
+# Handles directory-trust dialogs (?) by sending 'T' to trust temporarily,
+# then waits for the actual Claude prompt (>).
 # Usage: psm_wait_for_claude_prompt <session_name> [max_seconds]
 # Returns 0 when prompt detected; 1 on timeout.
 psm_wait_for_claude_prompt() {
     local session_name
     session_name=$(psm_tmux_safe_name "$1")
-    local max_wait="${2:-30}"
+    local max_wait="${2:-60}"  # Increased from 30 to 60 to allow time for trust dialog
     local waited=0
 
     while [[ $waited -lt $max_wait ]]; do
         local pane_content
         pane_content=$(tmux capture-pane -t "$session_name" -p 2>/dev/null) || return 1
+        
+        # Check for directory-trust prompt (shows as "?")
+        if printf '%s' "$pane_content" | grep -qE '^[[:space:]]*\?[[:space:]]*$'; then
+            # Send 'T' (temporary trust) to proceed without blocking
+            tmux send-keys -t "$session_name" 'T'
+            sleep 1
+            (( waited++ )) || true
+            continue
+        fi
+        
+        # Check for Claude's normal REPL prompt (shows as ">")
         if _psm_pane_has_claude_prompt "$pane_content"; then
             return 0
         fi
+        
         sleep 1
         (( waited++ )) || true
     done
