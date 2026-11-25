@@ -94,6 +94,7 @@ import {
   type WorkerLaunchContext,
 } from "./worker-launch-ack.js";
 import { resolveRuntimeCliPath } from "./runtime-owner-client.js";
+import { isHerdrPaneId as _isHerdrPaneId } from "./pane-id.js";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
@@ -943,11 +944,7 @@ export function resolveTeamMultiplexer(
 }
 
 /** Herdr pane ids look like `wN:pM` (workspace-qualified, never `%N`). */
-export function isHerdrPaneId(value: string | undefined): boolean {
-  return (
-    typeof value === "string" && /^w[0-9a-z]+:p[0-9a-z]+$/i.test(value.trim())
-  );
-}
+export const isHerdrPaneId = _isHerdrPaneId;
 
 /** Herdr team sessions are persisted as `herdr:<workspace_id>`. */
 export function isHerdrSessionTarget(
