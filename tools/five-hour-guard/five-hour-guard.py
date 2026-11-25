@@ -28,7 +28,7 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
+import argparse, datetime, glob, itertools, json, math, os, re, shlex, signal, stat, string, sys, time
 
 try:
     import fcntl
@@ -340,22 +340,30 @@ def command_tokens(command):
     return tokens
 
 
-def word_pieces(word):
-    """The word, and the parts of it that can be a file name too."""
+def word_pieces(word, assigned=None):
+    """The word, and the parts of it that can be a file name too. `assigned`: {name: [values]} that the command assigns (NAME=value words, in
+    any order, none expanded by another): each piece is also given with every combination of those values in the `$NAME` and `${NAME}` it holds."""
     pieces = [word]
     if '=' in word:
         pieces.append(word.partition('=')[2])   # --log=FILE, NAME=FILE
     if word[:1] == '-' and word[1:2] not in ('-', '') and len(word) > 2:
         pieces.append(word[2:])   # -SFILE, -oFILE: the value of a short option glued to it
-    return pieces
+    if assigned and '$' in word:
+        for piece in pieces[:]:
+            names = [n for n in assigned if n in piece]
+            combinations = list(itertools.islice(itertools.product(*[assigned[n] for n in names]), MAX_COMMAND_PROGRAMS + 1))
+            if len(combinations) > MAX_COMMAND_PROGRAMS:
+                raise ScanIncomplete('command assigns too many values to scan')
+            pieces += [string.Template(piece).safe_substitute(dict(zip(names, values))) for values in combinations]
+    return list(dict.fromkeys(pieces))
 
 
-def command_programs(command, exclude=None, depth=0, inherited=()):
+def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
     """The files that a shell command of a hook that is not ours may run or read, the same for every command and without knowing what any
     word means (nothing is run, nothing is expanded by a shell): every word of the command, each word that is a quoted command (it holds a
     blank: the words of an argument of -c or -S, two levels deep), the part of a word after its first `=` and the part after a short option that is glued to its value (`-SFILE`). A word with a directory part
     stands for that path, a word without one for the file of that name in the working directory of the guard and in each directory of the
-    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered). A word without a directory part, and a relative one with a directory part (`./prog`), is also looked for in each existing directory that any word of the whole command names (`cd DIR; prog`, `env -C DIR prog`: the shell may run it from there; no command is recognised), also in a quoted command inside it (`env -C DIR sh -c 'prog x'`). The rule is deliberately wide:
+    PATH of the guard, and in each directory of a `PATH=dir` word of its simple command (no assignment is expanded or ordered; the same words `NAME=value` of the whole command are also the values of `$NAME` and `${NAME}` in any word). A word without a directory part, and a relative one with a directory part (`./prog`), is also looked for in each existing directory that any word of the whole command names (`cd DIR; prog`, `env -C DIR prog`: the shell may run it from there; no command is recognised), also in a quoted command inside it (`env -C DIR sh -c 'prog x'`). The rule is deliberately wide:
     a word that is no program at all (an argument, an option value) is a file the guard then does not write, and no program is missed by
     not being recognised. A command with a NUL character or one that the shell cannot parse runs nothing and gives none. A command that a limit cuts
     short (more than MAX_COMMAND_CHARS characters, MAX_COMMAND_WORDS words or MAX_COMMAND_PROGRAMS files, or quoted commands nested deeper than
@@ -375,10 +383,16 @@ def command_programs(command, exclude=None, depth=0, inherited=()):
             words.append(token)
     simple.append(words)
     found = []
+    assigned = {n: list(v) for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
+    for words in simple:
+        for word in words:
+            name, equals, value = word.partition('=')
+            if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) and value not in assigned.setdefault(name, []):
+                assigned[name].append(value)
     named = list(inherited)   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR) and of the command it is quoted in: the shell may run a later word from there
     for words in simple:
         for word in words:
-            for piece in word_pieces(word):
+            for piece in word_pieces(word, assigned):
                 directory = os.path.expanduser(os.path.expandvars(piece))
                 if directory and len(directory) <= MAX_PATH_CHARS and '\0' not in directory and os.path.isdir(directory) and directory not in named:
                     named.append(directory)
@@ -391,8 +405,8 @@ def command_programs(command, exclude=None, depth=0, inherited=()):
             if any(c.isspace() for c in word):
                 if depth >= 2:
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
-                found += [t for t in command_programs(word, exclude, depth + 1, named) if t not in found]
-            for piece in word_pieces(word):
+                found += [t for t in command_programs(word, exclude, depth + 1, named, assigned) if t not in found]
+            for piece in word_pieces(word, assigned):
                 for path in word_files(piece, directories, named):
                     if path not in found:
                         found.append(path)
