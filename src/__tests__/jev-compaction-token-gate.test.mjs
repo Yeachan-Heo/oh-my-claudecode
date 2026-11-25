@@ -16,7 +16,7 @@ const TARGET_20 = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
 const IMAGE = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } };
 
-function fakeDollar({ env, usage, messages, api }) {
+function fakeDollar({ env, usage, messages, api, score = () => 0 }) {
   const store = new Map();
   const requests = [];
   const $ = {
@@ -33,7 +33,7 @@ function fakeDollar({ env, usage, messages, api }) {
       fetch: async (url, init) => {
         const body = JSON.parse(init.body);
         requests.push(body);
-        return { ok: true, status: 200, headers: {}, text: JSON.stringify({ answers: Object.fromEntries(Object.keys(body.questions).map((q) => [q, { type: 'score', score: 0, confidence: 0.9 }])) }) };
+        return { ok: true, status: 200, headers: {}, text: JSON.stringify({ answers: Object.fromEntries(Object.keys(body.questions).map((q) => [q, { type: 'score', score: score(body.state.results[q]?.result ?? ''), confidence: 0.9 }])) }) };
       },
     },
     clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; }, sleep: async () => { throw new Error('the module must not use $.clock.sleep'); } },
@@ -117,8 +117,8 @@ function taskSession(n) {
 
 // The compaction through register(on): the record, the scoring requests and what the host gets back. `form: false` leaves the API form out (the host answers rows);
 // `api` is the API form the host answers instead of the one made from the rows; `tokens: null` is a host with no usage to give (the tokens before are estimated).
-async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after, api } = {}) {
-  const fake = fakeDollar({ env, usage: usageOf(tokens), messages, api: api ?? (form ? apiOf(messages, after) : undefined) });
+async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after, api, score } = {}) {
+  const fake = fakeDollar({ env, usage: usageOf(tokens), messages, api: api ?? (form ? apiOf(messages, after) : undefined), score });
   const handlers = {};
   register((event, hook) => { handlers[event] = hook; });
   const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger, messages }), async () => ({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] }));
@@ -400,6 +400,48 @@ describe('the prediction is the list that is installed: the rows of the tail tha
         expectInstalled(await runOf({ block, chars: c.chars, delivered: c.delivered }), `${block} ${c.label}`);
       });
     }
+  }
+});
+
+describe('the text beside a result: the words of the user that no result stands beside any more', () => {
+  // listTokens counts a text beside a result at the rate of a reminder (0.363 a character) and the words of the user alone at their own (0.287). The last result of a
+  // message that goes takes that difference with it for the words that stay (a message the user typed during the tool turn, a row of its own that the host joins
+  // to the message of the result, or the text of the row of the result), so the prediction counts it, as the installed list does.
+  const ENV = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
+  const WORDS = 100000;
+  const typed = (k) => ({ role: 'user', text: `Typed during the tool turn ${k}: ${'w'.repeat(WORDS)}`, toolUses: [], handle: `u${k}` });
+  // 30 steps of text results, the result of step 10 with the words after it (`how`: a row of its own, the text of its row, or two rows of their own).
+  const withWords = (how) => {
+    const rows = session(30, { shot: () => false, chars: 4000 });
+    const at = rows.findIndex((m) => (m.toolResults || []).some((r) => r.tool_use_id === 't10'));
+    if (how === 'own row') return Object.freeze(rows.map((m, k) => (k === at ? Object.freeze({ ...m, text: typed(1).text }) : m)));
+    return Object.freeze([...rows.slice(0, at + 1), ...(how === 'two rows' ? [typed(1), typed(2)] : [typed(1)]), ...rows.slice(at + 1)]);
+  };
+  const cases = [['a row of its own after the result row', 'row'], ['the text of the row of the result', 'own row'], ['two rows of their own after the result row', 'two rows']];
+
+  for (const [label, how] of cases) {
+    it(`the prediction is the installed list when the result of the message goes: ${label}`, async () => {
+      const rows = withWords(how);
+      const counted = Math.round(listTokens(apiOf(rows)));
+      const { record, out } = await compactRun(ENV, rows, { tokens: counted, trigger: 'manual' });
+      expect(record.result).toBe('jev');
+      const installed = listTokens(apiOf(out.messages));
+      // The result of step 10 is traced and the words stay in a message of their own, at the rate of the user's words: 0.076 a character less than they were.
+      const slack = 0.6 * record.traced + 2;
+      expect(Math.abs(record.tokens_after_pred - installed), `pred ${record.tokens_after_pred}, installed ${installed}`).toBeLessThanOrEqual(slack);
+      expect(Math.abs(record.tokens_after - installed), `after ${record.tokens_after}, installed ${installed}`).toBeLessThanOrEqual(slack);
+    });
+
+    it(`the cascade keeps the results it needs for the tokens that the words give back when the result of the message is traced: ${label}`, async () => {
+      // 110 000 tokens and a target of 106 462: the trace of the result of step 10 (the only one that Jev scores low) gives back about 2 000 tokens, short of the 3 538 that
+      // the cut needs, and the words that stay beside no result give back about 7 600 more. Counted at the rate of a text beside a result, they leave the cut short,
+      // and results scored needed would be shortened for tokens that the installed list does not hold.
+      const rows = withWords(how);
+      const { record, out } = await compactRun({ ...ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '64' }, rows, { tokens: 110000, trigger: 'manual', score: (text) => (text.startsWith('RESULT-10 ') ? 0 : 3) });
+      expect(record).toMatchObject({ result: 'jev', cascade_pass: 'short_or_trace', kept_short: 0, traced: 1 });
+      expect(record.tokens_after_pred).toBeLessThanOrEqual(record.cascade_target_tokens);
+      expect(out.messages.filter((m) => (m.text || '').includes('[compacted]'))).toHaveLength(1);
+    });
   }
 });
 

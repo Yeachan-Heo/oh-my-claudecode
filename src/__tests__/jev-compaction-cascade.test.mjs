@@ -548,9 +548,12 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     const group = [-1, 0, -1, -1, 1];
     const candidates = [{ ...item('a', { resIdx: 2 }), useIdx: 1 }];
     const shape = shapeOf(rows, candidates, { group, keepFrom: rows.length });
-    // The user row of the result and the user row after it are one message of the host: the result row's block comes off it, the message stays.
-    expect(shape.shed(candidates, 'trace')).toBeCloseTo(msg(2) - msg(2 - 1) + (msg(2) - msg(1)), 6);
-    expect(shape.shed(candidates, 'drop')).toBeCloseTo((msg(2) - msg(1)) + (msg(2) - msg(1)), 6);
+    // The user row of the result and the user row after it are one message of the host: the result row's block comes off it, the message stays. The words of the row
+    // after it ('Last.') cost RATE_OWN a character instead of RATE_NOTE once no result stands beside them.
+    const { RATE_NOTE, RATE_OWN } = ratesFrom(undefined);
+    const alone = (RATE_NOTE - RATE_OWN) * 'Last.'.length;
+    expect(shape.shed(candidates, 'trace')).toBeCloseTo(msg(2) - msg(2 - 1) + (msg(2) - msg(1)) + alone, 6);
+    expect(shape.shed(candidates, 'drop')).toBeCloseTo((msg(2) - msg(1)) + (msg(2) - msg(1)) + alone, 6);
   });
 
   it('rows from keepFrom on keep their handles and stay as they are', () => {
@@ -606,9 +609,12 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     expect(none.removed()).toBeCloseTo(msg(3) - msg(2), 6);
     const traced = shape.tracker();
     traced.set(candidates[0], 'trace');
-    // The trace takes the block of the call and the message of the result on top of the thinking block.
-    expect(traced.removed() - none.removed()).toBeCloseTo(msg(2) - msg(1) + (msg(2) - msg(1)), 6);
-    expect(traced.removed()).toBeCloseTo(msg(3) - msg(2) + (msg(2) - msg(1)) + (msg(2) - msg(1)), 6);
+    // The trace takes the block of the call and the message of the result on top of the thinking block, and the words after the result ('Last.') cost RATE_OWN a
+    // character instead of RATE_NOTE once no result stands beside them.
+    const { RATE_NOTE, RATE_OWN } = ratesFrom(undefined);
+    const alone = (RATE_NOTE - RATE_OWN) * 'Last.'.length;
+    expect(traced.removed() - none.removed()).toBeCloseTo(msg(2) - msg(1) + (msg(2) - msg(1)) + alone, 6);
+    expect(traced.removed()).toBeCloseTo(msg(3) - msg(2) + (msg(2) - msg(1)) + (msg(2) - msg(1)) + alone, 6);
   });
 
   it('the deliveries after a row are one block of the rebuilt row: the blocks of the rest are given back', () => {
