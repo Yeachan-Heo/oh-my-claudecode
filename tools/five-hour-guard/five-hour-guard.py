@@ -197,6 +197,7 @@ def same_file(a, b):
 
 
 HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}
+ENTRY_LOG = 'registered hook log'   # the value of --log in a hook entry that carries the marker: the hook appends a line to it for every call it holds
 ENTRY_FILE = 'file named by the hook entry'   # a word of the command of the hook entry in settings.json that the entry the guard generates does not have (another hook, interpreter or log path)
 UNSCANNED = 'command that cannot be read to its end'   # the entry for a command of another hook that a limit of command_programs cut short: the guard writes nothing while it is there
 OTHER_PROGRAM = 'program of another hook'   # a file that a command of any other hook (or the status line) in settings.json runs
@@ -212,8 +213,10 @@ def may_be_one_file(la, pa, lb, pb):
     and a program of another hook entry that is one of those programs."""
     if OTHER_PROGRAM in (la, lb):   # the interpreter or script of another hook can be one of ours; what it may not be is a file the guard writes (state, pause, log and their locks: not the files it only reads)
         return (lb if la == OTHER_PROGRAM else la) in PROGRAM_LABELS | READ_ONLY_LABELS
+    if {la, lb} == {'hook_log_file', ENTRY_LOG}:
+        return True
     if ENTRY_FILE in (la, lb):   # a word of the entry beyond the generated ones (the hook, interpreter, log, pause file) may be the same file as another one of them; it may not be a file of the guard
-        return (lb if la == ENTRY_FILE else la) == ENTRY_FILE
+        return (lb if la == ENTRY_FILE else la) in (ENTRY_FILE, ENTRY_LOG, 'registered hook', 'registered interpreter')
     if la in ('hook script', 'registered hook') and lb in ('hook script', 'registered hook'):
         return True
     if la == lb == 'registered interpreter':
@@ -403,6 +406,15 @@ def hook_log_setting():
     return v if isinstance(v, str) and v and '\0' not in v else None
 
 
+def entry_roles(command):
+    """(hooks, interpreters, logs) of a hook entry that carries the marker, the format that `add` generates: the word after `-I` or `--hook`
+    is the hook, the word after `exec` or `--python` the interpreter, the word after `--log` the log, in the words that shlex splits the
+    command into. Read for no other command (a handler without the marker is never read this way)."""
+    words = [t for t in command_tokens(command) or [] if t and t[0] not in PUNCTUATION]
+    after = lambda *names: [words[i + 1] for i, w in enumerate(words[:-1]) if w in names]
+    return after('-I', '--hook'), after('exec', '--python'), after('--log')
+
+
 def registered_runtime_files():
     """The files that the hook entry in settings.json names besides the ones the guard generates itself (an entry written with `--hook`,
     `--python` or `--hook-log` of other paths: ENTRY_FILE, which may not be a file of the guard), the hook script and the interpreter
@@ -423,6 +435,9 @@ def registered_runtime_files():
         for _group, handler in entries:
             try:   # one handler that cannot be read must not hide the ones after it
                 found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated))]
+                if ENTRY.ENTRY_MARKER in handler['command']:   # the roles of three words are read in the entry that `add` writes, not in a command found by its exact path
+                    hooks, interpreters, logs = entry_roles(handler['command'])
+                    found += [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters] + [(ENTRY_LOG, t) for t in logs if os.path.isabs(t)]
             except ScanIncomplete as e:
                 found.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
             except Exception:
@@ -771,12 +786,12 @@ def check_wiring(where):
     runtime = configured_files()
     registered = registered_runtime_files()
     for la, pa, lb, pb in collisions(runtime + registered):
-        if not ({la, lb} & PROTECTED_LABELS):
+        if not ({la, lb} & (PROTECTED_LABELS | {ENTRY_LOG})):
             continue   # two configured files were refused at the start
-        program, other = ((la, pa), (lb, pb)) if la in PROTECTED_LABELS and lb not in PROTECTED_LABELS else ((lb, pb), (la, pa))
+        program, other = ((la, pa), (lb, pb)) if la in PROTECTED_LABELS | {ENTRY_LOG} and lb not in PROTECTED_LABELS | {ENTRY_LOG} else ((lb, pb), (la, pa))
         if program[0] == OTHER_PROGRAM:
             log(f'WARNING ({where}): the {program[0]} {program[1]} (run by a command in {SETTINGS}) is the {other[0]} of this guard ({other[1]}): every write of the guard to that file is refused, so the guard stores no pause (check the configured paths)')
-        elif program[0] == ENTRY_FILE:
+        elif program[0] in (ENTRY_FILE, ENTRY_LOG):
             log(f'WARNING ({where}): the hook entry in {SETTINGS} names {program[1]}, which is the {other[0]} of this guard ({other[1]}): the hook would append to it or a write of the guard would replace it, so a pause would hold no session. Run five-hour-guard-settings.py add again')
         else:
             log(f'WARNING ({where}): the {program[0]} {program[1]} is the {other[0]} of this guard ({other[1]}): a write of the guard would replace the program, so a pause would hold no session. Run five-hour-guard-settings.py add again')
@@ -805,8 +820,13 @@ def hook_log_collisions():
     rewrite after the start can make it that) and that is a file of the guard or a program. For every call it holds the hook appends a
     line to its log, which would end a pause (the pause file stops being one), destroy the state or the usage cache, or corrupt the
     program. The start refuses these pairs (check_distinct); this is the same look after the start."""
-    return [(pa if la == ENTRY_FILE else pb, lb if la == ENTRY_FILE else la, pb if la == ENTRY_FILE else pa)
-            for la, pa, lb, pb in collisions(configured_files() + registered_runtime_files()) if ENTRY_FILE in (la, lb)]
+    found = []
+    for la, pa, lb, pb in collisions(configured_files() + registered_runtime_files()):
+        if la in (ENTRY_FILE, ENTRY_LOG):
+            found.append((pa, lb, pb))
+        elif lb in (ENTRY_FILE, ENTRY_LOG):
+            found.append((pb, la, pa))
+    return found
 
 
 def check_pause_path():

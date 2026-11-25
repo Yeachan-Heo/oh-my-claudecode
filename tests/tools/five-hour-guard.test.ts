@@ -756,8 +756,16 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   });
 
   it('a hook log that is the hook program or its launcher is reported when a settings rewrite after the start put it there, as the start would refuse it', async () => {
+    const dir = join(fixture('wiring-log-program', {}).dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    const py = join(dir, 'my-python');
+    copyFileSync(HOOK, hook);
+    writeFileSync(py, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const cases: Array<[string, string, string, RegExp]> = [
       ['bundled-hook', HOOK, PYBIN, /names .*five-hour-guard-hook\.py, which is the hook script of this guard/],
+      ['registered-hook', hook, PYBIN, /names .*custom\/five-hour-guard-hook\.py, which is the registered hook of this guard/],
+      ['registered-launcher', hook, py, /names .*my-python, which is the registered interpreter of this guard/],
     ];
     for (const [name, entryHook, python, expected] of cases) {
       const f = fixture(`wiring-log-${name}`, { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
@@ -2221,6 +2229,38 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('the log of an entry that carries the marker is read from its words (--log after the generated format): it may not be the hook or interpreter of that entry, also with paths of its own, nor the hook of the guard when the command has no generated word', () => {
+    const f = fixture('entry-log-roles', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'my-hook.py');
+    const py = join(dir, 'my-python');
+    copyFileSync(HOOK, hook);
+    writeFileSync(py, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+    const entry = (log: string, hookPath = hook, python = py) => `exec ${python} -I ${hookPath} --pause-file ${f.pause} --log ${log} # five-hour-guard-entry`;
+    for (const [name, command] of [['its own hook', entry(hook)], ['its own interpreter', entry(py)], ['the hook of the guard, no generated word in the command', entry(HOOK)]] as const) {
+      put(command);
+      const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, name).toMatch(/"registered hook log" \(.*\) are the same file|and "registered hook log" \(/);
+    }
+    put(entry(join(dir, 'my-hook.log')));
+    expect(runSync(GUARD, ['--config', f.cfg, '--once']).status, 'a log of its own is fine').toBe(0);
+  });
+
+  it('a handler without the marker is not read for roles: its --log is a word like any other, a program of another hook for the guard', () => {
+    const f = fixture('foreign-log-not-read', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `other-tool -I /x/other-hook.py --log ${f.state}` }] }] } }), 'utf8');
+    const r = runSync(GUARD, ['--config', f.cfg, '--once']);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain(`"state_file" (${f.state}) and "program of another hook" (${f.state}) are the same file`);
+    expect(r.stderr).not.toMatch(/registered hook log/);
+  });
+
   it('the hook entry is compared with the generated one: an entry that differs warns once with the entry to paste, the generated entry (with or without a hook log) is silent', () => {
     const f = fixture('entry-drift', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const base = { usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings };
@@ -2541,6 +2581,27 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.stderr).toMatch(/are the same file/);
       expect(readFileSync(hook, 'utf8'), 'the registered hook is intact').toBe(hookText);
     }
+  });
+
+  it('a hook log that is the program of another recognised entry is reported, whichever entry comes first', async () => {
+    const f = fixture('wiring-log-cross-entry', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const dir = join(f.dir, 'custom');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    const hookBefore = readFileSync(hook, 'utf8');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const entry = (...commands: string[]) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: commands.map((command) => ({ type: 'command', command, timeout: 21600 })) }] } });
+    const plain = generatedCommand(f.pause, HOOK, PYBIN);
+    const logging = generatedCommand(f.pause, hook, PYBIN, HOOK);   // its log is the bundled hook, which the other entry runs
+    const g = startGuard(f, ['--warn-every', '1']);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeFileSync(f.settings, entry(logging, plain), 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /names .*five-hour-guard-hook\.py, which is the (hook script|registered hook) of this guard/.test(readText(f.log)), 20000, 'the cross-entry alias warning');
+    } finally { await stopGuard(g); }
+    expect(readFileSync(hook, 'utf8')).toBe(hookBefore);
   });
 
   it('no pause is published while the hook log of a registered entry, put there by a settings rewrite after the start, is a file of the guard or a program: the hook would append to it', async () => {
