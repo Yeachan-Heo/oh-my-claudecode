@@ -179,6 +179,33 @@ describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and 
     }
   });
 
+  // A cache root that can be searched but not listed (mode 0111, or an ACL that says so) hides its namespaces: one of them may hold the tree the backup
+  // directory leads into, and the next cleanup of the payload removes a recovery copy there. The listing that fails is played by a preload, so the
+  // case holds for a process that ignores the mode bits (root) too.
+  test.each([['EACCES'], ['EPERM'], ['EIO']])('a plugin cache that cannot be listed (%s) is refused before anything is moved, as the overlap is where the listing works', (code) => {
+    for (const command of commands) {
+      for (const listed of [false, true]) {
+        const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+        try {
+          // A namespace that is a link out of the cache: only the listing of the cache root finds it.
+          const hidden = path.join(dir, 'elsewhere', '9.9.9', 'skill-bodies', 'omc-doctor');
+          mkdirSync(hidden, { recursive: true });
+          link(path.join(dir, 'elsewhere'), path.join(dir, 'plugins', 'cache', 'other-namespace'));
+          writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0', installPath: path.join(cache, '5.9.0') }] });
+          link(hidden, path.join(dir, 'plugins', 'backups'));
+          const preload = path.join(dir, 'unlistable.cjs');
+          writeFileSync(preload, `const fs = require('fs'); const real = fs.readdirSync;\nfs.readdirSync = function (target, ...rest) {\n  if (!process.env.LISTABLE && String(target) === process.env.UNLISTABLE) throw Object.assign(new Error('${code}'), { code: '${code}' });\n  return real.call(this, target, ...rest);\n};\n`);
+          const result = runCommand(command, dir, { preloads: [preload], env: { UNLISTABLE: path.join(dir, 'plugins', 'cache'), ...(listed ? { LISTABLE: '1' } : {}) }, timeout: 20_000 });
+          // Listed, the namespace is found and the backup directory inside it is the overlap refusal; unlisted, the refusal says why.
+          expect({ command, listed, status: result.status, said: result.stdout.includes('could not be read completely'), overlap: REFUSED.test(result.stdout), cache: readdirSync(cache).sort(), landed: readdirSync(hidden) })
+            .toEqual({ command, listed, status: 1, said: !listed, overlap: listed, cache: ['5.8.0', '5.9.0'], landed: [] });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   // A rename cannot cross a file system. A destination on another device than the cache (reported here by a preload that
   // gives everything under the vault another device number) is refused before the directory is created, not half way.
   test('a redirected backup directory on another file system than the cache is refused before anything is created or moved', () => {

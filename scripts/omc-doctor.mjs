@@ -1334,7 +1334,8 @@ const backupPlace = (registry) => {
   try {
     for (const market of fs.readdirSync(cacheRoot)) namespaces.push(cacheDirOf(market), path.join(cacheRoot, market));
   } catch (error) {
-    // No readable cache root: the cache commands report that themselves.
+    // A cache root that is not there has no namespaces; one that cannot be listed may hide namespaces the backup must lie outside of.
+    if (!absent(error, cacheRoot)) return stop('the plugin cache ' + cacheRoot + ' could not be read completely');
   }
   // A version directory may be a link out of the cache too: the tree it leads to is a tree of its own. A link that leads nowhere (a loop,
   // a target that is gone) has no tree, and the entry is moved aside like any unused one.
