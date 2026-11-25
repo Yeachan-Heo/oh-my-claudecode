@@ -747,7 +747,9 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
       { role: 'user', text: 'IDLE', toolUses: [] }, { role: 'assistant', text: 'Next.', toolUses: [] }, { role: 'user', text: 'Last.', toolUses: [] }, { role: 'assistant', text: 'Done.', toolUses: [] }];
     const group = [-1, 0, -1, 1, -1, 2, -1, 3];
     const note = { ...item('note', { resIdx: 2 }), note: true, useIdx: -1 };
-    const shape = shapeOf(rows, [note], { group, keepFrom: rows.length, queued: new Map([[2, ['d1', 'd2']]]) });
+    // Two deliveries of a coordinator (a text at the rate of a reminder before and after the replacement, so no rate changes): the shape counts blocks and messages here.
+    const delivered = ['The coordinator sent a message while you were working:\nd1', 'The coordinator sent a message while you were working:\nd2'];
+    const shape = shapeOf(rows, [note], { group, keepFrom: rows.length, queued: new Map([[2, delivered]]) });
     // The row holds its text and two deliveries (3 blocks): a trace or a short copy carries them in one text, a drop leaves the deliveries in one text too.
     expect(shape.shed([note], 'trace')).toBeCloseTo(msg(3) - msg(1), 6);
     expect(shape.shed([note], 'drop')).toBeCloseTo(msg(3) - msg(1), 6);
@@ -816,5 +818,131 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     expect(counted.pass).toBe('short_or_trace');
     expect(counted.predicted).toBeLessThanOrEqual(14000);
     expect(candidates.some((c) => c.keep === 'drop')).toBe(false);
+  });
+
+  // A notification row that is replaced is one text block with the blocks delivered after it (build): the replacement or nothing, and each delivery in an envelope. listTokens counts
+  // that block at the rate of the words of the user when a message of the user is among the deliveries, the deliveries of a coordinator and the envelopes included, where apart,
+  // as the host holds them, they cost the rate of a reminder; in a message that holds a result they cost that rate whatever they are.
+  describe('a notification row replaced with the blocks delivered after it is one text block', () => {
+    const { RATE_NOTE, RATE_TRACE } = ratesFrom(undefined);
+    const USER = `The user sent a new message while you were working:\n${'Typed during the tool turn. '.padEnd(1000, 'w')}\n\nThis is how Claude Code surfaces messages`;
+    const COORD = (k) => `The coordinator sent a message while you were working:\nCOORD-${k} ${'c'.repeat(3000)}`;
+    const REPORT = `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<task-id>b1</task-id>\n<summary>Agent finished</summary>\n<result>REPORT ${'n'.repeat(4000)}</result>\n</task-notification>`;
+    const TRACE = `[compacted] background task notification (Agent finished) - ${REPORT.length} chars removed`;
+    // The text build writes for the row: the replacement (none for a drop) and each delivery in an envelope of its own, one per line.
+    const carried = (text, blocks) => [...(text ? [text] : []), ...blocks.map((b, k) => `<system-reminder id="jev-${k + 1}">\n${b}\n</system-reminder id="jev-${k + 1}">`)].join('\n');
+    const chars = (blocks) => blocks.reduce((n, b) => n + b.length, 0);
+    const task = { role: 'user', text: 'Task.', toolUses: [] };
+    const hello = { role: 'assistant', text: 'Hello.', toolUses: [] };
+    const stepRow = (ids, text) => ({ role: 'assistant', text, toolUses: ids.map((id) => ({ tool_use_id: id, tool: 'Bash', input: { command: `cat notes-${id}.txt` } })) });
+    const done = { role: 'assistant', text: 'Done.', toolUses: [] };
+    const noteRow = { role: 'user', text: REPORT, toolUses: [] };
+    const resultsRow = (ids) => ({ role: 'user', text: '', toolUses: [], toolResults: ids.map((id) => ({ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(4000)}`, isError: false })) });
+    // The API form of rows: the rows of the user in a run are one message, each row's results before its text, and the blocks delivered after a row come after its blocks.
+    const apiList = (rows, delivered = new Map()) => {
+      const out = [];
+      rows.forEach((m, i) => {
+        const content = m.role === 'assistant'
+          ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
+          : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : []), ...(delivered.get(i) || []).map((text) => ({ type: 'text', text }))];
+        if (m.role === 'user' && out.length && out[out.length - 1].role === 'user') out[out.length - 1].content.push(...content); else out.push({ role: m.role, content });
+      });
+      return out;
+    };
+    // The candidate of the notification row at `at`, with the characters build adds in the envelopes of the blocks delivered after it.
+    const noteFor = (at, blocks, text = REPORT) => ({
+      ...item(`note-${at}`, { score: 0, resIdx: at }), note: true, useIdx: -1, summary: 'Agent finished', trace: TRACE, res: { text, isError: false }, resultChars: text.length,
+      envelope: carried(TRACE, blocks).length - TRACE.length - chars(blocks), envelopeDrop: carried('', blocks).length - chars(blocks),
+    });
+    // The notification alone in its message (after the greeting), or after the row of a result in the message of that result. `blocks` are delivered after the notification.
+    function scene(blocks, { result = false, trim = false, said = true, ids = ['a'] } = {}) {
+      const rows = result ? [task, stepRow(ids, said ? 'Step 1.' : ''), resultsRow(ids), noteRow, done] : [task, hello, noteRow, done];
+      const group = result ? [-1, 0, -1, -1, 1] : [-1, 0, -1, 1];
+      const at = rows.indexOf(noteRow);
+      const note = noteFor(at, blocks);
+      const results = result ? ids.map((id) => ({ ...item(id, { score: 0, resIdx: 2 }), useIdx: 1 })) : [];
+      const kept = results[0];
+      const candidates = [...results, note];
+      const queued = new Map([[at, blocks]]);
+      const shape = shapeOf(rows, candidates, { rows: rows.map((m, i) => (trim && i === at ? { ...m, trimDrop: true } : m)), group, keepFrom: rows.length, queued });
+      const before = listTokens(apiList(rows, queued));
+      // The list when the notification is replaced as `keep` says (a trace, or a drop that leaves the deliveries) and the rest stays as it is.
+      const after = (keep) => listTokens(apiList(rows.map((m) => (m === noteRow ? { role: 'user', text: carried(keep === 'trace' ? TRACE : '', blocks), toolUses: [] } : m))));
+      return { rows, note, kept, results, candidates, shape, before, after };
+    }
+    // What the cost of the notification itself (itemTokens: its text less the replacement and the envelopes, at the rate of a reminder) and the shape (shed) take off the list.
+    const itemLoss = (c, keep) => RATE_NOTE * c.res.text.length - (keep === 'trace' ? RATE_TRACE * TRACE.length + RATE_NOTE * c.envelope : RATE_NOTE * c.envelopeDrop);
+    const predicted = ({ note, shape }, keep) => itemLoss(note, keep) + shape.shed([note], keep);
+    const cases = [['a message of the user', [USER]], ['a message of the user and three of a coordinator', [USER, COORD(0), COORD(1), COORD(2)]], ['a coordinator alone', [COORD(0), COORD(1), COORD(2)]], ['a coordinator and then the user', [COORD(0), USER]], ['no delivery', []]];
+
+    for (const [label, blocks] of cases) {
+      for (const keep of ['trace', 'drop']) {
+        it(`${label}, ${keep}: what the shape takes off is what the installed list loses`, () => {
+          const sc = scene(blocks);
+          expect(predicted(sc, keep), label).toBeCloseTo(sc.before - sc.after(keep), 4);
+        });
+        it(`${label}, ${keep}, in the message of a result that stays: the block is a reminder's whatever it holds`, () => {
+          const sc = scene(blocks, { result: true });
+          expect(predicted(sc, keep), label).toBeCloseTo(sc.before - sc.after(keep), 4);
+        });
+      }
+      it(`${label}, in the message of a result that goes too: the result and the notification dropped, the block is the words of the user when they are in it`, () => {
+        const { candidates, shape, before } = scene(blocks, { result: true });
+        // The call of the result goes, its message goes, and the notification leaves its deliveries in the one message that is left.
+        const after = listTokens(apiList([task, stepRow([], 'Step 1.'), { role: 'user', text: carried('', blocks), toolUses: [] }, done]));
+        expect(floorPrediction(candidates, before, undefined, shape), label).toBeCloseTo(after, 4);
+      });
+    }
+
+    it('a notification that stays whole beside a result that goes: the words of the user in its deliveries stand in a message of no result any more', () => {
+      const { kept, shape, before } = scene([USER, COORD(0)], { result: true });
+      // The row of the result is gone with its call; the notification and its two deliveries stay as separate blocks of one message with no result.
+      const after = listTokens(apiList([task, stepRow([], 'Step 1.'), noteRow, done], new Map([[2, [USER, COORD(0)]]])));
+      expect(floorPrediction([kept], before, undefined, shape)).toBeCloseTo(after, 4);
+    });
+
+    it('the order of the decisions does not matter: a trace dropped later is a drop, and a trace taken back leaves nothing', () => {
+      const { note, shape } = scene([USER, COORD(0), COORD(1)]);
+      const stepped = shape.tracker();
+      stepped.set(note, 'trace');
+      expect(stepped.removed()).toBeCloseTo(shape.shed([note], 'trace'), 6);
+      stepped.set(note, 'drop');
+      expect(stepped.removed()).toBeCloseTo(shape.shed([note], 'drop'), 6);
+      stepped.set(note, 'full');
+      expect(stepped.removed()).toBeCloseTo(shape.tracker().removed(), 6);
+    });
+
+    it('two notifications in one message: each is a block of its own and has the class of its own deliveries', () => {
+      for (const [first, second] of [[[USER], [COORD(0)]], [[COORD(0)], [USER]], [[USER], [USER]], [[COORD(0)], [COORD(1)]]]) {
+        const rows = [task, hello, noteRow, { ...noteRow, text: REPORT.replace('REPORT', 'REPORT-2') }, done];
+        const [one, two] = [noteFor(2, first), noteFor(3, second, rows[3].text)];
+        const queued = new Map([[2, first], [3, second]]);
+        const shape = shapeOf(rows, [one, two], { group: [-1, 0, -1, -1, 1], keepFrom: rows.length, queued });
+        const after = [task, hello, { role: 'user', text: carried(TRACE, first), toolUses: [] }, { role: 'user', text: carried(TRACE, second), toolUses: [] }, done];
+        expect(itemLoss(one, 'trace') + itemLoss(two, 'trace') + shape.shed([one, two], 'trace')).toBeCloseTo(listTokens(apiList(rows, queued)) - listTokens(apiList(after)), 4);
+      }
+    });
+
+    it('a decision that splits the messages again leaves the class of the notification as it was', () => {
+      // The calls of the results have no text of their own: both dropped, their message is gone and the task row and the row of the results are one message; the second one
+      // traced instead, the message is back (its trace is its text) and they are two, with no result in the second.
+      const { results: [a, b], note, shape } = scene([USER, COORD(0), COORD(1)], { result: true, said: false, ids: ['a', 'b'] });
+      const direct = shape.tracker();
+      direct.set(a, 'drop');
+      direct.set(b, 'trace');
+      direct.set(note, 'drop');
+      const stepped = shape.tracker();
+      stepped.set(note, 'drop');
+      stepped.set(a, 'drop');
+      stepped.set(b, 'drop');
+      stepped.set(b, 'trace');
+      expect(stepped.removed()).toBeCloseTo(direct.removed(), 6);
+    });
+
+    it('a row that the agent trim removes is gone with its deliveries: the words of the user in them change nothing', () => {
+      const withUser = scene([USER, COORD(0), COORD(1)], { trim: true });
+      const without = scene([COORD(2), COORD(0), COORD(1)], { trim: true });
+      expect(withUser.shape.shed([withUser.note], 'trace')).toBeCloseTo(without.shape.shed([without.note], 'trace'), 6);
+    });
   });
 });

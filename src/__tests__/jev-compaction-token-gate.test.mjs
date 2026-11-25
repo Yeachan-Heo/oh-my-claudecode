@@ -582,6 +582,84 @@ describe('a notification traced with the deliveries of a coordinator: the trace 
   });
 });
 
+describe('a notification that anchors a message of the user and the deliveries of a coordinator: the one block that replaces it is the words of the user', () => {
+  // build writes a notification that is replaced (a trace, a short copy or nothing) and the blocks delivered after it as one text block. listTokens counts that block at the
+  // rate of the words of the user (0.287 a character) when a message of the user is in it, the deliveries of a coordinator and the envelopes build adds included; apart, as
+  // the host holds them, they are at the rate of a reminder (0.363). The prediction takes the difference of the whole block, not only that of the message of the user.
+  const ENV = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '64' };
+  const EACH = 3550;
+  const note = { role: 'user', text: `[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\n<task-notification>\n<task-id>bk7x2mq9</task-id>\n<status>completed</status>\n<summary>Agent finished</summary>\n<result>NOTE-REPORT ${'n'.repeat(4000)}</result>\n</task-notification>`, toolUses: [] };
+  const framed = (words) => `The user sent a new message while you were working:\n${words}\n\nThis is how Claude Code surfaces messages the user sends mid-turn \u2014 within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.`;
+  // 30 steps of text results; the notification row stands right after the first row (a message that holds no result) or right after the row of the result of step 10. The
+  // deliveries are blocks of the API form after the notification: `users` messages of the user (300 characters), then `coords` of a coordinator.
+  // With `known` the task of the notification was started by a call that stands in the conversation, so the notification is scored by Jev; without it the source is unknown and the
+  // notification is held (never sent, a trace).
+  const launch = [
+    { role: 'assistant', text: 'Starting the task.', toolUses: [{ tool_use_id: 'bg1', tool: 'Bash', input: { command: 'sleep 1', run_in_background: true } }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'bg1', text: 'Command running in background with ID: bk7x2mq9. Output is being written to: /tmp/tasks/bk7x2mq9.output', isError: false }] },
+    { role: 'assistant', text: 'Waiting.', toolUses: [] },
+  ];
+  const fixture = (where, { users, coords, userChars, known }) => {
+    const steps = session(30, { shot: () => false, chars: 4000 });
+    const at = steps.findIndex((m) => (m.toolResults || []).some((r) => r.tool_use_id === 't10'));
+    const start = known ? [steps[0], ...launch] : [steps[0]];
+    const rows = where === 'no result' ? [...start, note, ...steps.slice(1)] : [...start, ...steps.slice(1, at + 1), note, ...steps.slice(at + 1)];
+    const frozen = Object.freeze(rows.map((m, k) => Object.freeze({ ...m, handle: `h${k}` })));
+    const api = apiOf(frozen);
+    const target = api.find((a) => a.role === 'user' && a.content.some((b) => b.type === 'text' && b.text.includes('<task-notification>')));
+    for (let k = 0; k < users; k++) target.content.push({ type: 'text', text: framed(`USER-${k} ${'u'.repeat(userChars)}`) });
+    for (let k = 0; k < coords; k++) target.content.push({ type: 'text', text: `The coordinator sent a message while you were working:\nCOORD-${k} ${'c'.repeat(EACH)}` });
+    return { rows: frozen, api };
+  };
+  // Jev scores the report of the notification `noteScore` (under 0.5 it goes to a trace, above it to a short copy), the result of step 10 low when the notification stands in
+  // its message, and every other result needed.
+  const run = async (where, { users = 1, coords = 20, noteScore = 0, userChars = 300, known = false } = {}) => {
+    const { rows, api } = fixture(where, { users, coords, userChars, known });
+    const score = (text) => (text.includes('NOTE-REPORT') ? noteScore : where === 'with a result' && text.startsWith('RESULT-10 ') ? 0 : 3);
+    const res = await compactRun(ENV, rows, { tokens: 110000, trigger: 'manual', api, score });
+    // The results that stay whole in the installed list (a short copy or a trace is not one).
+    const whole = res.out.messages.flatMap((m) => m.toolResults || []).filter((r) => (r.text || '').endsWith('x'.repeat(4000))).length;
+    // What the installed list loses against the list before, and what the prediction takes off the host's count.
+    const lost = listTokens(api) - listTokens(apiOf(res.out.messages));
+    // What stands in place of the notification: its trace, its short copy, or nothing.
+    const copy = res.out.messages.some((m) => (m.text || '').includes('notification shortened at compaction')) ? 'short' : res.out.messages.some((m) => (m.text || '').startsWith('[compacted] background task notification')) ? 'trace' : 'none';
+    return { ...res, whole, lost, copy, predicted: 110000 - res.record.tokens_after_pred };
+  };
+
+  for (const [label, where, noteScore, kind, known] of [['a trace in a message that holds no result', 'no result', 0, 'trace', false], ['a short copy of a notification of a known task in a message that holds no result', 'no result', 3, 'short', true], ['a trace in the message of a result that goes too', 'with a result', 0, 'trace', false]]) {
+    it(`one message of the user and twenty of a coordinator, ${label}: the prediction is what the installed list loses, and no result scored needed is cut for the difference`, async () => {
+      const { record, whole, lost, copy, predicted } = await run(where, { noteScore, known });
+      expect(record).toMatchObject({ result: 'jev', notifications: 1 });
+      expect(copy).toBe(kind);
+      // The words of the user make the block theirs: 71 000 characters of the coordinator at 0.287 instead of 0.363 are 5 396 tokens the list loses on top of the notification.
+      expect(lost).toBeGreaterThan(5000);
+      // The notification alone reaches the target of 106 462, so no result scored needed is cut (the results of 30 steps, less the one of step 10 that goes with the notification).
+      expect(whole).toBe(where === 'no result' ? 30 : 29);
+      expect(Math.abs(predicted - lost), `predicted ${predicted}, lost ${lost}`).toBeLessThanOrEqual(0.6 * (record.traced + record.kept_short) + 2);
+    });
+  }
+
+  it('a notification that stays whole in the message of a result that goes: the message of the user in its deliveries stands in a message of no result any more', async () => {
+    // The report is scored needed and stays; the result of step 10 goes. The 5 000 characters of the user are counted at 0.287 instead of 0.363 once no result stands beside them.
+    const { record, lost, predicted } = await run('with a result', { coords: 0, noteScore: 3, userChars: 5000 });
+    expect(record).toMatchObject({ result: 'jev', notifications: 1 });
+    expect(lost).toBeGreaterThan(400);
+    expect(Math.abs(predicted - lost), `predicted ${predicted}, lost ${lost}`).toBeLessThanOrEqual(0.6 * (record.traced + record.kept_short) + 2);
+  });
+
+  it('a message of the user alone after the notification: the envelope build adds is counted at the rate of the words of the user too', async () => {
+    const { record, lost, predicted } = await run('no result', { coords: 0 });
+    expect(record).toMatchObject({ result: 'jev', notifications: 1 });
+    expect(Math.abs(predicted - lost), `predicted ${predicted}, lost ${lost}`).toBeLessThanOrEqual(0.6 * (record.traced + record.kept_short) + 2);
+  });
+
+  it('the deliveries of a coordinator alone stay at the rate of a reminder: nothing to take off for them', async () => {
+    const { record, lost, predicted } = await run('no result', { users: 0 });
+    expect(record).toMatchObject({ result: 'jev', notifications: 1 });
+    expect(Math.abs(predicted - lost), `predicted ${predicted}, lost ${lost}`).toBeLessThanOrEqual(0.6 * (record.traced + record.kept_short) + 2);
+  });
+});
+
 describe('a session of screenshots and the own threshold (OMC_JEV_COMPACT_AT_PERCENT)', () => {
   const OWN = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60' };
 
