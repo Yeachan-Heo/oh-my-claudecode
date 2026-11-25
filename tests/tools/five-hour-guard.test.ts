@@ -1743,6 +1743,34 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readJson(missing.pause).paused, 'no settings.json names no hook: the pause is published').toBe(true);
   });
 
+  it('a relative path word of the command of another hook is also that path in each directory that another word of the same command names (cd DIR; ./prog, env -C DIR ./prog): never a file the guard writes', () => {
+    const f = fixture('foreign-cd-relative', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(join(hooks, 'sub'), { recursive: true });
+    const text = '# the script that the command runs after cd\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const [command, name] of [[`cd ${hooks}; ./audit`, 'audit'], [`cd ${hooks} && python3 sub/audit`, 'sub/audit'], [`env -C ${hooks} ./audit`, 'audit'], [`./audit --directory ${hooks}`, 'audit']]) {
+      const script = join(hooks, name);
+      writeFileSync(script, text, 'utf8');
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/"program of another hook" \(.*audit\) are the same file/);
+        expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // no directory is named: the relative path is no file of that directory
+    writeFileSync(f.settings, settings('./audit'), 'utf8');
+    const quiet = start({ state_file: join(hooks, 'audit') });
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
