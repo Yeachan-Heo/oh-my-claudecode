@@ -22,7 +22,8 @@ import {
   containedFsPlatformSupported,
 } from "./contained-fd.js";
 
-const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+/** Accepted run ids: shared by run containment, `omc graph gc` and `omc graph status`. */
+export const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 const DIRECTORY_FLAGS =
   fsConstants.O_RDONLY |

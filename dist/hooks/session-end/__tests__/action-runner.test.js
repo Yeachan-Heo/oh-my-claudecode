@@ -16,7 +16,8 @@ vi.mock('../cleanup-manifest.js', async () => {
     const actual = await vi.importActual('../cleanup-manifest.js');
     return { ...actual, markSessionEndActionRunner: manifest.markSessionEndActionRunner };
 });
-import { runSessionEndAction } from '../action-runner.js';
+import { runSessionEndAction, runnerEnvironment } from '../action-runner.js';
+import { getGlobalOmcStateRoot } from '../../../utils/paths.js';
 const directories = [];
 function context(directory, actionName = 'foreground-cleanup') {
     return {
@@ -275,6 +276,44 @@ describe('SessionEnd action runner', () => {
             expect(typeof identity).toBe('string');
             expect(identity.length).toBeGreaterThan(0);
         }
+    });
+    describe('runnerEnvironment()', () => {
+        it('passes through OMC_HOME, XDG_STATE_HOME, and XDG_CONFIG_HOME', () => {
+            const omcHome = '/custom/omc/home';
+            const xdgStateHome = '/custom/state';
+            const xdgConfigHome = '/custom/config';
+            vi.stubEnv('OMC_HOME', omcHome);
+            vi.stubEnv('XDG_STATE_HOME', xdgStateHome);
+            vi.stubEnv('XDG_CONFIG_HOME', xdgConfigHome);
+            vi.stubEnv('PATH', '/usr/bin');
+            const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
+            directories.push(directory);
+            const env = runnerEnvironment(context(directory));
+            expect(env.OMC_HOME).toBe(omcHome);
+            expect(env.XDG_STATE_HOME).toBe(xdgStateHome);
+            expect(env.XDG_CONFIG_HOME).toBe(xdgConfigHome);
+        });
+        it('resolves global state root consistently with parent env using passed-through vars', () => {
+            const omcHome = '/custom/omc/home';
+            vi.stubEnv('OMC_HOME', omcHome);
+            vi.stubEnv('PATH', '/usr/bin');
+            const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
+            directories.push(directory);
+            const parentRoot = getGlobalOmcStateRoot();
+            const env = runnerEnvironment(context(directory));
+            const childEnvState = { ...process.env, ...env };
+            const childRoot = join(childEnvState.OMC_HOME || '', 'state');
+            expect(env.OMC_HOME).toBe(omcHome);
+            expect(childRoot).toBe(parentRoot);
+        });
+        it('drops unrelated env vars that are not in the allow-list', () => {
+            vi.stubEnv('UNRELATED_VAR', 'should-not-pass');
+            vi.stubEnv('PATH', '/usr/bin');
+            const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
+            directories.push(directory);
+            const env = runnerEnvironment(context(directory));
+            expect(env.UNRELATED_VAR).toBeUndefined();
+        });
     });
 });
 //# sourceMappingURL=action-runner.test.js.map

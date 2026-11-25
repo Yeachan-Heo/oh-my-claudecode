@@ -769,7 +769,8 @@ function sessionStartOmissionNotice(budget) {
 const { MODEL_ROUTING_OVERRIDE_MESSAGE } = await import(pathToFileURL(join(__dirname, 'lib', 'model-routing-override-message.mjs')).href);
 
 function isTruthyProviderFlag(value) {
-  return value === '1' || value === 'true';
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
 }
 
 // The first non-blank of CLAUDE_MODEL and ANTHROPIC_MODEL, trimmed ('' when neither is set).

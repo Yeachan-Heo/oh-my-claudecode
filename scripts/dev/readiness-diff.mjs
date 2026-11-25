@@ -3,7 +3,11 @@
 // subsequence of them, and never waits less.
 //
 // Usage (from any cwd):
-//   node scripts/dev/readiness-diff.mjs [--base origin/dev] --set r5|trust [--out /tmp/readiness-diff-<set>]
+//   node scripts/dev/readiness-diff.mjs [--base origin/dev] --set r5|trust|trust-partial [--expect identical] [--out /tmp/readiness-diff-<set>]
+//
+// --expect identical replaces the set's own criteria with "every case sends
+// the same keys, returns the same result and waits as long as on base": for a
+// set whose criteria describe a change the base already holds.
 //
 // The base is checked out once as a detached worktree at
 // $TMPDIR/omc-readiness-diff-<base sha> and reused while its tracked files are
@@ -34,11 +38,11 @@ const HARNESS_FILES = [HARNESS, join('src', 'team', '__tests__', 'helpers', 'rea
 const FIXTURE_ROOT = join(HEAD_ROOT, 'src', 'team', '__tests__', 'fixtures', 'pane-frames');
 
 // Modules head must load for a set; a miss means head ran the base path.
-const REQUIRED_HEAD_MODULES = { r5: [], trust: [] };
+const REQUIRED_HEAD_MODULES = { r5: [], trust: [], 'trust-partial': [] };
 
 // Sets whose head may send keys the base did not, in cases where the base
 // failed: there head has to keep going to succeed.
-const HEAD_MAY_CONTINUE_WHERE_BASE_FAILED = new Set(['trust']);
+const HEAD_MAY_CONTINUE_WHERE_BASE_FAILED = new Set(['trust', 'trust-partial']);
 
 // Cases where head may return sooner than base: in the trust set's stale
 // case base answers the dead dialog first and head returns without a key.
@@ -51,6 +55,15 @@ const STARTUP_WAIT_DEFAULT_MS = 30_000;
 // waitForStartupPaneReady's default poll interval.
 const STARTUP_POLL_MS = 250;
 const TRUST_MODES = ['immediate', 'batched', 'stale'];
+const PARTIAL_STATES = ['reference', 'initial-partial', 'post-down-partial', 'pre-typing-partial'];
+// pre-typing-partial on head: the wait reads the idle pane at once; the check
+// before the trigger sees the partial frame and sends the start back to the
+// wait, which polls once after Down and once after Enter; then
+// deliverStartupInbox sleeps 100 ms after typing and 120 ms after the first
+// Enter. The startup test "sends the start back to the wait when the check
+// before the trigger catches the trust dialog mid-draw" plays the same frames.
+const PRE_TYPING_HEAD_WAIT_MS = 2 * STARTUP_POLL_MS + 100 + 120;
+const PRE_TYPING_KEYS_FROM = 'reference claude/2.1.330/trust.txt';
 
 // The product's own parser decides which values may lengthen the wait, so the
 // comparator cannot read a value differently from it (6e4, unsafe integers).
@@ -63,11 +76,32 @@ function readinessTimeoutAtDefault(raw) {
   return resolveStartupReadyTimeoutMs(env) === STARTUP_WAIT_DEFAULT_MS;
 }
 
+// r5 replays each fixture as a pane that never changes. These two are Claude
+// Code's trust dialog captured while it draws: frozen, they are a dialog that
+// never finishes drawing. Base reads them as an input box and types the
+// trigger into the dialog, the bug the trust-partial set covers; head sends no
+// key and waits until readiness_timeout. Only that exact difference passes.
+const R5_FROZEN_TRUST_PARTIALS = new Set([
+  'claude/2.1.330/trust-no-choice-partial.txt',
+  'claude/2.1.330/trust-yes-choice-partial.txt',
+]);
+
 // Set-specific review criteria, on top of the checks every set must pass.
 const SET_CRITERIA = {
   r5: (pairs) => {
     const failures = [];
     for (const { id, base, head, sameKeys, sameResult } of pairs) {
+      if (R5_FROZEN_TRUST_PARTIALS.has(base.fixture)) {
+        if (head.keys.length !== 0) failures.push(`${id} head sent ${head.keys.length} key(s) into a trust dialog still drawing`);
+        if (head.result?.reason !== 'readiness_timeout') failures.push(`${id} head result ${JSON.stringify(head.result)} is not readiness_timeout`);
+        if (base.result?.kind !== 'attempted_unconfirmed' || base.keys.length === 0) {
+          failures.push(`${id} base result ${JSON.stringify(base.result)} with ${base.keys.length} key(s) no longer types into the frozen frame`);
+        }
+        const timeout = resolveStartupReadyTimeoutMs(base.env.OMC_TEAM_READY_TIMEOUT_MS === null ? {} : { OMC_TEAM_READY_TIMEOUT_MS: base.env.OMC_TEAM_READY_TIMEOUT_MS });
+        if (head.wait_ms < timeout) failures.push(`${id} head gave up after ${head.wait_ms}ms, before its ${timeout}ms timeout`);
+        if (head.wait_ms > STARTUP_WAIT_MAX_MS) failures.push(`${id} head waited ${head.wait_ms}ms > ${STARTUP_WAIT_MAX_MS}ms`);
+        continue;
+      }
       if (!sameKeys) failures.push(`${id} key sequence differs from base`);
       if (!sameResult) failures.push(`${id} result differs from base`);
       if (readinessTimeoutAtDefault(base.env.OMC_TEAM_READY_TIMEOUT_MS) && head.wait_ms !== base.wait_ms) {
@@ -108,21 +142,78 @@ const SET_CRITERIA = {
     }
     return failures;
   },
+  // Claude Code's trust dialog captured while it draws (see the harness).
+  // A case base gets through gives the same answer on head; one base fails
+  // on gives head the keys base sends to the same dialog drawn whole, at most
+  // one poll later per partial capture. No case sends head a key on a
+  // partial frame.
+  'trust-partial': (pairs) => {
+    const failures = [];
+    for (const state of PARTIAL_STATES) {
+      if (!pairs.some(({ base }) => base.eventState === state)) failures.push(`no ${state} case`);
+    }
+    const byId = new Map(pairs.map(pair => [pair.id, pair]));
+    const identical = ({ base, head, sameKeys, sameResult }) => sameKeys && sameResult && base.wait_ms === head.wait_ms;
+    for (const pair of pairs) {
+      const { id, base, head } = pair;
+      if (!PARTIAL_STATES.includes(base.eventState)) failures.push(`${id} has unknown state ${base.eventState}`);
+      if (head.keys_on_partial !== 0) failures.push(`${id} head sent ${head.keys_on_partial} key(s) on a partial frame`);
+      if (base.eventState === 'reference' && !identical(pair)) failures.push(`${id} reference case differs from base`);
+      if (base.eventState === 'initial-partial' || base.eventState === 'post-down-partial') {
+        const reference = byId.get(base.reference_case);
+        if (!reference) {
+          failures.push(`${id} has no reference case ${base.reference_case}`);
+        } else if (succeeded(base)) {
+          if (!identical(pair)) failures.push(`${id} differs from base, which got through`);
+        } else {
+          if (base.result?.reason !== 'selector_persistent') failures.push(`${id} base result ${JSON.stringify(base.result)} is not selector_persistent`);
+          if (!succeeded(head)) failures.push(`${id} head result ${JSON.stringify(head.result)}`);
+          if (!isDeepStrictEqual(keySequence(head), keySequence(reference.base))) failures.push(`${id} head keys differ from the reference on base`);
+          // Exactly one poll per partial capture: fewer means head reread without sleeping.
+          const expected = reference.base.wait_ms + head.partial_captures * STARTUP_POLL_MS;
+          if (head.wait_ms !== expected) failures.push(`${id} head waited ${head.wait_ms}ms, not ${expected}ms`);
+        }
+      }
+      if (base.eventState === 'pre-typing-partial') {
+        if (!succeeded(head)) failures.push(`${id} head result ${JSON.stringify(head.result)}`);
+        // Down, Enter, the trigger, Enter, Enter: what base sends the whole
+        // 2.1.330 dialog, compared send by send (text, pane, guard).
+        const reference = byId.get(PRE_TYPING_KEYS_FROM);
+        if (!reference) failures.push(`${id} has no case ${PRE_TYPING_KEYS_FROM} to take its keys from`);
+        else if (!isDeepStrictEqual(keySequence(head), keySequence(reference.base))) failures.push(`${id} head keys differ from ${PRE_TYPING_KEYS_FROM} on base`);
+        if (head.wait_ms !== PRE_TYPING_HEAD_WAIT_MS) failures.push(`${id} head waited ${head.wait_ms}ms, not ${PRE_TYPING_HEAD_WAIT_MS}ms`);
+        if (base.result?.reason !== 'selector_persistent') failures.push(`${id} base result ${JSON.stringify(base.result)} is not selector_persistent`);
+        if (!(base.keys_on_partial >= 1)) failures.push(`${id} base sent no key on the partial frame: the case misses the gap`);
+      }
+    }
+    return failures;
+  },
 };
 
+function expectIdentical(pairs) {
+  const failures = [];
+  if (pairs.length === 0) failures.push('no case');
+  for (const { id, base, head, sameKeys, sameResult } of pairs) {
+    if (!sameKeys || !sameResult || base.wait_ms !== head.wait_ms) failures.push(`${id} differs from base`);
+  }
+  return failures;
+}
+
 function parseArgs(argv) {
-  const options = { base: 'origin/dev', set: undefined, out: undefined };
+  const options = { base: 'origin/dev', set: undefined, out: undefined, expect: undefined };
   for (let index = 0; index < argv.length; index += 2) {
     const [flag, value] = [argv[index], argv[index + 1]];
     if (value === undefined) throw new Error(`missing value for ${flag}`);
     if (flag === '--base') options.base = value;
     else if (flag === '--set') options.set = value;
     else if (flag === '--out') options.out = value;
+    else if (flag === '--expect') options.expect = value;
     else throw new Error(`unknown argument ${flag}`);
   }
   if (!options.set || !Object.hasOwn(SET_CRITERIA, options.set)) {
     throw new Error(`--set must be one of: ${Object.keys(SET_CRITERIA).join(', ')}`);
   }
+  if (options.expect !== undefined && options.expect !== 'identical') throw new Error('--expect must be identical');
   // Absolute, because the base harness runs with the base worktree as cwd.
   options.out = resolve(options.out ?? join('/tmp', `readiness-diff-${options.set}`));
   return options;
@@ -220,7 +311,7 @@ function isSubsequence(candidate, of) {
   return index === candidate.length;
 }
 
-export function compare(set, base, head) {
+export function compare(set, base, head, { expect } = {}) {
   const failures = [];
   const differences = [];
   const baseCases = new Map(base.cases.map(traceCase => [traceCase.case, traceCase]));
@@ -277,14 +368,14 @@ export function compare(set, base, head) {
   if (counts.head_only_keys > 0) failures.push(`head_only_keys=${counts.head_only_keys}`);
   if (counts.wait_shorter > 0) failures.push(`wait_shorter=${counts.wait_shorter}`);
   if (counts.nudge_missing > 0) failures.push(`nudge_missing=${counts.nudge_missing}`);
-  failures.push(...SET_CRITERIA[set](pairs));
+  failures.push(...(expect === 'identical' ? expectIdentical(pairs) : SET_CRITERIA[set](pairs)));
   return { counts, controls: controls.length, differences, failures, cases: pairs.length };
 }
 
-export function summarize({ set, baseSha, headSha, base, head }) {
-  const { counts, controls, differences, failures, cases } = compare(set, base, head);
+export function summarize({ set, baseSha, headSha, base, head, expect }) {
+  const { counts, controls, differences, failures, cases } = compare(set, base, head, { expect });
   return [
-    `readiness-diff base=${baseSha} head=${headSha} set=${set}`,
+    `readiness-diff base=${baseSha} head=${headSha} set=${set}${expect ? ` expect=${expect}` : ''}`,
     `cases=${cases} control_cases=${controls} base_keys=${sentCount(base)} head_keys=${sentCount(head)}`,
     `identical=${counts.identical} head_only_keys=${counts.head_only_keys} base_only_keys=${counts.base_only_keys} ` +
       `wait_shorter=${counts.wait_shorter} nudge_missing=${counts.nudge_missing} nudge_delay_max_ms=${counts.nudge_delay_max_ms}`,
@@ -303,7 +394,7 @@ function main() {
   const baseRoot = prepareBaseTree(baseSha);
   const base = runHarness(baseRoot, options.set, join(options.out, 'base.json'));
   const head = runHarness(HEAD_ROOT, options.set, join(options.out, 'head.json'));
-  const summary = summarize({ set: options.set, baseSha, headSha, base, head });
+  const summary = summarize({ set: options.set, baseSha, headSha, base, head, expect: options.expect });
   writeFileSync(join(options.out, 'summary.txt'), `${summary}\n`);
   console.log(summary);
   process.exit(summary.endsWith('RESULT PASS') ? 0 : 1);

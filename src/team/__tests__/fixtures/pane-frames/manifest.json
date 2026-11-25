@@ -409,6 +409,34 @@
     "note": "The whole Bypass Permissions warning on 2.1.330, after the trust dialog was answered: No, exit is focused."
   },
   {
+    "file": "claude/2.1.330/trust-60col.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "trust-60col",
+    "cols": 60,
+    "rows": 15,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/r2/frames.log#3",
+    "note": "The whole trust dialog in a 60x15 pane, the frame after trust-yes-choice-partial.txt: the path lines are pushed off the top."
+  },
+  {
+    "file": "claude/2.1.330/trust-80col.txt",
+    "provider": "claude",
+    "version": "2.1.330",
+    "state": "trust-80col",
+    "cols": 80,
+    "rows": 24,
+    "launch_args": [
+      "--dangerously-skip-permissions"
+    ],
+    "source": "recorded",
+    "origin": "/tmp/partial-measure/r1/frames.log#3",
+    "note": "The whole trust dialog in an 80x24 pane, the frame after trust-no-choice-partial.txt. The workspace path is redacted."
+  },
+  {
     "file": "claude/2.1.330/trust-body-partial.txt",
     "provider": "claude",
     "version": "2.1.330",
