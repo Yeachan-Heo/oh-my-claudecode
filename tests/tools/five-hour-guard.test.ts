@@ -894,6 +894,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(existsSync(a.pause), 'stopping the second guard leaves the pause of the first in force').toBe(true);
     } finally { await stopGuard(second); await stopGuard(first); }
     expect(existsSync(a.pause), 'stopping the first guard removes its pause').toBe(false);
+    expect(readJson(a.state).paused, 'and stores "not paused"').toBe(false);
   });
 
   it('where no lock is available two guards that cross their first publication leave the pause of the winner in force when the loser stops: the cleanup of the loser does not remove a pause that a live process published', async () => {
@@ -916,6 +917,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     } finally { await stopGuard(loser); }
     expect(existsSync(f.pause), 'stopping the loser leaves the pause of the winner in force').toBe(true);
     expect(readJson(f.pause).pid, 'it is still the winner\'s').toBe(process.pid);
+    expect(readJson(f.state).paused, 'the loser does not store "not paused" under the pause of the winner').toBe(true);
   });
 
   it('the files that the guard reads are not read to their end: a pause file, a usage cache, a state file or a configuration larger than the limit is read like a document that cannot be decoded', () => {
