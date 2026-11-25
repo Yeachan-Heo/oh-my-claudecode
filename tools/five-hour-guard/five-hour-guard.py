@@ -414,7 +414,7 @@ def other_commands(data, ours):
     return found
 
 
-LAST_SCAN = [[]]   # what the last readable settings.json gave: a file that cannot be read (a rewrite in progress, a broken edit) does not lift the protection
+LAST_SCAN = [[]]   # what every readable settings.json gave since the start: neither a file that cannot be read (a rewrite in progress, a broken edit) nor a rewrite that removes an entry lifts the protection
 
 
 def registered_runtime_files():
@@ -423,9 +423,10 @@ def registered_runtime_files():
     tool is as much a file the guard must not replace as ours). A relative hook, or an interpreter given with a directory part, is taken
     as the file it names from the working directory of the guard: a session resolves it from its own directory, which cannot be known
     here, so this is the conservative reading for the collision checks. An interpreter or launcher given by its bare name is looked up on
-    the PATH of the guard, as the wiring check does, and the file found is the one that counts. Best effort: an unreadable settings file
-    gives what the last scan that could read it gave (none before any), so that a rewrite in progress or a broken edit does not open the
-    programs to a write; hook_check says that the file cannot be read."""
+    the PATH of the guard, as the wiring check does, and the file found is the one that counts. Best effort: the programs found by every
+    scan since the start stay in the list (the unreadable file gives only those): a rewrite in progress or a broken edit does not open
+    them to a write, and a session that loaded an entry keeps running its program after a rewrite removed it, until it is restarted;
+    hook_check says that the file cannot be read."""
     found, companions = [], []   # the programs of the entries first: a collision is reported with the label of the entry
     try:
         with open(SETTINGS or default_settings()) as f:
@@ -458,8 +459,8 @@ def registered_runtime_files():
                 continue   # one command that cannot be read must not hide the others
     except Exception:
         return list(LAST_SCAN[0])
-    LAST_SCAN[0] = found
-    return list(found)
+    LAST_SCAN[0] = found + [x for x in LAST_SCAN[0] if x not in found]   # the programs of this scan first: a collision is reported with their label
+    return list(LAST_SCAN[0])
 
 
 def configured_files():
