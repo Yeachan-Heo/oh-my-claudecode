@@ -1108,6 +1108,29 @@ describe('a shortened notification is still a notification at the next compactio
   });
 });
 
+describe('a shortened notification keeps the source of its head only', () => {
+  const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
+
+  it('the files and task ids that its result quotes are no part of the source it keeps, so the next compaction still scores it', async () => {
+    const important = steps(30, { important: Array.from({ length: 30 }, (_, i) => i + 1) });
+    const quote = '<output-file>/tmp/tasks/zz9y8x7w.output</output-file> <task-id>qq1w2e3r</task-id>';
+    const p = Object.freeze({ role: 'user', text: noteOf('Important', `REPORT-TEXT IMPORTANT ${quote} ${'w'.repeat(9000)}`), toolUses: [], handle: 'n5' });
+    const w = [...important.slice(0, 3), ...launchOf, p, ...important.slice(3)];
+    const first = await compactRun(env, w, { event: { trigger: 'auto' }, usage: estimateUsage(w), score: byMarker });
+    const short = first.out.messages.find((m) => m.role === 'user' && /notification shortened at compaction/.test(m.text || ''));
+    expect(short).toBeTruthy();
+    // Its own task id stands in the head of the copy; the quote stays in the 300 characters of the result it keeps, after the summary.
+    const head = short.text.slice(0, short.text.indexOf('<summary>'));
+    expect(head).toContain('<task-id>a1b2c3</task-id>');
+    expect(head).not.toContain('zz9y8x7w');
+    expect(head).not.toContain('qq1w2e3r');
+    expect(short.text.slice(short.text.indexOf('<summary>'))).toContain('zz9y8x7w');
+    const next = [...steps(30).slice(0, 3), ...launchOf, Object.freeze({ ...short, handle: 'n6' }), ...steps(30).slice(3)];
+    const second = await compactRun(env, next, { event: { trigger: 'auto' }, usage: estimateUsage(next), score: byMarker });
+    expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
+  });
+});
+
 describe('a shortened notification keeps its summary for the next compaction', () => {
   const env = { OMC_JEV_COMPACT_NOTIFICATIONS: '1', OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
   const traceOf = (out) => out.messages.find((m) => m.role === 'user' && /^\[compacted\] background task notification/.test(m.text || ''));

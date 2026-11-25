@@ -309,6 +309,37 @@ describe('a notification whose summary or result quotes the source of another on
   });
 });
 
+describe('a notification of a task whose call is still there, and the files its result quotes', () => {
+  const call = (id, command) => ({ role: 'assistant', text: 'Starting.', toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command, run_in_background: true } }] });
+  const launched = (id, task, file) => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `Command running in background with ID: ${task}. Output is being written to: ${file}`, isError: false }] });
+  const reads = (k) => [
+    { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: `rd${k}`, tool: 'Bash', input: { command: 'cat a.txt' } }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `rd${k}`, text: `Filler ${k} ${'f'.repeat(7000)}`, isError: false }] },
+  ];
+  const SAFE_FILE = '/tmp/tasks/sf3t4a1k.output';
+  const SECRET_FILE = '/tmp/tasks/bk7x2mq9.output';
+  const STRANGER = '/tmp/tasks/zz9y8x7w.output';
+  // Two launches that stay in the conversation: one on a secret path and one that is not.
+  const launches = [call('bg1', 'cat ~/.ssh/id_rsa'), launched('bg1', 'bk7x2mq9', SECRET_FILE), call('bg2', 'npm test'), launched('bg2', 'sf3t4a1k', SAFE_FILE)];
+  const report = ({ head = '', quote = '' }) => `<task-notification>\n<task-id>sf3t4a1k</task-id>\n<output-file>${SAFE_FILE}</output-file>\n${head}<summary>Tests finished</summary>\n<result>PLAINBODY ${quote} ${'s'.repeat(7000)}</result>\n</task-notification>`;
+  const CASES = [
+    { name: 'a file that no call in the conversation produced, quoted in its result', note: report({ quote: `<output-file>${STRANGER}</output-file>` }), sent: true, held: 0 },
+    { name: 'a file that no call in the conversation produced, quoted in its result with a task id of no call', note: report({ quote: `<output-file>${STRANGER}</output-file> <task-id>qq1w2e3r</task-id>` }), sent: true, held: 0 },
+    { name: 'the file of a call on a secret path, quoted in its result', note: report({ quote: `<output-file>${SECRET_FILE}</output-file>` }), sent: false },
+    { name: 'a file that no call in the conversation produced, named in its own head', note: report({ head: `<output-file>${STRANGER}</output-file>\n` }), sent: false, held: 1 },
+  ];
+
+  for (const c of CASES) {
+    it(`${c.sent ? 'is scored as any other' : 'is held, never sent to Jev'} with ${c.name}`, async () => {
+      const w = talk(30);
+      const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...launches, ...[1, 2, 3].flatMap(reads), row(c.note), ...w.slice(3)]);
+      expect(run.record).toMatchObject({ result: 'jev', notifications: 1, ...(c.held === undefined ? {} : { secret_held: c.held }) });
+      expect(run.bodies.join('').includes('PLAINBODY'), c.name).toBe(c.sent);
+      expect(JSON.stringify(run.out.messages).includes('PLAINBODY'), c.name).toBe(false);
+    });
+  }
+});
+
 describe('the envelopes of the deliveries after a notification', () => {
   const words = Array.from({ length: 40 }, (_, k) => `The coordinator sent a message while you were working:\nd${k}`);
   const deliver = (i) => ({ [i]: words });

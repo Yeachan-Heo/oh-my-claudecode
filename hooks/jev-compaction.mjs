@@ -1424,8 +1424,9 @@ function outputFileOf(word) {
 }
 // Whether a notification names an output file that no background call still in the conversation produced (its call was cut or traced by an earlier
 // compaction, which took the file's name with it): whether that call was on a secret path is then unknown, so the notification is held like a secret one.
+// Only the heads of its blocks name its source (noteHeads): a file that the words of a task quote says nothing about where the notification comes from.
 function sourceUnknown(text, outputs) {
-  for (const m of text.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)) if (unknownFile(m[1].trim(), outputs.known)) return true;
+  for (const head of noteHeads(text)) for (const m of head.matchAll(/<output-file>([^<]{1,1000})<\/output-file>/g)) if (unknownFile(m[1].trim(), outputs.known)) return true;
   return false;
 }
 // What a notification says about its source, block by block (a row may hold several): 'secret' or 'held' when a call on a secret path started the task of a block
@@ -1437,6 +1438,19 @@ const NOTE_BLOCK_OPEN = /<task-notification[\s>]/g;
 // What a notification block holds before its <summary> and its <result>: its own metadata (the task id, the output file, the status). The summary and the result are the
 // words of the task and may quote the source of another notification, so the source is read from here and nowhere else in the block.
 const noteHead = (block) => { const at = block.search(/<(?:summary|result)>/); return at < 0 ? block : block.slice(0, at); };
+// The heads of the notification blocks of a text, in order (a block that is not closed runs to the end of the text).
+function noteHeads(text) {
+  const heads = [];
+  for (let at = 0; at < text.length;) {
+    NOTE_BLOCK_OPEN.lastIndex = at;
+    const open = NOTE_BLOCK_OPEN.exec(text);
+    if (!open) break;
+    const close = text.indexOf('</task-notification>', open.index);
+    at = close < 0 ? text.length : close + '</task-notification>'.length;
+    heads.push(noteHead(text.slice(open.index, at)));
+  }
+  return heads;
+}
 function sourceByTask(text, outputs) {
   let worst = 'known';
   let at = 0;
@@ -2169,7 +2183,7 @@ function shortText(c) {
     const summary = c.summary ? `<summary>${c.summary}</summary>\n` : '';
     const kept = `${summary}${body ? body[1].slice(0, SHORT_CHARS) : c.res.text.slice(0, SHORT_CHARS)}`;
     // The source stays in the copy (the task ids and output files of the notification, the first few): the next compaction ties it to its call by them.
-    const source = [...c.res.text.matchAll(/<(task-id|output-file)>\s*([^<]{1,200}?)\s*<\/\1>/g)].slice(0, 8).map((m) => `<${m[1]}>${m[2]}</${m[1]}>\n`).join('');
+    const source = [...noteHeads(c.res.text).join('\n').matchAll(/<(task-id|output-file)>\s*([^<]{1,200}?)\s*<\/\1>/g)].slice(0, 8).map((m) => `<${m[1]}>${m[2]}</${m[1]}>\n`).join('');
     return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${source}${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]\n</task-notification>`;
   }
   return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
