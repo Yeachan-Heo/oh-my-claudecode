@@ -2680,9 +2680,10 @@ function itemTokens(c, rates = DEFAULT_RATES) {
 // its traces one). So the floor, the cascade, the manual plan, the gates of cutInTokens and the accounting take it from here, in one place, and predict the list
 // as listTokens counts the list build writes. The messages are the host's: an assistant message is the rows of one group (groupsOf), a user message a run of user
 // rows; the rows from `keepFrom` on keep their handles and stay as they are. `rows` are the rows build is given (a row of the trim that goes whole has `trimDrop`),
-// `queued` the deliveries after each row. A user message that no result stands in any more has its text at the rate of the words of the user (besideResultGap).
-// Not counted: two user messages that a removed assistant message leaves side by side and the host joins (RATE_MESSAGE less, at most 41 tokens each, and the
-// text of the one that has no result at the rate of a text beside the results of the other). A message costs zero at least (listTokens), its text and its overhead together, so what its structure adds to the text `tok` is
+// `queued` the deliveries after each row. A user message that no result stands in any more has its text at the rate of the words of the user (besideResultGap). The
+// user rows on both sides of an assistant message that is gone (no text, no trace, every call dropped) are one message of the host: the tracker joins their runs, so they
+// cost one message, and their words keep the rate of a text beside a result while a result stays in either. Not counted: the words of a run that held no result, joined to
+// a message that has one (their rate goes up; only an assistant message of thinking alone leaves such a join). A message costs zero at least (listTokens), its text and its overhead together, so what its structure adds to the text `tok` is
 // no less than -tok; at the default rates it is never negative and the text is not needed (Infinity).
 const messageTokens = (blocks, tok, rates) => (blocks > 0 ? Math.max(-tok, blocks * rates.RATE_BLOCK + RATE_MESSAGE) : 0);
 export function shapeOf(messages, candidates, { rows = messages, group, keepFrom, queued = new Map(), rates = DEFAULT_RATES }) {
@@ -2708,10 +2709,12 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
   const runs = [];
   const runOf = new Map();
   let run;
+  let after;
   messages.forEach((m, i) => {
     if (m.role === 'assistant') {
       run = undefined;
-      if (!assistants.has(group[i])) assistants.set(group[i], { before: 0, text: false, calls: 0, first: i, idx: [] });
+      after = group[i];
+      if (!assistants.has(group[i])) assistants.set(group[i], { before: 0, text: false, calls: 0, first: i, idx: [], edges: [] });
       const u = assistants.get(group[i]);
       u.idx.push(i);
       u.before += blocksAt(i);
@@ -2719,7 +2722,11 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
       u.calls += callsAt(m);
       return;
     }
-    if (!run) runs.push((run = { before: 0, rows: [] }));
+    if (!run) {
+      runs.push((run = { before: 0, rows: [], k: runs.length }));
+      // The assistant message right before this run (`edges`): once it is gone, this run and the one before it are one user message.
+      if (runs.length > 1) assistants.get(after).edges.push(run.k);
+    }
     run.before += blocksAt(i);
     run.rows.push(i);
     runOf.set(i, run);
@@ -2755,34 +2762,61 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     const state = new Map();
     for (const r of runs) for (const i of r.rows) if (noteAt.has(i) || resultsAt(messages[i])) state.set(i, { left: resultsAt(messages[i]), changed: 0, keep: 'full', now: 0 });
     const nowOf = (s) => (s.first >= keepFrom ? s.before : (s.text || s.traces > 0 ? 1 : 0) + s.calls);
-    const runN = new Map();
-    const runT = new Map(runs.map((r) => [r, r.tok]));
-    // The results left in each message, and the tokens that its text costs less for having none (`gap`) once none is left.
-    const runResults = new Map(runs.map((r) => [r, r.results]));
-    let alone = runs.reduce((n, r) => n + (r.beside && r.results === 0 ? r.gap : 0), 0);
+    // A run has its own blocks, text tokens and results left (`own`), and the user message that holds it has their sums (`sum`, kept at its first run, found by `find`) with the
+    // tokens that its text costs less for having no result (`gap`) once none is left in the message. The runs on both sides of an assistant message that is gone are one message.
+    const own = runs.map((r) => ({ n: 0, t: r.tok, res: r.results }));
+    const sum = runs.map(() => ({ n: 0, t: 0, res: 0, gap: 0 }));
+    const up = runs.map((r) => r.k);
+    const find = (k) => { while (up[k] !== k) k = up[k] = up[up[k]]; return k; };
+    const cost = (k) => messageTokens(sum[k].n, sum[k].t, rates);
+    const rebate = (k) => (sum[k].res === 0 ? sum[k].gap : 0);
+    let alone = 0;
     let total = 0;
     for (const s of asst.values()) total += messageTokens(nowOf(s), s.tok, rates);
+    // The run `k` and the run before it, one message.
+    const join = (k) => {
+      const [a, b] = [find(k - 1), find(k)];
+      if (a === b) return;
+      total -= cost(a) + cost(b);
+      alone -= rebate(a) + rebate(b);
+      for (const f of ['n', 't', 'res', 'gap']) sum[a][f] += sum[b][f];
+      up[b] = a;
+      total += cost(a);
+      alone += rebate(a);
+    };
+    // Every run its own message, then the runs around each assistant message that is gone joined.
+    const settle = () => {
+      runs.forEach((r, k) => {
+        if (up[k] === k) { total -= cost(k); alone -= rebate(k); }
+        up[k] = k;
+        sum[k] = { ...own[k], gap: r.gap };
+        total += cost(k);
+        alone += rebate(k);
+      });
+      for (const s of asst.values()) if (nowOf(s) === 0) for (const k of s.edges) join(k);
+    };
     for (const r of runs) {
-      let n = 0;
       for (const i of r.rows) {
         const st = state.get(i);
         const now = rowNow(i, st);
         if (st) st.now = now;
-        n += now;
+        own[r.k].n += now;
       }
-      runN.set(r, n);
-      total += messageTokens(n, r.tok, rates);
     }
+    settle();
     // `dText`: the change of the text of the row's message (the zero floor of a message).
     const reread = (i, dText) => {
       const st = state.get(i);
-      const r = runOf.get(i);
+      const k = runOf.get(i).k;
+      const root = find(k);
       const now = rowNow(i, st);
-      total -= messageTokens(runN.get(r), runT.get(r), rates);
-      runN.set(r, runN.get(r) + now - st.now);
-      runT.set(r, runT.get(r) + dText);
+      total -= cost(root);
+      own[k].n += now - st.now;
+      own[k].t += dText;
+      sum[root].n += now - st.now;
+      sum[root].t += dText;
       st.now = now;
-      total += messageTokens(runN.get(r), runT.get(r), rates);
+      total += cost(root);
     };
     const gone = (keep) => (keep === 'trace' || keep === 'drop' ? 1 : 0);
     // What the decision `keep` on `c` leaves of its text in the message of its call (the call, or its trace) and in the message of its result (the rest of its cost).
@@ -2807,20 +2841,26 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
         }
         const s = asst.get(group[c.useIdx]);
         if (s) {
+          const goneWas = nowOf(s) === 0;
           total -= messageTokens(nowOf(s), s.tok, rates);
           s.calls -= gone(keep) - gone(was);
           s.traces += Number(keep === 'trace') - Number(was === 'trace');
           s.tok += callNow - callWas;
           total += messageTokens(nowOf(s), s.tok, rates);
+          // An assistant message that is gone joins the user messages on both sides of it; one that is back splits them.
+          if (nowOf(s) === 0 && !goneWas) for (const k of s.edges) join(k);
+          else if (goneWas && nowOf(s) !== 0) settle();
         }
         const st = state.get(c.resIdx);
         if (st) {
           st.left -= gone(keep) - gone(was);
           st.changed += Number(keep !== 'full') - Number(was !== 'full');
-          const r = runOf.get(c.resIdx);
-          const left = runResults.get(r) - (gone(keep) - gone(was));
-          if (r.beside) alone += (left === 0 ? r.gap : 0) - (runResults.get(r) === 0 ? r.gap : 0);
-          runResults.set(r, left);
+          const k = runOf.get(c.resIdx).k;
+          const root = find(k);
+          alone -= rebate(root);
+          own[k].res -= gone(keep) - gone(was);
+          sum[root].res -= gone(keep) - gone(was);
+          alone += rebate(root);
           reread(c.resIdx, resultNow - resultWas);
         }
       },

@@ -556,6 +556,119 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
     expect(shape.shed(candidates, 'drop')).toBeCloseTo((msg(2) - msg(1)) + (msg(2) - msg(1)) + alone, 6);
   });
 
+  // The calls of an assistant message that are all dropped leave no block in it, the host drops the message, and the user rows on both sides of it are one message of the
+  // list: they cost one message, and the words that stay in the later row still stand beside the results of the earlier one, so they stay at the rate of a text beside a
+  // result and the discount of the words alone does not come.
+  describe('user rows that the drop of the calls between them leaves side by side', () => {
+    const { RATE_NOTE, RATE_OWN } = ratesFrom(undefined);
+    const WORDS = 'Typed during the tool turn: '.padEnd(5000, 'w');
+    const alone = (RATE_NOTE - RATE_OWN) * WORDS.length;
+    // A task row, then `specs` (a call and the row of its result; the words in the row of the result when `words`; a task call, whose result is never cut, when `task`), and an
+    // answer. `said` is the assistant's text of a step.
+    function steps(specs, { said = () => '' } = {}) {
+      const rows = [{ role: 'user', text: 'Task.', toolUses: [] }];
+      const group = [-1];
+      const candidates = [];
+      specs.forEach(({ id, task = false, words = false }, k) => {
+        rows.push({ role: 'assistant', text: said(id), toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command: `cat notes-${id}.txt` } }] });
+        group.push(k);
+        rows.push({ role: 'user', text: words ? WORDS : '', toolUses: [], toolResults: [{ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(4000)}`, isError: false }] });
+        group.push(-1);
+        candidates.push({ ...item(id, { score: 0, resIdx: rows.length - 1, task }), useIdx: rows.length - 2 });
+      });
+      rows.push({ role: 'assistant', text: 'Done.', toolUses: [] });
+      group.push(specs.length);
+      return { rows, group, candidates, shape: shapeOf(rows, candidates, { group, keepFrom: rows.length }) };
+    }
+    const byId = (candidates, id) => candidates.find((c) => c.id === id);
+    // The list as the API holds it: a row of the user is a message, a text beside a result after it (apiOf of the other test files).
+    const listOf = (rows, rates) => listTokens(rows.map((m) => ({
+      role: m.role,
+      content: m.role === 'assistant'
+        ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input }))]
+        : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : [])],
+    })), rates);
+    const resultRow = (id) => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `RESULT-${id} ${'x'.repeat(4000)}`, isError: false }] });
+    const callRow = (id) => ({ role: 'assistant', text: '', toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command: `cat notes-${id}.txt` } }] });
+    const task = { role: 'user', text: 'Task.', toolUses: [] };
+    const done = { role: 'assistant', text: 'Done.', toolUses: [] };
+
+    it('the result of the dropped call goes and the earlier result stays: the two rows are one message, the words stay beside that result and nothing is given back for them', () => {
+      const { rows, candidates, shape } = steps([{ id: 'p', task: true }, { id: 'd', words: true }]);
+      // Before: the message of the call d (1 block), the result of p (1) and the result of d with the words (2). After: the result of p and the words in one message (2 blocks).
+      expect(shape.shed([byId(candidates, 'd')], 'drop')).toBeCloseTo(msg(1) + msg(1) + msg(2) - msg(2), 6);
+      // The list that is left: the result of p and the words, one message of the host.
+      const after = [task, callRow('p'), { role: 'user', text: WORDS, toolUses: [], toolResults: resultRow('p').toolResults }, done];
+      expect(floorPrediction(candidates, listOf(rows), undefined, shape)).toBeCloseTo(listOf(after), 4);
+    });
+
+    it('with a low block rate the floor of the joined message is on its text and its blocks together, as in the list that is left', () => {
+      for (const raw of ['{"RATE_BLOCK":1}', '{"RATE_BLOCK":20}', '{"RATE_BLOCK":40}']) {
+        const rates = ratesFrom(raw);
+        const { rows, group, candidates } = steps([{ id: 'p', task: true }, { id: 'd', words: true }]);
+        const shape = shapeOf(rows, candidates, { group, keepFrom: rows.length, rates });
+        const after = [task, callRow('p'), { role: 'user', text: WORDS, toolUses: [], toolResults: resultRow('p').toolResults }, done];
+        expect(floorPrediction(candidates, listOf(rows, rates), rates, shape), raw).toBeCloseTo(listOf(after, rates), 4);
+      }
+    });
+
+    it('the earlier result goes too: no result stands in the one message, and the words are given back their discount', () => {
+      const { rows, candidates, shape } = steps([{ id: 'p' }, { id: 'd', words: true }]);
+      // Both calls and both results go: the task row and the words are one message (2 blocks) of the words alone, at RATE_OWN, in place of four messages (1 block each
+      // but the last, 2).
+      expect(shape.shed(candidates, 'drop')).toBeCloseTo(4 * msg(1) + msg(2) - msg(2) + alone, 6);
+      const after = [{ role: 'user', content: [{ type: 'text', text: 'Task.' }, { type: 'text', text: WORDS }] }, { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] }];
+      expect(floorPrediction(candidates, listOf(rows), undefined, shape)).toBeCloseTo(listTokens(after), 4);
+    });
+
+    it('a call that leaves its text in the message keeps the message: the rows are not joined and the words are given back their discount as before', () => {
+      const { rows, candidates, shape } = steps([{ id: 'p', task: true }, { id: 'd', words: true }], { said: (id) => (id === 'd' ? 'Reading the notes.' : '') });
+      // The message of the call d keeps its text block (2 blocks before, 1 after); the words stand in a message of their own once the result of d is gone.
+      expect(shape.shed([byId(candidates, 'd')], 'drop')).toBeCloseTo((msg(2) - msg(1)) + (msg(2) - msg(1)) + alone, 6);
+      const after = [task, callRow('p'), resultRow('p'), { role: 'assistant', text: 'Reading the notes.', toolUses: [] }, { role: 'user', text: WORDS, toolUses: [] }, done];
+      expect(floorPrediction(candidates, listOf(rows), undefined, shape)).toBeCloseTo(listOf(after), 4);
+    });
+
+    it('two dropped calls in a row join three user rows into one message', () => {
+      const { rows, candidates, shape } = steps([{ id: 'p', task: true }, { id: 'a' }, { id: 'd', words: true }]);
+      const free = ['a', 'd'].map((id) => byId(candidates, id));
+      // Before: the messages of the calls a and d (1 block each), the results of p (1), of a (1) and of d with the words (2). After: the result of p and the words (2 blocks).
+      expect(shape.shed(free, 'drop')).toBeCloseTo(4 * msg(1) + msg(2) - msg(2), 6);
+      const after = [task, callRow('p'), { role: 'user', text: WORDS, toolUses: [], toolResults: resultRow('p').toolResults }, done];
+      expect(floorPrediction(candidates, listOf(rows), undefined, shape)).toBeCloseTo(listOf(after), 4);
+    });
+
+    it('an assistant message of thinking alone is gone before anything is decided, and the user rows around it are one message', () => {
+      const rows = [task, { role: 'assistant', text: '', toolUses: [] }, { role: 'user', text: 'Next.', toolUses: [] }, done];
+      const shape = shapeOf(rows, [], { group: [-1, 0, -1, 1], keepFrom: rows.length });
+      // Before: the task (1 block), the thinking (1) and the words (1); after: the task and the words in one message (2 blocks).
+      expect(shape.tracker().removed()).toBeCloseTo(msg(1) + msg(1) + msg(1) - msg(2), 6);
+    });
+
+    it('the order of the decisions does not matter, and a decision taken back leaves what it found', () => {
+      const { candidates, shape } = steps([{ id: 'p' }, { id: 'd', words: true }]);
+      const [p, d] = candidates;
+      const once = shape.shed([p, d], 'drop');
+      const run = (...moves) => { const t = shape.tracker(); for (const [c, keep] of moves) t.set(c, keep); return t.removed(); };
+      // The earlier result is removed after the join, before it, through a trace first, and the join is taken back.
+      expect(run([d, 'drop'], [p, 'drop'])).toBeCloseTo(once, 6);
+      expect(run([p, 'drop'], [d, 'drop'])).toBeCloseTo(once, 6);
+      expect(run([d, 'trace'], [p, 'trace'], [d, 'drop'], [p, 'drop'])).toBeCloseTo(once, 6);
+      expect(run([p, 'trace'], [d, 'trace'], [p, 'drop'], [d, 'drop'])).toBeCloseTo(once, 6);
+      expect(run([d, 'drop'], [p, 'drop'], [d, 'full'])).toBeCloseTo(run([p, 'drop']), 6);
+      expect(run([d, 'drop'], [p, 'drop'], [d, 'full'], [p, 'full'])).toBeCloseTo(0, 6);
+      const pinned = steps([{ id: 'p', task: true }, { id: 'd', words: true }]);
+      const dd = byId(pinned.candidates, 'd');
+      const traced = pinned.shape.tracker();
+      traced.set(dd, 'trace');
+      traced.set(dd, 'drop');
+      expect(traced.removed()).toBeCloseTo(pinned.shape.shed([dd], 'drop'), 6);
+      traced.set(dd, 'trace');
+      traced.set(dd, 'full');
+      expect(traced.removed()).toBeCloseTo(0, 6);
+    });
+  });
+
   it('rows from keepFrom on keep their handles and stay as they are', () => {
     const { rows, group, candidates } = parallel(2, 5);
     const shape = shapeOf(rows, candidates, { group, keepFrom: 4 });
