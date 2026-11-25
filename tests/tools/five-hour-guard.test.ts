@@ -2198,7 +2198,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start({ state_file: join(hooks, 'audit') }).status, 'a name that is not set, another ending').toBe(0);
   });
 
-  it('a parameter in the pattern of a trimming expression is filled in before the cut (${NAME%$SUFFIX}, ${NAME%${SUFFIX}}, ${NAME#$PREFIX}); an unknown name there cuts nothing and is no reason to refuse', () => {
+  it('a parameter in the pattern of a trimming expression is filled in before the cut (${NAME%$SUFFIX}, ${NAME%${SUFFIX}}, ${NAME#$PREFIX}); an unknown name there is refused, since the session may have it', () => {
     const f = fixture('foreign-trimmed-patterns', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2230,11 +2230,13 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
       }
     }
-    // a name that nobody sets in the pattern cuts nothing (the shell matches the empty pattern and cuts nothing too)
+    // a name that nobody sets in the pattern cuts nothing for the shell of the hook, but the session may set it: the scan cannot know what is cut, so the guard refuses to start
     const unknown = '${FHG_A%$FHG_NOBODY}';
     expect(spawnSync('sh', ['-c', `FHG_A='${hooks}/audit.py'; printf %s "${unknown}"`], { encoding: 'utf8' }).stdout, 'sh cuts nothing').toBe(`${hooks}/audit.py`);
     writeFileSync(f.settings, settings(`python3 "${unknown}"`, { FHG_A: `${hooks}/audit.py` }), 'utf8');
-    expect(start({ state_file: join(hooks, 'audit') }).status, 'an unknown name in a pattern').toBe(0);
+    const refusal = start({ state_file: join(hooks, 'audit') });
+    expect(refusal.status, 'an unknown name in a pattern').toBe(2);
+    expect(refusal.stderr).toMatch(/not read to its end/);
   });
 
   it('a command substitution in the command of another hook (a dollar and a parenthesis, or a backtick, outside single quotes) is a command that is not read to its end: the guard refuses to start; text that is no substitution is read as before', () => {
@@ -2929,6 +2931,45 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of settled(other)) {
       const r = start(command, { state_file: file });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
+  it('a pattern of a trimming expression (%, %%, #, ##) that holds a parameter that nothing gives a value to is a pattern whose cut the scan cannot know (the session may have it), so the guard refuses to start; a pattern that the settings, the command or a default word fills in, and a pattern with no parameter, are read as before', () => {
+    const f = fixture('foreign-trimming-pattern-parameter', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, env: Record<string, string>, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const settings = { FHG_A: `${audit}.py`, FHG_B: `/prefix/audit` };   // what the settings give the hook; the session has FHG_S besides
+    const session = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { ...process.env, ...settings, FHG_S: '.py', FHG_P: '/prefix/' } }).stdout;
+    expect(session(`printf %s "\${FHG_A%$FHG_S}"`), 'the shell cuts the suffix that only the session has').toBe(audit);
+    expect(session(`printf %s "\${FHG_A%%$FHG_S}"`)).toBe(audit);
+    expect(session(`printf %s "${hooks}/\${FHG_B#$FHG_P}"`), 'and the prefix').toBe(audit);
+    expect(session(`printf %s "${hooks}/\${FHG_B##$FHG_P}"`)).toBe(audit);
+    const refused = ['python3 "${FHG_A%$FHG_S}"', 'python3 "${FHG_A%%$FHG_S}"', `python3 "${hooks}/\${FHG_B#$FHG_P}"`, `python3 "${hooks}/\${FHG_B##$FHG_P}"`, 'python3 ${FHG_A%$FHG_S}', 'python3 "${FHG_A%$FHG_S$FHG_T}"'];
+    for (const command of refused) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, settings, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // read as before: a pattern without a parameter, one that the settings or the command give a value to, one with a default word (the file that it cuts to is a collision, not a refusal)
+    for (const [command, env] of [['python3 "${FHG_A%.py}"', settings], ['python3 "${FHG_A%$FHG_S}"', { ...settings, FHG_S: '.py' }], ['FHG_S=.py; python3 "${FHG_A%$FHG_S}"', settings], ['python3 "${FHG_A%${FHG_S:-.py}}"', settings],
+      [`python3 "${hooks}/\${FHG_B#$FHG_P}"`, { ...settings, FHG_P: '/prefix/' }]] as Array<[string, Record<string, string>]>) {
+      const r = start(command, env, { state_file: audit });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
     }
   });
 
