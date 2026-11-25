@@ -1026,11 +1026,18 @@ const readRegistry = () => {
 // Where this process runs, and whether a record names another place (copies of placeId and isForeignOwner of scripts/lib/cache-occupancy.mjs,
 // because this script is plain Node with no import of the plugin's files; omc-doctor-cache-occupancy-records.test.ts runs both and compares).
 const placeId = () => {
+  let machine = '';
+  for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+    try {
+      machine = fs.readFileSync(file, 'utf8').trim();
+    } catch {}
+    if (machine) break;
+  }
   let namespace = '';
   try {
     namespace = fs.readlinkSync('/proc/self/ns/pid');
   } catch {}
-  return namespace ? os.hostname() + '|' + namespace : os.hostname();
+  return os.hostname() + '|' + machine + '|' + namespace;
 };
 const isForeignOwner = (record) => typeof record?.host === 'string' && record.host !== '' && record.host !== placeId();
 // A record is ignored only when its owner is proven gone: the process does not exist, on Linux its start time

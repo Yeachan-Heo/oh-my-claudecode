@@ -90,12 +90,20 @@ function identities(pids, probeTimeoutMs = 3000) {
   }
   return result;
 }
-// Where this process runs: the host name and, on Linux, the PID namespace. A profile shared over NFS or mounted into a container holds
-// records of owners that this machine cannot probe, so a record that names another place is never judged by a local process probe.
+// Where this process runs: the host name, the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; empty where there is none)
+// and, on Linux, the PID namespace. Two machines can report the same host name and the same namespace text, so the machine id tells them
+// apart. A profile shared over NFS or mounted into a container holds records of owners that this machine cannot probe, so a record that
+// names another place is never judged by a local process probe. A record made before the machine id was added has the other format and
+// is taken for another place (kept, never judged by a local probe).
 function placeId() {
+  let machine = '';
+  for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+    try { machine = readFileSync(file, 'utf8').trim(); } catch {}
+    if (machine) break;
+  }
   let namespace = '';
   try { namespace = readlinkSync('/proc/self/ns/pid'); } catch {}
-  return namespace ? `${hostname()}|${namespace}` : hostname();
+  return `${hostname()}|${machine}|${namespace}`;
 }
 // A record without the field (made before it existed) is a local record.
 export function isForeignOwner(record) {

@@ -77,6 +77,26 @@ describe('cache occupancy registry', () => {
     expect({ foreign: existsSync(foreign), foreignOtherStart: existsSync(foreignOtherStart), local: existsSync(local) }).toEqual({ foreign: true, foreignOtherStart: true, local: false });
   });
 
+  // Two machines can report the same host name and the same PID namespace text; only the machine id tells them apart.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps the record of an owner whose host name and namespace match but whose machine id differs, for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    expect(await publish(root, dir)).toBe(true);
+    const file = join(dir, '.omc', 'cache-occupancy', readdirSync(join(dir, '.omc', 'cache-occupancy'))[0]);
+    const record = JSON.parse(readFileSync(file, 'utf8')) as { host: string; pid: number };
+    const [name, , namespace] = record.host.split('|');
+    writeFileSync(file, JSON.stringify({ ...record, pid: spawnSync(process.execPath, ['-e', '']).pid, host: `${name}|another-machine-id|${namespace ?? ''}` }));
+
+    expect(read(dir).roots).toEqual(new Set([root]));
+    expect(existsSync(file)).toBe(true);
+  });
+
   it.each([
     ['typescript', null],
     ['script', '../../../scripts/lib/cache-occupancy.mjs'],

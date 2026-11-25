@@ -40,11 +40,13 @@ describe('omc-doctor cache commands: occupancy records', { timeout: 120_000 }, (
     const lib = readFileSync(path.join(ROOT, 'scripts', 'lib', 'cache-occupancy.mjs'), 'utf8');
     const libSource = lib.slice(lib.indexOf('function placeId()'), lib.indexOf('function alive(')).replace('export function', 'function');
     const doctorSource = scriptText.slice(scriptText.indexOf('const placeId = '), scriptText.indexOf('// A record is ignored only when')).replace(/^const (\w+) = /gm, 'var $1 = ');
-    const records = [{}, { host: '' }, { host: 5 }, { host: null }, { host: 'machine-a' }, { host: 'machine-a|pid:[1]' }, { host: 'machine-b' }, { host: 'machine-b|pid:[1]' }, { host: 'machine-b|pid:[2]' }, undefined];
-    for (const place of [{ host: 'machine-a', namespace: '' }, { host: 'machine-a', namespace: 'pid:[1]' }, { host: 'machine-b', namespace: 'pid:[2]' }]) {
-      const sandbox = { readlinkSync: () => { if (!place.namespace) throw new Error('not linux'); return place.namespace; }, hostname: () => place.host };
+    const records = [{}, { host: '' }, { host: 5 }, { host: null }, { host: 'machine-a' }, { host: 'machine-a|pid:[1]' }, { host: 'machine-a|id-1|pid:[1]' }, { host: 'machine-a|id-2|pid:[1]' }, { host: 'machine-a|id-1|' }, { host: 'machine-a||' }, { host: 'machine-b|id-1|pid:[2]' }, { host: 'machine-b||pid:[2]' }, undefined];
+    // The machine id comes from the first readable of two files; a place has none where neither can be read.
+    for (const place of [{ host: 'machine-a', files: {}, namespace: '' }, { host: 'machine-a', files: { '/etc/machine-id': 'id-1\n' }, namespace: 'pid:[1]' }, { host: 'machine-a', files: { '/var/lib/dbus/machine-id': 'id-2' }, namespace: 'pid:[1]' }, { host: 'machine-a', files: { '/etc/machine-id': 'id-1', '/var/lib/dbus/machine-id': 'id-2' }, namespace: '' }, { host: 'machine-b', files: {}, namespace: 'pid:[2]' }]) {
+      const readFileSync = (file: string) => { const text = (place.files as Record<string, string>)[file]; if (text === undefined) throw new Error('no such file'); return text; };
+      const sandbox = { readFileSync, readlinkSync: () => { if (!place.namespace) throw new Error('not linux'); return place.namespace; }, hostname: () => place.host };
       const fromLib = vm.runInNewContext(`${libSource}\nrecords => records.map(isForeignOwner)`, sandbox) as (records: unknown[]) => boolean[];
-      const fromDoctor = vm.runInNewContext(`${doctorSource}\nrecords => records.map(isForeignOwner)`, { fs: { readlinkSync: sandbox.readlinkSync }, os: { hostname: sandbox.hostname } }) as (records: unknown[]) => boolean[];
+      const fromDoctor = vm.runInNewContext(`${doctorSource}\nrecords => records.map(isForeignOwner)`, { fs: { readFileSync, readlinkSync: sandbox.readlinkSync }, os: { hostname: sandbox.hostname } }) as (records: unknown[]) => boolean[];
       expect({ place, doctor: fromDoctor(records) }).toEqual({ place, doctor: fromLib(records) });
     }
   });
