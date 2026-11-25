@@ -438,6 +438,12 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
             name, equals, value = word.partition('=')
             if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) and own_value(name, value) not in assigned.setdefault(name, []):
                 assigned[name].append(own_value(name, value))
+    for words in simple:
+        for word in words:
+            for m in PARAMETER.finditer(word):
+                if m.group(3) in (':=', '='):   # ${NAME:=word} and ${NAME=word} assign NAME for the words that follow: the word is a value of NAME in the whole command, as an assignment is
+                    if own_value(m.group(2), m.group(4)) not in assigned.setdefault(m.group(2), []):
+                        assigned[m.group(2)].append(own_value(m.group(2), m.group(4)))
     named = list(inherited)   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR) and of the command it is quoted in: the shell may run a later word from there
     for words in simple:
         for word in words:

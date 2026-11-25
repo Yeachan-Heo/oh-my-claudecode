@@ -1975,6 +1975,39 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('the word of ${NAME:=word} and ${NAME=word} is a value of NAME for the other words of the command (: "${DIR:=/x}"; prog "$DIR/audit"): never a file the guard writes; ${NAME:-word} assigns nothing and a cycle of them is not read to its end', () => {
+    const f = fixture('foreign-assigning-default', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const script = join(hooks, 'audit');
+    const text = '# the script that the command runs\n';
+    writeFileSync(script, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const command of [`: "\${FHG_DIR:=${hooks}}"; python3 "$FHG_DIR/audit"`, `: "\${FHG_DIR=${hooks}}"; python3 "$FHG_DIR/audit"`, `echo "\${FHG_DIR:=${hooks}}"; python3 "$FHG_DIR/audit"`, `python3 "$FHG_DIR/audit"; : "\${FHG_DIR:=${hooks}}"`]) {
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // ${NAME:-word} assigns nothing: $NAME stays as written for the later word
+    writeFileSync(f.settings, settings(`: "\${FHG_DIR:-${hooks}}"; python3 "$FHG_DIR/audit"`), 'utf8');
+    const quiet = start({ state_file: script });
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+    // each takes the other's word: no end, so the command is not read to its end
+    writeFileSync(f.settings, settings(': "${FHG_A:=$FHG_B}" "${FHG_B:=$FHG_A}"; python3 "$FHG_A/audit"'), 'utf8');
+    const cycle = start({ state_file: script });
+    expect(cycle.status, `${cycle.stdout}${cycle.stderr}`).toBe(2);
+    expect(cycle.stderr).toMatch(/is not read to its end/);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
