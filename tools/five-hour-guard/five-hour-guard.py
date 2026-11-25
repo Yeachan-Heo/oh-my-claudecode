@@ -330,7 +330,8 @@ def word_files(word, directories, named=()):
 
 
 def is_operator(token):
-    """Whether shlex returned the token as a shell operator: it is made of operator characters only. A quoted word that merely starts with one
+    """Whether shlex returned the token as a shell operator: it is made of operator characters only. It splits a command into simple commands
+    and names no program, but it is still a candidate for a file (`python3 ';'` runs the script `;`): a quoted word that merely starts with one
     (`';audit'`, `'>out'`) is a word, and a file name."""
     return bool(token) and all(c in PUNCTUATION for c in token)
 
@@ -595,8 +596,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
             if '<' not in token and '>' not in token:   # the file of a redirection is a word like any other
                 simple.append(words)
                 words = []
-        else:
-            words.append(token)
+        words.append(token)   # an operator is a candidate too: shlex does not tell a quoted `;` (a script operand, `python3 ';'`) from the operator, so no word is left out
     simple.append(words)
     found = []
     assigned = {n: [own_value(n, x) for x in v] for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
@@ -626,7 +626,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
             if word in exclude:
                 exclude.remove(word)   # one occurrence of a word of the generated entry is that word of the entry, not a file it names besides
                 continue
-            if any(c.isspace() for c in word):
+            if any(c.isspace() for c in word) and not is_operator(word):   # (a newline is an operator: not a command to read)
                 if depth >= 2:
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
                 found += [t for t in command_programs(word, exclude, depth + 1, named, assigned) if t not in found]

@@ -2285,7 +2285,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start(`cd ${join(f.dir, 'nonexistent')}; PATH=bin audit`, inBin).status, 'no such directory').toBe(0);
   });
 
-  it('a quoted word that starts with an operator character is a word and a file name (python3 \';audit\', \'&&audit\', \'|audit\', \'>audit\'); a real operator, quoted or not, is no file', () => {
+  it('a quoted word that starts with an operator character is a word and a file name (python3 \';audit\', \'&&audit\', \'|audit\', \'>audit\'); a real operator between two commands is no file of its own', () => {
     const f = fixture('foreign-operator-words', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2309,14 +2309,43 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         }
       }
     }
-    // the operator itself makes no candidate: a real ; between two commands, and a quoted ;
+    // a real operator between two commands names no file of its own; a quoted one is a word, and the scanner does not tell them apart
     const operator = join(hooks, ';');
     writeFileSync(operator, text, 'utf8');
-    for (const command of [`python3 x ; python3 y`, `cd ${hooks} && python3 x || python3 y`, `cd ${hooks}; python3 ';' x`]) {
+    for (const command of [`python3 x ; python3 y`, `cd ${hooks} && python3 x || python3 y`]) {
       writeFileSync(f.settings, settings(command), 'utf8');
       const r = start({ state_file: operator });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
     }
+  });
+
+  it('a quoted word made only of operator characters (python3 \';\', \'&&\', \'|\', \'&\') is a script operand and a file name after a cd; a file that is no directory of the command joined with such a word is not', () => {
+    const f = fixture('foreign-operator-only-words', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, file: string, key = 'state_file') => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, [key]: file }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const word of [';', '&&', '|', '&']) {
+      const script = join(hooks, word);
+      writeFileSync(script, text, 'utf8');
+      expect(spawnSync('sh', ['-c', `cd ${hooks}; printf %s '${word}'; true`], { encoding: 'utf8' }).stdout, `the shell passes ${word} as an operand`).toBe(word);
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start(`cd ${hooks}; python3 '${word}'`, script, key);
+        expect(r.status, `${word} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${word} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${word} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a file that is not a directory of the command joined with such a word
+    const other = join(f.dir, 'other');
+    mkdirSync(other);
+    writeFileSync(join(other, ';'), text, 'utf8');
+    expect(start(`cd ${hooks}; python3 ';'`, join(other, ';')).status, 'a directory that the command does not name').toBe(0);
   });
 
   it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {
