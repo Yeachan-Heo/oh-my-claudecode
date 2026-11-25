@@ -28,7 +28,7 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, glob, itertools, json, math, os, shlex, signal, stat, sys, time
+import argparse, datetime, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
 
 try:
     import fcntl
@@ -324,6 +324,7 @@ def command_tokens(command):
         return None
     if len(command) > MAX_COMMAND_CHARS:
         raise ScanIncomplete('command too long to scan')
+    command = re.sub(r'(?<!\\)((?:\\\\)*)\\\n', r'\1', command)   # a backslash and the newline after it (not an escaped backslash) are removed before the words are split, as the shell does
     try:
         lex = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
         lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''

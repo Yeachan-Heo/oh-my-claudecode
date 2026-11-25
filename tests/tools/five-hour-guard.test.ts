@@ -1771,6 +1771,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
   });
 
+  it('a file name split by a line continuation in the command of another hook is that file (the shell removes a backslash and newline before it splits the words), and an escaped backslash before a newline is not a continuation', () => {
+    const f = fixture('foreign-continuation', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const script = join(f.dir, 'audit');
+    const text = '# a hook of another tool\n';
+    writeFileSync(script, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const cut = script.length - 2;
+    for (const command of [`python3 ${script.slice(0, cut)}\\\n${script.slice(cut)}`, `python3 "${script.slice(0, cut)}\\\n${script.slice(cut)}"`, `echo x\\\\\n${script}`]) {
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${JSON.stringify(command)} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
