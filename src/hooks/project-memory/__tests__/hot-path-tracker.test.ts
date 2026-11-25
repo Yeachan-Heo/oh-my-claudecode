@@ -157,3 +157,26 @@ describe("hot paths follow the current work", () => {
     expect(topPaths(hotPaths, NOW + 16 * DAY)).toEqual([...newArea].sort());
   });
 });
+
+describe("trackAccess ignore list", () => {
+  it("tracks files whose names only contain an ignored word", () => {
+    let hotPaths: HotPath[] = [];
+    for (const file of [".github/workflows/ci.yml", "src/distance.ts", "docs/build-guide.md", ".gitignore"]) {
+      hotPaths = trackAccess(hotPaths, `/repo/${file}`, "/repo", "file");
+    }
+    expect(hotPaths.map((hp) => hp.path)).toEqual([
+      ".github/workflows/ci.yml",
+      "src/distance.ts",
+      "docs/build-guide.md",
+      ".gitignore",
+    ]);
+  });
+
+  it("still ignores ignored directories at any depth", () => {
+    let hotPaths: HotPath[] = [];
+    for (const file of ["node_modules/a/index.js", "packages/x/dist/out.js", ".git/config", "build/app.js"]) {
+      hotPaths = trackAccess(hotPaths, file, "/repo", "file");
+    }
+    expect(hotPaths).toEqual([]);
+  });
+});
