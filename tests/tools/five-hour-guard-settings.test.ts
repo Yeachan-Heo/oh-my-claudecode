@@ -566,6 +566,41 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readJson(f.settings).hooks.PreToolUse, 'and still there after remove').toEqual(doc.hooks.PreToolUse);
   });
 
+  it('the path of the hook is one whole word of the command: a handler of another tool whose path of a file only starts or ends with it (a suffix or a prefix of characters that are valid in a file name) is left alone by remove and add, while the real forms of the entry are found', () => {
+    const foreign: string[] = [];
+    for (const glue of ['+audit', '.bak', ',x', '@x', '%x', '=x', ':x', '~', '-x', '_x', '/x']) {
+      foreign.push(`node ${HOOK}${glue} --pause-file /tmp/p`);
+    }
+    for (const glue of ['x+', 'a,', 'k@', 'p%', 'v=', 'h:', 'o~', 'w-']) {
+      foreign.push(`node ${glue}${HOOK} --pause-file /tmp/p`);
+    }
+    for (const command of foreign) {
+      const f = fixture('settings-whole-word');
+      const doc = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } };
+      write(f, doc);
+      const check = tool(f, 'check');
+      expect(check.status, `${command}: check does not take it for the entry: ${check.stdout}${check.stderr}`).toBe(1);
+      const remove = tool(f, 'remove');
+      expect(remove.stdout, `${command}: remove leaves it`).toMatch(/nothing to do/);
+      expect(readJson(f.settings), `${command}: the handler is as it was after remove`).toEqual(doc);
+      const add = tool(f, 'add');
+      expect(add.status, `${command}: ${add.stderr}`).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre, `${command}: add appends its own entry`).toHaveLength(2);
+      expect(pre[0], `${command}: and the handler of the other tool stays`).toEqual(doc.hooks.PreToolUse[0]);
+    }
+    const q = quote(HOOK);
+    const real = [`${HOOK} --pause-file /tmp/p`, `exec ${q} --pause-file /tmp/p`, `exec "${HOOK}" --pause-file /tmp/p`, `exec '${HOOK}' --pause-file /tmp/p`, `x; ${HOOK}`, `x;${HOOK};y`,
+      `(${HOOK})`, `x&&${HOOK}`, `x|${HOOK}`, `x\n${HOOK}\ny`, `cat < ${HOOK}`, `cat >${HOOK}`, `sh -c '${HOOK} --pause-file /tmp/p'`, `${HOOK}`];
+    for (const command of real) {
+      const f = fixture('settings-whole-word-real');
+      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      const check = tool(f, 'check');
+      expect(check.status, `${command}: check finds it: ${check.stdout}${check.stderr}`).toBe(0);
+      expect(check.stdout, command).toMatch(/1 entry\/entries/);
+    }
+  });
+
   it('a handler that is not a command is not our hook: check does not report it, add registers a real entry next to it', () => {
     const f = fixture('settings-handler-type');
     write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'prompt', command: 'x /old/five-hour-guard-hook.py' }] }] } });

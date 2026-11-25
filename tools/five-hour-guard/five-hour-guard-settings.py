@@ -12,7 +12,7 @@
 # it differs, and gives up (exit 2, nothing written) when it differs again. The instant between that comparison and the
 # rename remains: a rename has no compare-and-swap, so a write inside it is lost. Run `check` after `add` to see the result.
 # The hook entry is identified without analysing its command: by a fixed marker at the end of the command (a comment to the shell,
-# ENTRY_MARKER in five_hour_guard_entry.py), which `add` writes, or by the exact path of the hook (--hook) as a whole path in the command, which
+# ENTRY_MARKER in five_hour_guard_entry.py), which `add` writes, or by the exact path of the hook (--hook) as a whole word of the command, which
 # is how the entries written by earlier versions of `add` are found. A handler that has neither (written by hand with another
 # path, or another tool's command that only has a similar file name or --pause-file among its words) is never changed; `check` then
 # says so and prints the entry to paste. So `add` twice is a no-op, `add` with the same or another hook path replaces the entry

@@ -52,9 +52,10 @@ def entry_command(pause_file, hook, python, hook_log=None):
 
 def is_entry(handler, hook):
     """Whether a hook handler is the entry of this guard: a command handler whose command holds ENTRY_MARKER (what `add` writes now) or
-    the exact path `hook` of the hook script, as a whole path (not the start of a longer file name such as hook.py.js): the entries
-    that earlier versions of `add` wrote have no marker, and their command holds the path of the hook."""
+    the exact path `hook` of the hook script, as a whole word of the command (it starts and ends at a blank, a quote or an operator of the
+    shell, or at an end of the command: a character that is valid in a file name, such as `+`, `,`, `@`, `%`, `=`, `:` or `~`, is no boundary, so
+    `hook.py+audit` is another file): the entries that earlier versions of `add` wrote have no marker, and their command holds the path of the hook."""
     command = handler.get('command') if isinstance(handler, dict) else None
     if not isinstance(command, str) or handler.get('type') != 'command':
         return False
-    return ENTRY_MARKER in command or re.search(r'(?<![\w.~/-])' + re.escape(hook) + r'(?![\w./-])', command) is not None
+    return ENTRY_MARKER in command or re.search(r'(?<![^\s\'";&|()<>])' + re.escape(hook) + r'(?![^\s\'";&|()<>])', command) is not None
