@@ -1830,7 +1830,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
       return runSync(GUARD, ['--config', f.cfg, '--once']);
     };
-    for (const [command, name] of [[`cd ${hooks}; ./audit`, 'audit'], [`cd ${hooks} && python3 sub/audit`, 'sub/audit'], [`env -C ${hooks} ./audit`, 'audit'], [`./audit --directory ${hooks}`, 'audit']]) {
+    for (const [command, name] of [[`cd ${hooks}; ./audit`, 'audit'], [`cd ${hooks} && python3 sub/audit`, 'sub/audit'], [`env -C ${hooks} ./audit`, 'audit'], [`env --chdir ${hooks} ./audit`, 'audit']]) {
       const script = join(hooks, name);
       writeFileSync(script, text, 'utf8');
       writeFileSync(f.settings, settings(command), 'utf8');
@@ -2738,7 +2738,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     // not refused for that: a path of another name, and a path that a directory of the command settles (that is the collision of an earlier test)
     expect(start('python3 ./audit', {}).status, 'no file of the guard ends it').toBe(0);
     expect(start('python3 ./audit-other', { state_file: files['./audit'] }).status, 'another name').toBe(0);
-    for (const command of [`python3 ${files['./audit']}`, `cd ${project}; python3 ./audit`, `env -C ${project} python3 sub/audit`, `sh -c 'cd ${project} && ./audit'`, `python3 ./audit --directory ${project}`]) {
+    for (const command of [`python3 ${files['./audit']}`, `cd ${project}; python3 ./audit`, `env -C ${project} python3 sub/audit`, `sh -c 'cd ${project} && ./audit'`, `env --chdir ${project} python3 ./audit`]) {
       const r = start(command, { state_file: command.includes('sub/') ? files['sub/audit'] : files['./audit'] });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
       expect(r.stderr, command).toContain('are the same file');
@@ -2776,12 +2776,18 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
     }
     // a construct that moves the working directory settles it: the file is that of the directory it names (the collision of an earlier test)
-    for (const command of [`cd ${project}; python3 ./audit`, `pushd ${project} && python3 ./audit`, `env -C ${project} python3 ./audit`, `python3 ./audit --directory ${project}`, `python3 ./audit --directory=${project}`,
-      `make -C ${project} ./audit`, `env --chdir=${project} python3 ./audit`, `sh -c 'cd ${project} && ./audit'`, `cd ${other}; python3 ${other}/x; cd ${project}; ./audit`]) {
+    for (const command of [`cd ${project}; python3 ./audit`, `pushd ${project} && python3 ./audit`, `env -C ${project} python3 ./audit`, `env --chdir ${project} python3 ./audit`, `env --chdir=${project} python3 ./audit`,
+      `nohup env -C ${project} ./audit`, `env -i --chdir=${project} python3 ./audit`, `sh -c 'cd ${project} && ./audit'`, `cd ${other}; python3 ${other}/x; cd ${project}; ./audit`]) {
       const r = start(command, { state_file: files['./audit'] });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
       expect(r.stderr, command).toContain('are the same file');
       expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    // the option of a program that is not a wrapper the scan knows (`make -C DIR`, `nice -n 5 env -C DIR`) follows the word that is run: it is an argument, so the directory of the session stays a candidate (a false alarm, here)
+    for (const command of [`make -C ${project} ./audit`, `nice -n 5 env -C ${project} ./audit`]) {
+      const r = start(command, { state_file: files['./audit'] });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toMatch(/not read to its end/);
     }
     // a construct that moves it to another directory: the file of the session is not the one that runs
     for (const command of [`cd ${other}; python3 ./audit`, `env -C ${other} python3 ./audit --directory ${other}`]) {
@@ -2849,7 +2855,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const refused = (cd: string) => [`(cd ${cd}); python3 ./audit`, `cd ${cd} | python3 ./audit`, `cd ${cd} & python3 ./audit`, `cd ${cd} || python3 ./audit`, `{ cd ${cd}; } | python3 ./audit`, `true || cd ${cd}; python3 ./audit`,
       `(cd ${cd} && true); python3 ./audit`, `true && (cd ${cd}); python3 ./audit`];
     const settled = (cd: string) => [`cd ${cd}; python3 ./audit`, `cd ${cd} && python3 ./audit`, `cd ${cd}\npython3 ./audit`, `(cd ${cd} && python3 ./audit)`, `{ cd ${cd}; python3 ./audit; }`, `true; cd ${cd} && python3 ./audit`, `true & cd ${cd}; python3 ./audit`,
-      `env -C ${cd} python3 ./audit`, `python3 ./audit --directory ${cd}`, `env --chdir=${cd} python3 ./audit`];
+      `env -C ${cd} python3 ./audit`, `env --chdir ${cd} python3 ./audit`, `env --chdir=${cd} python3 ./audit`];
     for (const command of refused(other).map((c) => c.replace('python3', 'cat'))) {
       expect(shell(command), `${command}: the shell runs ./audit of the directory of the session`).toBe(command.includes(` || cat`) && !command.startsWith('true') ? '' : text);   // (after a cd that succeeds, || does not run the next command at all)
     }
@@ -2867,6 +2873,53 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
     }
     // a move of the same chain (or of the command itself) names the file of the directory it moves to: with the directory of the session there is a collision, with another one the file is not the one that runs
+    for (const command of settled(project)) {
+      const r = start(command, { state_file: file });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    for (const command of settled(other)) {
+      const r = start(command, { state_file: file });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
+  it('an option or a cd word that stands after the word a simple command runs is an argument of the program and moves nothing (python3 ./audit --chdir DIR, -C DIR, --directory=DIR, echo cd; ./audit, python3 ./audit cd DIR): the guard keeps the directory of the session as a candidate and refuses to start; a wrapper option in front of the word (env -C DIR, env --chdir DIR, env --chdir=DIR) and a cd that the shell runs settle it as before', () => {
+    const f = fixture('foreign-session-directory-position', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
+    const other = join(f.dir, 'other');   // a directory that the command names
+    mkdirSync(project);
+    mkdirSync(other);
+    const file = join(project, 'audit');
+    writeFileSync(file, 'echo from-project\n', 'utf8');
+    writeFileSync(join(other, 'audit'), 'echo from-other\n', 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const shell = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd: project }).stdout;
+    const refused = (cd: string) => [`python3 ./audit --chdir ${cd}`, `python3 ./audit -C ${cd}`, `python3 ./audit --directory=${cd}`, `python3 ./audit --directory ${cd}`, `echo cd; ./audit`, `python3 ./audit cd ${cd}`, `echo pushd ${cd}; python3 ./audit`,
+      `nice -n 5 env -C ${cd} ./audit`];
+    const settled = (cd: string) => [`env -C ${cd} python3 ./audit`, `env --chdir ${cd} python3 ./audit`, `env --chdir=${cd} python3 ./audit`, `cd ${cd}; python3 ./audit`, `cd ${cd} && python3 ./audit`, `env -i -C ${cd} python3 ./audit`];
+    // what the shell does: an argument after the script does not move it; the options of env before the program do
+    expect(shell(`sh ./audit --chdir ${other}`), 'an argument of the script').toBe('from-project\n');
+    expect(shell(`sh ./audit cd ${other}`), 'an argument of the script').toBe('from-project\n');
+    expect(shell(`echo cd; sh ./audit`), 'a word of another command').toBe('cd\nfrom-project\n');
+    expect(shell(`env -C ${other} sh ./audit`), 'the option of env moves').toBe('from-other\n');
+    expect(shell(`cd ${other}; sh ./audit`), 'a cd moves').toBe('from-other\n');
+    for (const command of refused(other)) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: file });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(file), `${command} as ${key}: the file is intact`).toBe('echo from-project\n');
+      }
+    }
+    // the options of a wrapper and a cd of the shell name the file of the directory that they move to: the directory of the session is a collision, another directory is a file that is not the one that runs
     for (const command of settled(project)) {
       const r = start(command, { state_file: file });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);

@@ -294,7 +294,7 @@ PUNCTUATION = '();<>|&\n'
 
 SHELL_KEYWORDS = frozenset({'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', '!', '{', '}'})   # words that stand before the command of a simple command
 SHELL_WRAPPERS = frozenset({'exec', 'command', 'env', 'time', 'nohup'})   # words that run the word after them (and its options)
-CHDIR_WORDS = frozenset({'cd', 'pushd', '-C', '--directory', '--chdir'})   # words that change the working directory of the command (`--directory=DIR` and `--chdir=DIR` too): the only constructs that tell where a relative path is run from
+CHDIR_WORDS = frozenset({'-C', '--directory', '--chdir'})   # options of a wrapper that change the working directory of the command it runs (`--directory=DIR` and `--chdir=DIR` too); `cd` and `pushd` change that of the shell: together the only constructs that tell where a relative path is run from
 
 
 class ScanIncomplete(Exception):
@@ -319,7 +319,8 @@ def command_word(words):
 def session_dependent(piece, runs, directories, named, moved, assigned):
     """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
     neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command does not move its working
-    directory (`moved`: no `-C`, `--directory` or `--chdir` word in its own simple command and no `cd` or `pushd` before it in its chain of
+    directory (`moved`: no `-C`, `--directory` or `--chdir` option in front of the word that its own simple command runs (an option of a wrapper, `env -C DIR prog`;
+    after that word it is an argument of the program) and no simple command that runs `cd` or `pushd` before it in its chain of
     commands, so the shell runs it from the directory of the session, whatever directories the words of the command name as arguments; a cd in a
     subshell, a pipe, the background or before `||` moves nothing after it) and that ends the path of a file the guard writes; a word without a
     directory part that the command runs (`runs`) and that is the name of a file the guard writes: the shell looks it up on the PATH of
@@ -788,9 +789,10 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
         join = (words[0] if words and is_operator(words[0]) else '').strip('\n')   # the operator in front of the simple command
         if join not in ('', ';', '&&'):
             chain = False   # a subshell, a pipe, `&` or `||` cuts the chain: a cd before it does not move what comes after it
-        if join not in ('|', '||', '&&') and any(w in ('cd', 'pushd') for w in words):
+        run = command_word(words)   # only the word that the simple command runs is a cd, and only an option in front of it is the option of a wrapper (`env -C DIR prog`): after it, `--chdir` is an argument of the program
+        if join not in ('|', '||', '&&') and run is not None and words[run] in ('cd', 'pushd'):
             chain = True   # (a cd that follows a pipe, `||` or `&&` may not run, or runs in a pipe: it counts for nothing)
-        moved_at.append(moved or chain or any(w in CHDIR_WORDS or w.startswith(('--directory=', '--chdir=')) for w in words))
+        moved_at.append(moved or chain or any(w in CHDIR_WORDS or w.startswith(('--directory=', '--chdir=')) for w in words[:run if run is not None else 0]))
     named = list(inherited)   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR) and of the command it is quoted in: the shell may run a later word from there
     for words in simple:
         for word in words:
