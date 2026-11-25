@@ -2034,6 +2034,36 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
   });
 
+  it('the PATH of the top-level env of settings.json is where a bare word of the command of another hook is looked up too (the hook processes get it, the guard does not): never a file the guard writes; a PATH that is no text leaves the guard free', () => {
+    const f = fixture('foreign-settings-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const script = join(hooks, 'audit');
+    const text = '# the script that the command runs\n';
+    writeFileSync(script, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (env: unknown, command = 'audit') => JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    for (const [path, command] of [[hooks, 'audit'], [`/nonexistent:${hooks}`, 'audit'], [`${hooks}:$PATH`, 'audit'], [hooks, 'env audit']]) {
+      writeFileSync(f.settings, settings({ PATH: path }, command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `PATH ${path}, ${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `PATH ${path}, ${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `PATH ${path}, ${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a PATH that is no text, or no PATH at all, names no directory
+    for (const env of [{ PATH: 5 }, { PATH: [hooks] }, { PATH: null }, {}]) {
+      writeFileSync(f.settings, settings(env), 'utf8');
+      const r = start({ state_file: script });
+      expect(r.status, `env ${JSON.stringify(env)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [

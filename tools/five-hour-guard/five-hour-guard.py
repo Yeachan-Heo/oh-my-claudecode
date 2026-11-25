@@ -438,6 +438,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
     simple.append(words)
     found = []
     assigned = {n: [own_value(n, x) for x in v] for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
+    given_path = [os.path.expanduser(os.path.expandvars(d)) for v in assigned.get('PATH', []) for d in v.split(os.pathsep)]   # the PATH that settings.json gives the hook processes: the guard does not have it, the shell of the hook looks a bare word up there
     for words in simple:
         for word in words:
             name, equals, value = word.partition('=')
@@ -457,7 +458,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
                 if directory and len(directory) <= MAX_PATH_CHARS and '\0' not in directory and os.path.isdir(directory) and directory not in named:
                     named.append(directory)
     for words in simple:
-        directories = [''] + os.environ.get('PATH', os.defpath).split(os.pathsep) + [d for w in words if w.startswith('PATH=') for d in w[5:].split(os.pathsep)] + named   # a PATH=dir word adds its directories for every word of the simple command
+        directories = [''] + os.environ.get('PATH', os.defpath).split(os.pathsep) + [d for w in words if w.startswith('PATH=') for d in w[5:].split(os.pathsep)] + given_path + named   # a PATH=dir word adds its directories for every word of the simple command
         for word in words:
             if word in exclude:
                 exclude.remove(word)   # one occurrence of a word of the generated entry is that word of the entry, not a file it names besides
