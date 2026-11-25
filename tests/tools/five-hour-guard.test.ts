@@ -2177,6 +2177,52 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {
+    const f = fixture('foreign-comments', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const audit = join(hooks, 'audit');
+    const hashed = join(hooks, 'a#b');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    // what a shell does with these texts
+    const sh = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout;
+    expect(sh('echo a # b'), 'a comment').toBe('a\n');
+    expect(sh('echo a#b'), 'a # inside a word').toBe('a#b\n');
+    expect(sh("echo '# b' \\# c"), 'quotes and a backslash').toBe('# b # c\n');
+    // comments: the file named only in the comment is free
+    for (const command of [`true # state is ${audit}`, `true;# ${audit}`, `python3 x # ${audit}\npython3 y`, `(true #${audit}\n)`]) {
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        rmSync(audit, { force: true });
+        const r = start({ [key]: audit });
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(0);
+      }
+    }
+    // not comments: the file is still named
+    writeFileSync(audit, text, 'utf8');
+    writeFileSync(hashed, text, 'utf8');
+    const named: Array<[string, string]> = [
+      [`python3 ${audit} # note`, audit], [`echo '# x ${audit}'`, audit], [`echo "a #b ${audit}"`, audit], [`python3 ${hashed}`, hashed], [`python3 \\# ${audit}`, audit],
+      [`true # note\npython3 ${audit}`, audit], [`true; python3 ${audit} # note`, audit], [`echo $# ${audit}`, audit], ['python3 "${FHG_A#x}" ' + audit, audit],
+      [`sh -c 'python3 ${audit} # note'`, audit], [`echo \${'$'}'a #x' ${audit}`, audit], [`cat <<EOF\n# ${audit}\nEOF`, audit],
+    ];
+    for (const [command, file] of named) {
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: file });
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        expect(readText(file), `${JSON.stringify(command)} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [

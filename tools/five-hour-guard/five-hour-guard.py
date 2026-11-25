@@ -335,7 +335,52 @@ def is_operator(token):
     return bool(token) and all(c in PUNCTUATION for c in token)
 
 
-def command_tokens(command):
+def strip_comments(command):
+    """The command without its shell comments: a `#` that starts a word (at the start, after a blank or a newline, or after one of ; & | ( ) ),
+    outside quotes and `${...}` and not escaped, up to the end of its line, which stays. A `#` inside a word (`a#b`, `$#`, `${A#x}`) is text. Where
+    this scan could differ from a shell (`$'...'`, a backtick, `<<` of a here document) nothing is removed: removing too much would hide a file, so such a
+    command stays whole, and so does any text that this scan cannot place (it is not a parser: `$(...)`, nested quotes
+    inside `$(...)` are scanned as plain text). The comment that is the marker of the entry of this guard is kept: what follows it
+    is a command to the guard's own entry that a shell would not run, and it stays a candidate."""
+    if "$'" in command or '`' in command or '<<' in command:
+        return command
+    out, quote, depth, boundary, i = [], None, 0, True, 0
+    while i < len(command):
+        c = command[i]
+        if quote:
+            out.append(c)
+            if c == '\\' and quote == '"' and i + 1 < len(command):
+                i += 1
+                out.append(command[i])
+            elif c == quote:
+                quote = None
+        elif c == '\\' and i + 1 < len(command):
+            out.append(command[i:i + 2])
+            i += 1
+            boundary = False
+        elif c in '\'"':
+            quote, boundary = c, False
+            out.append(c)
+        elif c == '#' and boundary and not depth and not command.startswith(ENTRY.ENTRY_MARKER, i):
+            end = command.find('\n', i)
+            i = len(command) if end < 0 else end
+            continue
+        else:
+            if c == '$' and command[i + 1:i + 2] == '{':
+                depth += 1
+                out.append('${')
+                i += 2
+                boundary = False
+                continue
+            if c == '}' and depth:
+                depth -= 1
+            boundary = c in ' \t\r\n;&|()'
+            out.append(c)
+        i += 1
+    return ''.join(out)
+
+
+def command_tokens(command, quoted=False):
     """The words and the operators of a command as the shell splits them (shlex), None for a command with a NUL character or one that cannot be
     parsed. Raises ScanIncomplete past MAX_COMMAND_CHARS or MAX_COMMAND_WORDS: a prefix would pass for the whole command."""
     if not isinstance(command, str) or '\0' in command:
@@ -343,6 +388,8 @@ def command_tokens(command):
     if len(command) > MAX_COMMAND_CHARS:
         raise ScanIncomplete('command too long to scan')
     command = re.sub(r'(?<!\\)((?:\\\\)*)\\\n', r'\1', command)   # a backslash and the newline after it (not an escaped backslash) are removed before the words are split, as the shell does
+    if not quoted:   # the text of a quoted word is not told apart from data (`echo "a #b file"`), so no comment is removed from it
+        command = strip_comments(command)
     try:
         lex = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
         lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''
@@ -505,7 +552,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None):
     two levels) raises ScanIncomplete: a prefix would pass for the whole command. A word longer than MAX_PATH_CHARS names no file and is skipped. `exclude`: a list of words that are not
     candidates, each once (the words of the entry that this guard generates, see registered_runtime_files)."""
     exclude = [] if exclude is None else exclude
-    tokens = command_tokens(command)
+    tokens = command_tokens(command, depth > 0)
     if tokens is None:
         return []   # a command with a NUL character (no process can be started with one in its arguments) or one the shell cannot parse runs nothing
     simple, words = [], []
