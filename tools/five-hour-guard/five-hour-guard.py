@@ -394,9 +394,62 @@ def parameter_variants(piece, assigned):
     raise ScanIncomplete('variables of the command refer to each other in a cycle or nest too deeply to scan')
 
 
+BRACES = re.compile(r'(?<!\$)\{([^{}]*)\}')   # an innermost brace expression that no $ opens
+BRACE_NUMBERS = re.compile(r'(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?')
+BRACE_LETTERS = re.compile(r'([A-Za-z])\.\.([A-Za-z])(?:\.\.(-?\d+))?')
+
+
+def brace_alternatives(body):
+    """What Bash makes of the inside of a brace expression: the items of `a,b` (an empty item is an item) or the numbers or letters of a range
+    `1..3`, `01..10`, `a..e`, `1..10..2`; None for anything else (`{}`, `{a}`: Bash leaves those as they are). A range of more than
+    MAX_COMMAND_PROGRAMS items is ScanIncomplete."""
+    if ',' in body:
+        return body.split(',')
+    for pattern, letters in ((BRACE_NUMBERS, False), (BRACE_LETTERS, True)):
+        m = pattern.fullmatch(body)
+        if m:
+            first, last = (ord(m.group(1)), ord(m.group(2))) if letters else (int(m.group(1)), int(m.group(2)))
+            step = abs(int(m.group(3) or 1)) or 1
+            if abs(last - first) // step + 1 > MAX_COMMAND_PROGRAMS:
+                raise ScanIncomplete('command has a brace range that is too long to scan')
+            numbers = range(first, last + 1 if last >= first else last - 1, step if last >= first else -step)
+            if letters:
+                return [chr(n) for n in numbers]
+            digits = [m.group(1).lstrip('-'), m.group(2).lstrip('-')]
+            width = max(len(d) for d in digits) if any(len(d) > 1 and d[0] == '0' for d in digits) else 0
+            return [('-' if n < 0 else '') + str(abs(n)).zfill(width) for n in numbers]
+    return None
+
+
+def brace_variants(piece):
+    """The piece with its brace expressions expanded as Bash does (`{a,b}`, `{1..3}`, nested ones innermost first, pass after pass until a
+    pass changes nothing), which happens before every other expansion; the guard does not tell whether a shell does it (zsh, sh, dash, and Bash
+    in quotes do not), so the piece itself stays a candidate. More than MAX_COMMAND_PROGRAMS variants or a text longer than MAX_COMMAND_CHARS is
+    ScanIncomplete."""
+    variants = [piece]
+    for _ in range(piece.count('{') + 1):
+        grown = []
+        for text in variants:
+            matches = [(m, brace_alternatives(m.group(1))) for m in BRACES.finditer(text)]
+            options = [alternatives if alternatives is not None else [m.group(0)] for m, alternatives in matches]
+            for choice in itertools.islice(itertools.product(*options), MAX_COMMAND_PROGRAMS + 1):
+                parts, last = [], 0
+                for (m, _alternatives), value in zip(matches, choice):
+                    parts += [text[last:m.start()], value]
+                    last = m.end()
+                grown.append(''.join(parts) + text[last:])
+        grown = list(dict.fromkeys(grown))
+        if len(grown) > MAX_COMMAND_PROGRAMS or any(len(text) > MAX_COMMAND_CHARS for text in grown):
+            raise ScanIncomplete('command has too many brace expansions to scan')
+        if grown == variants:
+            break
+        variants = grown
+    return variants
+
+
 def word_pieces(word, assigned):
     """The word, and the parts of it that can be a file name too, each also filled in with the values of its parameters (parameter_variants), a
-    filled-in value also split at its blanks.
+    filled-in value also split at its blanks, and each of them also with its brace expressions expanded (brace_variants).
     `assigned`: {name: [values]} that the command assigns (NAME=value words, in any order, none expanded by another)."""
     pieces = [word]
     if '=' in word:
@@ -409,6 +462,9 @@ def word_pieces(word, assigned):
                 pieces.append(variant)
                 if variant != piece:
                     pieces += variant.split()   # a value with blanks that the shell splits into words (an unquoted $NAME): each word of it is a piece too, whether or not the expansion was quoted
+    for piece in pieces[:]:
+        if '{' in piece:
+            pieces += brace_variants(piece)   # braces before parameters in Bash, after them here: both orders give the same pieces
     return list(dict.fromkeys(pieces))
 
 

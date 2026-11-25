@@ -2064,6 +2064,45 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a brace expression in a word of the command of another hook is expanded as Bash does ({a,b}, {1..3}, nested, before the parameters): each file it makes is never a file the guard writes; {} and {a} stay as they are and a range past the limit is not read to its end', () => {
+    const f = fixture('foreign-braces', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    for (const name of ['audit', 'audit2', 'other']) writeFileSync(join(hooks, name), text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string) => JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const bash = spawnSync('bash', ['-c', `printf '%s\\n' ${hooks}/{audit,other} ${hooks}/audit{1..2} ${hooks}/{x,{audit,y}}`], { encoding: 'utf8' });
+    if (bash.status === 0) expect(bash.stdout.split('\n').filter(Boolean).map((p) => p.slice(hooks.length + 1)), 'what Bash makes of these words').toEqual(['audit', 'other', 'audit1', 'audit2', 'x', 'audit', 'y']);
+    const cases: Array<[string, string]> = [
+      [`python3 ${hooks}/{audit,other}`, 'audit'], [`python3 ${hooks}/{other,audit}`, 'audit'], [`python3 ${hooks}/audit{1..2}`, 'audit2'],
+      [`python3 ${hooks}/{x,{y,audit}}`, 'audit'], [`FHG_B=audit; python3 ${hooks}/{$FHG_B,z}`, 'audit'], [`python3 ${hooks}/audit{,2}`, 'audit2'],
+    ];
+    for (const [command, name] of cases) {
+      const script = join(hooks, name);
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // {} and {a} are no brace expansion (find -exec cmd {} \;): they name no file of the guard
+    writeFileSync(f.settings, settings(`find . -name x -exec ${hooks}/tool {} \\; -o -name {a} -print`), 'utf8');
+    const quiet = start({ state_file: join(hooks, 'audit') });
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+    // a range with more items than the limit is a command that is not read to its end
+    writeFileSync(f.settings, settings('python3 x{1..100000}'), 'utf8');
+    const long = start({ state_file: join(hooks, 'audit') });
+    expect(long.status, `${long.stdout}${long.stderr}`).toBe(2);
+    expect(long.stderr).toMatch(/is not read to its end/);
+  });
+
   it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
