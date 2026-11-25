@@ -656,6 +656,24 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('a lone - is the script operand of a Python (it runs stdin) and ends its options: a handler that has the hook file after python3 - is not our hook', () => {
+    const f = fixture('settings-python-stdin');
+    const hook = '/opt/five-hour-guard-hook.py';
+    const foreign = ['-', '-I -', '-W ignore -'].map((o) => ({ type: 'command', command: `${quote(PYBIN)} ${o} ${hook} --pause-file /tmp/p` }));
+    foreign.push({ type: 'command', command: `exec env ${quote(PYBIN)} - ${hook} --pause-file /tmp/p` });
+    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+    expect(tool(f, 'check').status, 'none of them runs the hook').toBe(1);
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
+    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
+    const g = fixture('settings-python-dash-after');
+    write(g, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `${quote(PYBIN)} -I ${hook} - --pause-file /tmp/p`, timeout: 21600 }] }] } });
+    expect(tool(g, 'check').status, 'a dash after the hook is its argument: the hook runs').toBe(0);
+  });
+
   it('a Python that is given option values before the hook (-W ignore, -X dev, -Q, --check-hash-based-pycs) runs the hook behind them: check reports it and remove takes it away; a script in front of the hook file still makes it data', () => {
     const forms = (hook: string, pause: string) => [`${quote(PYBIN)} -W ignore ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -X dev ${hook} --pause-file ${pause}`,
       `${quote(PYBIN)} -W ignore -X dev -I ${hook} --pause-file ${pause}`, `${quote(PYBIN)} -Q new ${hook} --pause-file ${pause}`,

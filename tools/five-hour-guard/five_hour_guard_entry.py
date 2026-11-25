@@ -169,7 +169,7 @@ def strip_comments(command):
 def command_hook(words):
     """(hook, launcher) when the simple command `words` runs the hook of this guard, else None: the command word (after the wrappers) is
     the hook itself, or it is a Python or the command carries --pause-file and the first argument that is no option or operand is the
-    hook (and the Python is not asked to print its help or version instead). A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
+    hook (and the Python is not asked to print its help or version instead, or to run stdin with a lone `-`). A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
     words = expand_split_strings(words)
     operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
     first = skip_wrappers(words)
@@ -180,7 +180,7 @@ def command_hook(words):
     python = re.fullmatch(PYTHON_NAME, os.path.basename(words[first]).lower()) is not None
     if python or '--pause-file' in words:
         values = {i + 1 for i in range(first + 1, len(words)) if python and words[i] in PYTHON_VALUE_OPTIONS}   # -W ignore: `ignore` is no script
-        args = [i for i in range(first + 1, len(words)) if i not in operands and i not in values and not words[i].startswith('-')]
+        args = [i for i in range(first + 1, len(words)) if i not in operands and i not in values and (not words[i].startswith('-') or (python and words[i] == '-'))]   # a lone - is the script operand of a Python (stdin)
         if python and any(words[i] in PYTHON_INFO_OPTIONS and i not in values for i in range(first + 1, args[0] if args else len(words))):
             return None   # python3 --help <hook>: Python prints its help and exits, the hook is not run
         if args and MARK in os.path.basename(words[args[0]]):
