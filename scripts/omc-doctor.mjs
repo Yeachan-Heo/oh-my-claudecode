@@ -767,6 +767,7 @@ const claudeMdVersion = () => {
   let markerExact = true;
   let claudeSource = '(none)';
   let cannotRead = '';
+  let variant = null;
   for (const file of candidates) {
     try {
       const text = readFile(file);
@@ -774,16 +775,25 @@ const claudeMdVersion = () => {
       // digit first, and the first such marker decides, wherever a variant spelling stands; the marker chosen and its exactness are
       // one match. Where no exact marker exists, any other spelling is a marker it cannot read, which it reports as instruction drift.
       const exact = text.match(/<!-- OMC:VERSION:(\d+\.\d+\.\d+[^\s]*?) -->/);
-      const marker = exact || text.match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
-      if (marker) {
-        markerExact = !!exact;
-        claudeVersion = marker[1];
+      if (exact) {
+        markerExact = true;
+        claudeVersion = exact[1];
         claudeSource = file;
+        variant = null;
         break;
       }
+      // A variant spelling is a marker the runtime cannot read: it counts only when no later candidate holds an exact marker, which would decide.
+      const other = !variant && text.match(/<!--\s*OMC:VERSION:([^\s]+)\s*-->/i);
+      if (other) variant = { file, version: other[1], cannotRead };
     } catch (error) {
       if (!cannotRead && !absent(error, file)) cannotRead = file + ' (' + ((error && error.code) || 'not a regular file') + ')';
     }
+  }
+  if (variant) {
+    markerExact = false;
+    claudeVersion = variant.version;
+    claudeSource = variant.file;
+    cannotRead = variant.cannotRead;
   }
   if (cannotRead) {
     claudeVersion = '(unreadable)';

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, existsSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, existsSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -15,6 +15,12 @@ const source = (name: string) => {
   return RUNTIME.slice(start, RUNTIME.indexOf('\n}\n', start) + 3);
 };
 const FUNCTIONS = ['readJsonFile', 'parseSemver', 'semverCompare', 'getPluginCacheBase', 'isPathInsideOrEqual', 'isManagedPluginCacheRoot', 'getLatestPluginCacheVersion', 'getPluginVersion'];
+
+// getClaudeMdVersion() of the runtime for a configuration directory: the marker its drift check compares ('unknown' where none is readable).
+const markerOf = (configDir: string): unknown => vm.runInNewContext(
+  `${['readJsonFile', 'extractOmcVersion', 'getClaudeMdVersion'].map(source).join('\n')}\ngetClaudeMdVersion()`,
+  { existsSync, readFileSync, readdirSync, statSync, join: path.join, configDir },
+);
 
 const reorder = (names: string[], order: string[]) => [...order.filter((name) => names.includes(name)), ...names.filter((name) => !order.includes(name))];
 
@@ -207,5 +213,38 @@ describe.skipIf(process.platform === 'win32')('omc-doctor: Step 4 names the vers
       { label: 'no root', doctor: '5.9.0', build: (dir) => ({ root: '', registry: registered(dir) }) },
       { label: 'a root that does not exist', doctor: '5.9.0', build: (dir) => ({ root: path.join(dir, 'nowhere'), registry: registered(dir) }) },
     ]);
+  });
+
+  // The marker of the CLAUDE sources as the doctor prints it against the marker SessionStart compares. A variant spelling (one the runtime cannot read) is shown by the
+  // doctor only where the runtime finds no exact marker anywhere in the candidates; an exact marker in any candidate decides for both, in the runtime's order.
+  test('the marker of the CLAUDE sources is the one the runtime compares, a variant spelling counts only where no candidate holds an exact marker', () => {
+    const VARIANT = '<!-- omc:version:5.7.0 -->';
+    const exact = (version: string) => `<!-- OMC:VERSION:${version} -->`;
+    // runtime: what getClaudeMdVersion() returns; doctor: the version the doctor prints (a variant is its diagnostic reading where the runtime has none).
+    const cases: Array<{ label: string; files: Record<string, string>; runtime: string; doctor: string }> = [
+      { label: 'a variant in CLAUDE.md that references a companion with the exact marker', files: { 'CLAUDE.md': `${VARIANT}\nsee CLAUDE-omc.md\n`, 'CLAUDE-omc.md': exact('5.8.0') }, runtime: '5.8.0', doctor: '5.8.0' },
+      { label: 'a variant in CLAUDE.md, the exact marker in a companion that is not referenced', files: { 'CLAUDE.md': VARIANT, 'CLAUDE-omc.md': exact('5.8.0') }, runtime: '5.8.0', doctor: '5.8.0' },
+      { label: 'a variant in the first companion, the exact marker in the next one', files: { 'CLAUDE.md': 'nothing\n', 'CLAUDE-a.md': VARIANT, 'CLAUDE-b.md': exact('5.8.0') }, runtime: '5.8.0', doctor: '5.8.0' },
+      { label: 'two exact markers in two files: the first file decides', files: { 'CLAUDE.md': `${exact('5.7.0')}\nsee CLAUDE-omc.md\n`, 'CLAUDE-omc.md': exact('5.8.0') }, runtime: '5.7.0', doctor: '5.7.0' },
+      { label: 'two exact markers in two companions: the first in name order decides', files: { 'CLAUDE.md': 'nothing\n', 'CLAUDE-a.md': exact('5.7.0'), 'CLAUDE-b.md': exact('5.8.0') }, runtime: '5.7.0', doctor: '5.7.0' },
+      { label: 'a variant before the exact marker in one file', files: { 'CLAUDE.md': `${VARIANT}\n${exact('5.8.0')}\n` }, runtime: '5.8.0', doctor: '5.8.0' },
+      { label: 'a variant in CLAUDE.md and no companion: the runtime has no marker, the doctor shows the variant it cannot read as drift', files: { 'CLAUDE.md': VARIANT }, runtime: 'unknown', doctor: '5.7.0' },
+      { label: 'a variant in the only companion: the runtime has no marker, the doctor shows the variant', files: { 'CLAUDE.md': 'nothing\n', 'CLAUDE-omc.md': VARIANT }, runtime: 'unknown', doctor: '5.7.0' },
+    ];
+    const differences: Array<{ label: string; runtime: unknown; doctor: string }> = [];
+    for (const { label, files, runtime, doctor } of cases) {
+      const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-parity-'));
+      try {
+        for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
+        const run = runCommand(CLAUDE_MD_VERSION, dir, { timeout: 30_000 });
+        expect(run.error).toBeUndefined();
+        const printed = (run.stdout.match(/^CLAUDE\.md OMC version: (.*)$/m) ?? [])[1] ?? '(no line)';
+        const seen = markerOf(dir);
+        if (seen !== runtime || printed !== doctor) differences.push({ label, runtime: seen, doctor: printed });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+    expect(differences).toEqual([]);
   });
 });
