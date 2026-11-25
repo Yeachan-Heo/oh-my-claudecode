@@ -1425,6 +1425,12 @@ def main():
             while not STOP and time.monotonic() < end:
                 time.sleep(min(1.0, max(0.0, end - time.monotonic())))
     finally:
+        if not (A.once or A.dry_run or LOCK_LOST[0]):
+            try:
+                if not keep_locks():   # a signal can arrive before the next tick has looked: the lock files may be another guard's now, and its pause is not removed
+                    log('ERROR: a lock file of this guard was removed or replaced and another guard holds the new one: stopping, the pause file is left alone')
+            except OSError:
+                pass   # the directory of a lock file is gone: cleanup goes on as it did, a write that fails is logged
         if not (A.once or A.dry_run or LOCK_LOST[0]) and (state.get('paused') or state.get('unlink_pending')):
             # orderly exit never leaves sessions waiting; a restart re-enters the pause from the first fresh reading of the cache
             try:
