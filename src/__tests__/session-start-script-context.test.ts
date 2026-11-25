@@ -1558,7 +1558,7 @@ ${'- oversized startup guidance\n'.repeat(700)}
   });
 
   describe('CLAUDE.md version drift and claudeMdEnabled', () => {
-    function runDriftSession(claudeMdEnabled: boolean | undefined, files: Record<string, string> = { 'CLAUDE.md': '# My own global config without OMC markers\n' }): string {
+    function runDriftSession(claudeMdEnabled: boolean | undefined, files: Record<string, string> = { 'CLAUDE.md': '# My own global config without OMC markers\n' }, fifos: string[] = []): string {
       const claudeDir = join(fakeHome, '.claude');
       const pluginRoot = join(tempDir, 'local-plugin-4.15.4');
       mkdirSync(join(claudeDir, '.omc'), { recursive: true });
@@ -1568,6 +1568,7 @@ ${'- oversized startup guidance\n'.repeat(700)}
       writeFileSync(join(claudeDir, 'hud', 'omc-hud.mjs'), '');
       writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ statusLine: 'node ~/.claude/hud/omc-hud.mjs' }));
       for (const [name, text] of Object.entries(files)) writeFileSync(join(claudeDir, name), text);
+      for (const name of fifos) expect(spawnSync('mkfifo', [join(claudeDir, name)]).status).toBe(0);
       if (claudeMdEnabled !== undefined) {
         writeFileSync(join(claudeDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled }));
       }
@@ -1614,6 +1615,17 @@ ${'- oversized startup guidance\n'.repeat(700)}
       expect(matching).not.toContain('CLAUDE.md instructions');
       const outdated = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-omc.md\n', 'CLAUDE-omc.md': '<!-- OMC:VERSION:4.15.0 -->\n' });
       expect(outdated).toContain('CLAUDE.md instructions: 4.15.0');
+    });
+
+    // A FIFO has no writer here: opening it for reading would wait for one, and the hook would end without any output at all.
+    it.skipIf(process.platform === 'win32')('does not open a companion file that is a FIFO named CLAUDE-omc.md', () => {
+      const combined = runDriftSession(undefined, { 'CLAUDE.md': '# no marker\n' }, ['CLAUDE-omc.md']);
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    it.skipIf(process.platform === 'win32')('does not open a companion file that is a FIFO referenced by CLAUDE.md', () => {
+      const combined = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-other.md\n' }, ['CLAUDE-other.md']);
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
     });
 
     it('does not report CLAUDE.md drift when claudeMdEnabled is false', () => {

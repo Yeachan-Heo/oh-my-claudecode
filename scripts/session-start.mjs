@@ -1237,7 +1237,11 @@ function getClaudeMdVersion() {
     if (!version) {
       // The file-split layout keeps the marker in the companion file that CLAUDE.md references (or CLAUDE-omc.md), as the doctor reads it.
       const companion = content.match(/CLAUDE-[^ )]*[.]md/)?.[0] ?? 'CLAUDE-omc.md';
-      try { version = extractOmcVersion(readFileSync(join(configDir, companion), 'utf-8')); } catch { /* no companion */ }
+      try {
+        // Only a regular file is opened: reading a FIFO or a device would wait for a writer and hold the whole hook.
+        const companionPath = join(configDir, companion);
+        if (statSync(companionPath).isFile()) version = extractOmcVersion(readFileSync(companionPath, 'utf-8'));
+      } catch { /* no companion */ }
     }
     return version || 'unknown';  // File exists but no marker = 'unknown'
   } catch { return null; }
