@@ -509,7 +509,11 @@ describe('scaleUp launch config', () => {
 
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Failed strict provider argv construction for worker-1 (claude)') });
     expect(tmuxSessionMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    // Rolled back: no reservation blocks the next scale-up and no worker directory stays.
+    expect(monitorMocks.saveTeamConfigAtRevision.mock.calls.some(([candidate]) => (candidate as TeamConfig).active_scale_up)).toBe(true);
     expect(monitorMocks.currentConfig).toMatchObject({ worker_count: 0, workers: [] });
+    expect((monitorMocks.currentConfig as unknown as TeamConfig).active_scale_up).toBeUndefined();
+    expect(existsSync(absPath(cwd, TeamPaths.workerDir('demo-team', 'worker-1')))).toBe(false);
   });
 
   it('launches a claude scale-up worker under the absolute team root when the config records it relative and the caller runs elsewhere', async () => {

@@ -68,19 +68,9 @@ const tmuxState = vi.hoisted(() => ({
   paneRoots: [] as Array<{ pid: number; dead: boolean }>,
   afterEnter: null as ((attempt: WorkerLaunchAttempt) => Promise<void>) | null,
   onKillPane: null as (() => void) | null,
-  // Called with the launch command text when it is sent to the pane.
-  onLaunchSend: null as ((command: string) => void) | null,
+  // Called when the launch command is sent to the pane.
+  onLaunchSend: null as (() => void) | null,
 }));
-
-const providerEventsState = vi.hoisted(() => ({ delayMs: 0 }));
-vi.mock('../provider-events.js', async importOriginal => {
-  const actual = await importOriginal<typeof import('../provider-events.js')>();
-  const ensureProviderEventsLog: typeof actual.ensureProviderEventsLog = async (...args) => {
-    if (providerEventsState.delayMs > 0) await new Promise(resolve => setTimeout(resolve, providerEventsState.delayMs));
-    return actual.ensureProviderEventsLog(...args);
-  };
-  return { ...actual, ensureProviderEventsLog };
-});
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../cli/tmux-utils.js')>();
@@ -221,7 +211,7 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
             const commandText = syntheticArgs[syntheticArgs.indexOf('-l') + 1] ?? '';
             const descriptorMatch = commandText.match(/OMC_WORKER_LAUNCH_SPEC_FILE='([^']+)'/);
             if (descriptorMatch) {
-              tmuxState.onLaunchSend?.(commandText);
+              tmuxState.onLaunchSend?.();
               const spec = JSON.parse(await readFile(descriptorMatch[1], 'utf8'));
               tmuxState.activeAttempt = {
                 schema_version: spec.schema_version,
@@ -376,7 +366,6 @@ beforeEach(() => {
   tmuxState.afterEnter = null;
   tmuxState.onKillPane = null;
   tmuxState.onLaunchSend = null;
-  providerEventsState.delayMs = 0;
   originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   processMocks.isProcessIdentityLive.mockResolvedValue('live');
 });
@@ -2002,18 +1991,23 @@ describe('worker pane startup safety', () => {
     process.env.OMC_TEAM_START_ACK_TIMEOUT_MS = '50';
     processMocks.isProcessIdentityLive.mockResolvedValue('dead');
     const log = join(getOmcRoot(cwd), 'state', 'team', 'startup-team', 'workers', 'worker-1', 'provider-events.jsonl');
-    // A slow disk: a launch that does not wait for the log is sent before it exists.
-    providerEventsState.delayMs = 200;
+    const readLog = () => (existsSync(log) ? readFileSync(log, 'utf8') : null);
+    const logAtEnvRead: Array<string | null> = [];
     const logAtLaunchSend: Array<string | null> = [];
-    tmuxState.onLaunchSend = () => {
-      logAtLaunchSend.push(existsSync(log) ? readFileSync(log, 'utf8') : null);
-    };
+    tmuxState.onLaunchSend = () => { logAtLaunchSend.push(readLog()); };
 
     await expect(spawnOwnedWorkerInPane('startup:0', ownership(), {
       teamName: 'startup-team',
       workerName: 'worker-1',
       instanceId: randomUUID(),
-      envVars: {},
+      // The launch reads its environment right after the log creation. A launch
+      // that does not wait for the creation reads it before any file I/O ends.
+      envVars: {
+        get OMC_TEAM_WORKER() {
+          logAtEnvRead.push(readLog());
+          return 'startup-team/worker-1';
+        },
+      },
       launchArgs: ['--version'],
       launchBinary: '/usr/bin/claude',
       cwd,
@@ -2023,6 +2017,7 @@ describe('worker pane startup safety', () => {
       launchContext: { kind: 'initial' },
     })).rejects.toThrow('worker_launch_cleanup_unverified');
 
+    expect(logAtEnvRead[0]).toBe('');
     expect(logAtLaunchSend).toEqual(['']);
     expect(lstatSync(log).isFile()).toBe(true);
     expect(readFileSync(log, 'utf8')).toBe('');

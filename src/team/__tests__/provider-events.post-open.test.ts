@@ -223,7 +223,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
       'const real = fsp.open;',
       'const realLstat = fsp.lstat;',
       'let reused;',
-      // One line per successful open of the log and per close of it.
+      // One line per successful open of the log, per close of it and per lstat of its path.
       `const note = text => appendFileSync(${JSON.stringify(join(outside, 'handles.log'))}, text);`,
       `const kind = ${JSON.stringify(kind)};`,
       `const outside = ${JSON.stringify(outside)};`,
@@ -246,6 +246,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
       '  return handle;',
       '};',
       'fsp.lstat = async (path) => {',
+      "  if (path.endsWith('provider-events.jsonl')) note('lstat\\n');",
       '  const stats = await realLstat(path);',
       '  if (path === reused?.dir) stats.ino = reused.ino;',
       '  return stats;',
@@ -267,7 +268,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
 
   const hookHandles = () => (existsSync(join(outside, 'handles.log')) ? readFileSync(join(outside, 'handles.log'), 'utf8') : '');
 
-  it('hook opens nothing through a symlinked worker directory', () => {
+  it('hook opens and looks up nothing through a symlinked worker directory', () => {
     rmSync(workerDir, { recursive: true });
     symlinkSync(outside, workerDir);
     expectSilentExit(runHook('none'));
@@ -282,7 +283,7 @@ describe.skipIf(process.platform === 'win32')('provider events after a swap betw
 
   it.each(['none', 'leaf'] as const)('hook closes the file it opened (swap: %s)', kind => {
     expectSilentExit(runHook(kind));
-    expect(hookHandles()).toBe('open\nclose\n');
+    expect(hookHandles().replace('lstat\n', '')).toBe('open\nclose\n');
   });
 
   it('hook appends nothing when the leaf is replaced after the open', () => {

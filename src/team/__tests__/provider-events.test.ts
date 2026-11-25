@@ -278,9 +278,9 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
     mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
     await ensureProviderEventsLog(base, 'demo', 'worker-1');
     const env = { OMC_TEAM_STATE_ROOT: root, OMC_TEAM_WORKER: 'demo/worker-1', OMC_WORKER_LAUNCH_ATTEMPT_ID: 'a1' };
-    const startedAt = Date.now();
-    for (const event of ['SessionStart', 'UserPromptSubmit', 'StopFailure']) {
-      const result = run(await hookCommand(event), env);
+    for (const [event, now] of [['SessionStart', 1_000], ['UserPromptSubmit', 2_000], ['StopFailure', 3_000]] as const) {
+      const clock = `--import=data:text/javascript,Date.now=()=>${now}`;
+      const result = run(await hookCommand(event), { ...env, NODE_OPTIONS: clock });
       expect(result.status).toBe(0);
       expect(result.stdout).toBe('');
       expect(result.stderr).toBe('');
@@ -288,12 +288,11 @@ describe.skipIf(process.platform === 'win32')('provider event hook', () => {
     const lines = readFileSync(join(root, 'workers', 'worker-1', 'provider-events.jsonl'), 'utf8').trim().split('\n')
       .map(text => JSON.parse(text) as Record<string, unknown>);
     expect(lines.map(record => record.event)).toEqual(['SessionStart', 'UserPromptSubmit', 'StopFailure']);
+    expect(lines.map(record => record.at)).toEqual([1_000, 2_000, 3_000]);
     for (const record of lines) {
       expect(Object.keys(record)).toEqual(['v', 'event', 'at', 'attempt']);
       expect(record.v).toBe(1);
       expect(record.attempt).toBe('a1');
-      expect(record.at).toBeGreaterThanOrEqual(startedAt);
-      expect(record.at).toBeLessThanOrEqual(Date.now());
     }
     // An API error ends the turn with StopFailure and no Stop (E0 scenario 4).
     expect(await readLatestProviderEvent(root, 'worker-1', 'a1')).toMatchObject({ event: 'StopFailure' });
