@@ -4718,18 +4718,12 @@ async function ownThreshold($, e, next) {
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
     const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
-    // The blocks and messages that the cuts take off the list count with the costs of the candidates, as in decide (shapeOf): from the rows first, and from the API form once it is read.
+    // The blocks and messages that the cuts take off the list count with the costs of the candidates, as in decide (shapeOf), from the API form once it is read.
     const shapeIn = (apiForm, rows) => {
       const group = groupsOf(messages, apiForm);
       return shapeOf(messages, candidates, { group, keepFrom: openLoopStart(messages, group), queued: rows, rates: cfg.rates });
     };
-    let shape = cfg.targetPercent === undefined ? undefined : shapeIn(undefined, new Map());
-    // Only with the token cascade, which is where decide answers a request with that skip: without it nothing can follow, and the character gate is the only veto.
-    // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores. The floor counts
-    // results only, so with a stage on that takes text off as well (agent trim, long replies, pasted text) it is no proof: decide holds the request to the same
-    // bound with the text of those stages in its plan, and answers it with a skip.
-    const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active';
-    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates, shape) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
+    let shape; // with the token cascade, built once the API form is read: the deliveries are part of the shape, and no token measure is taken before it
     let removable = removableChars(candidates);
     let envelopes = 0;
     let api;
@@ -4739,10 +4733,11 @@ async function ownThreshold($, e, next) {
     // With the token cascade a session that fails the characters is measured in tokens (cutInTokens): an image has no characters and costs thousands of tokens.
     const tooSmall = () => (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window)
       && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens, shape), OWN_MIN_GAIN * window));
-    // The delivered messages can only make this worse (they add to `before`, their envelopes come off
-    // `removable`), so a transcript that fails here needs no API read, which may hold the turn for HOST_MS. With the agent stage on it is read all the same: the
-    // stage is planned from the API form and may carry the cut that the results do not.
-    if (tooSmall() && !stageCounts) return result;
+    // The delivered messages can only make this worse in characters (they add to `before`, their envelopes come off `removable`), so a transcript that fails
+    // here needs no API read, which may hold the turn for HOST_MS. With the token cascade it is read all the same: in tokens the deliveries can make the cut
+    // larger (a row's deliveries become one block, which takes their blocks off the list), and the agent stage is planned from the API form and may carry the
+    // cut that the results do not.
+    if (cfg.targetPercent === undefined && tooSmall()) return result;
     // Messages delivered during a tool turn are in the API form only; decide counts them, so the
     // preflight does too (else it could ask for a compaction that decide hands back to the summary).
     const apiRead = await withDeadline($, Promise.resolve().then(() => $.session.messages({ as: 'api' })), HOST_MS);
@@ -4756,7 +4751,13 @@ async function ownThreshold($, e, next) {
       envelopes = envelopeChars(messages, delivered.rows, candidates);
       removable = removableChars(candidates) - envelopes;
     }
-    if (shape) shape = shapeIn(api, delivered ? delivered.rows : new Map());
+    if (cfg.targetPercent !== undefined) shape = shapeIn(api, delivered ? delivered.rows : new Map());
+    // Only with the token cascade, which is where decide answers a request with that skip: without it nothing can follow, and the character gate is the only veto.
+    // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores. The floor counts
+    // results only, so with a stage on that takes text off as well (agent trim, long replies, pasted text) it is no proof: decide holds the request to the same
+    // bound with the text of those stages in its plan, and answers it with a skip. Held after the API read, with the deliveries in the shape.
+    const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active';
+    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates, shape) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     // Only a session that the results alone do not carry needs the stage's scans: the compaction it asks for makes them otherwise.
     if (stageCounts && api && tooSmall()) {
       // The rows that keep their handles, as decide finds them; without the API form that holds their calls there is no stage.

@@ -131,13 +131,19 @@ async function ownRun(env, messages, { tokens = 190000, after } = {}) {
   const handlers = {};
   register((event, hook) => { handlers[event] = hook; });
   const asked = [];
+  // `reads`: the reads of the API form that the preflight made before it asked the host (the compaction it asks for reads it again).
+  let reads = 0;
+  let asking = false;
+  const read = fake.$.session.messages;
+  fake.$.session.messages = async (o) => { if (o?.as === 'api' && !asking) reads++; return read(o); };
   fake.$.session.compact = async () => {
+    asking = true;
     const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger: 'plugin', messages }), async () => ({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] }));
     asked.push(out);
     return out;
   };
   await handlers['turn.complete'](fake.$, { isAborted: false }, async () => 'ok');
-  return { asked, records: fake.records() };
+  return { asked, records: fake.records(), reads };
 }
 
 describe('a session of screenshots in the compaction (the character gate in token mode)', () => {
@@ -486,6 +492,40 @@ describe('a session of screenshots and the own threshold (OMC_JEV_COMPACT_AT_PER
     const messages = session(80, { shot: (i) => i <= 3, chars: 30 });
     const { asked } = await ownRun({ ...OWN, OMC_JEV_COMPACT_TARGET_PERCENT: '20' }, messages, { tokens: 190000 });
     expect(asked).toHaveLength(0);
+  });
+});
+
+describe('the preflight of the own threshold with the token cascade: the vetoes on tokens come after the read of the API form', () => {
+  // The messages delivered during a tool turn stand in the API form only. With the cascade a row's deliveries become one block of the row that build writes, which takes
+  // their blocks off the list: the more of them, the larger the cut, so a veto that counts tokens from the rows alone (no delivery known) can turn away a session that
+  // the compaction would cut by more than a third. 30 steps of text results of `chars` characters, the usage 160 000 tokens of the window of 200 000, and 1 000
+  // deliveries after the result of step 10 (about 45 000 tokens of blocks, less the envelopes they get).
+  const OWN = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60', OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
+  const deliveries = { t10: Array.from({ length: 1000 }, (_, k) => `The coordinator sent a message while you were working:\nn${k}`) };
+  const text = (chars) => session(30, { shot: () => false, chars });
+  const run = (env, chars, after) => ownRun(env, text(chars), { tokens: 160000, after });
+
+  it('the floor veto counts the deliveries: a session whose floor cuts under 30 % of the rows alone is asked for when the deliveries bring it over', async () => {
+    const env = { ...OWN, OMC_JEV_COMPACT_OWN_THRESHOLD: 'active' };
+    expect((await run(env, 2500)).asked).toHaveLength(0);
+    expect((await run(env, 2500, deliveries)).asked).toHaveLength(1);
+  });
+
+  it('the gate on tokens counts the deliveries before it leaves a session alone: a session too small by its rows is asked for when the deliveries make the cut', async () => {
+    expect((await run(OWN, 1500)).asked).toHaveLength(0);
+    const delivered = await run(OWN, 1500, deliveries);
+    expect(delivered.asked).toHaveLength(1);
+    expect(delivered.records.find((r) => r.event === 'compact')).toMatchObject({ result: 'jev', queued_other: 1000 });
+  });
+
+  it('with the cascade a session too small to ask for is left alone after one read of the API form, and without it after none', async () => {
+    // The read is the price of counting the deliveries; without the cascade they can only make the characters worse, so the characters leave the session alone before it.
+    const small = await run(OWN, 600);
+    expect(small.asked).toHaveLength(0);
+    expect(small.reads).toBe(1);
+    const without = await run({ ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60' }, 600, deliveries);
+    expect(without.asked).toHaveLength(0);
+    expect(without.reads).toBe(0);
   });
 });
 
