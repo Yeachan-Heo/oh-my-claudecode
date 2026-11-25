@@ -67,6 +67,8 @@ function ensureHotPathList(hotPaths: HotPath[] | null | undefined): HotPath[] {
 }
 
 function shouldIgnorePath(relativePath: string): boolean {
+  // Match whole path segments, so `.github/` and `src/distance.ts` are not taken for `.git` and `dist`.
+  const segments = relativePath.split(/[\\/]/);
   const ignorePatterns = [
     "node_modules",
     ".git",
@@ -80,7 +82,7 @@ function shouldIgnorePath(relativePath: string): boolean {
     ".DS_Store",
   ];
 
-  return ignorePatterns.some((pattern) => relativePath.includes(pattern));
+  return ignorePatterns.some((pattern) => segments.includes(pattern));
 }
 
 /**
