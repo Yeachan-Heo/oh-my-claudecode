@@ -3624,14 +3624,20 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     expect(ownerMarked('anything', [])).toBe(false);
   });
 
-  it('ignores an owner marker that repeats a group holding a repeat, an optional part or an alternative, and keeps every other one', () => {
+  it('ignores an owner marker that repeats a group holding a repeat, an optional part or an alternative, or that has two repeats of overlapping characters next to each other, and keeps every other one', () => {
     // The shapes that take exponential time on a text that nearly matches: the group repeated holds something that can match the same text in more than one way.
     const unsafe = ['(a+)+$', '(a*)*b', '((a+))+$', '(?:a+)+$', '(a|a)*$', '(a|aa)+$', '(?:x|y+)*z', '(\\w+\\s?)*$', '(a?){30}a{30}', '(a+){2,}$', '(?=(a+)+$)', '(?<w>\\w+\\.)+x', '(a+?)+$'];
+    // The shapes that take time of a high power of the length: two repeats side by side (or with optional parts between them) that can match the same characters.
+    unsafe.push('a*a*$', 'a*a*a*$', '.*.*.*x', '\\w+\\w+', '\\s*\\s*x', 'a*b?a*$', 'a*aa*$', 'a*(?:b)*a*$', 'a*(?:b)?a*$', '[a-z]*[a-m]*$', '\\w*\\d*$', 'x*y*x*', 'a{2,}a{2,}$');
+    // An alternative in a group does not hide the repeats beside it: the repeat before the group and the one after it stand next to each other, and so do the two inside it.
+    unsafe.push('\\w{2,}(a|b)a+b', '(?:ab){2,}(a|b).*?a$', '(a*|b)a*$', '(b|a*)a*$');
     for (const source of unsafe) expect(ownerMarkerPatterns(source), source).toEqual([]);
     // One of a list is left out; the others stay.
     expect(ownerMarkerPatterns('ok,(a+)+$,^fine').map(String)).toEqual(['/ok/imu', '/^fine/imu']);
-    // Repeats of one character or class, groups that are repeated but hold neither, groups that hold something but are no repeated one, and escaped or classed signs.
-    const safe = ['^note:', '\\bplease\\s+\\w+\\s+me\\b', '(?:foo)+bar', '(?:ab){3}', '(foo|bar)baz', '^(?:thanks|thx)\\b', '(a+)?b', '(a|b){1}c', 'a{2,3}b', '[ ]<-+[ ]', '[(+*|]+x', '\\(a+\\)+', '\\p{L}+(?:x)+', '(?<=a+)b', '(?:\\s*please\\b)?'];
+    // Repeats of one character or class that no other repeat touches (a character or a class of other characters stands between), groups that are repeated but hold neither,
+    // groups that hold something but are no repeated one, and escaped or classed signs.
+    const safe = ['^note:', '\\bplease\\s+\\w+\\s+me\\b', '(?:foo)+bar', '(?:ab){3}', '(foo|bar)baz', '^(?:thanks|thx)\\b', '(a+)?b', '(a|b){1}c', 'a{2,3}b', '[ ]<-+[ ]', '[(+*|]+x', '\\(a+\\)+', '\\p{L}+x', '(?<=a+)b', '(?:\\s*please\\b)?',
+      '(?:thanks|regards),?\\s+\\w+', '(x|y)a*b*', 'fyi:\\s*\\w+', '\\w+\\.\\w+', 'a*ba*', '\\s*#\\s*\\w+', '<-.*$', 'a*|a*', '\\d+-\\d+'];
     for (const source of safe) expect(ownerMarkerPatterns(source), source).toHaveLength(1);
   });
 
@@ -3646,6 +3652,21 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
     // A safe marker beside it still holds the tag back.
     const marked = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_OWNER_MARKERS: '(a+)+$,omega' } });
     expect(marked.record.pastes).toMatchObject({ owner_marked: 1, moved: 0 });
+  });
+
+  it('an owner marker of adjacent overlapping repeats is left out too: a tag with one long line that nearly matches it is not held up', async () => {
+    // Without the check 3 000 characters of `a` and a `!` hold `a*a*$` for seconds, and 500 hold `.*.*.*x` for as long (the cube and the fourth power of the line; a tag of 30 000
+    // characters would hold the hook for good), and no deadline stops the synchronous test. The first tag is the line alone (a line end would let `$` match early), the second has
+    // short lines around it (no `x`, so the pattern cannot match there either).
+    const lines = (word) => `${word} beta gamma\n`.repeat(120);
+    const cases = [['a*a*$', `${'a'.repeat(3000)}!`], ['.*.*.*x', `${lines('alpha')}${'a'.repeat(500)}!\n${lines('omega')}`]];
+    for (const [source, inner] of cases) {
+      const messages = withPastes([`${OUTSIDE} ${tag(inner)}`]);
+      const t0 = performance.now();
+      const run = await compactPastes(messages, { env: { ...PASTES, OMC_JEV_COMPACT_OWNER_MARKERS: source } });
+      expect(performance.now() - t0, source).toBeLessThan(1000);
+      expect(run.record.pastes, source).toMatchObject({ owner_marked: 0, moved: 1 });
+    }
   });
 
   it('reads OMC_JEV_COMPACT_PASTES as off, shadow or active in any case; anything else is off', () => {

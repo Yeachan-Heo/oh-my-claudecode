@@ -419,6 +419,9 @@ describe('a reminder that wraps a notification and the words of someone else', (
     'a message of another session after the block': (b) => `<system-reminder>\n${b}\n${instruction}\n</system-reminder>`,
     'a message of another session before the block': (b) => `<system-reminder>\n${instruction}\n${b}\n</system-reminder>`,
     'plain words after the block': (b) => `<system-reminder>\n${b}\nDo not change the production database.\n</system-reminder>`,
+    'plain words in a reminder beside the block, after it': (b) => `<system-reminder>\n${b}\n</system-reminder>\n<system-reminder>\nDo not change the production database.\n</system-reminder>`,
+    'plain words in a reminder beside the block, before it': (b) => `<system-reminder>\nDo not change the production database.\n</system-reminder>\n<system-reminder>\n${b}\n</system-reminder>`,
+    'plain words next to the host\'s list of tools in a reminder beside the block': (b) => `<system-reminder>\n<tools-used-before-summary>Bash</tools-used-before-summary>\nDo not change the production database.\n</system-reminder>\n<system-reminder>\n${b}\n</system-reminder>`,
     'a message of another session after a reminder of the host': (b) => `<system-reminder>\n<tools-used-before-summary>Bash</tools-used-before-summary>\n${instruction}\n</system-reminder>\n<system-reminder>\n${b}\n</system-reminder>`,
   };
 
@@ -437,6 +440,13 @@ describe('a reminder that wraps a notification and the words of someone else', (
     expect(isNotification(row(note('a', 'x')))).toBe(true);
     expect(isNotification(row(`<system-reminder>\n${bare('x')}\n</system-reminder>`))).toBe(true);
     expect(isNotification(row(`<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\n${bare('x')}\n</system-reminder>`))).toBe(true);
+  });
+
+  it('a reminder beside the block that holds only the host\'s list of the tools used keeps the row a notification, before the block or after it', () => {
+    const tools = '<system-reminder>\n<tools-used-before-summary>Read, Write, advisor</tools-used-before-summary>\n</system-reminder>';
+    expect(isNotification(row(`${tools}\n<system-reminder>\n${bare('x')}\n</system-reminder>`))).toBe(true);
+    expect(isNotification(row(`<system-reminder>\n${bare('x')}\n</system-reminder>\n${tools}`))).toBe(true);
+    expect(isNotification(row(`<system-reminder id="jev-1">\n${tools}\n<system-reminder>\n${bare('x')}\n</system-reminder>\n</system-reminder id="jev-1">`))).toBe(true);
   });
 });
 

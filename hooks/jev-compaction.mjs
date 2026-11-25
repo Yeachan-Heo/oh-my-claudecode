@@ -2211,8 +2211,8 @@ function withoutReminderBlocks(text) {
 }
 // A <system-reminder> block that holds a message of another sender or the user: its frame (frameOf also takes a block opening with the notification's own
 // <task-notification> for a frame of another kind, which a notification is not).
-// The block is foreign also when it holds more than its opening: around a notification block only the marker and the host's own line may stand (anything else
-// in the same reminder is a message or words of someone else), and a reminder with no notification holds no line that opens a frame.
+// The block is foreign also when it holds more than its opening: around a notification block only the marker and the host's own line may stand, and a reminder
+// beside it holds nothing but the host's list of the tools used (anything else in a reminder is a message or words of someone else).
 const foreignBlock = (block) => {
   const body = block.replace(DELIVERY_WRAP, '');
   if (frameOf(block) !== undefined && !DELIVERY_NOTES.some((k) => body.startsWith(k))) return true;
@@ -2220,10 +2220,12 @@ const foreignBlock = (block) => {
   const lines = rest.split('\n').map((l) => l.trim()).filter(Boolean);
   return body.includes('</task-notification>')
     ? lines.some((l) => l !== DELIVERY_NOTES[0] && !NOTE_HOST_LINE.test(l))
-    : lines.some((l) => startsFrame(l) && !startsNote(l));
+    : lines.some((l) => !NOTE_HOST_TOOLS.test(l));
 };
 // The line the host writes between the marker and the first block; anything else there is not the host's framing, whoever it is from.
 const NOTE_HOST_LINE = /^This is an automated background-task event(?:, NOT a message from the user)?\.$/;
+// The one reminder the host writes beside a notification: the tools the session used before its summary.
+const NOTE_HOST_TOOLS = /^<tools-used-before-summary>[^<\n]*<\/tools-used-before-summary>$/;
 function isNoteBody(t) {
   const { rest, plain, first } = withoutReminderBlocks(t);
   if (plain.some(foreignBlock)) return false;
@@ -3301,55 +3303,81 @@ export function pasteTags(text) {
   return tags;
 }
 
-// Whether a regular expression source repeats a group (`*`, `+`, `{n,}`, or `{n,m}` with m above 1) that holds a repeat, an optional part or an alternative:
-// `(a+)+$`, `(a|a)*$`, `(a?){30}a{30}`. A text that nearly matches takes such an expression time that grows with the power of its length, and a synchronous test cannot be
-// stopped by the compaction's deadline. A hooks module may import only plain files of its plugin, so this is read from the source here and not by a package. A group that
-// is no repeated one (`(foo|bar)baz`, `(?:ab)+c`) and every repeat of a single character or class (`\w+\s+me`, `[ ]<-+[ ]`) pass.
+// Whether a regular expression source can take more than quadratic time on a text that nearly matches. A synchronous test cannot be stopped by the compaction's
+// deadline, and a hooks module may import only plain files of its plugin, so this is read from the source here and not by a package. Two shapes are refused:
+// - a group repeated (`*`, `+`, `{n,}`, or `{n,m}` with m above 1) that holds a repeat, an optional part or an alternative: `(a+)+$`, `(a|a)*$`, `(a?){30}a{30}`;
+// - two repeats that stand next to each other (nothing between them but optional parts) and match some of the same characters: `a*a*$`, `.*.*.*x`, `\w+\w+`, `a*b?a*$`.
+// What is left is a repeat of a character or class that no other repeat touches (`\s+\w+`, `\w+\.\w+`, `[ ]<-+[ ]`) or a group that is not repeated (`(foo|bar)baz`).
+// Characters tell whether two atoms overlap: the PROBES that an atom matches (an atom no probe matches, such as a group, may overlap anything).
+const PROBES = [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-.:,;@/\\<>()[]{}!?#$%^&*+=~|"\'`\t\n', '\u00e9', '\u00df', '\u0105', '\u4e2d', '\u{1f600}'];
+const probesOf = (atom) => { try { const re = new RegExp(`^(?:${atom})$`, 'iu'); return PROBES.filter((c) => re.test(c)).join(''); } catch { return ''; } };
+const sharesProbe = (x, y) => !x || !y || [...x].some((c) => y.includes(c));
 function repeatsRepeat(source) {
   const text = String(source);
   const open = /\((?:\?(?:[:=!]|<[=!]|<[^>]*>))?/y;
   const counted = /\{(\d+)(?:,(\d*))?\}/y;
-  const frames = [{ rep: false }]; // the groups that are open; `rep`: a repeat, an optional part or an alternative stands in it
-  let last; // the group that just closed, when the next character may repeat it
+  const frames = [{ rep: false, alt: [] }]; // the groups that are open; `rep`: a repeat, an optional part or an alternative stands in it
+  let atom; // the atom just read, until the next character says how often it stands: its text, and the group that closed when it is one
+  let chain = []; // the probes of the repeats that stand next to each other, up to the atom that is read now
   const skip = (from, close) => { const at = text.indexOf(close, from); return at < 0 ? text.length : at + 1; };
+  // The atom with its repeat (`min` to `max` times): true when it is a repeat that overlaps one next to it.
+  const stand = (a, min, max) => {
+    const repeated = max > 1;
+    if (min === 0 && !repeated) return false; // an optional single character stands between nothing
+    if (!repeated && !chain.length) return false;
+    const probes = probesOf(a.text);
+    if (repeated && chain.some((x) => sharesProbe(x, probes))) return true;
+    if (min >= 1) chain = repeated ? [probes] : chain.some((x) => sharesProbe(x, probes)) ? chain : []; // a character that no repeat touches stands between them
+    else chain.push(probes);
+    return false;
+  };
   for (let i = 0; i < text.length;) {
     const c = text[i];
-    const before = last;
-    last = undefined;
+    let min;
+    let max;
+    let end = i + 1;
+    if (c === '*') { min = 0; max = Infinity; } else if (c === '+') { min = 1; max = Infinity; } else if (c === '?') { min = 0; max = 1; } else if (c === '{') {
+      counted.lastIndex = i;
+      const m = counted.exec(text);
+      if (m) { min = Number(m[1]); max = m[2] === undefined ? min : m[2] === '' ? Infinity : Number(m[2]); end = counted.lastIndex; }
+    }
+    if (max !== undefined) {
+      if (text[end] === '?') end++; // a lazy repeat
+      if (atom?.group?.rep && max > 1) return true;
+      frames[frames.length - 1].rep = true;
+      if (atom?.group && min === 0) chain = [...atom.group.chain, ...chain]; // a group that may be left out: what stood before it stands next to what follows
+      if (atom && stand(atom, min, max)) return true;
+      atom = undefined;
+      i = end;
+      continue;
+    }
+    if (atom) stand(atom, 1, 1);
+    atom = undefined;
     if (c === '\\') {
       const next = text[i + 1];
-      i = (next === 'p' || next === 'P' || next === 'u') && text[i + 2] === '{' ? skip(i + 2, '}') : next === 'k' && text[i + 2] === '<' ? skip(i + 2, '>') : i + 2;
+      end = (next === 'p' || next === 'P' || next === 'u') && text[i + 2] === '{' ? skip(i + 2, '}') : next === 'k' && text[i + 2] === '<' ? skip(i + 2, '>') : i + 2;
+      if (next !== 'b' && next !== 'B') atom = { text: text.slice(i, end) };
     } else if (c === '[') {
       let j = i + 1;
       while (j < text.length && text[j] !== ']') j += text[j] === '\\' ? 2 : 1;
-      i = j + 1;
+      end = j + 1;
+      atom = { text: text.slice(i, end) };
     } else if (c === '(') {
       open.lastIndex = i;
       open.test(text);
-      i = open.lastIndex;
-      frames.push({ rep: false });
+      end = open.lastIndex;
+      frames.push({ rep: false, alt: [], chain: [...chain] });
     } else if (c === ')') {
-      i++;
-      if (frames.length > 1) { last = frames.pop(); frames[frames.length - 1].rep ||= last.rep; }
+      if (frames.length > 1) { const group = frames.pop(); frames[frames.length - 1].rep ||= group.rep; chain = [...chain, ...group.alt]; atom = { text: '', group }; }
     } else if (c === '|') {
-      frames[frames.length - 1].rep = true;
-      i++;
-    } else {
-      let max;
-      if (c === '*' || c === '+') max = Infinity;
-      else if (c === '?') max = 1;
-      else if (c === '{') {
-        counted.lastIndex = i;
-        const m = counted.exec(text);
-        if (m) { max = m[2] === undefined ? Number(m[1]) : m[2] === '' ? Infinity : Number(m[2]); i = counted.lastIndex - 1; }
-      }
-      i++;
-      if (max !== undefined) {
-        if (text[i] === '?') i++; // a lazy repeat
-        if (before?.rep && max > 1) return true;
-        frames[frames.length - 1].rep = true;
-      }
+      const frame = frames[frames.length - 1];
+      frame.rep = true;
+      frame.alt.push(...chain); // what the alternative that ends here leaves standing next to what follows the group
+      chain = [...(frame.chain ?? [])];
+    } else if (c !== '^' && c !== '$') {
+      atom = { text: c };
     }
+    i = end;
   }
   return false;
 }
