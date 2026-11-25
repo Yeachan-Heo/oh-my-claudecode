@@ -319,8 +319,9 @@ def command_word(words):
 def session_dependent(piece, runs, directories, named, moved, assigned):
     """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
     neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command does not move its working
-    directory (`moved`: no `cd`, `pushd`, `-C`, `--directory` or `--chdir` word, so the shell runs it from the directory of the session, whatever
-    directories the words of the command name as arguments) and that ends the path of a file the guard writes; a word without a
+    directory (`moved`: no `-C`, `--directory` or `--chdir` word in its own simple command and no `cd` or `pushd` before it in its chain of
+    commands, so the shell runs it from the directory of the session, whatever directories the words of the command name as arguments; a cd in a
+    subshell, a pipe, the background or before `||` moves nothing after it) and that ends the path of a file the guard writes; a word without a
     directory part that the command runs (`runs`) and that is the name of a file the guard writes: the shell looks it up on the PATH of
     the session, which the guard does not know, so a file that the guard finds on its own PATH does not tell which one runs; only a PATH that a
     `PATH=` word or the settings give (`assigned`) is the PATH of the hook, and then the word is settled when a directory the guard looks in has it. A parameter that nothing here gives a value (the command and the settings assign none; what the guard has in its own environment is a
@@ -778,7 +779,14 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                 if m.group(3) in (':=', '='):   # ${NAME:=word} and ${NAME=word} assign NAME for the words that follow: the word is a value of NAME in the whole command, as an assignment is
                     if own_value(m.group(2), m.group(4)) not in assigned.setdefault(m.group(2), []):
                         assigned[m.group(2)].append(own_value(m.group(2), m.group(4)))
-    moved = moved or any(w in CHDIR_WORDS or w.startswith(('--directory=', '--chdir=')) for words in simple for w in words)   # whether the command moves its working directory (of the command it is quoted in too): a directory that is only an argument does not
+    chain, moved_at = False, []   # for each simple command: whether it moves its own working directory (-C, --directory, --chdir) or a cd stands before it in its chain, or the command it is quoted in moved: the shell runs a relative path from there
+    for words in simple:
+        join = (words[0] if words and is_operator(words[0]) else '').strip('\n')   # the operator in front of the simple command
+        if join not in ('', ';', '&&'):
+            chain = False   # a subshell, a pipe, `&` or `||` cuts the chain: a cd before it does not move what comes after it
+        if join not in ('|', '||', '&&') and any(w in ('cd', 'pushd') for w in words):
+            chain = True   # (a cd that follows a pipe, `||` or `&&` may not run, or runs in a pipe: it counts for nothing)
+        moved_at.append(moved or chain or any(w in CHDIR_WORDS or w.startswith(('--directory=', '--chdir=')) for w in words))
     named = list(inherited)   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR) and of the command it is quoted in: the shell may run a later word from there
     for words in simple:
         for word in words:
@@ -786,7 +794,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                 directory = os.path.expanduser(os.path.expandvars(piece))
                 if directory and len(directory) <= MAX_PATH_CHARS and '\0' not in directory and os.path.isdir(directory) and directory not in named:
                     named.append(directory)
-    for words in simple:
+    for words, here in zip(simple, moved_at):
         run = command_word(words)
         path_dirs = os.environ.get('PATH', os.defpath).split(os.pathsep) + [os.path.expanduser(os.path.expandvars(d)) for w in words if w.startswith('PATH=') for piece in word_pieces(w, assigned) if piece.startswith('PATH=') for d in piece[5:].split(os.pathsep)] + given_path   # a PATH= word is filled in with the values of its parameters first, then split
         directories = [''] + path_dirs + [os.path.normpath(os.path.join(n, d)) for d in path_dirs if d and not os.path.isabs(d) for n in named] + named   # a PATH=dir word adds its directories for every word of the simple command; a relative PATH entry is also looked up from each directory that the command names (`cd /dir; PATH=bin prog`)
@@ -797,9 +805,9 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
             if any(c.isspace() for c in word) and not is_operator(word):   # (a newline is an operator: not a command to read)
                 if depth >= 2:
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
-                found += [t for t in command_programs(word, exclude, depth + 1, named, assigned, moved) if t not in found]
+                found += [t for t in command_programs(word, exclude, depth + 1, named, assigned, here) if t not in found]
             for piece in word_pieces(word, assigned):
-                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, moved, assigned):
+                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, here, assigned):
                     raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:

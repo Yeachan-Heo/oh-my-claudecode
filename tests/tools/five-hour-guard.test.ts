@@ -2829,6 +2829,56 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start('sh -c "exit 0"; python3 -I x', { state_file: audit }).status, 'programs of the PATH of the guard').toBe(0);
   });
 
+  it('a cd that does not move the working directory of the word after it (in a subshell, a pipe, the background, before ||, a group in a pipe) does not settle a relative path: the guard still takes the directory of the session as a candidate and refuses to start; a cd of the same chain (after ;, &&, a newline, in a group or a subshell that holds both), and -C, --directory and --chdir of the command itself settle it', () => {
+    const f = fixture('foreign-session-directory-chain', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
+    const other = join(f.dir, 'other');   // a directory that a cd names
+    mkdirSync(project);
+    mkdirSync(other);
+    const text = '# the script that the command runs\n';
+    const file = join(project, 'audit');
+    writeFileSync(file, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    // what the shell does: ./audit is the file of the directory of the session except where the cd moved this shell
+    const shell = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd: project }).stdout;
+    const refused = (cd: string) => [`(cd ${cd}); python3 ./audit`, `cd ${cd} | python3 ./audit`, `cd ${cd} & python3 ./audit`, `cd ${cd} || python3 ./audit`, `{ cd ${cd}; } | python3 ./audit`, `true || cd ${cd}; python3 ./audit`,
+      `(cd ${cd} && true); python3 ./audit`, `true && (cd ${cd}); python3 ./audit`];
+    const settled = (cd: string) => [`cd ${cd}; python3 ./audit`, `cd ${cd} && python3 ./audit`, `cd ${cd}\npython3 ./audit`, `(cd ${cd} && python3 ./audit)`, `{ cd ${cd}; python3 ./audit; }`, `true; cd ${cd} && python3 ./audit`, `true & cd ${cd}; python3 ./audit`,
+      `env -C ${cd} python3 ./audit`, `python3 ./audit --directory ${cd}`, `env --chdir=${cd} python3 ./audit`];
+    for (const command of refused(other).map((c) => c.replace('python3', 'cat'))) {
+      expect(shell(command), `${command}: the shell runs ./audit of the directory of the session`).toBe(command.includes(` || cat`) && !command.startsWith('true') ? '' : text);   // (after a cd that succeeds, || does not run the next command at all)
+    }
+    expect(shell(`cd ${join(f.dir, 'nonexistent')} || cat ./audit`), 'and after a cd that fails the next command runs there').toBe(text);
+    for (const command of settled(other).filter((c) => !c.includes('--')).map((c) => c.replace('python3', 'cat'))) {
+      expect(shell(command), `${command}: the shell runs ./audit of the directory that the cd names`).toBe('');
+    }
+    for (const command of refused(other)) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: file });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(file), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // a move of the same chain (or of the command itself) names the file of the directory it moves to: with the directory of the session there is a collision, with another one the file is not the one that runs
+    for (const command of settled(project)) {
+      const r = start(command, { state_file: file });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    for (const command of settled(other)) {
+      const r = start(command, { state_file: file });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a program of another hook that the PATH of the guard does find is still looked up on the PATH of the session when the command and the settings give no PATH: a file that the guard knows does not tell which one runs, so the guard refuses to start when the name is that of a file the guard writes; a PATH of the command or of the settings settles it as before', () => {
     const f = fixture('foreign-session-path-shadow', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // first on the PATH of the session
