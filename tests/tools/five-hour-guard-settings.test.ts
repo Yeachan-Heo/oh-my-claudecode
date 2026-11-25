@@ -494,10 +494,21 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(tool(f, 'check').status).toBe(0);
   });
 
+  it('a Python is recognised by its whole file name: python, python3, python3.12, pythonw.exe, pypy3 and py run our hook when they are given it, python-audit and the like do not', () => {
+    for (const [name, ours] of [['python', true], ['python3', true], ['python3.12', true], ['pythonw', true], ['pythonw.exe', true], ['python.exe', true], ['pypy', true], ['pypy3', true], ['py', true],
+      ['/usr/bin/python3', true], ['python-audit', false], ['python3-audit', false], ['pythonista', false], ['pypy-audit', false], ['pyaudit', false], ['/opt/python-audit', false]] as const) {
+      const f = fixture(`settings-python-name-${name.replace(/\W/g, '_')}`);
+      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `${name} /opt/five-hour-guard-hook.py` }] }] } });
+      expect(tool(f, 'check').status, `${name} /opt/five-hour-guard-hook.py: ${ours ? 'our hook' : 'a command that has the hook file as data'}`).toBe(ours ? 0 : 1);
+    }
+  });
+
   it('a command that only names the hook file as data is not our hook: check does not report it, add and remove leave it alone', () => {
     const f = fixture('settings-foreign-operand');
     const foreign = [
       '/x/foreign-audit.py /opt/five-hour-guard-hook.py',
+      '/opt/python-audit /tmp/five-hour-guard-hook.py',
+      'pypy-audit /tmp/five-hour-guard-hook.py',
       'grep -c five-hour-guard-hook.py /var/log/audit.log',
       'python3 /x/audit.py --target /opt/five-hour-guard-hook.py',
       'exec /bin/true --pause-file /opt/five-hour-guard-hook.py.pause',

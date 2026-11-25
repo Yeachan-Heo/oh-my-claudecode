@@ -5,7 +5,7 @@ import math, os, re, shlex, sys
 
 MARK = 'five-hour-guard-hook.py'
 OPERAND_OPTIONS = ('-f', '-x', '--pause-file', '--log')
-PYTHON_NAME = r'(python|pypy|py$)'
+PYTHON_NAME = r'(python|pythonw|pypy|py)[\d.]*(\.exe)?'   # the whole basename (python, python3, python3.12, pythonw.exe, pypy3, py): python-audit is no Python
 # The variables with which the hook decides that a session does not draw on the subscription window (foreign_provider() of
 # five-hour-guard-hook.py, which imports nothing and so keeps its own copy of this list): the probe of `add` runs without them.
 PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
@@ -87,7 +87,7 @@ def command_hook(words):
         return None
     if MARK in os.path.basename(words[first]):
         return words[first], words[first]   # run directly: the script itself is the program
-    if re.match(PYTHON_NAME, os.path.basename(words[first]).lower()) or '--pause-file' in words:
+    if re.fullmatch(PYTHON_NAME, os.path.basename(words[first]).lower()) or '--pause-file' in words:
         args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
         if args and MARK in os.path.basename(words[args[0]]):
             return words[args[0]], words[first]   # the program that is asked to run the hook
@@ -127,7 +127,7 @@ def entry_parts(command):
 
 def is_python_file(path):
     """An absolute path of a regular executable file with the name of a Python: what the entry can use as its interpreter."""
-    return os.path.isabs(path) and re.match(PYTHON_NAME, os.path.basename(path).lower()) is not None and os.path.isfile(path) and os.access(path, os.X_OK)
+    return os.path.isabs(path) and re.fullmatch(PYTHON_NAME, os.path.basename(path).lower()) is not None and os.path.isfile(path) and os.access(path, os.X_OK)
 
 
 def expected_command(command, pause_file, hook_log=None, copy_log=True):
