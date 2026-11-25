@@ -18,8 +18,9 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { spawn } from 'child_process';
 import { resolveDaemonModulePath } from '../../utils/daemon-module-path.js';
 import { getGlobalOmcStatePath } from '../../utils/paths.js';
-import { checkRateLimitStatus, formatRateLimitStatus, isRateLimitStatusDegraded, shouldMonitorBlockedPanes, } from './rate-limit-monitor.js';
-import { isTmuxAvailable, scanForBlockedPanes, revalidateBlockedPanes, sendResumeSequence, formatBlockedPanesSummary, isHerdrDetectorEnabled, scanForBlockedHerdrPanes, revalidateBlockedHerdrPanes, sendHerdrResumeSequence, } from './tmux-detector.js';
+import { checkPanelQuotaStatus, checkRateLimitStatus, formatRateLimitStatus, isRateLimitStatusDegraded, shouldMonitorBlockedPanes, } from './rate-limit-monitor.js';
+import { isTmuxAvailable, scanForBlockedPanes, revalidateBlockedPanes, sendResumeSequence, formatBlockedPanesSummary, isHerdrDetectorEnabled, scanForBlockedHerdrPanes, revalidateBlockedHerdrPanes, sendHerdrResumeSequence, panelQuotaTmux, } from './tmux-detector.js';
+import { runDaemonPanelQuotaPass } from './panel-quota-wait.js';
 import { isHerdrPaneId } from '../../team/tmux-session.js';
 import { isProcessAlive } from '../../platform/index.js';
 import { createInitialState, getUsageProfileHash, scopeStateToCurrentUsageProfile, shouldResumeBlockedPanesOnStatusChange, } from './daemon-state.js';
@@ -47,12 +48,17 @@ const DAEMON_ENV_ALLOWLIST = [
     'PATH', 'HOME', 'USERPROFILE',
     // OMC state/profile context (non-secret paths)
     'OMC_STATE_DIR', 'CLAUDE_CONFIG_DIR',
+    // Provider worker-panel quota wait (switch, codes, limits, paths; the API key is read from a key file, never passed in env)
+    'OMC_PANEL_QUOTA_WAIT', 'OMC_PANEL_QUOTA_WAIT_CODES', 'OMC_PANEL_QUOTA_END_CODES', 'OMC_PANEL_QUOTA_WAIT_MAX',
+    'OMC_PANEL_QUOTA_WAIT_MARGIN_S', 'OMC_PANEL_SESSION_PREFIX', 'OMC_PANEL_WRAPPER_OWNS_RE', 'OMC_PANEL_QUOTA_STATE',
+    'OMC_PANEL_QUOTA_JOURNAL', 'OMC_PANEL_QUOTA_KEY_FILE', 'OMC_PANEL_QUOTA_READ_URL',
+    'OMC_PANEL_QUOTA_PASS_LIMIT_S', 'OMC_PANEL_QUOTA_WEEK_UNIT',
     // User identification
     'USER', 'USERNAME', 'LOGNAME',
     // Locale settings
     'LANG', 'LC_ALL', 'LC_CTYPE',
     // Terminal/tmux (required for tmux integration)
-    'TERM', 'TMUX', 'TMUX_PANE',
+    'TERM', 'TMUX', 'TMUX_PANE', 'TMUX_TMPDIR',
     // Multiplexer election + herdr binary pin (non-secret paths/values)
     'OMC_TEAM_MULTIPLEXER', 'HERDR_BIN_PATH',
     // Temp directories
@@ -72,7 +78,7 @@ const DAEMON_ENV_ALLOWLIST = [
  * Create a minimal environment for daemon child processes.
  * Only includes allowlisted variables to prevent credential leakage.
  */
-function createMinimalDaemonEnv() {
+export function createMinimalDaemonEnv() {
     const env = {};
     for (const key of DAEMON_ENV_ALLOWLIST) {
         if (process.env[key] !== undefined) {
@@ -275,6 +281,20 @@ function registerDaemonCleanup(config) {
     process.once('SIGTERM', () => { cleanup(); process.exit(0); });
     process.once('exit', cleanup);
 }
+// Provider worker-panel quota wait (opt-in, OMC_PANEL_QUOTA_WAIT=1); runs on every poll and does nothing while the switch is off.
+async function panelQuotaPass(config) {
+    try {
+        await runDaemonPanelQuotaPass({
+            stateDir: dirname(config.stateFilePath),
+            tmux: panelQuotaTmux,
+            readQuota: checkPanelQuotaStatus,
+            log: (text) => log(text, config),
+        });
+    }
+    catch (error) {
+        log(`Panel quota pass failed: ${error instanceof Error ? error.message : String(error)}`, config);
+    }
+}
 /**
  * Main daemon polling loop
  */
@@ -299,6 +319,8 @@ async function pollLoop(config) {
                 log('Claude usage profile changed; discarded saved quota and pane state', config);
             }
             state.lastPollAt = new Date();
+            // Provider worker-panel quota pass, independent of the Claude limit status below (no-op while the switch is off).
+            await panelQuotaPass(config);
             // Check rate limit status with a 30s timeout to prevent poll loop stalls
             const rateLimitStatus = usageProfileHash === null
                 ? null

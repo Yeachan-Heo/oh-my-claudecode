@@ -1143,6 +1143,98 @@ describe('worker pane startup safety', () => {
         applyKeys();
         expect(keysSeenOn.filter(([frame]) => frame === 'partial')).toEqual([]);
     });
+    function scriptedPane(screens, start) {
+        let shown = start;
+        let lastReturned = null;
+        let applied = 0;
+        const keysSeenOn = [];
+        const applyKeys = () => {
+            const keys = tmuxState.args.slice(applied).filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+            applied = tmuxState.args.length;
+            for (const key of keys) {
+                keysSeenOn.push([lastReturned, key]);
+                shown = screens[shown][key] ?? shown;
+            }
+        };
+        tmuxState.captureAt = () => {
+            applyKeys();
+            lastReturned = shown;
+            shown = screens[shown].next ?? shown;
+            return screens[lastReturned].frame;
+        };
+        return {
+            keysOn: (screen) => {
+                applyKeys();
+                return keysSeenOn.filter(([on]) => on === screen).map(([, key]) => key);
+            },
+        };
+    }
+    const trigger = 'Read inbox.md, execute now.';
+    const delivered = ['Down', 'Enter', trigger, 'Enter', 'Enter'];
+    const sentKeys = () => tmuxState.args.filter(args => args[0] === 'send-keys').map(args => String(args.at(-1)));
+    strictTmuxIt.each(['trust-no-choice-partial', 'trust-yes-choice-partial'])('waits out the recorded 2.1.330 frame %s, then answers the whole trust dialog and delivers', async (partial) => {
+        const context = await acceptedContext('claude');
+        const pane = scriptedPane({
+            partial: { frame: v330(partial), next: 'trust' },
+            trust: { frame: v330('trust'), Down: 'yes' },
+            yes: { frame: v330('trust-yes-focused'), Enter: 'idle' },
+            idle: { frame: readFrame('claude/2.1.325/idle.txt') },
+        }, 'partial');
+        await expect(deliverStartupInbox(context, trigger)).resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+        expect(sentKeys()).toEqual(delivered);
+        expect(pane.keysOn('partial')).toEqual([]);
+    });
+    // After Down, Claude Code redraws both choices; a capture can cut the
+    // redraw below a "❯ Yes" line not drawn whole, with the old ❯ on "No, exit"
+    // gone or still there.
+    strictTmuxIt.each([
+        ['"No, exit" redrawn first', '  No, exit'],
+        ['"Yes" redrawn first', '❯ No, exit'],
+    ])('waits out a trust dialog redrawn after Down and cut at "❯ Yes, I tr" (%s), then delivers', async (_, noLine) => {
+        const context = await acceptedContext('claude');
+        const yes = v330('trust-yes-focused');
+        const cut = `${yes.slice(0, yes.indexOf('  No, exit'))}${noLine}\n ❯ Yes, I tr\n`;
+        const pane = scriptedPane({
+            trust: { frame: v330('trust'), Down: 'cut' },
+            cut: { frame: cut, next: 'yes' },
+            yes: { frame: yes, Enter: 'idle' },
+            idle: { frame: readFrame('claude/2.1.325/idle.txt') },
+        }, 'trust');
+        await expect(deliverStartupInbox(context, trigger)).resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+        expect(sentKeys()).toEqual(delivered);
+        expect(pane.keysOn('cut')).toEqual([]);
+    });
+    // A guard, not a measured sequence: the trust dialog starting to draw after
+    // the wait saw an idle pane is unlikely. It pins that the check before the
+    // trigger is typed, catching the dialog mid-draw, sends the start back to
+    // the wait instead of typing into it.
+    strictTmuxIt('sends the start back to the wait when the check before the trigger catches the trust dialog mid-draw', async () => {
+        const context = await acceptedContext('claude');
+        const idle = readFrame('claude/2.1.325/idle.txt');
+        const pane = scriptedPane({
+            idleFirst: { frame: idle, next: 'partial' },
+            partial: { frame: v330('trust-no-choice-partial'), next: 'trust' },
+            trust: { frame: v330('trust'), Down: 'yes' },
+            yes: { frame: v330('trust-yes-focused'), Enter: 'idle' },
+            idle: { frame: idle },
+        }, 'idleFirst');
+        await expect(deliverStartupInbox(context, trigger)).resolves.toEqual({ ok: true, kind: 'attempted_unconfirmed' });
+        expect(sentKeys()).toEqual(delivered);
+        expect(pane.keysOn('partial')).toEqual([]);
+    });
+    strictTmuxIt('stops without Enter when the check after the trigger is typed catches the trust dialog mid-draw', async () => {
+        const context = await acceptedContext('claude');
+        const idle = readFrame('claude/2.1.325/idle.txt');
+        const pane = scriptedPane({
+            idleWait: { frame: idle, next: 'idleCheck' },
+            idleCheck: { frame: idle, next: 'partial' },
+            partial: { frame: v330('trust-no-choice-partial'), next: 'trust' },
+            trust: { frame: v330('trust') },
+        }, 'idleWait');
+        await expect(deliverStartupInbox(context, trigger)).resolves.toEqual({ ok: false, reason: 'selector_persistent' });
+        expect(sentKeys()).toEqual([trigger]);
+        expect(pane.keysOn('partial')).toEqual([]);
+    });
     strictTmuxIt('answers the whole recorded 2.1.330 trust dialog with Down then Enter, then delivers', async () => {
         const context = await acceptedContext('claude');
         const frames = { trust: v330('trust'), yes: v330('trust-yes-focused'), idle: readFrame('claude/2.1.325/idle.txt') };
