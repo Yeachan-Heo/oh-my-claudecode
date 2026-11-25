@@ -2455,6 +2455,40 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a backslash in the pattern of a trimming expression is an escape as in a shell: before a special character, in the longest cut and in a prefix, before an ordinary character; two of them are one backslash; patterns without a backslash cut as before', () => {
+    const f = fixture('foreign-escaped-patterns', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const settings = (command: string, env: Record<string, string>) => JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } });
+    const start = (config: Record<string, string>) => {
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    // [the value of FHG_A, the expression, the file it makes]; what a shell makes of each is asked of sh below
+    const cases: Array<[string, string, string]> = [
+      [`${hooks}/audit.py`, '${FHG_A%\\.py}', join(hooks, 'audit')], [`${hooks}/audit*`, '${FHG_A%\\*}', join(hooks, 'audit')], [`${hooks}/audit?`, '${FHG_A%\\?}', join(hooks, 'audit')],
+      [`${hooks}/audit[`, '${FHG_A%\\[}', join(hooks, 'audit')], [`${hooks}/audit.tar.gz`, '${FHG_A%%\\.*}', join(hooks, 'audit')], [`${hooks}/audit.tar.gz`, '${FHG_A%%\\.t*z}', join(hooks, 'audit')],
+      [`${hooks}/audit`, '${FHG_A##\\/*\\/}', join(hooks, 'audit')], [`${hooks}/audit.py`, '${FHG_A%\\.p\\y}', join(hooks, 'audit')], [`${hooks}/audit.py\\`, '${FHG_A%.py\\\\}', join(hooks, 'audit')],
+    ];
+    for (const [value, expression, file] of cases) {
+      const made = spawnSync('sh', ['-c', `FHG_A='${value}'; printf %s "${expression}"`], { encoding: 'utf8' }).stdout;
+      expect(made === file || file === join(hooks, made), `sh makes ${made} of ${expression}`).toBe(true);
+      writeFileSync(file, text, 'utf8');
+      writeFileSync(f.settings, settings(made === file ? `python3 "${expression}"` : `cd ${hooks}; python3 "${expression}"`, { FHG_A: value }), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: file });
+        expect(r.status, `${expression} of ${value} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // an escaped special character is not a pattern: it cuts nothing from a value without it
+    writeFileSync(f.settings, settings('python3 "${FHG_A%\\*}"', { FHG_A: `${hooks}/other.py` }), 'utf8');
+    expect(start({ state_file: join(hooks, 'other') }).status, 'the escaped * is a character').toBe(0);
+  });
+
   it('a shell comment in the command of another hook names no file (true # state is guard.state), and a # anywhere else is text: in quotes, inside a word, escaped, in a parameter; the next line of a command is still read', () => {
     const f = fixture('foreign-comments', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');

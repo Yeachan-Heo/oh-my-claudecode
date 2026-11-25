@@ -519,10 +519,16 @@ def own_value(name, value):
     return PARAMETER.sub(lambda m: (os.environ.get(name) or m.group(4) or '') if (m.group(1) or m.group(2)) == name else m.group(0), value)
 
 
+def shell_pattern(pattern):
+    """The pattern of a shell with its escapes put in the form fnmatch reads: a backslash and the character after it are that character as
+    text (`*`, `?` and `[` as a class of their own, `[*]`), a backslash at the end stays a backslash."""
+    return re.sub(r'\\([*?\[])|\\(.)', lambda m: '[' + m.group(1) + ']' if m.group(1) else m.group(2), pattern, flags=re.DOTALL)
+
+
 def trimmed_values(values, operator, pattern):
     """Each value, and each cut of it that the pattern of `${NAME%pattern}`, `%%`, `#` or `##` can remove (from the end for `%`, from the start for
-    `#`; the shortest and the longest are not told apart, a shell pattern is matched as fnmatch matches it)."""
-    found = []
+    `#`; the shortest and the longest are not told apart, a shell pattern is matched as fnmatch matches it, with its backslash escapes read first)."""
+    found, pattern = [], shell_pattern(pattern)
     for value in values:
         found.append(value)
         for i in range(len(value) + 1):
