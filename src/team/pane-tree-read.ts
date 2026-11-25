@@ -12,7 +12,7 @@ export interface PaneTreeReadOps {
  * The read of a worker pane's process tree (OMC_TEAM_KILL_PANE_TREE) that a cleanup takes before it ends the pane's provider, for the
  * signal that follows. It stands behind what the kill of the pane (`killOwnedWorkerPane`) requires before it acts: not the pane of the
  * leader, not a reserved one, and a pane that shows, at the time of the read, to be a pane of the provider target the team recorded for
- * it. A pane that has left that target (and may have been repurposed since) is not read, so its processes are not signalled before the
+ * it, both before and after the tree is read. A pane that has left that target (and may have been repurposed since) is not read, so its processes are not signalled before the
  * kill refuses the pane. Returns null when the pane is refused, as `capturePaneProcessTree` does when it reads nothing.
  */
 export async function capturePaneProcessTreeOfWorkerPane(
@@ -27,20 +27,27 @@ export async function capturePaneProcessTreeOfWorkerPane(
     ownership.reservedPaneIds.includes(ownership.paneId)
   )
     return null;
-  try {
-    const membership = await ops.verifyTeamTargetOwnership({
-      provider: ownership.provider,
-      providerTarget: ownership.providerTarget,
-      recipient: "worker",
-      recipientRole: "worker",
-      paneId: ownership.paneId,
-      ...(ownership.provider === "tmux" ? { tmuxServerIdentity: ownership.tmuxServerIdentity } : {}),
-    } as MailboxNotificationTarget);
-    if (membership.kind !== "owned") return null;
-  } catch {
-    return null;
-  }
-  return ops.capturePaneProcessTree(ownership.tmuxServerIdentity, ownership.paneId);
+  const identity = ownership.tmuxServerIdentity;
+  const isOwned = async (): Promise<boolean> => {
+    try {
+      const membership = await ops.verifyTeamTargetOwnership({
+        provider: ownership.provider,
+        providerTarget: ownership.providerTarget,
+        recipient: "worker",
+        recipientRole: "worker",
+        paneId: ownership.paneId,
+        ...(ownership.provider === "tmux" ? { tmuxServerIdentity: identity } : {}),
+      } as MailboxNotificationTarget);
+      return membership.kind === "owned";
+    } catch {
+      return false;
+    }
+  };
+  if (!(await isOwned())) return null;
+  const tree = await ops.capturePaneProcessTree(identity, ownership.paneId);
+  // The pane may have left its target and been respawned between the proof and the read: the tree is then the one of a replacement, and it
+  // is given back only when the pane shows to be the pane of the team after the read as well.
+  return tree && (await isOwned()) ? tree : null;
 }
 
 /** The tree as JSON data (a Map has none), the form in which a fenced capture is persisted with the retirement record of a launch attempt. */

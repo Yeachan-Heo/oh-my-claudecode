@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readFencedPaneTree, revivePaneTree, revivePaneTrees, serializePaneTree } from '../pane-tree-read.js';
+import { capturePaneProcessTreeOfWorkerPane, readFencedPaneTree, revivePaneTree, revivePaneTrees, serializePaneTree } from '../pane-tree-read.js';
 import type { PaneProcessTree, WorkerPaneOwnership } from '../tmux-session.js';
 
 const IDENTITY = { socket_path: '/tmp/pane-tree-read-test.sock', server_pid: 4242, process_started_at: 'start' };
@@ -17,6 +17,39 @@ function ownership(overrides: Partial<WorkerPaneOwnership> = {}): WorkerPaneOwne
 }
 
 afterEach(() => { delete process.env.OMC_TEAM_KILL_PANE_TREE; });
+
+describe('the read of the process tree of a worker pane', () => {
+  it('returns the tree of a pane that is a pane of the team before and after the read', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const ops = { verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'owned' })), capturePaneProcessTree: vi.fn(async () => TREE) };
+    expect(await capturePaneProcessTreeOfWorkerPane(ownership(), ops)).toEqual(TREE);
+    expect(ops.verifyTeamTargetOwnership).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns no tree when the pane has left its provider target by the time the tree is read, since the tree is then the one of a replacement', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    let moved = false;
+    const ops = {
+      verifyTeamTargetOwnership: vi.fn(async () => ({ kind: moved ? 'foreign' : 'owned' })),
+      capturePaneProcessTree: vi.fn(async () => { moved = true; return TREE; }), // moved out and respawned after the proof, before the read
+    };
+    expect(await capturePaneProcessTreeOfWorkerPane(ownership(), ops)).toBeNull();
+    expect(ops.capturePaneProcessTree).toHaveBeenCalledTimes(1);
+    // the same when the proof after the read cannot be made at all
+    const failing = {
+      verifyTeamTargetOwnership: vi.fn().mockResolvedValueOnce({ kind: 'owned' }).mockRejectedValueOnce(new Error('tmux went away')),
+      capturePaneProcessTree: vi.fn(async () => TREE),
+    };
+    expect(await capturePaneProcessTreeOfWorkerPane(ownership(), failing)).toBeNull();
+  });
+
+  it('reads nothing from a pane that is not a pane of the team before the read', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const ops = { verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'foreign' })), capturePaneProcessTree: vi.fn(async () => TREE) };
+    expect(await capturePaneProcessTreeOfWorkerPane(ownership(), ops)).toBeNull();
+    expect(ops.capturePaneProcessTree).not.toHaveBeenCalled();
+  });
+});
 
 describe('the pane tree persisted with a launch retirement', () => {
   it('survives the round trip through JSON: the descendants and the identity of each', () => {

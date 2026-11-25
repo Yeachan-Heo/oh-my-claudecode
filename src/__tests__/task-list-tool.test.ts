@@ -229,6 +229,28 @@ describe('task_list replies', () => {
     }
   });
 
+  it('refuses a task number sent as text of more than 16 characters before it is trimmed or matched, whatever its value', async () => {
+    // a long run of leading zeros is a valid task number as a value (7) but not as text: the length is judged first, so nothing walks it
+    const padded = `${'0'.repeat(1_000_000)}7`;
+    const enormous = '9'.repeat(5_000_000);
+    for (const args of [
+      { start: padded },
+      { start: enormous },
+      { done: [padded] },
+      { done: [1, enormous] },
+      { done: JSON.stringify(['0'.repeat(100) + '7']) },
+      { start: '0'.repeat(16) + '7' },
+    ]) {
+      const r = await call(args);
+      expect(r.isError, JSON.stringify(args).slice(0, 40)).toBe(true);
+    }
+    // numbers as short text are still read: the longest accepted is 16 characters, padding included
+    for (const args of [{ start: '7' }, { start: ' 7 ' }, { start: '0'.repeat(15) + '7' }, { done: ['1', ' 50'] }]) {
+      const r = await call(args);
+      expect(r.isError, JSON.stringify(args)).toBeUndefined();
+    }
+  });
+
   it('rejects a note that is present but not a string, as the schema declares it, before it acknowledges the call', async () => {
     // the standalone server hands the raw arguments to the handler, so the handler holds every item to the schema
     for (const note of [5, true, null, {}, { text: 'x' }, [], ['a']]) {

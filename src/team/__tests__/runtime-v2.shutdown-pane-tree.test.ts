@@ -177,9 +177,9 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     return teamRoot;
   }
 
-  function prepare(teamName: string): Promise<WorkerLaunchAttempt> {
+  function prepare(teamName: string, workerName = 'worker-1', paneId = '%2'): Promise<WorkerLaunchAttempt> {
     return prepareWorkerLaunchAttempt({
-      cwd, teamName, workerName: 'worker-1', paneId: '%2', instanceId: TEAM_INSTANCE_ID,
+      cwd, teamName, workerName, paneId, instanceId: TEAM_INSTANCE_ID,
       provider: 'claude', runtimeCliPath: resolveRuntimeCliPath(), context: { kind: 'initial' },
     });
   }
@@ -366,14 +366,21 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
     process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     await withAcceptedProvider('pane-tree-moved-team', async () => {
       let reads = 0;
+      // the pane leaves right after the proof that follows the second read (a read is judged by a proof before and one after it), so the
+      // second read stands and the proof before the read at the fence is the first to see it gone
+      let leavesAfterNextProof = false;
+      let left = false;
+      tmuxUtilsMocks.tmuxExecAsync.mockImplementation(async (args: string[]) => {
+        const listed = left ? '%1\n%3\n' : '%1\n%2\n%3\n';
+        if (args.includes('list-panes') && leavesAfterNextProof) {
+          leavesAfterNextProof = false;
+          left = true;
+        }
+        return { stdout: args.includes('list-panes') ? listed : '', stderr: '' };
+      });
       tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
         paneState.events.push('capture');
-        if (++reads === 2) {
-          tmuxUtilsMocks.tmuxExecAsync.mockImplementation(async (args: string[]) => ({
-            stdout: args.includes('list-panes') ? '%1\n%3\n' : '',
-            stderr: '',
-          }));
-        }
+        if (++reads === 2) leavesAfterNextProof = true;
         return FIXTURE_TREE;
       });
       const { shutdownTeamV2 } = await import('../runtime-v2.js');
@@ -558,6 +565,40 @@ describe.skipIf(currentStrictProcessStartIdentity(process.pid) === null)('shutdo
       expect(await exists(captureFile)).toBe(false);
       await terminateWorkerLaunchProvider(attempt, 2_000);
     });
+  }, 60_000);
+
+  // The workers do not all answer alike: one that accepts exits (its pane may be gone by the time another one's rejection ends the shutdown), and
+  // what it had started is then recorded in its saved capture only. Only the capture of the worker that rejected, which goes on, is removed.
+  it('keeps the saved pane tree of a worker that accepted the shutdown when another worker rejects it', async () => {
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const teamName = 'pane-tree-mixed-team';
+    await reserve(teamName);
+    const accepting = await prepare(teamName);
+    const rejecting = await prepare(teamName, 'worker-2', '%3');
+    const teamRoot = await writeTeam(teamName, accepting.attempt_id);
+    const written = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf8')) as { workers: Array<Record<string, unknown>> };
+    written.workers.push({ ...written.workers[0], name: 'worker-2', index: 2, pane_id: '%3', launch_attempt_id: rejecting.attempt_id });
+    await writeJson(cwd, join(teamRoot, 'config.json'), { ...written, worker_count: 2 });
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => FIXTURE_TREE);
+    const acceptingCapture = `${accepting.decisionPath}.retired.fenced-capture`;
+    const rejectingCapture = `${rejecting.decisionPath}.retired.fenced-capture`;
+
+    const { shutdownTeamV2 } = await import('../runtime-v2.js');
+    const shutdown = shutdownTeamV2(teamName, cwd, { timeoutMs: 8_000 });
+    // both requests are out (and so both trees are saved) before the answers are written: an answer older than its request is stale
+    await vi.waitFor(async () => {
+      expect(await exists(join(teamRoot, 'workers', 'worker-1', 'shutdown-request.json'))).toBe(true);
+      expect(await exists(join(teamRoot, 'workers', 'worker-2', 'shutdown-request.json'))).toBe(true);
+    }, { timeout: 10_000, interval: 10 });
+    expect(await exists(acceptingCapture)).toBe(true);
+    expect(await exists(rejectingCapture)).toBe(true);
+    await writeJson(cwd, join(teamRoot, 'workers', 'worker-1', 'shutdown-ack.json'), { status: 'accept', reason: 'ok', updated_at: new Date().toISOString() });
+    await writeJson(cwd, join(teamRoot, 'workers', 'worker-2', 'shutdown-ack.json'), { status: 'reject', reason: 'still working', updated_at: new Date().toISOString() });
+    await expect(shutdown).rejects.toThrow(/shutdown_rejected:worker-2:still working/);
+
+    const kept = JSON.parse(await readFile(acceptingCapture, 'utf8')) as { capture: unknown[] };
+    expect(kept.capture).toEqual([serializePaneTree(FIXTURE_TREE)]);
+    expect(await exists(rejectingCapture)).toBe(false);
   }, 60_000);
 
   it('signals no saved tree when the switch is off, and the saved capture is not used', async () => {

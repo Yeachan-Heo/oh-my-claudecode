@@ -2451,7 +2451,15 @@ export async function scaleDownOwned(
       // requests are out, and the trees are held here, signalled in phase 3 and written with the fence, which stops before it terminates
       // a provider when it cannot write them.
       if (!(await reserveEffects().catch(() => false))) {
-        for (const attempt of capturedAttempts.values()) if (attempt) await discardWorkerLaunchFencedCapture(attempt).catch(() => undefined);
+        // a worker whose pane is gone (it finished during the drain) left its saved trees as the only record of what it had started, and a
+        // retry of the scale down needs them: only the trees of workers that are not known to be dead are removed
+        for (const worker of targetWorkers) {
+          const attempt = capturedAttempts.get(worker.name);
+          if (!attempt) continue;
+          const ownership = configuredPaneOwnership(config, worker.pane_id!, worker.name);
+          if (ownership && (await getOwnedWorkerLiveness(ownership).catch(() => "unknown")) === "dead") continue;
+          await discardWorkerLaunchFencedCapture(attempt).catch(() => undefined);
+        }
         await markScaleDownFailed("scale_down_fence_lost_before_effects");
         return { ok: false, error: "team_mutation_busy" };
       }

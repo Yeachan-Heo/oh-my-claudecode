@@ -9729,8 +9729,12 @@ export async function shutdownTeamV2(
 
     if (rejected.length > 0 && !force) {
       const detail = rejected.map((r) => `${r.worker}:${r.reason}`).join(",");
-      // the workers go on and no provider was terminated: what was saved for the cleanup that does not happen is removed
-      for (const attempt of capturedAttempts.values()) await discardWorkerLaunchFencedCapture(attempt).catch(() => undefined);
+      // no provider was terminated: what was saved for the cleanup that does not happen is removed, but only for the workers that said they
+      // go on; a worker that accepted (or has not answered) may have exited since, and what it started is then recorded in its capture only
+      for (const { worker } of rejected) {
+        const attempt = capturedAttempts.get(worker);
+        if (attempt) await discardWorkerLaunchFencedCapture(attempt).catch(() => undefined);
+      }
       if (!(await rollbackRejectedShutdownFence(config))) {
         throw new Error(`shutdown_rejected_fence_lost:${detail}`);
       }

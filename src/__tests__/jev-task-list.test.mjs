@@ -1684,6 +1684,18 @@ describe('task list: the hook accepts what the task_list tool accepts', () => {
     expect((await taskListTool.handler({ done: [50] })).isError).toBeUndefined();
   });
 
+  it('a task number sent as text of more than 16 characters is refused by both before the text is walked, whatever its value', async () => {
+    const padded = `${'0'.repeat(1_000_000)}7`; // the value is 7, the text is a million characters long
+    for (const args of [{ start: padded }, { done: [padded] }, { done: [1, '9'.repeat(5_000_000)] }, { done: JSON.stringify([`${'0'.repeat(100)}7`]) }, { start: `${'0'.repeat(16)}7` }]) {
+      expect((await taskListTool.handler(args)).isError, JSON.stringify(args).slice(0, 40)).toBe(true);
+      expect(L.updateShape(args, 'note').ok, JSON.stringify(args).slice(0, 40)).toBe(false);
+    }
+    for (const args of [{ start: ' 7 ' }, { start: `${'0'.repeat(15)}7` }, { done: ['1', ' 50'] }]) {
+      expect((await taskListTool.handler(args)).isError, JSON.stringify(args)).toBeUndefined();
+      expect(L.updateShape(args, 'note').ok, JSON.stringify(args)).toBe(true);
+    }
+  });
+
   it('a text longer than 2000 characters is refused by the tool before it is walked, and the hook cuts a text before it masks it', async () => {
     const long = (n) => `a b ${'x'.repeat(n)}`;
     for (const args of [{ items: [{ content: long(2000), status: 'pending' }] }, { items: [{ content: 'A', status: 'in_progress', note: long(2000) }] }, { items: JSON.stringify([{ content: 'A'.repeat(5000), status: 'pending' }]) }, { items: `[${' '.repeat(2_000_000)}]` }]) {

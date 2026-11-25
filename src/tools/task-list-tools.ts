@@ -35,8 +35,12 @@ const TASK_LIST_MAX = 50;
 const TASK_LIST_TEXT_MAX = 2000;
 const TASK_LIST_JSON_MAX = 2 * TASK_LIST_MAX * TASK_LIST_TEXT_MAX + 10_000;
 
+// A task number sent as text is at most this long (an integer that a number holds exactly has at most 16 digits, and a list has 50 tasks): the
+// length is checked before the text is trimmed or matched, so a call with an enormous string of digits is refused without being walked.
+const TASK_LIST_NUMBER_TEXT_MAX = 16;
+
 const taskListPositive = (value: unknown): boolean => {
-  const n = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value;
+  const n = typeof value === 'string' && value.length <= TASK_LIST_NUMBER_TEXT_MAX && /^\d+$/.test(value.trim()) ? Number(value) : value;
   return Number.isInteger(n) && (n as number) >= 1 && (n as number) <= TASK_LIST_MAX;
 };
 

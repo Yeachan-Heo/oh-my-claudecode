@@ -303,8 +303,11 @@ function arrayOf(value) {
   return null;
 }
 
+// A task number sent as text is at most NUMBER_TEXT_MAX long, checked before the text is trimmed or matched: task_list refuses a longer
+// one (src/tools/task-list-tools.ts), so a call it accepts is read as sent, and an enormous string of digits is not walked.
+const NUMBER_TEXT_MAX = 16;
 const intOf = (value) => {
-  const n = typeof value === 'string' && /^\d+$/.test(value.trim()) ? Number(value) : value;
+  const n = typeof value === 'string' && value.length <= NUMBER_TEXT_MAX && /^\d+$/.test(value.trim()) ? Number(value) : value;
   return Number.isInteger(n) && n >= 1 ? n : null;
 };
 
