@@ -4,6 +4,608 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 5142,
+      "targetRef": "main",
+      "mergeBaseSha": "074d348979836693321c72fc0ff99cdc0a895289",
+      "headSha": "702be1750a9b7be7e4922bd0888075e7f7905a74",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-31T23:59:59.999Z",
+      "generatedDelta": {
+        "count": 98,
+        "sha256": "b445c49d6c1679dd0b6d3d8d9b9e6ffab7d831d6276f47c897eb38f2313c6b4d"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "dce3f1a6aa7f8c44551b95a0649f9bd0d694f0c3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "1e9322172fb6620e9f934fb81ef938cfdebad625",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "91975fa41c6e529e20c919e78cf0a1145cbc02d5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "183a749807f93accd9e74177f2f6b8ac32120c1c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "bea81fdedcfd52af28e4c2520713e0c6bed1a60c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "40e58ba225c0c316bd3b6c58613be30edf0e0bd7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/rate-limit-wait/daemon.test.js",
+          "sha": "0d5950b7bd48ad56960766fe65d6ea6d3a4dc9ff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/rate-limit-wait/daemon.test.js.map",
+          "sha": "dab5a15c4a23ae4bc406b9c0a72f6015a5cbc833",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/graph.d.ts.map",
+          "sha": "ec4241fb67f3855769a485f51b29cd7d5b5ac8e6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/graph.js",
+          "sha": "8812e243a60d3f27e63771e88129daac642e0b5f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/graph.js.map",
+          "sha": "f4a354b441803410bd925d7e0f1ca1f047d086c7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/__tests__/models.test.js",
+          "sha": "84307bd7c9b1f08f6cb58d1a5aae606e005e2515",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/__tests__/models.test.js.map",
+          "sha": "3897d8a6c78f3320b76698521acbb44d385ac596",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/models.d.ts.map",
+          "sha": "bcfa5b7c66ead45fc2849fa4686c4ee6958c20aa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/models.js",
+          "sha": "6d54e72fc8ef28a6973542b6195ed8e8c6faa90f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/models.js.map",
+          "sha": "42f97c4a2e3347c3815bd7afcc793fca9ecfb065",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/daemon.d.ts",
+          "sha": "7662c3f9c73db0862b7d6f63dace83c46382a7b3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/daemon.d.ts.map",
+          "sha": "2f1d17d61a675c552a08223d707867181d69a60a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/daemon.js",
+          "sha": "c5b146ee90ef4d962b4aef594982e66e1ac71b68",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/daemon.js.map",
+          "sha": "6f7f22f10bf3b775f1e50870d97246eff3e35d30",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/rate-limit-monitor.d.ts",
+          "sha": "e4a171a8dd09265ecfd3db43f464de8402dfc14f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/rate-limit-monitor.d.ts.map",
+          "sha": "67e7fed42553bfd317fed5d9f0a77d71311c415e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/rate-limit-monitor.js",
+          "sha": "3ea1deedb9078cbe5746dc7faf2be68895069eb1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/rate-limit-monitor.js.map",
+          "sha": "f79d37ca22c81b5137d05adaa7479ea602e527f9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.d.ts",
+          "sha": "a4a64636c9b304ae9070e547f03357a0072e6ed3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.d.ts.map",
+          "sha": "65bebc10000392df26a9a932c0c33a9ab6b56a62",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.js",
+          "sha": "371407232f4596a4965801816341da85509b7ee0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.js.map",
+          "sha": "fed44e2c4a4f90e1894aa248c62cddcbadabb2bd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/types.d.ts",
+          "sha": "a6b6d7acb411d2d7d1fde77ec1c1e082b2f283dd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/types.d.ts.map",
+          "sha": "af737413b2231a42e3c4fbb093ca5f29a1b9bb11",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/contained-fd.d.ts",
+          "sha": "5705dc10c1bce1d79c13ee88d6e394f8a994e1a6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/contained-fd.d.ts.map",
+          "sha": "e8dcb073051f3841e746275243aea972eeb182d7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/contained-fd.js",
+          "sha": "9403efb6eabb050a247b0ff666197a95f8d056cc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/contained-fd.js.map",
+          "sha": "26b031b7f47cfb6650debcdc1568d8a47e3e064a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/executors/command.d.ts",
+          "sha": "f97c361e02f2a2b28a870dffc021d4742ca50864",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/executors/command.d.ts.map",
+          "sha": "6cd08177c24fc1762daa64b60787f8f6e85c5045",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/executors/command.js",
+          "sha": "359646472da99aa8f12c887cb4db75a44d43c736",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/executors/command.js.map",
+          "sha": "142be948726805bb64b140a0d5f023ccec101eb5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/fence.d.ts",
+          "sha": "cc65b5580c327f3df8bc4cb5c3afe6eda62eec83",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/fence.d.ts.map",
+          "sha": "d03ad2a9cf8af6346d2531b446fca5fdfc24e635",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/fence.js",
+          "sha": "b73e82e5fa83edf838ab9a89fa758c9ff0b0238d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/fence.js.map",
+          "sha": "ee40c35d9ab3cc3582c1829e5fc27b45ec3ccf79",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/journal.d.ts",
+          "sha": "9b7c9480ec8bb36fa5c54fe0cafaaef2d7fd787a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/journal.d.ts.map",
+          "sha": "04f777e6ae13a0434d0118157473a6838d693426",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/journal.js",
+          "sha": "a0075e94f05cdd9c774ca6fde3c353805ea424c0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/journal.js.map",
+          "sha": "616a088377d9aa001b6e41eb16ee9aa5c2538ca6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/run-dir.d.ts",
+          "sha": "1263d7a0b27727cc70a5badb35a4a4dafddd5f05",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/run-dir.d.ts.map",
+          "sha": "1ee808fff4ff0726fd1948172cbd5035ddfba9eb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/run-dir.js",
+          "sha": "42ea804a4b242d92cfec7bfc1208eb14035d5c9e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/run-dir.js.map",
+          "sha": "79b9a99eed9106258360b46aa022091bf13b1d11",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/runner.d.ts",
+          "sha": "dbb8ef20058dd1c6260501d3e3b5e5c430f2121c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/runner.d.ts.map",
+          "sha": "e1d112574a92ac53a6fe900fd886be8b99cab083",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/runner.js",
+          "sha": "0d16d292bd030e743869fe27e971a76922195dce",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/runner.js.map",
+          "sha": "0abc75f967f13f0f02d408ab737b69ed3c65f579",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/store.d.ts",
+          "sha": "54cd05eb2de25f1497c69a61011e2e8348bd402d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/store.d.ts.map",
+          "sha": "4e1156d5d8af75896cad61af194b33949c241a7d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/store.js",
+          "sha": "36a652dc48512ad17eefc63db106e38e20e6ccb8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/store.js.map",
+          "sha": "8bab0ddb3865972340e5b8706f1dd64f2805acc8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/__tests__/hot-path-tracker.test.js",
+          "sha": "c86f6d22d20043401a2c9f6e787b096f9f654b30",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/__tests__/hot-path-tracker.test.js.map",
+          "sha": "efb5cd02fcc3fa1be355cd15d331325491c7795c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/hot-path-tracker.d.ts.map",
+          "sha": "dc32dfc1e8c96f45c68593fc8ad4c8f8c47f105d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/hot-path-tracker.js",
+          "sha": "1e4d5ed4e8fd08fb7b0967380055b5c924c42754",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/hot-path-tracker.js.map",
+          "sha": "6ac4126de9bae8b14516b1f568df62529eaf283d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/action-runner.test.js",
+          "sha": "1435a02a9319e184abf637f9d52c004c1d178ff4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/action-runner.test.js.map",
+          "sha": "6e870942235d384d4c0cbe246e51eb599428baaa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/worker.test.js",
+          "sha": "ecd593fad99fd2c85387fd56263b81a0b81b7cea",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/worker.test.js.map",
+          "sha": "8730fc07858182fbac9a86e5682efe30a082cd98",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/action-runner.d.ts",
+          "sha": "053d53fcd8cb97df7283a99c52fb45fd12eb8755",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/action-runner.d.ts.map",
+          "sha": "153e6c462c2989a88e52dd1025f31cb9707fc38e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/action-runner.js",
+          "sha": "b577c864b3cbcde107f0c77a01f24593d44c086f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/action-runner.js.map",
+          "sha": "fd86d27ee8a5b0f2b81428849e0addebc2bdfa5f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/worker.js",
+          "sha": "9730ed353f500607163925572961bc688d7147e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/worker.js.map",
+          "sha": "130b7c78bd33e12c348a1b93a3ee2697adcf5522",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/atomic-write.d.ts",
+          "sha": "fd6bccff4577d80767ba35e533951ed884e6d75d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/atomic-write.d.ts.map",
+          "sha": "7799b6abd76dee680285e68ab9c66db294c6a4fd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/atomic-write.js",
+          "sha": "de0916bd916c515e9fe12d0f32269401f6d63684",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/atomic-write.js.map",
+          "sha": "4d1e4fa20a50d4a4ff8f0ba6b04fbca4ea13f6f8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/helpers/readiness-trace-tmux.d.ts",
+          "sha": "57ca2ed0285b34c358222aa0062900acc70252fd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/helpers/readiness-trace-tmux.d.ts.map",
+          "sha": "3993cf930f4c138db4a7d1ba268d62ccca9ca6f6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/helpers/readiness-trace-tmux.js",
+          "sha": "1dd661911a5bf81bdf1d83d330aa32928b939dd9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/helpers/readiness-trace-tmux.js.map",
+          "sha": "7f6197c463e62ba02036a74496b2516e257b83e5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/pane-frames.characterization.test.js",
+          "sha": "7757b4bfa9e6afdbf341fba56fec61b1f5a0d830",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/pane-frames.characterization.test.js.map",
+          "sha": "9e73909a255a1ea35e417e69f3986bb68363d0dd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/pane-readiness.classify.test.js",
+          "sha": "8e69e23bbb79d8bd7951c582e3a6750e78c40665",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/pane-readiness.classify.test.js.map",
+          "sha": "5dc329d08f8adaeea6271e13decb5074e7df0f4a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/readiness-diff.compare.test.js",
+          "sha": "0810393426668089fcf07fe0d7ecf5c2ca11602d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/readiness-diff.compare.test.js.map",
+          "sha": "a554c66d0d1fd3e993d8f47e6434b404cca20f56",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/readiness-trace.harness.test.js",
+          "sha": "ff66e4bbeeaf33fe54dd27dbbf3e8abf8c514332",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/readiness-trace.harness.test.js.map",
+          "sha": "dce580b55941420ef10a6cbcbb2b410daf838caf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/tmux-session.startup.test.js",
+          "sha": "2ca7719627eb2fa8401404137f2891b46ed09909",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/tmux-session.startup.test.js.map",
+          "sha": "a78e5defdcb30246e494943e380db575796a25a4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.d.ts.map",
+          "sha": "d98ce9fb29746c92627b296508ca790335d688d3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.js",
+          "sha": "86809edf41fc70b8240331653e47e9ab0238a1ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.js.map",
+          "sha": "831f70f643e4ea9775221f0ccb8d61026fc27bcc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "bc68f617e11814a2b3a0223cc565d9f1632bbf1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts.map",
+          "sha": "8c7dd0b5d10af7c96d31e93687cd5b4de8ac240a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "6ed47e8e67c30b077ea4fd24ae4e09eca5955709",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js.map",
+          "sha": "c31bb8f9392e76ec2b530292f2d6dbc1ca62d016",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 5122,
       "targetRef": "main",
       "mergeBaseSha": "dec7e4188c0e3de6b92fb3d734ee5c95326021ed",
