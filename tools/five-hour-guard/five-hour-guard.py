@@ -321,8 +321,8 @@ def session_dependent(piece, runs, directories, named, assigned):
     `cd DIR`: the shell runs it from the directory of the session) and that ends the path of a file the guard writes; a word without a
     directory part that the command runs (`runs`) and that is the name of a file the guard writes and no file in any directory the guard
     looks in (its PATH, the one a `PATH=` word or the settings give, the directories the command names): the shell looks it up on the PATH of
-    the session. A parameter that nothing here gives a value (the command and the settings assign none, the guard has none; `HOME` and `~` are the
-    session's, whatever the guard has) is the session's too: it is refused when what follows it in the word is empty or ends the path of a file the
+    the session. A parameter that nothing here gives a value (the command and the settings assign none; what the guard has in its own environment is a
+    candidate, not the value of the hook, whose session may have none or another one, `HOME` and `~` too) is the session's too: it is refused when what follows it in the word is empty or ends the path of a file the
     guard writes (`"$AUDIT"`, `$DIR/audit`); a word with something else after it is read as before. A piece that holds blanks is a quoted command
     (read as one), one that still holds a `$` has a parameter that is not decided here."""
     path = os.path.expanduser(os.path.expandvars(piece))
@@ -333,7 +333,7 @@ def session_dependent(piece, runs, directories, named, assigned):
     scan = re.sub(r'^~[^/\\]*', '${HOME}', piece)   # (a leading ~ is the HOME of the session)
     for m in PARAMETER.finditer(scan):
         name = m.group(1) or m.group(2) or m.group(5)
-        if not assigned.get(name) and (name not in os.environ or name == 'HOME') and m.group(3) not in ('-', ':-', '=', ':=', '+', ':+', '?', ':?'):
+        if not assigned.get(name) and m.group(3) not in ('-', ':-', '=', ':=', '+', ':+', '?', ':?'):
             rest = os.path.expandvars(scan[m.end():])
             if not rest or any(out.endswith(key(rest)) for out in written):
                 return True

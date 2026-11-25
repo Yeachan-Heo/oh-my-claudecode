@@ -2786,7 +2786,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
     }
     // a value from the guard, the settings, the command or a default word settles it: the collision of an earlier test
-    const settled: Array<[string, Record<string, string>, NodeJS.ProcessEnv]> = [['python3 "$FHG_SESSION_AUDIT"', {}, { ...ENV, FHG_SESSION_AUDIT: audit }], ['python3 "$FHG_SESSION_AUDIT"', { FHG_SESSION_AUDIT: audit }, ENV],
+    const settled: Array<[string, Record<string, string>, NodeJS.ProcessEnv]> = [['python3 "$FHG_SESSION_AUDIT"', { FHG_SESSION_AUDIT: audit }, ENV],
       [`FHG_SESSION_AUDIT=${audit}; python3 "$FHG_SESSION_AUDIT"`, {}, ENV], [`python3 "\${FHG_SESSION_AUDIT:-${audit}}"`, {}, ENV]];
     for (const [command, settingsEnv, guardEnv] of settled) {
       const r = start(command, { state_file: audit }, settingsEnv, guardEnv);
@@ -2797,6 +2797,52 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     // read as before: something else ends the word
     for (const command of ['bash "$FHG_SESSION_DIR"/tools/chmura/x.sh', 'python3 "$FHG_SESSION_DIR/other"', 'python3 "${FHG_SESSION_DIR}"/audit-other', 'python3 "${FHG_SESSION_AUDIT:-x}"']) {
       const r = start(command, { state_file: audit });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
+  it('a variable that the guard has in its own environment is a candidate, not the value that the hook gets: a session that has another value (the guard has an old file, the session the file the guard writes) is not read to its end and the guard refuses to start; a value of the settings or of the command settles it, and the value of the guard stays a candidate beside it', () => {
+    const f = fixture('foreign-session-other-value', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    const old = join(f.dir, 'old');
+    mkdirSync(hooks);
+    mkdirSync(old);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    const oldAudit = join(old, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    writeFileSync(oldAudit, '#!/bin/sh\necho old\n', { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>, settingsEnv: Record<string, string>, guardEnv: NodeJS.ProcessEnv) => {
+      writeFileSync(f.settings, JSON.stringify({ env: settingsEnv, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once'], { env: guardEnv });
+    };
+    // both processes have the variables, with other values
+    const guardEnv = { ...ENV, FHG_OTHER_AUDIT: oldAudit, FHG_OTHER_DIR: old };
+    const sessionEnv = { ...process.env, FHG_OTHER_AUDIT: audit, FHG_OTHER_DIR: hooks };
+    expect(spawnSync('sh', ['-c', '"$FHG_OTHER_AUDIT"'], { encoding: 'utf8', env: sessionEnv }).stdout, 'the session runs the file that the guard writes').toBe('ran\n');
+    expect(spawnSync('sh', ['-c', '"$FHG_OTHER_AUDIT"'], { encoding: 'utf8', env: guardEnv }).stdout, 'the process of the guard would run the old one').toBe('old\n');
+    for (const command of ['python3 "$FHG_OTHER_AUDIT"', 'python3 $FHG_OTHER_AUDIT', 'python3 "${FHG_OTHER_AUDIT}"', 'python3 "$FHG_OTHER_DIR/audit"', 'python3 ${FHG_OTHER_DIR}/audit', "sh -c 'python3 \"$FHG_OTHER_AUDIT\" x'", 'true; "$FHG_OTHER_AUDIT"']) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit }, {}, guardEnv);
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // a value that the settings or the command give is the one the hook gets: the collision of an earlier test (and the value of the guard is a candidate still)
+    for (const [command, settingsEnv, file] of [['python3 "$FHG_OTHER_AUDIT"', { FHG_OTHER_AUDIT: audit }, audit], [`FHG_OTHER_AUDIT=${audit}; python3 "$FHG_OTHER_AUDIT"`, {}, audit],
+      ['python3 "$FHG_OTHER_AUDIT"', { FHG_OTHER_AUDIT: audit }, oldAudit]] as Array<[string, Record<string, string>, string]>) {
+      const r = start(command, { state_file: file }, settingsEnv, guardEnv);
+      expect(r.status, `${command} with ${file}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, `${command} with ${file}`).toContain(`"state_file" (${file}) and "program of another hook" (${file}) are the same file`);
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    // read as before: another ending of the word, and a default word
+    for (const command of ['bash "$FHG_OTHER_DIR"/tools/chmura/x.sh', 'python3 "$FHG_OTHER_DIR/other"', 'python3 "${FHG_OTHER_AUDIT:-x}"']) {
+      const r = start(command, { state_file: audit }, {}, guardEnv);
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
     }
   });
