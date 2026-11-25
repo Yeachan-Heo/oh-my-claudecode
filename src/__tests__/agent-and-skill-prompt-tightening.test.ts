@@ -267,13 +267,15 @@ describe('omc-doctor skill', () => {
     const lines = script.split('\n');
     expect(lines.filter((l) => l.includes('rmSync('))).toEqual([]);
     const moves = lines.flatMap((l, i) => (l.includes('renameSync(') ? [i] : []));
-    expect(moves).toHaveLength(1);
-    // The move follows guard clauses, and the closest `if` above it is the check of the protection read once more right
-    // before the move (after the last check of the dates).
-    for (const move of moves) {
+    // The move out of the cache and the put-back of a version that showed use right after it was moved.
+    expect(moves).toHaveLength(2);
+    // The move out follows guard clauses, and the closest `if` above it is the check of the protection read once more right before the
+    // move (after the last check of the dates); the put-back sits behind the check that its place is still free.
+    const guards = ['last.kept.includes(name)', 'taken(original)'];
+    moves.forEach((move, n) => {
       const guard = lines.slice(0, move).reverse().find((l) => /^\s*if \(/.test(l)) ?? '';
-      expect({ line: move + 1, guard: guard.trim() }).toEqual({ line: move + 1, guard: expect.stringContaining('last.kept.includes(name)') });
-    }
+      expect({ line: move + 1, guard: guard.trim() }).toEqual({ line: move + 1, guard: expect.stringContaining(guards[n]) });
+    });
   });
 
   test('an outdated plugin is routed to the updater, and the cache commands are described as cleanup only', () => {
