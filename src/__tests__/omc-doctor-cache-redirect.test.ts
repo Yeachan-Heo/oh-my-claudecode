@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, lstatSync, lutimesSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { backupDir, CACHE_VERSIONS, commands, digitEntries, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
+import { ageVersions, backupDir, CACHE_VERSIONS, commands, digitEntries, digitVersions, makeCache, movedAside, PLUGIN_ID, runCommand, SCRIPT, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 import { ownHost, writeRecord } from './helpers/omc-doctor-occupancy-fixture.js';
 
 // A version that a repair command moves away leaves a link at its name, to the newest protected version that is a real directory of the cache, the same one for every link (the
@@ -347,6 +348,43 @@ fs.symlinkSync = function () { const error = new Error('operation not permitted'
       } finally {
         clean(dir);
       }
+    }
+  });
+
+  // The version that holds the running script is protected like a pinned one, whatever the root variables name (the locator of the skill falls back to the
+  // global package, and the script can be started from a version directory): a command must not move the directory it runs from. A script outside the cache protects nothing.
+  test('the version that holds the running script stays whatever the root variables name; a script outside the cache protects nothing', () => {
+    const copyTo = (root: string) => {
+      cpSync(path.dirname(SCRIPT), path.join(root, 'scripts'), { recursive: true });
+      return path.join(root, 'scripts', 'omc-doctor.mjs');
+    };
+    const base = mkdtempSync(path.join(tmpdir(), 'omc-doctor-skill-'));
+    try {
+      const outside = copyTo(path.join(base, 'global', 'oh-my-claude-sisyphus'));
+      for (const command of commands) {
+        for (const named of [false, true]) {
+          const { dir, cache } = setup(['5.7.0', '5.8.0', '5.9.0']);
+          try {
+            const inside = copyTo(path.join(cache, '5.8.0'));
+            ageVersions(cache);
+            const env: Record<string, string> = named ? { CLAUDE_PLUGIN_ROOT: path.join(cache, '5.9.0') } : {};
+            const result = runCommand(command, dir, { script: inside, env, timeout: 60_000 });
+            const at = { command, named };
+            expect({ ...at, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ ...at, status: 0, versions: '5.8.0,5.9.0', moved: 1 });
+          } finally {
+            clean(dir);
+          }
+        }
+        const { dir, cache } = setup(['5.7.0', '5.8.0', '5.9.0']);
+        try {
+          const result = runCommand(command, dir, { script: outside, timeout: 60_000 });
+          expect({ command, status: result.status, versions: digitVersions(cache), moved: movedAside(dir) }).toEqual({ command, status: 0, versions: '5.9.0', moved: 2 });
+        } finally {
+          clean(dir);
+        }
+      }
+    } finally {
+      clean(base);
     }
   });
 

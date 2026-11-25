@@ -52,6 +52,8 @@ const marketplaceOf = (id) => {
 };
 // A plugin root variable as it was set: a value of nothing but white space names no root, any other is kept exactly (a directory name may end in a space).
 const rootOf = (value) => (value && value.trim() ? value : '');
+// The package this script runs from: the parent of its scripts directory (a cached version, the global npm package, or a checkout).
+const SCRIPT_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 // A registry installPath as it was written (a directory name may end in a space, and a link may carry such a name) and, where the padding
 // differs, without it (a padded path names no directory itself, and the spelling without the padding stays protected as before). A value of
 // nothing but white space names nothing.
@@ -1272,7 +1274,9 @@ const protectionOf = (dir, versions, foldCase = false) => {
     unmapped = 'an occupancy record of another host or PID namespace has the plugin root ' + JSON.stringify(stray) + ', which lies in no cache of this system (the profile may be mounted under another path there), so the version it holds cannot be told; delete the record from ' + occupancyDir + ' once that session has ended';
   }
   const pinChains = pinPaths.flatMap(chainOf);
-  const otherChains = [...registry.other.flatMap(bothForms), ...held, ...rootVars.flatMap(bothForms)].flatMap(chainOf);
+  // The version that holds this script is in use too, wherever the root variables point: a command must not move the directory it runs from.
+  const running = insideCache(SCRIPT_ROOT) ? bothForms(SCRIPT_ROOT) : [];
+  const otherChains = [...registry.other.flatMap(bothForms), ...held, ...rootVars.flatMap(bothForms), ...running].flatMap(chainOf);
   // The versions a list of paths protects: a path that is, or lies inside, the version directory (as written or
   // through the real cache path), or an ancestor of a path with the identity of the version directory. lowercase
   // are the paths of records, which on win32 also protect by a lower-case comparison.
@@ -1361,7 +1365,7 @@ const backupPlace = (registry) => {
   const installPaths = [...registry.pins.map((entry) => entry.installPath), ...registry.other].flatMap(installForms);
   // The package this script runs from too: the locator of the skill falls back to the global npm package when the variables do not name it, and
   // an update of that package replaces the whole tree, a copy kept inside it included.
-  const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT, path.dirname(path.dirname(fileURLToPath(import.meta.url)))].map(rootOf).filter(Boolean);
+  const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT, SCRIPT_ROOT].map(rootOf).filter(Boolean);
   // A cache namespace (or the plugin directory in it) may be a link out of plugins/cache: its versions then lie
   // elsewhere, so each one is a tree of its own, resolved by the comparisons below.
   const namespaces = [...new Set([...registry.ids.map(marketplaceOf), 'omc'])].map(cacheDirOf);
