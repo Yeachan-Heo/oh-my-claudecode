@@ -1369,8 +1369,10 @@ const backupPlace = (registry) => {
     // A cache root that is not there has no namespaces; one that cannot be listed may hide namespaces the backup must lie outside of.
     if (!absent(error, cacheRoot)) return stop('the plugin cache ' + cacheRoot + ' could not be read completely');
   }
-  // A version directory may be a link out of the cache too: the tree it leads to is a tree of its own. A link that leads nowhere (a loop,
-  // a target that is gone) has no tree, and the entry is moved aside like any unused one.
+  // A version directory may be a link out of the cache too: the tree it leads to is a tree of its own. An entry that is gone, or a link that leads
+  // nowhere (a loop, a target that is gone, a file on the way), has no tree, and the entry is moved aside like any unused one. A probe that fails
+  // for another reason (no permission to search the namespace, an I/O error) leaves open where the link leads, so it stops the command.
+  const noTree = (error) => !!error && ['ENOENT', 'ELOOP', 'ENOTDIR'].includes(error.code);
   const versionTrees = [];
   for (const space of new Set(namespaces)) {
     try {
@@ -1379,7 +1381,7 @@ const backupPlace = (registry) => {
         try {
           if (fs.lstatSync(entry).isSymbolicLink() && fs.statSync(entry).isDirectory()) versionTrees.push(entry);
         } catch (error) {
-          // No tree to compare.
+          if (!noTree(error)) return stop('the plugin cache ' + entry + ' could not be read completely');
         }
         // The installer's skill compaction (compactPluginSkillPayload in src/installer/index.ts) removes and rewrites <version>/skill-bodies/<skill>
         // through a link, so a skill-bodies link of a version (a real one too) is a tree of its own; its other writes through a link (the SKILL.md
@@ -1387,8 +1389,9 @@ const backupPlace = (registry) => {
         try {
           const bodies = path.join(entry, 'skill-bodies');
           if (fs.lstatSync(bodies).isSymbolicLink() && fs.statSync(bodies).isDirectory()) versionTrees.push(bodies);
-        } catch {
+        } catch (error) {
           // No skill-bodies, or none that leads to a directory: no tree to compare.
+          if (!noTree(error)) return stop('the plugin cache ' + entry + ' could not be read completely');
         }
       }
     } catch (error) {

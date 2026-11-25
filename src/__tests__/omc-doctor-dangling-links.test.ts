@@ -196,6 +196,77 @@ describe.skipIf(!posix)('omc-doctor: the other ways a path cannot be read keep s
     }
   });
 
+  // The entries of a cache namespace that the registry does not name are probed one by one before anything is moved: a version that is a link, and the
+  // skill-bodies link inside a version, each lead to a tree the backup directory must lie outside of (the skill compaction of the installer removes
+  // there). Only an entry that is gone, or a link that leads nowhere (a target that is gone, a loop, a file on the way), has no tree; a probe that fails
+  // for another reason (no permission to search the namespace, an I/O error) leaves open where the link leads, so both commands refuse. The failure is
+  // played by a preload, so the case holds for a process that ignores the mode bits (root) too.
+  const OVERLAP = /Nothing moved: the backup directory \S+ (?:\(really \S+\) )?(?:is, or lies inside,|contains) the plugin cache/;
+  const failing = (dir: string, code: string) => {
+    const file = path.join(dir, 'unsearchable.cjs');
+    writeFileSync(file, `const fs = require('fs'); const real = fs.lstatSync;\nfs.lstatSync = function (target, ...rest) {\n  if (String(target) === process.env.UNSEARCHABLE) throw Object.assign(new Error('${code}'), { code: '${code}' });\n  return real.call(this, target, ...rest);\n};\n`);
+    return file;
+  };
+  const otherSpace = (dir: string) => path.join(dir, 'plugins', 'cache', 'other-market', 'oh-my-claudecode');
+  // The backup directory leads into the tree that an entry of the namespace, or its skill-bodies link, leads to.
+  const hiddenProfile = (kind: 'version' | 'bodies') => {
+    const { dir, cache } = profile();
+    const space = otherSpace(dir);
+    const hidden = path.join(dir, 'elsewhere', '9.9.9', 'skill-bodies', 'omc-doctor');
+    mkdirSync(hidden, { recursive: true });
+    mkdirSync(space, { recursive: true });
+    if (kind == 'version') {
+      symlinkSync(path.join(dir, 'elsewhere', '9.9.9'), path.join(space, '9.9.9'));
+    } else {
+      mkdirSync(path.join(space, '9.9.9'));
+      symlinkSync(path.join(dir, 'elsewhere', '9.9.9', 'skill-bodies'), path.join(space, '9.9.9', 'skill-bodies'));
+    }
+    symlinkSync(hidden, path.join(dir, 'plugins', 'backups'));
+    return { dir, cache, hidden, probed: kind == 'version' ? path.join(space, '9.9.9') : path.join(space, '9.9.9', 'skill-bodies') };
+  };
+
+  test.each([['EACCES'], ['EPERM'], ['EIO']])('an entry of an unregistered cache namespace that cannot be examined (%s) is refused before anything is moved, for a version link and for a skill-bodies link', (code) => {
+    for (const command of commands) {
+      for (const kind of ['version', 'bodies'] as const) {
+        for (const examined of [false, true]) {
+          const { dir, cache, hidden, probed } = hiddenProfile(kind);
+          try {
+            const result = runCommand(command, dir, { preloads: [failing(dir, code)], env: examined ? {} : { UNSEARCHABLE: probed }, timeout: 20_000 });
+            // Examined, the link is found and the backup directory inside its tree is the overlap refusal; not examined, the refusal says why.
+            expect({ command, kind, examined, status: result.status, said: result.stdout.includes('could not be read completely'), overlap: OVERLAP.test(result.stdout), cache: readdirSync(cache).sort(), landed: readdirSync(hidden) })
+              .toEqual({ command, kind, examined, status: 1, said: !examined, overlap: examined, cache: ['5.7.0', '5.8.0'], landed: [] });
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+  });
+
+  test('an entry that is gone, or a link that leads nowhere, in an unregistered cache namespace is no refusal: the cleanup goes on', () => {
+    const makers: Array<[string, (space: string) => void]> = [
+      ['a version link to a target that is gone', (space) => symlinkSync(GONE, path.join(space, '9.9.9'))],
+      ['a version link in a loop', (space) => symlinkSync('9.9.9', path.join(space, '9.9.9'))],
+      ['a version link through a file', (space) => { writeFileSync(path.join(space, 'stray'), 'x'); symlinkSync(path.join('stray', 'inside'), path.join(space, '9.9.9')); }],
+      ['a skill-bodies link to a target that is gone', (space) => { mkdirSync(path.join(space, '9.9.9')); symlinkSync(GONE, path.join(space, '9.9.9', 'skill-bodies')); }],
+      ['a skill-bodies link in a loop', (space) => { mkdirSync(path.join(space, '9.9.9')); symlinkSync('skill-bodies', path.join(space, '9.9.9', 'skill-bodies')); }],
+      ['a regular file as an entry', (space) => writeFileSync(path.join(space, '9.9.9'), 'not a version')],
+    ];
+    for (const command of commands) {
+      for (const [name, make] of makers) {
+        const { dir, cache } = profile();
+        try {
+          mkdirSync(otherSpace(dir), { recursive: true });
+          make(otherSpace(dir));
+          const result = runCommand(command, dir, { timeout: 20_000 });
+          expect({ name, command, status: result.status, cache: realEntries(cache).sort(), moved: movedAside(dir) }).toEqual({ name, command, status: 0, cache: ['5.8.0'], moved: 1 });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   test('a cache of a profile whose plugins directory holds nothing at all still reports a missing cache, exit 0', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'omc-doctor-absent-'));
     try {
