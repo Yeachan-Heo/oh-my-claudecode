@@ -19,6 +19,72 @@ import { buildCommandEnv, idempotencyKeyFor } from "./authority.js";
 const STREAM_TAIL_CHARS = 2000;
 /** Grace period after the first kill before escalating to a hard kill. */
 const KILL_ESCALATION_MS = 5000;
+/** How often the signal cleanup checks whether a closed command's process group is gone. */
+const GROUP_POLL_MS = 50;
+// Graph run signal cleanup. Active only when OMC_GRAPH_SIGNAL_CLEANUP is exactly "1";
+// any other value keeps the upstream behavior (no handlers, no AbortSignal, no child tracking).
+const graphSignalState = { interrupted: false };
+const graphActiveChildren = new Set();
+function graphSignalCleanupEnabled() {
+    return process.env.OMC_GRAPH_SIGNAL_CLEANUP === "1";
+}
+/**
+ * Installs SIGINT and SIGTERM handlers for one graph run. Returns the
+ * AbortSignal the runner observes, or undefined while the switch is off.
+ * On the first signal the active command children get SIGTERM, then SIGKILL
+ * after KILL_ESCALATION_MS, and the process exits once they have closed
+ * (130 for SIGINT, 143 for SIGTERM).
+ */
+export function installGraphSignalCleanup() {
+    if (!graphSignalCleanupEnabled()) {
+        return undefined;
+    }
+    const controller = new AbortController();
+    const interrupt = (signalName) => {
+        if (graphSignalState.interrupted) {
+            return;
+        }
+        graphSignalState.interrupted = true;
+        const exitCode = signalName === "SIGINT" ? 130 : 143;
+        controller.abort(new Error(`graph run interrupted by ${signalName}`));
+        const children = [...graphActiveChildren];
+        if (children.length === 0) {
+            process.exit(exitCode);
+        }
+        let open = children.length;
+        const hardDeadline = setTimeout(() => process.exit(exitCode), KILL_ESCALATION_MS * 2);
+        for (const child of children) {
+            terminateProcessTree(child, "SIGTERM");
+            const escalation = setTimeout(() => terminateProcessTree(child, "SIGKILL"), KILL_ESCALATION_MS);
+            child.once("close", () => {
+                // The shell closing does not prove that its descendants stopped: one that ignores SIGTERM
+                // and has closed or ignored stdio outlives it. Count the child as done only when its whole
+                // process group is gone; the escalation timer sends SIGKILL to what is left.
+                const settleWhenGroupIsGone = () => {
+                    if (!processGroupExists(child)) {
+                        clearTimeout(escalation);
+                        open -= 1;
+                        if (open === 0) {
+                            clearTimeout(hardDeadline);
+                            process.exit(exitCode);
+                        }
+                        return true;
+                    }
+                    return false;
+                };
+                if (settleWhenGroupIsGone())
+                    return;
+                const poll = setInterval(() => {
+                    if (settleWhenGroupIsGone())
+                        clearInterval(poll);
+                }, GROUP_POLL_MS);
+            });
+        }
+    };
+    process.once("SIGINT", () => interrupt("SIGINT"));
+    process.once("SIGTERM", () => interrupt("SIGTERM"));
+    return controller.signal;
+}
 /** Keeps only the trailing STREAM_TAIL_CHARS of one output stream. */
 class StreamTail {
     content = "";
@@ -78,6 +144,22 @@ function terminateProcessTree(child, signal) {
     }
 }
 /**
+ * True while a process of the child's process group exists (POSIX: signal 0 to the negative pid).
+ * Windows has no process group here: `taskkill /T` is the tree kill, so the group counts as gone.
+ */
+function processGroupExists(child) {
+    if (process.platform === "win32" || child.pid === undefined) {
+        return false;
+    }
+    try {
+        process.kill(-child.pid, 0);
+        return true;
+    }
+    catch (error) {
+        return error.code === "EPERM";
+    }
+}
+/**
  * Not named `runCommand`: that name is a reserved convention in
  * tests/lint/windows-hide-hooks.test.ts for `(command, args)` git-forwarding
  * helpers; this executor runs arbitrary shell lines instead (see trust model).
@@ -101,6 +183,10 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
             resolve({ timed_out: false, exit_code: null, infra_error: describeError(error) });
             return;
         }
+        // Tracked for the signal cleanup; a no-op while OMC_GRAPH_SIGNAL_CLEANUP is off.
+        if (graphSignalCleanupEnabled()) {
+            graphActiveChildren.add(child);
+        }
         let settled = false;
         let timedOut = false;
         let exitCode = null;
@@ -111,6 +197,7 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
                 return;
             }
             settled = true;
+            graphActiveChildren.delete(child);
             if (timeoutTimer !== undefined)
                 clearTimeout(timeoutTimer);
             if (escalationTimer !== undefined)
@@ -159,6 +246,11 @@ export class CommandNodeExecutor {
             throw new Error(`CommandNodeExecutor cannot execute node kind "${dispatched.kind}" (${dispatched.id})`);
         }
         const node = dispatched;
+        // After an interrupt no node starts and no result is committed: the promise never settles,
+        // so the journal keeps the last committed transition.
+        if (graphSignalState.interrupted) {
+            return new Promise(() => { });
+        }
         const startedAtMs = Date.now();
         const stdoutTail = new StreamTail();
         const stderrTail = new StreamTail();
@@ -171,6 +263,11 @@ export class CommandNodeExecutor {
         }
         const externalIdempotencyKey = idempotencyKeyFor(context);
         const result = await runShellCommand(node.command, node.timeout_ms, stdoutTail, stderrTail, externalIdempotencyKey);
+        // A node whose child was stopped by the interrupt must not commit its result (that would
+        // journal "failed exit=143" for an interrupted node). Its promise never settles.
+        if (graphSignalState.interrupted) {
+            return new Promise(() => { });
+        }
         const durationMs = Date.now() - startedAtMs;
         const succeeded = !result.infra_error && !result.timed_out && result.exit_code === 0;
         const outcome = succeeded ? "succeeded" : "failed";

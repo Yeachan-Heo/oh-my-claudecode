@@ -9,7 +9,19 @@ export type KeyRecord = {
 export type TracePane = {
     capture: () => string;
     send: (keys: string[]) => void;
+    partial?: () => {
+        keys: number;
+        captures: number;
+    };
 };
+export type TraceScreen = {
+    frame: string;
+    partial?: boolean;
+    next?: string;
+    Down?: string;
+    Enter?: string;
+};
+export declare function scriptedPane(screens: Record<string, TraceScreen>, start: string): TracePane;
 export declare const trace: {
     frame: string;
     pane: TracePane | null;

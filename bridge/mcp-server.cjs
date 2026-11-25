@@ -18678,7 +18678,7 @@ async function renameWithRetry(tempPath, filePath, maxAttempts = 10, delayMs = 3
   }
 }
 function writeAllSync(fd, content, label) {
-  const bytes = Buffer.from(content, "utf-8");
+  const bytes = typeof content === "string" ? Buffer.from(content, "utf-8") : Buffer.from(content);
   let offset = 0;
   while (offset < bytes.length) {
     const written = fsSync.writeSync(fd, bytes, offset, bytes.length - offset);

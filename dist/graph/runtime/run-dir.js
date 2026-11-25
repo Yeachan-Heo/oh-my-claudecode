@@ -11,7 +11,8 @@
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, } from "fs";
 import { join, resolve, sep } from "path";
 import { directoryOperations, containedFsPlatformSupported, } from "./contained-fd.js";
-const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+/** Accepted run ids: shared by run containment, `omc graph gc` and `omc graph status`. */
+export const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const DIRECTORY_FLAGS = fsConstants.O_RDONLY |
     (fsConstants.O_DIRECTORY ?? 0) |
     (fsConstants.O_NOFOLLOW ?? 0);
