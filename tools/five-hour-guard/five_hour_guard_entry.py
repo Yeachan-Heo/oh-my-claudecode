@@ -77,6 +77,23 @@ def skip_wrappers(words):
     return i
 
 
+def command_hook(words):
+    """(hook, launcher) when the simple command `words` runs the hook of this guard, else None: the command word (after the wrappers) is
+    the hook itself, or it is a Python or the command carries --pause-file and the first argument that is no option or operand is the
+    hook. A command that only has the name of the hook among its arguments (an audit tool given it as data) does not run it."""
+    operands = {i + 1 for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
+    first = skip_wrappers(words)
+    if first >= len(words) or first in operands:
+        return None
+    if MARK in os.path.basename(words[first]):
+        return words[first], words[first]   # run directly: the script itself is the program
+    if re.match(PYTHON_NAME, os.path.basename(words[first]).lower()) or '--pause-file' in words:
+        args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
+        if args and MARK in os.path.basename(words[args[0]]):
+            return words[args[0]], words[first]   # the program that is asked to run the hook
+    return None
+
+
 def entry_parts(command):
     """(hook scripts, interpreter files, log files, pause files, preflight files, launchers) that a hook entry command names, by the
     option or position they stand at: operands of -f, -x, --pause-file and --log are not scripts, whatever their file names say, and
@@ -101,17 +118,10 @@ def entry_parts(command):
         operands = {i + 1: t for i, t in enumerate(words[:-1]) if t in OPERAND_OPTIONS}
         for i, option in operands.items():
             found[option].append(words[i])
-        first = skip_wrappers(words)
-        if first >= len(words) or first in operands:
-            continue
-        if MARK in os.path.basename(words[first]):
-            hooks.append(words[first])
-            launchers.append(words[first])   # run directly: the script itself is the program
-        elif re.match(PYTHON_NAME, os.path.basename(words[first]).lower()) or '--pause-file' in words:
-            args = [i for i in range(first + 1, len(words)) if i not in operands and not words[i].startswith('-')]
-            if args and MARK in os.path.basename(words[args[0]]):
-                hooks.append(words[args[0]])
-                launchers.append(words[first])   # the program that is asked to run the hook
+        hook = command_hook(words)
+        if hook:
+            hooks.append(hook[0])
+            launchers.append(hook[1])
     return hooks, found['-x'], found['--log'], found['--pause-file'], found['-f'], launchers
 
 

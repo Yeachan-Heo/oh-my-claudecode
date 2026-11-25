@@ -1213,8 +1213,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
 
   it('a program that runs next to the hook in a handler of this guard (before it, after it) is never a file the guard writes: the high reading does not replace it', () => {
     for (const [name, wrap] of [['before', (generated: string, audit: string) => `${audit}; ${generated}`], ['after', (generated: string, audit: string) => `${generated}; ${audit}`],
-      ['both', (generated: string, audit: string) => `${audit} && ${generated} || ${audit}`]] as const) {
-      const f = fixture(`companion-${name}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
+      ['both', (generated: string, audit: string) => `${audit} && ${generated} || ${audit}`], ['hook path as data', (generated: string, audit: string) => `${audit} ${HOOK}; ${generated}`],
+      ['hook path as data behind a wrapper', (generated: string, audit: string) => `env -i ${audit} ${HOOK}; ${generated}`]] as const) {
+      const f = fixture(`companion-${name.replaceAll(' ', '-')}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
       const audit = join(f.dir, 'audit');   // no suffix: only its place in the command makes it a program
       writeFileSync(audit, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
       writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: wrap(generatedCommand(f.pause, HOOK, PYBIN), audit), timeout: 21600 }] }] } }), 'utf8');
@@ -1231,7 +1232,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);
     const syntax = ['true && AUDIT', 'false || AUDIT', 'echo x | AUDIT', 'true; AUDIT', 'true;AUDIT', 'AUDIT &', 'true & AUDIT', '(AUDIT)', 'AUDIT > AUDIT.out 2>&1', "sh -c 'AUDIT'", 'bash -lc "AUDIT"',
-      'echo $(AUDIT)', "env -S 'AUDIT --flag'", "env -S 'env -i AUDIT'"].map((form) => (audit: string) => form.replaceAll('AUDIT', audit));
+      'echo $(AUDIT)', "env -S 'AUDIT --flag'", "env -S 'env -i AUDIT'", "env --split-string 'AUDIT --flag'", "env --split-string='AUDIT --flag'", "env -S'AUDIT --flag'",
+      "env --split='AUDIT --flag'", "env -i --split-string='env -S\"AUDIT\"'"].map((form) => (audit: string) => form.replaceAll('AUDIT', audit));
     for (const [k, build] of [...wrappers, ...syntax].entries()) {
       const f = fixture(`wrapper-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
       const audit = join(f.dir, 'audit');
@@ -1870,15 +1872,39 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
 
   it('a file that appears at pause_file in the instant between the ownership check and the choice of the exclusive write is not replaced either', () => {
     // the file is created right after the check of a publication has found no file: a second look at the path would find it and allow the replacing write
-    const driver = ['import os, runpy, sys', 'real = os.path.lexists', 'target = sys.argv[1]',
-      'def late(path, *args):', '    found = real(path, *args)',
-      '    if str(path) == target and not found and sys._getframe(2).f_code.co_name == "publish": open(target, "w").write("late foreign file\\n")',
-      '    return found',
-      'os.path.lexists = late', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const driver = ['import os, runpy, sys', 'real = os.lstat', 'target = sys.argv[1]',
+      'def late(path, *args, **kw):', '    try:', '        return real(path, *args, **kw)', '    except FileNotFoundError:',
+      '        if str(path) == target and sys._getframe(2).f_code.co_name == "publish": open(target, "w").write("late foreign file\\n")',
+      '        raise',
+      'os.lstat = late', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const f = fixture('foreign-at-existence-check', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
     expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*appeared meanwhile/);
     expect(readText(f.pause), 'the file that appeared is not replaced').toBe('late foreign file\n');
+  });
+
+  it('a pause file that is swapped for a foreign file between the validation and the replacing write of a renewal is not replaced, and no temporary file is left', () => {
+    const f = fixture('renewal-swap', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(f);   // enters the pause; the next run renews it
+    expect(readJson(f.pause).paused, 'the pause is in force').toBe(true);
+    // the swap happens when the temporary file of the pause has been written: the validation is behind, the rename ahead
+    const driver = ['import json, os, runpy, sys', 'dump, opener, target, seen = json.dump, os.open, sys.argv[1], {}',
+      'def spy(path, *args, **kw):', '    if str(path).startswith(target + ".") and str(path).endswith(".tmp"): seen["tmp"] = path',
+      '    return opener(path, *args, **kw)',
+      'def swapped(obj, handle, *args, **kw):', '    dump(obj, handle, *args, **kw)',
+      '    if seen.pop("tmp", None) and os.path.lexists(target):',
+      '        open(target + ".foreign", "w").write("foreign file\\n")', '        os.replace(target + ".foreign", target)',
+      'os.open, json.dump = spy, swapped', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*changed since it was validated and is not replaced/);
+    expect(readText(f.pause), 'the foreign file is not replaced by the renewal').toBe('foreign file\n');
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    // the same renewal without the swap goes through (the pause file is written again, with a later heartbeat)
+    rmSync(f.pause);
+    guardOnce(f);
+    const before = readJson(f.pause).valid_until;
+    guardOnce(f);
+    expect(readJson(f.pause).valid_until, 'a renewal of an unchanged file still renews it').toBeGreaterThanOrEqual(before);
   });
 
   it('where hard links are not supported a file that appears at pause_file is still never replaced, and without one the pause is published with nothing left behind', () => {

@@ -304,14 +304,14 @@ def program_path(word, command_word):
     return word if os.path.isfile(word) else None
 
 
-def command_programs(command, depth=0, own=''):
+def command_programs(command, depth=0, own=False):
     """The programs that a shell command of a hook that is not ours runs, read from the text (nothing is run, nothing is expanded by a
     shell): the command word of each simple command (after exec, env, command, nohup, time and assignments), the script of an interpreter
     (its first argument, unless it takes code with -c, -e or -m; the string after -c of a shell is read as a command, two levels deep)
     and any argument that is named like a script. Wrong or hostile text gives what could be read and never an error: a command that is
     longer than MAX_COMMAND_CHARS, has a NUL character or cannot be parsed gives none, and the work is bounded by the number of words
-    and of programs. `own`: the simple commands that contain this text are left out (the hook and the interpreter of an entry of this
-    guard, which entry_parts reads); the other simple commands of such a handler are read."""
+    and of programs. `own`: the simple commands that run the hook of this guard (entry_parts reads them) are left out; the other simple
+    commands of such a handler are read, also one that only has the name of the hook among its arguments."""
     if not isinstance(command, str) or len(command) > MAX_COMMAND_CHARS or '\0' in command:
         return []
     try:
@@ -339,13 +339,21 @@ def command_programs(command, depth=0, own=''):
     simple.append(words)
     found = []
     for words in simple:
-        if own and any(own in w for w in words):
+        if own and ENTRY.command_hook(words):
             continue
         i = ENTRY.skip_wrappers(words)
-        if depth < 2:   # env -S 'command': the string is a command
-            for k in range(min(i, len(words)) - 1):
-                if words[k] in ('-S', '--split-string'):
-                    found += command_programs(words[k + 1], depth + 1, own)
+        if depth < 2:   # env -S 'command': the string is a command (-S STRING, -SSTRING, --split-string STRING, --split-string=STRING, which GNU env also takes abbreviated)
+            for k in range(min(i, len(words))):
+                name, eq, value = words[k].partition('=')
+                if eq and name.startswith('--s') and '--split-string'.startswith(name):
+                    string = value
+                elif words[k] in ('-S', '--split-string') and k + 1 < i:
+                    string = words[k + 1]
+                elif words[k][:2] == '-S' and len(words[k]) > 2:
+                    string = words[k][2:]
+                else:
+                    continue
+                found += command_programs(string, depth + 1, own)
         if i >= len(words):
             continue
         base = os.path.basename(words[i]).lower()
@@ -399,14 +407,14 @@ def registered_runtime_files():
     here, so this is the conservative reading for the collision checks. An interpreter or launcher given by its bare name is looked up on
     the PATH of the guard, as the wiring check does, and the file found is the one that counts. Best effort: an unreadable settings file
     gives none (hook_check says so later)."""
-    found = []
+    found, companions = [], []   # the programs of the entries first: a collision is reported with the label of the entry
     try:
         with open(SETTINGS or default_settings()) as f:
             data = json.load(f)
         entries = command_hooks(data.get('hooks', {}).get('PreToolUse', []))
         for _group, handler in entries:
             try:   # a command that runs before or after the hook in the same handler is a program of another hook too
-                found += [(OTHER_PROGRAM, t) for t in command_programs(handler['command'], own=HOOK_NAME)]
+                companions += [(OTHER_PROGRAM, t) for t in command_programs(handler['command'], own=True)]
             except Exception:
                 pass
             try:   # one handler that cannot be parsed must not hide the ones after it
@@ -422,6 +430,7 @@ def registered_runtime_files():
                 if program:
                     found.append(('registered interpreter', program))
             found += [('registered hook log', t) for t in logs if os.path.isabs(t)]
+        found += companions
         ours = {id(h) for _g, h in entries}
         for command in other_commands(data, ours):
             try:
@@ -557,9 +566,15 @@ def refuse_program_overwrite(*paths):
                 raise OSError(f'the {label} {program} is {path}, a file this guard writes: it is not replaced ({fix_hint(label)})')
 
 
-def write_json(path, obj, no_clobber=False):
+def file_identity(st):
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def write_json(path, obj, no_clobber=False, replaces=None):
     """Write atomically. no_clobber: a file that appears at the path meanwhile is kept and the write fails (a hard link is created
-    instead of a rename; where links are not supported the destination is reserved exclusively first)."""
+    instead of a rename; where links are not supported the destination is reserved exclusively first). replaces: the lstat result of the
+    file that this write renews; a file that is not that one any more when the rename is about to happen (somebody replaced the path since
+    the validation) is kept and the write fails; a file that is gone is written again."""
     if A.dry_run:
         return
     tmp = f'{path}.{os.getpid()}.tmp'
@@ -593,6 +608,13 @@ def write_json(path, obj, no_clobber=False):
             else:
                 os.unlink(tmp)
         else:
+            if replaces is not None:
+                try:
+                    now = os.lstat(path)
+                except FileNotFoundError:
+                    now = None
+                if now is not None and file_identity(now) != file_identity(replaces):
+                    raise OSError(f'the file {path} changed since it was validated and is not replaced')
             os.replace(tmp, path)
     except BaseException:
         try:
@@ -764,12 +786,16 @@ def check_wiring(where):
 
 def check_pause_path():
     """Never publish over a file that is not a pause of this guard: something else may have created it after the start check (a shared or
-    mistyped path). Returns whether the file exists: the caller acts on this one look (a second look could find a file that appeared in
-    between and take it for the pause it may replace)."""
-    exists = os.path.lexists(PAUSE_FILE)
-    if exists and not is_guard_pause(PAUSE_FILE):
+    mistyped path). Returns the lstat result of the file that exists, None when there is none: the caller acts on this one look (a second
+    look could find a file that appeared in between and take it for the pause it may replace) and gives the result to write_json, which
+    renews exactly that file."""
+    try:
+        seen = os.lstat(PAUSE_FILE)
+    except (OSError, ValueError):
+        return None
+    if not is_guard_pause(PAUSE_FILE):
         raise OSError(f'the file {PAUSE_FILE} is not a pause file of this guard: it is left untouched and no pause is published (check "pause_file")')
-    return exists
+    return seen
 
 
 def publish(state, pct=None, only=None):
@@ -779,7 +805,8 @@ def publish(state, pct=None, only=None):
            'valid_until': now + A.heartbeat, 'exclude': EXCLUDE, 'percent': pct, 'pid': os.getpid()}
     if only:
         doc['only'] = only
-    write_json(PAUSE_FILE, doc, no_clobber=not check_pause_path())
+    seen = check_pause_path()
+    write_json(PAUSE_FILE, doc, no_clobber=seen is None, replaces=seen)
 
 
 def unpublish(strict=False):
