@@ -1284,7 +1284,9 @@ const protectionOf = (dir, versions, foldCase = false) => {
     );
   };
   const pinned = versionsReachedBy(pinChains);
-  const kept = versionsReachedBy([...pinChains, ...otherChains], held);
+  // Read after a move on a volume that ignores letter case (foldCase), a path of the registry, a root variable or a record that spells the version in
+  // another letter case cannot be resolved by identity either, so every path that protects is read by its folded text then, as a record is on win32.
+  const kept = versionsReachedBy([...pinChains, ...otherChains], foldCase ? [...held, ...pinChains, ...otherChains] : held);
   // When the file system reports no identity for a version directory, a protecting path has to be placed by its
   // exact text inside a version (or above the cache directory) or it may be another name of a cached version.
   const resolvedHeld = held.map((target) => path.resolve(target));

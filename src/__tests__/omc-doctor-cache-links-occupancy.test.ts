@@ -641,6 +641,62 @@ fs.lstatSync = function (target, ...rest) {
     }
   });
 
+  // The same publication through the registry: an entry written right after the move, with no record, names the version by a path (an
+  // installPath of another plugin, or a pin by path alone). It has no identity to resolve either, so its text is read folded like a record.
+  const registryAfterMove = `const fs = require('fs'), path = require('path'); const real = fs.lstatSync; let written = false;
+fs.lstatSync = function (target, ...rest) {
+  const text = String(target);
+  if (!written && text.endsWith(path.sep + 'package.json') && text.startsWith(process.env.BACKUPS + path.sep)) {
+    written = true;
+    fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json'), process.env.REGISTRY_AFTER);
+  }
+  return real.call(this, target, ...rest);
+};
+`;
+  const registryAt = (command: string, kind: 'installPath of another plugin' | 'pin by path', spelling: 'as written' | 'upper case' | 'elsewhere', volume: 'fold' | 'plain') => {
+    const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+    try {
+      writeRegistry(dir, { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }] });
+      ageVersions(cache);
+      const named = spelling === 'as written' ? path.join(cache, '5.8.0') : spelling === 'upper case' ? upperBelow(dir, path.join(cache, '5.8.0')) : path.join(dir, 'elsewhere');
+      const after =
+        kind === 'pin by path'
+          ? { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }, { scope: 'user', installPath: named }] }
+          : { [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }], 'other-plugin@market': [{ scope: 'user', installPath: named }] };
+      const preload = path.join(dir, 'registry-after-move.cjs');
+      writeFileSync(preload, registryAfterMove);
+      const env = { BACKUPS: backupDir(dir), REGISTRY_AFTER: JSON.stringify({ version: 2, plugins: after }) };
+      const result = runCommand(command, dir, { env, preloads: [...(volume === 'fold' ? [writeCaseFoldPreload(dir)] : []), preload] });
+      return { status: result.status, versions: digitVersions(cache), moved: movedAside(dir), skipped: /Skipped 1 version/.test(result.stdout) };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const kept = { status: 0, versions: '5.8.0,5.9.0', moved: 0, skipped: true };
+  const movedOn = { status: 0, versions: '5.9.0', moved: 1, skipped: false };
+  test('an installPath of another plugin written right after the move that spells the version in another letter case keeps it on a volume that ignores letter case', () => {
+    for (const command of commands) {
+      expect({ command, ...registryAt(command, 'installPath of another plugin', 'upper case', 'fold') }).toEqual({ command, ...kept });
+      if (!folds) expect({ command, ...registryAt(command, 'installPath of another plugin', 'upper case', 'plain') }).toEqual({ command, ...movedOn });
+    }
+  });
+  test('a pin by path alone written right after the move that spells the version in another letter case keeps it on a volume that ignores letter case', () => {
+    for (const command of commands) {
+      expect({ command, ...registryAt(command, 'pin by path', 'upper case', 'fold') }).toEqual({ command, ...kept });
+      if (!folds) expect({ command, ...registryAt(command, 'pin by path', 'upper case', 'plain') }).toEqual({ command, ...movedOn });
+    }
+  });
+  test('a registry entry written right after the move keeps the version when it spells the path as written and moves it when the path names nothing of the cache', () => {
+    for (const command of commands) {
+      for (const kind of ['installPath of another plugin', 'pin by path'] as const) {
+        for (const volume of ['fold', 'plain'] as const) {
+          expect({ command, kind, volume, ...registryAt(command, kind, 'as written', volume) }).toEqual({ command, kind, volume, ...kept });
+          expect({ command, kind, volume, ...registryAt(command, kind, 'elsewhere', volume) }).toEqual({ command, kind, volume, ...movedOn });
+        }
+      }
+    }
+  });
+
   test('a version that shows use after the move and whose place is taken again stays in the backup, and the command says so', () => {
     for (const command of commands) {
       expect({ command, ...publishAt(command, 3, true) }).toEqual({ command, status: 1, versions: '5.8.0,5.9.0', moved: 1, said: true });
