@@ -1197,6 +1197,32 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
   });
 
+  it('a settings.json that cannot be read after a scan that found a program keeps that scan in force: no pause is stored and nothing is appended to the program, until a readable file does not name it any more', async () => {
+    const f = fixture('settings-unreadable', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS, ageMs: 600e3 } });   // stale: the guard logs a warning at every tick and enters no pause
+    const logPath = join(f.dir, 'audit-log.py');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: logPath, settings_file: f.settings }), 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours] } }), 'utf8');
+    const g = startGuard(f, ['--warn-every', '0']);
+    try {
+      await waitFor(() => /guard start/.test(readText(logPath)), 20000, 'the start in the log');
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command: `${PYBIN} ${logPath}` }] }] } }), 'utf8');
+      await waitFor(() => /nothing is appended to it/.test(g.out), 20000, 'a look that finds the log file named as a program');
+      const before = readText(logPath);
+      // the file cannot be read now (a rewrite in progress, a broken edit): what the last look found is still in force
+      writeFileSync(f.settings, '{"hooks": {"PreToolUse": [', 'utf8');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => /ERROR: tick failed/.test(g.out) || existsSync(f.pause), 20000, 'the refusal of the pause');
+      expect(g.out, 'the pause is refused').toMatch(/ERROR: tick failed.*program of another hook .*audit-log\.py is the log_file of this guard/);
+      await sleep(800);
+      expect(existsSync(f.pause), 'no pause was published').toBe(false);
+      expect(readText(logPath), 'nothing was appended to the program').toBe(before);
+      // a readable file that does not name the program any more ends the refusal
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours] } }), 'utf8');
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause once the program is not named any more');
+    } finally { await stopGuard(g); }
+  });
+
   it('the commands of other hooks are read without a failure and at a bounded cost: hostile text, wrong shapes and very long commands, and a program after them is still protected', () => {
     const f = fixture('foreign-hostile', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const victim = join(f.dir, 'later-hook.py');

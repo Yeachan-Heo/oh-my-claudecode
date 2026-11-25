@@ -399,6 +399,9 @@ def other_commands(data, ours):
     return found
 
 
+LAST_SCAN = [[]]   # what the last readable settings.json gave: a file that cannot be read (a rewrite in progress, a broken edit) does not lift the protection
+
+
 def registered_runtime_files():
     """The hook script and the interpreter that the hook entry in settings.json names (they can be anywhere: `add --hook` takes
     any path), and the programs that the commands of every other hook and of the status line run (command_programs: a hook of another
@@ -406,7 +409,8 @@ def registered_runtime_files():
     as the file it names from the working directory of the guard: a session resolves it from its own directory, which cannot be known
     here, so this is the conservative reading for the collision checks. An interpreter or launcher given by its bare name is looked up on
     the PATH of the guard, as the wiring check does, and the file found is the one that counts. Best effort: an unreadable settings file
-    gives none (hook_check says so later)."""
+    gives what the last scan that could read it gave (none before any), so that a rewrite in progress or a broken edit does not open the
+    programs to a write; hook_check says that the file cannot be read."""
     found, companions = [], []   # the programs of the entries first: a collision is reported with the label of the entry
     try:
         with open(SETTINGS or default_settings()) as f:
@@ -438,8 +442,9 @@ def registered_runtime_files():
             except Exception:
                 continue   # one command that cannot be read must not hide the others
     except Exception:
-        pass
-    return found
+        return list(LAST_SCAN[0])
+    LAST_SCAN[0] = found
+    return list(found)
 
 
 def configured_files():
