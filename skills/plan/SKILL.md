@@ -135,7 +135,7 @@ Without cleanup, the stop hook blocks all subsequent stops with `[RALPLAN - CONS
 
 1. Read plan file from `.omc/plans/`
 2. Evaluate via Critic using `Task(subagent_type="oh-my-claudecode:critic", ...)`
-3. Return verdict: APPROVED, REVISE (with specific feedback), or REJECT (replanning required)
+3. Return verdict: APPROVE, ITERATE (with specific feedback), or REJECT (replanning required)
 
 ### Plan Output Format
 
@@ -150,7 +150,11 @@ Every plan includes:
 - For consensus/ralplan final output: **ADR** (Decision, Drivers, Alternatives considered, Why chosen, Consequences, Follow-ups)
 - For deliberate consensus mode: **Pre-mortem (3 scenarios)** and **Expanded Test Plan** (unit/integration/e2e/observability)
 
-Plans are saved to `.omc/plans/`. Drafts go to `.omc/drafts/`.
+Plans are saved to `.omc/plans/`:
+- Direct mode: `.omc/plans/autopilot-impl.md` or `.omc/plans/{name}.md`
+- Consensus/ralplan mode: `.omc/plans/ralplan-{slug}.md` (where slug is a kebab-case identifier)
+
+Drafts go to `.omc/drafts/`.
 </Steps>
 
 <Tool_Usage>

@@ -179,7 +179,7 @@ disallowedTools: Write, Edit
   </Execution_Policy>
 
   <Output_Format>
-    **VERDICT: [REJECT / REVISE / ACCEPT-WITH-RESERVATIONS / ACCEPT]**
+    **VERDICT: [REJECT / ITERATE / APPROVE]**
 
     **Overall Assessment**: [2-3 sentence summary]
 
@@ -233,7 +233,7 @@ disallowedTools: Write, Edit
 
   <Failure_Modes_To_Avoid>
     - Rubber-stamping: Approving work without reading referenced files. Always verify file references exist and contain what the plan claims.
-    - Inventing problems: Rejecting clear work by nitpicking unlikely edge cases. If the work is actionable, say ACCEPT.
+    - Inventing problems: Rejecting clear work by nitpicking unlikely edge cases. If the work is actionable, say APPROVE.
     - Vague rejections: "The plan needs more detail." Instead: "Task 3 references `auth.ts` but doesn't specify which function to modify. Add: modify `validateToken()` at line 42."
     - Skipping simulation: Approving without mentally walking through implementation steps. Always simulate every task.
     - Confusing certainty levels: Treating a minor ambiguity the same as a critical missing requirement. Differentiate severity.
@@ -268,7 +268,7 @@ disallowedTools: Write, Edit
     - Did I run the self-audit and move low-confidence findings to Open Questions?
     - Did I run the Realist Check and pressure-test CRITICAL/MAJOR severity labels?
     - Did I check whether escalation to ADVERSARIAL mode was warranted?
-    - Is my verdict clearly stated (REJECT/REVISE/ACCEPT-WITH-RESERVATIONS/ACCEPT)?
+    - Is my verdict clearly stated (REJECT/ITERATE/APPROVE)?
     - Are my severity ratings calibrated correctly?
     - Are my fixes specific and actionable, not vague suggestions?
     - Did I differentiate certainty levels for my findings?

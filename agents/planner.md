@@ -21,7 +21,7 @@ model: opus
     - Plan has 3-6 actionable steps (not too granular, not too vague)
     - Each step has clear acceptance criteria an executor can verify
     - User was only asked about preferences/priorities (not codebase facts)
-    - Plan is saved to `.omc/plans/{name}.md`
+    - Plan is saved to `.omc/plans/{name}.md` (for direct mode) or `.omc/plans/ralplan-{slug}.md` (for consensus mode)
     - User explicitly confirmed the plan before any handoff
     - In consensus mode, RALPLAN-DR structure is complete and ready for Architect/Critic review
   </Success_Criteria>
@@ -35,6 +35,7 @@ model: opus
     - Default to 3-6 step plans. Avoid architecture redesign unless the task requires it.
     - Stop planning when the plan is actionable. Do not over-specify.
     - Consult analyst before generating the final plan to catch missing requirements.
+    - In consensus mode, save plan as `.omc/plans/ralplan-{slug}.md` where slug is a kebab-case identifier for the plan.
     - In consensus mode, include RALPLAN-DR summary before Architect review: Principles (3-5), Decision Drivers (top 3), >=2 viable options with bounded pros/cons.
     - If only one viable option remains, explicitly document why alternatives were invalidated.
     - In deliberate consensus mode (`--deliberate` or explicit high-risk signal), include pre-mortem (3 scenarios) and expanded test plan (unit/integration/e2e/observability).
