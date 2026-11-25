@@ -2469,6 +2469,50 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readFileSync(hook, 'utf8')).toBe(hookBefore);
   });
 
+  it('no pause is published while the hook log of a registered entry, put there by a settings rewrite after the start, is a file of the guard or a program: the hook would append to it', async () => {
+    for (const [name, label] of [['state', 'state_file'], ['pause', 'pause_file'], ['program', 'program of another hook'], ['cache', 'usage_cache']]) {
+      const f = fixture(`hook-log-refuses-${name}`, { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+      const audit = join(f.dir, 'audit');   // run by another hook of the settings
+      writeFileSync(audit, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const target = { state: f.state, pause: f.pause, program: audit, cache: f.cache }[name] as string;
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+      const settings = (log?: string) => JSON.stringify({ hooks: { PreToolUse: [
+        { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN, log), timeout: 21600 }] }, { matcher: 'Bash', hooks: [{ type: 'command', command: audit }] }] } });
+      writeFileSync(f.settings, settings(), 'utf8');
+      const before = name === 'cache' ? null : existsSync(target) ? readText(target) : null;   // (the usage cache is rewritten by the test itself)
+      const g = startGuard(f, ['--warn-every', '1']);
+      try {
+        await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+        writeFileSync(f.settings, settings(target), 'utf8');
+        writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+        await waitFor(() => new RegExp(`ERROR: tick failed.*logs to .*, which is the ${label} of this guard`).test(readText(f.log)), 20000, `the refusal (${name})`);
+        await sleep(600);   // a few more ticks
+        expect(existsSync(f.pause), `${name}: no pause was published`).toBe(false);
+        expect(existsSync(f.state) ? readJson(f.state).paused : false, `${name}: no pause was stored`).toBe(false);
+        writeFileSync(f.settings, settings(), 'utf8');   // a session that loaded the rewritten entry keeps appending to that log until it is restarted: the refusal stays too
+        await sleep(800);
+        expect(existsSync(f.pause), `${name}: still no pause after the entry was put right`).toBe(false);
+      } finally { await stopGuard(g); }
+      if (name !== 'cache') expect(existsSync(target) ? readText(target) : null, `${name}: the file is as it was`).toBe(before);
+    }
+  });
+
+  it('a pause that is in force is not renewed once the hook log of a registered entry has become a file of the guard: the heartbeat is not extended', async () => {
+    const f = fixture('hook-log-refuses-renewal', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    const settings = (log?: string) => JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN, log), timeout: 21600 }] }] } });
+    writeFileSync(f.settings, settings(), 'utf8');
+    const g = startGuard(f, ['--warn-every', '1']);
+    try {
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      writeFileSync(f.settings, settings(f.state), 'utf8');
+      await waitFor(() => /ERROR: tick failed.*logs to .*state\.json, which is the state_file of this guard/.test(readText(f.log)), 20000, 'the refusal of a renewal');
+      const seen = readJson(f.pause).valid_until;
+      await sleep(1000);   // five ticks
+      expect(readJson(f.pause).valid_until, 'the heartbeat of the pause is not extended').toBe(seen);
+    } finally { await stopGuard(g); }
+  });
+
   it('a timeout that is NaN or Infinity (raw tokens that Python reads and standard JSON does not) is a wiring problem, like a missing one', () => {
     const f = fixture('wiring-timeout-nonfinite', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');

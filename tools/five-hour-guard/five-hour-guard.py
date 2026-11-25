@@ -869,11 +869,27 @@ def live_owner():
         return None
 
 
+def hook_log_collisions():
+    """[(hook log, label, path)]: the --log of a registered entry (a settings rewrite after the start can make it that) that is a file of the
+    guard or a program: for every call it holds the hook appends a line to its log, which would end a pause (the pause file stops being one),
+    destroy the state or the usage cache, or corrupt the program. The start refuses these pairs (check_distinct); this is the same
+    look after the start. The files of the guard come first in a label, as in the wiring check."""
+    registered = registered_runtime_files()
+    others = [x for x in configured_files() + registered if x[0] != 'registered hook log']
+    return [(log_path, label, path) for log_label, log_path in registered if log_label == 'registered hook log'
+            for label, path in others if path and same_file(log_path, path)]
+
+
 def check_pause_path():
     """Never publish over a file that is not a pause of this guard: something else may have created it after the start check (a shared or
     mistyped path). Returns the lstat result of the file that exists, None when there is none: the caller acts on this one look (a second
     look could find a file that appeared in between and take it for the pause it may replace) and gives the result to write_json, which
-    renews exactly that file."""
+    renews exactly that file. Nothing is published either while the hook log of a registered entry is a file of the guard or a program
+    (hook_log_collisions): it is every publication, the entry into a pause and each renewal."""
+    for log_path, label, _path in hook_log_collisions()[:1]:
+        if LAST_WIRING_CHECK[0] is None or time.monotonic() - LAST_WIRING_CHECK[0] >= A.warn_every:
+            hook_check('pause refused')   # the wiring check names every file the hook log is, as it does when a pause begins
+        raise OSError(f'the hook entry in {SETTINGS or default_settings()} logs to {log_path}, which is the {label} of this guard: the hook would append its log lines to it, so no pause is published or renewed (run five-hour-guard-settings.py add again)')
     try:
         seen = os.lstat(PAUSE_FILE)
     except (OSError, ValueError):
