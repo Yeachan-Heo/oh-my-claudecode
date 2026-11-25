@@ -848,7 +848,9 @@ def publish(state, pct=None, only=None):
 def unpublish(strict=False):
     """Remove the pause file. False when it could not be removed (logged), so that a caller can keep its state and try again.
     The file is looked at again right before it is removed: one that is not a regular pause document of this guard any more
-    (somebody created or replaced it since the last check) is never removed; strict makes that a configuration error (exit 2)."""
+    (somebody created or replaced it since the last check) is never removed; strict makes that a configuration error (exit 2).
+    The path is then moved aside in one step and what was moved is compared with what was looked at: a file that took the place in the
+    instant between is put back (nothing is overwritten), so the removal can only hit the file that was looked at."""
     if A.dry_run:
         return True
     try:
@@ -861,18 +863,28 @@ def unpublish(strict=False):
     except Exception as e:
         log(f'cannot remove pause file: {e!r}')
         return False
+    if ours:
+        gone = f'{PAUSE_FILE}.{os.getpid()}.gone'
+        try:
+            os.rename(PAUSE_FILE, gone)
+            ours = file_identity(os.lstat(gone)) == file_identity(before)
+            if ours:
+                os.unlink(gone)
+            else:
+                try:
+                    os.link(gone, PAUSE_FILE)
+                    os.unlink(gone)
+                except FileExistsError:   # another file is there again: the one that was moved aside is kept under its new name
+                    log(f'the file that was at {PAUSE_FILE} is not a pause file of this guard and is kept as {gone}')
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            log(f'cannot remove pause file: {e!r}')
+            return False
     if not ours:
         if strict:
             fail(f'the file {PAUSE_FILE} is not a pause file of this guard (it changed since the start check): it is left untouched; check "pause_file", or remove the file yourself')
         log(f'the file {PAUSE_FILE} is not a pause file of this guard any more: left alone')
-        return True
-    try:
-        os.unlink(PAUSE_FILE)
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        log(f'cannot remove pause file: {e!r}')
-        return False
     return True
 
 

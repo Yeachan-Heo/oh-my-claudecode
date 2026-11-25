@@ -1396,9 +1396,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('an early stop of a test pause retries a failed removal and does not report it as done: a removal that never succeeds is an error with exit 1', async () => {
     const run = async (name: string, refusals: number) => {
       const f = fixture(name, {});
-      const code = ['import os, runpy, sys', 'real = os.unlink', 'target = sys.argv[1]', 'left = [int(sys.argv[2])]',
+      const code = ['import os, runpy, sys', 'real = os.rename', 'target = sys.argv[1]', 'left = [int(sys.argv[2])]',
         'def maybe(p, *a, **k):', '    if str(p) == target and left[0] > 0:', '        left[0] -= 1', '        raise OSError(1, "Operation not permitted")', '    return real(p, *a, **k)',
-        'os.unlink = maybe', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+        'os.rename = maybe', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
       const g = spawnPyCode(code, [f.pause, String(refusals), GUARD, ...guardArgs(f, ['--test-pause', '600'])]);
       try {
         await waitFor(() => existsSync(f.pause), 20000, 'the test pause');
@@ -1421,9 +1421,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a stop whose first removal of the pause file fails tries once more: the state is already unpaused and the sessions are not left waiting for the heartbeat', async () => {
     const f = fixture('stop-unlink-fails', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     const flag = join(f.dir, 'deny-unlink');
-    const code = ['import os, runpy, sys', 'real = os.unlink', 'flag = sys.argv[1]', 'target = sys.argv[2]',
+    const code = ['import os, runpy, sys', 'real = os.rename', 'flag = sys.argv[1]', 'target = sys.argv[2]',
       'def maybe(p, *a, **k):', '    if str(p) == target and os.path.exists(flag):', '        os.unlink(flag)', '        raise OSError(1, "Operation not permitted")', '    return real(p, *a, **k)',
-      'os.unlink = maybe', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+      'os.rename = maybe', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const g = spawnPyCode(code, [flag, f.pause, GUARD, ...guardArgs(f, ['--interval', '3', '--heartbeat', '600'])]);
     try {
       await waitFor(() => existsSync(f.pause), 20000, 'the pause');
@@ -1683,9 +1683,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a stop while the removal of the pause file is still pending makes the final removal attempt (the state is already unpaused)', async () => {
     const f = fixture('stop-with-pending-removal', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     const deny = join(f.dir, 'deny-unlink');
-    const code = ['import os, runpy, sys', 'real = os.unlink', 'flag = sys.argv[1]',
+    const code = ['import os, runpy, sys', 'real = os.rename', 'flag = sys.argv[1]',
       'def maybe(p, *a, **k):', '    if os.path.exists(flag) and str(p).endswith("pause.json"): raise PermissionError(13, "denied")', '    return real(p, *a, **k)',
-      'os.unlink = maybe', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+      'os.rename = maybe', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const g = spawnPyCode(code, [deny, GUARD, ...guardArgs(f, ['--interval', '3', '--heartbeat', '10'])]);
     try {
       await waitFor(() => existsSync(f.pause), 20000, 'the pause');
@@ -1970,6 +1970,25 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readJson(f.pause).valid_until, 'a renewal of an unchanged file still renews it').toBeGreaterThanOrEqual(before);
   });
 
+  it('a pause file that is swapped for a foreign file after the last look is not removed: the path is moved aside, found to be another file and put back', () => {
+    const f = fixture('unlink-swap', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
+    writePause(f, { pid: deadPid() });
+    // the swap follows the second look of unpublish() (the one that compares the file with the first look); the removal comes after it
+    const driver = ['import os, runpy, sys', 'real, pause, looks = os.lstat, sys.argv[1], []',
+      'def swap(path, *args, **kw):', '    found = real(path, *args, **kw)',
+      '    if str(path) == pause and sys._getframe(1).f_code.co_name == "unpublish":', '        looks.append(1)',
+      '        if len(looks) == 2:', '            open(pause + ".foreign", "w").write("foreign file\\n")', '            os.replace(pause + ".foreign", pause)',
+      '    return found',
+      'os.lstat = swap', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout, 'it is told that the file is not a pause of this guard').toMatch(/is not a pause file of this guard any more: left alone/);
+    expect(readText(f.pause), 'the foreign file is where it was').toBe('foreign file\n');
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.gone')), 'nothing is left aside').toEqual([]);
+    expect(readJson(f.state).paused, 'the pause itself is over').toBe(false);
+  });
+
   it('where hard links are not supported a file that appears at pause_file is still never replaced, and without one the pause is published with nothing left behind', () => {
     const driver = ['import errno, os, runpy, sys', 'target = sys.argv[1]', 'foreign = sys.argv[2] == "1"',
       'def nolink(a, b, *args, **kw):', '    if foreign and b == target: open(b, "w").write("late foreign file\\n")', '    raise OSError(errno.EPERM, "Operation not permitted")',
@@ -2124,9 +2143,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const f = fixture('unlink-fails', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
     writePause(f, { pid: deadPid() });
-    const code = ['import os, runpy, sys', 'real = os.unlink',
+    const code = ['import os, runpy, sys', 'real = os.rename',
       'def deny(p, *a, **k):', '    if str(p).endswith("pause.json"): raise PermissionError(13, "denied")', '    return real(p, *a, **k)',
-      'os.unlink = deny', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+      'os.rename = deny', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
     expect(r.stdout).toMatch(/ERROR/);
     expect(readJson(f.state).paused, 'the unpaused state was written before the file was touched').toBe(false);
