@@ -52,6 +52,10 @@ const marketplaceOf = (id) => {
 };
 // A plugin root variable as it was set: a value of nothing but white space names no root, any other is kept exactly (a directory name may end in a space).
 const rootOf = (value) => (value && value.trim() ? value : '');
+// A registry installPath as it was written (a directory name may end in a space, and a link may carry such a name) and, where the padding
+// differs, without it (a padded path names no directory itself, and the spelling without the padding stays protected as before). A value of
+// nothing but white space names nothing.
+const installForms = (value) => (typeof value == 'string' && value.trim() ? [...new Set([value, value.trim()])] : []);
 // The plugin cache directory of a marketplace.
 const cacheDirOf = (market) => path.join(configDir, 'plugins', 'cache', market, 'oh-my-claudecode');
 
@@ -1025,7 +1029,7 @@ const readRegistry = () => {
           throw 0;
         }
         if (!isSupported) {
-          if (typeof entry.installPath == 'string') other.push(entry.installPath.trim());
+          other.push(...installForms(entry.installPath));
         } else pins.push(entry);
       }
     }
@@ -1243,7 +1247,7 @@ const protectionOf = (dir, versions, foldCase = false) => {
         else if (identityOf(written) || lacksIdentity(written)) pinPaths.push(written);
       }
     }
-    if (pin.installPath != undefined) pinPaths.push(...bothForms(pin.installPath.trim()));
+    pinPaths.push(...installForms(pin.installPath).flatMap(bothForms));
   }
   // The plugin root of a record of another host is spelled as that host sees it, and a profile can be mounted under another path there. One
   // that does not lie in a cache of this system cannot be mapped to a version here, so nothing is moved while such a record is held.
@@ -1338,9 +1342,7 @@ const backupPlace = (registry) => {
   if (chain.unreadable) return stop('the backup directory ' + backups + ' cannot be resolved (a link loop, or a part of the path that cannot be examined)');
   if (!resolvable(backups)) return stop('the backup directory ' + backups + ' cannot be resolved (a link on the way to it points at nothing)');
   const bothForms = (target) => [...new Set([target, path.resolve(target)])];
-  const installPaths = [...registry.pins.map((entry) => entry.installPath), ...registry.other]
-    .filter((target) => typeof target == 'string' && target.trim())
-    .map((target) => target.trim());
+  const installPaths = [...registry.pins.map((entry) => entry.installPath), ...registry.other].flatMap(installForms);
   const roots = [process.env.OMC_PLUGIN_ROOT, process.env.CLAUDE_PLUGIN_ROOT].map(rootOf).filter(Boolean);
   // A cache namespace (or the plugin directory in it) may be a link out of plugins/cache: its versions then lie
   // elsewhere, so each one is a tree of its own, resolved by the comparisons below.

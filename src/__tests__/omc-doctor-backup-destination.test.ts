@@ -128,6 +128,31 @@ const cases: Case[] = [
       return { watch: [], tree: 'the plugin cache' };
     },
   },
+  {
+    // A directory name may end in a space, and so may the name of a link: the installPath is a tree as written, not as its padding-free sibling.
+    name: 'the installPath of an unrelated plugin is a link whose name ends in a space, to the directory the backup directory lies in',
+    make: (dir) => {
+      const tree = path.join(dir, 'elsewhere', 'consumer-tree');
+      const saved = path.join(tree, 'saved');
+      mkdirSync(saved, { recursive: true });
+      const spaced = path.join(dir, 'plugins', 'consumer ');
+      link(tree, spaced);
+      link(saved, path.join(dir, 'plugins', 'backups'));
+      return { watch: [saved], tree: 'an install path of the registry', extra: { 'other-plugin@market': [{ scope: 'user', installPath: spaced }] } };
+    },
+  },
+  {
+    name: 'the installPath of a pin is a link whose name ends in a space, to the directory the backup directory lies in',
+    make: (dir) => {
+      const tree = path.join(dir, 'elsewhere', 'pinned-tree');
+      const saved = path.join(tree, 'saved');
+      mkdirSync(saved, { recursive: true });
+      const spaced = path.join(dir, 'plugins', 'pinned ');
+      link(tree, spaced);
+      link(saved, path.join(dir, 'plugins', 'backups'));
+      return { watch: [saved], tree: 'an install path of the registry', installPath: spaced };
+    },
+  },
 ];
 
 describe.skipIf(!posix)('omc-doctor: the backup directory is resolved first and kept apart from every cache and source tree', { timeout: 180_000 }, () => {
@@ -365,6 +390,30 @@ fs.lstatSync = function (target, ...rest) {
           .toEqual({ command, status: 1, refused: true, cache: ['5.8.0', '5.9.0'], landed: [] });
       } finally {
         rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // A directory name may end in a space, and so may the name of a link: the installPath is protected as written (the spelling without the
+  // padding stays protected too), so a link named 'consumer ' keeps the version it points into.
+  test('an installPath that is a link whose name ends in a space protects the version it points into, for an unrelated plugin and for a pin', () => {
+    const scenarios: Record<string, (spaced: string) => Record<string, unknown>> = {
+      'an unrelated plugin': (spaced) => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0' }], 'other-plugin@market': [{ scope: 'user', installPath: spaced }] }),
+      'a pin of the plugin': (spaced) => ({ [PLUGIN_ID]: [{ scope: 'user', version: '5.9.0', installPath: spaced }] }),
+    };
+    for (const command of commands) {
+      for (const [label, registry] of Object.entries(scenarios)) {
+        const { dir, cache } = makeCache(['5.8.0', '5.9.0']);
+        try {
+          const spaced = path.join(dir, 'plugins', 'consumer ');
+          link(path.join(cache, '5.8.0'), spaced);
+          writeRegistry(dir, registry(spaced));
+          const result = runCommand(command, dir, { timeout: 20_000 });
+          expect({ label, status: result.status, cache: readdirSync(cache).sort(), moved: movedAside(dir) })
+            .toEqual({ label, status: 0, cache: ['5.8.0', '5.9.0'], moved: 0 });
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
       }
     }
   });
