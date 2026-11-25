@@ -331,7 +331,7 @@ def command_programs(command, depth=0, own=False):
     if not isinstance(command, str) or len(command) > MAX_COMMAND_CHARS or '\0' in command:
         return []
     try:
-        lex = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
+        lex = shlex.shlex(ENTRY.strip_comments(command), posix=True, punctuation_chars=PUNCTUATION)
         lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''
         tokens = []
         for token in lex:

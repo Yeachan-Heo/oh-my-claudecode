@@ -1440,6 +1440,46 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('the two readers of a command (the hook entry and the programs of other hooks) take an unquoted # that starts a word as the start of a comment and a # anywhere else as text', () => {
+    const f = fixture('comment-readers', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const audit = '/opt/x/audit.sh';   // named like a script: an argument that is one is a program wherever it stands
+    const bare = '/opt/x/audit';        // no suffix: a program only as the command word or as the script of an interpreter
+    const hook = '/opt/y/five-hour-guard-hook.py';
+    // [command, the file that is looked for, whether it is a program of the command, the hook scripts of the entry that the command is, the pause files it names]
+    const rows: Array<[string, string, boolean, string[], string[]]> = [
+      [`echo a; # ${audit}`, audit, false, [], []],
+      [`echo a # ${audit}`, audit, false, [], []],
+      [`echo a\n# ${audit}`, audit, false, [], []],
+      [`echo a;#${audit}`, audit, false, [], []],
+      [`echo a; # ${hook} --pause-file /tmp/p`, audit, false, [], []],
+      [`echo a;#${hook}`, audit, false, [], []],
+      [`exec ${PYBIN} -I ${hook} --pause-file /tmp/p # then ${audit}`, audit, false, [hook], ['/tmp/p']],
+      [`echo a#b ${audit}`, audit, true, [], []],
+      [`echo '#' ${audit}`, audit, true, [], []],
+      [`echo "#" ${audit}`, audit, true, [], []],
+      [`echo 'x # y' ${audit}`, audit, true, [], []],
+      [`echo "x; # y" ${audit}`, audit, true, [], []],
+      [`echo \\# ${audit}`, audit, true, [], []],
+      [`echo \\ #x ${audit}`, audit, true, [], []],
+      [`true # a comment\n${PYBIN} ${bare}`, bare, true, [], []],
+      [`true # a comment ${bare}\n${PYBIN} ${bare}`, bare, true, [], []],
+      [`exec ${PYBIN} -I ${hook} --pause-file /tmp/p#1`, audit, false, [hook], ['/tmp/p#1']],
+      [`exec ${PYBIN} -I ${hook} --pause-file '/tmp/#p' --log /tmp/l`, audit, false, [hook], ['/tmp/#p']],
+    ];
+    const driver = ['import json, runpy, sys', 'guard, rows = sys.argv[1], json.loads(sys.argv[2])', 'sys.argv = [guard] + sys.argv[3:]',
+      'g = runpy.run_path(guard, run_name="guard_functions")',
+      'print(json.dumps([[row, g["command_programs"](row), g["ENTRY"].entry_parts(row)] for row in rows]))'].join('\n');
+    const r = runPyCode(driver, [GUARD, JSON.stringify(rows.map((row) => row[0])), ...guardArgs(f)]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    const out = JSON.parse(r.stdout.trim().split('\n').pop() as string) as Array<[string, string[], [string[], string[], string[], string[]]]>;
+    for (const [k, [command, target, isProgram, hooks, pauses]] of rows.entries()) {
+      expect(out[k][0]).toBe(command);
+      expect(out[k][1].includes(target), `${JSON.stringify(command)}: ${target} is ${isProgram ? '' : 'not '}a program`).toBe(isProgram);
+      expect(out[k][2][0], `${JSON.stringify(command)}: the hooks of the entry`).toEqual(hooks);
+      expect(out[k][2][3], `${JSON.stringify(command)}: the pause files`).toEqual(pauses);
+    }
+  });
+
   it('a program behind the options of env, exec, command and time, and behind the separators, groups, keywords and wrappers of a shell command, is found', () => {
     const wrappers = ['env -i', 'env --ignore-environment', 'env -u X', 'env --unset=X', 'env -C /', 'env --', 'env -i -- FOO=1', 'env -i FOO=1', 'FOO=1 env -i', 'exec -a name', 'command -p',
       'time -p', 'nohup', 'env -i exec'].map((form) => (audit: string) => `${form} ${audit}`);

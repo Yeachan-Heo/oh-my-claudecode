@@ -78,6 +78,33 @@ def skip_wrappers(words):
     return i
 
 
+def strip_comments(command):
+    """The command without its shell comments, the one place that says what a comment is (the readers of a command in the guard and in
+    this module call it before they split the text): an unquoted `#` that starts a word (at the start, after a blank or one of ; & | ( ) < >)
+    comments out the rest of the line, the newline that ends it stays; a `#` inside a word (`a#b`, `${#x}`), in quotes or after a
+    backslash is text. The shell is the POSIX sh that the hook entry needs (Git Bash on Windows); a cmd.exe command has no such comment."""
+    out, i, n, quote, word_start = [], 0, len(command), None, True
+    while i < n:
+        c = command[i]
+        if quote is None and c == '#' and word_start:
+            while i < n and command[i] != '\n':
+                i += 1
+            continue
+        if c == '\\' and quote != "'" and i + 1 < n:   # the escaped character is text, and so is what follows it in the word
+            out.append(command[i:i + 2])
+            i += 2
+            word_start = False
+            continue
+        if quote is None and c in '\'"':
+            quote = c
+        elif c == quote:
+            quote = None
+        out.append(c)
+        i += 1
+        word_start = quote is None and c in ' \t\r\n;&|()<>'
+    return ''.join(out)
+
+
 def command_hook(words):
     """(hook, launcher) when the simple command `words` runs the hook of this guard, else None: the command word (after the wrappers) is
     the hook itself, or it is a Python or the command carries --pause-file and the first argument that is no option or operand is the
@@ -101,7 +128,7 @@ def entry_parts(command):
     neither is an argument of a program that is not an interpreter (a foreign audit tool that is given the hook file as data). The
     hook script is the command word of a simple command, or the first argument after it when the command word is a Python or the
     command carries --pause-file. Raises ValueError for a command the shell cannot parse (or one with a NUL character)."""
-    lex = shlex.shlex(command, posix=True, punctuation_chars=';&|')   # the separators are told from quoted text: a quoted path may end in `;`
+    lex = shlex.shlex(strip_comments(command), posix=True, punctuation_chars=';&|')   # the separators are told from quoted text: a quoted path may end in `;`
     lex.whitespace_split, lex.commenters = True, ''
     tokens = list(lex)
     if any('\0' in t for t in tokens):

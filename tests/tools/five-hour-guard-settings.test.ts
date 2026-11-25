@@ -558,6 +558,23 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
   });
 
+  it('text after an unquoted shell comment is no part of the command: a command that has the hook only in a comment is not our hook, check does not report it, add and remove leave it alone', () => {
+    const f = fixture('settings-comment');
+    const foreign = [
+      'echo audit; # /opt/five-hour-guard-hook.py --pause-file /tmp/pause',
+      'echo audit;#/opt/five-hour-guard-hook.py',
+      'echo audit;\n# /opt/five-hour-guard-hook.py --pause-file /tmp/pause',
+    ].map((command) => ({ type: 'command', command }));
+    write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: foreign }] } });
+    expect(tool(f, 'check').status, 'none of them is our hook').toBe(1);
+    expect(tool(f, 'add').status).toBe(0);
+    const pre = readJson(f.settings).hooks.PreToolUse;
+    expect(pre, 'the foreign group stays whole, ours is next to it').toHaveLength(2);
+    expect(pre.flatMap((g: { hooks: unknown[] }) => g.hooks).filter((h: { command: string }) => foreign.some((x) => x.command === h.command))).toHaveLength(foreign.length);
+    expect(tool(f, 'remove').status).toBe(0);
+    expect(readJson(f.settings).hooks.PreToolUse, 'remove takes only our hook').toEqual([{ matcher: '*', hooks: foreign }]);
+  });
+
   it('add refuses a pause file that is the default usage cache or its lock when the configuration names no usage_cache', () => {
     const f = fixture('settings-default-cache');
     const original = JSON.stringify(base(), null, 2) + '\n';
