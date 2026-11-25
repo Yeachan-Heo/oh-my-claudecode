@@ -13,6 +13,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 const LOOKBACK_MS = 7 * 24 * 3600_000;
 
@@ -57,6 +58,8 @@ function reconcile(entries) {
   return findings;
 }
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the ledger fields are cleaned before they are injected.
+// The module is loaded only when the switch is on; with the switch off the fields are injected unchanged.
 async function main() {
   const raw = await readStdin(3000);
   let payload = null;
@@ -85,19 +88,26 @@ async function main() {
     return;
   }
 
+  // Ledger fields are data. With the switch on the run and the session id are identifiers: each is written exactly (escaped,
+  // not cleaned; a written form over 200 characters is replaced by a notice), and the time is cleaned to one line.
+  const sanitize = await loadContextText();
+  const field = (value) => (sanitize ? sanitize.cleanHostText(value, 200) : value);
+  const identifier = (value) => (sanitize ? sanitize.escapeIdentifier(value, 200) : value);
   const lines = [
     `[RUN RECONCILIATION] ${findings.length} unattended run(s) ended without a notepad closeout — the run's friction was not captured:`,
-    ...findings.map((entry) => `- ${entry.run}${entry.sessionId ? ` (session ${entry.sessionId})` : ''}: ended ${entry.ts} without a notepad closeout`),
+    ...findings.map((entry) => `- ${identifier(entry.run)}${entry.sessionId ? ` (session ${identifier(entry.sessionId)})` : ''}: ended ${field(entry.ts)} without a notepad closeout`),
     'Nothing was changed automatically. If a lesson was learned in those runs, record it now (the notepad is the refit surface); otherwise acknowledge and move on.',
   ];
 
-  console.log(JSON.stringify({
+  // The number of findings is not bounded, so with the switch on the whole message is also bounded where it is emitted.
+  const output = {
     continue: true,
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
       additionalContext: lines.join('\n'),
     },
-  }));
+  };
+  console.log(JSON.stringify(sanitize ? sanitize.cleanHookOutput(output) : output));
 }
 
 await main();

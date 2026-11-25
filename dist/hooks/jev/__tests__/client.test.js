@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { JEV_MODEL, JevClientError, queryJev } from '../client.js';
+import { JEV_MODEL, JevClientError, noulAnswerIsYes, queryJev } from '../client.js';
 const QUESTIONS = {
     trigger: { type: 'choice', criteria: { ralph: 'persistent loop', tdd: 'test first' } },
 };
@@ -109,6 +109,25 @@ describe('queryJev', () => {
             throw 'boom';
         });
         await expect(queryJev({}, QUESTIONS, { endpoint: 'https://stub.example', apiKey: 'k', timeoutMs: 250, fetchFn })).rejects.toThrow(JevClientError);
+    });
+});
+describe('noulAnswerIsYes', () => {
+    it('reads the probability the API returns: 0.5 or more is yes', () => {
+        expect(noulAnswerIsYes({ type: 'noul', noul: 0.92 })).toBe(true);
+        expect(noulAnswerIsYes({ type: 'noul', noul: 0.5 })).toBe(true);
+        expect(noulAnswerIsYes({ type: 'noul', noul: 0.49 })).toBe(false);
+        expect(noulAnswerIsYes({ type: 'noul', noul: 0 })).toBe(false);
+    });
+    it('still accepts a boolean', () => {
+        expect(noulAnswerIsYes({ type: 'noul', noul: true })).toBe(true);
+        expect(noulAnswerIsYes({ type: 'noul', noul: false })).toBe(false);
+    });
+    it('reads a missing or non-finite value as no', () => {
+        expect(noulAnswerIsYes(undefined)).toBe(false);
+        expect(noulAnswerIsYes({ type: 'noul' })).toBe(false);
+        expect(noulAnswerIsYes({ type: 'noul', noul: Number.NaN })).toBe(false);
+        expect(noulAnswerIsYes({ type: 'noul', noul: Number.POSITIVE_INFINITY })).toBe(false);
+        expect(noulAnswerIsYes({ type: 'noul', noul: '0.9' })).toBe(false);
     });
 });
 //# sourceMappingURL=client.test.js.map

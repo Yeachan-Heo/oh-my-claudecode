@@ -1,0 +1,40 @@
+ ▐▛███▛█   Claude Code v2.1.328
+▝▜██████▀  Opus 5.5 · Claude Xxx
+ ▝▝   ▝▝   /private/tmp/tmp.djyOp49wZj
+
+  Fable 5.2 is here for your longest and toughest coding tasks. It draws down usage faster than Opus 5.5. Switch with
+  /model.
+  1 more notice hidden (ctrl+o to expand)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Try the new fullscreen renderer?
+
+  · Flicker-free output: no more flashing during long responses
+  · Mouse support: click to move your cursor or expand results
+  · Selected text auto-copies to your clipboard
+
+    1. Yes, try it
+  ❯ 2. Not now
+
+  Enter to confirm · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

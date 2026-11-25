@@ -833,6 +833,14 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
       const claimError = failure.claimError ? ` claim_error=${failure.claimError}` : '';
       console.error(`startup_failure worker=${failure.worker} reason=${failure.reason}${claimError}`);
     }
+    if (startupFailures.some(failure => /(?:claude_bypass_permissions_consent_required|claude_onboarding_required)$/.test(failure.reason))) {
+      console.error(
+        'Claude Code has first-run screens that omc team does not answer for you. '
+        + 'Run `claude --dangerously-skip-permissions` once in a terminal with the same CLAUDE_CONFIG_DIR, '
+        + 'finish Claude Code\'s first-run setup, choose "Yes, I accept" on the Bypass Permissions warning, '
+        + 'exit Claude Code, then run omc team again.',
+      );
+    }
     return;
   }
 

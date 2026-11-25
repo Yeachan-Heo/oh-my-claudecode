@@ -58,6 +58,9 @@ export declare const TeamPaths: {
     readonly mailbox: (teamName: string, workerName: string) => string;
     readonly mailboxLockDir: (teamName: string, workerName: string) => string;
     readonly dispatchRequests: (teamName: string) => string;
+    readonly dispatchLock: (teamName: string) => string;
+    readonly dispatchLegacyLockDir: (teamName: string) => string;
+    /** @deprecated Use `dispatchLegacyLockDir` instead. Kept for public API compatibility. */
     readonly dispatchLockDir: (teamName: string) => string;
     readonly mailboxNotificationLock: (teamName: string, requestId: string) => string;
     readonly workerStatus: (teamName: string, workerName: string) => string;
@@ -108,6 +111,9 @@ export declare const TeamPaths: {
     readonly recoveryResultByTeam: (workspaceHash: string, teamName: string, recoveryId: string) => string;
     readonly recoveryFinalIndexLock: (workspaceHash: string, teamName: string, recoveryId: string) => string;
     readonly scalingRollbackFailure: (teamName: string, recordedAt: number) => string;
+    readonly recoveryPaneRollbackFailures: (teamName: string, recoveryId: string) => string;
+    readonly recoveryPaneSplits: (teamName: string, recoveryId: string) => string;
+    readonly recoveryPaneSplit: (teamName: string, recoveryId: string, paneAttemptId: string) => string;
     readonly recoveryPaneRollbackFailure: (teamName: string, recoveryId: string, paneAttemptId: string, recordedAt: number) => string;
     readonly recoveryAuditIndex: () => string;
 };

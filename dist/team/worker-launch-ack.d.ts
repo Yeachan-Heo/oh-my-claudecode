@@ -124,6 +124,10 @@ export declare function loadWorkerLaunchAttempt(input: {
     attemptId: string;
     runtimeCliPath: string;
 }): Promise<WorkerLaunchAttempt | null>;
+export declare function isValidCurrentWorkerLaunchRecord(value: unknown): value is WorkerLaunchIdentity & {
+    runtime_cli_path: string;
+    context?: WorkerLaunchContext;
+};
 export declare function loadCurrentWorkerLaunchAttempt(input: {
     cwd: string;
     teamName: string;

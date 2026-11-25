@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { findNodeHeaders } from './lib/find-node-headers.mjs';
 
 // Build-time only. Runtime never invokes a compiler or downloads a binary.
 
@@ -25,19 +26,17 @@ if (!['darwin', 'linux'].includes(process.platform)) {
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const explicit = process.argv.find(arg => arg.startsWith('--headers='))?.slice('--headers='.length);
 const version = process.versions.node;
-const candidates = [
-  explicit,
-  process.env.npm_config_nodedir && join(process.env.npm_config_nodedir, 'include', 'node'),
-  process.env.npm_config_nodedir && join(process.env.npm_config_nodedir, 'src'),
-  join(homedir(), 'Library', 'Caches', 'node-gyp', version, 'include', 'node'),
-  join(homedir(), '.cache', 'node-gyp', version, 'include', 'node'),
-  '/usr/local/include/node',
-  '/usr/include/node',
-].filter(Boolean);
 
-const headers = candidates.find(path => existsSync(join(path, 'node_api.h')));
+const headers = findNodeHeaders({
+  argv: process.argv,
+  env: process.env,
+  execPath: process.execPath,
+  version,
+  homedir: homedir(),
+  exists: existsSync,
+});
+
 if (!headers) {
   if (isOptional) {
     // Graceful skip for optional builds

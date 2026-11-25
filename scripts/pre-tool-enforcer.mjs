@@ -6,9 +6,9 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, join, resolve, basename } from 'path';
+import { delimiter, dirname, join, resolve, basename, relative, isAbsolute, parse, sep } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -24,12 +24,15 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevAppliedLogEnabled, isJevShadowOptedIn, jevNoulOf, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from './lib/jev-shadow.mjs';
-import { resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
+import { pointerSecretPath } from './lib/jev-pointer-secret-path.mjs';
+import { isTruthyProviderFlag } from './lib/provider-env-helpers.mjs';
+import { isJevLogContextEnabled, isJevRowTelemetryEnabled, JEV_ROW_NO_ANSWER, jevLogContextOf, resolveExcerptChars, resolveJevLogMaxBytes, rotateJevLog } from './jev-resolve.mjs';
+import { loadContextText } from './lib/context-text-loader.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
 function isProviderSpecificModelId(modelId) {
-  if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
+  if (/^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
   if (/^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)) return true;
   if (modelId.toLowerCase().startsWith('vertex_ai/')) return true;
   return false;
@@ -41,9 +44,9 @@ function isSubagentSafeModelId(modelId) {
   return isProviderSpecificModelId(modelId) && !hasExtendedContextSuffix(modelId);
 }
 function isBedrockProviderEnv() {
-  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') return true;
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_BEDROCK)) return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-  if (/^((us|eu|ap|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
+  if (/^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)/i.test(modelId)) return true;
   if (
     /^arn:aws(-[^:]+)?:bedrock:/i.test(modelId)
     && /:(inference-profile|application-inference-profile)\//i.test(modelId)
@@ -54,7 +57,7 @@ function isBedrockProviderEnv() {
   return false;
 }
 function isVertexProviderEnv() {
-  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') return true;
+  if (isTruthyProviderFlag(process.env.CLAUDE_CODE_USE_VERTEX)) return true;
   const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
   return !!modelId && modelId.toLowerCase().startsWith('vertex_ai/');
 }
@@ -72,20 +75,72 @@ function isConfigForceInheritProxyEnv() {
   const config = loadOmcConfig();
   return config.routing?.forceInherit === true && !hasNormalClaudeActiveModel();
 }
-function isNonClaudeProviderEnv() {
+// A base URL is Anthropic's when its host is anthropic.com or ends in .anthropic.com: the host
+// is parsed (scheme optional, port and credentials ignored) and compared without case, never
+// matched as a substring of the URL. A URL that does not parse is not Anthropic's.
+function isAnthropicBaseUrl(baseUrl) {
+  const text = String(baseUrl).trim();
+  try {
+    const host = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`).hostname.toLowerCase().replace(/\.$/, '');
+    return host === 'anthropic.com' || host.endsWith('.anthropic.com');
+  } catch {
+    return false;
+  }
+}
+// forNamedGate: provider detection as in src/config/models.ts, which only the named-model gate
+// asks for (the proxy mapping check and the forceInherit gate keep the plain rules). The model
+// values it reads are the session model (CLAUDE_MODEL, then ANTHROPIC_MODEL) and, when neither
+// is set, the native default of each tier; all of them go through isNonClaudeModelName.
+// OMC_MODEL_* is not read here: Claude Code does not read it.
+function isNonClaudeProviderEnv(forNamedGate = false) {
   if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
-  const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
-  if (modelId && !modelId.toLowerCase().includes('claude')) return true;
+  if (forNamedGate) {
+    if (providerDetectionModelIds().some(isNonClaudeModelName)) return true;
+  } else {
+    const modelId = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || '';
+    if (modelId && !modelId.toLowerCase().includes('claude')) return true;
+  }
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
-  if (baseUrl && !baseUrl.includes('anthropic.com')) return true;
+  if (baseUrl && !isAnthropicBaseUrl(baseUrl)) return true;
   return isConfigForceInheritProxyEnv();
 }
-function acceptsProxyAnthropicDefaultTierValue(key, value) {
+// A model name is not Claude's when it is a provider-specific ID (Bedrock, Vertex) or does not
+// contain "claude" and is not a native alias. The value is trimmed, a context suffix ([1m],
+// [200k]) is dropped and the case is ignored; a blank value is not a name.
+function isNonClaudeModelName(value) {
+  const name = String(value).trim().replace(/\[\d+[mk]\]$/i, '');
+  if (!name) return false;
+  if (isProviderSpecificModelId(name)) return true;
+  const lower = name.toLowerCase();
+  return !lower.includes('claude') && !TIER_ALIASES.has(lower);
+}
+// The model values that identify the provider: the first non-blank of CLAUDE_MODEL and
+// ANTHROPIC_MODEL; with neither, the first non-blank native default of each tier
+// (CLAUDE_CODE_BEDROCK_<TIER>_MODEL, then ANTHROPIC_DEFAULT_<TIER>_MODEL).
+// The session model as the provider checks of the Jev gates read it: the first non-blank of
+// CLAUDE_MODEL and ANTHROPIC_MODEL, trimmed ('' when neither is set).
+function normalizedSessionModelId() {
+  return [process.env.CLAUDE_MODEL, process.env.ANTHROPIC_MODEL].map((v) => (v || '').trim()).find(Boolean) || '';
+}
+function providerDetectionModelIds() {
+  const session = normalizedSessionModelId();
+  if (session) return [session];
+  return Object.values(TIER_TO_DEFAULT_ENV_KEYS_FOR_APPLIED_LOG)
+    .map((keys) => keys.map((key) => (process.env[key] || '').trim()).find(Boolean))
+    .filter(Boolean);
+}
+// Bedrock or Vertex, from a flag or, for the named-model gate, also from a model value that
+// identifies the provider (providerDetectionModelIds), normalized like isNonClaudeModelName.
+function isCloudProviderEnv(forNamedGate = false) {
+  if (isBedrockProviderEnv() || isVertexProviderEnv()) return true;
+  return forNamedGate
+    && providerDetectionModelIds().some((value) => isProviderSpecificModelId(value.replace(/\[\d+[mk]\]$/i, '')));
+}
+function acceptsProxyAnthropicDefaultTierValue(key, value, forNamedGate = false) {
   return key.startsWith('ANTHROPIC_DEFAULT_')
     && Boolean(value)
-    && isNonClaudeProviderEnv()
-    && !isBedrockProviderEnv()
-    && !isVertexProviderEnv();
+    && isNonClaudeProviderEnv(forNamedGate)
+    && !isCloudProviderEnv(forNamedGate);
 }
 const TIER_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable']);
 function isTierAlias(modelId) {
@@ -121,10 +176,37 @@ const BUILTIN_TIER_MODEL_DEFAULTS = {
   opus:   'claude-opus-4-8',
   fable:  'claude-fable-5',
 };
-function resolveTierAliasToSafeModel(tierAlias) {
-  const keys = TIER_TO_DEFAULT_ENV_KEYS[(tierAlias || '').toLowerCase()];
+// The cloud family of a provider-specific model ID: 'vertex' for vertex_ai/..., 'bedrock' for the
+// other provider-specific IDs (region profiles, bare anthropic.claude, ARNs), null for anything else.
+function cloudFamilyOfModelId(modelId) {
+  const name = String(modelId).trim();
+  if (name.toLowerCase().startsWith('vertex_ai/')) return 'vertex';
+  return isProviderSpecificModelId(name) ? 'bedrock' : null;
+}
+// A native mapping of the other cloud than the one the session runs on (named by a flag or by the
+// session model) is not a mapping the provider can serve; with no cloud named, any family passes.
+function isMappingOfOtherCloud(modelId) {
+  const family = cloudFamilyOfModelId(modelId);
+  if (!family) return false;
+  // The flags and the session model, read normalized (trimmed, first non-blank, without a context
+  // suffix) as well as raw, so a padded or suffixed session ID names its cloud too.
+  const session = cloudFamilyOfModelId(normalizedSessionModelId().replace(/\[\d+[mk]\]$/i, ''));
+  const active = [
+    (isBedrockProviderEnv() || session === 'bedrock') && 'bedrock',
+    (isVertexProviderEnv() || session === 'vertex') && 'vertex',
+  ].filter(Boolean);
+  return active.length > 0 && !active.includes(family);
+}
+// nativeOnly skips OMC_SUBAGENT_MODEL: Claude Code does not read it, so it is no proof that
+// the provider serves the alias on a call. forNamedGate judges a plain ANTHROPIC_DEFAULT_* value
+// with the provider detection of the named-model gate, so the gate and its mapping agree.
+function resolveTierAliasToSafeModel(tierAlias, nativeOnly = false, forNamedGate = false) {
+  // Own keys only: an answer such as `constructor` or `__proto__` is not a tier.
+  const tier = (tierAlias || '').toLowerCase();
+  const keys = Object.hasOwn(TIER_TO_DEFAULT_ENV_KEYS, tier) ? TIER_TO_DEFAULT_ENV_KEYS[tier] : undefined;
   if (!keys) return '';
   for (const key of keys) {
+    if (nativeOnly && key === 'OMC_SUBAGENT_MODEL') continue;
     const value = (process.env[key] || '').trim();
     // CC-native vars (ANTHROPIC_DEFAULT_* and CLAUDE_CODE_BEDROCK_*) are read by CC's own
     // model resolution, which handles [1m] suffixes correctly for explicit model= calls.
@@ -133,7 +215,11 @@ function resolveTierAliasToSafeModel(tierAlias) {
     const isAnthropicDefaultTierVar = key.startsWith('ANTHROPIC_DEFAULT_');
     const isNativeCcVar = isAnthropicDefaultTierVar || key.startsWith('CLAUDE_CODE_BEDROCK_');
     const validator = isNativeCcVar ? isProviderSpecificModelId : isSubagentSafeModelId;
-    if (value && (validator(value) || acceptsProxyAnthropicDefaultTierValue(key, value))) return value;
+    if (nativeOnly && value && isNativeCcVar && isMappingOfOtherCloud(value)) return '';
+    if (value && (validator(value) || acceptsProxyAnthropicDefaultTierValue(key, value, forNamedGate))) return value;
+    // Claude Code uses the first native variable that is set: when that one is unusable, a later
+    // one is not what the alias resolves to (nativeOnly callers only).
+    if (nativeOnly && value && isNativeCcVar) return '';
   }
   return '';
 }
@@ -390,6 +476,67 @@ function buildCanonicalSkillRegistry() {
   }
   cachedCanonicalSkillRegistry = registry;
   return registry;
+}
+
+// Agent types the hook refuses: OMC_AGENT_TYPE_DENY is a comma-separated list, empty by default.
+// An entry matches a type without regard to letter case; an entry that starts with `=` matches
+// exactly, so a list can refuse `explore` while a differently cased user agent `Explore` passes.
+// OMC_AGENT_TYPE_DENY_MODE: off (default), shadow (log only), deny (refuse the call). Shadow and
+// deny log one row per Agent/Task call in agent-type.jsonl, so the allowed calls are counted too.
+// A call without subagent_type runs as general-purpose, so it is judged as general-purpose.
+const AGENT_TYPE_DENY_MODES = ['off', 'shadow', 'deny'];
+function agentTypeDenyList(env = process.env) {
+  return String(env.OMC_AGENT_TYPE_DENY ?? '').split(',').map((type) => type.trim()).filter(Boolean);
+}
+function isAgentTypeDenied(type, list) {
+  const lower = type.toLowerCase();
+  return list.some((entry) => (entry.startsWith('=') ? entry.slice(1).trim() === type : entry.toLowerCase() === lower));
+}
+function agentTypeDenyMode(env = process.env) {
+  const raw = String(env.OMC_AGENT_TYPE_DENY_MODE ?? '').trim();
+  const mode = raw.toLowerCase();
+  if (AGENT_TYPE_DENY_MODES.includes(mode)) return { mode };
+  if (!raw) return { mode: 'off' };
+  if (env.OMC_JEV_QUIET !== '1') console.error('[omc] agent-type: OMC_AGENT_TYPE_DENY_MODE=' + raw.slice(0, 40) + ' is not one of ' + AGENT_TYPE_DENY_MODES.join(', ') + '; using shadow');
+  return { mode: 'shadow', raw: raw.slice(0, 40) };
+}
+function evaluateForbiddenAgentType(toolName, data, stateDir) {
+  const { mode, raw: modeRaw } = agentTypeDenyMode();
+  if (mode === 'off') return null;
+  const toolInput = data && typeof data === 'object' ? (data.tool_input ?? data.toolInput) : undefined;
+  const inputOk = toolInput !== null && typeof toolInput === 'object' && !Array.isArray(toolInput);
+  const typeValue = inputOk ? toolInput.subagent_type : undefined;
+  const parsed = inputOk && (typeValue === undefined || typeof typeValue === 'string');
+  const rawType = typeof typeValue === 'string' ? typeValue.trim() : '';
+  const forbidden = isAgentTypeDenied(rawType || 'general-purpose', agentTypeDenyList());
+  const decision = !parsed ? 'unparsed' : !forbidden ? 'allow' : mode === 'deny' ? 'deny' : 'would-deny';
+  try {
+    const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'agent-type.jsonl');
+    rotateJevLog(path, resolveJevLogMaxBytes(process.env));
+    appendFileSync(path, JSON.stringify({
+      ts: new Date().toISOString(),
+      point: 'agent-type',
+      ...(isJevLogContextEnabled(process.env) ? jevLogContextOf(data && typeof data === 'object' ? data : {}) : {}),
+      tool_name: toolName,
+      subagent_type: rawType ? rawType.slice(0, 200) : null,
+      mode,
+      ...(modeRaw ? { mode_raw: modeRaw } : {}),
+      decision,
+    }) + '\n', 'utf8');
+  } catch {
+    // Best-effort logging: a logging failure never affects the call.
+  }
+  if (decision !== 'deny') return null;
+  return {
+    continue: true,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: `[AGENT TYPE] "${rawType || '(no subagent_type)'}" is not allowed by OMC_AGENT_TYPE_DENY; choose another agent type.`,
+    },
+  };
 }
 
 /**
@@ -812,13 +959,20 @@ function isModelRoutingContextEnabled(env = process.env) {
 // with no model at all (a general-purpose agent without one, an agent definition without a
 // `model:` field or with `inherit`): Jev's answer then sets the model and the effort as
 // usual. A call or an agent definition (plugin, project or user) that names any other
-// model, fable for example, is a deliberate choice and is still left alone.
+// model, fable for example, is a deliberate choice and is left alone, unless
+// OMC_JEV_MODEL_ROUTING_NAMED_MODELS=1 asks about those calls too.
 function isUnpinnedModel(model) {
   return !model || String(model).trim().toLowerCase() === 'inherit';
 }
 
 function isModelRoutingAllAgentsEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_ALL_AGENTS ?? '').trim().toLowerCase());
+}
+
+// OMC_JEV_MODEL_ROUTING_NAMED_MODELS=1 also asks about a call whose model (its own, an
+// agents.<name>.model override or an agent definition) is none of the models Jev may choose.
+function isModelRoutingNamedModelsEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_NAMED_MODELS ?? '').trim().toLowerCase());
 }
 
 // OMC_JEV_MODEL_ROUTING_HINTS=1 adds the routing hints to the model-routing questions.
@@ -836,9 +990,10 @@ function isModelRoutingFableOptinEnabled(env = process.env) {
 function readNativeAgentDefinitionModel(subagentType, directory) {
   const fromPlugin = readAgentDefinitionModel(subagentType);
   if (fromPlugin || typeof subagentType !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(subagentType)) return fromPlugin;
+  // The first definition file found wins, with or without a model: a missing field does not
+  // let a lower-priority definition of the same name take over.
   for (const agentsDir of [join(directory || process.cwd(), '.claude', 'agents'), join(getClaudeConfigDir(), 'agents')]) {
-    const model = readAgentDefinitionModel(subagentType, agentsDir);
-    if (model) return model;
+    if (existsSync(join(agentsDir, `${subagentType}.md`))) return readAgentDefinitionModel(subagentType, agentsDir);
   }
   return null;
 }
@@ -962,6 +1117,113 @@ function recordModelRoutingOverride(stateDir, row) {
   }
 }
 
+// A `fork` call is not asked about. While the model-routing point is on (shadow or active), such a
+// call gets one skipped row and no question, and a `use` marker on it is not applied.
+function recordJevForkSkipRow(data, toolInput, stateDir) {
+  try {
+    const dir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
+    mkdirSync(dir, { recursive: true });
+    rotateJevLog(join(dir, 'shadow.jsonl'), resolveJevLogMaxBytes(process.env));
+    appendFileSync(join(dir, 'shadow.jsonl'), JSON.stringify({
+      ts: new Date().toISOString(),
+      point: 'model-routing',
+      ...(isJevLogContextEnabled(process.env) ? jevLogContextOf(data) : {}),
+      subagent_type: typeof toolInput.subagent_type === 'string' ? toolInput.subagent_type.slice(0, 200) : null,
+      skipped: 'fork',
+      ...(isJevRowTelemetryEnabled(process.env) ? JEV_ROW_NO_ANSWER : {}),
+      durationMs: 0,
+    }) + '\n', 'utf8');
+  } catch {
+    // Best-effort logging: a logging failure never affects the call.
+  }
+}
+
+// Pointer expansion (OMC_JEV_POINTER_EXPAND=1): for a short Agent/Task prompt (under 600 characters)
+// that contains an absolute path to a .md file, the head (up to 8000 characters) of the file named
+// by the first such path is appended to the prompt in the Jev state; the prompt itself and the call
+// are not changed. Only files
+// under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (separated by the platform path
+// delimiter, empty by default, so nothing is read) are expanded. A file whose canonical path looks secret
+// (scripts/lib/jev-pointer-secret-path.mjs: SSH keys, env files, credential and token files, key stores), a
+// settings*.json file, and any file under a directory listed in OMC_JEV_POINTER_EXPAND_SECRET_DIRS is never
+// read. The excerpt is sent UNMASKED to the configured Jev endpoint: state masking is a separate change, so
+// the content leaves the machine as is.
+// Any failure leaves the prompt unchanged and sets the reason in the pointer telemetry (written to
+// the shadow line with OMC_JEV_ROW_TELEMETRY).
+const POINTER_MAX_PROMPT_CHARS = 600;
+const POINTER_MAX_EXCERPT_CHARS = 8000;
+const POINTER_MAX_FILE_BYTES = 1024 * 1024;
+const POINTER_BINARY_SCAN_BYTES = 8192;
+const POINTER_PATH_RE = /(?<![\w.\-/:~])\/[\w.\-/\p{L}]+\.md(?![.\w])/u;
+function isPointerExpandEnabled(env = process.env) {
+  return String(env.OMC_JEV_POINTER_EXPAND ?? '').trim() === '1';
+}
+function pointerDirList(value) {
+  return String(value ?? '').split(delimiter).map((dir) => dir.trim()).filter(Boolean)
+    .flatMap((dir) => {
+      try {
+        return [realpathSync(dir)];
+      } catch {
+        return [];
+      }
+    });
+}
+function pointerExpandRoots(env = process.env) {
+  return pointerDirList(env.OMC_JEV_POINTER_EXPAND_DIRS);
+}
+// Directories whose files are never expanded, in addition to the built-in secret path patterns
+// (OMC_JEV_POINTER_EXPAND_SECRET_DIRS, same format as OMC_JEV_POINTER_EXPAND_DIRS, empty by default).
+function pointerSecretDirs(env = process.env) {
+  return pointerDirList(env.OMC_JEV_POINTER_EXPAND_SECRET_DIRS);
+}
+// Check if a canonical path is contained within a directory (handles filesystem roots safely).
+function isPathInDirectory(canonicalPath, directory) {
+  if (canonicalPath === directory) return true;
+  // Handle root directory case: '/' + '/' = '//', but '/etc/passwd' starts with '/', not '//'
+  if (directory === sep) return canonicalPath.startsWith(sep);
+  return canonicalPath.startsWith(directory + sep);
+}
+
+// `pointer` is the telemetry object of the row ({ expanded, unexpanded }); undefined when the
+// switch is off, in which case the prompt passes through untouched.
+function expandTaskPointer(prompt, pointer) {
+  if (!pointer || typeof prompt !== 'string' || prompt.length === 0 || prompt.length >= POINTER_MAX_PROMPT_CHARS) return prompt;
+  const named = prompt.match(POINTER_PATH_RE)?.[0];
+  if (!named) return prompt;
+  try {
+    const stat = statSync(named);
+    if (!stat.isFile()) {
+      pointer.unexpanded = 'directory';
+      return prompt;
+    }
+    if (stat.size > POINTER_MAX_FILE_BYTES) {
+      pointer.unexpanded = 'too-large';
+      return prompt;
+    }
+    // Canonicalize before the exclusions, so a symlink or a ".." segment cannot dodge them.
+    const real = realpathSync(named);
+    if (pointerSecretPath(real) || /^settings.*\.json$/i.test(basename(real)) || pointerSecretDirs().some((dir) => isPathInDirectory(real, dir))) {
+      pointer.unexpanded = 'secret-path';
+      return prompt;
+    }
+    const roots = pointerExpandRoots();
+    if (!roots.some((root) => isPathInDirectory(real, root))) {
+      pointer.unexpanded = 'outside-allowed-dirs';
+      return prompt;
+    }
+    const content = readFileSync(real);
+    if (content.subarray(0, POINTER_BINARY_SCAN_BYTES).includes(0)) {
+      pointer.unexpanded = 'binary';
+      return prompt;
+    }
+    pointer.expanded = true;
+    return prompt + '\n\n[source file: ' + real + ', head of file]\n' + content.toString('utf8').slice(0, POINTER_MAX_EXCERPT_CHARS);
+  } catch (error) {
+    pointer.unexpanded = error?.code === 'ENOENT' ? 'missing' : 'read-error';
+    return prompt;
+  }
+}
+
 function boundModelRoutingInput(toolInput) {
   const bounded = {};
   for (const key of ['description', 'prompt', 'subagent_type', 'model', 'effort', 'resume']) {
@@ -976,13 +1238,18 @@ function boundModelRoutingInput(toolInput) {
   return bounded;
 }
 
-function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir, toolUseId, inheritedModel = null) {
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory, sessionId, stateDir, toolUseId, inheritedModel = null, data = undefined) {
+  if (toolInput.subagent_type === 'fork' && isJevShadowOptedIn('model-routing', process.env, permissionMode)) {
+    recordJevForkSkipRow(data, toolInput, stateDir);
+    return;
+  }
   const incomingUpdated = updatedToolInput;
   // OMC_JEV_MODEL_ROUTING_MARKER: a `use` line in the prompt pins the model and/or the effort.
   // The marker is the caller's own instruction, so it works whether or not the point is on;
   // Jev is then asked only the questions the marker leaves open.
   const marker = isModelRoutingMarkerEnabled() ? parseModelRoutingMarker(toolInput.prompt) : null;
-  if (marker?.model && isForceInheritEnabled() && !resolveTierAliasToSafeModel(marker.model)) {
+  const markerHadModel = Boolean(marker?.model);
+  if (marker?.model && isForceInheritEnabled() && !resolveTierAliasToSafeModel(marker.model, true)) {
     // A tier alias the provider cannot resolve is not set (the marker then sets no model).
     marker.rejected.push('force-inherit');
     marker.model = undefined;
@@ -991,8 +1258,9 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   const jevOptedIn = isJevShadowOptedIn('model-routing', process.env, permissionMode);
   if (!jevOptedIn && !marker) return;
 
-  // Jev judges the task without the marker line.
-  const originalInput = boundModelRoutingInput(markerApplies ? { ...toolInput, prompt: marker.prompt } : toolInput);
+  // Jev judges the task without the marker line, also when the marker's model was refused and
+  // still pins the call (the prompt of the call itself keeps the line then).
+  const originalInput = boundModelRoutingInput(markerApplies || markerHadModel ? { ...toolInput, prompt: marker.prompt } : toolInput);
   const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
   // A model from the marker counts as the call's model: Jev is asked the open questions
   // about a call whose model is known, whether the call or the marker named it.
@@ -1007,14 +1275,24 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   // definition is unpinned; only OMC_JEV_MODEL_ROUTING_ALL_AGENTS asks about those.
   const unpinned = !knownTier && isModelRoutingAllAgentsEnabled()
     && isUnpinnedModel(selectedModel || readNativeAgentDefinitionModel(originalInput.subagent_type, directory));
-  if (!knownTier && !unpinned && !marker) return;
+  // With OMC_JEV_MODEL_ROUTING_NAMED_MODELS a call that names a model other than haiku, sonnet
+  // or opus (fable, a non-Claude model) is asked about as well, whether or not
+  // OMC_JEV_MODEL_ROUTING_FABLE adds fable to the answers. A model from the marker counts as the
+  // call's model, as for a known tier, so Jev is asked only the effort question.
+  const namedModel = isModelRoutingNamedModelsEnabled()
+    ? selectedModel || readNativeAgentDefinitionModel(originalInput.subagent_type, directory)
+    : null;
+  const named = !knownTier && Boolean(namedModel) && String(namedModel).trim() !== '' && !isUnpinnedModel(namedModel)
+    && !['haiku', 'sonnet', 'opus'].includes(isTierAlias(namedModel) ? namedModel.toLowerCase() : normalizeToCcAlias(namedModel));
+  if (!knownTier && !unpinned && !named && !marker) return;
 
   // What the marker settles is not asked: a model leaves the effort question, an effort
   // leaves the model-tier question, both leave no question and no Jev request at all.
   const questions = { ...MODEL_ROUTING_QUESTIONS };
-  if (marker?.model) delete questions['model-tier'];
+  // A marker model that forceInherit refused still pins a named call: Jev does not replace its model.
+  if (marker?.model || (markerHadModel && named)) delete questions['model-tier'];
   if (marker?.effort) delete questions.effort;
-  const askJev = jevOptedIn && (knownTier || unpinned) && Object.keys(questions).length > 0;
+  const askJev = jevOptedIn && (knownTier || unpinned || named) && Object.keys(questions).length > 0;
 
   // No twin tier for a call without a known model: nothing comparable to log.
   const heuristic = knownTier ? model : null;
@@ -1028,18 +1306,20 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     };
   }
 
+  const pointer = isPointerExpandEnabled() ? { expanded: false, unexpanded: null } : undefined;
   const jevResult = !askJev ? undefined : recordJevShadow({
     point: 'model-routing',
     state: {
       tool_name: toolName,
       subagent_type: originalInput.subagent_type || '',
-      task: originalInput.prompt || '',
+      task: expandTaskPointer(originalInput.prompt || '', pointer),
       ...context,
     },
     questions,
     heuristic,
     permissionMode,
     toolUseId,
+    pointer,
   });
 
   const ensureUpdated = () => {
@@ -1064,12 +1344,16 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // With forceInherit a call without a model deliberately inherits the session model,
     // and a tier alias the provider cannot resolve is denied: set the alias on such a call
     // only when it resolves to a provider model.
-    const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice);
+    // A call that names a model keeps it, and only gets the effort, where the provider is not
+    // Claude or forceInherit is on and does not resolve the alias, and where a marker model that
+    // forceInherit refused still pins the call.
+    const inheritsSessionModel = unpinned && isForceInheritEnabled() && !resolveTierAliasToSafeModel(jevChoice, true);
+    const keepsNamedModel = named && (markerHadModel || ((isNonClaudeProviderEnv(true) || isForceInheritEnabled()) && !resolveTierAliasToSafeModel(jevChoice, true, true)));
     const allowedJevChoices = ['haiku', 'sonnet', 'opus'];
     if (isModelRoutingFableOptinEnabled()) {
       allowedJevChoices.push('fable');
     }
-    if (jevChoice && allowedJevChoices.includes(jevChoice) && !inheritsSessionModel) {
+    if (jevChoice && allowedJevChoices.includes(jevChoice) && !inheritsSessionModel && !keepsNamedModel) {
       ensureUpdated().model = jevChoice;
     }
 
@@ -1091,7 +1375,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // resolve to a different version.
     const baselineModel = inheritsSession
       ? inheritedModel
-      : knownTier && !isTierAlias(selectedModel) ? selectedModel : knownTier ? model : modifiedInput.model;
+      : knownTier && !isTierAlias(selectedModel) ? selectedModel : knownTier ? model : named ? namedModel : modifiedInput.model;
     // Resolve the baseline effort: the effort the call would run on without Jev, checking
     // explicit call effort, agent definition effort, and inherited session effort in order.
     // Use the original baseEffort saved before any modifications, but resolve inherited values.
@@ -1100,7 +1384,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     // an inherited effort stays as it is and a Jev change from it is recorded.
     const explicitEffort = typeof baseEffort === 'string' && isMaxEffortAlwaysEnabled() ? capEffort(baseEffort, maxEffort()) : baseEffort;
     const baselineEffort = explicitEffort || resolveBaselineEffort(undefined, originalInput.subagent_type, directory);
-    noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type, typeof toolInput.name === 'string' && toolInput.name.trim() !== '');
+    noteJevRouting({ model: baselineModel, effort: baselineEffort }, updatedToolInput, answers, originalInput.subagent_type, typeof toolInput.name === 'string' && toolInput.name.trim() !== '', jevResult?.jevModel);
   }
 
   // The marker wins over the call's own values and over Jev's answers. The effort is still
@@ -1127,6 +1411,58 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
       target.prompt = marker.prompt;
     }
     recordModelRoutingOverride(stateDir, row);
+    // OMC_JEV_ROW_TELEMETRY: the applied line of a marker. A marker that changed the call is the cause of one
+    // line for the whole decision, each value with its source (marker, jev, explicit, heuristic); like a Jev
+    // answer it is written by flushJevRouting once the output carries the decided values, and it replaces any
+    // pending Jev line. A refused marker (`use max`, or a model force-inherit refuses) that sets nothing leaves
+    // its own line, unless Jev's answer changed the call: then the marker fields join the Jev line.
+    if (isJevRowTelemetryEnabled() && isJevAppliedLogEnabled()) {
+      const refusedText = marker.rejected.join(',');
+      const jevApplied = pendingJevRouting ?? {};
+      if (markerApplies) {
+        const cap = maxEffort();
+        const teamMember = typeof toolInput.name === 'string' && toolInput.name.trim() !== '';
+        const line = {
+          override: row.override,
+          marker: marker.line,
+          ...(refusedText ? { override_rejected: refusedText } : {}),
+        };
+        let appliedModel;
+        let appliedEffort;
+        if (marker.model) appliedModel = { from: baseModel ?? null, to: marker.model, source: 'marker' };
+        else if (jevApplied.model) appliedModel = { ...jevApplied.model, source: 'jev' };
+        else if (baseModel) appliedModel = { from: baseModel, to: baseModel, source: 'explicit' };
+        else if (knownTier) appliedModel = { from: null, to: model, source: 'heuristic' };
+        if (marker.effort) {
+          const to = capEffort(marker.effort, cap);
+          appliedEffort = { from: baseEffort ?? null, to, source: 'marker', ...(to !== marker.effort ? { capped: true, requested: marker.effort } : {}) };
+        } else if (jevApplied.effort) appliedEffort = { ...jevApplied.effort, source: 'jev' };
+        else if (typeof baseEffort === 'string') appliedEffort = { from: baseEffort, to: baseEffort, source: 'explicit' };
+        if (appliedEffort && teamMember) appliedEffort.delivered = 'unknown-team-member';
+        pendingJevRouting = {
+          subagent_type: originalInput.subagent_type || null,
+          cause: JEV_APPLIED_CAUSES.marker,
+          markerLine: line,
+          ...(appliedModel ? { model: appliedModel } : {}),
+          ...(appliedEffort ? { effort: appliedEffort } : {}),
+          ...(jevResult?.jevModel ? { jevModel: jevResult.jevModel } : {}),
+          fallbackLogDir: join(stateDir, 'jev'),
+        };
+      } else if (refusedText) {
+        const refusedLine = { marker: marker.line, override_rejected: refusedText };
+        if (pendingJevRouting) {
+          pendingJevRouting.refusedLine = refusedLine;
+        } else {
+          recordJevApplied(
+            'model-routing',
+            { subagent_type: originalInput.subagent_type || null, cause: JEV_APPLIED_CAUSES.marker, ...refusedLine },
+            undefined,
+            jevResult?.jevModel ? { jev_model: jevResult.jevModel } : {},
+            join(stateDir, 'jev'),
+          );
+        }
+      }
+    }
   }
 
   // A copy of the call's input that no answer and no marker changed is not sent back: an
@@ -1148,7 +1484,12 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
 // alone is the cap's doing, not Jev's, and is not recorded.
 let pendingJevRouting;
 
-function noteJevRouting(before, updated, answers, subagentType, teamMember = false) {
+// OMC_JEV_ROW_TELEMETRY: the closed list of values of the `cause` field of a model-routing applied.jsonl line.
+// Today the hook writes `jev` (the answer decided) and `marker` (the `use` marker decided); `breaker` and
+// `no-answer` are reserved for later rows.
+const JEV_APPLIED_CAUSES = { jev: 'jev', marker: 'marker', breaker: 'breaker', noAnswer: 'no-answer' };
+
+function noteJevRouting(before, updated, answers, subagentType, teamMember = false, jevModel) {
   pendingJevRouting = undefined;
   if (!updated || !isJevAppliedLogEnabled()) return;
   const applied = {};
@@ -1182,7 +1523,7 @@ function noteJevRouting(before, updated, answers, subagentType, teamMember = fal
       ...(teamMember ? { delivered: 'unknown-team-member' } : {}),
     };
   }
-  if (applied.model || applied.effort) pendingJevRouting = { subagent_type: subagentType || null, ...applied };
+  if (applied.model || applied.effort) pendingJevRouting = { subagent_type: subagentType || null, ...applied, ...(jevModel ? { jevModel } : {}) };
 }
 
 function flushJevRouting(output) {
@@ -1192,12 +1533,23 @@ function flushJevRouting(output) {
   try {
     const sent = output?.hookSpecificOutput?.updatedInput;
     if (!sent || typeof sent !== 'object') return;
-    const { subagent_type, model, effort } = pending;
+    const { subagent_type, model, effort, jevModel, cause, refusedLine, markerLine, fallbackLogDir } = pending;
+    const telemetry = isJevRowTelemetryEnabled();
+    if (markerLine) {
+      // A marker line is written whole, but only when every value the marker or Jev decided is in the
+      // output; values the call already had (explicit) or the agent definition gives (heuristic) are listed, not required.
+      const decided = (entry) => entry && entry.source !== 'explicit' && entry.source !== 'heuristic';
+      if ((decided(model) && sent.model !== model.to) || (decided(effort) && sent.effort !== effort.to)) return;
+      recordJevApplied('model-routing', { subagent_type, cause, ...markerLine, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }, undefined, jevModel ? { jev_model: jevModel } : {}, fallbackLogDir);
+      return;
+    }
     const carried = {
       ...(model && sent.model === model.to ? { model } : {}),
       ...(effort && sent.effort === effort.to ? { effort } : {}),
     };
-    if (carried.model || carried.effort) recordJevApplied('model-routing', { subagent_type, ...carried });
+    if (carried.model || carried.effort) {
+      recordJevApplied('model-routing', { subagent_type, ...carried, ...(telemetry ? { cause: cause ?? JEV_APPLIED_CAUSES.jev, ...(refusedLine ?? {}) } : {}) }, undefined, telemetry && jevModel ? { jev_model: jevModel } : {});
+    }
   } catch {
     // The applied log is advisory: it must never cost the hook its output.
   }
@@ -1909,8 +2261,11 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
 
   const expected = getExpectedUltragoalObjective(state, directory);
   const actual = extractClaudeGoalSnapshot(data, sessionId, directory);
-  const actualObjective = normalizeText(actual?.objective);
-  const expectedObjective = normalizeText(expected);
+  // With the text cleaning switch on the deny reason shows the expected objective cleaned and not cut, so the objectives are
+  // compared in their cleaned form: a goal typed from that text matches an expected objective that contains a removed character.
+  const comparable = (value) => normalizeText(contextText && typeof value === 'string' ? contextText.cleanHostText(value, Infinity) : value);
+  const actualObjective = comparable(actual?.objective);
+  const expectedObjective = comparable(expected);
   const status = normalizePhase(actual?.status);
   const objectiveMatches = Boolean(actualObjective && expectedObjective && actualObjective === expectedObjective);
   const activeStatus = status === '' || status === 'active' || status === 'in_progress' || status === 'running';
@@ -1925,9 +2280,12 @@ function evaluateUltragoalPreToolEnforcement(stateDir, directory, sessionId, dat
   if (objectiveMatches && activeStatus) return null;
 
   const mismatch = actualObjective
-    ? `current Claude /goal appears unrelated: "${actual.objective}".`
+    ? `current Claude /goal appears unrelated: "${contextText ? contextText.cleanHostText(actual.objective) : actual.objective}".`
     : 'no active Claude /goal snapshot was visible to the hook.';
-  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expected || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
+  // The expected objective is a value that the model has to give back in full, so the bound on the output does not cut it.
+  const expectedText = contextText ? contextText.cleanHostText(expected, Infinity) : expected;
+  if (contextText && expectedText) wholeTexts.push(expectedText);
+  return `[ULTRAGOAL /GOAL REQUIRED] Active ultragoal state requires the matching Claude /goal before tools run; ${mismatch} Activate /goal with the ultragoal objective, or set ALLOW_ULTRAGOAL_WITHOUT_GOAL=1 to bypass this guard intentionally. Expected objective: ${expectedText || '<record one in ultragoal-state.json or .omc/ultragoal/goals.json>'}`;
 }
 
 function hasActiveJsonMode(stateDir, { allowSessionTagged = false } = {}) {
@@ -2362,6 +2720,11 @@ ${hookOutput.additionalContext}`
 
 function emitPreToolUseOutput(output, input, space = 0) {
   output = withShellCheckContext(output);
+  // With the text cleaning switch on, every text of the output (a refusal, a model routing notice, the shell check warnings, the
+  // reminders) is cleaned and bounded here, at the one place where the hook emits, so that no branch can skip it. updatedInput,
+  // the decision and the flags are not touched; a text that the model has to give back in full (wholeTexts) is not cut. With
+  // the switch off the output is written as it is.
+  if (contextText) output = contextText.cleanHookOutput(output, { whole: wholeTexts });
   flushJevRouting(output);
   if (!isCodexPreToolUse(input)) {
     console.log(JSON.stringify(output, null, space));
@@ -2411,6 +2774,176 @@ function emitPreToolUseOutput(output, input, space = 0) {
   }
 }
 
+// Opt-in text cleaning (OMC_CONTEXT_TEXT_SANITIZE=1 or true): the /goal objective and the expected objective are cleaned in the
+// deny reason, and every output of the hook is cleaned and bounded in emitPreToolUseOutput, only when the switch is on. main()
+// loads the module right after it reads the input; with the switch off nothing is imported.
+let contextText = null;
+// Texts that a refusal asks the model to give back exactly (the expected /goal objective): cleanHookOutput does not cut them.
+const wholeTexts = [];
+// Plan write guard (opt-in, OMC_PLANNER_WRITE_GUARD=1): a Write, Edit, MultiEdit or NotebookEdit call made inside a
+// subagent whose agent_type is in the guarded list is denied unless the target is a Markdown file under <cwd>/.omc/plans/.
+// The list comes from OMC_PLANNER_WRITE_GUARD_TYPES (comma separated, exact match after trimming; default:
+// oh-my-claudecode:planner). Calls without agent_type and calls of other agent types pass. The path is normalized
+// lexically first. The raw path and the normalized path are then walked from the working directory the way the kernel
+// resolves them (see walkKernelPath), also when the plans directory does not exist yet, and the last component is followed
+// one link at a time (see planEntryAllowed): every entry on the way must be a path that ends in .md inside the real plans directory, and the
+// entry that ends the chain must be a regular file or must not exist yet. A link that cannot be resolved, a link that loops
+// and a directory are denied. Every text among file_path, filePath, notebook_path, path and file (the names the hooks of
+// this plugin read), in tool_input and in toolInput, must pass, because the tool may act on any of them; a call with none of
+// them readable passes. The agent is guarded when agent_type or agentType is in the list. Anything else unreadable passes
+// (fail-open). With the guard on, each call of a guarded tool adds one row to
+// plan-write-guard.jsonl in OMC_JEV_LOG_DIR or <state dir>/jev, with decision allow or deny; a call without agent_type or
+// with another agent_type adds one row with decision allow and a reason.
+const PLAN_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const PLAN_WRITE_DIR = join('.omc', 'plans');
+const PLAN_WRITE_EXT = '.md';
+const PLAN_WRITE_PATH_FIELDS = ['file_path', 'filePath', 'notebook_path', 'path', 'file'];
+const PLAN_WRITE_MAX_LINKS = 40;
+const PLAN_WRITE_DEFAULT_TYPES = ['oh-my-claudecode:planner'];
+
+function planWriteGuardTypes(env = process.env) {
+  const list = String(env.OMC_PLANNER_WRITE_GUARD_TYPES ?? '').split(',').map((name) => name.trim()).filter(Boolean);
+  return list.length > 0 ? list : PLAN_WRITE_DEFAULT_TYPES;
+}
+
+// The path the kernel reaches for `filePath`, walked from `cwd` one component at a time on the raw text: a link is followed
+// where it stands, so ".." after a link goes to the parent of the link target, not to the parent of the link. A component that
+// does not exist has no link below it; the rest is walked as text and a ".." after it only removes it again. With `followLast`
+// false the last component is not followed: the result is the real path of its directory joined with its name, which may be a
+// link. Returns null when a component cannot be resolved (a link that dangles or loops, a file used as a directory).
+function walkKernelPath(filePath, cwd, followLast = true) {
+  try {
+    const root = isAbsolute(filePath) ? parse(filePath).root : '';
+    let current = realpathSync.native(root || cwd);
+    let missing = 0;
+    const parts = filePath.slice(root.length).split(process.platform === 'win32' ? /[\\/]+/ : /\/+/).filter((part) => part !== '' && part !== '.');
+    for (const [index, part] of parts.entries()) {
+      if (part === '..') {
+        current = dirname(current);
+        if (missing > 0) missing -= 1;
+        continue;
+      }
+      const next = join(current, part);
+      if (missing === 0) {
+        try {
+          lstatSync(next);
+        } catch (error) {
+          if (error?.code !== 'ENOENT') return null;
+          missing = 1;
+          current = next;
+          continue;
+        }
+        current = followLast || index < parts.length - 1 ? realpathSync.native(next) : next;
+      } else {
+        missing += 1;
+        current = next;
+      }
+    }
+    return current;
+  } catch {
+    return null;
+  }
+}
+
+// A real directory and a name: the entry the tool opens is that name, followed through every link the way the kernel does,
+// one link at a time (the Linux limit is 40). Every entry on the way must be inside the real plans directory and end in
+// .md, so a link to a file of another extension, a link that leaves the plans directory and comes back, and a link to the
+// plans directory are denied, as are a link that dangles or loops. The entry that ends the chain must be a regular file; it
+// may be missing only when no link was followed, the way a new plan file is.
+function planEntryAllowed(entry, nativePlansDir) {
+  let current = entry;
+  for (let hop = 0; hop <= PLAN_WRITE_MAX_LINKS; hop += 1) {
+    if (current === null) return false;
+    const rel = relative(nativePlansDir, current);
+    if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !current.endsWith(PLAN_WRITE_EXT)) return false;
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch (error) {
+      return hop === 0 && error?.code === 'ENOENT';
+    }
+    if (!stat.isSymbolicLink()) return stat.isFile();
+    try {
+      current = walkKernelPath(readlinkSync(current), dirname(current), false);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function planWritePathAllowed(filePath, cwd) {
+  const plansDir = resolve(cwd, PLAN_WRITE_DIR);
+  const target = resolve(cwd, filePath);
+  const rel = relative(plansDir, target);
+  if (rel === '' || rel.split(sep)[0] === '..' || isAbsolute(rel) || !rel.endsWith(PLAN_WRITE_EXT)) return false;
+  // The plans directory as the kernel reaches it, also when it does not exist yet: the existing part is resolved, the rest
+  // stays text, so the raw walks below run in every case. A part that cannot be resolved is a denial.
+  const nativePlansDir = walkKernelPath(plansDir, cwd);
+  if (nativePlansDir === null) return false;
+  // The raw path as the kernel resolves it must end inside the real plans directory: a link followed by ".." in the input
+  // must not lead out of it, whether the link comes before or after the plans directory in the path. The normalized target is
+  // checked the same way, for a caller that normalizes the path before it opens it.
+  return planEntryAllowed(walkKernelPath(filePath, cwd, false), nativePlansDir)
+    && planEntryAllowed(walkKernelPath(target, cwd, false), nativePlansDir);
+}
+
+function appendPlanWriteGuardRow(data, toolName, stateDir, row) {
+  try {
+    const logDir = process.env.OMC_JEV_LOG_DIR || join(stateDir, 'jev');
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join(logDir, 'plan-write-guard.jsonl');
+    rotateJevLog(logPath, resolveJevLogMaxBytes(process.env));
+    appendFileSync(logPath, JSON.stringify({
+      ts: new Date().toISOString(),
+      point: 'plan-write-guard',
+      ...jevLogContextOf(data),
+      tool_name: toolName,
+      ...row,
+    }) + '\n', 'utf8');
+  } catch { /* logging never breaks the hook */ }
+}
+
+function evaluatePlanWriteGuard(toolName, data, directory, stateDir) {
+  if (process.env.OMC_PLANNER_WRITE_GUARD !== '1' || !PLAN_WRITE_TOOLS.has(toolName)) return null;
+  try {
+    const guardedTypes = planWriteGuardTypes();
+    const agentTypes = [data?.agent_type, data?.agentType].filter((value) => typeof value === 'string').map((value) => value.trim()).filter(Boolean);
+    const agentType = agentTypes.find((name) => guardedTypes.includes(name)) ?? agentTypes[0] ?? '';
+    if (!agentType || !guardedTypes.includes(agentType)) {
+      appendPlanWriteGuardRow(data, toolName, stateDir, {
+        agent_type: agentType ? agentType.slice(0, 200) : null,
+        decision: 'allow',
+        reason: agentType ? 'agent_type not guarded' : 'no agent_type',
+      });
+      return null;
+    }
+    const filePaths = [data.tool_input, data.toolInput]
+      .filter((input) => input !== null && typeof input === 'object' && !Array.isArray(input))
+      .flatMap((input) => PLAN_WRITE_PATH_FIELDS.map((field) => input[field]))
+      .filter((value) => typeof value === 'string' && value.trim() !== '');
+    if (filePaths.length === 0) return null;
+    const cwd = typeof data.cwd === 'string' && data.cwd !== '' ? data.cwd : directory;
+    const deniedPath = filePaths.find((candidate) => !planWritePathAllowed(candidate, cwd));
+    const allowed = deniedPath === undefined;
+    const filePath = deniedPath ?? filePaths[0];
+    appendPlanWriteGuardRow(data, toolName, stateDir, {
+      agent_type: agentType.slice(0, 200),
+      path: filePath.slice(0, 300),
+      decision: allowed ? 'allow' : 'deny',
+    });
+    if (allowed) return null;
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: `[PLAN WRITE GUARD] The planner may write only Markdown files under ${PLAN_WRITE_DIR}/ (denied: "${filePath.slice(0, 200)}"). Write the plan to ${PLAN_WRITE_DIR}/<name>${PLAN_WRITE_EXT} instead.`,
+      },
+    };
+  } catch { return null; }
+}
+
 async function main() {
   // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
   const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
@@ -2423,6 +2956,7 @@ async function main() {
   let input = '';
   try {
     input = await readStdin();
+    contextText = await loadContextText();
 
     const toolName = extractJsonField(input, 'tool_name') || extractJsonField(input, 'toolName', 'unknown');
     const directory = extractJsonField(input, 'cwd') || extractJsonField(input, 'directory', process.cwd());
@@ -2437,6 +2971,15 @@ async function main() {
     data = {};
     try { data = JSON.parse(input); } catch {}
     await setJevHookContext(data);
+
+    // Opt-in plan write guard (OMC_PLANNER_WRITE_GUARD=1): the planner may write only plan files.
+    if (PLAN_WRITE_TOOLS.has(toolName)) {
+      const planWriteDeny = evaluatePlanWriteGuard(toolName, data, directory, stateDir);
+      if (planWriteDeny) {
+        emitPreToolUseOutput(planWriteDeny, data);
+        return;
+      }
+    }
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands. Fail-open: any error here
     // leaves the hook behaving as without the checks.
@@ -2514,6 +3057,12 @@ async function main() {
     //   DENY  no-model calls when the session model itself has [1m] — guide to OMC_SUBAGENT_MODEL
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
+      // Agent-type deny list (OMC_AGENT_TYPE_DENY): before any Jev query and before model routing.
+      const agentTypeDeny = evaluateForbiddenAgentType(toolName, data, stateDir);
+      if (agentTypeDeny) {
+        emitPreToolUseOutput(agentTypeDeny, data);
+        return;
+      }
       // Skill vs agent namespace guard (issue #3667): deny BEFORE the native
       // boundary when a bundled skill name is passed as subagent_type, with an
       // error that names the Skill tool and the correct identifier.
@@ -2638,7 +3187,7 @@ async function main() {
         const anthropicModel = process.env.ANTHROPIC_MODEL || '';
         inheritedModel = claudeModel || anthropicModel || null;
       }
-      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir, data.tool_use_id || data.toolUseID, inheritedModel);
+      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory, data.session_id || data.sessionId || '', stateDir, data.tool_use_id || data.toolUseID, inheritedModel, data);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
       // Test-only: force exception after Jev routing is staged to verify catch path

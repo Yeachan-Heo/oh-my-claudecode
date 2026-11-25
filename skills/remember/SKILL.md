@@ -18,11 +18,15 @@ Promote durable, reusable knowledge into the right memory surface instead of lea
 
 ## Workflow
 1. Gather the relevant session findings.
-2. Classify each item:
-   - durable project fact
-   - temporary working note
+2. Classify each item. When there is more to keep than room for, select in
+   this order: the user's mistakes and corrections first, then preferences
+   and instructions, then durable facts, then duplicates and conflicts to
+   clean up:
+   - user mistake or correction (what went wrong and what the user wants instead)
    - operator preference or instruction
+   - durable project fact
    - duplicate / stale / conflicting information
+   - temporary working note (notepad, not project memory)
 3. Propose the best destination for each item.
 4. Write or update only the appropriate memory surface.
 5. Call out duplicates or conflicts that should be cleaned up.
@@ -33,6 +37,14 @@ Promote durable, reusable knowledge into the right memory surface instead of lea
 - Prefer notepad for short-lived working context.
 - Keep entries concise and actionable.
 - If something is uncertain, mark it as uncertain rather than storing it as fact.
+- When the destination is a user memory note (a file under
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<project>/memory/`), set `metadata.source` (`user` only
+  with a quote of the user's words, otherwise `agent` or `inferred`), set
+  `metadata.expires` for dated state, and set `metadata.lastVerified` when
+  you checked the note against the repository or system. For a repeated
+  user correction, record the `count` field as described in `correct`.
+  The `metadata.*` fields and `count` are a convention for the note; the agent
+  that reads the note follows it, and no OMC code reads these fields.
 
 ## Output
 - What was stored

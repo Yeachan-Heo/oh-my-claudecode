@@ -1,11 +1,11 @@
 /**
  * Dispatch Queue - Low-level file-based dispatch request operations.
  *
- * Manages dispatch/requests.json with atomic read/write, dedup, and
- * directory-based locking (O_EXCL mkdir) with stale lock detection.
+ * Manages dispatch/requests.json with atomic read/write, dedup, and a
+ * process-identity file lock that is reclaimed only from a dead holder.
  *
  * State file: .omc/state/team/{name}/dispatch/requests.json
- * Lock path:  .omc/state/team/{name}/dispatch/.lock/
+ * Lock paths: .omc/state/team/{name}/dispatch/requests.lock, then dispatch/.lock/
  *
  * Mirrors OMX src/team/state/dispatch.ts behavior exactly.
  */
@@ -97,6 +97,19 @@ export type PatchPendingDispatchReasonResult = {
 } | {
     kind: 'write_failed';
 };
+export type DispatchStoreInvalidReason = 'unreadable' | 'json' | 'non_array';
+/** Thrown by writers instead of replacing a requests.json they could not parse. */
+export declare class DispatchStoreInvalidError extends Error {
+    readonly path: string;
+    readonly reason: DispatchStoreInvalidReason;
+    constructor(path: string, reason: DispatchStoreInvalidReason);
+}
+/** Thrown when the team's dispatch lock stays held past the acquisition deadline. */
+export declare class DispatchLockTimeoutError extends Error {
+    constructor(teamName: string, timeoutMs: number);
+}
+/** Failures of the team's shared lock or store, which every other enqueue for the team would hit as well. */
+export declare function isTeamWideDispatchFailure(error: unknown): boolean;
 export declare function resolveDispatchLockTimeoutMs(env?: NodeJS.ProcessEnv): number;
 export declare function normalizeDispatchRequest(teamName: string, raw: Partial<TeamDispatchRequest>, nowIso?: string): TeamDispatchRequest | null;
 /**

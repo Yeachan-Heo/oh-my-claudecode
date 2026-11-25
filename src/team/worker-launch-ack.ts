@@ -732,6 +732,15 @@ export async function loadWorkerLaunchAttempt(input: {
   };
 }
 
+export function isValidCurrentWorkerLaunchRecord(
+  value: unknown,
+): value is WorkerLaunchIdentity & { runtime_cli_path: string; context?: WorkerLaunchContext } {
+  if (!isValidIdentity(value)) return false;
+  const record = value as WorkerLaunchIdentity & { runtime_cli_path?: unknown; context?: unknown };
+  return isExactText(record.runtime_cli_path)
+    && (record.context === undefined || isValidLaunchContext(record.context));
+}
+
 export async function loadCurrentWorkerLaunchAttempt(input: {
   cwd: string;
   teamName: string;
@@ -744,11 +753,10 @@ export async function loadCurrentWorkerLaunchAttempt(input: {
   try {
     return await withFileLock(lockPathFor(currentPath), async () => {
       const current = await readJson(currentPath);
-      if (current.kind !== 'value' || !isValidIdentity(current.value)) return null;
-      const record = current.value as WorkerLaunchIdentity & { runtime_cli_path?: unknown; context?: unknown };
+      if (current.kind !== 'value' || !isValidCurrentWorkerLaunchRecord(current.value)) return null;
+      const record = current.value;
       if (record.team_name !== input.teamName || record.instance_id !== input.instanceId || record.worker_name !== input.workerName
-        || record.provider !== input.provider || !isExactText(record.runtime_cli_path)
-        || (record.context !== undefined && !isValidLaunchContext(record.context))) return null;
+        || record.provider !== input.provider) return null;
       const attempt = await loadWorkerLaunchAttempt({
         cwd: input.cwd,
         teamName: input.teamName,

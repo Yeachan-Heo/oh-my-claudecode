@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import { getWorktreeProjectMemoryPath, ensureOmcDir, validateWorkingDirectory, } from '../lib/worktree-paths.js';
-import { loadProjectMemory, saveProjectMemory, addCustomNote, addDirective, } from '../hooks/project-memory/index.js';
+import { loadProjectMemory, saveProjectMemory, withProjectMemoryLock, addCustomNote, addDirective, } from '../hooks/project-memory/index.js';
 import { mergeProjectMemory } from '../lib/project-memory-merge.js';
 // ============================================================================
 // project_memory_read - Read project memory
@@ -86,27 +86,29 @@ export const projectMemoryWriteTool = {
             const root = validateWorkingDirectory(workingDirectory);
             // Ensure .omc directory exists
             ensureOmcDir('', root);
-            let finalMemory;
-            if (merge) {
-                const existing = await loadProjectMemory(root);
-                if (existing) {
-                    finalMemory = mergeProjectMemory(existing, memory);
+            await withProjectMemoryLock(root, async () => {
+                let finalMemory;
+                if (merge) {
+                    const existing = await loadProjectMemory(root);
+                    if (existing) {
+                        finalMemory = mergeProjectMemory(existing, memory);
+                    }
+                    else {
+                        finalMemory = memory;
+                    }
                 }
                 else {
                     finalMemory = memory;
                 }
-            }
-            else {
-                finalMemory = memory;
-            }
-            // Ensure required fields
-            if (!finalMemory.version)
-                finalMemory.version = '1.0.0';
-            if (!finalMemory.lastScanned)
-                finalMemory.lastScanned = Date.now();
-            if (!finalMemory.projectRoot)
-                finalMemory.projectRoot = root;
-            await saveProjectMemory(root, finalMemory);
+                // Ensure required fields
+                if (!finalMemory.version)
+                    finalMemory.version = '1.0.0';
+                if (!finalMemory.lastScanned)
+                    finalMemory.lastScanned = Date.now();
+                if (!finalMemory.projectRoot)
+                    finalMemory.projectRoot = root;
+                await saveProjectMemory(root, finalMemory);
+            });
             return {
                 content: [{
                         type: 'text',
@@ -183,31 +185,33 @@ export const projectMemoryAddDirectiveTool = {
         const { directive, context = '', priority = 'normal', workingDirectory } = args;
         try {
             const root = validateWorkingDirectory(workingDirectory);
-            // Ensure memory exists
-            const memory = await loadProjectMemory(root);
-            if (!memory) {
+            return await withProjectMemoryLock(root, async () => {
+                // Ensure memory exists
+                const memory = await loadProjectMemory(root);
+                if (!memory) {
+                    return {
+                        content: [{
+                                type: 'text',
+                                text: 'Project memory does not exist. Run a session first to auto-detect project environment.'
+                            }]
+                    };
+                }
+                const newDirective = {
+                    timestamp: Date.now(),
+                    directive,
+                    context,
+                    source: 'explicit',
+                    priority,
+                };
+                memory.userDirectives = addDirective(memory.userDirectives, newDirective);
+                await saveProjectMemory(root, memory);
                 return {
                     content: [{
                             type: 'text',
-                            text: 'Project memory does not exist. Run a session first to auto-detect project environment.'
+                            text: `Successfully added directive to project memory.\n\n- **Directive:** ${directive}\n- **Priority:** ${priority}\n- **Context:** ${context || '(none)'}`
                         }]
                 };
-            }
-            const newDirective = {
-                timestamp: Date.now(),
-                directive,
-                context,
-                source: 'explicit',
-                priority,
-            };
-            memory.userDirectives = addDirective(memory.userDirectives, newDirective);
-            await saveProjectMemory(root, memory);
-            return {
-                content: [{
-                        type: 'text',
-                        text: `Successfully added directive to project memory.\n\n- **Directive:** ${directive}\n- **Priority:** ${priority}\n- **Context:** ${context || '(none)'}`
-                    }]
-            };
+            });
         }
         catch (error) {
             return {

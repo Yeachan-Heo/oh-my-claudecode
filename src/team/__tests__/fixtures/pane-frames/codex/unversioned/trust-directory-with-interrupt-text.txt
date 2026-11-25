@@ -1,0 +1,5 @@
+Do you trust the contents of this directory?
+› 1. Yes, continue
+  2. No, quit
+esc to interrupt
+ctrl+c to stop
