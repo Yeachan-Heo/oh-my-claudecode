@@ -2248,6 +2248,43 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a relative entry of a PATH (of the command, of the env of settings.json) is looked up from each directory that the command names (cd DIR; PATH=bin audit), also with env -C, an entry of . or an empty one; a directory that does not exist adds nothing', () => {
+    const f = fixture('foreign-relative-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(join(hooks, 'bin'), { recursive: true });
+    const text = '#!/bin/sh\nexit 0\n';
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, file: string, env: Record<string, string> = {}) => {
+      writeFileSync(f.settings, JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: file, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const inBin = join(hooks, 'bin', 'audit');
+    const inHooks = join(hooks, 'audit');
+    // what the shell runs: the script in bin below the directory that cd made the working directory
+    const ran = (command: string, env: Record<string, string> = {}) => spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...env } }).stdout;
+    writeFileSync(inBin, '#!/bin/sh\necho bin\n', { mode: 0o755 });
+    writeFileSync(inHooks, '#!/bin/sh\necho here\n', { mode: 0o755 });
+    expect(ran(`cd ${hooks}; PATH=bin audit`), 'a relative entry after cd').toBe('bin\n');
+    expect(ran(`cd ${hooks}; PATH=. audit`), 'an entry of .').toBe('here\n');
+    expect(ran('cd ' + hooks + '; audit', { PATH: 'bin' }), 'a relative entry of the environment after cd').toBe('bin\n');
+    writeFileSync(inBin, text, { mode: 0o755 });
+    writeFileSync(inHooks, text, { mode: 0o755 });
+    const refused: Array<[string, string, Record<string, string>]> = [
+      [`cd ${hooks}; PATH=bin audit`, inBin, {}], [`env -C ${hooks} PATH=bin audit`, inBin, {}], [`cd ${hooks}; audit`, inBin, { PATH: 'bin' }],
+      [`cd ${hooks}; audit`, inBin, { PATH: '/usr/bin:bin' }], [`cd ${hooks}; PATH=. audit`, inHooks, {}], [`cd ${hooks}; PATH=:bin audit`, inBin, {}],
+      [`cd ${hooks}; PATH=./bin audit`, inBin, {}],
+    ];
+    for (const [command, file, env] of refused) {
+      const r = start(command, file, env);
+      expect(r.status, `${JSON.stringify(command)} with ${JSON.stringify(env)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${file}) and "program of another hook" (${file}) are the same file`);
+      expect(readText(file), `${command}: the program is intact`).toBe(text);
+    }
+    // a directory that does not exist is no directory of the command: nothing is added
+    expect(start(`cd ${join(f.dir, 'nonexistent')}; PATH=bin audit`, inBin).status, 'no such directory').toBe(0);
+  });
+
   it('a quoted word that starts with an operator character is a word and a file name (python3 \';audit\', \'&&audit\', \'|audit\', \'>audit\'); a real operator, quoted or not, is no file', () => {
     const f = fixture('foreign-operator-words', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
