@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
 import { hostname, networkInterfaces } from 'os';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, resolve, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
 
@@ -175,6 +175,16 @@ function runsThroughDanglingLink(path) {
   }
 }
 
+// The plugin root of a record of another host is spelled as that host sees it, and a profile can be mounted under another path there. One that
+// does not lie in the plugin cache of this configuration directory cannot be matched with a version here, so the registry is reported unavailable
+// (nothing is cleaned or relinked) while such a record exists, as scripts/omc-doctor.mjs stops the repair commands.
+function isUnmappableForeignRoot(record, configDir) {
+  if (!isForeignOwner(record)) return false;
+  const cache = pathIdentity(join(configDir, 'plugins', 'cache'));
+  const root = pathIdentity(record.pluginRoot);
+  return root !== cache && !root.startsWith(cache + sep);
+}
+
 export function readOccupiedPluginRoots(configDir, options = {}) {
   const probeBudget = Number.isFinite(options.probeTimeoutMs) ? Math.max(0, options.probeTimeoutMs) : undefined;
   const probeDeadline = probeBudget === undefined ? Infinity : Date.now() + probeBudget;
@@ -226,6 +236,7 @@ export function readOccupiedPluginRoots(configDir, options = {}) {
       try { unlinkSync(path); } catch {}
       continue;
     }
+    if (isUnmappableForeignRoot(record, configDir)) unavailable = true;
     roots.add(pathIdentity(record.pluginRoot));
   }
   return { roots, unavailable, identities: currentIdentities };

@@ -170,6 +170,30 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
     expect(existsSync(join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs'))).toBe(true);
   });
 
+  // A record of another host names its plugin root as that host sees it; a profile mounted under another path there gives a spelling that matches
+  // no version here, so the version that host still uses cannot be told and nothing is replaced by a link.
+  it('keeps old versions as real directories while a record of another host names a root that lies in no cache here', () => {
+    createFakeVersion('4.4.1');
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+    const registry = join(fakeHome, '.claude', '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    writeFileSync(join(registry, `${'a'.repeat(64)}.json`), JSON.stringify({
+      version: 1,
+      pid: 999999,
+      processStartIdentity: 'start',
+      pluginRoot: '/Users/b/.claude/plugins/cache/omc/oh-my-claudecode/4.4.1',
+      host: 'another-machine|id|pid:[4026539999]',
+      updatedAt: new Date().toISOString(),
+    }));
+
+    runSessionStart();
+
+    const v1Stat = lstatSync(join(fakeCacheBase, '4.4.1'));
+    expect(v1Stat.isSymbolicLink()).toBe(false);
+    expect(existsSync(join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs'))).toBe(true);
+  });
+
   it('with only 2 versions, no symlinks are created', () => {
     createFakeVersion('4.4.2');
     createFakeVersion('4.4.3');

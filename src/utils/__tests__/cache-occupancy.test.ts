@@ -86,6 +86,33 @@ describe('cache occupancy registry', () => {
     expect({ foreign: existsSync(foreign), foreignOtherStart: existsSync(foreignOtherStart), local: existsSync(local) }).toEqual({ foreign: true, foreignOtherStart: true, local: false });
   });
 
+  // A record of another host names its plugin root as that host sees it (a profile can be mounted under another path there). One that lies in no
+  // plugin cache of this configuration directory cannot be matched with a version here: the registry is unavailable, so no cleanup runs on it.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('reports the registry unavailable for a record of another host whose root lies in no cache here, for %s', async (_name, path) => {
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    const answers: Record<string, boolean> = {};
+    for (const [label, fields, root] of [
+      ['another host, root spelled as that host sees it', { host: 'another-machine|id|pid:[4026539999]' }, '/Users/b/.claude/plugins/cache/omc/oh-my-claudecode/4.4.1'],
+      ['another host, root in the cache here', { host: 'another-machine|id|pid:[4026539999]' }, join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.4.1')],
+      ['no host field, root outside the cache', {}, join(dir, 'checkout')],
+    ] as [string, Record<string, unknown>, string][]) {
+      for (const name of readdirSync(registry)) rmSync(join(registry, name));
+      writeFileSync(join(registry, `${'a'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: 'start', pluginRoot: root, updatedAt: new Date().toISOString(), ...fields }));
+      answers[label] = read(dir).unavailable;
+    }
+    expect(answers).toEqual({
+      'another host, root spelled as that host sees it': true,
+      'another host, root in the cache here': false,
+      'no host field, root outside the cache': false,
+    });
+  });
+
   // Two machines can report the same host name and the same PID namespace text; only the machine id tells them apart.
   it.each([
     ['typescript', null],

@@ -3,7 +3,7 @@ import { hostname, networkInterfaces } from 'os';
 import { mkdir, writeFile, rename, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
 import { execFileSync } from 'node:child_process';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, resolve, sep } from 'path';
 import { getClaudeConfigDir } from './config-dir.js';
 
 const REGISTRY_VERSION = 1;
@@ -187,6 +187,16 @@ function runsThroughDanglingLink(path: string): boolean {
   }
 }
 
+// The plugin root of a record of another host is spelled as that host sees it (a profile can be mounted under another path there); one that
+// does not lie in the plugin cache of this configuration directory cannot be matched with a version here, so the registry is reported
+// unavailable while such a record exists, as in scripts/lib/cache-occupancy.mjs.
+function isUnmappableForeignRoot(record: CacheOccupancyRecord, configDir: string): boolean {
+  if (!isForeignOwner(record)) return false;
+  const cache = pathIdentity(join(configDir, 'plugins', 'cache'));
+  const root = pathIdentity(record.pluginRoot);
+  return root !== cache && !root.startsWith(cache + sep);
+}
+
 export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), options: ReadOccupiedPluginRootsOptions = {}): { roots: Set<string>; unavailable: boolean; identities: Map<number, string> } {
   const directory = getCacheOccupancyDir(configDir);
   let names: string[];
@@ -237,6 +247,7 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), option
     if (currentIdentity && currentIdentity !== record.processStartIdentity && !isForeignOwner(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     // A live process whose identity cannot be read (including EPERM) is retained
     // conservatively; only a proven-dead PID or proven mismatch self-invalidates.
+    if (isUnmappableForeignRoot(record, configDir)) unavailable = true;
     roots.add(pathIdentity(record.pluginRoot));
   }
   return { roots, unavailable, identities: currentIdentities };
