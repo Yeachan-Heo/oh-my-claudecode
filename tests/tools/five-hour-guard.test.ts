@@ -1879,9 +1879,11 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     const put = (command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
     const rel = (p: string) => relative(f.dir, p);
     const gen = (o: { pause?: string; hook?: string; python?: string; log?: string } = {}) => generatedCommand(o.pause ?? f.pause, o.hook ?? HOOK, o.python ?? PYBIN, o.log);
-    const missingPy = join(f.dir, 'python3-missing');
-    const dirPy = join(f.dir, 'python3-dir');
-    mkdirSync(dirPy);
+    const missingPy = join(f.dir, 'missing', 'python3');   // a name that is a Python as a whole, in a directory that is not there
+    const dirPy = join(f.dir, 'dir', 'python3');
+    mkdirSync(dirPy, { recursive: true });
+    const auditPy = join(f.dir, 'python-audit');   // an executable file whose name only begins like a Python
+    symlinkSync(PYBIN, auditPy);
     const copy = join(f.dir, 'five-hour-guard-hook.py');
     copyFileSync(HOOK, copy);
     chmodSync(copy, 0o644);
@@ -1893,8 +1895,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       { name: 'a stale hook in the shell check', command: gen().replace(`[ -f ${HOOK} ]`, '[ -f /old/five-hour-guard-hook.py ]'), paste: gen() },
       { name: 'an interpreter in the shell check other than the one that runs', command: gen().replace(`[ -x ${PYBIN} ]`, '[ -x /bin/sh ]'), paste: gen() },
       { name: 'a launcher that is not a Python, the shell check left as it was', command: gen().replace(`exec ${PYBIN}`, `exec ${process.execPath}`), paste: gen(), also: /runs the hook with .*, which is not a Python/ },
-      { name: 'a launcher that does not exist (also in the shell check)', command: gen({ python: missingPy }), paste: gen(), also: /runs the hook with .*python3-missing, which does not exist or cannot be run/ },
-      { name: 'a launcher that is a directory named like a Python', command: gen({ python: dirPy }), paste: gen(), also: /runs the hook with .*python3-dir, which does not exist or cannot be run/ },
+      { name: 'a launcher that does not exist (also in the shell check)', command: gen({ python: missingPy }), paste: gen(), also: /runs the hook with .*missing\/python3, which does not exist or cannot be run/ },
+      { name: 'a launcher that is a directory named like a Python', command: gen({ python: dirPy }), paste: gen(), also: /runs the hook with .*dir\/python3, which does not exist or cannot be run/ },
+      { name: 'a launcher whose name only begins like a Python', command: gen({ python: auditPy }), paste: gen(), also: /runs the hook with .*python-audit, which is not a Python/ },
       { name: 'the script run directly (mode 0644)', command: exec644, paste: gen({ hook: copy }) },
       { name: 'a pause file other than the guard writes', command: gen({ pause: `${f.dir}/old-pause.json` }), paste: gen() },
       { name: 'no pause file at all', command: `exec ${PYBIN} -I ${HOOK}`, paste: gen() },

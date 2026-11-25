@@ -824,7 +824,7 @@ def check_wiring(where):
             if launcher in hooks:
                 continue   # run directly: the drift warning above covers it
             path = launcher if os.path.isabs(launcher) else shutil.which(launcher)
-            if not re.match(r'(python|pypy|py$)', os.path.basename(launcher).lower()):
+            if not re.fullmatch(ENTRY.PYTHON_NAME, os.path.basename(launcher).lower()):
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which is not a Python: it would not run the hook, so a pause would hold no session')
             elif not path or not os.path.isfile(path) or not os.access(path, os.X_OK):   # isfile: a searchable directory passes `[ -x ]` and still cannot be run
                 log(f'WARNING ({where}): the hook entry in {SETTINGS} runs the hook with {launcher}, which does not exist or cannot be run: the shell guard of the entry lets every call through, so a pause would hold no session')
