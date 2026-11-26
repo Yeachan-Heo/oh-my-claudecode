@@ -206,6 +206,9 @@ const BLOCKED: string[] = [
   "tar -cMf a.tar -F 'rm /dev/null' x", "tar -cMF 'rm /dev/null' -f a.tar x", "tar -cM -F'rm /dev/null' -f a.tar x", "tar -cM --info-script='rm /dev/null' -f a.tar x", "tar -cM --info-script 'rm /dev/null' -f a.tar x",
   "tar -cM --new-volume-script='rm /dev/null' -f a.tar x", "tar -cM --new-volume-script 'rm /dev/null' -f a.tar x", "tar -cM --new-v='rm /dev/null' -f a.tar x", "tar -cM --info 'rm /dev/null' -f a.tar x", "tar -tM -F 'rm /dev/null' -f a.tar",
   "sudo tar -xf a.tar -I 'rm /dev/null'", "nice tar -xf a.tar --checkpoint=1 --checkpoint-action='exec=rm /dev/null'", "bash -c \"tar -cM -F 'rm /dev/null' -f a.tar x\"", "tar -C /tmp -xf a.tar -I 'sh -c \"rm /dev/null\"'",
+  // env -S text that starts with time: env runs time as a program (its -f takes a value), not as the keyword of the shell
+  "env -S 'time -f %e rm /dev/null'", "env -S 'time -p rm /dev/null'", "env -S'time -f %e rm /dev/null'", "env --split-string='time -f %e rm /dev/null'", "env -S 'time -o out.tmp rm /dev/null'",
+  "env -S '\"time\" -f %e rm /dev/null'", "env -i -S 'time -f %e rm /dev/null'", "sudo env -S 'time -f %e rm /dev/null'", "env -S 'time -f %e rm /dev/null' extra", "env -S 'nice time -f %e rm /dev/null'",
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -354,6 +357,8 @@ const ALLOWED: string[] = [
   'tar -C / -xf a.tar --use-compress-program dev/null', 'tar -C / -xf a.tar --use dev/null', 'tar -C / -xf a.tar --info-script dev/null', 'tar -C / -xf a.tar --checkpoint-a dev/null', 'bsdtar -C / -xf a.tar --us dev/null',
   // an echo action prints its text and runs nothing, and bsdtar knows none of the GNU options (it reads their value as a member)
   "tar -xf a.tar --checkpoint=1 --checkpoint-action='echo=rm /dev/null'", "bsdtar -tf a.tar --to-command='rm /dev/null'", "bsdtar -xf a.tar --info-script 'rm /dev/null'",
+  // ... and a time program that wraps something harmless
+  "env -S 'time -f %e true'", "env -S 'time -f %e echo /dev/null'", "env -S 'time -p true'",
 ];
 
 describe('/dev guard: Bash commands', () => {

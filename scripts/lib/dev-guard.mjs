@@ -197,7 +197,7 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
     if (split !== undefined) {
       const text = envSplitText(split);
       const words = tokenizeBash(text).tokens.filter((t) => t.type === 'word').map(devWordText);
-      if (words[0]?.startsWith('-')) { values = ['env', ...words, ...values.slice(i)]; at = 0; continue; } // env reads the words again as its own options, then assignments, then the command
+      if (words[0]?.startsWith('-') || words[0] === 'time') { values = ['env', ...words, ...values.slice(i)]; at = 0; continue; } // env reads the words again as its own options, then assignments, then the command; time is a program to it, not the keyword of the shell
       return { name: 'eval', args: [text, ...values.slice(i)], xargs, replace };
     }
     if (name === 'command' && values.slice(at + 1, i).some((o) => /^-[a-z]*[vV]/.test(o))) return null; // command -v only looks the name up
