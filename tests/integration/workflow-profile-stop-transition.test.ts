@@ -414,12 +414,68 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(beforeReentry).toMatchObject({ active: true, phase: 'execution', pipelineTracking: { currentStageIndex: 1 } });
 
     // Simulate stop_hook_active re-entry: workflow completion should be processed
-    // without emitting another decision:block (which would trigger safety overrides).
-    // The re-entry logic should detect the pending completion and advance the workflow.
+    // and dispatch the completion message (not just continue:true).
+    // The re-entry logic should detect the pending completion and emit it.
     const reentryResult = invoke(f, { stop_hook_active: true });
-    expect(reentryResult).toEqual({ continue: true, suppressOutput: true });
+    expect(reentryResult).toMatchObject({ decision: 'block', reason: expect.stringContaining('All selected stages are complete') });
     const afterReentry = readState(f);
     expect(afterReentry).toMatchObject({ active: false, phase: 'complete' });
+  });
+
+  it('dispatches the next stage prompt on stop_hook_active re-entry advancement', () => {
+    // Test multi-stage workflow: re-entry should dispatch next stage, not just continue:true
+    const f = fixture(kind);
+    writeState(f, workflowState(f, ['ralplan', 'execution', 'qa']));
+    
+    // Stage 1 completes: normal stop should advance to stage 2
+    appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+    const toExecution = invoke(f);
+    expect(toExecution.reason).toBe(expectedStagePrompt('execution'));
+    expect(readState(f).pipelineTracking.currentStageIndex).toBe(1);
+    
+    // Stage 2 completes: add completion and prepare for re-entry
+    appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
+    expect(readState(f)).toMatchObject({ active: true, phase: 'execution', pipelineTracking: { currentStageIndex: 1 } });
+    
+    // Re-entry should dispatch stage 3 prompt, not just continue:true
+    const toQa = invoke(f, { stop_hook_active: true });
+    expect(toQa).toMatchObject({ decision: 'block' });
+    expect(toQa.reason).toBe(expectedStagePrompt('qa'));
+    expect(readState(f)).toMatchObject({ active: true, phase: 'qa', pipelineTracking: { currentStageIndex: 2 } });
+    
+    // Stage 3 completes: re-entry should emit completion message
+    appendRecord(f, { message: { role: 'assistant', content: completion('qa') } });
+    const toComplete = invoke(f, { stop_hook_active: true });
+    expect(toComplete).toMatchObject({ decision: 'block', reason: expect.stringContaining('All selected stages are complete') });
+    expect(readState(f)).toMatchObject({ active: false, phase: 'complete' });
+  });
+
+  it('prevents stop_hook_active re-entry from advancing workflows in foreign project paths', () => {
+    // Test that re-entry checks project ownership, not just session
+    const f = fixture(kind);
+    const state = workflowState(f, ['ralplan', 'execution']);
+    writeState(f, state);
+    
+    // Set up and advance to stage 2 in the current project
+    appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+    const toExecution = invoke(f);
+    expect(toExecution.reason).toBe(expectedStagePrompt('execution'));
+    
+    // Get the advanced state and simulate it being from a foreign project
+    const advancedState = readState(f);
+    const foreignState = { ...advancedState, project_path: '/different/project' };
+    writeState(f, foreignState);
+    
+    // Add a completion that would trigger re-entry
+    appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
+    
+    // Re-entry with foreign project_path should NOT advance the workflow
+    const result = invoke(f, { stop_hook_active: true });
+    expect(result).toEqual({ continue: true, suppressOutput: true });
+    
+    // State should not be advanced (should remain at the foreign project's stage 2)
+    const stateAfter = readState(f);
+    expect(stateAfter).toMatchObject({ active: true, phase: 'execution', project_path: '/different/project', pipelineTracking: { currentStageIndex: 1 } });
   });
 
   it('allows concurrent duplicate stops to commit only one revision', async () => {

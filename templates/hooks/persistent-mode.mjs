@@ -1386,17 +1386,21 @@ async function main() {
         "autopilot-state.json",
         sessionId,
       );
-      const autopilotSessionMatches = hasValidSessionId
-        ? autopilotForReentry.state?.session_id === sessionId
-        : !autopilotForReentry.state?.session_id || autopilotForReentry.state.session_id === sessionId;
-      if (autopilotForReentry.state?.active && hasNamedWorkflowMarkers(autopilotForReentry.state) && autopilotSessionMatches) {
+      const currentAutopilotReentry = isCurrentAutopilotState(autopilotForReentry.state, directory, autopilotForReentry.isGlobal, hasValidSessionId, sessionId)
+        ? autopilotForReentry.state
+        : null;
+      if (currentAutopilotReentry && autopilotForReentry.state?.active && hasNamedWorkflowMarkers(currentAutopilotReentry)) {
         // Check if workflow has advanced to a new stage or completed
-        const workflowAdvance = advanceWorkflowOnStop(autopilotForReentry.state, data, sessionId);
+        const workflowAdvance = advanceWorkflowOnStop(currentAutopilotReentry, data, sessionId);
         if (workflowAdvance) {
           const commit = commitWorkflowAdvance(autopilotForReentry.path, workflowAdvance);
           if (commit.committed) {
-            // Workflow advanced; silently continue (next Stop will show the new prompt)
-            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            // Workflow advanced; dispatch the newly activated stage's prompt
+            if (workflowAdvance.nextStage) {
+              console.log(JSON.stringify({ decision: "block", reason: workflowAdvance.nextStagePrompt }));
+            } else {
+              console.log(JSON.stringify({ decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." }));
+            }
             return;
           }
         }

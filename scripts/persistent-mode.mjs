@@ -1842,8 +1842,12 @@ async function main() {
         if (workflowAdvance) {
           const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);
           if (commit.committed) {
-            // Workflow advanced; silently continue (next Stop will show the new prompt)
-            emit({ continue: true, suppressOutput: true });
+            // Workflow advanced; dispatch the newly activated stage's prompt
+            if (workflowAdvance.nextStage) {
+              emit({ decision: "block", reason: workflowAdvance.nextStagePrompt });
+            } else {
+              emit({ decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." });
+            }
             return;
           }
         }
