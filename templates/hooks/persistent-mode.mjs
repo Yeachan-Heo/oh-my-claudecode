@@ -1389,6 +1389,18 @@ async function main() {
       const currentAutopilotReentry = isCurrentAutopilotState(autopilotForReentry.state, directory, autopilotForReentry.isGlobal, hasValidSessionId, sessionId)
         ? autopilotForReentry.state
         : null;
+      
+      // Check for pending cancellation before advancing the workflow on re-entry.
+      // A fresh cancel-signal-state.json must win over stage-completion advancement.
+      if (currentAutopilotReentry && autopilotForReentry.state?.active && hasNamedWorkflowMarkers(currentAutopilotReentry)) {
+        const cancellation = isSessionCancelInProgress(stateDir, sessionId, autopilotForReentry.path, { directory, isGlobal: autopilotForReentry.isGlobal, hasValidSessionId });
+        if (cancellation.currentAutopilot) autopilotForReentry.state = cancellation.currentAutopilot;
+        if (cancellation.active) {
+          console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+          return;
+        }
+      }
+      
       if (currentAutopilotReentry && autopilotForReentry.state?.active && hasNamedWorkflowMarkers(currentAutopilotReentry)) {
         // Check if workflow has advanced to a new stage or completed
         const workflowAdvance = advanceWorkflowOnStop(currentAutopilotReentry, data, sessionId);

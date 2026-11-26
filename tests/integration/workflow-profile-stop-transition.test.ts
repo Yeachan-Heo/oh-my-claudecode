@@ -478,6 +478,45 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(stateAfter).toMatchObject({ active: true, phase: 'execution', project_path: '/different/project', pipelineTracking: { currentStageIndex: 1 } });
   });
 
+  it('prevents stop_hook_active re-entry from advancing workflows when a cancel signal is active', () => {
+    // Test that re-entry checks for pending cancellation before advancing
+    const f = fixture(kind);
+    const state = workflowState(f, ['ralplan', 'execution']);
+    writeState(f, state);
+    
+    // Set up and advance to stage 2 in the current project
+    appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
+    const toExecution = invoke(f);
+    expect(toExecution.reason).toBe(expectedStagePrompt('execution'));
+    expect(readState(f).pipelineTracking.currentStageIndex).toBe(1);
+    
+    // Add completion that would trigger re-entry advancement
+    appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
+    const beforeReentry = readState(f);
+    expect(beforeReentry).toMatchObject({ active: true, phase: 'execution', pipelineTracking: { currentStageIndex: 1 } });
+    
+    // Create an authenticated cancel signal targeting the current state
+    const signalPath = join(dirname(f.statePath), 'cancel-signal-state.json');
+    const requestedAt = Date.now();
+    writeFileSync(signalPath, JSON.stringify({
+      active: true,
+      mode: 'autopilot',
+      source: 'state_clear',
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
+      target_workflow_run_id: beforeReentry.workflowRunId,
+      target_state_sha256: createHash('sha256').update(JSON.stringify(beforeReentry)).digest('hex'),
+    }));
+    
+    // Re-entry with active cancel signal should NOT advance the workflow
+    const reentryResult = invoke(f, { stop_hook_active: true });
+    expect(reentryResult).toEqual({ continue: true, suppressOutput: true });
+    
+    // State should NOT be advanced (should still be at stage 2 index 1)
+    const stateAfter = readState(f);
+    expect(stateAfter).toMatchObject({ active: true, phase: 'execution', pipelineTracking: { currentStageIndex: 1 } });
+  });
+
   it('allows concurrent duplicate stops to commit only one revision', async () => {
     const f = fixture(kind);
     writeState(f, workflowState(f));
