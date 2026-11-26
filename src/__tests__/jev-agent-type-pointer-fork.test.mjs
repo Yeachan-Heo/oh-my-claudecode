@@ -784,7 +784,22 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       expect(viaHome.row?.pointer_unexpanded).toBe('working-dir-too-broad');
     });
 
-    it('with the working directory switch on, a file outside a usable working directory keeps the usual reason', async () => {
+    it('a home directory given as a link is compared by its real path, and the switch value is trimmed', async () => {
+      const context = makeContext();
+      const homeLink = join(context.root, 'home-sym');
+      symlinkSync(context.home, homeLink);
+      writeFileSync(join(context.home, 'notes.md'), 'HOME-MARKER', 'utf8');
+      const prompt = TASK + ' Details in ' + join(context.home, 'notes.md');
+      const refused = await taskSentFor(context, prompt, CWD(context, { HOME: homeLink, USERPROFILE: homeLink }), { cwd: context.home });
+      expect(refused.task).toBe(prompt);
+      expect(refused.row?.pointer_unexpanded).toBe('working-dir-too-broad');
+      const file = cwdFile(context, 'notes.md', 'CWD-MARKER');
+      const padded = TASK + ' Details in ' + file;
+      const { task } = await taskSentFor(context, padded, CWD(context, { OMC_JEV_POINTER_EXPAND_CWD: ' 1 ' }));
+      expect(task).toBe(padded + label(realpathSync(file)) + 'CWD-MARKER');
+    });
+
+    it('with the working directory switch on, a file outside the working directory keeps the usual reason, also under a broad one', async () => {
       const context = makeContext();
       mkdirSync(join(context.root, 'elsewhere'));
       writeFileSync(join(context.root, 'elsewhere', 'notes.md'), 'OUTSIDE-MARKER', 'utf8');
@@ -792,6 +807,9 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       const { task, row } = await taskSentFor(context, prompt, CWD(context));
       expect(task).toBe(prompt);
       expect(row?.pointer_unexpanded).toBe('outside-allowed-dirs');
+      const underBroad = await taskSentFor(context, prompt, CWD(context), { cwd: context.home });
+      expect(underBroad.task).toBe(prompt);
+      expect(underBroad.row?.pointer_unexpanded).toBe('outside-allowed-dirs');
     });
   });
 });
