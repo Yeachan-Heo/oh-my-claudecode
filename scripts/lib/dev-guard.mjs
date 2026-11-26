@@ -24,7 +24,7 @@
 // directory above /dev, wildcard or listed (-T) members, commands that are not listed (mkswap, blkdiscard,
 // losetup, cryptsetup, mdadm, ...).
 
-import { lstatSync } from 'node:fs';
+import { lstatSync, realpathSync, statSync } from 'node:fs';
 import { posix } from 'node:path';
 import { tokenizeBash } from './shell-checks.mjs'; // import cycle: tokenizeBash is only called at run time, never while the modules load
 
@@ -70,17 +70,57 @@ function devNullState({ platform, devNullProbe }) {
   }
 }
 
-// The normalized path when value is an absolute path at or under /dev, else null.
-function devPathOf(value) {
-  const raw = String(value ?? '');
-  if (!raw.startsWith('/')) return null;
-  const glued = /^\/dev(?=[\u0000*?[])/.test(raw) ? `/dev/${raw.slice(4)}` : raw; // /dev* and /dev$X may name /dev or anything under it
-  const path = posix.normalize(glued).replace(/\/+$/, '');
-  return path === '/dev' || path.startsWith('/dev/') ? path : null;
+// The directory in force for the relative paths of the command being scanned (set by checkBashDevPath and checkDevFileTool, followed through cd, pushd and
+// popd): undefined when the hook gave none (relative paths are then not read), a path, or null after a cd that the guard cannot follow.
+let devCwd;
+let devRealLeft = 0; // how many paths the file system may still resolve for the command being scanned; beyond that only the text counts
+
+// The path after the file system has resolved the links and the .. of the directories; the last component only when follow is true, or when follow is 'dir' and
+// it is a directory (a link to a directory is entered by mv, cp, install and ln, a link to a file is replaced by them). Null when nothing could be resolved.
+function devReal(path, follow) {
+  if (devRealLeft-- <= 0) return null;
+  const last = posix.basename(path);
+  try {
+    if (follow === true || path.endsWith('/') || last === '.' || last === '..') return realpathSync.native(path);
+    if (follow === 'dir') { const full = realpathSync.native(path); if (statSync(full).isDirectory()) return full; }
+  } catch { /* the path does not exist: its directory decides */ }
+  try { return posix.join(realpathSync.native(posix.dirname(path)), last); } catch { return null; }
 }
-const devChanged = (value) => { const p = devPathOf(value); return p && !DEV_SCRATCH.test(p) ? p : null; }; // a path the commands of the guard must not change
-const devChangedIn = (value) => { const p = devPathOf(value); return p && !DEV_SCRATCH.test(p) && p !== '/dev/shm' ? p : null; }; // like devChanged, but the scratch directory itself is a fine place to put files into
+
+// The normalized path when value, read from the directory in force and through symbolic links, is at or under /dev, else null. resolve: false reads the text only.
+function devPathOf(value, follow = true, resolve = true) {
+  const raw = String(value ?? '');
+  let path = raw;
+  if (!raw.startsWith('/')) {
+    if (!resolve || !raw || typeof devCwd !== 'string' || raw.includes('\u0000') || raw.startsWith('~')) return null;
+    path = `${devCwd}/${raw}`;
+  }
+  const glued = /^\/dev(?=[\u0000*?[])/.test(path) ? `/dev/${path.slice(4)}` : path; // /dev* and /dev$X may name /dev or anything under it
+  const lexical = posix.normalize(glued).replace(/\/+$/, '');
+  if (lexical === '/dev' || lexical.startsWith('/dev/')) return lexical;
+  if (!resolve || glued.includes('\u0000')) return null;
+  const real = devReal(glued, follow);
+  const resolved = real === null ? '' : posix.normalize(real).replace(/\/+$/, '');
+  return resolved === '/dev' || resolved.startsWith('/dev/') ? resolved : null;
+}
+// A literal relative path after a cd that the guard cannot follow: it names an unknown file, so strict operations (the ones that replace a file) refuse it.
+const devUnknownDir = (value, strict) => (strict && devCwd === null && typeof value === 'string' && value !== '' && !value.startsWith('/') && !value.startsWith('~') && !value.includes('\u0000') ? `${value} (a relative path after a cd that the guard cannot follow)` : null);
+const devChanged = (value, follow = true, strict = false) => { const p = devPathOf(value, follow); return p ? (DEV_SCRATCH.test(p) ? null : p) : devUnknownDir(value, strict); }; // a path the commands of the guard must not change
+const devChangedIn = (value, follow = true, strict = false) => { const p = devPathOf(value, follow); return p ? (DEV_SCRATCH.test(p) || p === '/dev/shm' ? null : p) : devUnknownDir(value, strict); }; // like devChanged, but the scratch directory itself is a fine place to put files into
+const devLexicalIn = (value) => { const p = devPathOf(value, true, false); return p && !DEV_SCRATCH.test(p) && p !== '/dev/shm' ? p : null; }; // the text of an absolute path only: for the words of a command that are no operation target
 const devWritten = (value) => { const p = devPathOf(value); return p && !DEV_SINK.test(p) && !DEV_SCRATCH.test(p) ? p : null; }; // a path a redirect, tee or dd may not write
+
+// cd, pushd and popd: the directory in force for the relative paths that follow, until the end of the command (a group or a subshell is read as if it did not end).
+function devChangeDir(name, args) {
+  if (name === 'popd') { devCwd = null; return; }
+  let i = 0;
+  while (i < args.length && args[i].startsWith('-') && args[i] !== '-') if (args[i++] === '--') break;
+  const target = args[i];
+  if (target === undefined || target === '-' || target.includes('\u0000') || /^[~+-]/.test(target)) devCwd = null; // HOME, OLDPWD, a variable, a substitution, the stack of pushd
+  else if (target === '') return;
+  else if (target.startsWith('/')) devCwd = posix.normalize(target).replace(/\/+$/, '') || '/';
+  else if (typeof devCwd === 'string') devCwd = posix.normalize(`${devCwd}/${target}`).replace(/\/+$/, '') || '/';
+}
 
 // Text of a word after quote removal; every expansion becomes a NUL, so "$HOME/dev/x" is not read as /dev/x and "/dev/$x" stays under /dev.
 function devPartText(part) {
@@ -128,6 +168,7 @@ function splitArgs(args, valueOpts = []) {
 }
 
 // Every operand of these commands is a path they change (chmod, chown and chgrp also have a mode or owner operand, which is never /dev).
+const DEV_ACTS_ON_LINK = new Set(['rm', 'unlink', 'rmdir']); // they remove a symbolic link and leave what it points to
 const DEV_EVERY_OPERAND = {
   rm: [], unlink: [], rmdir: [], chattr: [], chmod: ['--reference'], chown: ['--reference', '--from'], chgrp: ['--reference'],
   setfacl: ['-m', '-x', '-M', '-X'], setfattr: ['-n', '-v', '-x'], shred: ['-n', '-s', '--iterations', '--size'],
@@ -435,8 +476,8 @@ function tarExtractDir(args, name) {
     else steps.push([parsed.operandAt[k], null, stripped(m)]);
   });
   steps.sort((x, y) => x[0] - y[0]);
-  let current = null;
-  let found = null;
+  let current = typeof devCwd === 'string' ? devCwd : null; // without -C the members go to the directory of the session
+  let found = current !== null && !steps.some(([, dir]) => dir !== null) ? devChangedIn(current) : null;
   let inArchive = null;
   for (const [, dir, member] of steps) {
     if (dir !== null) {
@@ -450,7 +491,7 @@ function tarExtractDir(args, name) {
 // Commands the guard judges by one argument pattern each (disk tools, archives, in-place awk, line editors): undefined when `name` is none of them, else a finding or null.
 function devExtraCommand(name, args) {
   const hit = (path) => (path ? { what: name, path } : null);
-  const firstChanged = (list) => { for (const p of list) { const d = devChanged(p); if (d) return d; } return null; };
+  const firstChanged = (list, follow = true) => { for (const p of list) { const d = devChanged(p, follow, true); if (d) return d; } return null; };
   if (/^mkfs(?:\..+)?$/.test(name) || name === 'mke2fs') return hit(firstChanged(parseGetopt(args).operands));
   if (name === 'wipefs') { // only the erasing forms: -a, --all, -o, --offset
     const { shorts, longs, operands } = parseGetopt(args, 'otO', ['--offset', '--types', '--output']);
@@ -488,8 +529,9 @@ function devExtraCommand(name, args) {
       else if (skipping && !a.startsWith('-')) continue;
       else { skipping = false; members.push(a); }
     }
+    if (!dirs.length && typeof devCwd === 'string') dirs.push(devCwd); // without -d the members go to the directory of the session
     for (const value of dirs) { const d = devChangedIn(value); if (d) return { what: name, path: d }; }
-    return hit(archiveMemberInDev(dirs.filter((d) => d.startsWith('/')).map((d) => posix.normalize(d)), shorts.includes('j') ? [] : members)); // -j drops the directories of the members
+    return hit(archiveMemberInDev(dirs.map((d) => (d.startsWith('/') || typeof devCwd !== 'string' ? d : posix.join(devCwd, d))).filter((d) => d.startsWith('/')).map((d) => posix.normalize(d)), shorts.includes('j') ? [] : members)); // -j drops the directories of the members
   }
   if (name === 'awk' || name === 'gawk') { // -i inplace, --include=inplace: the gawk extension that rewrites the files
     const { operands, values } = parseGetopt(args, 'fvFeEilW', (n) => ['--file', '--assign', '--field-separator', '--source', '--exec', '--load'].includes(n) || longIs(n, '--include', 5));
@@ -506,8 +548,8 @@ const shellOf = (text, depth) => { const t = tokenizeBash(text); return devScanT
 // A finding { what, path } when the command `name args` changes a path under /dev; fed: scripts fed to it on stdin.
 function devCommand(name, args, fed, depth) {
   const hit = (path) => (path ? { what: name, path } : null);
-  const firstChanged = (list) => { for (const p of list) { const d = devChanged(p); if (d) return d; } return null; };
-  if (Object.hasOwn(DEV_EVERY_OPERAND, name)) return hit(firstChanged(splitArgs(args, DEV_EVERY_OPERAND[name]).operands));
+  const firstChanged = (list, follow = true) => { for (const p of list) { const d = devChanged(p, follow, true); if (d) return d; } return null; };
+  if (Object.hasOwn(DEV_EVERY_OPERAND, name)) return hit(firstChanged(splitArgs(args, DEV_EVERY_OPERAND[name]).operands, !DEV_ACTS_ON_LINK.has(name)));
   if (name === 'tar' || name === 'gtar' || name === 'bsdtar') for (const text of tarCommandTexts(args, name)) { const inner = shellOf(text, depth); if (inner) return inner; }
   const extra = devExtraCommand(name, args);
   if (extra !== undefined) return extra;
@@ -516,7 +558,7 @@ function devCommand(name, args, fed, depth) {
     const dirs = values.filter(([key]) => isTargetDirOption(key)).map(([, value]) => value);
     const sources = dirs.length ? operands : operands.slice(0, -1);
     const targets = dirs.length ? dirs : operands.slice(-1);
-    return hit(firstChanged(sources) ?? targets.map(devChangedIn).find(Boolean));
+    return hit(firstChanged(sources, false) ?? targets.map((t) => devChangedIn(t, 'dir', true)).find(Boolean)); // a source link is moved itself, a target link to a directory is entered
   }
   if (name === 'cp' || name === 'install' || name === 'ln' || name === 'link' || name === 'rsync') {
     // rsync has no target directory option (-t is --times there), so no option of it takes a value here.
@@ -527,7 +569,8 @@ function devCommand(name, args, fed, depth) {
     const targets = dirs.length ? dirs : directories ? operands : operands.length >= 2 ? [operands[operands.length - 1]] : [];
     // A plain cp onto /dev/null and the other pseudo devices only writes data into them, like a redirect. Options that attach attributes or replace the target (-a, -p, --preserve, -l, -s, -b, --remove-destination) stay refused.
     const plainCopy = name === 'cp' && !shorts.some((c) => 'aplsb'.includes(c)) && !longs.some((o) => /^--(?:archive|preserve|attributes-only|remove-destination|link|symbolic-link|backup)/.test(o));
-    for (const p of targets) { const d = devChangedIn(p); if (d && !(plainCopy && DEV_SINK.test(d))) return { what: name, path: d }; }
+    const follow = name === 'cp' && !longs.some((o) => longIs(o, '--remove-destination', 8)) ? true : 'dir'; // cp writes through a link to a file, the others replace it
+    for (const p of targets) { const d = devChangedIn(p, follow, !plainCopy); if (d && !(plainCopy && DEV_SINK.test(d))) return { what: name, path: d }; }
     return null;
   }
   if (name === 'dd') {
@@ -538,8 +581,8 @@ function devCommand(name, args, fed, depth) {
     for (const p of splitArgs(args).operands) { const d = devWritten(p); if (d) return { what: name, path: d }; }
     return null;
   }
-  if (name === 'sed') return hit(firstChanged(sedInPlaceFiles(args)));
-  if (name === 'perl') return hit(firstChanged(perlInPlaceFiles(args)));
+  if (name === 'sed') return hit(firstChanged(sedInPlaceFiles(args), args.includes('--follow-symlinks'))); // without that option sed replaces a link by a file
+  if (name === 'perl') return hit(firstChanged(perlInPlaceFiles(args), false));
   if (name === 'find') {
     const starts = [];
     let i = 0;
@@ -549,7 +592,7 @@ function devCommand(name, args, fed, depth) {
       if (a === '!' || a === '(' || (a.startsWith('-') && !/^-[HLP]$|^-O\d$/.test(a))) break;
       if (!a.startsWith('-')) starts.push(a);
     }
-    const start = starts.map(devChangedIn).find(Boolean) ?? null;
+    const start = starts.map((d) => devChangedIn(d, args.some((a) => a === '-L' || a === '-H'))).find(Boolean) ?? null;
     for (let k = i; k < args.length; k++) {
       const a = args[k];
       if (a === '-delete' && start) return { what: 'find -delete', path: start };
@@ -624,6 +667,7 @@ function devScanTokens(tokens, heredocs, depth) {
       const piped = unwrapped.replace ? unwrapped.args.map((a) => a.split(unwrapped.replace).join('/dev/\u0000')) : [...unwrapped.args, '/dev/\u0000'];
       if (!found && unwrapped.xargs && pipeDev && devCommand(unwrapped.name, piped, [], depth)) found = { what: `xargs ${unwrapped.name}`, path: pipeDev };
     }
+    if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd')) devChangeDir(unwrapped.name, unwrapped.args);
     pipeDev = (op === '|' || op === '|&') && unwrapped && DEV_FEEDERS.has(unwrapped.name) ? wordDev : null;
     words = [];
     fed = [];
@@ -646,7 +690,7 @@ function devScanTokens(tokens, heredocs, depth) {
       words.push(text);
       if (t.parts.length === 1 && t.parts[0].kind === 'lit' && DEV_OPENERS.has(text)) afterPipe = false; // a group or a condition after a pipe starts a list of its own, where time is the keyword again
       if (baseName(text) === 'find') isFind = true;
-      if (!(isFind && FIND_REFERENCE.test(words[words.length - 2] ?? ''))) wordDev ??= devChangedIn(text); // the file after find -newer is only compared with
+      if (!(isFind && FIND_REFERENCE.test(words[words.length - 2] ?? ''))) wordDev ??= devLexicalIn(text); // the file after find -newer is only compared with
       continue;
     }
     if (t.type !== 'redir') continue;
@@ -700,11 +744,18 @@ function devReason(what, path, repair = '') {
   return `Blocked: ${what.startsWith('redirect') ? what : `\`${what}\``} would change ${path}. ${why}Paths under /dev are device nodes (a deleted or replaced /dev/null breaks the whole machine), so commands that delete, move, overwrite, truncate, re-own, format, partition, extract into or recreate them are refused. Redirects to /dev/null, /dev/stdout, /dev/stderr, /dev/tty and /dev/fd/N and reads from /dev stay allowed. If /dev is damaged, do not repair it from this session: tell the owner, who fixes it outside this session. The one exception: only while /dev/null is not the character device 1:3, the exact command \`${DEV_NULL_REPAIR}\` as the whole command is allowed.`;
 }
 
+// The state of one scan: the working directory of the session (an absolute path, else none) and the budget of the paths that the file system resolves.
+function startDevScan(cwd) {
+  devCwd = typeof cwd === 'string' && cwd.startsWith('/') && !cwd.includes('\u0000') ? posix.normalize(cwd).replace(/\/+$/, '') || '/' : undefined;
+  devRealLeft = 256;
+}
+
 // The Write, Edit, MultiEdit and NotebookEdit tools: the same effect as sed -i on the path.
 export function checkDevFileTool(toolName, data) {
   try {
+    startDevScan(data?.cwd);
     const input = data?.tool_input || data?.toolInput || {};
-    const path = [input.file_path, input.notebook_path].filter((v) => typeof v === 'string').map(devChanged).find(Boolean);
+    const path = [input.file_path, input.notebook_path].filter((v) => typeof v === 'string').map((v) => devChanged(v)).find(Boolean);
     return path ? { decision: 'deny', reason: `[SHELL CHECK] ${devReason(`${toolName} tool`, path)}`, context: '', checks: [DEV_GUARD_CLASS] } : { decision: 'allow', reason: '', context: '', checks: [] };
   } catch {
     return { decision: 'allow', reason: '', context: '', checks: ['dev-path-error'] }; // visible in checks.jsonl: the guard itself failed
@@ -723,8 +774,9 @@ function trimBlanks(text) {
 
 // The guard for one Bash command (text; tokenized = tokenizeBash of the text the shell will see): { checks, denial }, denial being the message or ''.
 // The repair recipe for /dev/null passes only as the whole command and only while /dev/null is not the character device 1:3.
-export function checkBashDevPath(text, tokenized, { platform = process.platform, devNullProbe } = {}) {
+export function checkBashDevPath(text, tokenized, { platform = process.platform, devNullProbe, cwd } = {}) {
   const checks = [];
+  startDevScan(cwd);
   let devHit = null;
   const repair = trimBlanks(text) === DEV_NULL_REPAIR ? devNullState({ platform, devNullProbe }) : '';
   if (repair === 'broken') checks.push('dev-path-repair'); // visible in checks.jsonl: the exception was used
