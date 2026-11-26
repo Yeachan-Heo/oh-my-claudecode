@@ -186,7 +186,14 @@ function invoke(f, input = {}, extraEnv = {}) {
     encoding: 'utf8',
     env: { ...process.env, HOME: f.home, USERPROFILE: f.home, CLAUDE_CONFIG_DIR: f.claudeConfigDir, OMC_STATE_DIR: '', OMC_PERSISTENT_MODE_TIMEOUT_MS: '3000', ...extraEnv },
   });
-  return JSON.parse(stdout.trim());
+  return assertBlockKeepsTurn(JSON.parse(stdout.trim()));
+}
+
+// #5147: a block response carries a prompt the agent must receive; continue:false would end the turn and drop it.
+function assertBlockKeepsTurn(result) {
+  if (result.decision === 'block') expect(result.continue).toBeUndefined();
+  if (result.continue === false) expect(result.decision).toBeUndefined();
+  return result;
 }
 
 function invokeAsync(f, input = {}, extraEnv = {}) {
@@ -431,6 +438,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     appendRecord(f, { message: { role: 'assistant', content: completion('ralplan') } });
     const toExecution = invoke(f);
     expect(toExecution.reason).toBe(expectedStagePrompt('execution'));
+    expect(toExecution.continue).toBeUndefined();
     expect(readState(f).pipelineTracking.currentStageIndex).toBe(1);
     
     // Stage 2 completes: add completion and prepare for re-entry
@@ -441,6 +449,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const toQa = invoke(f, { stop_hook_active: true });
     expect(toQa).toMatchObject({ decision: 'block' });
     expect(toQa.reason).toBe(expectedStagePrompt('qa'));
+    expect(toQa.continue).toBeUndefined();
     expect(readState(f)).toMatchObject({ active: true, phase: 'qa', pipelineTracking: { currentStageIndex: 2 } });
     
     // Stage 3 completes: re-entry should emit completion message

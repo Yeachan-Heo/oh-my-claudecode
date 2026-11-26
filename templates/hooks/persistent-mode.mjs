@@ -1503,7 +1503,6 @@ async function main() {
 
           console.log(
             JSON.stringify({
-              continue: false,
               decision: "block",
               reason: `[RALPH LOOP - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
             }),
@@ -1543,7 +1542,6 @@ async function main() {
 
           console.log(
             JSON.stringify({
-              continue: false,
               decision: "block",
               reason,
             }),
@@ -1563,7 +1561,6 @@ async function main() {
 
         console.log(
           JSON.stringify({
-            continue: false,
             decision: "block",
             reason: `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`,
           }),
@@ -1666,7 +1663,6 @@ async function main() {
 
             console.log(
               JSON.stringify({
-                continue: false,
                 decision: "block",
                 reason,
               }),
@@ -1707,7 +1703,6 @@ async function main() {
 
           console.log(
             JSON.stringify({
-              continue: false,
               decision: "block",
               reason,
             }),
@@ -1744,7 +1739,6 @@ async function main() {
 
           console.log(
             JSON.stringify({
-              continue: false,
               decision: "block",
               reason,
             }),
@@ -1782,7 +1776,6 @@ async function main() {
 
           console.log(
             JSON.stringify({
-              continue: false,
               decision: "block",
               reason,
             }),
@@ -1820,7 +1813,6 @@ async function main() {
 
             console.log(
               JSON.stringify({
-                continue: false,
                 decision: "block",
                 reason,
               }),
