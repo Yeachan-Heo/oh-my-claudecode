@@ -171,6 +171,11 @@ function devUnwrap(values) {
         if (m) replace = m[1] ?? (m[2] || m[3] || '{}');
       }
       if (spec.val.includes(a)) i++;
+      else if (!a.startsWith('--')) { // a cluster of short options: the first letter with a value takes the rest of the word, or the next word when it ends the cluster
+        let k = 1;
+        while (k < a.length && !spec.val.includes(`-${a[k]}`)) k++;
+        if (k === a.length - 1) i++;
+      }
     }
     if (split !== undefined) return { name: 'eval', args: [split, ...values.slice(i)], xargs, replace };
     if (name === 'command' && values.slice(at + 1, i).some((o) => /^-[a-z]*[vV]/.test(o))) return null; // command -v only looks the name up
