@@ -15,8 +15,11 @@
 // with the directory in force at them, after --strip-components for tar, without the members that a literal --exclude of tar names and
 // without the words from unzip -x up to the next option; after the archive every word of unzip is a member but -x and -d), awk and gawk with -i inplace, ed, ex and red.
 // One exception: the atomic repair recipe for /dev/null passes when it is the whole command and /dev/null is not the character device 1:3.
-// Not resolved (known limits): variables and command substitutions inside the path, relative paths after cd /dev, scripts read from a
-// file, interpreters (python -c ...), unknown wrappers, symbolic links to /dev, a script piped into a shell, wildcards, braces, ANSI-C
+// Relative paths are read from the cwd of the hook input and from cd, pushd and popd along the command (a cd that cannot be followed makes a replacing
+// operation on a literal relative path refused), and the target of an operation goes through the links of the file system (rm, unlink, mv, install, ln, sed -i and
+// perl -i replace a link as a link and are not followed; truncate, chmod, redirects, plain cp and a trailing slash are).
+// Not resolved (known limits): variables and command substitutions inside the path, CDPATH, scripts read from a
+// file, interpreters (python -c ...), unknown wrappers, a script piped into a shell, wildcards, braces, ANSI-C
 // escapes and tildes in the path, a here-document for sudo -i, sudo -s and su, coproc NAME { ...; }, flock FILE COMMAND, runuser -u USER --
 // COMMAND, a filter between a feeder and xargs, xargs -rI {}, abbreviated long options of the wrappers with a value in
 // the next word, tar --transform, --xform, bsdtar -s, --one-top-level, tar --exclude with a wildcard or naming
