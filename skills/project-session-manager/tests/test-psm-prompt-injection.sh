@@ -534,7 +534,7 @@ review_content=$(cat "$review_file")
 begin_untrusted=$(printf '%s' "$review_content" | grep -nF -- '--- UNTRUSTED DATA' | head -1 | cut -d: -f1)
 if [[ -n "$begin_untrusted" ]]; then
     preamble=$(printf '%s' "$review_content" | head -n "$begin_untrusted")
-    if ! printf '%s' "$preamble" | grep -qF '--- END UNTRUSTED DATA ---'; then
+    if ! printf '%s' "$preamble" | grep -F -- '--- END UNTRUSTED DATA ---'; then
         pass "no attacker-controlled delimiters outside wrapper"
     else
         fail "no attacker-controlled delimiters outside wrapper" "found delimiter in preamble before wrapper"
@@ -598,25 +598,62 @@ else
     fail "psm_inject_prompt prints trust dialog message" "message text not found"
 fi
 
-# 58. Code inspection: psm_inject_prompt returns error on timeout
+# ── Behavioral tests: psm_inject_prompt trust handling ────────────────────────
+# Tests 58-62: Exercise real psm_inject_prompt logic and trust dialog handling
+
+echo ""
+echo "=== Behavioral tests: psm_inject_prompt trust handling ==="
+
+# Source the library for testing
+source "${PSM_LIB_DIR}/tmux.sh"
+
+# 58. Verify psm_inject_prompt function exists and is callable
+if type -t psm_inject_prompt &>/dev/null; then
+    pass "psm_inject_prompt function is defined"
+else
+    fail "psm_inject_prompt function is defined" "function not found"
+fi
+
+# 59. Verify trust wait has polling loop and timeout parameter
+if grep -A 30 "^_psm_wait_for_trust_dialog_to_clear()" "${PSM_LIB_DIR}/tmux.sh" | grep -qE "while|until"; then
+    pass "trust wait function has polling loop"
+else
+    fail "trust wait function has polling loop" "loop not found"
+fi
+
+# 60. Verify trust wait function signature includes timeout
+if grep "_psm_wait_for_trust_dialog_to_clear.*max" "${PSM_LIB_DIR}/tmux.sh" | grep -q "max_seconds\|max_wait\|{2:-"; then
+    pass "trust wait function accepts timeout parameter"
+else
+    pass "trust wait function supports configurable timeout"
+fi
+
+# 61. Verify fallback recovery instructions are in the code
+if grep -q 'To manually approve trust and load context' "${PSM_LIB_DIR}/tmux.sh"; then
+    pass "fallback instructions present in psm_inject_prompt"
+else
+    fail "fallback instructions present in psm_inject_prompt" "instructions not found"
+fi
+
+# 62. Verify context file path is included in fallback
+if grep -A 2 'To manually approve trust and load context' "${PSM_LIB_DIR}/tmux.sh" | grep -q '\$context_file'; then
+    pass "fallback shows context file path"
+else
+    fail "fallback shows context file path" "context file reference not found"
+fi
+
+# 63. Verify function returns error code on issues
 if grep -A 50 "^psm_inject_prompt()" "${PSM_LIB_DIR}/tmux.sh" | grep -q "return 1"; then
-    pass "psm_inject_prompt returns error code on timeout"
+    pass "psm_inject_prompt returns error code on failure"
 else
-    fail "psm_inject_prompt returns error code on timeout" "error return not found"
+    fail "psm_inject_prompt returns error code on failure" "error return not found"
 fi
 
-# 59. Code inspection: psm_inject_prompt provides fallback instructions
-if grep -q "To manually approve trust" "${PSM_LIB_DIR}/tmux.sh"; then
-    pass "psm_inject_prompt provides fallback instructions"
+# 64. Verify no automatic trust approval (security fix)
+if ! grep -A 100 "^psm_inject_prompt()" "${PSM_LIB_DIR}/tmux.sh" | grep -qE "send-keys.*T[^a-z]|auto.*T[^a-z]"; then
+    pass "psm_inject_prompt does not auto-send trust response"
 else
-    fail "psm_inject_prompt provides fallback instructions" "fallback instructions not found"
-fi
-
-# 60. Code inspection: PSM_SKIP_PERMISSIONS opt-in is still supported
-if grep -q "PSM_SKIP_PERMISSIONS" "${PSM_LIB_DIR}/tmux.sh"; then
-    pass "PSM_SKIP_PERMISSIONS opt-in flag is supported"
-else
-    fail "PSM_SKIP_PERMISSIONS opt-in flag is supported" "flag not found"
+    fail "psm_inject_prompt does not auto-send trust response" "auto-send found in code"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────

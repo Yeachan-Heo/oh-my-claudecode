@@ -274,7 +274,7 @@ psm_inject_prompt() {
             echo "error|Task context remains in: $context_file" >&2
             if [[ -n "$session_path" ]]; then
                 echo "error|To manually approve trust and load context, run:" >&2
-                echo "error|  cd '$session_path' && cat $context_file | tmux send-keys -t '$session_name' -l -- - 2>/dev/null; tmux send-keys -t '$session_name' Enter" >&2
+                echo "error|  cd '$session_path' && cat '$context_file' | tmux send-keys -t '$session_name' - && tmux send-keys -t '$session_name' Enter" >&2
             fi
             return 1
         fi
