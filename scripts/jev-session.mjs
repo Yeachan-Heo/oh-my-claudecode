@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 // Launcher of background Claude Code sessions with the model and effort chosen by Jev (opt-in by use: nothing runs unless it is called).
 //   node scripts/jev-session.mjs --role coordinator|worker --brief <file> --name "<name>" [--coordinator <id>] [--cwd <dir>]
-//        [--mode shadow|active|off] [--starter <command>] [--prompt <text>] [--dry-run]
-//   resume: jev-session --resume <sessionId> --prompt "<text>" --cwd <dir> [--name "<name>"] [--starter <cmd>] [--dry-run]
+//        [--mode shadow|active|off] [--starter <command>] [--prompt <text>] [--dry-run] [--no-advisor]
+//   resume: jev-session --resume <sessionId> --prompt "<text>" --cwd <dir> [--name "<name>"] [--starter <cmd>] [--dry-run] [--no-advisor]
 //     the same path as a regular start (start dir and trust, the session pool ceiling, the starter, a row in sessions.jsonl),
 //     but without the Jev decision and without the role settings file: the role and the model stay from the original start, no --model/--effort in argv;
 //     --role/--brief/--mode/--coordinator are refused with exit code 2 at a resume.
+// --no-advisor (a regular start and a resume) turns off the advisor tool of the session: CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 goes into the `env` block of the
+// --settings file (a regular start adds it next to the role variables; a resume writes a separate file with only this variable and adds --settings <file>
+// to the starter argv, before the prompt). Without the flag nothing changes. A row has `advisor: "disabled"` with the flag (`"settings-error"` when the
+// file could not be written). With OMC_JEV_SESSION_PROVIDER=1 every row also has `provider`: the profile name in OMC_PROVIDER, or `claude` without it.
 // What it does: reads the brief, asks Jev the same model-routing questions the Agent hook asks (scripts/lib/jev-routing.mjs: the `use` marker of the
 // first brief line, the answers read by decideRoutingFromAnswers, the effort cap OMC_JEV_MAX_EFFORT; Jev never picks fable), and starts the session with
 // `<starter> --bg --name <name> [--model <m> --effort <e>] --settings <file> "<prompt>"` (starter: --starter, OMC_JEV_SESSION_STARTER, else `claude`).
@@ -45,11 +49,12 @@ const MODES = ['shadow', 'active', 'off'];
 const maskJevState = (state) => Object.fromEntries(Object.entries(state).map(([key, value]) => [key, typeof value === 'string' ? maskSecrets(value) : value]));
 
 function parseArgs(argv) {
-  const out = { dryRun: false };
+  const out = { dryRun: false, noAdvisor: false };
   const flags = { '--role': 'role', '--brief': 'brief', '--name': 'name', '--coordinator': 'coordinator', '--cwd': 'cwd', '--mode': 'mode', '--starter': 'starter', '--prompt': 'prompt', '--resume': 'resume' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') out.dryRun = true;
+    else if (a === '--no-advisor') out.noAdvisor = true; // no value, like --dry-run
     else if (Object.hasOwn(flags, a)) {
       if (argv[i + 1] === undefined) return { error: `${a} needs a value` };
       if ((a === '--name' || a === '--prompt' || a === '--resume') && argv[i + 1].startsWith('-')) return { error: `${a}: the value must not start with "-" (claude would read it as a flag)` };
@@ -182,14 +187,17 @@ function settingsPathFor({ logDir, name }) { // a durable directory: `env` of a 
   const slug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'session';
   return join(logDir, 'session-settings', `${slug}-${Date.now()}-${randomUUID().slice(0, 8)}.json`); // a unique name, two starts of one name in one millisecond never share a file
 }
-function writeSettings(path, { name, role, coordinator }) {
+function writeSettings(path, { name, role, coordinator, noAdvisor }) { // a resume calls with noAdvisor only; JSON.stringify leaves out undefined keys
   mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
-  const sessionEnv = { OMC_SESSION_ROLE: role, OMC_SESSION_NAME: name, ...(coordinator ? { OMC_SESSION_COORDINATOR: coordinator } : {}) };
+  const sessionEnv = { OMC_SESSION_ROLE: role, OMC_SESSION_NAME: name, ...(coordinator ? { OMC_SESSION_COORDINATOR: coordinator } : {}), ...(noAdvisor ? { CLAUDE_CODE_DISABLE_ADVISOR_TOOL: '1' } : {}) };
   writeFileSync(path, JSON.stringify({ env: sessionEnv }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' }); // never overwrites a file of another session
   return path;
 }
 
 const quote = (a) => (/[\s"]/.test(a) ? JSON.stringify(a) : a);
+// OMC_JEV_SESSION_PROVIDER=1 adds the provider to every row: the profile name of the OMC_PROVIDER marker the launcher runs with (and passes to the
+// starter), `claude` without it. Without the switch the rows have no such field.
+const providerField = (env) => (String(env?.OMC_JEV_SESSION_PROVIDER ?? '').trim() === '1' ? { provider: String(env.OMC_PROVIDER ?? '').trim() || 'claude' } : {});
 const describe = (decision) => (decision.degraded ? `degraded (${decision.reason})` : `model ${decision.model ?? '-'}, effort ${decision.effort ?? '-'}`);
 
 // The session pool gate: off unless OMC_JEV_POOL=1; at a ceiling above 0 (OMC_JEV_POOL_MAX_SESSIONS) the start is refused. A counter
@@ -220,7 +228,8 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 
 async function launch(argv, env, held) {
   const args = parseArgs(argv);
-  const usage = 'Usage: jev-session --role coordinator|worker --brief <file> --name "<name>" [--coordinator <id>] [--cwd <dir>] [--mode shadow|active|off] [--starter <command>] [--prompt <text>] [--dry-run] | resume: jev-session --resume <sessionId> --prompt "<text>" --cwd <dir> [--name "<name>"] [--starter <command>] [--dry-run]';
+  const usage = 'Usage: jev-session --role coordinator|worker --brief <file> --name "<name>" [--coordinator <id>] [--cwd <dir>] [--mode shadow|active|off] [--starter <command>] [--prompt <text>] [--dry-run] [--no-advisor] | resume: jev-session --resume <sessionId> --prompt "<text>" --cwd <dir> [--name "<name>"] [--starter <command>] [--dry-run] [--no-advisor]';
+  let advisorField = args.noAdvisor ? { advisor: 'disabled' } : {}; // without the flag the rows have no new field; a failed settings write changes it to settings-error
   if (args.error) { console.error(`jev-session: ${args.error}\n${usage}`); return 2; }
 
   const logDir = await resolveJevLogDir(env);
@@ -231,7 +240,7 @@ async function launch(argv, env, held) {
   // start of the session, there is no --model or --effort in argv. Options that make no sense at a resume (--role, --brief, --mode,
   // --coordinator) are refused with exit code 2.
   if (args.resume) {
-    const usageResume = 'Usage of resume: jev-session --resume <sessionId> --prompt "<text>" --cwd <dir> [--name "<name>"] [--starter <command>] [--dry-run]';
+    const usageResume = 'Usage of resume: jev-session --resume <sessionId> --prompt "<text>" --cwd <dir> [--name "<name>"] [--starter <command>] [--dry-run] [--no-advisor]';
     for (const [flag, value] of [['--role', args.role], ['--brief', args.brief], ['--mode', args.mode], ['--coordinator', args.coordinator]]) {
       if (value !== undefined) { console.error(`jev-session: --resume: ${flag} makes no sense at a resume (the role and the Jev decision stay from the original start of the session)\n${usageResume}`); return 2; }
     }
@@ -246,16 +255,23 @@ async function launch(argv, env, held) {
     const gate = poolGate(env, logDir, held);
     if (gate.refuse) {
       const maskedRefusal = maskJevState({ cwd });
-      writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...(maskedRefusal.cwd ? { cwd: maskedRefusal.cwd } : {}), cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
+      writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...advisorField, ...(maskedRefusal.cwd ? { cwd: maskedRefusal.cwd } : {}), cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
       console.error(refusalMessage(gate));
       return 2;
     }
 
     const starter = args.starter || env.OMC_JEV_SESSION_STARTER || 'claude';
     const maskedCwd = maskJevState({ cwd }).cwd;
-    const starterArgv = ['--bg', '--resume', String(args.resume), args.prompt]; // no --model/--effort and no --settings
+    const starterArgv = ['--bg', '--resume', String(args.resume), args.prompt]; // no --model/--effort; --settings only with --no-advisor
+    if (args.noAdvisor) { // a resume with --no-advisor gets a settings file of its own (the env of the launching process does not reach a background session)
+      let resumeSettings = settingsPathFor({ logDir, name }); // the same directory as the role file of a regular start
+      if (!args.dryRun) { // a dry run writes nothing
+        try { writeSettings(resumeSettings, { noAdvisor: true }); } catch (error) { resumeSettings = null; advisorField = { advisor: 'settings-error' }; console.error(`jev-session: warning: the settings file that disables the advisor was not created (${error.message}); the resume starts without --settings`); }
+      }
+      if (resumeSettings) starterArgv.splice(3, 0, '--settings', resumeSettings); // the prompt stays last
+    }
     if (args.dryRun) {
-      writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...(maskedCwd ? { cwd: maskedCwd } : {}), cwd_source: cwdSource, result: 'dry-run', ...(gate.pool ? { pool: gate.pool } : {}) }, env);
+      writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...advisorField, ...providerField(env), ...(maskedCwd ? { cwd: maskedCwd } : {}), cwd_source: cwdSource, result: 'dry-run', ...(gate.pool ? { pool: gate.pool } : {}) }, env);
       console.log(`jev-session (dry run): resume ${args.resume}, directory ${cwd} (${cwdSource})\ncommand: ${starter} ${starterArgv.map(quote).join(' ')}`);
       return 0;
     }
@@ -263,7 +279,7 @@ async function launch(argv, env, held) {
     const started = spawnSync(starter, starterArgv, { cwd, encoding: 'utf8', timeout: 120_000, env });
     const output = `${started.stdout || ''}${started.stderr || ''}`;
     const id = /backgrounded\s*[·.]\s*([0-9a-f]{6,})\b/i.exec(output)?.[1] ?? null;
-    writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...(maskedCwd ? { cwd: maskedCwd } : {}), cwd_source: cwdSource, result: 'resume', ...(gate.pool ? { pool: gate.pool } : {}), started_with: { model: null, effort: null }, queryMs: 0, session_id: id, starter_exit: started.status ?? (started.error ? `error:${started.error.code || started.error.message}` : null), totalMs: Date.now() - startedAt }, env);
+    writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...advisorField, ...providerField(env), ...(maskedCwd ? { cwd: maskedCwd } : {}), cwd_source: cwdSource, result: 'resume', ...(gate.pool ? { pool: gate.pool } : {}), started_with: { model: null, effort: null }, queryMs: 0, session_id: id, starter_exit: started.status ?? (started.error ? `error:${started.error.code || started.error.message}` : null), totalMs: Date.now() - startedAt }, env);
     if (started.error || started.status !== 0) {
       if (/not trusted/i.test(output)) console.error(`jev-session: directory ${cwd} (source: ${cwdSource}) is not trusted by Claude Code: run \`claude\` once in this directory, accept the trust and repeat.`);
       process.stderr.write(output);
@@ -293,7 +309,7 @@ async function launch(argv, env, held) {
   const gate = poolGate(env, logDir, held);
   if (gate.refuse) {
     const maskedRefusal = maskJevState({ brief: briefPath, cwd }); // the same mask as the regular row
-    writeRow(logDir, { role: args.role, name: args.name, ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
+    writeRow(logDir, { role: args.role, name: args.name, ...advisorField, ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
     console.error(refusalMessage(gate));
     return 2;
   }
@@ -334,15 +350,15 @@ async function launch(argv, env, held) {
 
   // The log row keeps paths only through the state mask, never the text of the brief.
   const masked = maskJevState({ brief: briefPath, cwd });
-  const row = { mode, role: args.role, name: args.name, ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: masked.brief, cwd: masked.cwd, cwd_source: cwdSource, result: decision.degraded ? 'degraded' : mode === 'off' ? 'off' : 'decided', ...(decision.reason ? { reason: decision.reason } : {}), ...(decision.marker ? { marker: decision.marker } : {}), ...(decision.refused ? { refused: decision.refused } : {}), ...(decision.capped ? { capped: decision.capped } : {}), ...(decision.model ? { model: { to: decision.model, source: decision.source.model } } : {}), ...(decision.effort ? { effort: { to: decision.effort, source: decision.source.effort, ...(decision.score !== undefined ? { score: decision.score, confidence: decision.confidence } : {}) } } : {}), ...(gate.pool ? { pool: gate.pool } : {}), started_with: { model: passModel ?? null, effort: passEffort ?? null }, queryMs };
+  const row = { mode, ...advisorField, role: args.role, name: args.name, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: masked.brief, cwd: masked.cwd, cwd_source: cwdSource, result: decision.degraded ? 'degraded' : mode === 'off' ? 'off' : 'decided', ...(decision.reason ? { reason: decision.reason } : {}), ...(decision.marker ? { marker: decision.marker } : {}), ...(decision.refused ? { refused: decision.refused } : {}), ...(decision.capped ? { capped: decision.capped } : {}), ...(decision.model ? { model: { to: decision.model, source: decision.source.model } } : {}), ...(decision.effort ? { effort: { to: decision.effort, source: decision.source.effort, ...(decision.score !== undefined ? { score: decision.score, confidence: decision.confidence } : {}) } } : {}), ...(gate.pool ? { pool: gate.pool } : {}), started_with: { model: passModel ?? null, effort: passEffort ?? null }, queryMs };
 
   if (args.dryRun) { // a dry run writes no settings file; it prints the one it would write
     writeRow(logDir, { ...row, result: 'dry-run' }, env);
-    console.log(`jev-session (dry run): mode ${mode}, decision ${describe(decision)}\ncommand: ${starter} ${buildArgs(true, true).map(quote).join(' ')}\n(the role settings file would be created in ${settingsFile})`);
+    console.log(`jev-session (dry run): mode ${mode}, decision ${describe(decision)}\ncommand: ${starter} ${buildArgs(true, true).map(quote).join(' ')}\n(the role settings file would be created in ${settingsFile}${args.noAdvisor ? ', with CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1' : ''})`);
     return 0;
   }
   let withSettings = true;
-  try { writeSettings(settingsFile, { name: args.name, role: args.role, coordinator: args.coordinator }); } catch (error) { withSettings = false; console.error(`jev-session: warning: the role settings file was not created (${error.message}); the session starts without a role`); }
+  try { writeSettings(settingsFile, { name: args.name, role: args.role, coordinator: args.coordinator, noAdvisor: args.noAdvisor }); } catch (error) { withSettings = false; if (args.noAdvisor) row.advisor = 'settings-error'; console.error(`jev-session: warning: the role settings file was not created (${error.message}); the session starts without a role`); }
   let started = spawnSync(starter, buildArgs(true, withSettings), { cwd, encoding: 'utf8', timeout: 120_000, env });
   let output = `${started.stdout || ''}${started.stderr || ''}`;
   let fallback = false;
