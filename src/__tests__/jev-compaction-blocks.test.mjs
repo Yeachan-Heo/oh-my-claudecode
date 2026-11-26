@@ -116,11 +116,19 @@ describe('blocks of text: the blocks of a text and the trace', () => {
   it('splits paragraphs, closed fenced code blocks and closed pasted tags; traces and blank lines are no block', () => {
     const text = ['First paragraph', 'with two lines.', '', '```js', 'const a = 1;', '', 'const b = 2;', '```', '', '<pasted_content id="p1">', 'pasted', '', 'text', '</pasted_content>', '[block moved at compaction: 10 chars, full text in /x/y.txt]', 'Last one.'].join('\n');
     const blocks = splitBlocks(text).map((b) => ({ kind: b.kind, text: text.slice(b.start, b.end) }));
-    expect(blocks.map((b) => b.kind)).toEqual(['text', 'text', 'tag', 'text']);
+    expect(blocks.map((b) => b.kind)).toEqual(['text', 'text', 'tag']);
     expect(blocks[0].text).toBe('First paragraph\nwith two lines.');
     expect(blocks[1].text).toBe('```js\nconst a = 1;\n\nconst b = 2;\n```');
     expect(blocks[2].text.startsWith('<pasted_content')).toBe(true);
-    expect(blocks[3].text).toBe('Last one.');
+  });
+
+  it('leaves the whole paragraph with a trace line in it out of the blocks, the text above and below the trace line included, and cuts at the blank line', () => {
+    const trace = '[block moved at compaction: 10 chars, full text in /x/y.txt]';
+    const call = '[compacted] Bash(ls) - result of 3 chars removed';
+    const text = `Above the trace.\n${trace}\nBelow the trace.\n\nSeparate one.\n${call}\n\nSeparate two.\n\n${call}\n${call}`;
+    expect(splitBlocks(text).map((b) => text.slice(b.start, b.end))).toEqual(['Separate two.']);
+    const fenced = `Lead line.\n${call}\n\`\`\`js\nconst a = 1;\n\`\`\`\n\nTail.`;
+    expect(splitBlocks(fenced).map((b) => fenced.slice(b.start, b.end))).toEqual(['```js\nconst a = 1;\n```', 'Tail.']);
   });
 
   it('reads the lines of an unclosed fence as an ordinary paragraph', () => {

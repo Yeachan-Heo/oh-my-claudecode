@@ -4565,19 +4565,22 @@ function closedFence(text, from, to, mark) {
   }
   return false;
 }
-// The paragraphs and closed fenced code blocks of text[from, to): a trace line ends a paragraph and belongs to no block; a block ends before its last line break.
+// The paragraphs and closed fenced code blocks of text[from, to): a paragraph (the lines between blank lines) with a trace line in it is no block, whole, so the text that
+// stands next to traces stays beside them; a block ends before its last line break.
 function lineBlocks(text, from, to, out) {
   let i = from;
   let start = -1;
   let fence = '';
+  let traced = false; // the paragraph in hand holds a trace line
   const noCloser = new Set(); // a fence mark with no closing fence after one opener has none after a later one either
   const flush = (end) => {
-    if (start >= 0) {
+    if (start >= 0 && !traced) {
       let e = end;
       if (text[e - 1] === '\n') e -= text[e - 2] === '\r' ? 2 : 1;
       if (e > start && text.slice(start, e).trim()) out.push({ kind: 'text', start, end: e });
     }
     start = -1;
+    traced = false;
   };
   while (i < to) {
     const nl = text.indexOf('\n', i);
@@ -4595,8 +4598,8 @@ function lineBlocks(text, from, to, out) {
       noCloser.add(open[1]);
     }
     if (/^[ \t\r]*\n?$/.test(line)) { flush(i); i = end; continue; }
-    if (isStageTraceLine(line)) { flush(i); i = end; continue; }
     if (start < 0) start = i;
+    if (isStageTraceLine(line)) traced = true;
     i = end;
   }
   flush(to);
