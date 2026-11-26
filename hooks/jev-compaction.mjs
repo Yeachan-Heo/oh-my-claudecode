@@ -106,6 +106,13 @@
  * and read back like those of the pastes (same directory, same retention), when the module's own result is certain, or before the plan with
  * OMC_JEV_COMPACT_TARGET_PERCENT; `shadow` counts only; the record gets `replies`.
  *
+ * Series of traces (OMC_JEV_COMPACT_TRESC=off|shadow|active; off when unset or anything else). Two or more traces of the module on neighbouring lines of one
+ * row (a removed call, a moved reply, a moved agent message; only white space between them, a pasted-text trace ends a series) are a series; a series the caller asks
+ * for merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces go word for word to a file in the pastes
+ * directory, written and read back like the other files. Rows in the tail, rows the host cannot rebuild from text and rows with tool results stay; in a direct reply the
+ * trace of a reply or of an agent's message is never merged. The functions (seriesContext, seriesItems, mergeSeries) are not called by the compaction run yet: they
+ * wait for the queue of the second round of F2, which decides which series merge, so the variable is read into the configuration and has no effect on a compaction.
+ *
  * Secrets in the paste, reply and agent stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
  * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added. The check is bounded (maskSecrets
@@ -730,6 +737,7 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_OWNER_MARKERS: await $.env.get('OMC_JEV_COMPACT_OWNER_MARKERS'),
     OMC_JEV_COMPACT_LONG_REPLIES: await $.env.get('OMC_JEV_COMPACT_LONG_REPLIES'),
     OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: await $.env.get('OMC_JEV_COMPACT_HOOK_ROW_PREFIXES'),
+    OMC_JEV_COMPACT_TRESC: await $.env.get('OMC_JEV_COMPACT_TRESC'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
     OMC_JEV_BREAKER_DIR: await $.env.get('OMC_JEV_BREAKER_DIR'),
@@ -783,6 +791,7 @@ export async function readConfig($) {
   const notifications = ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_NOTIFICATIONS ?? '').trim());
   const pastes = pasteMode(env.OMC_JEV_COMPACT_PASTES);
   const replies = pasteMode(env.OMC_JEV_COMPACT_LONG_REPLIES);
+  const series = pasteMode(env.OMC_JEV_COMPACT_TRESC);
   return {
     mode,
     key: env.TYPESAFE_API_KEY,
@@ -830,6 +839,8 @@ export async function readConfig($) {
     // Row prefixes of the paste and reply stages: the built-in ones, then the comma separated list of OMC_JEV_COMPACT_HOOK_ROW_PREFIXES.
     hookRowPrefixes: [...HOOK_ROW_PREFIXES, ...String(env.OMC_JEV_COMPACT_HOOK_ROW_PREFIXES ?? '').split(',').map((x) => x.trim()).filter(Boolean)],
     replies,
+    // Series of traces (off unless TRESC says shadow or active): `shadow` counts what would merge, `active` merges the series that are asked for into one line and a file.
+    series,
   };
 }
 
@@ -4423,6 +4434,166 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
     }
   } catch { stats.error = 1; }
   return { rows, stats };
+}
+
+// --- series of traces (OMC_JEV_COMPACT_TRESC) --------------------------------------------------
+// Two or more traces of the module on neighbouring lines of one row (SERIES_MIN; only white space between them) are a series, and a series that is asked for merges into one
+// line that names a file holding the traces word for word. A series merges only whole, as a unit, and only where the row may be edited: before the tail, outside the rows the
+// host cannot rebuild from text, and, in a direct reply, never over the trace of a reply or of an agent's message. Which series to merge is not decided here: the caller passes the keys.
+const SERIES_MIN = 2;
+const SERIES_NOTE = '[compacted] traces merged:';
+const SERIES_NOTE_RE = /^\[compacted\] traces merged: (\d+) calls, (\d+) replies, (\d+) others; list in /;
+const seriesNote = (stats, path) => `${SERIES_NOTE} ${stats.calls} calls, ${stats.replies} replies, ${stats.others} others; list in ${path}`;
+const seriesTok = (text, rates) => rates.RATE_TRACE * text.length + rates.RATE_NON_ASCII * nonAscii(text);
+const seriesPath = (cfg, sessionId, name) => `${cfg.pasteDir}/${safeName(sessionId)}/${name}.txt`;
+// The paths of the module's own files stand in its traces (a reply, an agent's message, a merged series). They are no secret, and a name of 32 hexadecimal digits is what the masker
+// takes for one, so the check reads the text with them out (as the agent stage reads a trace without its path).
+const ownFilePaths = (cfg) => new RegExp(`${escapeRegExp(cfg.pasteDir)}/[A-Za-z0-9_-]{1,80}/[0-9a-f]{32}\\.txt`, 'g');
+// A row a series may stand in: text, no tool result.
+const seriesRowOk = (m) => typeof m.text === 'string' && m.text.trim() && !(m.toolResults || []).length;
+
+// The traces of the module in a text, one per line, from the first character of the line to its end: a removed call (`[compacted] `), a reply moved to a file and an agent's
+// message moved to a file. The trace of a pasted text stands inside a line and is no span, so it ends a series like any other text.
+function seriesSpans(text, protect = false) {
+  const spans = [];
+  for (let at = 0; at < text.length;) {
+    const nl = text.indexOf('\n', at);
+    const end = nl < 0 ? text.length : nl;
+    const kind = text.startsWith('[compacted] ', at) ? 'call' : text.startsWith(REPLY_TRACE_PREFIX, at) ? 'reply' : text.startsWith(AGENT_TRACE_PREFIX, at) ? 'other' : undefined;
+    if (kind) spans.push({ start: at, end, kind, ...(protect && kind !== 'call' ? { fixed: true } : {}) }); // in a direct reply (protect) the trace of a reply or of a message stays as it is
+    at = end + 1;
+  }
+  return spans;
+}
+
+/**
+ * The series of a text: runs of at least SERIES_MIN neighbouring traces. [{start, end, text, stats}]; stats: traces, calls, replies, others, tools (calls by tool), errors, file
+ * (some trace names a file). A line merged by an earlier compaction joins a new series with its own counts. In a direct reply (`protect`) a trace that stays fixed
+ * is no member of a series and ends the one beside it.
+ */
+export function seriesRuns(text, protect = false) {
+  const runs = [];
+  let cur;
+  for (const sp of seriesSpans(text, protect)) {
+    if (sp.fixed) { cur = undefined; continue; }
+    if (cur && !text.slice(cur.end, sp.start).trim()) { cur.end = sp.end; cur.spans.push(sp); } else { cur = { start: sp.start, end: sp.end, spans: [sp] }; runs.push(cur); }
+  }
+  return runs.filter((r) => r.spans.length >= SERIES_MIN).map((r) => {
+    const stats = { traces: 0, calls: 0, replies: 0, others: 0, tools: {}, errors: 0, file: false };
+    for (const sp of r.spans) {
+      const line = text.slice(sp.start, sp.end);
+      const note = SERIES_NOTE_RE.exec(line);
+      if (note) { stats.calls += Number(note[1]); stats.replies += Number(note[2]); stats.others += Number(note[3]); stats.traces += Number(note[1]) + Number(note[2]) + Number(note[3]); stats.file = true; continue; }
+      stats.traces++;
+      if (sp.kind === 'reply') stats.replies++;
+      else if (sp.kind === 'other') stats.others++;
+      else {
+        stats.calls++;
+        const tool = /^\[compacted\] ([^\s(]+)/.exec(line)?.[1];
+        if (tool) stats.tools[tool] = (stats.tools[tool] || 0) + 1;
+        if (/ - error of \d+ chars removed$/.test(line)) stats.errors++;
+      }
+      if (/full text in |^\[agent message moved/.test(line)) stats.file = true;
+    }
+    return { start: r.start, end: r.end, text: text.slice(r.start, r.end), stats };
+  });
+}
+
+/**
+ * Which rows a series may stand in: [0, tail) less `skip` (the rows the host cannot rebuild from text: server blocks in an assistant row, an image or a file in a user row,
+ * a user row a delivered message is anchored to), and `direct`, the direct replies. `reason` says that nothing can be told: no API form, or a message with an image that matches no row.
+ */
+export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) {
+  if (!api) return { reason: 'no_api_form' };
+  const images = nonTextUserRows(messages, api);
+  if (images.unmatched) return { reason: 'image_unmatched' };
+  const skip = new Set([...nonTextAssistantRows(messages, api), ...images.rows]);
+  for (const [row] of queued) if (messages[row]?.role === 'user') skip.add(row);
+  const users = ownerRows(messages, cfg.hookRowPrefixes);
+  const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
+  return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skip, direct: directReplyRows(messages, users, delivered) };
+}
+
+/**
+ * The series for Jev and for the second round of the cascade: one item per text of a series (the same series in several rows is one item with its rows), with what merging it
+ * gains in tokens (the traces at RATE_TRACE less the one line that replaces them, its path planned at the length of a file's). {kind, key, body, row (the last row), rows, chars, run,
+ * gain, repeated, f2: what Jev is told of the series}. `key` is the text of the series.
+ */
+export function seriesItems(cfg, messages, ctx, sessionId) {
+  const byKey = new Map();
+  if (ctx.reason) return [];
+  const planned = seriesPath(cfg, sessionId, '0'.repeat(32));
+  for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
+    const m = messages[i];
+    if (!seriesRowOk(m) || ctx.skip.has(i)) continue;
+    for (const run of seriesRuns(m.text, ctx.direct.has(i))) {
+      const seen = byKey.get(run.text);
+      if (seen) { seen.rows.push(i); seen.repeated = true; seen.row = i; continue; }
+      const gain = Math.max(0, seriesTok(run.text, cfg.rates) - seriesTok(seriesNote(run.stats, planned), cfg.rates));
+      const { traces, calls, replies, others, tools, errors, file } = run.stats;
+      byKey.set(run.text, {
+        kind: 'series', key: run.text, body: run.text, row: i, rows: [i], chars: run.text.length, run, gain, repeated: false,
+        f2: { kind: 'trace_series', traces, calls, replies, others, tools, errors, has_file: file, tokens: Math.round(seriesTok(run.text, cfg.rates)), gain_tokens: Math.round(gain) },
+      });
+    }
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * Merges the series whose keys are in `keys` (the texts of the series): one line `[compacted] traces merged: N calls, M replies, K others; list in <file>` in place of the
+ * traces, and the file holds them word for word. Same files and same checks as the stages that move text: the state directory, `savePaste`, a secret check within the budget of
+ * the scan; a series stays whole when its file cannot be written and read back in time, or when the check holds it. `record.series` holds the counts. Returns the new text of each
+ * changed row by its row index (none unless active). Never rejects. `ctx` is seriesContext's.
+ */
+export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId, deadline) {
+  const mode = cfg.series === 'active' && cfg.mode === 'active' ? 'active' : 'shadow';
+  const stats = { mode, series: 0, traces: 0, tokens_before: 0, tokens_after: 0, files: 0, written: 0, reused: 0, write_failed: 0, secret: 0, unchecked: 0, timed_out: 0, ...(mode === 'active' ? { installed: false } : {}) };
+  record.series = stats;
+  const edited = new Map();
+  if (ctx.reason) { stats.reason = ctx.reason; return edited; }
+  if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return edited; }
+  if (!sessionId) { stats.reason = 'no_session'; return edited; }
+  try {
+    const gate = { deadline, stalled: false };
+    const budget = { left: SCAN_BUDGET_CHARS, deadline };
+    const own = ownFilePaths(cfg);
+    const done = new Map(); // text of a series -> {path} or {}: the same series in several rows gets one file
+    const paths = new Set();
+    for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
+      const m = messages[i];
+      if (!seriesRowOk(m) || ctx.skip.has(i)) continue;
+      const runs = seriesRuns(m.text, ctx.direct.has(i)).filter((r) => keys.has(r.text));
+      let text = m.text;
+      for (const run of [...runs].reverse()) {
+        let r = done.get(run.text);
+        if (!r) {
+          const file = `${run.text.trim()}\n`;
+          const held = secretCheck(file.replace(own, 'file.txt'), cfg.privatePaths, budget);
+          r = {};
+          if (held) stats[held]++;
+          else {
+            const path = seriesPath(cfg, sessionId, (await sha256Hex(file)).slice(0, 32));
+            const saved = mode === 'active' ? await savePaste($, gate, path, file) : 'planned';
+            if (saved === 'written' || saved === 'reused' || saved === 'planned') { if (saved !== 'planned') stats[saved]++; r = { path }; }
+            else stats[saved === 'timeout' ? 'timed_out' : 'write_failed']++;
+          }
+          done.set(run.text, r);
+        }
+        if (!r.path) continue;
+        const note = seriesNote(run.stats, r.path);
+        text = text.slice(0, run.start) + note + text.slice(run.end);
+        paths.add(r.path);
+        stats.series++;
+        stats.traces += run.stats.traces;
+        stats.tokens_before += seriesTok(run.text, cfg.rates);
+        stats.tokens_after += seriesTok(note, cfg.rates);
+        if (mode === 'active') edited.set(i, text);
+      }
+    }
+    stats.files = paths.size;
+  } catch { stats.error = 1; }
+  return edited;
 }
 
 async function decide($, e, cfg, record, started) {
