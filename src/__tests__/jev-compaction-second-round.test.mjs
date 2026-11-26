@@ -1,6 +1,6 @@
 /* global setTimeout, clearTimeout */
 /**
- * Tests for the second round in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_TRESC=active with the token cascade): the results and the blocks Jev kept in one queue in the order of
+ * Tests for the second round in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_BLOCKS=active with the token cascade): the results and the blocks Jev kept in one queue in the order of
  * Jev's ratings, the stop at the target, the owner's blocks last (OMC_JEV_COMPACT_OWNER_LAST), the question about a tie, the scan budget of the blocks and the trace of a block.
  * The calls of Jev are a fake `$.http.fetch`; no network.
  */
@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { chooseByRank, reduceToLimit, register, traceHeader } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
-const BLOCKS = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TRESC: 'active' };
+const BLOCKS = { ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active' };
 const PASTES = '/home/u/.omc/state/jev/compaction-pastes/';
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
 
@@ -220,7 +220,7 @@ describe('second round: the owner blocks last (OMC_JEV_COMPACT_OWNER_LAST)', () 
   });
 });
 
-describe('second round: in a compaction (OMC_JEV_COMPACT_TRESC=active, the token cascade)', () => {
+describe('second round: in a compaction (OMC_JEV_COMPACT_BLOCKS=active, the token cascade)', () => {
   it('lowers the results and the blocks Jev kept, in one pass of its own, and the prediction ends at the target', async () => {
     const run = await compactRun(CASCADE(54), session(40, { said, asks: ask }), results06);
     expect(run.record).toMatchObject({ result: 'jev', cascade_pass: 'F2' });
@@ -256,8 +256,8 @@ describe('second round: in a compaction (OMC_JEV_COMPACT_TRESC=active, the token
   });
 
   it('no second round without the switch, and in shadow only a count in the record, with the conversation as before', async () => {
-    const off = await compactRun({ ...CASCADE(54), OMC_JEV_COMPACT_TRESC: 'off' }, session(40, { said, asks: ask }), results06);
-    const shadow = await compactRun({ ...CASCADE(54), OMC_JEV_COMPACT_TRESC: 'shadow' }, session(40, { said, asks: ask }), results06);
+    const off = await compactRun({ ...CASCADE(54), OMC_JEV_COMPACT_BLOCKS: 'off' }, session(40, { said, asks: ask }), results06);
+    const shadow = await compactRun({ ...CASCADE(54), OMC_JEV_COMPACT_BLOCKS: 'shadow' }, session(40, { said, asks: ask }), results06);
     expect(off.record.f2).toBeUndefined();
     expect(shadow.record.f2).toEqual({ mode: 'shadow', candidates: expect.objectContaining({ result: expect.any(Number), block: expect.any(Number) }) });
     expect(JSON.stringify(shadow.out.messages)).toBe(JSON.stringify(off.out.messages));

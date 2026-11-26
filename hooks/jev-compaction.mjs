@@ -106,7 +106,7 @@
  * and read back like those of the pastes (same directory, same retention), when the module's own result is certain, or before the plan with
  * OMC_JEV_COMPACT_TARGET_PERCENT; `shadow` counts only; the record gets `replies`.
  *
- * Verdicts of Jev on blocks of text (OMC_JEV_COMPACT_TRESC=off|shadow|active; off when unset or anything else). In a conversation with the API form, a state
+ * Verdicts of Jev on blocks of text (OMC_JEV_COMPACT_BLOCKS=off|shadow|active; off when unset or anything else; the one switch also steers the second round, active only, and the series of traces, counted only in shadow, below). In a conversation with the API form, a state
  * directory and a session id, Jev rates each block (a paragraph, a closed fenced code block or a closed pasted tag of the user's own words or of an assistant
  * row; a whole message block of an agent row) of the rows before the tail on four levels: 3 and 2 leave the block word for word, 1 and 0 move it to a file of
  * the pastes directory and leave a trace, `[block moved at compaction: <n> chars in b/<file>...]` (level 1 adds the first BLOCK_HEAD_CHARS
@@ -124,7 +124,7 @@
  * level 1); a tie at the edge of the choice is put to Jev once, and the passes of the cascade after the second one run as the reserve. OMC_JEV_COMPACT_OWNER_LAST=active puts the owner's
  * blocks last in that queue. The checks of the blocks for a secret have their own budget, BLOCK_SCAN_BUDGET_CHARS. The record gets `f2`; see "second round" below.
  *
- * Series of traces (the same switch, OMC_JEV_COMPACT_TRESC). Two or more traces of the module on neighbouring lines of one row (a removed call, a moved reply, a moved agent
+ * Series of traces (the same switch, OMC_JEV_COMPACT_BLOCKS). Two or more traces of the module on neighbouring lines of one row (a removed call, a moved reply, a moved agent
  * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round every series of the rows before the tail
  * (the rows the blocks left, less the rows another stage changes) that the check for a secret lets through is rated by Jev with the question of the round and stands in the queue
  * with the results and the blocks; a series that comes down merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces
@@ -767,7 +767,7 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_OWNER_MARKERS: await $.env.get('OMC_JEV_COMPACT_OWNER_MARKERS'),
     OMC_JEV_COMPACT_LONG_REPLIES: await $.env.get('OMC_JEV_COMPACT_LONG_REPLIES'),
     OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: await $.env.get('OMC_JEV_COMPACT_HOOK_ROW_PREFIXES'),
-    OMC_JEV_COMPACT_TRESC: await $.env.get('OMC_JEV_COMPACT_TRESC'),
+    OMC_JEV_COMPACT_BLOCKS: await $.env.get('OMC_JEV_COMPACT_BLOCKS'),
     OMC_JEV_COMPACT_VERDICTS: await $.env.get('OMC_JEV_COMPACT_VERDICTS'),
     OMC_JEV_COMPACT_BLOCK_QUESTIONS: await $.env.get('OMC_JEV_COMPACT_BLOCK_QUESTIONS'),
     OMC_JEV_COMPACT_WINDOW_CHARS: await $.env.get('OMC_JEV_COMPACT_WINDOW_CHARS'),
@@ -827,7 +827,7 @@ export async function readConfig($) {
   const notifications = ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_NOTIFICATIONS ?? '').trim());
   const pastes = pasteMode(env.OMC_JEV_COMPACT_PASTES);
   const replies = pasteMode(env.OMC_JEV_COMPACT_LONG_REPLIES);
-  const blocks = pasteMode(env.OMC_JEV_COMPACT_TRESC);
+  const blocks = pasteMode(env.OMC_JEV_COMPACT_BLOCKS);
   return {
     mode,
     key: env.TYPESAFE_API_KEY,
@@ -875,7 +875,7 @@ export async function readConfig($) {
     // Row prefixes of the paste and reply stages: the built-in ones, then the comma separated list of OMC_JEV_COMPACT_HOOK_ROW_PREFIXES.
     hookRowPrefixes: [...HOOK_ROW_PREFIXES, ...String(env.OMC_JEV_COMPACT_HOOK_ROW_PREFIXES ?? '').split(',').map((x) => x.trim()).filter(Boolean)],
     replies,
-    // Verdicts of Jev on blocks of text (off unless TRESC says shadow or active): `verdicts` off asks no question (the verdict files that exist still apply), `blockQuestions`
+    // Verdicts of Jev on blocks of text (off unless OMC_JEV_COMPACT_BLOCKS says shadow or active): `verdicts` off asks no question (the verdict files that exist still apply), `blockQuestions`
     // shared puts the wording of the question once in the state of a request, `windowChars` is the window of Jev in bytes (8000 or more), `fullInput` bounds the user's words in the
     // header of a request by the window alone, `jevStages` lets the verdicts decide what the paste and reply stages and the agent messages to files decide by fixed lengths.
     blocks,
@@ -4491,7 +4491,7 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
   return { rows, stats };
 }
 
-// --- verdicts of Jev on blocks of text (OMC_JEV_COMPACT_TRESC=off|shadow|active, off when unset) ------------------------------------------------
+// --- verdicts of Jev on blocks of text (OMC_JEV_COMPACT_BLOCKS=off|shadow|active, off when unset) ------------------------------------------------
 // With the switch on, in a session with the API form, a state directory and a session id at hand, Jev rates the BLOCKS of the rows before the tail on four levels and
 // the code only carries the levels out. A block is a paragraph, a closed fenced code block or a closed <pasted_content> tag of a row with the user's own words (in a
 // subagent: the messages of the session that gave the task) or of an assistant row, and a whole <teammate-message>, <agent-message> or <cross-session-message> block of
@@ -5114,7 +5114,7 @@ async function backgroundBlockVerdicts($, cfg) {
 }
 // --- end of verdicts of Jev on blocks of text -----------------------------------------------------------------------------------------------
 
-// --- second round: Jev's order, one queue for the results and the blocks (OMC_JEV_COMPACT_TRESC=active) -------------------------------------------------------------
+// --- second round: Jev's order, one queue for the results and the blocks (OMC_JEV_COMPACT_BLOCKS=active) -------------------------------------------------------------
 //
 // After the second pass of the cascade (a secret or non-text result to a trace, a result Jev scored low to a trace) the prediction may still be above the target. The second
 // round (`reduceToLimit`) then puts every item that Jev rated and that can still come down into one queue, in the order of Jev's ratings (a low rating is the least needed word for
@@ -5322,7 +5322,7 @@ async function askTie($, cfg, group, ctx) {
 }
 // --- end of the second round ------------------------------------------------------------------------------------------------------------------------------------------
 
-// --- series of traces (OMC_JEV_COMPACT_TRESC) --------------------------------------------------
+// --- series of traces (OMC_JEV_COMPACT_BLOCKS) --------------------------------------------------
 // Two or more traces of the module on neighbouring lines of one row (SERIES_MIN; only white space between them) are a series, and a series that is asked for merges into one
 // line that names a file holding the traces word for word. A series merges only whole, as a unit, and only where the row may be edited: before the tail, outside the rows the
 // host cannot rebuild from text, and, in a direct reply, never over the trace of a reply, of a block or of an agent's message. Which series to merge is not decided here: the caller passes the keys.
@@ -5578,7 +5578,7 @@ async function decide($, e, cfg, record, started) {
   const envelopeTokens = cfg.rates.RATE_NOTE * envelopes;
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target is the rule's target, a share of the window).
-  // Verdicts of Jev on blocks of text (OMC_JEV_COMPACT_TRESC): off without the API form, a state directory or a session; `shadow` also while the point itself is not active. They ask
+  // Verdicts of Jev on blocks of text (OMC_JEV_COMPACT_BLOCKS): off without the API form, a state directory or a session; `shadow` also while the point itself is not active. They ask
   // only while the point is active and OMC_JEV_COMPACT_VERDICTS is not off. With OMC_JEV_COMPACT_JEV_STAGES=active the verdicts that run (active) decide what the paste and reply stages
   // and the agent messages to files decide by fixed lengths: those do not run (the agent trim stays).
   const blocksMode = cfg.blocks !== 'off' && api && cfg.pasteDir && record.session_id ? (cfg.blocks === 'active' && cfg.mode !== 'active' ? 'shadow' : cfg.blocks) : 'off';
@@ -5858,7 +5858,7 @@ async function decide($, e, cfg, record, started) {
     let base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens - thinking.removed + headerTokens();
     let plan;
     if (blocksMode === 'active' && blockOn) {
-      // The second round (OMC_JEV_COMPACT_TRESC=active): the first pass (or the scores alone, for a manual compaction) comes first, and a prediction still above the target goes to the
+      // The second round (OMC_JEV_COMPACT_BLOCKS=active): the first pass (or the scores alone, for a manual compaction) comes first, and a prediction still above the target goes to the
       // round that lowers the results and the blocks in Jev's order; the cascade then goes on as the reserve (the passes after the second one, from the state the round left).
       const first = manual ? manualPlan(candidates, base, cfg.rates, shape) : cascade(candidates, base, target, cfg.rates, shape, { stopAfterA: true });
       plan = first;

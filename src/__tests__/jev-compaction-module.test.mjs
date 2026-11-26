@@ -2871,7 +2871,7 @@ describe('jev-compaction module: settings fallback for the options of the stages
     ['OMC_JEV_COMPACT_OWNER_MARKERS', 'my marker', (c) => c.ownerMarkers, ['my marker'], []],
     ['OMC_JEV_COMPACT_LONG_REPLIES', 'active', (c) => c.replies, 'active', 'off'],
     ['OMC_JEV_COMPACT_HOOK_ROW_PREFIXES', 'Custom note:', (c) => c.hookRowPrefixes.includes('Custom note:'), true, false],
-    ['OMC_JEV_COMPACT_TRESC', 'active', (c) => c.blocks, 'active', 'off'],
+    ['OMC_JEV_COMPACT_BLOCKS', 'active', (c) => c.blocks, 'active', 'off'],
     ['OMC_JEV_COMPACT_VERDICTS', 'off', (c) => c.verdicts, 'off', 'active'],
     ['OMC_JEV_COMPACT_BLOCK_QUESTIONS', 'shared', (c) => c.blockQuestions, 'shared', 'full'],
     ['OMC_JEV_COMPACT_WINDOW_CHARS', '9000', (c) => c.windowChars, 9000, undefined],

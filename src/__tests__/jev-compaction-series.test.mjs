@@ -1,6 +1,6 @@
 /* global setTimeout, clearTimeout */
 /**
- * Tests for the series of traces in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_TRESC=off|shadow|active, off when unset): two or more neighbouring traces of the module in one row
+ * Tests for the series of traces in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_BLOCKS=off|shadow|active, off when unset): two or more neighbouring traces of the module in one row
  * are a series, and a series that is asked for merges into one line that names a file with the traces word for word. No network; files are a map in memory.
  */
 
@@ -138,7 +138,7 @@ describe('series of traces: the trace of a block', () => {
   });
 
   it('the file of a series that holds a block trace opens with the header that says which directory the letter stands for, and the letter paths are no secret', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const text = `Findings.\n${call(1)}\n${block(2, 'start')}\n${call(3)}`;
     const messages = conversation([text]);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
@@ -157,7 +157,7 @@ describe('series of traces: the trace of a block', () => {
 
 describe('series of traces: the rows a series may stand in', () => {
   it('the last KEEP_LAST rows and the rows from keepFrom are the tail; the tail is no place for a series', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([`${call(1)}\n${call(2)}`]);
     expect(seriesContext(cfg, messages, apiOf(messages), messages.length).tail).toBe(messages.length - 6);
     expect(seriesContext(cfg, messages, apiOf(messages), 3).tail).toBe(3);
@@ -165,7 +165,7 @@ describe('series of traces: the rows a series may stand in', () => {
   });
 
   it('without the API form nothing is known, and a user message with an image that matches no row stops it too', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([`${call(1)}\n${call(2)}`]);
     expect(seriesContext(cfg, messages, undefined, messages.length).reason).toBe('no_api_form');
     const api = apiOf(messages);
@@ -174,7 +174,7 @@ describe('series of traces: the rows a series may stand in', () => {
   });
 
   it('a user row with an image, an assistant row with a server block and a user row a delivered message hangs on are skipped', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([`${call(1)}\n${call(2)}`, `${call(3)}\n${call(4)}`, `${call(5)}\n${call(6)}`, `${call(7)}\n${call(8)}`]);
     const api = apiOf(messages);
     // The assistant row of text `call(3)...` also holds a server block in the API form; the user message of step 2 carries an image.
@@ -195,7 +195,7 @@ describe('series of traces: the rows a series may stand in', () => {
   });
 
   it('the rows of a direct reply are marked so that the traces of replies in them stay', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = frozen([user('Task: report.'), assistant('Looking.'), assistant(`${call(1)}\n${call(2)}`), assistant('Looked.'), user('what did you find out about the notes?'), assistant(`The answer is in the notes.\n${reply(3)}\n${call(4)}\n${call(5)}`), user('go on'), assistant('Next.'), ...Array.from({ length: 8 }, (_, k) => (k % 2 ? assistant(`tail ${k}`) : user(`tail ${k}`)))]);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
     expect(ctx.direct.has(5)).toBe(true);
@@ -209,7 +209,7 @@ describe('series of traces: the rows a series may stand in', () => {
 
 describe('series of traces: the items for Jev', () => {
   it('one item per text of a series, the same series in several rows is one item with its rows, and the gain is the traces less the line that replaces them', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const same = `${call(1)}\n${call(2)}\n${call(3)}`;
     const messages = conversation([same, `${call(7)}\n${call(8)}`, same, call(9)]);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
@@ -224,7 +224,7 @@ describe('series of traces: the items for Jev', () => {
   });
 
   it('a series that is shorter than the line that replaces it gains nothing (zero, never negative)', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation(['[compacted] A() - x\n[compacted] B() - y']);
     const items = seriesItems(cfg, messages, seriesContext(cfg, messages, apiOf(messages), messages.length), SESSION);
     expect(items).toHaveLength(1);
@@ -232,7 +232,7 @@ describe('series of traces: the items for Jev', () => {
   });
 
   it('a row with a tool result and a row from the tail hold no item', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const rows = [user('Task.'), { role: 'assistant', text: 'Step 1.', toolUses: [{ tool_use_id: 't1', tool: 'Bash', input: { command: 'ls' } }] }, { role: 'user', text: `${call(1)}\n${call(2)}`, toolUses: [], toolResults: [{ tool_use_id: 't1', text: 'r', isError: false }] }, assistant('ok'), user('go'), assistant('Looking.'), assistant(`${call(3)}\n${call(4)}`), assistant('Looked.'), user('go on'), assistant('a'), user('b'), assistant('c'), user('d'), assistant('e'), user('f'), assistant('g')];
     const messages = frozen(rows);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
@@ -241,7 +241,7 @@ describe('series of traces: the items for Jev', () => {
   });
 
   it('a context that holds a reason gives no item', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([`${call(1)}\n${call(2)}`]);
     expect(seriesItems(cfg, messages, { reason: 'no_api_form' }, SESSION)).toEqual([]);
   });
@@ -251,7 +251,7 @@ describe('series of traces: merging', () => {
   const SERIES_A = `${call(1)}\n${failed(2)}\n${reply(3)}`;
   const SERIES_B = `${call(4)}\n${call(5)}`;
 
-  async function run({ env = { OMC_JEV_COMPACT_TRESC: 'active' }, texts = [`Findings.\n${SERIES_A}\nAnd more.\n${SERIES_B}`], keys, fake = fakeDollar(), deadline = FAR, sessionId = SESSION } = {}) {
+  async function run({ env = { OMC_JEV_COMPACT_BLOCKS: 'active' }, texts = [`Findings.\n${SERIES_A}\nAnd more.\n${SERIES_B}`], keys, fake = fakeDollar(), deadline = FAR, sessionId = SESSION } = {}) {
     const cfg = await configOf(env);
     const messages = conversation(texts);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
@@ -307,7 +307,7 @@ describe('series of traces: merging', () => {
   });
 
   it('shadow: counts what would merge, writes nothing, edits nothing', async () => {
-    const { edited, record, fake } = await run({ env: { OMC_JEV_COMPACT_TRESC: 'shadow' } });
+    const { edited, record, fake } = await run({ env: { OMC_JEV_COMPACT_BLOCKS: 'shadow' } });
     expect(edited.size).toBe(0);
     expect(fake.files().size).toBe(0);
     expect(record.series).toMatchObject({ mode: 'shadow', series: 2, traces: 5, files: 2, written: 0 });
@@ -315,7 +315,7 @@ describe('series of traces: merging', () => {
   });
 
   it('active needs the point itself active: with the point in shadow the series only count', async () => {
-    const { edited, record, fake } = await run({ env: { OMC_JEV_COMPACT_TRESC: 'active', OMC_JEV: 'compaction' } });
+    const { edited, record, fake } = await run({ env: { OMC_JEV_COMPACT_BLOCKS: 'active', OMC_JEV: 'compaction' } });
     expect(edited.size).toBe(0);
     expect(fake.files().size).toBe(0);
     expect(record.series.mode).toBe('shadow');
@@ -378,7 +378,7 @@ describe('series of traces: merging', () => {
   });
 
   it('without a state directory, a session or the API form nothing merges and the reason is in the record', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([SERIES_B]);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
     const noDir = {};
@@ -393,7 +393,7 @@ describe('series of traces: merging', () => {
   });
 
   it('the rows of the tail and the rows that were skipped are never edited', async () => {
-    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([SERIES_B, SERIES_B]);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
     ctx.fixed.add(rowOf(0));
@@ -417,10 +417,10 @@ describe('series of traces: merging', () => {
 describe('series of traces: the switch', () => {
   it('is off when unset, shadow or active by its value in any case, and any other value is off', async () => {
     expect((await configOf({})).blocks).toBe('off');
-    expect((await configOf({ OMC_JEV_COMPACT_TRESC: 'shadow' })).blocks).toBe('shadow');
-    expect((await configOf({ OMC_JEV_COMPACT_TRESC: ' Active ' })).blocks).toBe('active');
-    expect((await configOf({ OMC_JEV_COMPACT_TRESC: '1' })).blocks).toBe('off');
-    expect((await configOf({ OMC_JEV_COMPACT_TRESC: 'on' })).blocks).toBe('off');
+    expect((await configOf({ OMC_JEV_COMPACT_BLOCKS: 'shadow' })).blocks).toBe('shadow');
+    expect((await configOf({ OMC_JEV_COMPACT_BLOCKS: ' Active ' })).blocks).toBe('active');
+    expect((await configOf({ OMC_JEV_COMPACT_BLOCKS: '1' })).blocks).toBe('off');
+    expect((await configOf({ OMC_JEV_COMPACT_BLOCKS: 'on' })).blocks).toBe('off');
   });
 
   it('a compaction without the token cascade leaves neighbouring traces as they are whatever the switch says (series merge only in the second round)', async () => {
@@ -431,7 +431,7 @@ describe('series of traces: the switch', () => {
     const messages = frozen(rows);
     const outs = [];
     for (const value of [undefined, 'shadow', 'active']) {
-      const env = { ...ACTIVE_ENV, ...(value ? { OMC_JEV_COMPACT_TRESC: value } : {}) };
+      const env = { ...ACTIVE_ENV, ...(value ? { OMC_JEV_COMPACT_BLOCKS: value } : {}) };
       const store = new Map();
       const $ = {
         env: { get: async (name) => env[name] },

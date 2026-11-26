@@ -1,6 +1,6 @@
 /* global setTimeout, clearTimeout */
 /**
- * Tests for the series of traces in the compaction run (hooks/jev-compaction.mjs, OMC_JEV_COMPACT_TRESC=active with the token cascade): the series stand in the queue of the second round
+ * Tests for the series of traces in the compaction run (hooks/jev-compaction.mjs, OMC_JEV_COMPACT_BLOCKS=active with the token cascade): the series stand in the queue of the second round
  * with the results and the blocks, Jev rates them with the question of the round, the ones that come down merge into one line and a file, the floor counts them, and the block
  * traces join a series. The calls of Jev are a fake `$.http.fetch`; no network.
  */
@@ -12,7 +12,7 @@ import { register } from '../../hooks/jev-compaction.mjs';
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const PASTES = '/home/u/.omc/state/jev/compaction-pastes/';
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
-const CASCADE = (percent, extra = {}) => ({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TRESC: 'active', OMC_JEV_COMPACT_TARGET_PERCENT: String(percent), ...extra });
+const CASCADE = (percent, extra = {}) => ({ ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active', OMC_JEV_COMPACT_TARGET_PERCENT: String(percent), ...extra });
 
 /** A fake `$`: `rate(item)` is the score (0-3) the answer to a series question gives, `blockScore(text)` that of a block; the questions about results are answered with `resultScore`. */
 function fakeDollar({ env, messages, api, rate = () => 0, blockScore = () => 3, resultScore = () => 0.6 }) {
@@ -134,7 +134,7 @@ describe('series of traces in the compaction run: the queue of the second round'
     expect(calm.record.f2.reason).toBe('below_goal');
     expect(calm.record.f2.series_question).toBeUndefined();
     expect(calm.asked).toHaveLength(0);
-    const off = await compactRun({ ...CASCADE(55), OMC_JEV_COMPACT_TRESC: undefined }, session(40, withSeries));
+    const off = await compactRun({ ...CASCADE(55), OMC_JEV_COMPACT_BLOCKS: undefined }, session(40, withSeries));
     expect(off.record.f2).toBeUndefined();
     expect(off.record.series).toBeUndefined();
     expect(allText(off.out)).not.toContain('traces merged');
@@ -159,7 +159,7 @@ describe('series of traces in the compaction run: the queue of the second round'
   });
 
   it('in shadow it counts the series candidates and writes nothing', async () => {
-    const shadow = await compactRun({ ...CASCADE(55), OMC_JEV_COMPACT_TRESC: 'shadow' }, session(40, withSeries));
+    const shadow = await compactRun({ ...CASCADE(55), OMC_JEV_COMPACT_BLOCKS: 'shadow' }, session(40, withSeries));
     expect(shadow.record.f2).toMatchObject({ mode: 'shadow', candidates: { series: 2 } });
     expect(shadow.asked).toHaveLength(0);
     expect(shadow.record.series).toBeUndefined();

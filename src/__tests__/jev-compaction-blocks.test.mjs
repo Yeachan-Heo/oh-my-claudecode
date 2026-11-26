@@ -1,6 +1,6 @@
 /* global setTimeout, clearTimeout */
 /**
- * Tests for the verdicts of Jev on blocks of text in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_TRESC=off|shadow|active, off when unset): the blocks of the rows before the
+ * Tests for the verdicts of Jev on blocks of text in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_BLOCKS=off|shadow|active, off when unset): the blocks of the rows before the
  * tail are rated on four levels, level 3 and 2 stay word for word, level 1 and 0 go to a file and leave a trace. The calls of Jev are a fake `$.http.fetch`; no network.
  */
 
@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { blockTrace, register, splitBlocks, traceHeader } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
-const BLOCKS = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TRESC: 'active' };
+const BLOCKS = { ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active' };
 const PASTES = '/home/u/.omc/state/jev/compaction-pastes/';
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
 
@@ -140,7 +140,7 @@ describe('blocks of text: the blocks of a text and the trace', () => {
   });
 });
 
-describe('blocks of text: the verdicts carried out (OMC_JEV_COMPACT_TRESC=active)', () => {
+describe('blocks of text: the verdicts carried out (OMC_JEV_COMPACT_BLOCKS=active)', () => {
   it('leaves level 3 and 2 word for word, moves level 1 with its start and level 0 bare, the full text in a file under the pastes directory', async () => {
     const run = await compactRun(BLOCKS, session(40, { said }));
     expect(run.out?.messages).toBeTruthy();
@@ -328,7 +328,7 @@ describe('blocks of text: the switch', () => {
     expect(base.asked).toHaveLength(0);
     expect(base.record.blocks).toBeUndefined();
     for (const value of ['off', '', 'yes', '1', 'true']) {
-      const run = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TRESC: value }, session(40, { said }));
+      const run = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: value }, session(40, { said }));
       expect(run.asked).toHaveLength(0);
       expect(run.record.blocks).toBeUndefined();
       expect(asBefore(run)).toBe(asBefore(base));
@@ -337,7 +337,7 @@ describe('blocks of text: the switch', () => {
 
   it('shadow asks, counts and writes the verdict files, but the window is the same as with the switch off and no text moves', async () => {
     const base = await compactRun(ACTIVE_ENV, session(40, { said }));
-    const run = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TRESC: 'shadow' }, session(40, { said }));
+    const run = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'shadow' }, session(40, { said }));
     expect(run.asked.length).toBeGreaterThan(8);
     expect(run.record.blocks).toMatchObject({ mode: 'shadow' });
     expect(run.record.blocks.installed).toBe(false);
@@ -348,7 +348,7 @@ describe('blocks of text: the switch', () => {
   });
 
   it('reads the value in any case', async () => {
-    const run = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TRESC: 'ACTIVE' }, session(40, { said }));
+    const run = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'ACTIVE' }, session(40, { said }));
     expect(run.record.blocks.mode).toBe('active');
   });
 
