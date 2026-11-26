@@ -448,6 +448,8 @@ function heredocAt(heredocs, start) {
 // Findings in a command list. The heredocs of the whole text are looked up by the offset of their redirection.
 function devScanTokens(tokens, heredocs, depth) {
   if (depth > DEV_MAX_DEPTH) return devMentions(tokens) ? { what: 'a nested command', path: '/dev' } : null;
+  const ticks = backtickTexts.get(tokens);
+  if (ticks !== undefined) return shellOf(ticks, depth - 1); // read again as a text of its own, so that its here-documents are found at the right offsets
   let words = [];
   let fed = [];
   let pipeDev = null; // a /dev path among the words of the command before the last pipe
@@ -502,8 +504,10 @@ function devScanTokens(tokens, heredocs, depth) {
 }
 
 // Command lists nested in the parts of a word: $( ), ` `, <( ) and >( ), also inside "..." and ${...}.
+const backtickTexts = new WeakMap(); // token list of a `...` part -> its text after unescaping: the offsets of those tokens are relative to that text, not to the whole command
 function devSubLists(parts, out = []) {
   for (const p of parts) {
+    if (p.kind === 'backtick') backtickTexts.set(p.tokens, p.text.replace(/\\([`\\$])/g, '$1'));
     if (p.tokens) out.push(p.tokens);
     else if (p.parts) devSubLists(p.parts, out);
   }

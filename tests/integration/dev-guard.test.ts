@@ -74,6 +74,8 @@ const BLOCKED: string[] = [
   'sudo --user root rm /dev/null', 'sudo --chdir /tmp rm /dev/null', 'env --unset X rm /dev/null', 'env --chdir /tmp rm /dev/null', "env -S 'rm -f /dev/null'", 'env --split-string="rm /dev/null"', "env -S'rm /dev/null'",
   "env -S 'rm -f' /dev/null", "env -i -S 'sh -c \"rm /dev/null\"'", 'stdbuf --output L rm /dev/null', 'ionice --class 3 rm /dev/null', 'echo /dev/null | xargs --max-args 1 rm', `${'sudo '.repeat(11)}rm /dev/null`,
   'sudo --group wheel --user root env --unset X nice --adjustment 3 rm /dev/null', 'coproc rm /dev/null',
+  // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
+  'echo `bash <<B\nrm /dev/null\nB\n`', 'x=`bash <<B\nrm -f /dev/sda\nB\n`', 'echo `echo \\`rm /dev/null\\``',
   // a path from the pipe lands in the place of the replace string of xargs -I
   'echo /dev/sda | xargs -I{} rm {}', 'echo /dev/sda | xargs -i rm {}', 'echo /dev/sda | xargs --replace=@ rm @', 'echo /dev/sda | xargs -I @ rm @', 'echo /dev/sda | xargs -I{} cp x {}', 'echo -newer /dev/sda | xargs rm', 'find . -newer /dev/null -o -name /dev/sda | xargs rm',
   // more wrappers, keywords and spellings
@@ -144,6 +146,8 @@ const ALLOWED: string[] = [
   // xargs -I puts the path in the place of the replace string, and the file after a find test such as -newer is only compared with
   'echo /dev/null | xargs -I{} cp {} ./empty', 'ls /dev/disk/by-id/* | xargs -I{} ln -s {} ./links/', "find . -newer /dev/null -name '*.tmp' | xargs rm -f", 'find . -samefile /dev/null | xargs rm', 'find . -newerBt /dev/null | xargs rm',
   'echo /dev/null | xargs -i cp {} ./e', 'echo /dev/null | xargs --replace=@ cp @ ./e', 'echo /dev/null | xargs -I @ cp @ ./e',
+  // a here-document of cat inside backticks, and a top-level one whose offset happens to match the one inside the backticks
+  'echo `cat <<B\nrm /dev/null\nB\n`', "cats <<'A'\nrm -f /dev/null\nA\necho `bash <<B`", 'echo `ls /tmp`',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
