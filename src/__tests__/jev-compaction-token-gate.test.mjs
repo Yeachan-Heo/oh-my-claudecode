@@ -409,6 +409,63 @@ describe('the prediction is the list that is installed: the rows of the tail tha
   }
 });
 
+describe('the zero floor of a message holds the deliveries it carries: a block delivered during the tool turn is text of the message', () => {
+  // 200 steps of a text result of 600 characters, with `per` messages of a coordinator after the result of every `every`th step (the API form only: no row shows them), at a block
+  // rate of 10 (under the 40.5 that the constant of a message takes off, so a message that holds little text costs nothing), and four results that Jev scores needed, the others low.
+  // The host counts the list plus a prefix (the system prompt and the tools) that leaves the list with only the low-scored results traced `left` tokens under the target of 34 000.
+  const NEEDED = ['RESULT-20 ', 'RESULT-60 ', 'RESULT-100 ', 'RESULT-140 '];
+  const score = (text) => (NEEDED.some((k) => text.startsWith(k)) ? 3 : 0);
+  async function layout({ every = 0, per = 1, left = 500, raw = '{"RATE_BLOCK":10}' }) {
+    const rows = session(200, { shot: () => false, chars: 600 });
+    const after = {};
+    if (every) for (let i = every; i <= 200; i += every) after[`t${i}`] = Array.from({ length: per }, (_, k) => `The coordinator sent a message while you were working:\nn${i}-${k}`);
+    const rates = ratesFrom(raw);
+    const env = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', ...(raw ? { OMC_JEV_COMPACT_RATES: raw } : {}) };
+    // The list with only the low-scored results traced (a compaction of a list at or under the target is decided by the scores alone).
+    const low = listTokens(apiOf((await compactRun(env, rows, { tokens: 1000, trigger: 'manual', after, score })).out.messages), rates);
+    const counted = Math.round(listTokens(apiOf(rows, after), rates) + 34000 - left - low);
+    const prefix = counted - Math.round(listTokens(apiOf(rows, after), rates));
+    // The same plan at a target high enough for the scores to decide: the estimate of the monitor for the list that keeps the four results whole.
+    const plan = (await compactRun({ ...env, OMC_JEV_COMPACT_TARGET_PERCENT: '80' }, rows, { tokens: counted, trigger: 'manual', after, score })).record;
+    const run = await compactRun(env, rows, { tokens: counted, trigger: 'manual', after, score });
+    return { plan, run, byList: low + prefix, installed: listTokens(apiOf(run.out.messages), rates) + prefix };
+  }
+  // The layouts are read once: the plan and the cascade of a layout are two tests.
+  const laid = new Map();
+  const read = (c) => { if (!laid.has(c)) laid.set(c, layout(c)); return laid.get(c); };
+  const wholeOf = (out) => out.messages.flatMap((m) => m.toolResults || []).filter((r) => NEEDED.some((k) => r.text.startsWith(k)) && r.text.endsWith('x'.repeat(600))).length;
+  // The monitor's estimate of the plan, and the cascade's: the list that is installed is what listTokens counts, within the line break before each trace that the prediction leaves out.
+  const planIsInstalled = async (c) => {
+    const { plan, byList } = await read(c);
+    expect(plan).toMatchObject({ cascade_pass: 'manual', traced: 194 });
+    expect(Math.abs(plan.tokens_after_pred - byList), `monitor ${plan.tokens_after_pred}, listTokens ${byList}`).toBeLessThanOrEqual(0.6 * plan.traced + 2);
+  };
+  const needsStayWhole = async (c) => {
+    const { run, installed } = await read(c);
+    expect(run.record).toMatchObject({ result: 'jev', cascade_pass: 'short_or_trace', kept_short: 0 });
+    expect(wholeOf(run.out)).toBe(4);
+    expect(run.record.tokens_after_pred).toBeLessThanOrEqual(run.record.cascade_target_tokens);
+    expect(Math.abs(run.record.tokens_after_pred - installed), `monitor ${run.record.tokens_after_pred}, listTokens ${installed}`).toBeLessThanOrEqual(0.6 * run.record.traced + 2);
+  };
+  const CASES = [
+    { label: 'a message after every result', every: 1, left: 500 },
+    { label: 'a message after every tenth result', every: 10, left: 300 },
+    { label: 'three messages after every tenth result (one block of the row that build writes)', every: 10, per: 3, left: 300 },
+  ];
+  // The list that tracing only the low-scored results leaves is under the target (33 500 or 33 700 of 34 000), so no result scored needed is shortened or traced for tokens
+  // that the list does not hold.
+  for (const c of CASES) {
+    it(`the plan that traces the low-scored results is the list that is installed: ${c.label}`, () => planIsInstalled(c));
+    it(`the cascade keeps the four needed results whole: ${c.label}`, () => needsStayWhole(c));
+  }
+
+  // The same layouts where the floor of a message is not in play (a block of 45.4 leaves every message above zero) or nothing is delivered: decided as before.
+  for (const [label, c] of [['the default block rate', { every: 1, left: 500, raw: null }], ['no delivery at the low block rate', { left: 500 }]]) {
+    it(`unchanged, the plan: ${label}`, () => planIsInstalled(c));
+    it(`unchanged, the cascade: ${label}`, () => needsStayWhole(c));
+  }
+});
+
 describe('the text beside a result: the words of the user that no result stands beside any more', () => {
   // listTokens counts a text beside a result at the rate of a reminder (0.363 a character) and the words of the user alone at their own (0.287). The last result of a
   // message that goes takes that difference with it for the words that stay (a message the user typed during the tool turn, a row of its own that the host joins

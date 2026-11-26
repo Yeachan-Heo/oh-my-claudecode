@@ -1050,5 +1050,75 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
       const without = scene([COORD(2), COORD(0), COORD(1)], { trim: true });
       expect(withUser.shape.shed([withUser.note], 'trace')).toBeCloseTo(without.shape.shed([without.note], 'trace'), 6);
     });
+
+    // With a block rate under the constant of a message (40.5) a message costs nothing at least, so what its structure adds to its text is no less than minus that text: the floor
+    // is on the text and the blocks together. The deliveries after a row are text of its message, a block each as the host holds them, and in a row of results that build
+    // rewrites they are one block with the row's text, each in its envelope. Both forms are in the text the floor is held to.
+    describe('the zero floor of a message that holds deliveries (a block rate under the constant of a message)', () => {
+      const SHORT = (k) => `The coordinator sent a message while you were working:\nn${k}`;
+      const RAWS = [undefined, '{"RATE_BLOCK":1}', '{"RATE_BLOCK":10}', '{"RATE_BLOCK":20}', '{"RATE_BLOCK":40}'];
+      const kinds = [['a short delivery', [SHORT(1)]], ['three short ones', [SHORT(1), SHORT(2), SHORT(3)]], ['a long one', [COORD(0)]], ['a message of the user and a short one', [USER, SHORT(1)]]];
+      // A result of a few characters, so that the message it stands in holds little text.
+      const tiny = (id) => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: id, text: `RESULT-${id} `, isError: false }] });
+      const next = { role: 'user', text: 'Next.', toolUses: [] };
+      const open = (id, at, extra) => ({ ...item(id, { score: 0, resIdx: at, chars: 0, ...extra }), useIdx: at - 1 });
+      // The tokens before are the host's count and the envelopes that build adds to the rows it rewrites (envelopeChars, a reminder's rate a character) come on top of them.
+      const wrapOf = (blocks) => carried('', blocks).length - chars(blocks);
+      const floorOf = (rows, group, candidates, queued, rates, wrapped = 0) => floorPrediction(candidates, listTokens(apiList(rows, queued), rates) + RATE_NOTE * wrapped, rates, shapeOf(rows, candidates, { group, keepFrom: rows.length, queued, rates }));
+
+      for (const raw of RAWS) {
+        for (const [label, blocks] of kinds) {
+          const rates = ratesFrom(raw);
+          const name = `${label}, RATE_BLOCK ${raw ? JSON.parse(raw).RATE_BLOCK : 'at its default'}`;
+          it(`the result of a row with deliveries goes: the message that is left is the deliveries in their envelopes, as the installed list holds it: ${name}`, () => {
+            const rows = [task, stepRow(['a'], 'Step 1.'), resultsRow(['a']), done];
+            const after = [task, stepRow([], 'Step 1.'), { role: 'user', text: carried('', blocks), toolUses: [] }, done];
+            expect(floorOf(rows, [-1, 0, -1, 1], [{ ...item('a', { score: 0, resIdx: 2 }), useIdx: 1 }], new Map([[2, blocks]]), rates, wrapOf(blocks))).toBeCloseTo(listTokens(apiList(after), rates), 4);
+          });
+
+          it(`a notification replaced with deliveries after it: the block that replaces it costs what the installed list holds: ${name}`, () => {
+            for (const keep of ['trace', 'drop']) {
+              const rows = [task, hello, noteRow, done];
+              const note = noteFor(2, blocks);
+              const queued = new Map([[2, blocks]]);
+              const shape = shapeOf(rows, [note], { group: [-1, 0, -1, 1], keepFrom: rows.length, queued, rates });
+              const after = [task, hello, { role: 'user', text: carried(keep === 'trace' ? TRACE : '', blocks), toolUses: [] }, done];
+              expect(predicted({ note, shape }, keep), keep).toBeCloseTo(listTokens(apiList(rows, queued), rates) - listTokens(apiList(after), rates), 4);
+            }
+          });
+
+          it(`the call between two user messages is dropped and their rows are one message: the deliveries of the later row are in its text: ${name}`, () => {
+            const rows = [task, stepRow(['p'], ''), tiny('p'), stepRow(['d'], ''), resultsRow(['d']), done];
+            const after = [task, stepRow(['p'], ''), { role: 'user', text: carried('', blocks), toolUses: [], toolResults: tiny('p').toolResults }, done];
+            const candidates = [open('p', 2, { task: true }), { ...item('d', { score: 0, resIdx: 4 }), useIdx: 3 }];
+            expect(floorOf(rows, [-1, 0, -1, 1, -1, 2], candidates, new Map([[4, blocks]]), rates, wrapOf(blocks))).toBeCloseTo(listTokens(apiList(after), rates), 4);
+          });
+
+          it(`a row of thinking goes and the user rows around it are one message: the deliveries after the later row stay as blocks of it: ${name}`, () => {
+            const rows = [task, stepRow(['p'], ''), tiny('p'), thinking, next, done];
+            const after = [task, stepRow(['p'], ''), tiny('p'), next, done];
+            // The words of the later row change their class when they join the message of the result (0.076 a character, 0.4 of a token here), which a message that costs
+            // nothing does not follow: the prediction is within a token of the list.
+            const floor = floorOf(rows, [-1, 0, -1, 1, -1, 2], [open('p', 2, { task: true })], new Map([[4, blocks]]), rates);
+            expect(Math.abs(floor - listTokens(apiList(after, new Map([[3, blocks]])), rates))).toBeLessThan(1);
+          });
+        }
+      }
+
+      it('a result of a few characters with one short delivery after it: at a block of 1 the message costs nothing before the cut as well, and what it costs after is the envelope form', () => {
+        const rows = [task, stepRow(['a'], 'Step 1.'), tiny('a'), done];
+        const blocks = [SHORT(1)];
+        const after = [task, stepRow([], 'Step 1.'), { role: 'user', text: carried('', blocks), toolUses: [] }, done];
+        const rates = ratesFrom('{"RATE_BLOCK":1}');
+        expect(floorOf(rows, [-1, 0, -1, 1], [open('a', 2)], new Map([[2, blocks]]), rates, wrapOf(blocks))).toBeCloseTo(listTokens(apiList(after), rates), 4);
+      });
+
+      it('a row that the agent trim removes takes its deliveries with it: what they say is no part of the text the floor is held to', () => {
+        // The row has no text of its own and the message of the result before it holds little, so the floor is in play; deliveries of another length change nothing.
+        const rows = [task, stepRow(['a'], 'Step 1.'), tiny('a'), { role: 'user', text: '', toolUses: [] }, done];
+        const removed = (blocks) => shapeOf(rows, [], { rows: rows.map((m, i) => (i === 3 ? { ...m, trimDrop: true } : m)), group: [-1, 0, -1, -1, 1], keepFrom: rows.length, queued: new Map([[3, blocks]]), rates: ratesFrom('{"RATE_BLOCK":10}') }).tracker().removed();
+        expect(removed([SHORT(1)])).toBeCloseTo(removed([COORD(0)]), 6);
+      });
+    });
   });
 });

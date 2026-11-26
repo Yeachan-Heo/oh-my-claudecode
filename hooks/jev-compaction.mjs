@@ -2685,7 +2685,8 @@ function itemTokens(c, rates = DEFAULT_RATES) {
 // cost one message, and their words keep the rate of a text beside a result while a result stays in either. A notification row that is replaced is one text block with the
 // blocks delivered after it, which costs the rate of the words of the user when a message of the user is among them (noteOwn). The words of a run that held no result, joined to a
 // message that keeps one (an assistant message of thinking alone leaves such a join), stand beside it: they cost more than they did (`loss`). A message costs zero at least (listTokens), its text and its overhead together, so what its structure adds to the text `tok` is
-// no less than -tok; at the default rates it is never negative and the text is not needed (Infinity).
+// no less than -tok; at the default rates it is never negative and the text is not needed (Infinity). The text holds the blocks delivered after its rows, as the host holds them (`tok`)
+// and, once a row of text results is rewritten, as build writes them (`tokBuilt`).
 const messageTokens = (blocks, tok, rates) => (blocks > 0 ? Math.max(-tok, blocks * rates.RATE_BLOCK + RATE_MESSAGE) : 0);
 export function shapeOf(messages, candidates, { rows = messages, group, keepFrom, queued = new Map(), rates = DEFAULT_RATES }) {
   const queuedAt = (i) => (queued.get(i) || []).length;
@@ -2697,11 +2698,17 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     return (m.text ? 1 : 0) + callsAt(m) + resultsAt(m) + queuedAt(i) + (m.role === 'assistant' && !m.text && !callsAt(m) ? 1 : 0);
   };
   // Only with a block rate under -RATE_MESSAGE can a message cost less than its text, and only then is its text needed: that of its rows as listTokens counts it (the
-  // block rate that cancels the constant of the message leaves the text alone).
+  // block rate that cancels the constant of the message leaves the text alone). The deliveries after a row are text of its message, each a block as the host holds them (a row that
+  // the trim removes takes none); `built` is the text of a row of text results that build rewrites: its own text and the deliveries in their envelopes as one block (carriedText).
   const floored = rates.RATE_BLOCK + RATE_MESSAGE < 0;
-  const textOf = (role, idx) => {
+  const textOf = (role, idx, built = false) => {
     if (!floored) return Infinity;
-    const content = idx.flatMap((i) => rowsAsApi([messages[i]])[0].content);
+    const content = idx.flatMap((i) => {
+      const own = rowsAsApi([messages[i]])[0].content;
+      const blocks = rows[i].trimDrop === true ? [] : queued.get(i) || [];
+      if (built && blocks.length && textRow.has(i)) return [{ type: 'text', text: carriedText(messages[i], blocks).text }, ...own.filter((b) => b.type !== 'text')];
+      return [...own, ...blocks.map((text) => ({ type: 'text', text }))];
+    });
     return content.length ? listTokens([{ role, content }], { ...rates, RATE_BLOCK: -RATE_MESSAGE / content.length }) : 0;
   };
   const noteAt = new Set(candidates.filter((c) => c.note).map((c) => c.resIdx));
@@ -2735,6 +2742,7 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
   for (const u of assistants.values()) u.tok = textOf('assistant', u.idx);
   for (const r of runs) {
     r.tok = textOf('user', r.rows);
+    r.tokBuilt = r.rows.some((i) => queued.has(i)) ? textOf('user', r.rows, true) : r.tok;
     // The results that stand in the message after the agent trim (`results`), whether one stood in it before (`beside`), and the tokens the words of its text cost less once none
     // does (`gap`) or more once one stands in it (`loss`, for a run that held none): the text as build writes it, a row of results as one block of its text with its deliveries,
     // any other row as its text and each delivery after it.
@@ -2778,7 +2786,7 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     // A run has its own blocks, text tokens and results left (`own`), and the user message that holds it has their sums (`sum`, kept at its first run, found by `find`) with the
     // tokens that its text costs less for having no result (`gap`) once none is left in the message, or costs more for having one (`loss`, the words of a run that held none).
     // The runs on both sides of an assistant message that is gone are one message.
-    const own = runs.map((r) => ({ n: 0, t: r.tok, res: r.results, gap: r.gap, loss: r.loss }));
+    const own = runs.map((r) => ({ n: 0, t: r.tokBuilt, res: r.results, gap: r.gap, loss: r.loss }));
     const sum = runs.map(() => ({ n: 0, t: 0, res: 0, gap: 0, loss: 0 }));
     const up = runs.map((r) => r.k);
     const find = (k) => { while (up[k] !== k) k = up[k] = up[up[k]]; return k; };
