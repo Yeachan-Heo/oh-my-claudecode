@@ -293,6 +293,7 @@ PUNCTUATION = '();<>|&\n'
 
 
 SHELL_KEYWORDS = frozenset({'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', '!', '{', '}'})   # words that stand before the command of a simple command
+BRANCH_WORDS = frozenset({'then', 'else', 'elif', 'do'})   # the words that start a branch or a loop body: what stands after them in the command may not run, so no assignment from there on settles a name
 SHELL_WRAPPERS = frozenset({'exec', 'command', 'env', 'time', 'nohup'})   # words that run the word after them (and its options)
 CHDIR_WORDS = frozenset({'-C', '--directory', '--chdir'})   # options of a wrapper that change the working directory of the command it runs (`--directory=DIR` and `--chdir=DIR` too); `cd` and `pushd` change that of the shell: together the only constructs that tell where a relative path is run from
 
@@ -812,12 +813,14 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                 if m.group(3) in (':=', '='):   # ${NAME:=word} and ${NAME=word} assign NAME for the words that follow: the word is a value of NAME in the whole command, as an assignment is
                     if own_value(m.group(2), m.group(4)) not in assigned.setdefault(m.group(2), []):
                         assigned[m.group(2)].append(own_value(m.group(2), m.group(4)))
-    settled_at = []   # for each simple command, for each word and once more after the last: the names that have a value for the whole command at that place, in the order of the words (the settings, an assignment that stands alone or after export, declare, typeset, readonly or local, and ${NAME:=word} count from the word after theirs on, but only in a simple command that stands first or after `;` or a new line and that no pipe or `&` follows, `unset NAME` takes the name away from the next command on): `"$A"; A=/x` runs the A of the session, `A=/x; "$A"` does not, and neither does `false && A=/x; "$A"`. Only the operators around the simple command are read, not the words of control flow: an assignment after `then`, in a loop or in a branch counts like one that runs
+    settled_at = []   # for each simple command, for each word and once more after the last: the names that have a value for the whole command at that place, in the order of the words (the settings, an assignment that stands alone or after export, declare, typeset, readonly or local, and ${NAME:=word} count from the word after theirs on, but only in a simple command that stands first or after `;` or a new line, that no pipe or `&` follows and that no `then`, `else`, `elif` or `do` has come before in the command, `unset NAME` takes the name away from the next command on): `"$A"; A=/x` runs the A of the session, `A=/x; "$A"` does not, and neither does `false && A=/x; "$A"` or `if false; then A=/x; fi; "$A"`. The operators around the simple command and those four words are read, no other word of control flow and no reachability: from the first of them on nothing settles a name (the branch or the body may not run, and the command does not tell where it ends), so an assignment after the `fi` or `done` that closes it counts as not made too
+    branch = False   # set at the first `then`, `else`, `elif` or `do` that starts a simple command, and for the rest of the command: it does not tell where the branch ends
     for k, words in enumerate(simple):
         run = command_word(words)
+        branch = branch or next((w for w in words if not is_operator(w)), None) in BRANCH_WORDS
         join = (words[0] if words and is_operator(words[0]) else '').strip('\n')   # the operator in front of this simple command, and in front of the next one: an assignment is the shell's own only where the command stands first or after `;` or a new line and no pipe or `&` follows it (not after `&&` or `||`, in a subshell, in a pipeline or in the background)
         following = simple[k + 1][0] if k + 1 < len(simple) and simple[k + 1] and is_operator(simple[k + 1][0]) else ''
-        own = join in ('', ';') and following not in ('|', '|&', '&')
+        own = join in ('', ';') and following not in ('|', '|&', '&') and not branch
         row = []
         for word in words:
             row.append(frozenset(settled))
