@@ -334,12 +334,12 @@ def session_dependent(piece, runs, directories, named, moved, settled, path_valu
     guard writes (`"$AUDIT"`, `$DIR/audit`); a word with something else after it is read as before. A piece that holds blanks is a quoted command
     (read as one), one that still holds a `$` has a parameter that is not decided here."""
     path = os.path.expanduser(os.path.expandvars(piece))
-    if not path or len(path) > MAX_PATH_CHARS or '\0' in path or any(c.isspace() for c in path) or path[0] == '-' or re.match(r'[^/\\]*=', path):
-        return False   # (an option, or a NAME=value word: the value after the `=` is a piece of its own)
+    if not path or len(path) > MAX_PATH_CHARS or '\0' in path or any(c.isspace() for c in path) or path[0] == '-' or re.match(r'[^/\\$]*=', path):
+        return False   # (an option, or a NAME=value word: the value after the `=` is a piece of its own; `${NAME=word}` and `${NAME:=word}` are no such word)
     key = lambda text: os.path.normcase(text).lower() if sys.platform == 'darwin' else os.path.normcase(text)
     written = [key(path_key(out)) for _label, out in written_files()]
     scan = re.sub(r'^~[^/\\]*', '${HOME}', piece)   # (a leading ~ is the HOME of the session)
-    unknown = lambda m: (m.group(1) or m.group(2) or m.group(5)) not in settled and not ((m.group(1) or m.group(2) or m.group(5)) == 'PATH' and path_values) and m.group(3) not in ('-', ':-', '=', ':=', '+', ':+', '?', ':?')   # a parameter that nothing gives a value to (`$PATH` has one when a PATH is given: the one before it is the guard's candidate)
+    unknown = lambda m: (m.group(1) or m.group(2) or m.group(5)) not in settled and not ((m.group(1) or m.group(2) or m.group(5)) == 'PATH' and path_values)   # a parameter that nothing gives a value to at this place, whatever operator follows it (`${A:-word}` is the value of A when the session has one; `$PATH` has a value when a PATH is given: the one before it is the guard's candidate)
     for m in PARAMETER.finditer(scan):
         name = m.group(1) or m.group(2) or m.group(5)
         if unknown(m):

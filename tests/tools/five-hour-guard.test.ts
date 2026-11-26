@@ -1944,13 +1944,15 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       return runSync(GUARD, ['--config', f.cfg, '--once'], { env: withoutConfigDir });
     };
     for (const form of ['${CLAUDE_CONFIG_DIR:-$HOME/.claude}', '${CLAUDE_CONFIG_DIR-$HOME/.claude}', '${CLAUDE_CONFIG_DIR:=$HOME/.claude}', '${CLAUDE_CONFIG_DIR:-${HOME}/.claude}']) {
-      for (const [script, where] of [[defaulted, 'the guard has no CLAUDE_CONFIG_DIR'], [valued, 'the command assigns it']] as const) {
-        const command = where === 'the command assigns it' ? `CLAUDE_CONFIG_DIR=${CONFIG_DIR}; node "${form}/hooks/audit.mjs"` : `node "${form}/hooks/audit.mjs"`;
+      for (const [script, where] of [[defaulted, 'the command assigns it, the file is the default word'], [valued, 'the command assigns it'], [defaulted, 'the guard has no CLAUDE_CONFIG_DIR']] as const) {
+        const command = where === 'the guard has no CLAUDE_CONFIG_DIR' ? `node "${form}/hooks/audit.mjs"` : `CLAUDE_CONFIG_DIR=${CONFIG_DIR}; node "${form}/hooks/audit.mjs"`;
         writeFileSync(f.settings, settings(command), 'utf8');
         for (const key of ['log_file', 'state_file', 'pause_file']) {
           const r = start({ [key]: script });
           expect(r.status, `${command} as ${key} (${where}): ${r.stdout}${r.stderr}`).toBe(2);
-          expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+          // (a name that nothing at that place gives a value to may be set in the session, so what ends the word decides: refused, not read)
+          if (where === 'the guard has no CLAUDE_CONFIG_DIR' && !form.includes('${HOME}')) expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);   // (the form with braces inside the word is read inside out, as before)
+          else expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
           expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
         }
       }
@@ -1959,9 +1961,14 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     writeFileSync(f.settings, settings(`node "$HOME/.claude/hooks/audit\${NAME:+.mjs}"`), 'utf8');
     expect(start({ state_file: defaulted }).status, 'the form with the word').toBe(2);
     // a default word that names no guard file leaves the guard free
-    writeFileSync(f.settings, settings('node "${NOTHING_SET:-/nonexistent}/hooks/audit.mjs"'), 'utf8');
+    writeFileSync(f.settings, settings('node "${NOTHING_SET:-/nonexistent}/hooks/other.mjs"'), 'utf8');
     const quiet = start({ state_file: defaulted });
     expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+    // the same with the ending of the guard file: nothing gives the name a value, so the session may have one (refused, not read)
+    writeFileSync(f.settings, settings('node "${NOTHING_SET:-/nonexistent}/hooks/audit.mjs"'), 'utf8');
+    const refused = start({ state_file: defaulted });
+    expect(refused.status, `${refused.stdout}${refused.stderr}`).toBe(2);
+    expect(refused.stderr).toMatch(/not read to its end/);
   });
 
   it('nested default-value parameters are filled in to the end, however deep, and parameters that refer to each other in a cycle are a command that is not read to its end', () => {
@@ -2048,7 +2055,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
       return runSync(GUARD, ['--config', f.cfg, '--once']);
     };
-    for (const command of [`: "\${FHG_DIR:=${hooks}}"; python3 "$FHG_DIR/audit"`, `: "\${FHG_DIR=${hooks}}"; python3 "$FHG_DIR/audit"`, `echo "\${FHG_DIR:=${hooks}}"; python3 "$FHG_DIR/audit"`, `python3 "$FHG_DIR/audit"; : "\${FHG_DIR:=${hooks}}"`]) {
+    for (const command of [`: "\${FHG_DIR:=${hooks}}/"; python3 "$FHG_DIR/audit"`, `: "\${FHG_DIR=${hooks}}/"; python3 "$FHG_DIR/audit"`, `echo "\${FHG_DIR:=${hooks}}/"; python3 "$FHG_DIR/audit"`]) {
       writeFileSync(f.settings, settings(command), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: script });
@@ -2057,12 +2064,22 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
       }
     }
+    // the expansion alone (nothing after it) is refused where the name is not settled before it: the session may have a value, and the shell then uses it; a use before the expansion is the session's too
+    for (const command of [`: "\${FHG_DIR:=${hooks}}"; python3 "$FHG_DIR/audit"`, `: "\${FHG_DIR=${hooks}}"; python3 "$FHG_DIR/audit"`, `echo "\${FHG_DIR:=${hooks}}"; python3 "$FHG_DIR/audit"`, `python3 "$FHG_DIR/audit"; : "\${FHG_DIR:=${hooks}}/"`]) {
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
     // ${NAME:-word} assigns nothing: $NAME stays as written for the later word, and is the session's (refused where the word ends the path of the file)
     writeFileSync(f.settings, settings(`: "\${FHG_DIR:-${hooks}}"; python3 "$FHG_DIR/audit"`), 'utf8');
     const unknown = start({ state_file: script });
     expect(unknown.status, `${unknown.stdout}${unknown.stderr}`).toBe(2);
     expect(unknown.stderr).toMatch(/not read to its end/);
-    writeFileSync(f.settings, settings(`: "\${FHG_DIR:-${hooks}}"; python3 "$FHG_DIR/other"`), 'utf8');
+    writeFileSync(f.settings, settings(`: "\${FHG_DIR:-${hooks}}/"; python3 "$FHG_DIR/other"`), 'utf8');
     const quiet = start({ state_file: script });
     expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
     // each takes the other's word: no end, so the command is not read to its end
@@ -2284,7 +2301,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
     }
     // read as before: no substitution
-    const plain = [`python3 '$(x)'`, 'python3 "\\$(x)"', 'python3 "\\$((1+1))"', "python3 '$((1+1))'", 'python3 $FHG_NOBODY/x ${FHG_NOBODY:-x}', "python3 '`x`'", 'python3 \\`x', 'true # $(x)', "python3 $'$(x)'"];
+    const plain = [`python3 '$(x)'`, 'python3 "\\$(x)"', 'python3 "\\$((1+1))"', "python3 '$((1+1))'", 'python3 $FHG_NOBODY/x ${FHG_NOBODY:-x}/y', "python3 '`x`'", 'python3 \\`x', 'true # $(x)', "python3 $'$(x)'"];
     for (const command of plain) {
       const r = start(command, 'state_file');
       expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
@@ -3012,8 +3029,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     };
     const path = (command: string) => spawnSync('sh', ['-c', command.replace('python3', 'printf %s')], { encoding: 'utf8' }).stdout;
     const refused = [`FHG_S=.old true; python3 ${hooks}/audit$FHG_S`, `env FHG_S=.old true; python3 ${hooks}/audit$FHG_S`, `FHG_S=.old; unset FHG_S; python3 ${hooks}/audit$FHG_S`, `FHG_S=.old; unset -v FHG_S; python3 ${hooks}/audit$FHG_S`,
-      `FHG_S=.old python3 ${hooks}/audit$FHG_S`, `FHG_S=.old true; python3 "${hooks}/audit$FHG_S"`, `FHG_S=.old true; sh -c 'python3 ${hooks}/audit$FHG_S'`];
-    const settled = [`FHG_S=.old; python3 ${hooks}/audit$FHG_S`, `export FHG_S=.old; python3 ${hooks}/audit$FHG_S`, `env FHG_S=.old sh -c 'python3 ${hooks}/audit$FHG_S'`, `: \${FHG_S:=.old}; python3 ${hooks}/audit$FHG_S`,
+      `FHG_S=.old python3 ${hooks}/audit$FHG_S`, `FHG_S=.old true; python3 "${hooks}/audit$FHG_S"`, `FHG_S=.old true; sh -c 'python3 ${hooks}/audit$FHG_S'`, `: \${FHG_S:=.old}; python3 ${hooks}/audit$FHG_S`];
+    const settled = [`FHG_S=.old; python3 ${hooks}/audit$FHG_S`, `export FHG_S=.old; python3 ${hooks}/audit$FHG_S`, `env FHG_S=.old sh -c 'python3 ${hooks}/audit$FHG_S'`, `: \${FHG_S:=.old}x; python3 ${hooks}/audit$FHG_S`,
       `FHG_S=.old\npython3 ${hooks}/audit$FHG_S`, `FHG_S=.old; true; python3 ${hooks}/audit\${FHG_S}`];
     for (const command of refused.slice(0, 5)) {
       expect(path(command).includes('.old'), `${command}: the shell does not give the name to this command`).toBe(false);
@@ -3075,6 +3092,45 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a default or error operator (-, :-, =, :=, ?, :?) does not settle a parameter: where nothing at that place gives the name a value, the session may have one and the shell then uses it, so the guard refuses to start when the word is the whole expansion or ends the path of a file it writes; a name that the settings or an earlier assignment give, and an expansion with something else after it, are read as before', () => {
+    const f = fixture('foreign-default-operator', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>, settingsEnv: Record<string, string> = {}) => {
+      writeFileSync(f.settings, JSON.stringify({ env: settingsEnv, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const printed = (command: string) => spawnSync('sh', ['-c', command.replace('python3', 'printf %s')], { encoding: 'utf8', env: { ...process.env, FHG_AUDIT: audit } }).stdout;
+    const refused = [`python3 "\${FHG_AUDIT:-/nonexistent/fallback}"`, `python3 "\${FHG_AUDIT-/nonexistent/fallback}"`, `python3 "\${FHG_AUDIT=/nonexistent/fallback}"`, `python3 "\${FHG_AUDIT:=/nonexistent/fallback}"`,
+      `python3 "\${FHG_AUDIT?missing}"`, `python3 "\${FHG_AUDIT:?missing}"`, `python3 \${FHG_AUDIT:-/nonexistent/fallback}`];
+    for (const command of refused) {
+      expect(printed(command), `${command}: the shell takes the value of the session`).toBe(audit);
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // the name has a value here: an assignment before the use, or the settings (the session is given them too)
+    for (const [command, env] of [[`FHG_AUDIT=/nonexistent/later; python3 "\${FHG_AUDIT:-/nonexistent/fallback}"`, {}], [`python3 "\${FHG_AUDIT:-/nonexistent/fallback}"`, { FHG_AUDIT: '/nonexistent/env' }],
+      [`export FHG_AUDIT=/nonexistent/later; python3 "\${FHG_AUDIT:?missing}"`, {}]] as Array<[string, Record<string, string>]>) {
+      const r = start(command, { state_file: audit }, env);
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+    // something else after the expansion: read as before (the form that the installer writes for the directory of the plugin)
+    for (const command of [`node "\${FHG_ROOT:-x}/scripts/y.mjs"`, `python3 "\${FHG_AUDIT:-/nonexistent/fallback}.old"`]) {
+      const r = start(command, { state_file: audit });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a PATH that the command or the settings give is the PATH of the hook only when no component of it holds a parameter that nothing gives a value to (PATH=$DIR:$PATH, DIR only in the session), and only in the simple command that has it (PATH=dir true; audit): the guard cannot tell which file a bare name runs, so it refuses to start; a PATH whose parameters the settings, the command or a default word fill in settles it as before', () => {
     const f = fixture('foreign-session-path-component', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // the directory that only the session has in FHG_DIR
@@ -3098,7 +3154,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(spawnSync('sh', ['-c', 'PATH=$FHG_DIR:$PATH audit'], { encoding: 'utf8', env: guardOnly }).stdout, 'the guard has none: it finds the other file').toBe('guard\n');
     expect(spawnSync('sh', ['-c', `PATH=${project} true; audit`], { encoding: 'utf8', env: guardOnly }).stdout, 'a PATH in front of another command is not the PATH of this one').toBe('guard\n');
     const refused: Array<[string, Record<string, string>]> = [['PATH=$FHG_DIR:$PATH audit', {}], ['PATH=$PATH:$FHG_DIR audit', {}], ['audit', { PATH: '$FHG_DIR:$PATH' }], ['PATH=${FHG_DIR}:$PATH exec audit', {}], ['true; PATH=$FHG_DIR:$PATH audit', {}],
-      [`PATH=${project} true; audit`, {}], [`PATH=${project} true | audit`, {}], [`PATH=${project} true; env audit`, {}], ['FHG_DIR=x PATH=$FHG_DIR:$PATH audit', {}]];
+      [`PATH=${project} true; audit`, {}], [`PATH=${project} true | audit`, {}], [`PATH=${project} true; env audit`, {}], ['FHG_DIR=x PATH=$FHG_DIR:$PATH audit', {}], [`PATH=\${FHG_DIR:-${project}}:$PATH audit`, {}]];
     for (const [command, settingsEnv] of refused) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit }, settingsEnv);
@@ -3109,7 +3165,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
     }
     // a PATH whose components are all known settles which file is meant: the collision with the file of that directory
-    const settled: Array<[string, Record<string, string>, string]> = [[`PATH=${usr}:$PATH audit`, {}, known], [`PATH=\${FHG_DIR:-${project}}:$PATH audit`, {}, audit], ['PATH=$FHG_DIR:$PATH audit', { FHG_DIR: project }, audit], ['audit', { PATH: `${project}:$PATH` }, audit],
+    const settled: Array<[string, Record<string, string>, string]> = [[`PATH=${usr}:$PATH audit`, {}, known], [`FHG_DIR=${project}; PATH=\${FHG_DIR:-/nonexistent}:$PATH audit`, {}, audit], ['PATH=$FHG_DIR:$PATH audit', { FHG_DIR: project }, audit], ['audit', { PATH: `${project}:$PATH` }, audit],
       ['FHG_DIR=' + project + '; PATH=$FHG_DIR:$PATH audit', {}, audit], [`PATH=${project}; audit`, {}, audit], [`PATH=${usr} audit`, {}, known]];
     for (const [command, settingsEnv, file] of settled) {
       const r = start(command, { state_file: file }, settingsEnv);
@@ -3276,7 +3332,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
     // a value from the guard, the settings, the command or a default word settles it: the collision of an earlier test
     const settled: Array<[string, Record<string, string>, NodeJS.ProcessEnv]> = [['python3 "$FHG_SESSION_AUDIT"', { FHG_SESSION_AUDIT: audit }, ENV],
-      [`FHG_SESSION_AUDIT=${audit}; python3 "$FHG_SESSION_AUDIT"`, {}, ENV], [`python3 "\${FHG_SESSION_AUDIT:-${audit}}"`, {}, ENV]];
+      [`FHG_SESSION_AUDIT=${audit}; python3 "$FHG_SESSION_AUDIT"`, {}, ENV], [`FHG_SESSION_AUDIT=/nonexistent/x; python3 "\${FHG_SESSION_AUDIT:-${audit}}"`, {}, ENV]];
     for (const [command, settingsEnv, guardEnv] of settled) {
       const r = start(command, { state_file: audit }, settingsEnv, guardEnv);
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
@@ -3284,9 +3340,15 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.stderr, command).not.toMatch(/not read to its end/);
     }
     // read as before: something else ends the word
-    for (const command of ['bash "$FHG_SESSION_DIR"/tools/chmura/x.sh', 'python3 "$FHG_SESSION_DIR/other"', 'python3 "${FHG_SESSION_DIR}"/audit-other', 'python3 "${FHG_SESSION_AUDIT:-x}"']) {
+    for (const command of ['bash "$FHG_SESSION_DIR"/tools/chmura/x.sh', 'python3 "$FHG_SESSION_DIR/other"', 'python3 "${FHG_SESSION_DIR}"/audit-other', 'python3 "${FHG_SESSION_AUDIT:-x}"/y']) {
       const r = start(command, { state_file: audit });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+    // a default word does not settle the name (the session may have a value): the expansion alone is refused
+    for (const command of [`python3 "\${FHG_SESSION_AUDIT:-${audit}}"`, 'python3 "${FHG_SESSION_AUDIT:-x}"']) {
+      const r = start(command, { state_file: audit });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toMatch(/not read to its end/);
     }
   });
 
@@ -3330,10 +3392,11 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.stderr, command).not.toMatch(/not read to its end/);
     }
     // read as before: another ending of the word, and a default word
-    for (const command of ['bash "$FHG_OTHER_DIR"/tools/chmura/x.sh', 'python3 "$FHG_OTHER_DIR/other"', 'python3 "${FHG_OTHER_AUDIT:-x}"']) {
+    for (const command of ['bash "$FHG_OTHER_DIR"/tools/chmura/x.sh', 'python3 "$FHG_OTHER_DIR/other"', 'python3 "${FHG_OTHER_AUDIT:-x}/y"']) {
       const r = start(command, { state_file: audit }, {}, guardEnv);
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
     }
+    expect(start('python3 "${FHG_OTHER_AUDIT:-x}"', { state_file: audit }, {}, guardEnv).status, 'the expansion alone: a default word does not settle the name').toBe(2);
   });
 
   it('a parameter expansion that the scan does not model (replacement, case change, a transformation with @, indirection, a slice, an array) is not read to its end, so the guard refuses to start; a plain ${NAME}, the modeled operators and braces without a dollar are read as before', () => {
