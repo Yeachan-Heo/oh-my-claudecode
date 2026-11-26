@@ -1130,7 +1130,7 @@ def write_json(path, obj, no_clobber=False, replaces=None):
     """Write atomically. no_clobber: a file that appears at the path meanwhile is kept and the write fails (a hard link is created
     instead of a rename; where links are not supported the destination is reserved exclusively first). replaces: the lstat result of the
     file that this write renews; a file that is not that one any more when the file is put in place (somebody replaced the path since
-    the validation) is kept and the write fails; a file that is gone is written again. A renewal and the replacing of the reservation (see
+    the validation) is kept and the write fails; a file that is gone is written like a first publication (no_clobber), so a file that comes in meanwhile is kept. A renewal and the replacing of the reservation (see
     swap_in) put the new file in place by exchanging it with the file at the path, and where two paths cannot be exchanged they fail: the path
     is never empty (the hook reads no pause file as no pause), and a file that came in after the validation is put back, not destroyed."""
     if A.dry_run:
@@ -1183,9 +1183,11 @@ def write_json(path, obj, no_clobber=False, replaces=None):
                     now = None
                 if now is not None and file_identity(now) != file_identity(replaces):
                     raise OSError(f'the file {path} changed since it was validated and is not replaced')
-                if now is not None:
-                    swap_in(tmp, path, file_identity(replaces), mine)
-                    return
+                if now is None:   # the file is gone: the pause is written the way a first publication is, so a file that comes in now is kept
+                    os.unlink(tmp)
+                    return write_json(path, obj, no_clobber=True)
+                swap_in(tmp, path, file_identity(replaces), mine)
+                return
             os.replace(tmp, path)
     except KeptAside:
         raise   # the file under the temporary name is not ours

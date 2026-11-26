@@ -4595,6 +4595,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readJson(f.pause).valid_until, 'a renewal that finds the file it validated renews it').toBeGreaterThanOrEqual(first);
   });
 
+  it('a pause file that is gone when a renewal looks at it is written like a first publication: a foreign file that comes in right after that look is kept and the write fails, and without one the pause is written again', () => {
+    // the renewal validated an existing file; the look that write_json makes finds the path empty, and the foreign file comes in right after it, before the pause is written
+    const driver = ['import os, runpy, sys', 'pause, late, real, looks = sys.argv[1], sys.argv[2] == "1", os.lstat, []',
+      'def look(path, *args, **kw):', '    if str(path) == pause and sys._getframe(1).f_code.co_name == "write_json" and not looks:', '        looks.append(1)', '        os.unlink(pause)',
+      '        try:', '            return real(path, *args, **kw)', '        finally:', '            if late:', '                open(pause, "w").write("foreign file\\n")',
+      '    return real(path, *args, **kw)',
+      'os.lstat = look', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('renewal-vanished-late-arrival', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(f);   // enters the pause; the next run renews it
+    expect(readJson(f.pause).paused, 'the pause is in force').toBe(true);
+    const r = runPyCode(driver, [f.pause, '1', GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*appeared meanwhile/);
+    expect(readText(f.pause), 'the foreign file that came in after the look is not replaced').toBe('foreign file\n');
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    // the same renewal with nobody coming in: the pause is written again
+    const g = fixture('renewal-vanished-clean', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(g);
+    const clean = runPyCode(driver, [g.pause, '0', GUARD, ...guardArgs(g, ['--once'])]);
+    expect(clean.status, `${clean.stdout}${clean.stderr}`).toBe(0);
+    expect(readJson(g.pause).paused, 'the pause is written again').toBe(true);
+    expect(readdirSync(g.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+  });
+
   it('a second foreign file that takes the path of the pause file after the first exchange of a renewal is kept too: the file that the exchange back returns stays under the temporary name, and the log names it', () => {
     const f = fixture('renewal-two-arrivals', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     guardOnce(f);   // enters the pause; the next run renews it
