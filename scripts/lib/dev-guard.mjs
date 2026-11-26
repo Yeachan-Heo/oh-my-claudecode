@@ -140,6 +140,7 @@ const DEV_WRAPPERS = {
   timeout: { val: ['-s', '--signal', '-k', '--kill-after'], skip: 1 }, stdbuf: { val: ['-i', '-o', '-e', '--input', '--output', '--error'] }, setsid: { val: [] }, time: { val: ['-f', '-o', '--format', '--output'] }, coproc: { val: [] },
   xargs: { val: ['-n', '-I', '-L', '-P', '-d', '-E', '-s', '-a', '--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file', '--process-slot-var'], opt: 'lei' }, // opt: -l, -e and -i (and their long forms) take an attached value only, so the rest of a cluster after them is that value
 };
+const DEV_OPENERS = new Set(['{', 'if', 'while', 'until']); // the words that may follow a pipe and open a command list
 const DEV_LEADING = new Set(['then', 'do', 'else', 'elif', '{', '!', 'if', 'while', 'until']);
 const baseName = (value) => String(value).replace(/\/+$/, '').split('/').pop();
 const isAssignment = (value) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
@@ -552,6 +553,7 @@ function devScanTokens(tokens, heredocs, depth) {
       const text = devWordText(t);
       if (!afterPipe && text === 'time' && t.parts.length === 1 && t.parts[0].kind === 'lit' && t.parts[0].text === 'time') timeWords.add(words.length);
       words.push(text);
+      if (t.parts.length === 1 && t.parts[0].kind === 'lit' && DEV_OPENERS.has(text)) afterPipe = false; // a group or a condition after a pipe starts a list of its own, where time is the keyword again
       if (baseName(text) === 'find') isFind = true;
       if (!(isFind && FIND_REFERENCE.test(words[words.length - 2] ?? ''))) wordDev ??= devChangedIn(text); // the file after find -newer is only compared with
       continue;

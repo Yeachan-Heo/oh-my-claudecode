@@ -106,6 +106,9 @@ const BLOCKED: string[] = [
   'tar -C / -xf a.tar dev/null --exclude=other', 'tar -C / -xf a.tar dev/null --exclude=dev/n*', 'tar -C / -xf a.tar dev/null --exclude=*', 'tar -C / -xf a.tar dev/null dev/zero --exclude=dev/null',
   'tar -C / -xf a.tar dev/null --exclude=ev/null', 'tar -C / -xf a.tar dev/null --exclude=dev/null/', 'tar --anchored -C / -xf a.tar dev/null --exclude=null', 'bsdtar -C / -xf a.tar dev/null --exclude=dev/null',
   'tar -C / -xf a.tar dev/null --exclude-from=x', 'tar -C / -xf a.tar dev/null --exclude-from x',
+  // a plain time at the start of a command is the keyword also in a group or a condition after a pipe, and the external utility everywhere else
+  'echo x | time -f %e rm /dev/null', 'echo x | sudo { time -f %e rm /dev/null; }', 'echo x | env { time -f %e rm /dev/null; }', 'echo x | { time -p rm /dev/null; }',
+  'echo x | { command time -f %e rm /dev/null; }', 'echo x | time -p { time -f %e rm /dev/null; }',
   // the options of xargs whose value is optional and attached: the next word is the command
   'echo /dev/null | xargs -rl rm', 'echo /dev/null | xargs -l rm', 'echo /dev/null | xargs -rl2 rm', 'echo /dev/null | xargs --max-lines rm', 'echo /dev/null | xargs --max-lines=2 rm',
   'echo /dev/null | xargs --eof rm', 'echo /dev/null | xargs -e rm', 'echo /dev/null | xargs -re rm', 'echo /dev/null | xargs -rt -l rm',
@@ -207,6 +210,9 @@ const ALLOWED: string[] = [
   'tar -C / -xf a.tar dev/null --exclude=dev/null', 'tar -C / -xf a.tar dev/null --exclude dev/null', 'tar -C / -xf a.tar --exclude=dev/null dev/null', 'tar -C / -xf a.tar dev/null --exclude=null',
   'gtar -C / -xf a.tar dev/null --exclude=dev/null', 'tar -C / -xf a.tar dev/null dev/zero --exclude=dev/null --exclude=dev/zero', 'tar --strip-components=1 -C / -xf a.tar foo/dev/null --exclude=dev/null',
   'tar --anchored -C / -xf a.tar dev/null --exclude=dev/null',
+  // the keyword time opens its own context in a group or a condition after a pipe
+  'echo x | { time -f %e rm /dev/null; }', 'echo x | { true; time -f %e rm /dev/null; }', 'echo x | if time -f %e rm /dev/null; then true; fi', 'echo x | while time -f %e rm /dev/null; do break; done',
+  'echo x | until time -f %e rm /dev/null; do break; done', 'echo x | { ! time -f %e rm /dev/null; }',
   // the options of xargs whose value is the next word still take it
   'echo /dev/null | xargs -L 1 ls', 'echo /dev/null | xargs -rL 1 ls', 'echo /dev/null | xargs -E rm ls', 'echo /dev/null | xargs -rE rm ls', 'echo /dev/null | xargs --max-args 1 ls',
   // a member that is empty after the strip is skipped, and one that lands outside /dev stays outside
