@@ -1038,4 +1038,16 @@ describe('/dev guard: spellings of round 6', () => {
   ])('reads the prefixes of the value options of tar: %s is %s', (command, expected) => {
     expect(check(command).decision).toBe(expected);
   });
+
+  // bsdtar reads every word after its first member as a member, an option too (measured with bsdtar 3.7.4: a late -C, --cd or --exclude is a name that is not
+  // in the archive); GNU tar applies -C from its place on
+  it.each([
+    ['cd /; bsdtar -xf /tmp/a.tar x -C /tmp dev/null', 'deny'], ['cd /; bsdtar -xf /tmp/a.tar x --cd /tmp dev/null', 'deny'], ['cd /; bsdtar -xf /tmp/a.tar x --directory /tmp dev/null', 'deny'],
+    ['cd /; bsdtar -xf /tmp/a.tar dev/null -C /tmp', 'deny'], ['cd /; bsdtar -xf /tmp/a.tar x -C /tmp -C /tmp2 dev/null', 'deny'], ['cd /; bsdtar -xf /tmp/a.tar x --strip-components=1 dev/null', 'deny'],
+    ['cd /; bsdtar -xf /tmp/a.tar -C /tmp x dev/null', 'allow'], ['cd /; bsdtar -C /tmp -xf /tmp/a.tar dev/null', 'allow'], ['cd /; bsdtar -xf /tmp/a.tar x -C /tmp', 'allow'],
+    ['cd /; bsdtar -xf /tmp/a.tar -C /tmp x -C /tmp2 y', 'allow'], ['cd /; bsdtar -xf /tmp/a.tar --strip-components=1 dev/null', 'allow'],
+    ['cd /; tar -xf /tmp/a.tar x -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --directory /tmp dev/null', 'allow'],
+  ])('reads the words after the first member of bsdtar as members: %s is %s', (command, expected) => {
+    expect(check(command).decision).toBe(expected);
+  });
 });

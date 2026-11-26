@@ -444,7 +444,13 @@ function tarMode(args, name) {
     }
     rest = args.slice(next);
   }
-  const parsed = parseGetopt(rest, valueLetters, (opt) => tarLongTakesValue(opt, name === 'bsdtar' ? 'bsd' : 'gnu')); // bsdtar: --cd is --directory
+  const takesValue = (opt) => tarLongTakesValue(opt, name === 'bsdtar' ? 'bsd' : 'gnu'); // bsdtar: --cd is --directory
+  let parsed = parseGetopt(rest, valueLetters, takesValue);
+  if (name === 'bsdtar' && parsed.operands.length) { // bsdtar reads every word after its first member as a member, an option too (measured with bsdtar 3.7.4)
+    const first = parsed.operandAt[0];
+    parsed = parseGetopt(rest.slice(0, first), valueLetters, takesValue);
+    for (let k = first; k < rest.length; k++) { parsed.operands.push(rest[k]); parsed.operandAt.push(k); }
+  }
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
   if (parsed.shorts.includes('P') || parsed.longs.some((l) => longIs(l, '--absolute-names', 4) || longIs(l, '--absolute-paths', 4))) absolute = true; // the second name is the one of bsdtar
   if (parsed.shorts.includes('O') || parsed.longs.some((l) => longIs(l, '--to-stdout', 6))) toStdout = true; // -O and --to-stdout write the members to the standard output, not to files
