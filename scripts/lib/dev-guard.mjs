@@ -11,14 +11,16 @@
 // wrappers sudo, doas, env, command, builtin, exec, nice, ionice, nohup, timeout, stdbuf, setsid, time, coproc and xargs.
 // Also refused with a path under /dev: mkfs*, mke2fs, wipefs (erasing forms), fdisk, sfdisk, gdisk and parted (not their listing forms),
 // tar and bsdtar extracting with -C or --directory, unzip -d (also the members named after the archive, joined with that directory, after
-// --strip-components for tar and without the words after unzip -x), awk and gawk with -i inplace, ed, ex and red.
+// --strip-components for tar, without the members that a literal --exclude of tar names and without the words after unzip -x),
+// awk and gawk with -i inplace, ed, ex and red.
 // One exception: the atomic repair recipe for /dev/null passes when it is the whole command and /dev/null is not the character device 1:3.
 // Not resolved (known limits): variables and command substitutions inside the path, relative paths after cd /dev, scripts read from a
 // file, interpreters (python -c ...), unknown wrappers, symbolic links to /dev, a script piped into a shell, wildcards, braces, ANSI-C
 // escapes and tildes in the path, a here-document for sudo -i, sudo -s and su, coproc NAME { ...; }, flock FILE COMMAND, runuser -u USER --
 // COMMAND, a filter between a feeder and xargs, env -iS TEXT, xargs -rI {}, abbreviated long options of the wrappers with a value in
-// the next word, tar --transform, --xform, bsdtar -s, --one-top-level, -P and --absolute-names, an archive extracted without naming
-// its members into / or a directory above /dev, wildcard or listed (-T) members, commands that are not listed (mkswap, blkdiscard,
+// the next word, tar --transform, --xform, bsdtar -s, --one-top-level, -P and --absolute-names, tar --exclude with a wildcard or naming
+// a directory and any bsdtar --exclude, an archive extracted without naming its members into / or a directory above /dev, wildcard or
+// listed (-T) members, commands that are not listed (mkswap, blkdiscard,
 // losetup, cryptsetup, mdadm, ...).
 
 import { lstatSync } from 'node:fs';
