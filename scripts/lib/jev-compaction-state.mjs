@@ -29,15 +29,24 @@
  *    everything). A link and anything outside that directory stay, and without a session id nothing is touched or removed. It
  *    runs only while the compaction point is enabled, and a session idle for longer than the days can find that a trace names a
  *    file that is gone.
+ * 5. Archive retention. With OMC_JEV_COMPACT_ARCHIVE the module writes the calls and results it cuts to
+ *    <state dir>/compaction-archive/<session>/<tool_use_id>.txt (see its header), and every compaction that archives touches
+ *    `.compaction` in the session's directory. SessionStart (any source but `compact`) removes the other session directories whose
+ *    newest file is older than OMC_JEV_ARCHIVE_DAYS days (default 14; a whole number from 1 to 99999; `0` or any other value keeps
+ *    everything): the directory is renamed first, its plain files and then the empty directory are removed, a link is never followed
+ *    or removed, the current session's directory stays, and nothing is removed without a session id. The work stops after
+ *    ARCHIVE_SWEEP_MS (the rest waits for the next start); an error never changes what the hook outputs. A session idle for longer
+ *    than the days can find that a trace names a file that is gone.
  *
  * <state dir> is OMC_JEV_LOG_DIR when set, else ~/.omc/state/jev: the module knows only the home
  * directory, not the project's state root. Registry text is masked with scripts/lib/jev-mask.mjs, the
  * masking the module uses for what it sends.
  */
 
-import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
 import { parseJevEnv, resolveJevLogMaxBytes, rotateJevLog } from '../jev-resolve.mjs';
@@ -56,6 +65,12 @@ const MISSING_WINDOW_MS = 24 * 3600_000;
 const MISSING_TO_NOTIFY = 3;
 const MAX_AGE_MS = 7 * 24 * 3600_000;
 const PASTES_DAYS_DEFAULT = 14;
+const ARCHIVE_DAYS_DEFAULT = 14;
+const ARCHIVE_SWEEP_MS = 200;
+// A session directory the sweep renamed to be removed: the module names a session directory with [A-Za-z0-9_-] only, so this suffix never names a live one.
+const ARCHIVE_DOOMED = '.removing';
+// The file of a session directory that every compaction with the archive touches (the module's ARCHIVE_MARKER).
+const ARCHIVE_MARKER = '.compaction';
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 // git subcommands that change the repository or its remote (status, log and diff are not worth a line).
@@ -308,6 +323,97 @@ export function sweepPastes(sessionId, now = Date.now(), env = process.env) {
   return removed;
 }
 
+/** OMC_JEV_ARCHIVE_DAYS: days a session directory of compaction-archive is kept, a whole number from 1 to 99999 (unset or empty: the default); 0 or any other value: no removal. */
+export function archiveDays(env = process.env) {
+  const raw = String(env.OMC_JEV_ARCHIVE_DAYS ?? '').trim();
+  if (!raw) return ARCHIVE_DAYS_DEFAULT;
+  return /^[1-9]\d{0,4}$/.test(raw) ? Number(raw) : 0;
+}
+
+// "old" when every plain file of the directory changed before the cutoff (the marker first), "new" when one is newer or the directory cannot be read, "stop" when `stop()` says the budget is
+// over during the check (the directory waits for the next start).
+function archiveFilesAge(dir, cutoff, stop) {
+  try {
+    const names = readdirSync(dir).sort((a, b) => (a === ARCHIVE_MARKER ? -1 : b === ARCHIVE_MARKER ? 1 : 0));
+    for (const f of names) {
+      if (stop()) return 'stop';
+      const st = lstatSync(join(dir, f));
+      if (st.isFile() && st.mtimeMs >= cutoff) return 'new';
+    }
+    return 'old';
+  } catch { return 'new'; }
+}
+
+const insideDir = (path, dir) => path.toLowerCase().startsWith(dir.toLowerCase().replace(/[\\/]+$/, '') + sep);
+
+/**
+ * Removes the session directories of compaction-archive whose newest file is older than OMC_JEV_ARCHIVE_DAYS days: the directory is renamed to <name>.<random>.removing, its plain files are
+ * removed, then the empty directory. Never the current session's directory, never a link (not followed, not removed), nothing outside the root (the real path stays inside it), nothing
+ * without the current session's id. A directory already renamed is finished first, whatever its age. At most `budgetMs` of work (at least one file); the rest waits for the next start.
+ * Returns the counts, or undefined when the retention is off, there is no root or no session id.
+ */
+export function sweepArchive(sessionId, now = Date.now(), env = process.env, budgetMs = ARCHIVE_SWEEP_MS) {
+  const days = archiveDays(env);
+  if (!days || !sessionId) return undefined;
+  const t0 = performance.now();
+  const root = join(stateDirOf(env), 'compaction-archive');
+  let realRoot;
+  try {
+    if (lstatSync(root).isSymbolicLink()) return undefined;
+    realRoot = realpathSync(root);
+  } catch { return undefined; }
+  const out = { days, removed_dirs: 0, removed_files: 0, removed_bytes: 0, links_skipped: 0, stopped: false, ms: 0 };
+  const over = () => performance.now() - t0 >= budgetMs;
+  const current = safeName(sessionId);
+  const cutoff = now - days * 24 * 3600_000;
+  let names = [];
+  try { names = readdirSync(root).sort(); } catch { return undefined; }
+  const queue = names.filter((n) => n.endsWith(ARCHIVE_DOOMED));
+  let checked = 0; // directories whose files were checked: the first check always runs
+  for (const n of names) {
+    if (n.endsWith(ARCHIVE_DOOMED) || n === current) continue;
+    let st;
+    try { st = lstatSync(join(root, n)); } catch { continue; }
+    if (st.isSymbolicLink()) { out.links_skipped++; continue; }
+    if (!st.isDirectory() || st.mtimeMs >= cutoff) continue;
+    const age = archiveFilesAge(join(root, n), cutoff, () => over() && (checked > 0 || out.removed_files > 0));
+    checked++;
+    if (age === 'stop') { out.stopped = true; break; }
+    if (age === 'old') queue.push(n);
+  }
+  for (let q = 0; q < queue.length; q++) {
+    const n = queue[q];
+    let dir = join(root, n);
+    try {
+      const st = lstatSync(dir);
+      if (st.isSymbolicLink()) { out.links_skipped++; continue; }
+      if (!st.isDirectory() || !insideDir(realpathSync(dir), realRoot)) continue;
+      if (!n.endsWith(ARCHIVE_DOOMED)) {
+        const doomed = `${dir}.${Math.random().toString(36).slice(2, 8)}${ARCHIVE_DOOMED}`;
+        renameSync(dir, doomed);
+        dir = doomed;
+      }
+      let left = 0;
+      let halted = false;
+      for (const f of readdirSync(dir)) {
+        if (over() && (out.removed_files || out.removed_dirs)) { out.stopped = true; halted = true; break; }
+        const p = join(dir, f);
+        const fst = lstatSync(p);
+        if (fst.isSymbolicLink()) { out.links_skipped++; left++; continue; }
+        if (!fst.isFile()) { left++; continue; }
+        unlinkSync(p);
+        out.removed_files++;
+        out.removed_bytes += fst.size;
+      }
+      if (halted) break;
+      if (!left) { rmdirSync(dir); out.removed_dirs++; }
+    } catch { /* in use or removed meanwhile: the next start tries again */ }
+    if (over()) { out.stopped = out.stopped || q < queue.length - 1; break; }
+  }
+  out.ms = Math.round(performance.now() - t0);
+  return out;
+}
+
 // The session's spool files: [{name, record}], record undefined for an unreadable file.
 function readSpool(spoolDir, sessionId) {
   let names = [];
@@ -378,7 +484,16 @@ export function afterSessionStart(data, { logDir, writers } = {}, env = process.
       sweep(spoolDir, now);
       sweep(join(stateDir, 'compaction-registry'), now);
     }
-    if (data.source !== 'compact') sweepPastes(sessionId, now, env);
+    if (data.source !== 'compact') {
+      sweepPastes(sessionId, now, env);
+      // The archive's retention never changes what the hook outputs; a row says what it removed.
+      try {
+        const swept = sweepArchive(sessionId, now, env);
+        if (swept && (swept.removed_dirs || swept.removed_files || swept.links_skipped || swept.stopped)) {
+          appendRows(target, [{ ts: new Date(now).toISOString(), point: POINT, event: 'archive_retention', session_id: sessionId, agent_id: null, ...swept }], env);
+        }
+      } catch { /* retention never changes the hook output */ }
+    }
     return out;
   } catch { return {}; }
 }
