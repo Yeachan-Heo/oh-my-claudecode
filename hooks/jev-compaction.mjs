@@ -5364,7 +5364,7 @@ async function askTie($, cfg, group, ctx) {
 
 // --- series of traces (OMC_JEV_COMPACT_BLOCKS) --------------------------------------------------
 // Two or more traces of the module on neighbouring lines of one row (SERIES_MIN; only white space between them) are a series, and a series that is asked for merges into one
-// line that names a file holding the traces word for word. A series merges only whole, as a unit, and only where the row may be edited: before the tail, outside the rows the
+// line that names a file holding the traces word for word. A series merges only whole, as a unit, and only where the row may be edited: before the open tool loop, outside the rows the
 // host cannot rebuild from text, and, in a direct reply, never over the trace of a reply, of a block or of an agent's message. Which series to merge is not decided here: the caller passes the keys.
 const SERIES_MIN = 2;
 const SERIES_NOTE = '[compacted] traces merged:';
