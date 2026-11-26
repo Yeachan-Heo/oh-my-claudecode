@@ -631,6 +631,35 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('a blank in front of the marker that a backslash escapes (a backslash and a blank, or a backslash and a new line) makes the marker part of a word, not a comment: the command of another tool is no entry, so check does not count it and add and remove leave it alone; two backslashes leave the blank free, and that command is the entry', () => {
+    const marker = '# five-hour-guard-entry';
+    const foreign = [`printf '%s\\n' foo\\ ${marker}`, `printf '%s\\n' foo\\\n${marker}`, `echo foo\\\\\\ ${marker}`, `printf '%s\\n' x\\ ${marker}   \n`];
+    for (const command of foreign) {
+      // what the shell does: the marker text is an argument, so the command prints it
+      expect(spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout, `${JSON.stringify(command)}: the shell takes the marker for an argument`).toMatch(/five-hour-guard-entry/);
+      const f = fixture('settings-marker-escaped');
+      const doc = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } };
+      write(f, doc);
+      const check = tool(f, 'check');
+      expect(check.status, `${JSON.stringify(command)}: check does not take it for the entry: ${check.stdout}${check.stderr}`).toBe(1);
+      expect(tool(f, 'remove').stdout, `${JSON.stringify(command)}: remove leaves it`).toMatch(/nothing to do/);
+      expect(readJson(f.settings), `${JSON.stringify(command)}: the only handler is as it was after remove`).toEqual(doc);
+      const add = tool(f, 'add');
+      expect(add.status, `${command}: ${add.stderr}`).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre, `${JSON.stringify(command)}: add appends its own entry`).toHaveLength(2);
+      expect(pre[0], `${JSON.stringify(command)}: and the handler of the other tool stays`).toEqual(doc.hooks.PreToolUse[0]);
+    }
+    const real = [`echo foo\\\\ ${marker}`, `echo foo\\\\\\\\ ${marker}`, `echo foo\\  ${marker}`, `echo x\\\n ${marker}`];
+    for (const command of real) {
+      expect(spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout, `${JSON.stringify(command)}: the shell takes the marker for a comment`).not.toMatch(/five-hour-guard-entry/);
+      const f = fixture('settings-marker-free-blank');
+      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      const check = tool(f, 'check');
+      expect(check.status, `${JSON.stringify(command)}: check finds it: ${check.stdout}${check.stderr}`).toBe(0);
+    }
+  });
+
   it('quotes that touch the path of the hook make it part of a longer word of the shell (quote concatenation): a handler of another tool whose word is the path plus something outside the quotes, or something before the quote, is left alone by remove and add, while the path bare, in single or in double quotes, and in the shapes of the older entries is found', () => {
     const foreign = [`'${HOOK}'+audit`, `audit'${HOOK}'`, `"${HOOK}"x`, `'${HOOK}'"x"`, `${HOOK}'x'`, `'${HOOK}'x`, `x"${HOOK}"`, `"${HOOK}'`, `'${HOOK}"`, `exec '${HOOK}'+audit --pause-file /tmp/p`, `sh -c 'x'${HOOK}`];
     for (const command of foreign) {

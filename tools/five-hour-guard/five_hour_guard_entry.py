@@ -53,9 +53,13 @@ def entry_command(pause_file, hook, python, hook_log=None):
 def has_marker(command):
     """Whether the command ends with ENTRY_MARKER after a blank, as the command that `add` writes does (a comment to the shell, last in the command;
     trailing blanks and new lines do not count). The text elsewhere in a command (`echo '# five-hour-guard-entry'`, in quotes, or in the middle) is data or
-    another comment, not the entry."""
+    another comment, not the entry. The blank must be free: an odd number of backslashes in front of it (`foo\\ # five-hour-guard-entry`, or a new line after
+    a backslash, which continues the line) makes it part of the word, so the `#` is no comment."""
     text = command.rstrip()
-    return text.endswith(ENTRY_MARKER) and text[:-len(ENTRY_MARKER)][-1:].isspace()
+    if not text.endswith(ENTRY_MARKER):
+        return False
+    before = text[:-len(ENTRY_MARKER)]
+    return before[-1:].isspace() and (len(before) - 1 - len(before[:-1].rstrip('\\'))) % 2 == 0
 
 
 def is_entry(handler, hook):
