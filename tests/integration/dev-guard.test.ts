@@ -1024,4 +1024,18 @@ describe('/dev guard: spellings of round 6', () => {
   ])('allows %j (session in %j)', (command, cwd) => {
     expect(check(command, cwd).decision).toBe('allow');
   });
+
+  // a value option of tar written as a prefix takes the next word too (measured with GNU tar 1.35: --la, --listed-i and --index-f are taken, --sparse and
+  // --xattrs are flags whose next word is a member); here the word is -C, which is then a value and not a directory step
+  it.each([
+    ['cd /; tar -xf /tmp/a.tar x --labe -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --la -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --lab -C /tmp dev/null', 'deny'],
+    ['cd /; tar -xf /tmp/a.tar x --label -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --listed-i -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --index-f -C /tmp dev/null', 'deny'],
+    ['cd /; tar -xf /tmp/a.tar x --volno-f -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --rsh-c -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --exclude-f -C /tmp dev/null', 'deny'],
+    ['cd /; tar x --labe -C -f /tmp/a.tar dev/null', 'deny'],
+    ['cd /; tar -xf /tmp/a.tar x --sparse -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --xattrs -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --list -C /tmp dev/null', 'allow'],
+    ['cd /; tar -xf /tmp/a.tar x --checkpoint -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --labe=L -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --verbose -C /tmp dev/null', 'allow'],
+    ['cd /; tar -xf /tmp/a.tar x --labe L -C /tmp dev/null', 'allow'],
+  ])('reads the prefixes of the value options of tar: %s is %s', (command, expected) => {
+    expect(check(command).decision).toBe(expected);
+  });
 });

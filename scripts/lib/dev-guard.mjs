@@ -397,7 +397,7 @@ function archiveMemberInDev(dirs, members) {
 }
 
 // The long options of tar and of bsdtar with a mandatory value, which may be the next word and is not a member (an archive, a list, a pattern, a date, a
-// text...); exact names only, because the abbreviations are ambiguous, and one set per tool, because a name that a tool does not know ends the command
+// text...), by their full names (tarLongTakesValue reads the prefixes), and one set per tool, because a name that a tool does not know ends the command
 // with an error and would swallow a real member if it were listed for the other. Options with an optional value (--backup, --checkpoint, --occurrence,
 // --one-top-level, --totals) take it only after an equals sign.
 const TAR_LONG_VALUE = {
@@ -418,9 +418,11 @@ const TAR_LONG_VALUE = {
   ]),
 };
 
-// The long options of tar that run a command text (also abbreviated, as far as the tool takes the abbreviation; the value may be in the next word): the
-// compress program (both tools), the --to-command text, the scripts at the end of a volume and the exec= action of a checkpoint (GNU tar only).
-const tarTextLong = (opt, gnu) => longIs(opt, '--use-compress-program', 4) || (gnu && (longIs(opt, '--to-command', 6) || longIs(opt, '--info-script', 6) || longIs(opt, '--new-volume-script', 7) || longIs(opt, '--checkpoint-action', 13)));
+// Whether the long option `opt`, written in full or as a prefix, takes the next word as its value. Both tools take any prefix of an option name that is not
+// ambiguous, and stop with an error on one that two options share, so such a prefix is read as a value option when it starts the name of one; only the exact
+// name of an option without a mandatory value that starts a longer name (--sparse and --sparse-version) stays one without (measured with GNU tar 1.35).
+const TAR_FLAG_PREFIX = new Set(['--checkpoint', '--list', '--sparse', '--xattrs']);
+const tarLongTakesValue = (opt, tool) => TAR_LONG_VALUE[tool].has(opt) || (opt.length > 2 && !TAR_FLAG_PREFIX.has(opt) && [...TAR_LONG_VALUE[tool]].some((n) => n.startsWith(opt)));
 
 // tar and bsdtar: the options of a command, with an old style first word read as options too. writes: the command extracts to files (not to the standard output).
 function tarMode(args, name) {
@@ -442,7 +444,7 @@ function tarMode(args, name) {
     }
     rest = args.slice(next);
   }
-  const parsed = parseGetopt(rest, valueLetters, (opt) => longIs(opt, '--directory', 5) || opt === '--cd' || longIs(opt, '--strip-components', 5) || TAR_LONG_VALUE[name === 'bsdtar' ? 'bsd' : 'gnu'].has(opt) || tarTextLong(opt, name !== 'bsdtar')); // bsdtar: --cd is --directory
+  const parsed = parseGetopt(rest, valueLetters, (opt) => tarLongTakesValue(opt, name === 'bsdtar' ? 'bsd' : 'gnu')); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
   if (parsed.shorts.includes('P') || parsed.longs.some((l) => longIs(l, '--absolute-names', 4) || longIs(l, '--absolute-paths', 4))) absolute = true; // the second name is the one of bsdtar
   if (parsed.shorts.includes('O') || parsed.longs.some((l) => longIs(l, '--to-stdout', 6))) toStdout = true; // -O and --to-stdout write the members to the standard output, not to files
