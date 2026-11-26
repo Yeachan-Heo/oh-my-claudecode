@@ -484,6 +484,33 @@ describe('jev-compaction-state: archive of calls and results kept for the traces
     // Nothing removed, nothing logged.
     afterSessionStart({ session_id: sid, source: 'resume' }, {}, env);
     expect(logRows(log).filter((r) => r.event === 'archive_retention')).toHaveLength(1);
+    // The same on resume and on clear: an old directory goes and a row says so.
+    for (const [k, source] of ['resume', 'clear'].entries()) {
+      const older = archive(env, `older-${source}`, 20);
+      afterSessionStart({ session_id: sid, source }, {}, env);
+      expect(existsSync(older), source).toBe(false);
+      expect(logRows(log).filter((r) => r.event === 'archive_retention'), source).toHaveLength(k + 2);
+    }
+  });
+
+  it('a directory that keeps a link or a subdirectory after the removal does not add a row at every start: the row says what was removed, and only that', () => {
+    const { env, sid, log } = setup();
+    const target = join(tmp, `archive-kept-target-${n}`);
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, 'keep.txt'), 'outside');
+    const doomed = archive(env, 'half.abc123.removing', 0, ['x.txt']);
+    let linked = true;
+    try { symlinkSync(join(target, 'keep.txt'), join(doomed, 'link.txt')); } catch { linked = false; }
+    mkdirSync(join(doomed, 'inner'));
+    afterSessionStart({ session_id: sid, source: 'startup' }, {}, env);
+    const rows = () => logRows(log).filter((r) => r.event === 'archive_retention');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toMatchObject({ removed_dirs: 0, removed_files: 1, links_skipped: linked ? 1 : 0 });
+    expect(existsSync(doomed)).toBe(true);
+    for (const source of ['resume', 'clear', 'startup']) afterSessionStart({ session_id: sid, source }, {}, env);
+    expect(rows()).toHaveLength(1);
+    expect(sweepArchive(sid, Date.now(), env)).toMatchObject({ removed_files: 0, removed_dirs: 0, links_skipped: linked ? 1 : 0 });
+    expect(existsSync(join(target, 'keep.txt'))).toBe(true);
   });
 });
 

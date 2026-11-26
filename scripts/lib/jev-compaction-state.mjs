@@ -501,10 +501,10 @@ export function afterSessionStart(data, { logDir, writers } = {}, env = process.
     }
     if (data.source !== 'compact') {
       sweepPastes(sessionId, now, env);
-      // The archive's retention never changes what the hook outputs; a row says what it removed.
+      // The archive's retention never changes what the hook outputs; a row says what it removed (a link or a subdirectory that stays is no news at the next start).
       try {
         const swept = sweepArchive(sessionId, now, env);
-        if (swept && (swept.removed_dirs || swept.removed_files || swept.links_skipped || swept.stopped)) {
+        if (swept && (swept.removed_dirs || swept.removed_files || swept.stopped)) {
           appendRows(target, [{ ts: new Date(now).toISOString(), point: POINT, event: 'archive_retention', session_id: sessionId, agent_id: null, ...swept }], env);
         }
       } catch { /* retention never changes the hook output */ }
