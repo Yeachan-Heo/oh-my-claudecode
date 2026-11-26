@@ -74,6 +74,8 @@ const BLOCKED: string[] = [
   'sudo --user root rm /dev/null', 'sudo --chdir /tmp rm /dev/null', 'env --unset X rm /dev/null', 'env --chdir /tmp rm /dev/null', "env -S 'rm -f /dev/null'", 'env --split-string="rm /dev/null"', "env -S'rm /dev/null'",
   "env -S 'rm -f' /dev/null", "env -i -S 'sh -c \"rm /dev/null\"'", 'stdbuf --output L rm /dev/null', 'ionice --class 3 rm /dev/null', 'echo /dev/null | xargs --max-args 1 rm', `${'sudo '.repeat(11)}rm /dev/null`,
   'sudo --group wheel --user root env --unset X nice --adjustment 3 rm /dev/null', 'coproc rm /dev/null',
+  // a path from the pipe lands in the place of the replace string of xargs -I
+  'echo /dev/sda | xargs -I{} rm {}', 'echo /dev/sda | xargs -i rm {}', 'echo /dev/sda | xargs --replace=@ rm @', 'echo /dev/sda | xargs -I @ rm @', 'echo /dev/sda | xargs -I{} cp x {}', 'echo -newer /dev/sda | xargs rm', 'find . -newer /dev/null -o -name /dev/sda | xargs rm',
   // more wrappers, keywords and spellings
   'shred /dev/sda', 'doas rm /dev/null', 'ionice -c3 rm /dev/null', 'stdbuf -oL rm /dev/null', 'setsid rm /dev/null', 'time rm /dev/null',
   'exec rm /dev/null', 'builtin rm /dev/null', 'mv -t /dev/null x', '! rm /dev/null', 'while rm /dev/null; do :; done', 'until rm /dev/null; do :; done', 'if rm /dev/null; then :; else rm /dev/null; fi',
@@ -139,6 +141,9 @@ const ALLOWED: string[] = [
   'echo x | xargs rm', "ls -d x 2>/dev/null | xargs rm -rf", 'sort x | tee /dev/stderr | xargs -r rm -rf', 'cat /dev/null | xargs rm', 'ssh host ls /dev', "ssh host 'cat /dev/null'",
   'echo "rm /dev/null"', "echo 'rm -f /dev/null'", 'git commit -m "rm /dev/null"', "grep -r 'rm /dev/null' .", "cat <<'EOF'\nrm /dev/null\nEOF",
   'bash script.sh', "bash -c 'echo hi > /dev/null'", 'sudo ls /dev', 'sudo -u root ls /dev', "bash <<'EOF'\necho hi > /dev/null\nEOF",
+  // xargs -I puts the path in the place of the replace string, and the file after a find test such as -newer is only compared with
+  'echo /dev/null | xargs -I{} cp {} ./empty', 'ls /dev/disk/by-id/* | xargs -I{} ln -s {} ./links/', "find . -newer /dev/null -name '*.tmp' | xargs rm -f", 'find . -samefile /dev/null | xargs rm', 'find . -newerBt /dev/null | xargs rm',
+  'echo /dev/null | xargs -i cp {} ./e', 'echo /dev/null | xargs --replace=@ cp @ ./e', 'echo /dev/null | xargs -I @ cp @ ./e',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move

@@ -25,6 +25,7 @@ const DEV_SCRATCH = /^\/dev\/shm\/./; // tmpfs scratch space: ordinary files of 
 const DEV_MAX_DEPTH = 6; // nested bash -c, eval, ssh, here-documents and find -exec
 const DEV_SHELLS = new Set(['bash', 'sh', 'dash', 'zsh', 'ksh', 'ash']);
 const DEV_FEEDERS = new Set(['echo', 'printf', 'ls', 'find', 'readlink', 'realpath']); // commands whose arguments become the input of the next command in a pipe (xargs)
+const FIND_REFERENCE = /^-(?:newer|anewer|cnewer|samefile|newer[acmBt][acmBt])$/; // find tests whose argument is a file to compare with, not a file found
 
 // The only command that may recreate /dev/null from a session: atomic (the node never disappears), and allowed only as the whole command
 // (only spaces, tabs and newlines around it are ignored: bash keeps a CR or a Unicode space as part of a word, trim() would drop them).
@@ -451,17 +452,21 @@ function devScanTokens(tokens, heredocs, depth) {
   let fed = [];
   let pipeDev = null; // a /dev path among the words of the command before the last pipe
   let wordDev = null; // a /dev path among the words of the current command
+  let isFind = false; // the current command has find among its words
   const flush = (op) => {
     const unwrapped = words.length ? devUnwrap(words) : null;
     let found = null;
     if (unwrapped) {
       found = devCommand(unwrapped.name, unwrapped.args, fed, depth);
-      if (!found && unwrapped.xargs && pipeDev && devCommand(unwrapped.name, [...unwrapped.args, '/dev/\u0000'], [], depth)) found = { what: `xargs ${unwrapped.name}`, path: pipeDev };
+      // the path from the pipe lands at the end of the arguments, or in the place of the replace string of xargs -I
+      const piped = unwrapped.replace ? unwrapped.args.map((a) => a.split(unwrapped.replace).join('/dev/\u0000')) : [...unwrapped.args, '/dev/\u0000'];
+      if (!found && unwrapped.xargs && pipeDev && devCommand(unwrapped.name, piped, [], depth)) found = { what: `xargs ${unwrapped.name}`, path: pipeDev };
     }
     pipeDev = (op === '|' || op === '|&') && unwrapped && DEV_FEEDERS.has(unwrapped.name) ? wordDev : null;
     words = [];
     fed = [];
     wordDev = null;
+    isFind = false;
     return found;
   };
   const subs = (word) => { for (const list of devSubLists(word.parts)) { const found = devScanTokens(list, heredocs, depth + 1); if (found) return found; } return null; };
@@ -473,7 +478,8 @@ function devScanTokens(tokens, heredocs, depth) {
       if (found) return found;
       const text = devWordText(t);
       words.push(text);
-      wordDev ??= devChangedIn(text);
+      if (baseName(text) === 'find') isFind = true;
+      if (!(isFind && FIND_REFERENCE.test(words[words.length - 2] ?? ''))) wordDev ??= devChangedIn(text); // the file after find -newer is only compared with
       continue;
     }
     if (t.type !== 'redir') continue;
