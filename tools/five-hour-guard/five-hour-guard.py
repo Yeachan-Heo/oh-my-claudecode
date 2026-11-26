@@ -1171,10 +1171,17 @@ def write_json(path, obj, no_clobber=False, replaces=None):
     file that this write renews; a file that is not that one any more when the file is put in place (somebody replaced the path since
     the validation) is kept and the write fails; a file that is gone is written like a first publication (no_clobber), so a file that comes in meanwhile is kept. A renewal and the replacing of the reservation (see
     swap_in) put the new file in place by exchanging it with the file at the path, and where two paths cannot be exchanged they fail: the path
-    is never empty (the hook reads no pause file as no pause), and a file that came in after the validation is put back, not destroyed."""
+    is never empty (the hook reads no pause file as no pause), and a file that came in after the validation is put back, not destroyed. A write
+    with neither (the state file) renews the file that is at the path when the write starts, or is a first publication where there is none: there is no
+    plain replace, so no file that comes in after the check of the settings is destroyed."""
     if A.dry_run:
         return
     tmp = f'{path}.{os.getpid()}.{os.urandom(8).hex()}.tmp'   # a name that no other process can have made: nothing is removed to make room for it
+    if not no_clobber and replaces is None:   # a plain write (the state file) renews the file that is at the path before the settings are checked, or is a first publication where there is none: a file that comes in after the check is kept
+        try:
+            replaces = os.lstat(path)
+        except FileNotFoundError:
+            no_clobber = True
     refuse_program_overwrite(path)
     # exclusive and without following links: another account that can write to the directory cannot redirect the write
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644)
@@ -1226,8 +1233,6 @@ def write_json(path, obj, no_clobber=False, replaces=None):
                     os.unlink(tmp)
                     return write_json(path, obj, no_clobber=True)
                 swap_in(tmp, path, file_identity(replaces), mine)
-                return
-            os.replace(tmp, path)
     except KeptAside:
         raise   # the file under the temporary name is not ours
     except BaseException:

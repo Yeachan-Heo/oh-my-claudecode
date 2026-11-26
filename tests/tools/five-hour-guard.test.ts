@@ -263,8 +263,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     mkdirSync(pauseDir);
     writeFileSync(v.cfg, JSON.stringify({ usage_cache: v.cache, pause_file: join(pauseDir, 'pause.json'), state_file: v.state, log_file: v.log }), 'utf8');
     const blocked = fixture('pause-blocked', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
-    // the replace of the pause file fails (a full disk): the write fails, and a single check says so by its status
-    const once = runPyCode(['import os, runpy, sys', 'def full(*a, **k): raise OSError(28, "No space left on device")', 'os.replace = full',
+    // the temporary file of a write cannot be created (a full disk): the write fails, and a single check says so by its status
+    const once = runPyCode(['import os, runpy, sys', 'real = os.open', 'def full(path, *a, **k):', '    if str(path).endswith(".tmp"): raise OSError(28, "No space left on device")', '    return real(path, *a, **k)', 'os.open = full',
       'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n'), [GUARD, ...guardArgs(blocked, ['--once'])]);
     expect(once.status, 'a failed tick under --once is status 1').toBe(1);
     expect(once.stdout).toMatch(/ERROR: tick failed/);
@@ -2519,6 +2519,35 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a state file is put in place like a pause file: a file that comes in at its path after the check of the settings and before the state is written is kept and the write fails, whether a state file was there or not; without one coming in the state is written as before', () => {
+    // the arrival is injected when the temporary file of the write is created: after the check of the settings, before the file is put in place
+    const driver = ['import os, runpy, sys', 'state, real, arrivals = sys.argv[1], os.open, []',
+      'def late(path, *args, **kw):', '    if str(path).startswith(state + ".") and str(path).endswith(".tmp") and sys._getframe(1).f_code.co_name == "write_json" and not arrivals:',
+      '        arrivals.append(1)', '        open(state + ".a", "w").write("foreign program\\n")', '        os.replace(state + ".a", state)',
+      '    return real(path, *args, **kw)',
+      'os.open = late', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('state-late-arrival-existing', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.state, 'old state\n', 'utf8');
+    const r = runPyCode(driver, [f.state, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*changed since it was validated and is not replaced/);
+    expect(readText(f.state), 'the file that came in over the old state is kept').toBe('foreign program\n');
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    const g = fixture('state-late-arrival-absent', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const first = runPyCode(driver, [g.state, GUARD, ...guardArgs(g, ['--once'])]);
+    expect(first.stdout, `${first.stdout}${first.stderr}`).toMatch(/ERROR: tick failed.*appeared meanwhile/);
+    expect(readText(g.state), 'the file that came in where no state was is kept').toBe('foreign program\n');
+    expect(readdirSync(g.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    // nobody comes in: the first state is written, and a state that was there is replaced
+    const h = fixture('state-clean-first', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(h);
+    expect(readJson(h.state).paused, 'the first state is written').toBe(true);
+    const k = fixture('state-clean-existing', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(k.state, 'old state\n', 'utf8');
+    guardOnce(k);
+    expect(readJson(k.state).paused, 'the old state is replaced').toBe(true);
+    expect(readdirSync(k.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+  });
+
   it('a relative entry of a PATH (of the command, of the env of settings.json) is looked up from each directory that the command names (cd DIR; PATH=bin audit), also with env -C, an entry of . or an empty one; a directory that does not exist adds nothing', () => {
     const f = fixture('foreign-relative-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
@@ -4357,9 +4386,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a stored pause that is over at start is cleared even when the state file cannot be written: an ERROR line, not a traceback', () => {
     const f = fixture('start-write-fails', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
-    const code = ['import os, runpy, sys', 'real = os.replace',
-      'def fail_on_state(src, dst, *a, **k):', '    if str(dst).endswith("state.json"): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
-      'os.replace = fail_on_state', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const code = ['import os, runpy, sys', 'real = os.open',
+      'def fail_on_state(path, *a, **k):', '    if "state.json." in str(path) and str(path).endswith(".tmp"): raise OSError(30, "Read-only file system")', '    return real(path, *a, **k)',
+      'os.open = fail_on_state', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(1); // the tick tries again, the write fails again
     expect(r.stdout).toMatch(/ERROR: cannot leave the stored pause cleanly at start/);
@@ -4374,9 +4403,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a pause is left in this order: the state is written first, the pause file removed after, so a failed write leaves the pause in force (also across a restart)', async () => {
     const f = fixture('state-write-retry', { cache: { pct: 97, resetMs: Date.now() + 3000 } });
     const flag = join(f.dir, 'break-state');
-    const code = ['import os, runpy, sys', 'real = os.replace', 'flag = sys.argv[1]',
-      'def maybe_fail(src, dst, *a, **k):', '    if str(dst).endswith("state.json") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
-      'os.replace = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const code = ['import os, runpy, sys', 'real = os.open', 'flag = sys.argv[1]',
+      'def maybe_fail(path, *a, **k):', '    if "state.json." in str(path) and str(path).endswith(".tmp") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(path, *a, **k)',
+      'os.open = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const g = spawnPyCode(code, [flag, GUARD, ...guardArgs(f, ['--margin', '0.5'])]);
     try {
       await waitFor(() => existsSync(f.pause), 20000, 'pause file');
@@ -4394,9 +4423,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('an early resume whose state write fails keeps the pause (file and disk) even when the cache turns stale; it ends when the write works and a reading shows it', async () => {
     const f = fixture('early-resume-retry', { cache: { pct: 97, resetMs: Date.now() + HOUR_MS } });
     const flag = join(f.dir, 'break-state');
-    const code = ['import os, runpy, sys', 'real = os.replace', 'flag = sys.argv[1]',
-      'def maybe_fail(src, dst, *a, **k):', '    if str(dst).endswith("state.json") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
-      'os.replace = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const code = ['import os, runpy, sys', 'real = os.open', 'flag = sys.argv[1]',
+      'def maybe_fail(path, *a, **k):', '    if "state.json." in str(path) and str(path).endswith(".tmp") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(path, *a, **k)',
+      'os.open = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const g = spawnPyCode(code, [flag, GUARD, ...guardArgs(f, ['--max-age', '3'])]);
     try {
       await waitFor(() => existsSync(f.pause), 20000, 'pause file');
@@ -4830,7 +4859,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       '    return found',
       'os.lstat = swap'];
     // the system has no exchange of two paths (the C library cannot be loaded, as on macOS and Windows, or the file system refuses it)
-    const noExchange = ['import ctypes', 'def none(*args, **kw):', '    raise OSError("no such library")', 'ctypes.CDLL = none'];
+    const noExchange = ['import ctypes', 'real_cdll, pause_path = ctypes.CDLL, sys.argv[1]', 'class NoSwap:', '    def __init__(self, library):', '        self.library = library',
+      '    def renameat2(self, *args):', '        return -1 if os.fsdecode(args[3]) == pause_path else self.library.renameat2(*args)', 'ctypes.CDLL = lambda *args, **kw: NoSwap(real_cdll(*args, **kw))'];
     const run = (lines: string[], f2: Fixture) => runPyCode(['import os, runpy, sys', ...lines, 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n'), [f2.pause, GUARD, ...guardArgs(f2, ['--once'])]);
     const r = run(swap, f);
     expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*changed since it was validated and is not replaced/);
@@ -4888,7 +4918,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       '        open(pause + ".a", "w").write("foreign file A\\n")', '        os.replace(pause + ".a", pause)',
       '    return found',
       'class Library:', '    def __init__(self, library):', '        self.library = library',
-      '    def renameat2(self, *args):', '        done = self.library.renameat2(*args)', '        calls.append(1)',
+      '    def renameat2(self, *args):', '        if os.fsdecode(args[3]) != pause:', '            return self.library.renameat2(*args)', '        done = self.library.renameat2(*args)', '        calls.append(1)',
       '        if len(calls) == 1:', '            open(pause + ".b", "w").write("foreign file B\\n")', '            os.replace(pause + ".b", pause)',
       '        return done',
       'os.lstat, ctypes.CDLL = swap, lambda *args, **kw: Library(real_cdll(*args, **kw))', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
@@ -4913,7 +4943,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       '        open(pause + ".a", "w").write("foreign file A\\n")', '        os.replace(pause + ".a", pause)',
       '    return found',
       'class Library:', '    def __init__(self, library):', '        self.library = library',
-      '    def renameat2(self, *args):', '        calls.append(1)', '        return self.library.renameat2(*args) if len(calls) == 1 else -1',
+      '    def renameat2(self, *args):', '        if os.fsdecode(args[3]) != pause:', '            return self.library.renameat2(*args)', '        calls.append(1)', '        return self.library.renameat2(*args) if len(calls) == 1 else -1',
       'os.lstat, ctypes.CDLL = swap, lambda *args, **kw: Library(real_cdll(*args, **kw))', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
     const kept = readdirSync(f.dir).filter((n) => n.endsWith('.tmp'));
@@ -5014,9 +5044,11 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
 
   it('where hard links are not supported and the pause cannot be put in place, the reservation is removed only while it is still the reservation: a foreign file that takes its place in the last moment before the removal is kept', () => {
     // the cleanup that follows a failed publication looks at the path (the second look of write_json: the first is the check of the reservation) and then takes the reservation away; the foreign file comes in right after that look
-    const driver = ['import ctypes, errno, os, runpy, sys', 'target, late, real_lstat, looks = sys.argv[1], sys.argv[2] == "1", os.lstat, []',
-      'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',
-      'def none(*args, **kw):', '    raise OSError("no such library")',
+    const driver = ['import ctypes, errno, os, runpy, sys', 'target, late, real_lstat, real_link, real_cdll, looks = sys.argv[1], sys.argv[2] == "1", os.lstat, os.link, ctypes.CDLL, []',
+      'def nolink(a, b, *args, **kw):', '    if str(b) != target:', '        return real_link(a, b, *args, **kw)', '    raise OSError(errno.EPERM, "Operation not permitted")',
+      'class NoSwap:', '    def __init__(self, library):', '        self.library = library',
+      '    def renameat2(self, *args):', '        return -1 if os.fsdecode(args[3]) == target else self.library.renameat2(*args)',
+      'def none(*args, **kw):', '    return NoSwap(real_cdll(*args, **kw))',
       'def look(path, *args, **kw):', '    found = real_lstat(path, *args, **kw)',
       '    if str(path) == target and sys._getframe(1).f_code.co_name == "write_json":', '        looks.append(1)', '        if late and len(looks) == 2:', '            os.unlink(target)', '            open(target, "w").write("foreign file\\n")',
       '    return found',
