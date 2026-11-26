@@ -3529,6 +3529,43 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a PATH= word that stands after the program of a simple command is an argument, not the PATH of that program: the guard cannot tell which file a bare name runs and refuses to start, while a PATH= word in front of the program, also after env, settles it as before', () => {
+    const f = fixture('foreign-path-argument', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project-bin');   // on the PATH of the session only
+    const usr = join(f.dir, 'usr-bin');   // on the PATH of the guard
+    mkdirSync(project);
+    mkdirSync(usr);
+    const text = '#!/bin/sh\necho session\n';
+    const audit = join(project, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    writeFileSync(join(usr, 'audit'), '#!/bin/sh\necho guard\n', { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const guardOnly = { ...ENV, PATH: `${usr}:${ENV.PATH}` };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once'], { env: guardOnly });
+    };
+    const sessionEnv = { ...process.env, PATH: `${project}:${usr}:${process.env.PATH}` };
+    expect(spawnSync('sh', ['-c', 'audit PATH=/nonexistent/safe'], { encoding: 'utf8', env: sessionEnv }).stdout, 'the word after the program is an argument: the session runs its own file').toBe('session\n');
+    expect(spawnSync('sh', ['-c', `PATH=${usr} audit`], { encoding: 'utf8', env: sessionEnv }).stdout, 'a PATH= word in front of the program is its PATH').toBe('guard\n');
+    expect(spawnSync('sh', ['-c', `env -C ${usr} PATH=${usr} audit`], { encoding: 'utf8', env: sessionEnv }).stdout, 'also after the option -C DIR of env').toBe('guard\n');
+    for (const command of ['audit PATH=/nonexistent/safe', `audit PATH=${usr}`, 'audit --flag PATH=/nonexistent/safe', 'true; audit PATH=/nonexistent/safe']) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a PATH= word in front of the program (also after env) gives the PATH of that program: the file of the session is not meant, so the guard starts
+    for (const command of [`PATH=${usr} audit`, `env PATH=${usr} audit`, `PATH=/nonexistent/safe audit`, `FHG_X=1 PATH=${usr} audit --flag PATH=/nonexistent/other`, `env -C ${usr} PATH=${usr} audit`]) {
+      const r = start(command, { state_file: audit });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a $PATH in the value that a PATH= word gives is the PATH that the session has before the assignment, not the one the guard has: where no PATH is given before it the guard cannot tell which file a bare name runs, so it refuses to start; a PATH that the settings or an earlier assignment give, and a PATH= word with no $PATH in it, settle it as before', () => {
     const f = fixture('foreign-path-self-reference', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // on the PATH of the session only

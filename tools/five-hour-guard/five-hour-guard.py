@@ -833,8 +833,12 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                     named.append(directory)
     for k, (words, here) in enumerate(zip(simple, moved_at)):
         run = command_word(words)
-        path_values = (assigned.get('PATH', []) if 'PATH' in settled_at[k][0] else []) + [w[5:] for w in words if w.startswith('PATH=')]   # the PATH of this simple command: the one that holds for the whole command, and its own PATH= words as written (a PATH= in front of another command is not its PATH; a `$PATH` in one is the PATH before the assignment, which the session has, so session_dependent reads it as a parameter that may have no value here)
-        path_dirs = os.environ.get('PATH', os.defpath).split(os.pathsep) + [os.path.expanduser(os.path.expandvars(d)) for w in words if w.startswith('PATH=') for piece in word_pieces(w, assigned) if piece.startswith('PATH=') for d in piece[5:].split(os.pathsep)] + given_path   # a PATH= word is filled in with the values of its parameters first, then split
+        prog = run   # the word that runs, but the argument of `-C DIR` of a wrapper (`env -C DIR PATH=x prog`) is no program: the program is the word after it that is no assignment
+        while prog is not None and prog > 0 and words[prog - 1] in CHDIR_WORDS:
+            prog = None if command_word(words[prog + 1:]) is None else prog + 1 + command_word(words[prog + 1:])
+        head = words[:prog] if prog is not None else words   # the words in front of the operand of the program: after it `PATH=x` is an argument
+        path_values = (assigned.get('PATH', []) if 'PATH' in settled_at[k][0] else []) + [w[5:] for w in head if w.startswith('PATH=')]   # the PATH of this simple command: the one that holds for the whole command, and its own PATH= words as written (a PATH= in front of another command is not its PATH; a `$PATH` in one is the PATH before the assignment, which the session has, so session_dependent reads it as a parameter that may have no value here)
+        path_dirs = os.environ.get('PATH', os.defpath).split(os.pathsep) + [os.path.expanduser(os.path.expandvars(d)) for w in head if w.startswith('PATH=') for piece in word_pieces(w, assigned) if piece.startswith('PATH=') for d in piece[5:].split(os.pathsep)] + given_path   # a PATH= word is filled in with the values of its parameters first, then split
         directories = [''] + path_dirs + [os.path.normpath(os.path.join(n, d)) for d in path_dirs if d and not os.path.isabs(d) for n in named] + named   # a PATH=dir word adds its directories for every word of the simple command; a relative PATH entry is also looked up from each directory that the command names (`cd /dir; PATH=bin prog`)
         for index, word in enumerate(words):
             if word in exclude:
