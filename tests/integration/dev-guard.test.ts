@@ -100,6 +100,8 @@ const BLOCKED: string[] = [
   // a letter with an optional attached value ends a cluster of xargs options: the rest of the word is its value and the next word is the command
   'echo x | xargs -iL rm /dev/null', 'echo x | xargs -rilL rm /dev/null', 'echo x | xargs -ilx rm /dev/null', 'echo x | xargs -eL rm /dev/null', 'echo x | xargs -lL rm /dev/null',
   'echo x | xargs -rtiL rm /dev/null', 'echo /dev/null | xargs -iL rm L', 'echo x | xargs -rL 1 rm /dev/null', 'echo x | xargs -rn 1 rm /dev/null', 'echo x | xargs -rnL rm /dev/null',
+  // the value of --file, --files-from and --exclude-from is not a member; the members that follow still count
+  'tar -C / --extract --file a.tar dev/null', 'tar -C / -x --files-from /dev/fd/3 dev/null', 'tar -C / -x --exclude-from /dev/fd/3 dev/null', 'bsdtar -C / --extract --file a.tar dev/null',
   // the options of xargs whose value is optional and attached: the next word is the command
   'echo /dev/null | xargs -rl rm', 'echo /dev/null | xargs -l rm', 'echo /dev/null | xargs -rl2 rm', 'echo /dev/null | xargs --max-lines rm', 'echo /dev/null | xargs --max-lines=2 rm',
   'echo /dev/null | xargs --eof rm', 'echo /dev/null | xargs -e rm', 'echo /dev/null | xargs -re rm', 'echo /dev/null | xargs -rt -l rm',
@@ -194,6 +196,9 @@ const ALLOWED: string[] = [
   // members that stay outside /dev, a member without an extraction directory, and -j, which drops the directories of the members
   'tar -C /tmp -xf /tmp/a.tar dev/null', 'tar -xf /tmp/a.tar dev/null', 'tar -C / -xf /tmp/a.tar etc/x', 'tar -tf /tmp/a.tar dev/null', 'tar -C / -tf /tmp/a.tar dev/null',
   'unzip -o /tmp/a.zip dev/null -d /tmp', 'unzip /tmp/a.zip dev/null', 'unzip -j /tmp/a.zip dev/null -d /', 'unzip -l /tmp/a.zip dev/null -d /', 'unzip -o /tmp/a.zip etc/x -d /',
+  // the value of the file options of tar is the archive or a list, not a member
+  'tar -C / --extract --file /dev/fd/3 tmp/out', 'tar -C / --extract --file=/dev/fd/3 tmp/out', 'gtar -C / --extract --file /dev/fd/3 tmp/out', 'bsdtar -C / --extract --file /dev/fd/3 tmp/out',
+  'tar -C / -x --files-from /dev/fd/3 tmp/out', 'tar -C / -x --exclude-from /dev/fd/3 tmp/out',
   // the options of xargs whose value is the next word still take it
   'echo /dev/null | xargs -L 1 ls', 'echo /dev/null | xargs -rL 1 ls', 'echo /dev/null | xargs -E rm ls', 'echo /dev/null | xargs -rE rm ls', 'echo /dev/null | xargs --max-args 1 ls',
   // a member that is empty after the strip is skipped, and one that lands outside /dev stays outside

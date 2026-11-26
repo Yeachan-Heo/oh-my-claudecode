@@ -323,6 +323,10 @@ function archiveMemberInDev(dirs, members) {
   return null;
 }
 
+// The long options of tar and bsdtar whose value may be the next word and is neither a directory nor a member (the archive, a list of names, a list of
+// patterns, a pattern); exact names only, because --f, --fi and --fil are ambiguous for both.
+const TAR_LONG_VALUE = new Set(['--file', '--files-from', '--exclude-from', '--exclude']);
+
 // tar and bsdtar: the directories of -C / --directory (each relative one resolves against the previous), when the command extracts.
 function tarExtractDir(args) {
   const valueLetters = 'bCfFgHIKLNTVX';
@@ -338,7 +342,7 @@ function tarExtractDir(args) {
     }
     rest = args.slice(next);
   }
-  const parsed = parseGetopt(rest, valueLetters, (name) => longIs(name, '--directory', 5) || name === '--cd' || longIs(name, '--strip-components', 5)); // bsdtar: --cd is --directory
+  const parsed = parseGetopt(rest, valueLetters, (name) => longIs(name, '--directory', 5) || name === '--cd' || longIs(name, '--strip-components', 5) || TAR_LONG_VALUE.has(name)); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
   if (!extract) return null;
   for (const [key, value] of parsed.values) if (key === 'C' || key === '--cd' || longIs(key, '--directory', 5)) dirs.push(value);
