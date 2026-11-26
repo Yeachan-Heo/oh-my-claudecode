@@ -704,7 +704,12 @@ function heredocAt(heredocs, start) {
 function devScanTokens(tokens, heredocs, depth) {
   if (depth > DEV_MAX_DEPTH) return devMentions(tokens) ? { what: 'a nested command', path: '/dev' } : null;
   const ticks = backtickTexts.get(tokens);
-  if (ticks !== undefined) return shellOf(ticks, depth - 1); // read again as a text of its own, so that its here-documents are found at the right offsets
+  if (ticks !== undefined) { // read again as a text of its own, so that its here-documents are found at the right offsets; a cd in it runs in a subshell
+    const outer = devCwd;
+    const found = shellOf(ticks, depth - 1);
+    devCwd = outer;
+    return found;
+  }
   let words = [];
   let fed = [];
   let pipeDev = null; // a /dev path among the words of the command before the last pipe
@@ -754,7 +759,11 @@ function devScanTokens(tokens, heredocs, depth) {
     afterPipeOp = op === '|' || op === '|&';
     return found;
   };
-  const subs = (word) => { for (const list of devSubLists(word.parts)) { const found = devScanTokens(list, heredocs, depth + 1); if (found) return found; } return null; };
+  const subs = (word) => { // a cd inside $( ) and <( ) runs in a subshell and leaves the directory of the command as it was
+    const outer = devCwd;
+    for (const list of devSubLists(word.parts)) { const found = devScanTokens(list, heredocs, depth + 1); devCwd = outer; if (found) return found; }
+    return null;
+  };
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (t.type === 'op') {

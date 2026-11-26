@@ -1082,4 +1082,13 @@ describe('/dev guard: spellings of round 6', () => {
   ])('reads the words after the first member of bsdtar as members: %s is %s', (command, expected) => {
     expect(check(command).decision).toBe(expected);
   });
+
+  // a cd inside a command substitution runs in a subshell (measured with bash 5.2: echo $(cd A); pwd prints the directory it started in)
+  it.each([
+    ['cd /dev; echo $(cd /tmp); rm null', '/tmp', 'deny'], ['cd /dev; echo `cd /tmp`; rm null', '/tmp', 'deny'], ['cd /dev; cat <(cd /tmp); rm null', '/tmp', 'deny'], ['cd /dev; echo "$(cd /tmp)"; rm null', '/tmp', 'deny'],
+    ['echo $(cd /tmp); rm null', '/dev', 'deny'], ['cd /dev; echo $(cd /tmp && ls); echo $(pwd); rm null', '/tmp', 'deny'],
+    ['cd /dev; echo $(cd /tmp; rm null)', '/tmp', 'allow'], ['cd /tmp; echo $(cd /dev); rm null', '/tmp', 'allow'], ['cd /tmp; echo $(ls); rm null', '/dev', 'allow'],
+  ])('keeps the directory after a cd in a substitution: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
 });
