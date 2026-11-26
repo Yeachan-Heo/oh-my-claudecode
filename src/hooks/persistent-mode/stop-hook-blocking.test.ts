@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { execSync } from "child_process";
@@ -40,12 +40,14 @@ function deactivateUltrawork(directory: string, sessionId?: string): boolean {
 
 function writeSubagentTrackingState(
   tempDir: string,
+  sessionId: string,
   agents: Array<Record<string, unknown>>,
 ): void {
-  const stateDir = join(tempDir, ".omc", "state");
-  mkdirSync(stateDir, { recursive: true });
+  // Where the subagent tracker writes (resolveSessionStatePaths, #5148).
+  const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+  mkdirSync(sessionDir, { recursive: true });
   writeFileSync(
-    join(stateDir, "subagent-tracking.json"),
+    join(sessionDir, "subagent-tracking-state.json"),
     JSON.stringify(
       {
         agents,
@@ -1131,7 +1133,7 @@ describe("Stop Hook Blocking Contract", () => {
     it("returns continue: true for active ralph with a running delegated subagent", () => {
       const sessionId = "ralph-mjs-subagent-running";
       writeActiveRalphState(tempDir, sessionId);
-      writeSubagentTrackingState(tempDir, [
+      writeSubagentTrackingState(tempDir, sessionId, [
         {
           agent_id: "agent-mjs-running",
           agent_type: "executor",
@@ -1152,7 +1154,7 @@ describe("Stop Hook Blocking Contract", () => {
       // the boulder — only an in-flight one does. Proves the gate has teeth.
       const sessionId = "ralph-mjs-subagent-done";
       writeActiveRalphState(tempDir, sessionId);
-      writeSubagentTrackingState(tempDir, [
+      writeSubagentTrackingState(tempDir, sessionId, [
         {
           agent_id: "agent-mjs-done",
           agent_type: "executor",
@@ -2110,7 +2112,7 @@ describe("Stop Hook Blocking Contract", () => {
     it("returns continue: true for active ralph with a running delegated subagent", () => {
       const sessionId = "ralph-cjs-subagent-running";
       writeActiveRalphState(tempDir, sessionId);
-      writeSubagentTrackingState(tempDir, [
+      writeSubagentTrackingState(tempDir, sessionId, [
         {
           agent_id: "agent-cjs-running",
           agent_type: "executor",
@@ -2131,7 +2133,7 @@ describe("Stop Hook Blocking Contract", () => {
       // the boulder — only an in-flight one does. Proves the gate has teeth.
       const sessionId = "ralph-cjs-subagent-done";
       writeActiveRalphState(tempDir, sessionId);
-      writeSubagentTrackingState(tempDir, [
+      writeSubagentTrackingState(tempDir, sessionId, [
         {
           agent_id: "agent-cjs-done",
           agent_type: "executor",
@@ -2163,7 +2165,7 @@ describe("Stop Hook Blocking Contract", () => {
           stale_ttl_ms: 15 * 60 * 1000,
         }),
       );
-      writeSubagentTrackingState(tempDir, [
+      writeSubagentTrackingState(tempDir, sessionId, [
         {
           agent_id: "agent-cjs-1",
           agent_type: "explore",
@@ -2385,6 +2387,103 @@ describe("Stop Hook Blocking Contract", () => {
         sessionId,
       });
       expect(output.continue).toBe(true);
+    });
+  });
+
+  describe("installed template persistent-mode.mjs reads the state the writers produce (#5148)", () => {
+    let tempDir: string;
+    let installRoot: string;
+    let scriptPath: string;
+
+    function runScript(input: Record<string, unknown>): Record<string, unknown> {
+      const result = execSync(`node "${scriptPath}"`, {
+        encoding: "utf-8",
+        timeout: 5000,
+        input: JSON.stringify(input),
+        env: { ...process.env, NODE_ENV: "test", CLAUDE_PLUGIN_ROOT: undefined },
+      });
+      const lines = result.trim().split("\n");
+      return JSON.parse(lines[lines.length - 1]);
+    }
+
+    beforeEach(() => {
+      tempDir = mkdtempSync(join(tmpdir(), "stop-hook-template-test-"));
+      execSync("git init", { cwd: tempDir });
+      delete process.env.OMC_STATE_DIR;
+      // Stage the template the way the standalone installer does: template
+      // hook and lib, with config-dir and state-lock taken from scripts/lib.
+      installRoot = mkdtempSync(join(tmpdir(), "stop-hook-template-install-"));
+      const libDir = join(installRoot, "lib");
+      mkdirSync(libDir, { recursive: true });
+      scriptPath = join(installRoot, "persistent-mode.mjs");
+      copyFileSync(join(process.cwd(), "templates", "hooks", "persistent-mode.mjs"), scriptPath);
+      for (const file of readdirSync(join(process.cwd(), "templates", "hooks", "lib"))) {
+        copyFileSync(join(process.cwd(), "templates", "hooks", "lib", file), join(libDir, file));
+      }
+      for (const file of ["config-dir.mjs", "state-lock.mjs"]) {
+        copyFileSync(join(process.cwd(), "scripts", "lib", file), join(libDir, file));
+      }
+    });
+
+    afterEach(() => {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(installRoot, { recursive: true, force: true });
+    });
+
+    it("does not reinforce an active skill while a subagent tracked for this session is running", () => {
+      const sessionId = "skill-active-subagents-template";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "skill-active-state.json"),
+        JSON.stringify({
+          active: true,
+          skill_name: "ralplan",
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+          reinforcement_count: 0,
+          max_reinforcements: 5,
+          stale_ttl_ms: 15 * 60 * 1000,
+        }),
+      );
+      writeSubagentTrackingState(tempDir, sessionId, [
+        {
+          agent_id: "agent-template-1",
+          agent_type: "explore",
+          started_at: new Date().toISOString(),
+          parent_mode: "none",
+          status: "running",
+        },
+      ]);
+
+      const output = runScript({ cwd: tempDir, session_id: sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+
+      const persisted = JSON.parse(
+        readFileSync(join(sessionDir, "skill-active-state.json"), "utf-8"),
+      ) as { reinforcement_count?: number };
+      expect(persisted.reinforcement_count).toBe(0);
+    });
+
+    it("adds retry guidance from the session-scoped tool error to the ralph continuation", () => {
+      const sessionId = "ralph-tool-error-template";
+      writeActiveRalphState(tempDir, sessionId);
+      writeFileSync(
+        join(tempDir, ".omc", "state", "sessions", sessionId, "last-tool-error-state.json"),
+        JSON.stringify({
+          tool_name: "Bash",
+          error: "exit status 2",
+          timestamp: new Date().toISOString(),
+          retry_count: 1,
+        }),
+      );
+
+      const output = runScript({ cwd: tempDir, session_id: sessionId });
+      expect(output.decision).toBe("block");
+      expect(String(output.reason)).toContain("[TOOL ERROR - RETRY REQUIRED]");
+      expect(String(output.reason)).toContain("exit status 2");
     });
   });
 });

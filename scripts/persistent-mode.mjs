@@ -605,11 +605,22 @@ function dispatchIdleNotificationInBackground(sessionId, directory) {
 }
 
 /**
- * Read last tool error from state directory.
+ * Path the post-tool-use-failure hook writes for this session (#5148):
+ * session-scoped last-tool-error-state.json when a session id is known,
+ * otherwise the legacy root last-tool-error.json.
+ */
+async function resolveToolErrorStatePath(directory, sessionId) {
+  const paths = sessionId
+    ? await resolveSessionStatePathsForHook(directory, "last-tool-error", sessionId)
+    : await resolveSessionStatePathsForHook(directory, "last-tool-error", undefined, { fileName: "last-tool-error.json" });
+  return paths.sessionScopedPath ?? paths.legacyPath;
+}
+
+/**
+ * Read last tool error from the given state file.
  * Returns null if file doesn't exist or error is stale (>60 seconds old).
  */
-function readLastToolError(stateDir) {
-  const errorPath = join(stateDir, "last-tool-error.json");
+function readLastToolError(errorPath) {
   const toolError = readJsonFile(errorPath);
 
   if (!toolError || !toolError.timestamp) return null;
@@ -623,20 +634,6 @@ function readLastToolError(stateDir) {
   if (age > 60000) return null;
 
   return toolError;
-}
-
-/**
- * Clear tool error state file atomically.
- */
-function clearToolErrorState(stateDir) {
-  const errorPath = join(stateDir, "last-tool-error.json");
-  try {
-    if (existsSync(errorPath)) {
-      unlinkSync(errorPath);
-    }
-  } catch {
-    // Ignore errors - file may have been removed already
-  }
 }
 
 /**
@@ -806,12 +803,13 @@ function hasPendingScheduledWakeup(stateDir, sessionId) {
   });
 }
 
-function hasRunningSubagent(stateDir) {
-  // subagent-tracking.json is per-directory (not session-scoped), written by the
-  // wired SubagentStart/SubagentStop hooks. A "running" entry means a delegated
+function hasRunningSubagent(trackingPath) {
+  // The subagent tracker (SubagentStart/SubagentStop hooks) writes
+  // subagent-tracking-state.json via resolveSessionStatePaths, so callers pass
+  // the same resolved read path (#5148). A "running" entry means a delegated
   // agent is still working, so persistent modes must not inject a "stalled"
   // reinforcement while we wait for it (mirrors the background-task gate).
-  const tracking = readJsonFile(join(stateDir, "subagent-tracking.json"));
+  const tracking = readJsonFile(trackingPath);
   const agents = Array.isArray(tracking?.agents) ? tracking.agents : [];
   return agents.some((agent) => {
     if (agent?.status !== "running") return false;
@@ -819,10 +817,10 @@ function hasRunningSubagent(stateDir) {
   });
 }
 
-function hasPendingOwnedAsyncWork(stateDir, sessionId) {
+function hasPendingOwnedAsyncWork(stateDir, sessionId, subagentTrackingPath) {
   return (
     hasPendingBackgroundTask(stateDir, sessionId) ||
-    hasRunningSubagent(stateDir) ||
+    hasRunningSubagent(subagentTrackingPath) ||
     hasPendingScheduledWakeup(stateDir, sessionId)
   );
 }
@@ -1736,6 +1734,9 @@ async function main() {
     const omcRoot = await resolveOmcStateRoot(directory);
     const stateDir = join(omcRoot, "state");
     const globalStateDir = join(homedir(), ".omc", "state");
+    const stateSessionId = hasValidSessionId ? sessionId : undefined;
+    const toolErrorPath = await resolveToolErrorStatePath(directory, stateSessionId);
+    const { readPath: subagentTrackingPath } = await resolveSessionStatePathsForHook(directory, "subagent-tracking", stateSessionId);
 
     // CRITICAL: Never block context-limit stops.
     // Blocking these causes a deadlock where Claude Code cannot compact.
@@ -1768,7 +1769,7 @@ async function main() {
       return;
     }
 
-    if (hasPendingOwnedAsyncWork(stateDir, sessionId)) {
+    if (hasPendingOwnedAsyncWork(stateDir, sessionId, subagentTrackingPath)) {
       emit({ continue: true, suppressOutput: true });
       return;
     }
@@ -1955,7 +1956,7 @@ async function main() {
         }
 
         if (iteration < maxIter) {
-          const toolError = readLastToolError(stateDir);
+          const toolError = readLastToolError(toolErrorPath);
           const errorGuidance = getToolErrorRetryGuidance(toolError);
 
           ralph.state.iteration = iteration + 1;
@@ -2075,7 +2076,7 @@ async function main() {
           return;
         }
 
-        const toolError = readLastToolError(stateDir);
+        const toolError = readLastToolError(toolErrorPath);
         const errorGuidance = getToolErrorRetryGuidance(toolError);
 
         ultragoal.state.reinforcement_count = newCount;
@@ -2191,7 +2192,7 @@ async function main() {
           // The capped fallback releases; only a valid active answer refreshes the heartbeat (after the request).
           const newCount = releaseOnly ? Math.min(currentCount + 1, 20) : currentCount + 1;
           if (newCount <= 20) {
-            const toolError = readLastToolError(stateDir);
+            const toolError = readLastToolError(toolErrorPath);
             const errorGuidance = getToolErrorRetryGuidance(toolError);
             if (!reinforcementLimitReached) {
               const reinforced = { ...autopilot.state, reinforcement_count: newCount, last_checked_at: new Date().toISOString() };
@@ -2283,7 +2284,7 @@ async function main() {
       if (incomplete > 0) {
         const newCount = (ultrapilot.state.reinforcement_count || 0) + 1;
         if (newCount <= 20) {
-          const toolError = readLastToolError(stateDir);
+          const toolError = readLastToolError(toolErrorPath);
           const errorGuidance = getToolErrorRetryGuidance(toolError);
 
           ultrapilot.state.reinforcement_count = newCount;
@@ -2316,7 +2317,7 @@ async function main() {
       if (pending > 0) {
         const newCount = (swarmSummary.reinforcement_count || 0) + 1;
         if (newCount <= 15) {
-          const toolError = readLastToolError(stateDir);
+          const toolError = readLastToolError(toolErrorPath);
           const errorGuidance = getToolErrorRetryGuidance(toolError);
 
           swarmSummary.reinforcement_count = newCount;
@@ -2351,7 +2352,7 @@ async function main() {
       if (currentStage < totalStages) {
         const newCount = (pipeline.state.reinforcement_count || 0) + 1;
         if (newCount <= 15) {
-          const toolError = readLastToolError(stateDir);
+          const toolError = readLastToolError(toolErrorPath);
           const errorGuidance = getToolErrorRetryGuidance(toolError);
 
           pipeline.state.reinforcement_count = newCount;
@@ -2386,7 +2387,7 @@ async function main() {
         if (phase) {
           const newCount = getSafeReinforcementCount(team.state.reinforcement_count) + 1;
           if (newCount <= 20) {
-            const toolError = readLastToolError(stateDir);
+            const toolError = readLastToolError(toolErrorPath);
             const errorGuidance = getToolErrorRetryGuidance(toolError);
 
             team.state.reinforcement_count = newCount;
@@ -2422,7 +2423,7 @@ async function main() {
         if (phase) {
           const newCount = getSafeReinforcementCount(omcTeams.state.reinforcement_count) + 1;
           if (newCount <= 20) {
-            const toolError = readLastToolError(stateDir);
+            const toolError = readLastToolError(toolErrorPath);
             const errorGuidance = getToolErrorRetryGuidance(toolError);
 
             omcTeams.state.reinforcement_count = newCount;

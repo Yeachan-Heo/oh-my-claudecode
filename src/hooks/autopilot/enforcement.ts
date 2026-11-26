@@ -487,7 +487,7 @@ function generateContinuationPrompt(
     };
   }
   // Read tool error before generating message
-  const toolError = readLastToolError(directory);
+  const toolError = readLastToolError(directory, sessionId);
   const errorGuidance = getToolErrorRetryGuidance(toolError);
   const runtimeInsight = formatAutopilotRuntimeInsight(directory, sessionId);
 
@@ -654,7 +654,7 @@ ${stagePrompt}
   // No signal detected — continue current stage
   incrementStageIteration(directory, sessionId);
 
-  const toolError = readLastToolError(directory);
+  const toolError = readLastToolError(directory, sessionId);
   const errorGuidance = getToolErrorRetryGuidance(toolError);
   const runtimeInsight = formatAutopilotRuntimeInsight(directory, sessionId);
 
