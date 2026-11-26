@@ -97,6 +97,9 @@ const BLOCKED: string[] = [
   'unzip -o /tmp/a.zip dev/null -d /', 'unzip /tmp/a.zip dev/null -d /', 'unzip -d / /tmp/a.zip dev/null', 'unzip -d/ /tmp/a.zip dev/null', 'unzip -o /tmp/a.zip x ../dev/null -d /tmp',
   // the options of xargs whose value is the next word still take it, so the command comes after it
   'echo /dev/null | xargs -L 1 rm', 'echo /dev/null | xargs -rL 1 rm', 'echo /dev/null | xargs -E x rm', 'echo /dev/null | xargs -rE x rm',
+  // a letter with an optional attached value ends a cluster of xargs options: the rest of the word is its value and the next word is the command
+  'echo x | xargs -iL rm /dev/null', 'echo x | xargs -rilL rm /dev/null', 'echo x | xargs -ilx rm /dev/null', 'echo x | xargs -eL rm /dev/null', 'echo x | xargs -lL rm /dev/null',
+  'echo x | xargs -rtiL rm /dev/null', 'echo /dev/null | xargs -iL rm L', 'echo x | xargs -rL 1 rm /dev/null', 'echo x | xargs -rn 1 rm /dev/null', 'echo x | xargs -rnL rm /dev/null',
   // the options of xargs whose value is optional and attached: the next word is the command
   'echo /dev/null | xargs -rl rm', 'echo /dev/null | xargs -l rm', 'echo /dev/null | xargs -rl2 rm', 'echo /dev/null | xargs --max-lines rm', 'echo /dev/null | xargs --max-lines=2 rm',
   'echo /dev/null | xargs --eof rm', 'echo /dev/null | xargs -e rm', 'echo /dev/null | xargs -re rm', 'echo /dev/null | xargs -rt -l rm',

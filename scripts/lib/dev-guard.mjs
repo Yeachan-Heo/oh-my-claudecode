@@ -138,7 +138,7 @@ const DEV_WRAPPERS = {
   doas: { val: ['-u', '-C'] }, env: { val: ['-u', '-C', '-S', '-a', '--unset', '--chdir', '--argv0', '--block-signal', '--default-signal', '--ignore-signal'], assign: true }, command: { val: [] }, builtin: { val: [] },
   exec: { val: ['-a'] }, nice: { val: ['-n', '--adjustment'] }, ionice: { val: ['-c', '-n', '-p', '-P', '-u', '--class', '--classdata', '--pid', '--pgid', '--uid'] }, nohup: { val: [] },
   timeout: { val: ['-s', '--signal', '-k', '--kill-after'], skip: 1 }, stdbuf: { val: ['-i', '-o', '-e', '--input', '--output', '--error'] }, setsid: { val: [] }, time: { val: ['-f', '-o', '--format', '--output'] }, coproc: { val: [] },
-  xargs: { val: ['-n', '-I', '-L', '-P', '-d', '-E', '-s', '-a', '--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file', '--process-slot-var'] }, // -l, -e, -i and their long forms take an attached value only
+  xargs: { val: ['-n', '-I', '-L', '-P', '-d', '-E', '-s', '-a', '--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file', '--process-slot-var'], opt: 'lei' }, // opt: -l, -e and -i (and their long forms) take an attached value only, so the rest of a cluster after them is that value
 };
 const DEV_LEADING = new Set(['then', 'do', 'else', 'elif', '{', '!', 'if', 'while', 'until']);
 const baseName = (value) => String(value).replace(/\/+$/, '').split('/').pop();
@@ -185,8 +185,8 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
       if (spec.val.includes(a)) i++;
       else if (!a.startsWith('--')) { // a cluster of short options: the first letter with a value takes the rest of the word, or the next word when it ends the cluster
         let k = 1;
-        while (k < a.length && !spec.val.includes(`-${a[k]}`)) k++;
-        if (k === a.length - 1) i++;
+        while (k < a.length && !spec.val.includes(`-${a[k]}`) && !spec.opt?.includes(a[k])) k++;
+        if (k === a.length - 1 && !spec.opt?.includes(a[k])) i++;
       }
     }
     if (split !== undefined) return { name: 'eval', args: [envSplitText(split), ...values.slice(i)], xargs, replace };
