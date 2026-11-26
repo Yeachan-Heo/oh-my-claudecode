@@ -644,6 +644,19 @@ describe("parseFrontmatter trailing comments", () => {
     expect(parse('note: Hello !world "x # y"').note).toBe('Hello !world "x');
   });
 
+  it("opens a quote after a verbatim YAML tag", () => {
+    expect(parse('description: !<tag:yaml.org,2002:str> "Use # carefully"').description).toBe(
+      '!<tag:yaml.org,2002:str> "Use # carefully"',
+    );
+    expect(parse("map: {k: !<tag:yaml.org,2002:str> 'v # x'} # c").map).toBe(
+      "{k: !<tag:yaml.org,2002:str> 'v # x'}",
+    );
+    expect(parse('items: [!<tag:example.com,2026:x[1]> "a # b"]').items).toBe(
+      '[!<tag:example.com,2026:x[1]> "a # b"]',
+    );
+    expect(parse('note: Hello !<a,b> "x # y"').note).toBe('Hello !<a,b> "x');
+  });
+
   it("opens a quote right after the colon of a quoted key", () => {
     expect(parse('metadata: {"label":"a # b"}').metadata).toBe('{"label":"a # b"}');
     expect(parse("metadata: {'label':'a # b'} # c").metadata).toBe("{'label':'a # b'}");

@@ -188,8 +188,11 @@ function foldBlockScalarRows(rows: BlockScalarRow[]): string {
   );
 }
 
-/** YAML tags and anchors (`!!str `, `!local `, `&name `) right before a scalar. */
-const NODE_PROPERTIES = /(?:[!&][^\s,[\]{}]*\s+)+$/;
+/**
+ * YAML tags and anchors (`!!str `, `!local `, `&name `) right before a scalar.
+ * A verbatim tag (`!<tag:yaml.org,2002:str> `) may hold commas and brackets.
+ */
+const NODE_PROPERTIES = /(?:(?:!<[^\s>]+>|[!&][^\s,[\]{}]*)\s+)+$/;
 
 /**
  * Drop a trailing YAML comment from a one-line value. A `#` starts a comment only
