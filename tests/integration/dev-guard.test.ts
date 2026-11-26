@@ -270,6 +270,32 @@ describe('/dev guard: Bash commands', () => {
     }
   });
 
+  it('gives each here-document to its own command', () => {
+    expect(verdict("cat <<A\nx\nA\nbash <<B\nrm /dev/null\nB").decision).toBe('deny');
+    expect(verdict("bash <<A\necho hi\nA\ncat <<B\nrm /dev/null\nB").decision).toBe('allow');
+    expect(verdict("cat <<A\nrm /dev/null\nA\nbash <<'B'\necho hi\nB").decision).toBe('allow');
+  });
+
+  it('scans the substitutions in the target of a redirect', () => {
+    for (const command of ['echo x > >(rm /dev/null)', 'echo x > $(rm /dev/null)', 'echo x > "$(rm /dev/null)"', 'cat < <(rm /dev/null)']) {
+      expect(verdict(command).decision, command).toBe('deny');
+    }
+    expect(verdict('echo x > >(cat > /dev/null)').decision).toBe('allow');
+  });
+
+  it('makes a failure of the guard on the Bash side visible and lets the other checks run', () => {
+    const found = guard.checkBashDevPath('echo x', { tokens: null, heredocs: [] }, { platform: 'linux', devNullProbe: probeOf('healthy') });
+    expect(found).toEqual({ checks: ['dev-path-error'], denial: '' });
+  });
+
+  it('shows one refusal at a time on Windows: a /dev refusal hides the CR parser check', () => {
+    const cr = `echo "$(echo $'\\r' | wc -c) $(echo $'\\r' | wc -c)"`;
+    expect(verdict(cr, 'win32').checks).toEqual(['cr-parser']);
+    const both = verdict(`${cr}\nrm /dev/null`, 'win32');
+    expect(both.decision).toBe('deny');
+    expect(both.checks).toEqual(['dev-path']);
+  });
+
   it('never throws on a malformed or huge command', () => {
     for (const command of ['', '(((((', '$(', '`rm', 'rm /dev/null "', 'x=$(($(($(1', `${'$('.repeat(200)}rm /dev/null`, 'a'.repeat(50000)]) {
       expect(() => verdict(command), `threw on ${command.slice(0, 20)}`).not.toThrow();
