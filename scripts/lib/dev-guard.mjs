@@ -187,6 +187,25 @@ const DEV_EVERY_OPERAND = {
   truncate: ['-s', '-r', '--size', '--reference'], touch: ['-d', '-t', '-r', '--date', '--time', '--reference'], mknod: ['-m', '--mode'], mkfifo: ['-m', '--mode'],
 };
 
+// touch, chown and chgrp change a symbolic link itself, not what it points to, with -h or --no-dereference; --dereference (chown and chgrp) turns that off
+// again, and the last of them counts (measured with coreutils 9.4: --no-d and --d are the shortest prefixes, -h may sit in a cluster before a letter with a value).
+const DEV_NO_DEREF = new Set(['touch', 'chown', 'chgrp']);
+function changesLinkItself(opts, name) {
+  let itself = false;
+  for (const o of opts) {
+    if (o.startsWith('--')) {
+      if (longIs(o, '--no-dereference', 6)) itself = true;
+      else if (name !== 'touch' && longIs(o, '--dereference', 3)) itself = false;
+      continue;
+    }
+    for (const c of o.slice(1)) {
+      if (name === 'touch' && 'dtr'.includes(c)) break; // the rest of the word is the value of that option
+      if (c === 'h') itself = true;
+    }
+  }
+  return itself;
+}
+
 // Wrappers: options with a value (a long option with its value in the next argument too), and how many operands to skip before the wrapped
 // command (timeout: the duration). env -S TEXT and env --split-string=TEXT are handled in devUnwrap.
 const DEV_WRAPPERS = {
@@ -578,7 +597,10 @@ const shellOf = (text, depth) => { const t = tokenizeBash(text); return devScanT
 function devCommand(name, args, fed, depth) {
   const hit = (path) => (path ? { what: name, path } : null);
   const firstChanged = (list, follow = true) => { for (const p of list) { const d = devChanged(p, follow, true); if (d) return d; } return null; };
-  if (Object.hasOwn(DEV_EVERY_OPERAND, name)) return hit(firstChanged(splitArgs(args, DEV_EVERY_OPERAND[name]).operands, !DEV_ACTS_ON_LINK.has(name)));
+  if (Object.hasOwn(DEV_EVERY_OPERAND, name)) {
+    const { opts, operands } = splitArgs(args, DEV_EVERY_OPERAND[name]);
+    return hit(firstChanged(operands, !DEV_ACTS_ON_LINK.has(name) && !(DEV_NO_DEREF.has(name) && changesLinkItself(opts, name))));
+  }
   if (name === 'tar' || name === 'gtar' || name === 'bsdtar') for (const text of tarCommandTexts(args, name)) { const inner = shellOf(text, depth); if (inner) return inner; }
   const extra = devExtraCommand(name, args);
   if (extra !== undefined) return extra;

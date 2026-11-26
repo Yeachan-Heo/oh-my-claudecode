@@ -931,6 +931,22 @@ describe('/dev guard: working directory and symbolic links', () => {
     expect(check(command, '/tmp').decision).toBe(expected);
   });
 
+  // touch, chown and chgrp change the link itself with -h or --no-dereference (measured with coreutils 9.4: --no-d is the shortest prefix, --d is --dereference
+  // for chown and chgrp, the last of them counts)
+  it('reads -h and --no-dereference of touch, chown and chgrp as changes of the link itself', () => {
+    const nulllink = join(dir, 'nulllink');
+    const devlink = join(dir, 'devlink');
+    for (const command of [`touch -h ${nulllink}`, `touch --no-dereference ${nulllink}`, `touch --no-d ${nulllink}`, `touch -ch ${nulllink}`, `touch -hd 2001-01-01 ${nulllink}`, `touch -h -d 2001-01-01 ${nulllink}`,
+      `chown -h nobody ${nulllink}`, `chown --no-dereference nobody ${nulllink}`, `chown --no-d nobody ${nulllink}`, `chown -hR nobody ${nulllink}`, `chown --dereference -h nobody ${nulllink}`,
+      `chgrp -h nogroup ${nulllink}`, `chgrp --no-dereference nogroup ${nulllink}`, `chgrp --no-d nogroup ${nulllink}`, `chgrp --deref -h nogroup ${nulllink}`]) {
+      expect(check(command, '/tmp').decision, command).toBe('allow');
+    }
+    for (const command of [`touch ${nulllink}`, `touch -dh ${nulllink}`, `touch -d 2001-01-01 ${nulllink}`, `touch -r x ${nulllink}`, `chown nobody ${nulllink}`, `chown -h --dereference nobody ${nulllink}`, `chown -h --d nobody ${nulllink}`,
+      `chown --no-dereference --dereference nobody ${nulllink}`, `chgrp -h --deref nogroup ${nulllink}`, `chgrp nogroup ${nulllink}`, `touch -h ${devlink}/null`, `chown -h nobody ${devlink}/null`, `touch -h /dev/null`, `chown -h nobody /dev/null`]) {
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+    }
+  });
+
   it('reads cd like the shell: -P and -- are options, a group does not end the cd and a subshell or a pipeline does, a cd after || is unknown, an empty target stays', () => {
     expect(check('(cd /dev); rm null', '/tmp').decision).toBe('allow');
     expect(check('{ cd /dev; }; rm null', '/tmp').decision).toBe('deny');
