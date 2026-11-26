@@ -363,6 +363,13 @@ describe.skipIf(!hasPython3)('decision_outcome_join', () => {
     expect(out.agents.length).toBe(0);
   });
 
+  it.each(['--tsv', '--json'])('an output path %s that is a directory stops the run with exit 2 and a message that names it, without a traceback', (option) => {
+    const result = run([option, journal]);
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain(`cannot write ${option} ${journal}`);
+    expect(result.stderr).not.toMatch(/Traceback/);
+  });
+
   it('without --prices the price table is empty: one note on stderr, exit 0, every cost unavailable (null), never zero', () => {
     const noPrices = join(base, 'result-no-prices-option.json');
     const missing = spawnSync('python3', ['-I', SCRIPT, '--journal', journal, '--transcripts', transcripts, '--json', noPrices], { encoding: 'utf8' });
@@ -615,6 +622,16 @@ describe.skipIf(!hasPython3)('decision_outcome_join edge cases', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('counts every tool_use block of a row as a call of its own, with or without an id', () => {
+    const block = (id?: string) => ({ type: 'tool_use', ...(id === undefined ? {} : { id }), name: 'Bash', input: { command: 'ls' } });
+    const first = assistant('m1', 'claude-haiku-5-5', { content: [block('toolu-a'), block('toolu-b'), block(), block()], usage: usage(1000, 0, 0, 0, 100) });
+    const replay = assistant('m2', 'claude-haiku-5-5', { content: [block('toolu-a')], usage: usage(1000, 0, 0, 0, 100) });
+    const result = oneAgent(first + replay, PRICES);
+    expect(result.status, result.stderr).toBe(0);
+    // four blocks in the first row (two ids, two without one); the replay of toolu-a adds nothing
+    expect(result.agent!.tool_calls).toBe(4);
   });
 
   it('counts a replayed tool call once', () => {

@@ -553,15 +553,16 @@ async function main() {
   }
   let text;
   try {
-    text = args.file === '-' ? readFileSync(0, 'utf8') : readFileSync(args.file, 'utf8');
+    // A file named with --input must be valid UTF-8; standard input (-) is decoded leniently.
+    text = args.file === '-' ? readFileSync(0, 'utf8') : new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(args.file));
   } catch (e) {
-    console.error(`wilson_threshold: unreadable input file ${args.file}: ${e?.code ?? e?.message ?? e}`);
+    console.error(`wilson_threshold: unreadable input file ${args.file}: ${e?.code === 'ERR_ENCODING_INVALID_ENCODED_DATA' ? 'not valid UTF-8' : e?.code ?? e?.message ?? e}`);
     process.exitCode = 2;
     return;
   }
   const data = parseTsv(text);
   if (data.columns.length === 0 || !data.columns.includes('result')) {
-    console.error('wilson_threshold: file without a header or without the required column result');
+    console.error(`wilson_threshold: file without a header or without the required column result: ${args.file}`);
     process.exitCode = 2;
     return;
   }

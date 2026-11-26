@@ -13,10 +13,11 @@
 // and its rotated parts (denials-YYYYMMDD-HHMMSS.jsonl or denials-YYYYMMDD-HHMMSS-<pid>.jsonl); run it from the project root.
 // The state root comes from scripts/lib/state-root.mjs, so it follows OMC_STATE_DIR like the hooks do; when it cannot be
 // resolved the tool asks for --dir or OMC_JEV_LOG_DIR.
-// A file given on the command line that does not exist is reported with a warning on stderr; the summary and the exit
-// code are not changed by it.
-// Exit code: 0 summary printed, 2 no journal file found.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+// A file given on the command line that cannot be used (it does not exist, is a directory, cannot be read or is not valid
+// UTF-8), and a journal found in a directory that cannot be read, stop the run: one line on stderr that names the path, no
+// summary, exit 2.
+// Exit code: 0 summary printed, 2 no journal file found or a journal file that cannot be read.
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // The closed vocabularies of the journal rows, as the denial counter writes them (scripts/lib/jev-denial-counter.mjs and the
@@ -75,14 +76,15 @@ export function validateRow(w) {
 }
 
 /** Reading journal files: parseable rows only (a truncated tail of a rotated part is skipped),
- * deduplicated by the stable event id (the same event in two journals counts once). */
+ * deduplicated by the stable event id (the same event in two journals counts once). A file that cannot be read
+ * throws an error that names it: it is never left out of the counts. */
 export function readJournal(files) {
   const byId = new Map();
   let duplicates = 0;
   let unparseable = 0;
   for (const file of files) {
-    let text = '';
-    try { text = readFileSync(file, 'utf8'); } catch { continue; }
+    let text;
+    try { text = readFileSync(file, 'utf8'); } catch (e) { throw new Error(`cannot read ${file}: ${e && e.code ? e.code : e}`); }
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let w;
@@ -226,19 +228,35 @@ const main = async () => {
   let dir = opts.dir;
   if (!files.length && !dir) dir = process.env.OMC_JEV_LOG_DIR || await defaultLogDir();
   files.push(...opts.positional); // positional paths come after the default directory decision
+  // A file named on the command line must be readable and valid UTF-8 (the files found in a directory are read leniently:
+  // a rotated part may end in the middle of a character).
+  const strict = new TextDecoder('utf-8', { fatal: true });
   for (const file of files) {
-    if (!existsSync(file)) console.error(`denial_log_summary: warning: file not found: ${file}`);
+    try { strict.decode(readFileSync(file)); } catch (e) {
+      console.error(`denial_log_summary: cannot read ${file}: ${e && e.code === 'ERR_ENCODING_INVALID_ENCODED_DATA' ? 'not valid UTF-8' : e && e.code ? e.code : e}`);
+      process.exit(2);
+    }
   }
   if (dir) {
     let names = [];
-    try { names = readdirSync(dir).filter((n) => n === 'denials.jsonl' || /^denials-\d{8}-\d{6}(-\d+)?\.jsonl$/.test(n)).sort(); } catch { /* no directory */ }
+    try { names = readdirSync(dir).filter((n) => n === 'denials.jsonl' || /^denials-\d{8}-\d{6}(-\d+)?\.jsonl$/.test(n)).sort(); } catch (e) {
+      // The default directory may not exist yet; a directory named with --dir that cannot be read is an error, whatever else is given.
+      if (opts.dir !== null) {
+        console.error(`denial_log_summary: cannot read ${dir}: ${e && e.code ? e.code : e}`);
+        process.exit(2);
+      }
+    }
     for (const n of names) files.push(join(dir, n));
   }
   if (!files.length) {
-    console.error('denial_log_summary: no denials.jsonl journal files found');
+    console.error(`denial_log_summary: no denials.jsonl journal files found${dir ? ` in ${dir}` : ''}`);
     process.exit(2);
   }
-  const result = summarize(files);
+  let result;
+  try { result = summarize(files); } catch (e) {
+    console.error(`denial_log_summary: ${e.message}`);
+    process.exit(2);
+  }
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
     return;

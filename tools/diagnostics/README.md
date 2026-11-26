@@ -135,7 +135,7 @@ python3 -I tools/diagnostics/executor_outcome_metrics.py --transcript A.jsonl --
 | `--error-field-status NAME=CODE` | HTTP status for an `error` field value, used when the error text has no status (repeatable; there is no built-in mapping) |
 | `--json` | JSON output instead of text |
 
-Exit codes: `0` success (whatever the numbers), `2` usage error (missing file, bad date, bad
+Exit codes: `0` success (whatever the numbers), `2` usage error (a missing file, a transcript that is a directory, cannot be read or is not valid UTF-8, bad date, bad
 `--provider-map` entry, bad regular expression, a threshold below its minimum, a bad `--error-field-status` entry).
 
 ## Input format
@@ -202,7 +202,22 @@ Top level: `tasks`, `summary_by_provider`, `coverage` (`with_transcript`, `total
   thresholds, the exhaustion statuses and phrases and the error-field mapping have the defaults named above and
   can be changed with the options; the same values are parameters of the functions in the script.
 - The tool does not know which transcript belongs to which task of a larger run; it measures the files given.
-- Test-run detection is by command name only; use `--test-pattern` for other runners.
+- Test-run detection is by command name only; use `--test-pattern` for other runners. A Bash command is read as shell words:
+  before the command word a leading assignment (its value may be quoted, hold an escaped space, be empty or be a command
+  substitution), a redirection with its target (`> out`, `2>&1`, `< in`) and the launch wrappers `sudo`, `nohup`, `command`,
+  `exec`, `nice`, `time`, `timeout` and `env` with their options are skipped, so `MODE="a b" pytest`, `> out pytest` and
+  `sudo -u root pytest` and `sudo -n pytest` run `pytest` (the options are the table in "Launch wrappers" below). A wrapper with no
+  command behind it (`sudo -l pytest`, `command -v pytest`), an option outside the table (`sudo -z pytest`, except for `env` and
+  `timeout`, see "Launch wrappers") and a `timeout` with no duration end the reading: the wrapper stays the program and nothing
+  behind it is a test run.
+  The target of a redirection and a command substitution are never a command word (`echo hi > pytest` and
+  `echo $(date) pytest` run only `echo`), and the body of a substitution is not read. The body of a here-document (`<<EOF`, `<<-EOF`
+  with a tab-indented terminator) is cut line by line, and an operator inside quotes or a `#` comment (`echo "<<EOF"`) opens no body.
+  The delimiter is the whole word as the shell reads it, quoted or not (`<<'EOF-TEXT'`, `<<"A B"`, `<<EOF.x`, `<<E\OF` is `EOF`).
+  Only a whole line ends a body: the delimiter alone, or for `<<-` the delimiter behind tabs (`EOF is still body` and ` EOF` stay body lines).
+  A double-quoted string ends at its first quote that is not escaped (`echo "a \" ; npm test"` prints), and an escaped quote outside strings opens none.
+  An escaped separator is a character of its word: `echo \; npm test` runs only `echo`, while `echo \\; npm test` (an escaped backslash) splits.
+  A command longer than 100000 characters with a word longer than 50000 is split on whitespace and operators without reading quotes.
 
 # Decision-outcome join
 
@@ -216,6 +231,7 @@ the npm package.
 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The journals and transcripts are only read. The only files written are the `--tsv` and `--json` outputs, if given.
+- A directory below the transcripts directory or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A transcript that does not exist is `undetermined`, as before; this tool opens only the transcripts that a journal row names, so a `.jsonl` link whose target is gone is read as a transcript that does not exist.
 
 ```
 python3 -I tools/diagnostics/decision_outcome_join.py --journal <jev dir> --transcripts <transcript dir> --prices prices.json
@@ -234,13 +250,13 @@ python3 -I tools/diagnostics/decision_outcome_join.py --journal J --transcripts 
 | `--json <file>` | the whole result as JSON (see the note on output files below) |
 | `--wilson-vectors` | print the Wilson test vectors (shared with `wilson_threshold.mjs`) and exit |
 
-Exit codes: `0` valid run (also with no data), `2` argument or input error.
+Exit codes: `0` valid run (also with no data), `2` argument or input error, including an output file (`--tsv`, `--json`) that cannot be written (a directory, no permission).
 
 Output files: `--tsv` and `--json` open the given path for writing, so an existing file is overwritten and a symbolic link is followed. Point them at a new path.
 
 ## Input format
 
-- `applied.jsonl` rows with `point` `model-routing` and a `tool_use_id` are joined to `agent-*.meta.json` by `toolUseId`.
+- `applied.jsonl` rows with `point` `model-routing` and a `tool_use_id` are joined to `agent-*.meta.json` by `toolUseId`. A meta file that cannot be read stops the run with exit 2 and a message that names it; one that is no JSON is left out.
   The transcript is the `agent-*.jsonl` next to the meta file.
 - `shadow.jsonl` rows with the same `tool_use_id` give the Jev answers (probabilities and confidence of `model-tier` and `effort`).
 - Rotated files are read as `<name>-YYYYMMDD-HHMMSS.jsonl` or `<name>-YYYYMMDD-HHMMSS-<pid>.jsonl`.
@@ -289,7 +305,7 @@ node tools/diagnostics/wilson_threshold.mjs --input labels.tsv --target 0.10 --d
 | `--holdout <0-0.5>` | fit/holdout split of the sessions (needs a `session` column) |
 | `--json` | JSON output instead of the text report |
 
-Exit codes: `0` valid run (also `no threshold`), `2` argument or input error.
+Exit codes: `0` valid run (also `no threshold`), `2` argument or input error, including an `--input` file that is missing, is a directory, cannot be read or is not valid UTF-8 (standard input, `--input -`, is decoded leniently).
 
 ## Input format
 
@@ -317,6 +333,7 @@ It is a standalone diagnostic run by hand. It does not change OMC behaviour and 
 ## Requirements and usage
 
 - Node 20 or later, built-in modules only.
+- A directory below the transcripts directory or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A session with no transcript is `undetermined`, as before; this tool opens only the transcripts that a journal row names, so a `.jsonl` link whose target is gone is read as no transcript.
 
 ```
 node tools/diagnostics/jev_outcome_labels.mjs --journal <journal dir> --transcripts <transcript dir> [--from <ISO>] [--to <ISO>] [--session <id>] [--tsv <file>] [--json]
@@ -331,7 +348,7 @@ node tools/diagnostics/jev_outcome_labels.mjs --journal <journal dir> --transcri
 | `--tsv <file>` | the labelled rows as TSV, the input of `wilson_threshold.mjs` (columns `result`, `confidence`, `mode`, `point`, `spec_version`, `jev_model`, `session`, `ts`) |
 | `--json` | JSON output |
 
-Exit codes: `0` valid run, `2` argument or input error.
+Exit codes: `0` valid run, `2` argument or input error, including a `--journal` directory or a journal file in it that cannot be read.
 
 ## Label rules
 
@@ -356,6 +373,7 @@ run by hand: it does not change OMC behaviour, has no switch, and is not shipped
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The transcripts are only read. The only files written are the `--tsv` and `--json` files, if given. They are opened for
   writing as given, so an existing file is overwritten and a symbolic link is followed: point them at a new path.
+- A directory below the transcripts directory or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A `.jsonl` link whose target is gone is a transcript that cannot be read: it is named and stops the run in the same way (a main transcript and a subagent transcript alike).
 
 ```
 python3 -I tools/diagnostics/tool_call_repeats.py --transcripts <dir> [--from <ISO>] [--to <ISO>]
@@ -405,6 +423,7 @@ It is a standalone offline diagnostic run by hand: it does not change OMC behavi
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The only files written are the `--tsv` and `--json` files, if given. They are opened for
   writing as given, so an existing file is overwritten and a symbolic link is followed: point them at a new path.
+- A directory below the transcripts directory or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A `.jsonl` link whose target is gone is a transcript that cannot be read: it is named and stops the run in the same way (a main transcript and a subagent transcript alike).
 
 ```
 python3 -I tools/diagnostics/empty_results.py --transcripts <dir> [--teams <dir>] [--from <ISO>] [--to <ISO>]
@@ -421,7 +440,7 @@ python3 -I tools/diagnostics/empty_results.py --transcripts <dir> --intent inten
 | `--tsv <file>`, `--json <file>` | optional outputs (one TSV row per empty or stopped call or task; the full JSON result) |
 | `--wilson-vectors` | print the Wilson test vectors as JSON and exit |
 
-At least one of `--transcripts` and `--teams` is required. Exit codes: `0` normal run (also with no data), `2` argument or input error.
+At least one of `--transcripts` and `--teams` is required. Exit codes: `0` normal run (also with no data), `2` argument or input error, including a `--transcripts` or `--teams` directory that cannot be read, a task file below `--teams` that cannot be read (one that is no JSON is counted as bad JSON) and an `--intent` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 
 ## What is counted
 
@@ -449,6 +468,7 @@ behaviour, has no switch, is not run by any hook, and is not shipped in the npm 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The transcripts and the journal are only read. The only file written is the `--out` file, if given
   (a new file with mode `0600`; an existing file is an error).
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A `.jsonl` link whose target is gone is a transcript that cannot be read: it is named and stops the run in the same way (a main transcript and a subagent transcript alike). The same holds for a `--transcript` or `--compact` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 - The journal is read from `OMC_JEV_LOG_DIR`, else from `.omc/state/jev` under the current directory (run the tool from
   the project root), unless `--compact` is given. With `OMC_STATE_DIR` set, the Jev log directory has a project identifier
   in its path, so pass the journal with `--compact` (or set `OMC_JEV_LOG_DIR`). The projects directory defaults to
@@ -486,8 +506,9 @@ change OMC behaviour, has no switch, and is not shipped in the npm package.
 ## Requirements and usage
 
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
-- The inputs are only read. The only file written is the `--out` file, if given (a new file with mode `0600`).
+- The inputs are only read. The files written are the `--out` file and, with `--export-labeling`, the export file (new files with mode `0600`). The result and the `--out` file carry no ask or state content; the opt-in export file holds human message text by design, and also the transcript path (`file`) and the `session_id` of each unit.
 - This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A `.jsonl` link whose target is gone is a transcript that cannot be read: it is named and stops the run in the same way (a main transcript and a subagent transcript alike). The same holds for a `--transcript`, `--compact` or `--labels` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 
 ```
 python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 7] [--ask-loss-threshold 0.05] [--json]
@@ -495,11 +516,210 @@ python3 -I tools/diagnostics/compaction_ask_probe.py [--projects <dir>] [--days 
 
 | Option | Meaning |
 |---|---|
-| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool (including the default journal: `OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory; with `OMC_STATE_DIR` set, pass `--compact` or set `OMC_JEV_LOG_DIR`) |
+| `--projects <dir>`, `--transcript <file>`, `--compact <file>` | inputs, as for the window drops tool (including the default journal: `OMC_JEV_LOG_DIR`, else `.omc/state/jev` under the current directory; with `OMC_STATE_DIR` set, pass `--compact` or set `OMC_JEV_LOG_DIR`). A `--transcript` path that cannot be read (missing, a directory, no permission) exits 2 with a message that names it, and so does a `--projects` directory that is missing or cannot be read when the transcripts are searched, a directory below it and a transcript found by the search that cannot be read, a `.jsonl` link whose target is gone included (the message names the path, and no count covers a part of the transcripts) |
 | `--to <ISO>`, `--days N` | the period end (default: now, UTC) and its length in days (default 7) |
 | `--ask-loss-threshold X` | the threshold the upper Wilson bound is compared with (default 0.05) |
 | `--details` | add the list of units (without ask contents) |
 | `--json`, `--out <file>` | the result as one JSON object, and the file to write it to |
+| `--export-labeling <file>` | write the blind labelling export (see below); a new file with mode `0600`, an existing file is refused (exit 1) |
+| `--labels <file>` | read blind labels and add the `command_measure` block (see below); a missing file exits 2 |
+| `--export-window N`, `--export-limit N` | human messages kept per unit in the export (default 40) and characters kept per text block (default 500) |
+
+## Binding and stale instructions (opt-in)
+
+Without `--export-labeling` and `--labels` the output is exactly the one described above. The two options
+measure a failure that the ask levels do not show: a standing instruction that disappears from the state,
+and an outdated instruction that survives while its correction disappears.
+
+1. `--export-labeling <file.jsonl>` writes one JSON line per main-thread unit with the last `--export-window`
+   human messages before the boundary, split into text blocks with the ids `<message uuid>#<block index>`
+   (a message without a uuid gets `line-<row number>`). Each block is cut to `--export-limit` characters and
+   flagged `truncated`. Nothing after the boundary is written, so a reader labelling the file cannot see the
+   state. Standard output carries only the counts of units and blocks.
+2. A reader labels blocks in a JSONL file of rows
+   `{"unit_id", "block_id", "label": "binding" | "stale", "superseded_by", "reason"}`. `reason` is a non-empty
+   string. A `stale` block must name a later block in `superseded_by` (its correction); a `binding` block may
+   name a later block that restates it.
+3. `--labels <file.jsonl>` adds `command_measure` to the result, per group `jev/main` and `fallback/main`:
+   `binding_lost` is the share of `binding` blocks that are lost after the compaction (level `lost`, as for
+   `ask_lost`) and whose restatement, if named, is lost too; `stale_kept_fix_lost` is the share of `stale`
+   blocks that are kept while the block named in `superseded_by` is lost. A removed `stale` block is not a
+   failure and is counted in `stale_removed`. The denominators are the labelled blocks of units that have a
+   state; unlabelled blocks are counted separately and rejected label rows are counted by reason
+   (`bad_json`, `not_an_object`, `bad_ids`, `bad_label`, `missing_reason`, `bad_superseded_by`, `unknown_unit`,
+   `unknown_block`, `stale_without_fix`, `unknown_successor`, `successor_not_later`, `duplicate`). The verdict
+   follows `--ask-loss-threshold`; with fewer than 30 blocks in a group it is `insufficient data`.
+
+# Compaction harm monitor
+
+`compaction_harm_monitor.py` computes three cheap signals of harm after a compaction from transcripts and
+the compaction journal, and, when given the per-unit output of the ask probe, measures how well each signal
+agrees with `ask_lost`. It takes no action: nothing is written to sessions, the plugin or the state, and
+standard output carries only numbers and group names. It is a standalone offline diagnostic run by hand.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- Inputs: Claude Code transcripts (`<projects>/<dir>/<id>.jsonl` and `<id>/subagents/agent-*.jsonl`, rows with
+  `type`, `message.id`, `message.content`, with `system` rows of `subtype` `compact_boundary` and `api-request`
+  rows) and the compaction journal `compaction.jsonl` (rows with `event` `compact`, `session_id`, `agent_id`,
+  `ts` and `result` `jev`, `fallback` or `shadow`; it is written by the Jev compaction module when the
+  compaction point is enabled, see `docs/HOOKS.md`). Defaults: `$CLAUDE_CONFIG_DIR/projects`, else
+  `~/.claude/projects`, and `$OMC_JEV_LOG_DIR/compaction.jsonl`, else `.omc/state/jev/compaction.jsonl` under
+  the current directory (run the tool from the project root). With `OMC_STATE_DIR` set, the Jev log directory
+  has a project identifier in its path: pass the file with `--compact` or set `OMC_JEV_LOG_DIR`.
+- Only `compaction.jsonl` is read. `OMC_JEV_LOG_MAX_MB` rotates the journal into `compaction-<YYYYMMDD-HHmmss>-<pid>.jsonl`
+  files next to it; the rotated files are not read, so a period that spans a rotation loses the older journal
+  rows and those units are counted as `host`. Check the rotation setting before you read a long period.
+- `--probe <file>` is the result of `compaction_ask_probe.py --details --out <file>`, run with the same
+  `--to` and `--days` and the same transcript files.
+
+```
+python3 -I tools/diagnostics/compaction_harm_monitor.py [--projects <dir>] [--transcript <file>]... [--compact <file>] [--to <ISO>] [--days 7] [--probe <file>] [--json]
+```
+
+`--transcript <file>` (repeatable) replaces the search under `--projects`. A `--transcript` path that cannot be read
+(missing, a directory, no permission, not valid UTF-8) stops the run with exit 2 and a message that names it, before any report is
+printed, so a mistyped path never gives an empty report; the same holds for a `--projects` directory that is missing
+or cannot be read when the transcripts are searched (no `--transcript`); so do a directory below it and a transcript found
+by the search that cannot be read (the message names the path, and no count covers a part of the transcripts); a `.jsonl` link
+whose target is gone is such a transcript.
+
+## Units and signals
+
+A unit, its group (`jev`, `fallback` or `host`, times `main` or `subagent`) and the pairing with a journal row
+are the ones of the ask probe. The state after a compaction is the user and assistant rows after the boundary
+up to the first `api-request` row. A call is all assistant rows that share one `message.id`; only calls first
+seen after the state count.
+
+| Signal | Definition | Flagged when |
+|---|---|---|
+| `empty_series` | the longest run of empty calls (no non-blank text, no `tool_use`) among the first 10 calls after the state; text or a tool call ends a run | defined from 3 calls; flagged at a run of 3 |
+| `tool_errors` | the share of `tool_result` blocks with `is_error` among the first 10 `tool_use` blocks after the state | defined from 3 results; flagged at a share of 0.5 |
+| `fallback_run` | the number of consecutive `fallback` rows of the journal in one thread, ending at the unit's own row (a `jev` row resets the run) | defined only for group `fallback`; flagged at 5 |
+
+The thresholds are options (`--window`, `--tool-window`, `--series-min`, `--min-tool-results`,
+`--error-share-min`, `--fallback-run-min`) and the rule is fixed in the script docstring before a measurement.
+
+## Output
+
+Per group and signal: the number of units, how many have the signal defined and how many are flagged. With
+`--probe`, also `n`, `tp`, `fp`, `fn`, `tn`, the agreement with `ask_lost` with 95 % Wilson bounds, the lost
+share among flagged units (`selective`) and the flagged-and-lost units over all joined units (`per_query`),
+plus the counters `monitor_only`, `probe_only` and `group_mismatch` (a value other than 0 means another period
+or another set of files). With `n` below 30 the verdict is `no threshold` and the rates are hidden. With `n`
+of at least 30 the verdict is `correlated` only when the lower Wilson bound of the lost share among flagged
+units is above the upper Wilson bound of the lost share among unflagged units; otherwise `no correlation` and
+the signal is dropped (agreement alone depends on the base rate). The report also counts the lines it could not
+read, as `input.journal` and `input.transcripts` (`rows`: lines that are JSON objects, `bad_lines`: the other
+non-empty lines), and the text report prints them on its `input:` line. A journal that has lines but none that is
+a JSON object (a wrong file or a wrong format) still exits 0, but every unit then counts as `host` and a warning
+goes to stderr. Exit codes: 0, 2 (a usage error or a missing or unusable input file).
+
+# User prohibitions after compaction
+
+`user_prohibitions_after_compaction.py` counts how many times a tool call that changes state matches an
+explicit prohibition the user gave earlier in the same session, after a compaction boundary. A candidate is
+a call that matches a prohibition, not proof of a breach: the reader decides. It is a standalone offline
+diagnostic run by hand; the report holds no message text, command or transcript path; the `--locators` file
+holds the transcript path of each candidate.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- Inputs are only read: transcripts under `--projects` (default `$CLAUDE_CONFIG_DIR/projects`, else
+  `~/.claude/projects`; subagent transcripts are counted, not read) and, optionally, the compaction journal
+  `--compact-log` (rows with `event` `compact`, result `jev` or `fallback` and no `agent_id`; the journal is
+  described under the harm monitor above). Only the file given as `--compact-log` is read: when
+  `OMC_JEV_LOG_MAX_MB` has rotated the journal, the older rows are in the rotated files next to it, which are
+  not read, so the Jev boundaries of that period are undercounted. The files written are `--out` and
+  `--locators`, both new files with mode `0600`; they must be two different paths, and when the second write
+  fails the first file is removed again.
+
+```
+python3 -I tools/diagnostics/user_prohibitions_after_compaction.py [--projects <dir>] [--compact-log <file>] [--to <ISO>] [--days 7] [--rule 1|2|3] [--patterns <file>] [--out <file>] [--locators <file>]
+```
+
+Without `--out` the JSON report goes to standard output and the summary line to standard error. Exit codes: 0,
+2 (a usage error, an unreadable input, which includes a directory below `--projects` or a transcript in it that cannot be read, a `.jsonl` link whose target is gone included (the message names the path; it is never left out of the counts) and a `--compact-log` or `--patterns` file that is missing, is a directory, cannot be read or is not valid UTF-8, a bad `--patterns` file or an output file that already exists).
+
+## What is counted
+
+The full rules (a to f for rule 1, then rules 2 and 3) are in the script docstring, written before a
+measurement. In short:
+
+- A compaction is one boundary. A journal row and a transcript `compact_boundary` of the same session that are
+  at most 600 s apart are the same compaction (the pairing rule of the ask probe and the harm monitor: closest
+  pair first, each side used once). A transcript boundary paired with a `jev` row is a Jev boundary; every
+  other transcript boundary, including one paired with a `fallback` row, is a host boundary. A `jev` row of the
+  period that pairs with no transcript boundary is a Jev boundary on its own.
+- A user message is a `user` row without `isMeta`, `isCompactSummary`, `isVisibleInTranscriptOnly`,
+  `toolUseResult` or a `tool_result` block; reminder fragments are cut from its blocks.
+- The default prohibition wording covers every class except `other`: `don't` or `do not` followed by touch, modify, edit, change, commit, push, delete, remove, restart, run, deploy, merge or install, plus `never install`, `no installing` and `no installs`. `other` has no default phrase and exists for wording in a `--patterns` file.
+- A prohibition is a user message that matches a prohibition pattern; it has targets (backtick text, absolute
+  paths, file names with an extension) or is general. A candidate is a `Bash`, `Edit`, `Write`, `MultiEdit` or
+  `NotebookEdit` call after the first boundary that follows the prohibition and matches its class (`edit`,
+  `delete`, `commit`, `push`, `restart`, `run`, `install`, `deploy`, `merge`; `other` never gives a candidate
+  under rule 1). Each call counts once, for the earliest matching prohibition, under rule 1. `commit`, `push`
+  and `merge` match a `git` command whose subcommand is a whole word after any git options; `-C`, `-c` and the
+  long options that take a value (`--git-dir`, `--work-tree`, `--namespace`, `--config-env`, `--attr-source`) skip
+  it, so `git -c commit.gpgSign=false status` and `git -C commit status` have no `commit`. A Bash command is read as
+  the shell reads it, for every class: a word is a command only at the start of the text or after `;`, `&`, `|`, `(`,
+  `)`, a backtick or a newline, after launch wrappers with their options (`sudo`, `doas`, `env`, `command`, `nohup`,
+  `exec`, `time`, `nice`, `timeout`, `xargs`, `VAR=x` assignments; the options of the wrappers `sudo`, `nohup`, `command`, `exec`,
+  `nice`, `time`, `timeout` and `env` are the table in "Launch wrappers" below, so `sudo -n git commit` is a `commit` and
+  `sudo -l git commit` is not; an option outside the table is skipped as a flag without a value, and `doas` and `xargs` take
+  any option) or reserved words (`if`, `then`, `do`, `!`, `{`), after
+  `find -exec`, and in the string of `sh -c`, `su -c` or `ssh host '...'` (two levels deep). A command name in the
+  arguments of another command, in quotes, in a `#` comment or in a here-document body is text, so `echo "git commit"`,
+  `rg 'git commit' README.md`, `grep rm f` and `echo "npm install x"` give no candidate, while `bash -c "git commit"`,
+  `timeout 30 git push` and `ssh host 'systemctl restart web'` do. A redirection (`>f`, `>>f`, `>|f`, `&>f`, `<f`, `2>&1`,
+  with or without a file descriptor and a blank) and its target are no command word and end no command: `> out git commit`
+  runs `git`, and `echo hi > git commit` runs only `echo` (`commit` is one more argument), so it gives no candidate. A
+  command substitution is one part of the word it stands in and its end opens no command (`echo $(date) git commit` runs
+  only `echo`, `A=$(date) git commit` runs `git`); its body is read as a command of its own, eight levels deep, nine in `isMutation` (counted apart from the two levels of nested shell
+  strings above). A process substitution (`<(...)`, `>(...)`) is read the same way: one word of the command it stands in, and a body that is a command of its own. A here-document operator inside quotes or a `#` comment (`echo "<<EOF"`) is text and opens no body. A
+  here-document that a shell takes as its input (`bash <<EOF`), a command substitution inside double quotes (`echo "$(git commit)"`; an unquoted `$(...)` and
+  backticks are read, and so is the usual `git commit -m "$(cat <<'EOF' ... EOF)"`, whose `git` stands outside the
+  quotes) and `docker exec` or `kubectl exec` are not read. The general `deploy` class also counts the word
+  `deploy` in the name or arguments of a command that is not read-only (`npm run deploy`, `./deploy.sh`, not
+  `grep deploy README.md`).
+- Rule 2 cuts more fragment kinds (counted in `removed_fragments`), flags a prohibition revoked in its own
+  message, matches general prohibitions by the kind of call (a `Bash` command is read-only or state-changing by
+  its first word, taken after leading assignments, redirections and launch wrappers (`< in cat` and `sudo -n ls` are read-only, and a wrapper with no command behind it, `sudo -l`, changes nothing; reserved words (`if`, `then`, `do`, `{`, `!`), `xargs` and `doas` are not skipped, so `if grep -q x f; then rm -rf build; fi` is state-changing; only that first word is judged, so what a chain (`;`, `&&`, `||`, a pipe or a new line) holds behind a read-only first word is not read, and `grep a f; rm -rf build` counts as read-only, while an assignment before a `;` makes the whole line state-changing, so `D=/x; grep a $D/f` counts as a change of state and the same two commands on two lines do not), and a `>`, `>>`, `>|` or
+  `>&file` redirection to a file outside quotes and comments makes it state-changing:
+  `echo '>'`, `grep ">" README.md`, `ls >&2`, `ls # > x` and `echo >(cat)` are still read-only; a process substitution passes a descriptor path, not a file, and its body is judged as a command, so `echo >(tee f)` is state-changing), and counts pairs (prohibition, call); `--locators` then has one row
+  per prohibition with a candidate and a `history_group` hash that copies of the same message share. Rule 3 (the
+  default) changes only the revocation check: explicit permission only, no revocation in a question, none after a
+  negation.
+
+## Wording as data
+
+Everything that depends on a language is a list of regular expressions, not code. The English defaults are in
+`DEFAULT_PATTERNS` in the script; `--patterns <file>` reads a JSON object whose keys replace the default list
+of the same name as a whole (a key that is absent keeps its default):
+
+| Key | Content |
+|---|---|
+| `prohibitions` | `[regular expression, class]` pairs in matching order |
+| `revocations_v2` | revocation wording of rule 2 (a negation before the phrase is part of each pattern) |
+| `revocations_v3` | explicit permission phrases of rule 3 |
+| `permission_words`, `question_starts` | a sentence with a permission word that ends with `?` or starts with a question word does not revoke. Defaults: the words of the default permission phrases (`go ahead`, `may`, `can`, `allowed`, `permitted`, `permission`) and a modal or auxiliary verb followed by a pronoun (`can you`, `could we`, `may I`, `should we`, `do you`, `is it`, ...), so `Don't deploy. Can you go ahead with analysis?` keeps the prohibition and `You may now deploy.` lifts it. An empty list switches the exception off |
+| `negations` | words that, directly before a revocation phrase, cancel it (default `not`) |
+
+Patterns are matched case-insensitively. A pattern that does not compile, an unknown key or an unknown class
+exits 2.
+
+## Output
+
+The report (template `compaction-report/1`, metric `user-prohibitions`) holds only numbers: the period, the
+files and sessions, the boundaries (`host`, `jev`), the user messages (in the period, before a boundary, with a
+prohibition), the prohibitions (total, with a target, general, by class, revoked in the same message), the
+candidates (total, by class, by tool, by boundary kind, sessions with a candidate, unique calls, prohibitions
+with a candidate, history groups), the data quality counters and the method limits. A call is one `tool_use`
+block, told apart by its id and, for a block without an id, by its place in its row, so the unique calls of a row
+with several blocks count each of them (they used to count the row once); the transcript line in `call_line` and
+`call_lines` is still the row.
 
 # Compaction cache cost
 
@@ -514,6 +734,7 @@ no switch, and is not shipped in the npm package.
 - `python3` (standard library only). Run it in isolated mode with `python3 -I`.
 - The inputs are only read. The only file written is the `--out` file, if given.
 - This tool does not resolve the state root (it uses `.omc/state/jev` under the current directory); `denial_log_summary.mjs` and `compaction_review.mjs` do.
+- A directory below `--projects` or a transcript in it that cannot be read stops the run with exit 2 and a message that names the path; it is never left out of the counts. A `.jsonl` link whose target is gone is a transcript that cannot be read: it is named and stops the run in the same way (a main transcript and a subagent transcript alike). The same holds for a `--transcript`, `--compact` or `--prices` file that is missing, is a directory, cannot be read or is not valid UTF-8.
 - Prices come only from the file given with `--prices`; without it every USD figure is reported as
   unavailable and the cache measurements still run. The file is JSON, with prices in USD per million
   tokens:
@@ -559,11 +780,11 @@ node tools/diagnostics/denial_log_summary.mjs [--file <path>]... [--dir <dir>] [
 
 | Option | Meaning |
 |---|---|
-| `--file <path>` | a journal file; repeatable. Plain arguments are taken as files too, and (unlike `--file`) do not turn off the default directory. A file given on the command line that does not exist is reported with a warning on stderr; the summary and the exit code do not change |
-| `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`) |
+| `--file <path>` | a journal file; repeatable. Plain arguments are taken as files too, and (unlike `--file`) do not turn off the default directory. A file given on the command line that does not exist, is a directory, cannot be read or is not valid UTF-8 stops the run with exit `2` and one line that names it |
+| `--dir <dir>` | a directory: reads `denials.jsonl` and its rotated parts (`denials-YYYYMMDD-HHMMSS.jsonl`, `denials-YYYYMMDD-HHMMSS-<pid>.jsonl`). A directory given with `--dir` that is missing, is not a directory or cannot be listed exits 2 and names it, also when `--file` or a plain argument names a good journal beside it; only the default directory (`OMC_JEV_LOG_DIR`, else `state/jev` under the state root) may be missing |
 | `--json` | JSON output |
 
-With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `state/jev` under the state root of the current directory (run the tool from the project root). The state root is resolved with `scripts/lib/state-root.mjs`, the resolver the hooks use, so it follows `OMC_STATE_DIR`; if it cannot be resolved the tool exits with `2` and asks for `--dir` (or `OMC_JEV_LOG_DIR`). This tool and `compaction_review.mjs` resolve the state root; the `compaction_*.py` tools do not. Exit codes: `0` summary printed, `2` no journal file found.
+With no `--file` and no `--dir` it also reads the directory `$OMC_JEV_LOG_DIR`, else `state/jev` under the state root of the current directory (run the tool from the project root). The state root is resolved with `scripts/lib/state-root.mjs`, the resolver the hooks use, so it follows `OMC_STATE_DIR`; if it cannot be resolved the tool exits with `2` and asks for `--dir` (or `OMC_JEV_LOG_DIR`). This tool and `compaction_review.mjs` resolve the state root; the `compaction_*.py` tools do not. A journal found in the directory that cannot be read stops the run the same way (it is never left out of the counts; a file found in a directory is decoded leniently, because a rotated part may end in the middle of a character). Exit codes: `0` summary printed, `2` no journal file found or a journal file that cannot be read.
 
 ## What is counted
 
@@ -595,3 +816,314 @@ change, not from this one). A row that does not match this layout is still summa
 | `bytes` | of a `handoff` row: the size in bytes, or `null` when unknown |
 | `effectiveness` | always `null` |
 | `tool_name`, `tool_use_id`, `truncated` | the call, and a marker for a row that was shortened to fit 2000 characters |
+
+# Hook latency p95
+
+`hook_latency_p95.mjs` prints the number of samples, p50, p95 and maximum of the run times of OMC hooks that do not call a
+model, read from the hook logs of the last N days, as tab-separated text. Percentiles use the nearest-rank method. It is a
+standalone diagnostic run by hand. It reads files only, does not change OMC behaviour and is not shipped in the npm package.
+The header of the script lists every option and rule.
+
+```
+node tools/diagnostics/hook_latency_p95.mjs [--days 7] [--hooks-json hooks/hooks.json --hooks-json ~/.claude/settings.json]
+node tools/diagnostics/hook_latency_p95.mjs --dir <Jev log dir> --shell-checks-dir <shell-checks dir> --process-max-ms 150
+```
+
+| Option | Meaning |
+|---|---|
+| `--dir <dir>` | Jev log directory (`OMC_JEV_LOG_DIR`, default `state/jev` under the state root plus `~/.omc/state/jev` for `hook-timing*.jsonl`, see below); a directory that was given must exist and is the only one read |
+| `--shell-checks-dir <dir>` | shell-checks directory (`OMC_SHELL_CHECKS_LOG_DIR`, default `state/shell-checks` under the state root); a directory that was given must exist |
+| `--days <N>` | window in days (`HOOK_LATENCY_DAYS`, default 7); a log file whose last change is older than the window is not read |
+| `--hook-max-ms <ms>` | limit for the hook logic time (`HOOK_LATENCY_HOOK_MAX_MS`, default 40) |
+| `--process-max-ms <ms>` | limit for the whole-process time of `hook-timing.jsonl` rows (`OMC_HOOK_PROCESS_MAX_MS`, no default; an empty value is no limit) |
+| `--total-max-ms <ms>` | limit for the `TOTAL` row (`HOOK_LATENCY_TOTAL_MAX_MS`, default 60) |
+| `--hooks-json <file>` | a `hooks.json` or `settings.json` (repeatable): the hooks in its `hooks` section are named `Event:script` and listed with `n` 0 when no log has a time for them. Both forms of a hook are read: one `command` text, or `command` plus the array `args` as in `hooks/hooks.json` |
+| `--now <ISO time>` | end of the window (`HOOK_LATENCY_NOW`, default the system clock); for tests |
+| `--help`, `-h` | print the options and exit with code 0 |
+
+Exit codes: `0` success, also when there are no samples; `2` bad argument, a log directory that was given and is missing or is not a directory, an unreadable log file or an unreadable `--hooks-json` file (a directory, no permission or not valid UTF-8; the message names the file).
+The window, the directories and files read, and the row counts go to stderr.
+
+## Default directories
+
+Without `--dir` and `--shell-checks-dir` (or their variables) the tool uses the directories of the hooks: `state/jev` and
+`state/shell-checks` under the state root of the current directory, which follows `OMC_STATE_DIR` like the hooks do, so run it from the
+project root. When the state root cannot be resolved the home directory is used (`~/.omc/state/jev`). A default directory that does
+not exist is skipped, so the tool then shows no samples for it.
+
+`scripts/run.cjs` does not resolve the project state root: without `OMC_JEV_LOG_DIR` it writes `hook-timing.jsonl` to `~/.omc/state/jev`,
+which is not the project's default directory. So when neither `--dir` nor a non-empty `OMC_JEV_LOG_DIR` is given, the tool also reads
+`hook-timing*.jsonl` (only those files) from `~/.omc/state/jev`; a file reached through both directories is read once. To read one
+directory only, pass `--dir` or set `OMC_JEV_LOG_DIR`, and set the same variable for the hooks when you switch on `OMC_HOOK_TIMING`.
+The directories and files read are listed on stderr.
+
+## Input format
+
+Only these logs are read, and only the time field and the field that selects the row. Rotated files
+(`<name>-YYYYMMDD-HHMMSS.jsonl`, with `-<pid>` appended for the Jev logs) are read as well. A line that is not JSON, or has no
+text `ts`, is counted as unparsable; a row whose time is missing, not a number, negative or not finite is counted as without a usable time.
+
+| Log | Directory | Rows used | Time field | Kind |
+|---|---|---|---|---|
+| `hook-timing.jsonl` | Jev log directory (and `~/.omc/state/jev` when no directory was given) | every row `{ts, hook, ms}` written by `scripts/run.cjs` when `OMC_HOOK_TIMING=1` (see [Hooks](../../docs/HOOKS.md)); grouped by `hook` | `ms` | `whole` |
+| `checks.jsonl` | shell-checks directory | rows with `point` `shell-check`, one per Bash or PowerShell command the `pre-tool-enforcer` checked | `durationMs` | `partial` |
+| `compaction.jsonl` | Jev log directory | rows with `event` `compact` | `duration_ms` | `model` |
+
+`hook-timing.jsonl` exists only after `OMC_HOOK_TIMING=1` has been set; without it the other two logs give only the two rows below.
+`shadow.jsonl` is not read: its `durationMs` is the wait for a model answer.
+
+## Kinds and flags
+
+- `whole`: the time of the whole `run.cjs` process, node start included. Rows are judged against `--process-max-ms` only: `NO_PROCESS_LIMIT` without a limit, `TOO_FEW_SAMPLES` with a limit and fewer than 30 samples, `OVER` above the limit, otherwise empty. A script that also has a `partial` row (the enforcer) is named `<name> (process)`.
+- `partial`: only the shell checks inside the enforcer, so the figure is a lower bound for that hook. The flag is `OVER` above `--hook-max-ms` and otherwise `LOWER_BOUND_ONLY`: a lower bound can never show that the hook meets the limit.
+- `model`: the compaction module including its model calls. It is shown with the flag `n/a`, not compared with a limit and not part of the total.
+- `none`: a hook listed by `--hooks-json` for which no log has a time. It is never estimated.
+
+The `TOTAL` row is the plain sum of the p95 of the measured `partial` hooks (with these logs, the shell checks of the enforcer alone;
+`whole` rows are on another scale and are left out). It is not the p95 of a tool call and not a bound: percentiles are not additive, the hooks run at different rates,
+and hooks without a time are missing from it. Its source column states the coverage (measured hooks of all listed hooks; the listing needs `--hooks-json`). The flag is `OVER` above `--total-max-ms`, otherwise `PARTIAL_COVERAGE`.
+When `hook-timing.jsonl` has rows, a `TOTAL_PROCESS` row follows with the sum of their p95, flag `NO_VERDICT` (information only, same caveats, no limit).
+
+## Output
+
+One header line and then one line per hook: `hook`, `source` (`<log>:<field>`, or `-`), `kind`, `n`, `p50_ms`, `p95_ms`, `max_ms`, `flag`.
+An empty cell is `-`. The `n` of a `TOTAL` row is `-`.
+
+# Check classifier
+
+`check_classifier.mjs` is a pure ESM library (no imports, no state, no I/O) for offline diagnostics. It classifies a shell
+command as a check (`test`, `lint`, `typecheck` or `build`), classifies the tool result of a check as `passed`, `failed` or
+`undetermined`, and tells whether a tool call changes code. It is not wired into any hook, has no switch and does not change
+OMC behaviour. It is not shipped in the npm package.
+
+It does not duplicate `scripts/lib/shell-checks.mjs`: that module denies malformed shell commands at hook time (length,
+syntax, here-documents), while this one only classifies commands, results and writes after the fact.
+
+```
+import { classifyCommand, classifyCheckResult, isMutation } from './tools/diagnostics/check_classifier.mjs';
+```
+
+| Export | Meaning |
+|---|---|
+| `classifyCommand(command)` | `{ isCheck, kind, runner, narrowed, exitHidden, chained, piped, pipefail, reason }`. A runner counts at the start of a shell piece after launch wrappers (`sudo`, `nohup`, `command`, `exec`, `nice`, `time`, `timeout` and `env` with their options as in the table in "Launch wrappers", `npx`, `uv run`, ...); comments and printing commands (`echo`, `cat`, `grep`, `git`) name no check, and a quoted string is one word: it cannot join the words around it into a runner name or split the command (`git commit -m "npm test"` names no check; a quote inside the string, as in `"don't"`, opens no string, so a substitution that follows is still read), yet it stays an argument, and a quoted command word is still that command (`"pytest" -q`). The body of a here-document is input, not shell: it is cut out before the command is read (`<<-` with a tab-indented terminator too; an operator inside quotes or a `#` comment, as in `echo "<<EOF"`, opens no body), so `cat <<EOF` with `npm test` in its body names no check and a summary line in it is no result, while the command on the operator line (`npm test <<EOF`) and the lines after the terminator are read as usual. The value of a leading assignment is one shell word: it may be quoted, hold an escaped space, be empty or be a command substitution (`MODE="a b" npm test`, `A=b\ c npm test`, `A= npm test`, `A=$(git rev-parse HEAD) npm test`), and a substitution outside quotes names no check (`echo $(npm test)`). A redirection before or after the command word (`> out.txt npm test`, `2>&1 pytest`, `pytest > out.txt`, `npm test >| out`) names no runner and is no file operand: its target narrows nothing and its operator is no pipe. `narrowed` is set for flags that weaken a check (`--passWithNoTests`, `--exclude`, and `--if-present` of a package manager, which exits 0 when the package has no such script; `--if-present=false` is the plain run), for the options that select one package of a workspace (`npm -w`/`--workspace`, `pnpm -F`/`--filter`/`--filter-prod`, `bun -F`/`--filter`, read before `--` only; `npm --workspaces` and `pnpm -w` select no package), for `make -i`/`--ignore-errors` (a failed recipe still exits 0) and, for tests, for options that run only some of the tests or none and for file arguments, quoted or not. The options are listed per runner (pytest: `-m`, `-k`, `--lf`, `--sw`, `--deselect`, `--ignore`, `--collect-only`; vitest, jest and bun: `-t`, `--changed`, `--onlyChanged`, `--findRelatedTests`, `--shard`, `--testPathPattern`, `--project`; mocha: `--grep`, `--fgrep`, `--invert`, `--dry-run`; go: `-run`, `-skip`, `-short`, `-list`, with one or two dashes and an optional `test.` prefix; cargo: a test name filter, `--lib`, `--bins`, `--doc`, `--test`, `-p`, `--skip`, `--ignored`, `--no-run` and, for `cargo nextest run`, `-E`, `--filter-expr`, `--partition` and `--run-ignored`; also node:test, unittest, ava, dotnet, rspec (`-t` is `--tag` there), mix, phpunit, deno, ctest, xcodebuild, swift, tox and nox), and a package manager or `make` is read, behind its script word, for the long options of all of them and for `-t`, `-m`, `-g`, `-k`, `--skip` and `-run`, except `--run`; options that only reorder, stop early or tune a run (`--ff`, `-x`, `--bail`, `--maxfail`, `-timeout`, `--run` and `--watch=false` of vitest, the `--retries`, `--failure-output`, `--status-level`, `--max-fail` and `--test-threads` of nextest, `-t` of mocha, which is a timeout there, and `--tap` of ava) select nothing, and neither do the options of the package manager in front of the script word (`pnpm --dir pkg test`; `pnpm --filter pkg test` does select a package). A file argument narrows too (`src/a.test.ts`, `"tests/my dir/a.py"`, `tests/a.py::test_x`). `exitHidden` is set when `&`, `\|\|` (after the check, or before it: `build \|\| npm test` exits 0 without running the check), a pipe without `pipefail` into anything but `tail`, or a separator with a successor hides the runner's own exit status. `chained` is set when the status stays visible but another command may have produced it: one joined to the check by `&&` (`false && npm test` never runs the check, `npm test && false` fails after it) or, under `pipefail`, one piped into it; `set`, `export`, `unset`, `true`, `:`, `tail` and an `echo` or `printf` without a redirection cannot fail in practice and do not count (`cd` can). `piped` is set when the check feeds a pipe without `pipefail`, so `$?` after it is the last command's |
+| `classifyCheckResult({ command, output, isError, exitCode })` | `{ verdict, reason, rule }`. Zero tests run and narrowed checks stay `undetermined`; a failure in the runner summary wins over a zero exit and over a zero-test report; a visible exit status decides, except that a nonzero status of a `chained` command stays `undetermined` (rule `chained-exit`): only a failure line of the runner names the check; a zero status of a chain means every command passed; when the status is hidden, a printed exit code that belongs to the check (see "Printed exit codes" below) or the runner summary in the last 6000 characters of the output decides |
+| `isMutation(toolName, toolInput)` | true for `Write`, `Edit` and `MultiEdit` (target in `file_path`) and `NotebookEdit` (target in `notebook_path`, else `file_path`; a `.ipynb` file is code) on a code file, and for `Bash` commands that write a code file by redirection, `tee`, a here-document or in-place `sed` / `perl`. For a here-document the body is cut out and the rest of the line with the `<<TAG` operator stays, so `cat <<EOF > src/a.ts` and `cat <<EOF \| tee src/a.ts` write `src/a.ts`; several operators on one line take their bodies in order, and `<<<` and an operator with no terminator line are not here-documents. The body is cut wherever the operator stands, so in the usual `git commit -m "$(cat <<'EOF' ... EOF)"` the body is no command and a quote in it opens no string, while a command or a redirection that follows the string (`&& npm test`, `> src/a.ts`) is read as usual. A write target is read as the shell reads it, with its quotes removed and an escaped space kept in the name, before the ignore rules apply: `echo x > "README.md"`, `tee 'package-lock.json'` and `printf x >> "/tmp/x.ts"` are not code, and `> "my docs/a.md"` is one target. `tee`, `sed` and `perl` count only as the command word of a command: first in the text, after `;`, `&&`, `\|\|`, `\|`, `&`, `(`, a backtick or a newline, after launch wrappers with their options (`sudo`, `doas`, `env`, `command`, `nohup`, `exec`, `time`, `nice`, `timeout`, `xargs`, `VAR=x` assignments; the options of the eight wrappers of the table are skipped as in "Launch wrappers", so `sudo -n tee src/a.ts` writes and `sudo -l tee src/a.ts` does not, an option outside the table is skipped as a flag, and `doas` and `xargs` take any option) or a reserved word (`then`, `do`, `if`, `!`, `{`), and after `find -exec`; so `rg tee src/a.ts`, `echo sed -i x src/a.ts` and `grep mv src/a.ts` write nothing, and a `#` comment holds no command and no redirection. A redirection (`>f`, `>>f`, `>|f`, `&>f`, `<f`, `2>&1`, `{fd}>f`, with or without a descriptor and a space) is no command word and ends no command: its operator and its target are dropped and the other words stay one command, so `> README.md tee src/a.ts` runs `tee`, `FOO=1 > /dev/null cp a src/a.ts` runs `cp`, and `echo hi > README.md tee src/a.ts` runs only `echo` (`tee` is an argument). `>|f`, `&>>f` and `>&f` write the file; `>&2` and `>&-` name a descriptor. A redirection needs no blank before it: `printf x>src/a.ts`, `echo x>>src/a.ts`, `echo x&>src/a.ts`, `echo x<>src/a.ts` and `x=1>src/a.ts` write the file, and the digits in front of the operator are a descriptor only as a word of their own (`echo a2>f` and `echo 2>f` both write `f`, the first with the word `a2`). A `>` in text is not read as a redirection: inside quotes or after a backslash, in a parameter expansion (`${x//>/-}`), in arithmetic (`(( a>b ))`, `$((a>b))`), in a conditional (`[[ a>b ]]`), in a `#` comment (also one that follows `;`, `&`, `|` or `(`) and in the body of a here-document, and `>(` is a process substitution. A process substitution (`>(...)`, `<(...)`) is a command of its own `cp`, `mv` and `install` write their destination (the value of `-t` / `--target-directory`, else the last operand; a destination known to be a directory, with `-t`, a trailing `/` or several sources, is joined with the name of each source, so `cp README.md src/` writes `src/README.md`), `truncate` writes its file operands (not the value of `-s` or `-r`) and `dd` writes the value of `of=`, each on the same command word rule and through the same ignore rules; `--help`, `install -d` and a command with no destination write nothing, and `mv` also removes its source, which counts as no write, like `rm`. `ln`, `rsync`, `git checkout` and `git mv` are not scanned. A shell or `su` with `-c` (`sh -c '...'`, `bash -lc`, `sudo sh -c`, `env FOO=1 bash -c`, `su -c`, also by absolute path) runs a command string, which is read again by the same rules, two levels deep and up to 100000 characters; `ssh host '...'` runs on another machine and is not read, so a code edit sent that way is not counted. For an in-place edit (`-i`, `-i.bak`, `-i ''`, `-ni`, `-pi`, `--in-place[=SUFFIX]`) the file operands are the targets: options, `-e` / `-f` scripts and the script operand are skipped, and a command with no file operand counts as code only behind `xargs` (`xargs sed -i ...` takes its files from its input; see "In-place edits"). Documentation, images, lockfiles, logs, temp directories (`TEMP_DIRS`), `/dev/null` and `$TMPDIR` are not code. A command substitution inside double quotes (`echo "$(tee src/a.ts)"`) is quoted text and is not read; an unquoted `$(...)` or backtick pair is one part of the word it stands in and its end opens no command (`echo $(date) tee src/a.ts` runs only `echo`), and its body is read as a command of its own, nine levels deep, the bodies of process substitutions included (apart from the two levels of nested shell strings), so `echo $(tee src/a.ts)` and `A=$(tee src/a.ts) true` write the file. Bodies are read down to the ninth level; a body at the ninth level that holds the text `<(` or `>(` counts as a write, quoted or not (`echo $(` nested nine times around `echo "<(x)"` is a write, eight times is not), and a write that stands only in a `$(` or a pair of backticks at the tenth level is not seen, also below process substitutions (`echo >(` nested nine times around `echo $(tee src/a.ts)` counts as no write). A body of more than 100000 characters is not read, so a write in it counts as no write; the prohibitions tool does not skip a process substitution body of that length and reads `echo >(tee src/a.ts)` there as not read-only. A here-document operator inside quotes or in a `#` comment (`echo "<<EOF"`) opens no body, so the lines after it are read as commands |
+| `RULES_VERSION`, `TEMP_DIRS` | the rules version string and the temp directories whose writes hold no code |
+
+Runner summaries are read for node:test (the `ℹ` lines of the spec reporter and the `# ` lines of the TAP reporter, which node prints when the output is piped), pytest, vitest, eslint, ruff (the same rule reads mypy and biome counts and the lines of `ruff format --check`) and tsc, and for the failures of jest (`Tests:       1 failed`, `Test Suites: 1 failed`; a jest pass stays with the exit status). A
+summary line counts only for the detected runner: a passing `vitest run` that prints `Found 3 errors.` is not a failure, and
+`All checks passed!` behind `pytest | tail` is not a pass. A package manager (`npm`, `pnpm`, `yarn`, `bun`) or `make` runs a
+script of unknown content, so it reads the runners that fit the kind of the check (`test`: vitest, jest, node:test, pytest;
+`lint`: eslint, ruff; `typecheck`: tsc, ruff; `build`: tsc). A runner that is not listed reads no summary, so only its visible
+exit status or a printed exit code decides. The output can hold several summaries, as a script that runs two commands (`a && b`, `a; b`), a package manager that runs several packages, or a loop prints them, and every summary in the last 6000 characters is read: a failure in any one of them (a `ℹ fail 1` behind a `ℹ fail 0`, a `Tests  1 failed` behind a `Tests  2 passed`, an eslint `1 error` behind `0 errors, 2 warnings`) fails the check, a pass needs a summary and no failure in any of them, and the summaries of the different runners that the command may print are read together (a jest failure behind a passed node:test summary fails the check). A summary that stands before the last 6000 characters is not read, so a failure that long output has pushed out of the window leaves a later pass standing. A command with several runner pieces (`eslint . ; vitest run`) reads the summaries of each of them. A package manager script of unknown content may print the failure of a runner that its kind does not read (`eslint . && vitest run` in a `test` script); such a line is no failure of the check, since a passing run can print it as data, but it holds a pass back (`undetermined`, rule `foreign-summary-failure`), while a failing exit status stays a failure. The generic line of ruff (`Found 3 errors.`) is not looked for in this way. A pytest summary that is no pass (nothing passed, a count of a word it does not know) holds back a pass that stands next to it. A failure is looked for in the whole summary before a pass is accepted, because a count
+of failures can stand behind the count of passes: pytest's `1 passed, 1 error` (a teardown failed, exit 1) and the same with
+`xfailed`, `warnings` or `rerun` in between, vitest's `Errors  1 error`, `Type Errors  1 failed` and `Leaks  1 leak` behind a
+`Tests  2 passed (2)` line, a node:test run with `ℹ fail 0` and `ℹ cancelled 1`, and eslint's `ESLint found too many warnings`
+behind `0 errors, 2 warnings` (`--max-warnings`). Only the pytest summary line with the `=====` rules is read (not the `-q` form), and a time such as `61.00s (0:01:01)` is
+part of it. It counts as a pass only when it holds a passed count and nothing but counts of plain words (`5 passed, 1 skipped, 2 warnings`);
+a count of a word of another shape leaves the check undetermined, while a failed or error count anywhere in it fails the check. The zero-test reports (`Tests: 0 total`, `No tests found`, `no tests ran`,
+`ℹ tests 0`, `[no tests to run]`, `running 0 tests`) follow the same rule, and they stand only without real results in the output (a line that counts a test as passed, failed or skipped, such as `Tests  2 failed | 1 passed (3)`): `No tests found` printed by a test, or by one child of a script, does not hide the run. A report alone leaves the check `undetermined` whatever the exit status, because the runners exit nonzero themselves when they find no test. An option value that looks like a file (`--config vitest.config.ts`, `-c pytest.ini`) is read as a file operand and narrows a test run, because the classifier does not know which options take a value. Gradle and Maven are not recognized on purpose:
+their lifecycle goals can also publish, so an exit code proves less there. A pass behind a hidden status is taken only from the summary of the last runner of a command with several runners (`tsc; vitest run | tail`), and only when that runner has a summary rule, so `ruff check . && python3 -m unittest discover | tail` is `undetermined` whatever ruff printed, and so is `python3 -m unittest discover ; ruff check . | tail`, since a runner with no summary rule in front of a `;`, a `||` or a pipe may have failed unseen (behind `&&` it passed, or the last runner would not have run); a failure is still read in the summary of every runner. A pytest run that was interrupted (`KeyboardInterrupt`, `Interrupted: ...`, `pytest.exit()`, `INTERNALERROR`) prints the count of the tests it got to, so its summary is no pass. A runner word is complete: `node --test-reporter` is not `node --test`, and `pytest-watch` or `cargo test-foo` are other programs. A line break behind `&&`, `||` or `|` continues the expression, so `true ||` and a line break and `node --test` is one list whose status is not the check's. A `!` at the start of a pipeline inverts the whole pipeline, so no stage of it is a check (`! printf x | node --check a.js` exits 0 on a syntax error). An `exit` or `return` in front of the check hides its status (`exit 0; npm test` exits 0 without a test). A pass is read from a summary rule only when no earlier runner of the command is read by the same rule (`node --test; node --test | tail -5` can show the summary of the first run when the last one printed none), apart from `ruff format --check`, whose pass line is `N files already formatted`, not the `All checks passed!` of `ruff check`. `pipefail` is the setting at the pipeline of the check, the last `set` before it, so a `set -o pipefail` behind the pipeline changes nothing for it, and a `tail` that names a file or reads a redirected one can fail on its own, so its failure is not read as the failure of the check (`node --check a.js && tail missing.txt` with the status 1 is `undetermined`). The cost, measured before the rule for a repeated runner and without runs that repeat one, in 864 ratings of two real runners (ruff, `python3 -m unittest discover`, vitest and `node --test`, joined by `&&`, `;` and `||`, the last one with and without `| tail -5`; 288 ratings belong to runs that passed and 576 to runs that failed): 108 of the 288 are read as `passed` and 180 stay `undetermined`, 144 of them with `||` (`ruff check . || python3 -m unittest discover` with the exit status 0 is `undetermined`, because the second runner does not run after the first passed, so its summary is no summary of the command), 24 with `;` and 12 with `&&`. Of the 576 ratings of failed runs 6 are read as `passed`, all `python3 -m unittest discover ; X` without a pipe, where the status of the command is the status of `X`.
+
+A run that asks a program to print, list or simulate instead of checking is no check (for `make` that is `-n`, `-q`, `-t`, `-p` and their long forms: no recipe runs), and a zero exit status of it proves nothing (`pytest -h`, `tsc --showConfig`, `eslint --env-info`, `ruff check --diff`). The words that do so depend on the program, because the same short word means something else elsewhere: `-v` prints the version in eslint, tsc, vitest, prettier and webpack and raises the verbosity in pytest, and a single `-V` prints the version in mypy and mocha while pytest 9.0.3 runs its tests with it (`-VV` and `--version` print it). The words are one table of text lines in `check_classifier.mjs` (`INFO_TABLE_TEXT`): per program the words that print (`info`), the words that do so only when given twice (`twice`), a first word that is a subcommand of its own (`word`: `vitest list`, `webpack help`), the options that take the next word as their value (`value`: `pytest -k -h` runs the tests that match `-h`), and whether short options may be glued (`cluster`: `pytest -xh` is `-x -h`) and whether the words behind `--` go to a program behind the runner (`after`; otherwise they are positional, as `pytest -- -h` is a file named `-h`). A word that is the value of another option, or a quoted word that the shell hands over as one argument, is read as a value only for the options the table lists as taking one. The table was made from the `--help` of pytest 9.0.3, ruff 0.15.12, mypy 2.4.1, black 26.10.1, flake8 7.5.0, pylint 4.1.4, tox 4.67.15, nox 2026.10.20, vitest 4.1.11, eslint 9.39.2, tsc 5.9.3, prettier 3.8.1, jest 30.5.2, mocha 12.0.3, webpack 5.113.0 (webpack-cli 7.3.1), esbuild 0.27.2, vite 8.2.2 and node 20.19.2, and each word was run once with the program; cargo and go are from their documentation and were not run. A program that is not in the table is read for the long `--help` and `--version`, for `-h` and for `-?`, never for `-v` or `-V`, and a word behind `--` counts there only for a package manager or `make`, which pass it on. One more word is one more word on a line of the table. Options that list or collect tests without running them (`--collect-only`, `--list`, `--no-run`, `--dry-run`) narrow the run instead: a failing status of one still decides, and a zero status leaves it `undetermined`.
+
+A run that fixes errors prints the errors it fixed together with the ones that remain (`Found 3 errors (2 fixed, 1 remaining).`), and only the remaining count is a verdict. A positive remaining count fails the check. `0 remaining` is neither a failure nor a pass: the exit status decides (zero passes, and a nonzero one fails, as `--exit-non-zero-on-fix` makes it), and a status that is hidden leaves the run `undetermined`. The `Would fix N errors.` line of a diff counts as errors that stay in the files. The plain `Found N errors.` line of a run that fixed nothing, and the count of mypy, are still failures.
+
+## Printed exit codes
+
+A check whose own exit status is hidden (a `;` with a command after it, a pipe, `||`) can still be judged by a status that the command prints
+(`npm test; echo "EXIT=$?"`). That status is used only when it belongs to the check: the check, or the pipeline it stands in, is
+followed directly by the print, as the next command after a `;`, a newline (a blank line runs nothing) or `&&`, so that nothing between them sets `$?` (`true`, `:`,
+`cd`, `echo`, `test`, a block, a function, another command, a list with `||` or `&&` that has an alternative), the check runs whatever comes
+before it (a `||` before it can skip it: `true || npm test; echo $?` runs no check), the print is not redirected, and no second print of a status
+follows (it could repeat the text). The print is an `echo` (with `-n`, `-e`, `-E`) or a `printf` with the conversions `%s`, `%d`, `%i`,
+and the status is `$?`, `${?}`, `${PIPESTATUS[n]}`, `$PIPESTATUS` or `${PIPESTATUS}`. `$?` after a pipe is the status of the last command of
+the pipeline, so it belongs to the check only when the check is that command or `pipefail` is set; `${PIPESTATUS[n]}` belongs to it when n is
+the position of the check in its pipeline (`npm test | tail; echo ${PIPESTATUS[0]}`). A printed status that does not belong to the check gives
+no verdict of its own: the runner summary decides, and without one the result is `undetermined`. A command with a `trap` is read the same
+way: the trap can end the shell with a status of its own, so no exit status is the check's. A printed number is found in the output as the
+text of the print with the number in place of the variable, on a line of its own; a line of the check's own output with the same shape cannot
+be told from it, so the last such line is taken.
+
+Not read, so the result stays `undetermined`: a status kept in a variable (`code=$?; echo $code`), a print after `||`
+(`npm test || echo "EXIT=$?"`), `set -e`, `exit $?`, a status printed from a function, a block, a subshell or a trap, a print that is
+redirected (`echo $? > log`), `eval` and `bash -c` strings, and an `echo` that is not the next command.
+
+# Advisor event coverage
+
+`advisor_event_coverage.py` measures whether a session called the advisor near the events where the advisor rule asks for it: a
+plan, a series of failures and the end of the session. It reads Claude Code transcripts and writes counts only (no message text,
+command or file path in the report). It is a standalone offline diagnostic run by hand: it does not change OMC behaviour, has
+no switch and is not shipped in the npm package.
+
+## Requirements and usage
+
+- `python3` (standard library only). Run it in isolated mode with `python3 -I`.
+- The transcripts are only read. The only files written are `--out` and `--sessions-out`: each must not exist before the run
+  and is created with mode 0600.
+
+```
+python3 -I tools/diagnostics/advisor_event_coverage.py --projects <dir> --label <text> [--since <ISO>] [--until <ISO>]
+python3 -I tools/diagnostics/advisor_event_coverage.py --projects <dir> --label week-47 --consult-command my-advisor --out report.json --sessions-out sessions.json
+```
+
+| Option | Meaning |
+|---|---|
+| `--projects <dir>` | required: transcripts laid out `<dir>/<any depth>/<session>.jsonl`; files with a `subagents` directory on the path are counted and never read. A directory that is missing, is not a directory or cannot be read exits 2, and so does a directory below it or a transcript in it that cannot be read, a `.jsonl` link whose target is gone included (the message names the path) |
+| `--label <text>` | required: written to the field `label` of the report |
+| `--since`, `--until` | ISO 8601 window `[since, until)`; without an offset the time is UTC. The window limits what is counted, not the numbering of calls |
+| `--consult-command <name>` | Bash command that counts as a consultation (kind `bash-<name>`); repeatable, none by default. It matches the first word of the command after leading `NAME=value` assignments and redirections, never a prefix; the value of an assignment is one shell word, so it may be quoted, hold an escaped space, be empty or be a command substitution (`MODE="deep analysis" my-advisor`, `A=$(date) my-advisor`). Launch wrappers (`sudo`, `nohup`, `command`, `exec`, `nice`, `time`, `timeout`, `env`) are taken off with their options (the table in "Launch wrappers"), so `sudo my-advisor`, `sudo -n my-advisor` and `timeout 60 my-advisor` are consultations; the command word ends at a blank or at an operator, so `my-advisor>out.log` and `my-advisor;ls` are consultations too; an option outside the table (`sudo -z`), a wrapper with no command (`sudo -l my-advisor`) and a wrapper that ends the line (`timeout 5` and a newline) are not |
+| `--declaration-prefix <text>` | prefix of the lines an agent writes after a consultation (default `ADVISOR:`, leading whitespace allowed); counted beside the consultations, not as consultations |
+| `--report-prefix <text>` | prefix of the first line of a final report (default `STATUS:`); a text block with such a line is an `end` event |
+| `--out <file>` | write the JSON report to a new file; without it the report goes to stdout |
+| `--sessions-out <file>` | write the list of main sessions that have, in the window, at least one `advisor` call or declaration line: a JSON list (ASCII only), sorted by session id, with the fields `session`, `model_class`, `transcript` (absolute path, the only place where a transcript path is written), `fired` and `advisor_rows`. It must not exist and must differ from `--out`; the report is the same with or without it |
+
+Exit codes: `0` normal run, `2` usage error, invalid time, unreadable input, an output file that already exists, or a write error (a write error removes the files
+the run created). The output directories are checked before the input is read.
+
+## Input format
+
+- The main transcript `<session>.jsonl` rows of `type` `assistant` and `user`, as in the session comparison tool above: `message.content` blocks
+  `text`, `tool_use`, `server_tool_use` (the advisor tool block is `server_tool_use` or `tool_use` named `advisor`) and `tool_result` with `is_error`,
+  `message.model`, `message.id`, `uuid` and `timestamp`.
+- Not created by OMC itself and read only when you use the convention: the declaration lines (`--declaration-prefix`), the report lines
+  (`--report-prefix`) and Bash consult commands (`--consult-command`). Without them the tool counts the `advisor` tool calls only.
+
+## What is counted
+
+- Session class: the most frequent `message.model` of the assistant rows (`<synthetic>` and empty models ignored; a tie goes to the
+  alphabetically first model): `glm` for a name starting with `glm-`, `haiku` for a name containing `haiku`, `claude` for any other
+  model and for a session without a model. Every count is given per class and in `total`.
+- Events: `plan` (`ExitPlanMode`, a `Write` or `Edit` of a plan or brief file, the first `TodoWrite`), `failures` (the second and each further
+  consecutive `tool_result` with `is_error`, one event per series) and `end` (the last assistant text and each text with a report line).
+- Distance: calls between the event and the nearest consultation of the same session, looking back for `plan` and `end` (after the previous event of that class)
+  and forward for `failures` (before the next one). Events of one class at the same call position (two text blocks with no call between them) keep their
+  order: the earlier is the previous event of the later, so one consultation covers only the first of them. Coverage is reported for the windows
+  1, 2, 3, 5, 10, 20 and unlimited calls, with the one-sided lower Wilson bound for z = 1.645; below 30 events the share and the bound read
+  `too little data` and the counts stay.
+- Copies of one history (forked and resumed sessions) count once for the whole run: the first file in sorted path order owns a call id or a text;
+  skipped copies are counted in `duplicates`. Positions and distances are still numbered over the whole file.
+
+# Launch wrappers
+
+The check classifier, the user prohibitions tool, advisor event coverage and the executor outcome metrics take the launch
+wrappers `sudo`, `nohup`, `command`, `exec`, `nice`, `time`, `timeout` and `env` off in front of a command word, with their
+options, so `sudo -n pytest`, `timeout --foreground 5 npm test` and `nice -5 git commit` read like the bare command. The table
+of options is one text, the same in the head of each of the four scripts; `tests/tools/launch-wrapper-table.test.ts` compares
+the copies and the structures that the Python tools build from them. A line of the table names a wrapper and one kind of
+option: `flag` (no value), `value` (the next word, or the rest of the word: `-uroot`, `--user=root`), `optional` (a value only as
+`--name=value`), `number` (`nice -5`), `stop` (the wrapper then runs no command: `sudo -l`, `command -v`, `--help`), `assign`
+(`NAME=VALUE` words may follow the options: `env`, `sudo`, `time`; behind the others the shell runs `NAME=VALUE` as a command) and
+`duration` (`timeout`: a number as `strtod` reads it, such as `5`, `1.5m`, `1e1`, `0x5` or `inf`, with an optional `s`, `m`, `h` or
+`d`; ASCII digits only). The options come from `--help` of sudo 1.9.16, GNU coreutils 9.7 (`timeout`, `nice`, `env`, `nohup`), from
+`help command` and `help exec` of bash 5.2 and from `--help` of GNU time 1.9 (`/usr/bin/time`; the table reads its
+options after the shell keyword `time` too). A short option may be glued to the next one (`sudo -nu root`), a long option may be
+shortened to a name that is unique in the wrapper (`nice --adj=3`), `--` ends the options, and at most eight wrappers in a row are
+taken off by every tool.
+
+No command runs, so none is read, when the wrapper has no command behind it, after a `stop` option, when the duration of
+`timeout` is missing or is not a number (`timeout 5x`), when an option that takes a value has none, and when an assignment stands
+behind a wrapper that takes none (`nohup A=1 cmd`). An option that is not in the table is read as it was before the table,
+and so the tools differ: the write reading and the commit reading skip it as a flag without a value for every wrapper (`sudo -z
+tee src/a.ts` is still a write); the check reading and the executor outcome metrics skip it for `env` and `timeout` only
+(`timeout --no-such 5 pytest` is still a test run) and read nothing behind it for the other wrappers (`sudo -z pytest` is no
+test run); the read-only judgement skips it for `sudo` only, so `nohup -z ls` is not read-only; advisor event coverage read no
+wrapper before the table and reads nothing behind such an option (`sudo -z ask-advisor` is no consultation). `env -S` is read as a flag: its string is split into words that
+come before the rest of the command, so `env -S pytest` runs `pytest`. The attached forms (`-Spytest`, `--split-string=pytest`)
+hold the string in the same word, so the words behind them are arguments of that command, but the tools read the first of them
+as the command.
+
+# In-place edits (`sed`, `perl`)
+
+Two readings look for an in-place edit: the write reading of the check classifier (`isMutation`: the files behind the options are
+the targets, and an edit of a documentation file, a lockfile or a temp path is no code change) and the user prohibitions tool (a
+targeted `edit` or `delete` prohibition is matched by `sed` and `perl` with an in-place option, as by `rm` and `mv`; a `sed` with
+`-n` and no in-place option is read-only). Both read the options with one table of the options of `sed` (GNU sed 4.9, `sed --help`)
+and of `perl` (perlrun, perl 5.40), the same text in both scripts (`EDIT_TABLE_TEXT`; a test compares the copies). Each line
+names the options of one kind: `flag`, `value` (`-e SCRIPT`, `-eSCRIPT`, `--expression=SCRIPT`, `--expression SCRIPT`, `-l 5`),
+`optional` (the rest of the word, never the next one: `-i.bak`, `-ibak`, `--in-place=.bak`, `-F:`), `octal` (`-0777`, `-l012`) and
+`stop` (the program prints text and exits: `--help`, `--version`, `-v`), plus the marks `script`, `inplace` and `quiet`.
+
+An in-place option is looked for in every option of the command, not only in the first one: `sed -E -i`, `sed -nEi`, `sed -e
+'s/a/b/' -i f`, `sed -s -z -f script.sed -i f`, `sed -l 5 -i f`, `sed -i -- 's/a/b/' f` and `perl -I lib -pi -e 's/a/b/' f` are
+edits. Short options glued in one word end at the first one that takes the rest of the word, so `-ie` is `-i` with the suffix `e`,
+and `-pie` is `-p` and `-i` with the suffix `e`; sed takes options between the operands too (`sed 's/a/b/' f -i`), and perl stops
+at its first operand when no `-e` gave the script. A long option of sed may be shortened to a name that is unique (`--in-pl`,
+`--in`, `--i`, `--expr`). The files of the edit are the operands that remain once the script is taken (the first operand, unless an
+option gave it).
+
+Where the words cannot show what the program does: an edit with no file operand edits nothing (sed stops with an error, perl reads
+standard input), so both readings take it for an edit only behind `xargs` (`xargs sed -i 's/a/b/' < list`), which hands it the
+files; the user prohibitions tool looks for the word `xargs` in the command text, since its command splitter drops the wrapper words.
+`perl -pie 's/a/b/' f` has the suffix `e` and takes `s/a/b/` as the name of a script file, which does not exist, so perl dies and
+writes nothing, and `sed -if script.sed f` has the suffix `f` and takes `script.sed` for the script, which sed cannot parse; both
+readings take them for an edit of `f`, since the words do not show that the script is wrong. A `w` command or a `-i` inside a sed script is not
+read. `tests/tools/shell-syntax-matrix.test.ts` holds the rows (`EDIT_ROWS`), each run once by the real programs; a new form is one
+more row there, and one more option is one more word in the table.
+
+# Shell syntax the tools do not read
+
+The tools that read a Bash command (the check classifier, the user prohibitions tool, advisor event coverage and the
+executor outcome metrics) split it into words with a reader of their own, not with a shell. The section of each tool lists
+what that tool reads in front of a command word: leading assignments, leading redirections, launch wrappers, quoting and
+command substitution. These constructs stay outside the scope of every tool, so a command written that way is not counted:
+
+- `eval '...'` and `source script.sh`: the string or the script that is run is not read.
+- A command word that comes from an expansion: no word is expanded (`$CMD commit`, `{git,commit} -m x`).
+- An alias or a shell function at its call: `g` after `alias g='git commit'` and `f` after `f() { git commit; }` are no
+  `git commit`. The user prohibitions tool and the write reading of the check classifier read the body of a function where
+  it is written, as a part of the command that holds it.
+- A command substitution inside double quotes (`echo "$(git commit)"`) is quoted text.
+- A here-document that a shell takes as its input (`bash <<EOF ... EOF`): the shell runs the body, and no tool reads the body of any
+  here-document.
+- `docker exec` and `kubectl exec`: the command that runs in the container is not read.
+- `ssh host '...'` runs on another machine: only the user prohibitions tool reads the string (two levels deep); the check
+  classifier, advisor event coverage and the executor outcome metrics do not.
+- The check reading of the check classifier finds a runner only at the start of a piece of the command: a runner in a
+  subshell (`(npm test)`), in a brace group, in an `if` branch or in a `bash -c` string is not found, although the write
+  reading and the user prohibitions tool read those. In a pipe, a group therefore hides the failure of a runner in it. Real runs
+  with ruff 0.15.12, vitest 4.1.11 and unittest of Python 3.14 (a file with three unused imports for ruff, a passing test file for vitest): `{ ruff check . ; vitest run; } | tail -50` and
+  `( ruff check . ; vitest run ) | tail -50` print `Found 3 errors.` and the summary of the passed vitest and are read as `passed`,
+  while `ruff check . ; vitest run | tail -50` is `failed`; `ruff check . && (python3 -m unittest discover) | tail -50` is read as
+  `passed` when unittest fails and ruff passes.
+- The polling exception of the tool call repeats tool does not split the command: it matches the start of the command text
+  (`sleep`, `gh run watch`, `tail -f`, `git status` and each `--poll-prefix`), so a leading assignment, a redirection or a
+  launch wrapper (`A=1 sleep 5`, `time sleep 5`) hides the prefix and that call is not polling.
+- `xargs` and `watch`: the command that they run is not read by the check reading, advisor event coverage or the executor
+  outcome metrics (the user prohibitions tool and the write reading read `xargs`, not `watch`).
+- A launch wrapper that is not in the table (`doas`, `chrt`, `ionice`, `setsid`, `stdbuf`) hides the command behind it from the
+  check reading, advisor event coverage and the executor outcome metrics; the user prohibitions tool and the write reading skip
+  `doas` and `xargs` with any option, and the read-only judgement of the user prohibitions tool skips neither. The wrappers
+  `sudo`, `nohup`, `command`, `exec`, `nice`, `time`, `timeout` and `env` are read by every tool, see "Launch wrappers".
+- A wrapper with a redirection between it and its duration (`timeout > out.log 5 git commit`): the readings that cut the
+  redirection out of the words (the write reading and the user prohibitions tool) find the command, the check reading, advisor event
+  coverage and the executor outcome metrics do not.
+- A status that a command keeps in a variable (`code=$?; echo $code`), prints from a function, a block, a subshell or a `trap`, sends
+  to a file (`echo $? > log`) or prints after `||` (`npm test || echo "EXIT=$?"`) is not read as the status of a check, and neither is a
+  second print of a status behind the first; see "Printed exit codes".
+- `set -e` and `exit $?`: the check reading does not take them as making the exit status visible, so a check with a command behind
+  it stays hidden; `eval` and `bash -c` strings hold no check for it either.
+- `PIPESTATUS` through a variable (`${PIPESTATUS[$i]}`), as a whole array (`${PIPESTATUS[@]}`) or after several pipelines on one line:
+  only a literal element of the pipeline that stands directly before the print is read.
+- A process substitution (`>(...)`, `<(...)`, outside quotes and comments) is one word, the descriptor path bash passes on, in these
+  places: after a blank, a `=`, a `,` or a `(`, at the start, behind another redirection (`cmd > >(tee x)`, `cmd 2> >(grep e)`) or twice in
+  a row. It is no redirection to a file, so `echo >(cat)` writes nothing and `tee >(cat) src/a.ts` writes `src/a.ts` through its own
+  operand. Its body is a command of its own and is read as one (`echo >(tee src/a.ts)` and `cmd > >(tee log.txt)` write a file, as do the
+  commands in `$(...)` and backticks). A target that is a device (`/dev/null`, `/dev/zero`, `/dev/full`, `/dev/tty`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`,
+  `/dev/fd/N`, `/dev/tcp/host/port`, `/dev/udp/host/port`) is no file either, and neither are the descriptor forms (`>&2`, `>&-`, `2>&1`), `[[ a > b ]]`, `(( a > b ))`,
+  `$(( a>b ))` and `${v:-a>b}`; `&>`, `>|`, `>>` and `<>` write, and so does any other path under `/dev` (`>/dev/urandom`). In the read-only judgement of the user prohibitions tool a
+  command whose first word only reads stays read-only behind a pipe into a writer (`echo hi | tee >(cat) src/a.ts`), as without the
+  process substitution. The user prohibitions tool reads the bodies of process substitutions nested in each other or in command
+  substitutions down to nine levels and judges each body once, so a text of any depth ends in time linear in its length; a command that
+  holds a process substitution below those levels is state-changing (`echo >(` nested nine times around `cat` is read-only, ten times
+  is not). `isMutation` reads the bodies of both kinds of substitution nine levels deep as well, so `echo >(` nested nine times around
+  `tee src/a.ts` writes the file, and it counts a command as a write when a body at the ninth level holds the text of a process
+  substitution, which it does not read (`echo >(` nested ten times around `cat` is a write there, as it is no read-only command for
+  the user prohibitions tool). Below the ninth level both tools take a command with a process substitution on the careful side; a chain
+  of command substitutions alone (`echo $(` nested ten times around `tee src/a.ts`) holds no process substitution and counts as no write.
+- A command substitution inside double quotes is not read as a command (`echo "$(echo x>f)"` writes `f` and counts as no write), and a
+  quote inside one (`echo "$(echo ">f")"`) ends the quoted string early, so the `>f` behind it is read as a redirection.
+
+`tests/tools/shell-syntax-matrix.test.ts` holds one table of the prefixes that a command can have (assignments,
+redirections, wrappers and their mixes) and says for each tool whether the command word is found behind it; a new variant of
+the syntax is one more row of that table.

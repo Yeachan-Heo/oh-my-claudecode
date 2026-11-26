@@ -1,0 +1,1119 @@
+import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { classifyCheckResult, classifyCommand, isMutation } from '../../tools/diagnostics/check_classifier.mjs';
+
+// One table for the shell syntax that the diagnostic tools read with a parser of their own. A row is a PREFIX that
+// stands in front of a command (an assignment, a redirection, a launch wrapper, or a mix of them); each prefix is
+// combined with the command words that the tools look for, and the table says, for each reading of the shell, whether it
+// gets through the prefix to that command word. A new variant of the syntax is one more row here, not a new defect.
+//
+// The readings (columns):
+//   check    check_classifier.classifyCommand: `npm test` and `pytest` are a check that narrows nothing
+//   write    check_classifier.isMutation: `tee src/a.ts` and `cp a src/a.ts` write a code file
+//   commit   user_prohibitions_after_compaction: `git commit` is a commit
+//   consult  advisor_event_coverage: `ask-advisor` is a consultation (--consult-command)
+//   metrics  executor_outcome_metrics: `pytest` is a passed test run and `ask-advisor` a consultation (--advisor-pattern)
+//   readonly user_prohibitions_after_compaction: `rm -rf build` makes the call state-changing, so it is not read-only
+//
+// A row of the generated kind (every option of every wrapper, the `stop` options, the unknown options, `--` and the read-only
+// column) fails on the previous reading of the wrappers; the hand-written rows before them hold for the older readings too and stay
+// as guards. Every launch wrapper of the table is read by every reading; the rows for each of its options are generated from the
+// table text in check_classifier.mjs. A wrapper that runs no command, and an option that is not in the table, are pinned
+// by the rows of their own (the README lists them), so a change of that reading shows up here as one row to flip.
+
+const TOOLS = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'tools', 'diagnostics');
+const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
+
+type Column = 'check' | 'write' | 'commit' | 'consult' | 'metrics' | 'readonly';
+type Reads = Record<Column, boolean>;
+const ALL: Reads = { check: true, write: true, commit: true, consult: true, metrics: true, readonly: true };
+const except = (...columns: Column[]): Reads => ({ ...ALL, ...Object.fromEntries(columns.map((column) => [column, false])) });
+// advisor_event_coverage reads the first command of the text only, so a command after `;`, `&&` or a newline is no consultation.
+const FIRST_COMMAND_ONLY = ['consult'] as const;
+
+const PREFIXES: Array<[string, Reads]> = [
+  ['', ALL],
+  // leading assignments: simple, quoted, escaped space, empty, command substitution, appended, glued quotes
+  ['A=1 ', ALL], ['A=1 B=2 ', ALL], ['A="b c" ', ALL], ["A='b c' ", ALL], ['A=b\\ c ', ALL], ['A= ', ALL], ['A=$(date) ', ALL],
+  ['A=`date` ', ALL], ['A=$(a b) ', ALL], ['A="$(a b)" ', ALL], ['A+=1 ', ALL], ['A=x"y z" ', ALL], ['A=$(echo ")") ', ALL],
+  ['MODE="deep analysis" ', ALL], ['A=$(a $(b c)) ', ALL], ['A=$() ', ALL],
+  // leading redirections: operator and target are no command word, with a descriptor or without, with a blank or without
+  ['> out.log ', ALL], ['>out.log ', ALL], ['>> out.log ', ALL], ['>>out.log ', ALL], ['2> err.log ', ALL], ['2>err.log ', ALL], ['2>&1 ', ALL], ['&> all.log ', ALL],
+  ['&>all.log ', ALL], ['&>> all.log ', ALL], ['< in.txt ', ALL], ['<in.txt ', ALL], ['>| out.log ', ALL], ['>|out.log ', ALL], ['{fd}> out.log ', ALL], ['> "a b.log" ', ALL],
+  ['>a\\ b.log ', ALL], ['<<< x ', ALL], ['2>/dev/null ', ALL], ['>&2 ', ALL], ['3< in.txt ', ALL], ['> out.log > out2.log ', ALL], ['2>&1 > out.log ', ALL],
+  // a redirection glued to an assignment: `A=1>out.log` is the assignment and a redirection, as the shell reads it
+  ['A=1>out.log ', ALL], ['A=1>>out.log ', ALL], ['A=1 B=2>out.log ', ALL], ['A=$(date)>out.log ', ALL], ['A=1 2>err.log B=2>out.log ', ALL], ['A="b c">out.log ', ALL],
+  // assignments and redirections together, in both orders
+  ['A=1 > out.log ', ALL], ['> out.log A=1 ', ALL], ['A="b c" 2>&1 ', ALL], ['> out.log 2>&1 A=$(d) ', ALL], ['A=1 B="c d" < in.txt 2> err.log ', ALL],
+  // launch wrappers: every wrapper of the table is read by every reading
+  ['env ', ALL], ['env A=1 ', ALL], ['time ', ALL], ['timeout 5 ', ALL],
+  ['command ', ALL], ['exec ', ALL], ['nice -n 5 ', ALL],
+  ['sudo ', ALL], ['nohup ', ALL], ['sudo -u root ', ALL],
+  // wrappers with assignments and redirections, and wrappers with each other
+  ['A=1 env ', ALL], ['A="b c" time ', ALL], ['env > out.log ', ALL], ['> out.log env ', ALL],
+  ['time > out.log ', ALL], ['env A=1 time ', ALL], ['A=1 sudo ', ALL],
+  ['sudo A=1 ', ALL], ['> out.log sudo ', ALL], ['sudo > out.log ', ALL],
+  ['sudo env A=1 nohup ', ALL], ['time sudo ', ALL], ['env sudo ', ALL],
+  ['command nohup ', ALL],
+  // `--` ends the options of a wrapper, and the command stands behind it
+  ['sudo -- ', ALL], ['env -- ', ALL], ['nice -- ', ALL], ['command -- ', ALL], ['nohup -- ', ALL], ['time -- ', ALL], ['exec -- ', ALL], ['timeout -- 5 ', ALL],
+  ['sudo -u root -- ', ALL], ['env -i -- ', ALL],
+  // the words of a wrapper may be quoted: the shell removes the quotes before the wrapper reads them
+  ['timeout "5" ', ALL], ["timeout '1m' ", ALL], ['sudo -u "root" ', ALL], ["sudo -u 'root' ", ALL], ['nice -n "5" ', ALL], ['env "A=1" ', ALL],
+  ['timeout "5" env A=1 ', ALL], ['"sudo" ', ALL], ["'timeout' '5' ", ALL],
+];
+
+// The command words each reading looks for, as the text that follows the prefix.
+const WORDS: Record<Column, string[]> = {
+  check: ['npm test', 'pytest'],
+  write: ['tee src/a.ts', 'cp a src/a.ts'],
+  commit: ['git commit -m x'],
+  consult: ['ask-advisor --ask', 'ask-advisor'],
+  metrics: ['pytest', 'ask-advisor --ask', 'ask-advisor'],
+  readonly: ['rm -rf build'],
+};
+
+// Negative rows: the command word is only an argument or the target of a redirection, so no reading may see it.
+// A redirection operator and its target never open a command, and neither does the end of a command substitution.
+// The target is README.md, a file that is no code, so a write reading sees no write through the redirection itself.
+const ARGUMENT_OF: string[] = [
+  'echo hi > README.md ', 'echo hi >> README.md ', 'echo hi 2> README.md ', 'echo hi &> README.md ', 'echo hi >| README.md ', 'echo hi >& README.md ',
+  'echo hi >README.md ', 'echo hi 2>&1 ', 'cat < README.md ', 'cat <<< README.md ', 'A=1 echo hi > README.md ', 'A="b c" echo hi > README.md ',
+  '> out.log echo hi > README.md ', 'echo $(date) ', 'echo `date` ', 'echo $(a b) ', 'echo "x" ', 'echo x $(date) ', 'A=$(date) echo hi > README.md ',
+  'sudo echo hi > README.md ', 'env A=1 echo hi > README.md ', 'time echo hi > README.md ',
+];
+// Negative rows for the launch wrappers: no command runs behind the wrapper (a `stop` option that lists or describes, a bad duration, an
+// assignment behind a wrapper that takes none, a timeout with no duration), so no reading sees the command behind it. The rows for the
+// `stop` options and the assignments of every wrapper are generated from the table below.
+const NO_COMMAND_RUNS: string[] = [
+  'timeout ', 'timeout 5x ', 'timeout 5S ', 'timeout abc ', 'timeout --foreground ',
+  'A=1 sudo -l ', '> out.log sudo -l ', 'sudo -E -l ', 'time sudo -l ', 'env A=1 sudo -l ', 'sudo timeout ', 'nice -n 5 timeout 5x ', 'sudo -l -- ', 'sudo -nl ',
+  'nohup A=1 ', 'timeout 5 A=1 ', 'nice A=1 ', 'command A=1 ', 'exec A=1 ', 'sudo nohup A=1 ',
+];
+// A value option with no value takes the command word as its value (`sudo -u rm`), and `--` after the duration is the command itself; the
+// word behind is then no command of the table, and the judgement of the first word (readonly) sees a word that is not read-only.
+const EATS_THE_COMMAND: string[] = ['timeout -s ', 'timeout 5 -- ', 'nice -n ', 'exec -a ', 'sudo -u ', 'env -u '];
+// An option that is not in the table is read as before the table: the readings that look for a command that writes or commits skip it
+// as a flag for every wrapper; `env` and `timeout` are skipped so by the check and the metrics readings too (the read-only judgement does
+// so for `sudo`, and its word `rm` is state-changing behind any wrapper, so the column is true everywhere); the consultation reading
+// read no wrapper and reads nothing behind such an option. Nothing else is read behind it: nothing is guessed.
+const UNKNOWN_OPTION: Array<[string, Reads]> = [
+  ['sudo -z ', except('check', 'consult', 'metrics')], ['sudo --no-such-option ', except('check', 'consult', 'metrics')], ['sudo -E -z ', except('check', 'consult', 'metrics')],
+  ['nohup -x ', except('check', 'consult', 'metrics')], ['nice -z ', except('check', 'consult', 'metrics')], ['exec -z ', except('check', 'consult', 'metrics')],
+  ['time -z ', except('check', 'consult', 'metrics')], ['command -z ', except('check', 'consult', 'metrics')],
+  ['timeout --no-such 5 ', except('consult')], ['timeout -z 5 ', except('consult')], ['env -z ', except('consult')], ['env --no-such-option ', except('consult')],
+];
+// A wrapper with no command behind it is no command at all.
+const BARE_WRAPPER: string[] = ['sudo', 'nohup', 'time', 'command', 'exec', 'nice', 'env', 'env A=1', 'timeout', 'timeout 5', 'sudo -u root', 'sudo -E', 'nice -n 5', 'exec -a x', 'sudo env A=1 nohup'];
+// The command word itself is the target of the redirection: `echo hi > git commit` runs echo and writes a file named git.
+// For the write reading that file is a write of its own (no extension, so code), which is why these rows skip it.
+const TARGET_IS_THE_WORD: string[] = [
+  'echo hi > ', 'echo hi >> ', 'echo hi 2> ', 'echo hi &> ', 'echo hi >| ', 'echo hi >& ', 'echo hi >', 'cat < ', 'cat <<< ', 'A=1 echo hi > ',
+  'A="b c" echo hi > ', '> out.log echo hi > ', 'A=$(date) echo hi > ', 'sudo echo hi > ', 'env A=1 echo hi > ', 'time echo hi > ',
+];
+
+// Boundary rows: the end of a command opens a new one. advisor_event_coverage reads the first command only.
+const AFTER_BOUNDARY: Array<[string, Reads]> = [
+  ['echo hi > f; ', except(...FIRST_COMMAND_ONLY)], ['echo hi > f && ', except(...FIRST_COMMAND_ONLY)], ['echo hi > f\n', except(...FIRST_COMMAND_ONLY)],
+  ['echo $(date); ', except(...FIRST_COMMAND_ONLY)], ['echo $(date) && ', except(...FIRST_COMMAND_ONLY)], ['echo "$(date)" && ', except(...FIRST_COMMAND_ONLY)],
+  ['A=$(date) true; ', except(...FIRST_COMMAND_ONLY)], ['echo hi 2>&1 && ', except(...FIRST_COMMAND_ONLY)],
+];
+
+// Here-document rows: the body of a here-document is input, not shell, so the command word inside it is read by no reading.
+// The terminator line is part of the command, so these rows are templates, not prefixes. `bash <<EOF` really runs its body;
+// the rows pin it as outside the scope of every tool (the README lists it).
+const HEREDOC_BODY: Array<(word: string) => string> = [
+  (word) => `cat <<EOF\n${word}\nEOF`, (word) => `cat <<'EOF' > README.md\n${word}\nEOF`, (word) => `cat <<-EOF\n\t${word}\n\tEOF`,
+  (word) => `A=1 cat <<"EOF"\n${word}\nEOF`, (word) => `cat 2>&1 <<EOF\n${word}\nEOF`, (word) => `bash <<EOF\n${word}\nEOF`,
+  (word) => `sudo bash <<'EOF'\n${word}\nEOF`, (word) => `echo "$(cat <<'EOF'\n${word}\nEOF\n)"`, (word) => `cat <<EOF\nline \\\n${word}\nEOF`,
+  (word) => `cat <<'EOF'\nline \\\n${word}\nEOF`,
+];
+// A here-document operator in quotes or in a comment is text: the line that starts with the tag is no terminator, so the shell runs
+// the command in the middle. The rows are templates as above; a tab-indented terminator and a command behind it are read too.
+const HEREDOC_AS_TEXT: Array<(word: string) => string> = [
+  (word) => `echo "<<EOF"\n${word}\nEOF`, (word) => `echo '<<EOF'\n${word}\nEOF`, (word) => `echo hi # <<EOF\n${word}\nEOF`,
+  (word) => `echo "it's <<EOF"\n${word}\nEOF`,
+];
+const AFTER_HEREDOC: Array<(word: string) => string> = [
+  (word) => `cat <<-EOF\n\tx\n\tEOF\n${word}`, (word) => `cat <<EOF\nx\nEOF\n${word}`, (word) => `cat <<A <<-B\nx\nA\n\ty\n\tB\n${word}`,
+];
+
+// A redirection or an operator needs no blank before it: it glues to the last word of the command (`ask-advisor>out.log`, `git commit -m x;ls`),
+// and the command is still the same command. A digit before the operator is part of the last word here (`npm test2>f` has the word `test2`), so
+// no descriptor is glued in these rows.
+const GLUED = [
+  '>out.log', '>>out.log', ' 2>err.log', '&>all.log', '&>>all.log', '<in.txt', '>|out.log', '>&2', ' 2>&1', ';ls', '&&ls', '||ls', '|cat', '>out.log;ls', '>out.log&&ls',
+  '<in.txt>out.log',
+];
+
+interface Case { command: string; word: string; want: boolean; row: string }
+
+// The table of launch wrappers is the text in check_classifier.mjs (the same text is in the Python tools, see launch-wrapper-table.test.ts).
+// A prefix is generated for every option of every wrapper, in each of its forms, and for each kind of option the row says what is read.
+function wrapperTable() {
+  const text = /const LAUNCH_TABLE_TEXT = `([^`]*)`;/.exec(readFileSync(join(TOOLS, 'check_classifier.mjs'), 'utf8'))?.[1] ?? '';
+  const table = new Map<string, Record<string, string[]>>();
+  for (const line of text.split('\n')) {
+    const [name, kind, ...options] = line.split(' ');
+    const entry = table.get(name) ?? {};
+    entry[kind] = [...(entry[kind] ?? []), ...options];
+    table.set(name, entry);
+  }
+  const reads: string[] = [];
+  const none: string[] = [];
+  for (const [name, entry] of table) {
+    const duration = entry.duration === undefined ? ' ' : ' 5 '; // timeout: the duration stands behind the options
+    const flags = entry.flag ?? [];
+    for (const flag of flags) reads.push(`${name} ${flag}${duration}`);
+    const short = flags.filter((flag) => /^-[A-Za-z]$/.test(flag));
+    if (short.length > 1) reads.push(`${name} ${short[0]}${short[1].slice(1)}${duration}`);
+    for (const value of entry.value ?? []) {
+      if (value.startsWith('--')) reads.push(`${name} ${value} x${duration}`, `${name} ${value}=x${duration}`);
+      else reads.push(`${name} ${value} x${duration}`, `${name} ${value}x${duration}`);
+    }
+    for (const option of entry.optional ?? []) reads.push(`${name} ${option}${duration}`, `${name} ${option}=x${duration}`);
+    if (entry.number !== undefined) reads.push(`${name} -5${duration}`, `${name} --5${duration}`);
+    if (entry.assign !== undefined) reads.push(`${name} A=1${duration}`, `${name} A=1 B="c d"${duration}`);
+    else none.push(`${name}${duration}A=1 `);
+    for (const stop of entry.stop ?? []) none.push(`${name} ${stop}${duration}`);
+  }
+  return { reads, none, wrappers: [...table.keys()] };
+}
+const TABLE = wrapperTable();
+// A redirection to a file other than /dev/null (not `>&2`, which names a descriptor).
+const WRITES_A_FILE = /(?:>>|>\||&>>?|>(?![&(]))\s*(?!\/dev\/null)\S/;
+
+// A prefix that writes a file by redirection makes a command state-changing by itself; the readonly column does not use such rows.
+function casesFor(column: Column): Case[] {
+  const cases: Case[] = [];
+  const add = (prefix: string, want: boolean) => {
+    for (const word of WORDS[column]) cases.push({ command: prefix + word, word, want, row: prefix });
+  };
+  for (const [prefix, reads] of PREFIXES) add(prefix, reads[column]);
+  for (const prefix of TABLE.reads) add(prefix, true);
+  for (const prefix of [...NO_COMMAND_RUNS, ...TABLE.none]) if (column !== 'readonly' || !WRITES_A_FILE.test(prefix)) add(prefix, false);
+  if (column !== 'readonly') for (const prefix of EATS_THE_COMMAND) add(prefix, false);
+  for (const [prefix, reads] of UNKNOWN_OPTION) add(prefix, reads[column]);
+  for (const word of WORDS[column]) for (const suffix of GLUED) cases.push({ command: word + suffix, word, want: true, row: `<word>${suffix}` });
+  for (const command of BARE_WRAPPER) cases.push({ command, word: '', want: false, row: command });
+  if (column === 'readonly') return cases; // the rows below hold a redirection, a boundary or a here-document: state-changing or text for the judgement of its first word
+  const negatives = column === 'write' ? ARGUMENT_OF : [...ARGUMENT_OF, ...TARGET_IS_THE_WORD];
+  for (const prefix of negatives) add(prefix, false);
+  for (const [prefix, reads] of AFTER_BOUNDARY) add(prefix, reads[column]);
+  for (const template of HEREDOC_BODY) {
+    for (const word of WORDS[column]) cases.push({ command: template(word), word, want: false, row: template('<word>') });
+  }
+  for (const template of [...HEREDOC_AS_TEXT, ...AFTER_HEREDOC]) {
+    for (const word of WORDS[column]) cases.push({ command: template(word), word, want: !column.startsWith('consult'), row: template('<word>') });
+  }
+  return cases;
+}
+
+// One Python process per tool: it loads the script as a module and answers for every command of the table.
+function pyEval(script: string, expression: string, argument: unknown) {
+  const code = [
+    'import importlib.util, json, re, sys',
+    'sys.dont_write_bytecode = True',
+    'spec = importlib.util.spec_from_file_location("tool", sys.argv[1])',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'argument = json.loads(sys.argv[2])',
+    `print(json.dumps(${expression}))`,
+  ].join('\n');
+  const proc = spawnSync('python3', ['-I', '-B', '-c', code, join(TOOLS, script), JSON.stringify(argument)], { encoding: 'utf8', timeout: 60000 });
+  expect(proc.status, proc.stderr).toBe(0);
+  return JSON.parse(proc.stdout) as boolean[];
+}
+
+function verify(column: Column, cases: Case[], got: boolean[]) {
+  const wrong = cases.flatMap((entry, index) => (got[index] === entry.want ? [] : [`${column}: ${JSON.stringify(entry.command)} gave ${got[index]}, the table says ${entry.want}`]));
+  expect(wrong, wrong.join('\n')).toEqual([]);
+}
+
+// The status of a check, read by the shell. Every row below was run by a real bash (5.2) in an empty directory: the check is
+// `node --check broken.js` (F, exits 1: a syntax error) or `node --check ok.js` (P, exits 0), the template is the command around it, and the
+// exit code and the output are the real ones of the whole command (the node error text is left out). The truth column is what the shell did to the
+// check: f it failed, p it passed, n it never ran (`true || {C}`). classifyCheckResult may say `undetermined` for any of them, but never
+// `passed` for f or n and never `failed` for p or n; the last column marks the rows where it must be right (a visible exit status,
+// or a printed status that belongs to the check) so that a loss of that reading shows up here too.
+const STATUS_ROWS: Array<[string, 'F' | 'P', number, string, 'f' | 'p' | 'n', 0 | 1]> = [
+  ['{C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo $?', 'F', 0, '1', 'f', 1],
+  ['{C}; echo $?', 'P', 0, '0', 'p', 1],
+  ['{C};echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C};echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}\necho "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}\necho "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo "EXIT=${?}"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=${?}"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; printf "EXIT=%s\\n" $?', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; printf "EXIT=%s\\n" $?', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; printf %s $?', 'F', 0, '1', 'f', 1],
+  ['{C}; printf %s $?', 'P', 0, '0', 'p', 1],
+  ['{C}; printf "EXIT=$?\\n"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; printf "EXIT=$?\\n"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} | tail -3; echo "EXIT=${PIPESTATUS[0]}"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} | tail -3; echo "EXIT=${PIPESTATUS[0]}"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} | tail -3; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C} | tail -3; echo "EXIT=$PIPESTATUS"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} | tail -3; echo "EXIT=$PIPESTATUS"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} | tail -3; echo "EXIT=${PIPESTATUS[1]}"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['set -o pipefail; {C} | tail -3; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['set -o pipefail; {C} | tail -3; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['set -o pipefail; {C} | tail -3; echo "EXIT=${PIPESTATUS[0]}"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['set -o pipefail; {C} | tail -3; echo "EXIT=${PIPESTATUS[0]}"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['set -eo pipefail; {C} | tail -3', 'F', 1, '', 'f', 1],
+  ['{ {C}; }; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['( {C} ); echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['( {C}; true ); echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['set -e; {C}', 'F', 1, '', 'f', 1],
+  ['set -e; {C}; echo "EXIT=$?"', 'F', 1, '', 'f', 0],
+  ['set -e; {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['set -e; {C}; true', 'F', 1, '', 'f', 0],
+  ['set -e\n{C}\necho "EXIT=$?"', 'F', 1, '', 'f', 0],
+  ['set -e\n{C}\necho "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['set +e; {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['set +e; {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['echo "EXIT=$?"; {C}', 'F', 1, '', 'f', 1],
+  ['echo "EXIT=$?"; {C}', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; true; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C}; false; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C}; false; echo "EXIT=$?"', 'P', 0, 'EXIT=1', 'p', 0],
+  ['{C}; :; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C}; cd .; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C}; echo x; echo "EXIT=$?"', 'F', 0, 'x\nEXIT=0', 'f', 0],
+  ['{C}; test 1 = 1; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C}; [ 1 = 1 ]; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C}; echo "EXIT=$?"; true', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=$?"; true', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo "EXIT=$?"; echo "EXIT=$?"', 'F', 0, 'EXIT=1\nEXIT=0', 'f', 0],
+  ['{C}; echo "EXIT=$?"; echo done', 'F', 0, 'EXIT=1\ndone', 'f', 1],
+  ['{C}; echo "EXIT=$?"; echo done', 'P', 0, 'EXIT=0\ndone', 'p', 1],
+  ['{C} || true; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C} || :; echo $?', 'F', 0, '0', 'f', 0],
+  ['{C} && true; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C} && echo ok; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C} || echo x; echo "EXIT=$?"', 'F', 0, 'x\nEXIT=0', 'f', 0],
+  ['true || {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'n', 0],
+  ['true || {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'n', 0],
+  ['false && {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'n', 0],
+  ['true && {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['true && {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['false || {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['cd . && {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['cd . && {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['cd . && {C} && echo "EXIT=$?"', 'F', 1, '', 'f', 0],
+  ['cd . && {C} && echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} && echo "EXIT=$?"', 'F', 1, '', 'f', 1],
+  ['{C} && echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} || echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C}\ntrue\necho "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C} & echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C} & wait $!; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['f() { {C}; }; f; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['f() { {C}; }; f || true; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['trap \'exit 0\' EXIT; {C}', 'F', 0, '', 'f', 0],
+  ['trap \'echo "EXIT=$?"\' EXIT; {C}', 'F', 1, 'EXIT=1', 'f', 0],
+  ['trap "exit 0" 0; {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['trap "exit 0" 0; {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['x=$({C}); echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['out=$({C}); echo $?', 'F', 0, '1', 'f', 0],
+  ['{C}; code=$?; echo "EXIT=$code"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C}; rc=$?; echo $rc', 'F', 0, '1', 'f', 0],
+  ['{C}; echo "EXIT=$?" > log.txt', 'F', 0, '', 'f', 0],
+  ['{C}; echo "EXIT=$?" >> log.txt', 'F', 0, '', 'f', 0],
+  ['{C}; echo "EXIT=$?" | cat', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=$?" | cat', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo "EXIT=$?" >&2', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C}; exit $?', 'F', 1, '', 'f', 0],
+  ['time {C}; echo "EXIT=$?"', 'F', 0, 'real	0m0.100s\nuser	0m0.098s\nsys	0m0.004s\nEXIT=1', 'f', 1],
+  ['time {C}; echo "EXIT=$?"', 'P', 0, 'real	0m0.108s\nuser	0m0.083s\nsys	0m0.023s\nEXIT=0', 'p', 1],
+  ['timeout 5 {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['timeout 5 {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['env A=1 {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['env A=1 {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['nice {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['nice {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['nohup {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['nohup {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['exec {C}; echo "EXIT=$?"', 'F', 1, '', 'f', 0],
+  ['! {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['if {C}; then echo ok; fi; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['for i in 1; do {C}; done; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['while false; do :; done; {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['while false; do :; done; {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}  ;  echo   "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}  ;  echo   "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} > out.log; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} > out.log; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} 2>err.log; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} 2>err.log; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo "EXIT=$?" # note', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=$?" # note', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; /bin/echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; /bin/echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo \'EXIT=$?\'', 'F', 0, 'EXIT=$?', 'f', 0],
+  ['{C}; echo "EXIT=\\$?"', 'F', 0, 'EXIT=$?', 'f', 0],
+  ['{C}; echo   "code: $?"', 'F', 0, 'code: 1', 'f', 1],
+  ['{C}; echo   "code: $?"', 'P', 0, 'code: 0', 'p', 1],
+  ['{C}; echo EXIT=$?', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo EXIT=$?', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo -n "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo -n "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo "EXIT=$?" "EXIT=$?"', 'F', 0, 'EXIT=1 EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=$?" "EXIT=$?"', 'P', 0, 'EXIT=0 EXIT=0', 'p', 1],
+  ['{C}; echo "A=$? B=$?"', 'F', 0, 'A=1 B=1', 'f', 1],
+  ['{C}; echo "A=$? B=$?"', 'P', 0, 'A=0 B=0', 'p', 1],
+  ['{C}; echo "$?"', 'F', 0, '1', 'f', 1],
+  ['{C}; echo "$?"', 'P', 0, '0', 'p', 1],
+  ['{C}; echo "${PIPESTATUS[0]}"', 'F', 0, '1', 'f', 1],
+  ['{C}; echo "${PIPESTATUS[0]}"', 'P', 0, '0', 'p', 1],
+  ['{C} | cat; echo "EXIT=${PIPESTATUS[0]}"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} | cat; echo "EXIT=${PIPESTATUS[0]}"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} | cat; echo "EXIT=${PIPESTATUS[1]}"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['echo | {C} | tail -1; echo "EXIT=${PIPESTATUS[1]}"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['echo | {C} | tail -1; echo "EXIT=${PIPESTATUS[1]}"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['echo | {C} | tail -1; echo "EXIT=${PIPESTATUS[0]}"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['echo | {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['echo | {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['echo | {C} | tail -1; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C} <<EOF\nx\nEOF\necho "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} <<EOF\nx\nEOF\necho "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['echo \'{C}\'; echo "EXIT=$?"', 'F', 0, 'node --check broken.js\nEXIT=0', 'n', 0],
+  ['{C} 2>&1; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} 2>&1; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} >out.log 2>&1; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} >out.log 2>&1; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['cd . && {C} 2>&1 | tail -3; echo "EXIT=${PIPESTATUS[0]}"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['cd . && {C} 2>&1 | tail -3; echo "EXIT=${PIPESTATUS[0]}"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} && {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C} && {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['A=1 {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['A=1 {C}; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C} \\\n; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} \\\n; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; (exit 3); echo "EXIT=$?"', 'F', 0, 'EXIT=3', 'f', 0],
+  ['{C}; (exit 3); echo "EXIT=$?"', 'P', 0, 'EXIT=3', 'p', 0],
+  ['{C}; ! true; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C}; ! true; echo "EXIT=$?"', 'P', 0, 'EXIT=1', 'p', 0],
+  ['{C}; wait; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C} 2>&1 | head -1; echo "EXIT=${PIPESTATUS[0]}"', 'F', 0, 'broken.js:1\nEXIT=1', 'f', 1],
+  ['{C} 2>&1 | head -1; echo "EXIT=${PIPESTATUS[0]}"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['echo a; {C}; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['echo a; {C}; echo "EXIT=$?"', 'P', 0, 'a\nEXIT=0', 'p', 1],
+  ['x=1 {C}; echo $?', 'F', 0, '1', 'f', 1],
+  ['x=1 {C}; echo $?', 'P', 0, '0', 'p', 1],
+  ['{C}; echo "EXIT=$?"; exit 0', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=$?"; exit 0', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo "EXIT=$?" && true', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=$?" && true', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo "EXIT=$?" || true', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo "EXIT=$?" || true', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}\n\necho "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}\n\necho "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}  # comment\necho "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}  # comment\necho "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo \'EXIT=\'$?', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; echo \'EXIT=\'$?', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; echo EXIT=$? ; echo EXIT=$?', 'F', 0, 'EXIT=1\nEXIT=0', 'f', 0],
+  ['{C}; echo "$?" "$?"', 'F', 0, '1 1', 'f', 1],
+  ['{C}; echo "$?" "$?"', 'P', 0, '0 0', 'p', 1],
+  ['{C}; printf "EXIT=%s\\n" "$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; printf "EXIT=%s\\n" "$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; printf \'EXIT=%d\\n\' $?', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C}; printf \'EXIT=%d\\n\' $?', 'P', 0, 'EXIT=0', 'p', 1],
+  ['{C}; printf "%s\\n" "$?"', 'F', 0, '1', 'f', 1],
+  ['{C}; printf "%s\\n" "$?"', 'P', 0, '0', 'p', 1],
+  ['{C}; echo "done"; echo "EXIT=$?"', 'F', 0, 'done\nEXIT=0', 'f', 0],
+  ['{C} | cat | tail -1; echo "EXIT=${PIPESTATUS[0]}"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['{C} | cat | tail -1; echo "EXIT=${PIPESTATUS[0]}"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['set -o pipefail; {C} | cat | tail -1; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['set -o pipefail; {C} | cat | tail -1; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['set -o pipefail; echo | {C} | tail -1; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 1],
+  ['set -o pipefail; echo | {C} | tail -1; echo "EXIT=$?"', 'P', 0, 'EXIT=0', 'p', 1],
+  ['set +o pipefail; {C} | tail -1; echo "EXIT=$?"', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C} | { cat; }; echo "EXIT=${PIPESTATUS[0]}"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['for i in 1 2; do {C}; done; echo "EXIT=$?"', 'F', 0, 'EXIT=1', 'f', 0],
+  ['{C}; if [ $? -ne 0 ]; then echo "EXIT=$?"; fi', 'F', 0, 'EXIT=0', 'f', 0],
+  ['{C}; [ $? -eq 0 ] && echo PASS || echo FAIL', 'F', 0, 'FAIL', 'f', 0],
+  ['{C}; echo "status:$?"', 'F', 0, 'status:1', 'f', 1],
+  ['{C}; echo "status:$?"', 'P', 0, 'status:0', 'p', 1],
+  ['{C}; echo "[$?]"', 'F', 0, '[1]', 'f', 1],
+  ['{C}; echo "[$?]"', 'P', 0, '[0]', 'p', 1],
+  ['{C}; echo "exit code was $?."', 'F', 0, 'exit code was 1.', 'f', 1],
+  ['{C}; echo "exit code was $?."', 'P', 0, 'exit code was 0.', 'p', 1],
+];
+
+describe('shell status oracle: the exit status and the printed status of a check, as bash ran them', () => {
+  it('no check is passed that failed or never ran, none is failed that passed, and the readable ones are read', () => {
+    const wrong = STATUS_ROWS.flatMap(([template, which, exitCode, output, truth, exact]) => {
+      const command = template.replaceAll('{C}', which === 'F' ? 'node --check broken.js' : 'node --check ok.js');
+      const verdict = classifyCheckResult({ command, output, isError: exitCode !== 0, exitCode }).verdict;
+      const allowed = truth === 'n' ? ['undetermined'] : exact === 1 ? [truth === 'f' ? 'failed' : 'passed'] : ['undetermined', truth === 'f' ? 'failed' : 'passed'];
+      return allowed.includes(verdict) ? [] : [`${JSON.stringify(command)} (exit ${exitCode}, output ${JSON.stringify(output)}): the check ${truth === 'f' ? 'failed' : truth === 'p' ? 'passed' : 'never ran'}, the verdict is ${verdict}`];
+    });
+    expect(wrong, wrong.join('\n')).toEqual([]);
+    expect(STATUS_ROWS.length).toBeGreaterThan(100);
+  });
+});
+
+// Writes, as a real bash did them (5.2, an empty directory with `src/`): the second column is 1 when the command wrote a file that is code
+// (anything but a .md, .log or .txt file), the third when it wrote any file. Every row is a way to glue a redirection to a word, to quote
+// or escape the operator so that it is text, or to put it where it is no redirection (arithmetic, a conditional, a parameter expansion,
+// a comment, a here-document body, a process substitution).
+const WRITE_ROWS: Array<[string, 0 | 1, 0 | 1]> = [
+  ['printf x>src/a.ts', 1, 1],
+  ['echo x>>src/a.ts', 1, 1],
+  ['echo x>|src/a.ts', 1, 1],
+  ['echo x&>src/a.ts', 1, 1],
+  ['echo x&>>src/a.ts', 1, 1],
+  ['echo x>&src/a.ts', 1, 1],
+  ['echo x<>src/a.ts', 1, 1],
+  ['echo a2>src/a.ts', 1, 1],
+  ['echo 2>src/a.ts', 1, 1],
+  ['echo a 2>src/a.ts', 1, 1],
+  ['cat a 1>src/a.ts', 1, 1],
+  ['cat a>src/a.ts', 1, 1],
+  ['cat a>>src/a.ts', 1, 1],
+  ['cat<a>src/a.ts', 1, 1],
+  ['cat <a>src/a.ts', 1, 1],
+  ['x=1>src/a.ts', 1, 1],
+  ['x=a>src/a.ts', 1, 1],
+  ['echo "x">src/a.ts', 1, 1],
+  ['echo \'x\'>src/a.ts', 1, 1],
+  ['echo x>"src/a.ts"', 1, 1],
+  ['echo x>\'src/a.ts\'', 1, 1],
+  ['echo x>src/a\\.ts', 1, 1],
+  ['echo x>src/a.ts;echo y', 1, 1],
+  ['echo x>src/a.ts&&echo y', 1, 1],
+  ['echo x>src/a.ts||echo y', 1, 1],
+  ['echo x>src/a.ts|cat', 1, 1],
+  ['echo y;echo x>src/a.ts', 1, 1],
+  ['{ echo x>src/a.ts; }', 1, 1],
+  ['(echo x>src/a.ts)', 1, 1],
+  ['echo $(echo x>src/a.ts)', 1, 1],
+  ['echo `echo x>src/a.ts`', 1, 1],
+  ['bash -c \'echo x>src/a.ts\'', 1, 1],
+  ['sh -c "echo x>src/a.ts"', 1, 1],
+  ['echo x>src/a.ts 2>&1', 1, 1],
+  ['echo x 2>&1>src/a.ts', 1, 1],
+  ['echo x>src/a.ts>src/b.ts', 1, 1],
+  ['echo x>src/a.ts<in.txt', 1, 1],
+  ['cat<in.txt>src/a.ts', 1, 1],
+  ['echo x>out.log>src/a.ts', 1, 1],
+  ['echo x{,}>src/a.ts', 1, 1],
+  ['f(){ echo x>src/a.ts; }; f', 1, 1],
+  ['if true; then echo x>src/a.ts; fi', 1, 1],
+  ['for i in 1; do echo $i>src/a.ts; done', 1, 1],
+  ['echo x>src/a.ts #', 1, 1],
+  ['echo x>src/a.ts # >other', 1, 1],
+  ['echo x>src/a.ts\necho y', 1, 1],
+  ['echo\\ x>src/a.ts', 1, 1],
+  ['echo a\\>b>src/a.ts', 1, 1],
+  ['echo -n>src/a.ts', 1, 1],
+  ['echo $RANDOM>src/a.ts', 1, 1],
+  ['time echo x>src/a.ts', 1, 1],
+  ['env A=1 echo x>src/a.ts', 1, 1],
+  ['sudo echo x>src/a.ts', 1, 1],
+  ['ls>src/a.ts', 1, 1],
+  ['grep x a>src/a.ts', 1, 1],
+  ['sed s/h/j/ a>src/a.ts', 1, 1],
+  ['true>src/a.ts', 1, 1],
+  [':>src/a.ts', 1, 1],
+  ['>src/a.ts', 1, 1],
+  ['> src/a.ts', 1, 1],
+  ['>>src/a.ts', 1, 1],
+  ['echo x >src/a.ts', 1, 1],
+  ['echo x> src/a.ts', 1, 1],
+  ['echo x >> src/a.ts', 1, 1],
+  ['echo x >| src/a.ts', 1, 1],
+  ['echo x &> src/a.ts', 1, 1],
+  ['echo x >& src/a.ts', 1, 1],
+  ['3>src/a.ts', 1, 1],
+  ['exec 3>src/a.ts', 1, 1],
+  ['echo x 3>src/a.ts', 1, 1],
+  ['echo x {fd}>src/a.ts', 1, 1],
+  ['echo x{fd}>src/a.ts', 1, 1],
+  ['echo "x>src/a.ts"', 0, 0],
+  ['echo \'x>src/a.ts\'', 0, 0],
+  ['echo x\\>src/a.ts', 0, 0],
+  ['echo "a>b">README.md', 0, 1],
+  ['echo $((1>2))', 0, 0],
+  ['echo $(( 3>2 ))', 0, 0],
+  ['(( 3>2 ))', 0, 0],
+  ['[[ b>a ]]', 0, 0],
+  ['[[ b > a ]]', 0, 0],
+  ['x=ab; echo ${x//>/-}', 0, 0],
+  ['x=a>b; true', 1, 1],
+  ['echo a\\>src/a.ts', 0, 0],
+  ['echo \'>src/a.ts\'', 0, 0],
+  ['cat <<EOF\nx>src/a.ts\nEOF', 0, 0],
+  ['cat <<\'EOF\'\n>src/a.ts\nEOF', 0, 0],
+  ['cat <<EOF >src/a.ts\nx\nEOF', 1, 1],
+  ['cat <<EOF>src/a.ts\nx\nEOF', 1, 1],
+  ['cat<<EOF>src/a.ts\nx\nEOF', 1, 1],
+  ['cat<<-EOF>src/a.ts\n	x\n	EOF', 1, 1],
+  ['cat <<< x>src/a.ts', 1, 1],
+  ['cat<<<x>src/a.ts', 1, 1],
+  ['echo x # >src/a.ts', 0, 0],
+  ['echo x #>src/a.ts', 0, 0],
+  ['echo x;# >src/a.ts', 0, 0],
+  ['echo a#b>src/a.ts', 1, 1],
+  ['echo x >&2', 0, 0],
+  ['echo x>&2', 0, 0],
+  ['echo x 2>&1', 0, 0],
+  ['echo x>&1', 0, 0],
+  ['echo x 1>&2', 0, 0],
+  ['echo x>&-', 0, 0],
+  ['echo x<src/a.ts', 0, 0],
+  ['cat <a', 0, 0],
+  ['cat<a', 0, 0],
+  ['cat a<in.txt', 0, 0],
+  ['echo x|cat', 0, 0],
+  ['echo $((1<2))', 0, 0],
+  ['cat <(echo x)', 0, 0],
+  ['echo x>(cat)', 0, 0],
+  ['diff <(echo a) <(echo b)', 0, 0],
+  ['tee >(cat) src/a.ts', 1, 1],
+  ['echo hi | tee >(cat) src/a.ts', 1, 1],
+  ['cat a | tee >(cat >out.log) src/a.ts', 1, 1],
+  ['echo x>README.md', 0, 1],
+  ['echo x>>README.md', 0, 1],
+  ['echo x&>README.md', 0, 1],
+  ['echo x>docs/n.md', 0, 1],
+  ['printf x>notes.txt', 0, 1],
+  ['echo x>out.log', 0, 1],
+  ['echo x 2>err.log', 0, 1],
+  ['echo x>&README.md', 0, 1],
+  ['echo x|tee src/a.ts', 1, 1],
+  ['echo x|tee -a src/a.ts', 1, 1],
+  ['cp a src/a.ts', 1, 1],
+  ['cp a src/', 1, 1],
+  ['cp -t src a', 1, 1],
+  ['mv a src/a.ts', 1, 1],
+  ['install a src/a.ts', 1, 1],
+  ['truncate -s 0 src/a.ts', 1, 1],
+  ['dd if=a of=src/a.ts 2>err.log', 1, 1],
+  ['sed -i s/h/j/ a.js', 1, 1],
+  ['sed -i.bak s/h/j/ a.js', 1, 1],
+  // process substitutions, device files, and text that holds a > or a < without a redirection (bash 5.x, one real run per row)
+  ['echo >(cat)', 0, 0],
+  ['echo x >(cat) src/a.ts', 0, 0],
+  ['echo y|tee src/a.ts>/dev/null', 1, 1],
+  ['echo x >/dev/stdout', 0, 0],
+  ['echo x 1>/dev/stderr', 0, 0],
+  ['echo <(cat)', 0, 0],
+  ['echo a>(cat)', 0, 0],
+  ['echo a<(cat)', 0, 0],
+  ['x=>(cat)', 0, 0],
+  ['x=<(cat)', 0, 0],
+  ['echo x=>(cat)', 0, 0],
+  ['echo x=<(cat)', 0, 0],
+  ['echo a,>(cat)', 0, 0],
+  ['echo a,<(cat)', 0, 0],
+  ['echo >(cat) >(cat)', 0, 0],
+  ['echo >(cat) <(cat)', 0, 0],
+  ['(echo >(cat))', 0, 0],
+  ['(>(cat))', 0, 0],
+  ['>(cat)', 0, 0],
+  ['<(cat)', 0, 0],
+  ['>(cat) echo x', 0, 0],
+  ['echo "x" >(cat)', 0, 0],
+  ['echo `echo >(cat)`', 0, 0],
+  ['echo $(echo >(cat))', 0, 0],
+  ['echo x > >(cat)', 0, 0],
+  ['echo x >> >(cat)', 0, 0],
+  ['echo x 2> >(cat)', 0, 0],
+  ['echo x 2> >(grep e)', 0, 0],
+  ['echo x &> >(cat)', 0, 0],
+  ['echo x > >(cat) 2> >(cat)', 0, 0],
+  ['echo x | tee >(cat)', 0, 0],
+  ['echo x | tee >(cat) >(cat)', 0, 0],
+  ['echo x | cat >(cat)', 0, 0],
+  ['cat <(echo x) <(echo y)', 0, 0],
+  ['echo x >(cat);echo y', 0, 0],
+  ['echo x >(cat)&&echo y', 0, 0],
+  ['echo x>(cat)|cat', 0, 0],
+  ['echo >(tee src/a.ts)', 1, 1],
+  ['echo >(cat >src/a.ts)', 1, 1],
+  ['echo <(tee src/a.ts)', 1, 1],
+  ['echo x > >(tee src/a.ts)', 1, 1],
+  ['echo x 2> >(grep e >src/a.ts)', 1, 1],
+  ['echo x >(tee src/a.ts) >(cat)', 1, 1],
+  ['echo >(cat) >(tee src/a.ts)', 1, 1],
+  ['cat <(echo x) >src/a.ts', 1, 1],
+  ['cat <(echo x >src/a.ts)', 1, 1],
+  ['echo x | tee >(cat >src/a.ts)', 1, 1],
+  ['echo x | tee >(cat) src/a.ts', 1, 1],
+  ['exec > >(tee src/a.ts)', 1, 1],
+  ['{ echo x; } > >(tee src/a.ts)', 1, 1],
+  ['echo x > >(tee src/a.ts) 2> >(cat)', 1, 1],
+  ['echo x > >(tee out.txt)', 0, 1],
+  ['echo >(tee out.txt)', 0, 1],
+  ['echo a>(tee src/a.ts)', 1, 1],
+  ['echo x &> >(tee src/a.ts)', 1, 1],
+  ['echo x | tee >(tee src/a.ts)', 1, 1],
+  ['echo x >(tee src/a.ts) src/b.ts', 1, 1],
+  ['cat <(echo x | tee src/a.ts)', 1, 1],
+  ['cat > >(tee src/a.ts) < in.txt', 1, 1],
+  ['bash -c "echo x > >(tee src/a.ts)"', 1, 1],
+  ['bash -c \'echo >(tee src/a.ts)\'', 1, 1],
+  ['(( 3>(2) ))', 0, 0],
+  ['[[ b>(a) ]]', 0, 0],
+  ['echo $((3>(2)))', 0, 0],
+  ['echo ">(cat)"', 0, 0],
+  ['echo \'>(cat)\'', 0, 0],
+  ['echo \\>(cat)', 0, 0],
+  ['# >(tee src/a.ts)', 0, 0],
+  ['echo x # >(tee src/a.ts)', 0, 0],
+  ['cat <<EOF\n>(tee src/a.ts)\nEOF', 0, 0],
+  ['echo x # <(tee src/a.ts)', 0, 0],
+  ['echo ">(tee src/a.ts)"', 0, 0],
+  ['echo x#>(tee src/a.ts)', 1, 1],
+  ['echo ${#x}>(tee src/a.ts)', 1, 1],
+  ['echo $#>(tee src/a.ts)', 1, 1],
+  ['echo x >/dev/null', 0, 0],
+  ['echo x >> /dev/null', 0, 0],
+  ['echo x &>/dev/null', 0, 0],
+  ['echo x >|/dev/null', 0, 0],
+  ['echo x >/dev/stderr', 0, 0],
+  ['echo x 2>/dev/stderr', 0, 0],
+  ['echo x >/dev/fd/1', 0, 0],
+  ['echo x >/dev/fd/2', 0, 0],
+  ['echo x 2>/dev/fd/1', 0, 0],
+  ['echo x >/dev/tcp/127.0.0.1/9', 0, 0],
+  ['echo x 2>/dev/null >src/a.ts', 1, 1],
+  ['echo x >/dev/null; echo y>src/a.ts', 1, 1],
+  ['echo x 2>/dev/null;echo y', 0, 0],
+  ['(echo x 2>/dev/null)', 0, 0],
+  ['echo x 2>/dev/null|cat', 0, 0],
+  ['echo x 2>/dev/null&echo y', 0, 0],
+  ['echo x >/dev/null&&echo y', 0, 0],
+  ['echo x 2>/dev/null;echo y>src/a.ts', 1, 1],
+  ['(echo x 2>/dev/null)>src/a.ts', 1, 1],
+  ['echo x 2>/dev/null|echo y>src/a.ts', 1, 1],
+  ['echo x 2>/dev/null&echo y>src/a.ts', 1, 1],
+  ['exec 3>/dev/null', 0, 0],
+  ['exec 3<>/dev/tcp/127.0.0.1/9', 0, 0],
+  ['echo x </dev/null', 0, 0],
+  ['cat </dev/null', 0, 0],
+  ['echo x >&2-', 0, 0],
+  ['echo x 2>&-', 0, 0],
+  ['echo x >&1', 0, 0],
+  ['exec 3>&1', 0, 0],
+  ['exec 3>&-', 0, 0],
+  ['echo x 3>&1', 0, 0],
+  ['echo x <&0', 0, 0],
+  ['echo x 0<&-', 0, 0],
+  ['echo x &>>src/a.ts', 1, 1],
+  ['exec 3<>src/a.ts', 1, 1],
+  ['echo x 3<>src/a.ts', 1, 1],
+  ['cat <<< x', 0, 0],
+  ['cat <<<x', 0, 0],
+  ['cat <<< ">src/a.ts"', 0, 0],
+  ['cat <<< x >src/a.ts', 1, 1],
+  ['echo x >/dev/stderr >src/a.ts', 1, 1],
+  ['echo x >/dev/fd/1>src/a.ts', 1, 1],
+  ['echo x 2>/dev/null 2>&1 >src/a.ts', 1, 1],
+  ['cp >(cat) src/a.ts', 1, 1],
+  ['cp <(echo x) src/a.ts', 1, 1],
+  ['truncate -s 0 >(cat) src/a.ts', 1, 1],
+  ['sed -i s/h/j/ a.js <(echo x)', 1, 1],
+  ['dd if=<(echo x) of=src/a.ts', 1, 1],
+];
+// The read-only judgement reads the first word of the command, so a pipe into `tee` is outside it (documented in the README).
+const FIRST_WORD_ONLY = new Set([
+  'echo x|tee src/a.ts', 'echo x|tee -a src/a.ts',
+  'echo y|tee src/a.ts>/dev/null',
+  'echo hi | tee >(cat) src/a.ts', 'echo x | tee >(cat) src/a.ts',
+  'cat <(echo x | tee src/a.ts)',
+]);
+
+describe('shell write oracle: the files a command writes, as bash wrote them', () => {
+  it('write: isMutation finds the code file of every command of the table that wrote one, and none of the other rows of the table', () => {
+    const wrong = WRITE_ROWS.flatMap(([command, code]) => (isMutation('Bash', { command }) === (code === 1) ? [] : [`${JSON.stringify(command)}: bash wrote ${code === 1 ? 'a code file' : 'no code file'}, isMutation says ${!(code === 1)}`]));
+    expect(wrong, wrong.join('\n')).toEqual([]);
+    expect(WRITE_ROWS.filter(([, code]) => code === 1).length).toBeGreaterThan(60);
+  });
+
+  it.skipIf(!hasPython3)('readonly: a command that wrote a file is not read-only', () => {
+    const rows = WRITE_ROWS.filter(([command, , any]) => any === 1 && !FIRST_WORD_ONLY.has(command));
+    const got = pyEval('user_prohibitions_after_compaction.py', '[not module.is_read_only_command(c) for c in argument]', rows.map(([command]) => command));
+    const wrong = rows.flatMap(([command], index) => (got[index] ? [] : [`${JSON.stringify(command)}: bash wrote a file, the command is judged read-only`]));
+    expect(wrong, wrong.join('\n')).toEqual([]);
+  });
+
+  // Rows on which bash wrote no file, and whose first word only reads: a process substitution or a device is no file.
+  const READ_ONLY_ROWS = [
+    'echo >(cat)',
+    'echo x >(cat) src/a.ts',
+    'echo x >/dev/stdout',
+    'echo x 1>/dev/stderr',
+    'echo <(cat)',
+    'echo a>(cat)',
+    'echo a<(cat)',
+    'echo x=>(cat)',
+    'echo x=<(cat)',
+    'echo a,>(cat)',
+    'echo a,<(cat)',
+    'echo >(cat) >(cat)',
+    'echo >(cat) <(cat)',
+    'echo "x" >(cat)',
+    'echo `echo >(cat)`',
+    'echo $(echo >(cat))',
+    'echo x > >(cat)',
+    'echo x >> >(cat)',
+    'echo x 2> >(cat)',
+    'echo x 2> >(grep e)',
+    'echo x &> >(cat)',
+    'echo x > >(cat) 2> >(cat)',
+    'echo x | tee >(cat)',
+    'echo x | tee >(cat) >(cat)',
+    'echo x | cat >(cat)',
+    'cat <(echo x) <(echo y)',
+    'echo x >(cat);echo y',
+    'echo x >(cat)&&echo y',
+    'echo x>(cat)|cat',
+    'echo $((3>(2)))',
+    'echo ">(cat)"',
+    'echo \'>(cat)\'',
+    'echo \\>(cat)',
+    'echo x # >(tee src/a.ts)',
+    'cat <<EOF\n>(tee src/a.ts)\nEOF',
+    'echo x # <(tee src/a.ts)',
+    'echo ">(tee src/a.ts)"',
+    'echo x >/dev/null',
+    'echo x >> /dev/null',
+    'echo x &>/dev/null',
+    'echo x >|/dev/null',
+    'echo x >/dev/stderr',
+    'echo x 2>/dev/stderr',
+    'echo x >/dev/fd/1',
+    'echo x >/dev/fd/2',
+    'echo x 2>/dev/fd/1',
+    'echo x >/dev/tcp/127.0.0.1/9',
+    'echo x </dev/null',
+    'cat </dev/null',
+    'echo x 2>/dev/null;echo y',
+    'echo x 2>/dev/null|cat',
+    'echo x 2>/dev/null&echo y',
+    'echo x >/dev/null&&echo y',
+    'echo x >&2-',
+    'echo x 2>&-',
+    'echo x >&1',
+    'echo x 3>&1',
+    'echo x <&0',
+    'echo x 0<&-',
+    'cat <<< x',
+    'cat <<<x',
+    'cat <<< ">src/a.ts"',
+  ];
+  // Rows on which the program deleted or moved a file, with a process substitution among the words.
+  const DELETE_ROWS = [
+    'rm >(cat) a',
+    'rm a >(cat)',
+    'rm <(echo) a',
+    'rm a <(cat)',
+    'cat <(rm a)',
+    'diff <(rm a) in.txt',
+    'rm a > >(cat)',
+    'echo >(rm a)',
+  ];
+
+  it.skipIf(!hasPython3)('readonly: a command that wrote nothing, with a process substitution or a device in it, is read-only', () => {
+    const got = pyEval('user_prohibitions_after_compaction.py', '[module.is_read_only_command(c) for c in argument]', READ_ONLY_ROWS);
+    const wrong = READ_ONLY_ROWS.flatMap((command, index) => (got[index] ? [] : [`${JSON.stringify(command)}: bash wrote no file, the command is judged state-changing`]));
+    expect(wrong, wrong.join('\n')).toEqual([]);
+  });
+
+  it.skipIf(!hasPython3)('delete: the commands that deleted or moved a file with a process substitution among their words are found', () => {
+    const got = pyEval('user_prohibitions_after_compaction.py', '[module.has_delete_or_move(c) for c in argument]', DELETE_ROWS);
+    const wrong = DELETE_ROWS.flatMap((command, index) => (got[index] ? [] : [`${JSON.stringify(command)}: the program deleted a file, has_delete_or_move says no`]));
+    expect(wrong, wrong.join('\n')).toEqual([]);
+  });
+});
+
+// The files an in-place `sed` or `perl` writes. Every row was run in an empty directory that held `config.py` and `notes.md` (both
+// `x = 1`), by GNU sed 4.9 and perl 5.40 under bash; `code` says that `config.py` changed, `any` that one of the two files did. A
+// markdown file holds no code, so a write to `notes.md` alone is `code` 0. The third element names a row whose reading the words
+// cannot settle: `stdin` is an edit with no file operand (sed stops with an error, perl reads standard input), which both readings
+// take for an edit only behind `xargs`; `script-file` is `-pie` and `-i.e`, where the suffix is `e` and the first operand is a script
+// file that does not exist, so perl dies. Both readings take that for an edit of the file behind it.
+const EDIT_ROWS: Array<[string, 0 | 1, 0 | 1, ('stdin' | 'script-file')?]> = [
+  ["sed -i 's/1/2/' config.py", 1, 1],
+  ["sed -i.bak 's/1/2/' config.py", 1, 1],
+  ["sed -ibak 's/1/2/' config.py", 1, 1],
+  ["sed -i.bak -e 's/1/2/' config.py", 1, 1],
+  ["sed --in-place 's/1/2/' config.py", 1, 1],
+  ["sed --in-place=.bak 's/1/2/' config.py", 1, 1],
+  ["sed --in-place=bak 's/1/2/' config.py", 1, 1],
+  ["sed -ni 's/1/2/p' config.py", 1, 1],
+  ["sed -Ei 's/1/2/' config.py", 1, 1],
+  ["sed -nEi 's/1/2/p' config.py", 1, 1],
+  ["sed -ie 's/1/2/' config.py", 1, 1],
+  ["sed -in 's/1/2/' config.py", 1, 1],
+  ["sed -i -e 's/1/2/' config.py", 1, 1],
+  ["sed -e 's/1/2/' -i config.py", 1, 1],
+  ["sed -s -i 's/1/2/' config.py", 1, 1],
+  ["sed -z -i 's/1/2/' config.py", 1, 1],
+  ["sed -i -f script.sed config.py", 1, 1],
+  ["sed -f script.sed -i config.py", 1, 1],
+  ["sed -i -l 5 's/1/2/' config.py", 1, 1],
+  ["sed -l 5 -i 's/1/2/' config.py", 1, 1],
+  ["sed -l5 -i 's/1/2/' config.py", 1, 1],
+  ["sed --line-length=5 -i 's/1/2/' config.py", 1, 1],
+  ["sed --line-length 5 -i 's/1/2/' config.py", 1, 1],
+  ["sed --expression='s/1/2/' -i config.py", 1, 1],
+  ["sed --expression 's/1/2/' --in-place config.py", 1, 1],
+  ["sed --file=script.sed -i config.py", 1, 1],
+  ["sed --file script.sed -i config.py", 1, 1],
+  ["sed -i -- 's/1/2/' config.py", 1, 1],
+  ["sed -i 's/1/2/' -- config.py", 1, 1],
+  ["sed -- 's/1/2/' config.py", 0, 0],
+  ["sed -n -i 's/1/2/p' config.py", 1, 1],
+  ["sed -E -i 's/1/2/' config.py", 1, 1],
+  ["sed -r -i 's/1/2/' config.py", 1, 1],
+  ["sed --regexp-extended --in-place 's/1/2/' config.py", 1, 1],
+  ["sed -E -i -e 's/1/2/' config.py", 1, 1],
+  ["sed -E -e 's/1/2/' -i config.py", 1, 1],
+  ["sed -i 's/1/2/' config.py notes.md", 1, 1],
+  ["sed -i 's/1/2/' notes.md config.py", 1, 1],
+  ["sed -i 's/1/2/' notes.md", 0, 1],
+  ["sed -u -i 's/1/2/' config.py", 1, 1],
+  ["sed -b -i 's/1/2/' config.py", 1, 1],
+  ["sed --debug -i 's/1/2/' config.py", 1, 1],
+  ["sed --follow-symlinks -i 's/1/2/' config.py", 1, 1],
+  ["sed --posix -i 's/1/2/' config.py", 1, 1],
+  ["sed --sandbox -i 's/1/2/' config.py", 1, 1],
+  ["sed --null-data -i 's/1/2/' config.py", 1, 1],
+  ["sed --zero-terminated -i 's/1/2/' config.py", 1, 1],
+  ["sed --separate -i 's/1/2/' config.py", 1, 1],
+  ["sed --quiet -i 's/1/2/p' config.py", 1, 1],
+  ["sed --silent --in-place 's/1/2/p' config.py", 1, 1],
+  ["sed --in-pl 's/1/2/' config.py", 1, 1],
+  ["sed --in 's/1/2/' config.py", 1, 1],
+  ["sed --i 's/1/2/' config.py", 1, 1],
+  ["sed --in-place --expr 's/1/2/' config.py", 1, 1],
+  ["sed --expr='s/1/2/' --in-pl config.py", 1, 1],
+  ["sed 's/1/2/' -i config.py", 1, 1],
+  ["sed 's/1/2/' config.py -i", 1, 1],
+  ["sed 's/1/2/' config.py --in-place", 1, 1],
+  ["sed -n 's/1/2/p' config.py -i", 1, 1],
+  ["sed -n -i -e 's/1/2/p' -e 's/2/3/p' config.py", 1, 1],
+  ["sed -i -e 's/1/2/' -e 's/2/3/' config.py", 1, 1],
+  ["sed -i -s -n -E -e 's/1/2/p' config.py", 1, 1],
+  ["sed -sni 's/1/2/p' config.py", 1, 1],
+  ["sed -nsi 's/1/2/p' config.py", 1, 1],
+  ["sed -znEi 's/1/2/' config.py", 1, 1],
+  ["sed -Ei -e 's/1/2/' config.py", 1, 1],
+  ["sed -E -ie 's/1/2/' config.py", 1, 1],
+  ["sed -E -i.orig 's/1/2/' config.py", 1, 1],
+  ["sed -i 's/1/2/' ./config.py", 1, 1],
+  ["sed -i 's/1/2/' \"config.py\"", 1, 1],
+  ["sed -i \"s/1/2/\" 'config.py'", 1, 1],
+  ["sed -i -e \"s/1/2/\" -- config.py notes.md", 1, 1],
+  ["sed 's/1/2/' config.py", 0, 0],
+  ["sed -n 's/1/2/p' config.py", 0, 0],
+  ["sed -n -e 's/1/2/p' config.py", 0, 0],
+  ["sed -ne 's/1/2/p' config.py", 0, 0],
+  ["sed -En 's/1/2/p' config.py", 0, 0],
+  ["sed -nE 's/1/2/p' config.py", 0, 0],
+  ["sed -E 's/1/2/' config.py", 0, 0],
+  ["sed -s -n 's/1/2/p' config.py notes.md", 0, 0],
+  ["sed -z 's/1/2/' config.py", 0, 0],
+  ["sed -f script.sed config.py", 0, 0],
+  ["sed -l 5 's/1/2/' config.py", 0, 0],
+  ["sed --expression='s/1/2/' config.py", 0, 0],
+  ["sed --file=script.sed config.py", 0, 0],
+  ["sed --line-length=5 's/1/2/' config.py", 0, 0],
+  ["sed --quiet 's/1/2/p' config.py", 0, 0],
+  ["sed -- 's/1/2/' config.py", 0, 0],
+  ["sed -n -- 's/1/2/p' config.py", 0, 0],
+  ["sed -ei 's/1/2/' config.py", 0, 0],
+  ["sed -fi script.sed config.py", 0, 0],
+  ["sed -e '-i' config.py", 0, 0],
+  ["sed -n '/-i/p' config.py", 0, 0],
+  ["sed -n 's/x/-i/p' config.py", 0, 0],
+  ["sed -n -e 'p' -s config.py", 0, 0],
+  ["sed -n -u config.py -e p", 0, 0],
+  ["sed -E -n -z -s 's/1/2/p' config.py", 0, 0],
+  ["sed --version -i 's/1/2/' config.py", 0, 0],
+  ["sed --help -i 's/1/2/' config.py", 0, 0],
+  ["sed -i --version 's/1/2/' config.py", 0, 0],
+  ["sed --vers -i 's/1/2/' config.py", 0, 0],
+  ["xargs sed -i 's/1/2/' < list.txt", 1, 1],
+  ["xargs -n1 sed -i.bak 's/1/2/' < list.txt", 1, 1],
+  ["xargs -I{} sed -i 's/1/2/' {} < list.txt", 1, 1],
+  ["find . -name config.py -exec sed -i 's/1/2/' {} +", 1, 1],
+  ["find . -name config.py -exec sed -i 's/1/2/' {} \\;", 1, 1],
+  ["xargs sed -ni 's/1/2/p' < list.txt", 1, 1],
+  ["sed -i 's/1/2/'", 0, 0, "stdin"],
+  ["sed -i -e 's/1/2/'", 0, 0, "stdin"],
+  ["sed -E -i 's/1/2/'", 0, 0, "stdin"],
+  ["sed --in-place 's/1/2/'", 0, 0, "stdin"],
+  ["perl -i -pe 's/1/2/' config.py", 1, 1],
+  ["perl -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -p -i -e 's/1/2/' config.py", 1, 1],
+  ["perl -i.bak -pe 's/1/2/' config.py", 1, 1],
+  ["perl -pi.bak -e 's/1/2/' config.py", 1, 1],
+  ["perl -i.orig -pe 's/1/2/' config.py", 1, 1],
+  ["perl -0pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -0777pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -0777 -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -0 -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -0x31pi -e 's/1/2/' config.py", 0, 0],
+  ["perl -lpi -e 's/1/2/' config.py", 1, 1],
+  ["perl -l -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -wpi -e 's/1/2/' config.py", 1, 1],
+  ["perl -Mstrict -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -M strict -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -I lib -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -Ilib -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -pi -E 's/1/2/' config.py", 1, 1],
+  ["perl -i -ne 's/1/2/;print' config.py", 1, 1],
+  ["perl -ni -e 's/1/2/;print' config.py", 1, 1],
+  ["perl -i -ne 'print unless /1/' config.py", 1, 1],
+  ["perl -i -e 'while(<>){s/1/2/;print}' config.py", 1, 1],
+  ["perl -i.bak -e 'while(<>){s/1/2/;print}' config.py", 1, 1],
+  ["perl -pi -e 's/1/2/' notes.md", 0, 1],
+  ["perl -pi -e 's/1/2/' config.py notes.md", 1, 1],
+  ["perl -pi -e 's/1/2/' notes.md config.py", 1, 1],
+  ["perl -pi -e 's/1/2/' -- config.py", 1, 1],
+  ["perl -pi -e 's/1/2/' ./config.py", 1, 1],
+  ["perl -p -e 's/1/2/' -i config.py", 1, 1],
+  ["perl -p -e 's/1/2/' -i.bak config.py", 1, 1],
+  ["perl -e 's/1/2/' -pi config.py", 1, 1],
+  ["perl -i -p -e 's/1/2/' -- config.py notes.md", 1, 1],
+  ["perl -p -i.bak -e 's/1/2/;' -e 's/2/3/' config.py", 1, 1],
+  ["perl -pi -e 's/1/2/;' -e 's/2/3/' config.py", 1, 1],
+  ["perl -pi -e \"s/1/2/\" \"config.py\"", 1, 1],
+  ["perl -CS -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -Mutf8 -pi.bak -e 's/1/2/' config.py", 1, 1],
+  ["perl -s -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -t -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -a -F: -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -F: -pi -e 's/1/2/' config.py", 1, 1],
+  ["perl -n -i -e 's/1/2/;print' config.py", 1, 1],
+  ["perl -pi -e 's/1/2/' config.py -i", 1, 1],
+  ["perl -pe 's/1/2/' config.py", 0, 0],
+  ["perl -ne 'print' config.py", 0, 0],
+  ["perl -ne 'print if /1/' config.py notes.md", 0, 0],
+  ["perl -e 'print 1' config.py", 0, 0],
+  ["perl -lne 'print' config.py", 0, 0],
+  ["perl -0777 -ne 'print' config.py", 0, 0],
+  ["perl -p -e 's/1/2/' config.py", 0, 0],
+  ["perl -wne 'print' config.py", 0, 0],
+  ["perl -Mstrict -ne 'print' config.py", 0, 0],
+  ["perl -I lib -ne 'print' config.py", 0, 0],
+  ["perl -pe 's/-i/x/' config.py", 0, 0],
+  ["perl -ne 'print \"-i\"' config.py", 0, 0],
+  ["perl -pie 's/1/2/' config.py", 0, 0, "script-file"],
+  ["sed -if script.sed config.py", 0, 0, "script-file"],
+  ["perl -pie 's/1/2/' config.py notes.md", 0, 0, "script-file"],
+  ["perl -i.e 's/1/2/' config.py", 0, 0, "script-file"],
+  ["perl -v -pi config.py", 0, 0],
+  ["perl -h -pi config.py", 0, 0],
+  ["xargs perl -pi -e 's/1/2/' < list.txt", 1, 1],
+  ["xargs -n1 perl -i.bak -pe 's/1/2/' < list.txt", 1, 1],
+  ["find . -name config.py -exec perl -pi -e 's/1/2/' {} +", 1, 1],
+  ["perl -pi -e 's/1/2/'", 0, 0, "stdin"],
+  ["perl -i -pe 's/1/2/'", 0, 0, "stdin"],
+  ["perl -pi.bak -e 's/1/2/'", 0, 0, "stdin"],
+];
+
+describe('in-place edit oracle: sed and perl, as the programs ran them', () => {
+  const settled = EDIT_ROWS.filter(([, , , note]) => note !== 'script-file');
+  it('write: isMutation finds the code file of every in-place edit that changed one, and none of the other rows', () => {
+    const wrong = settled.flatMap(([command, code]) => (isMutation('Bash', { command }) === (code === 1) ? [] : [`${JSON.stringify(command)}: the program ${code === 1 ? 'changed' : 'left'} the code file, isMutation says ${code !== 1}`]));
+    expect(wrong, wrong.join('\n')).toEqual([]);
+    expect(EDIT_ROWS.filter(([, code]) => code === 1).length).toBeGreaterThan(100);
+  });
+
+  it.skipIf(!hasPython3)('the edit prohibitions tool: an edit of any file is an edit, a command that edited one is not read-only', () => {
+    const rows = settled;
+    const edits = pyEval('user_prohibitions_after_compaction.py', '[module.has_delete_or_move(c) for c in argument]', rows.map(([command]) => command));
+    const wrongEdit = rows.flatMap(([command, , any], index) => (edits[index] === (any === 1) ? [] : [`${JSON.stringify(command)}: the program ${any === 1 ? 'edited' : 'did not edit'} a file, has_delete_or_move says ${edits[index]}`]));
+    expect(wrongEdit, wrongEdit.join('\n')).toEqual([]);
+    const changed = EDIT_ROWS.filter(([, , any]) => any === 1);
+    const readOnly = pyEval('user_prohibitions_after_compaction.py', '[module.is_read_only_command(c) for c in argument]', changed.map(([command]) => command));
+    const wrongRead = changed.flatMap(([command], index) => (readOnly[index] ? [`${JSON.stringify(command)}: the program edited a file, the command is judged read-only`] : []));
+    expect(wrongRead, wrongRead.join('\n')).toEqual([]);
+  });
+
+  it.skipIf(!hasPython3)('sed -n in any glued or long form, with no in-place option, is read-only; with one it is not', () => {
+    const cases: Array<[string, boolean]> = [
+      ['sed -n p config.py', true], ['sed -nE p config.py', true], ['sed -En p config.py', true], ['sed -ne p config.py', true], ['sed -n -e p config.py', true],
+      ['sed --quiet p config.py', true], ['sed --silent -E p config.py', true], ['sed -E -n -s -z p config.py a', true], ['sed -n -l 5 p config.py', true],
+      ['sed -E p config.py', false], ['sed p config.py', false], ['sed -n -i p config.py', false], ['sed -nEi p config.py', false], ['sed --quiet --in-place p config.py', false],
+      ['sed -n p config.py -i', false], ['sed -n --in-pl p config.py', false], ['sed -ni p config.py', false], ['sed -n -ie p config.py', false],
+    ];
+    const got = pyEval('user_prohibitions_after_compaction.py', '[module.is_read_only_command(c) for c in argument]', cases.map(([command]) => command));
+    const wrong = cases.flatMap(([command, want], index) => (got[index] === want ? [] : [`${JSON.stringify(command)}: read-only is ${got[index]}, the table says ${want}`]));
+    expect(wrong, wrong.join('\n')).toEqual([]);
+  });
+});
+
+describe('shell syntax matrix: the prefix of a command, for every tool that reads it', () => {
+  it('check: a runner is found behind assignments, redirections and the wrappers that are read, and nothing narrows it', () => {
+    const cases = casesFor('check');
+    verify('check', cases, cases.map(({ command }) => {
+      const got = classifyCommand(command);
+      return got.isCheck === true && got.narrowed === false;
+    }));
+  });
+
+  it('write: a code file written by tee and cp is found behind assignments, redirections and every launch wrapper', () => {
+    const cases = casesFor('write');
+    verify('write', cases, cases.map(({ command }) => isMutation('Bash', { command })));
+    // Control: with a documentation file as the target the same rows write nothing, so the result above comes from the
+    // command word and not from the prefix.
+    const controls: Case[] = PREFIXES.flatMap(([prefix]) => ['tee README.md', 'cp a README.md'].map((word) => ({ command: prefix + word, word, want: false, row: prefix })));
+    verify('write', controls, controls.map(({ command }) => isMutation('Bash', { command })));
+  });
+
+  it.skipIf(!hasPython3)('commit: git commit is found behind assignments, redirections and every launch wrapper', () => {
+    const cases = casesFor('commit');
+    verify('commit', cases, pyEval('user_prohibitions_after_compaction.py', '[module.command_matches("commit", c) for c in argument]', cases.map((c) => c.command)));
+  });
+
+  it.skipIf(!hasPython3)('consult: a consultation is the first command, found behind assignments, redirections and the wrappers that are read', () => {
+    const cases = casesFor('consult');
+    const expression = '[module.consult_kind("Bash", {"command": c}, module.Config(["ask-advisor"], "ADVISOR:", "STATUS:")) == "bash-ask-advisor" for c in argument]';
+    verify('consult', cases, pyEval('advisor_event_coverage.py', expression, cases.map((c) => c.command)));
+  });
+
+  it.skipIf(!hasPython3)('metrics: a test run and a consultation are found behind assignments, redirections and the wrappers that are read', () => {
+    const cases = casesFor('metrics');
+    const expression = '[module.classify_call("Bash", c, {"is_error": False}, None, re.compile("ask-advisor")) == kind for c, kind in argument]';
+    const argument = cases.map((c) => [c.command, c.word === 'pytest' ? 'S' : 'k']);
+    verify('metrics', cases, pyEval('executor_outcome_metrics.py', expression, argument));
+  });
+
+  it.skipIf(!hasPython3)('readonly: a command that changes state is found behind assignments, redirections and every launch wrapper, and a wrapper that runs nothing changes none', () => {
+    const cases = casesFor('readonly');
+    // got = the call is state-changing (not read-only): the command word `rm` was reached
+    const got = pyEval('user_prohibitions_after_compaction.py', '[not module.is_read_only_command(c) for c in argument]', cases.map((c) => c.command));
+    verify('readonly', cases, got);
+    // Control: the same prefixes in front of a command that only reads leave the call read-only unless the prefix writes a file.
+    const controls: Case[] = PREFIXES.map(([prefix]) => ({ command: `${prefix}ls -la`, word: 'ls -la', want: WRITES_A_FILE.test(prefix), row: prefix }));
+    verify('readonly', controls, pyEval('user_prohibitions_after_compaction.py', '[not module.is_read_only_command(c) for c in argument]', controls.map((c) => c.command)));
+  });
+
+  it('the table has the rows the readings are checked with', () => {
+    // A guard against an emptied table: every kind of prefix is present and every column has command words.
+    expect(PREFIXES.length).toBeGreaterThan(60);
+    for (const column of Object.keys(WORDS) as Column[]) expect(casesFor(column).length).toBeGreaterThan(80);
+    // Every wrapper of the table has rows, and the table is not read as empty.
+    expect(TABLE.wrappers).toEqual(['sudo', 'nohup', 'command', 'exec', 'nice', 'time', 'timeout', 'env']);
+    expect(TABLE.reads.length).toBeGreaterThan(120);
+    expect(TABLE.none.length).toBeGreaterThan(30);
+    expect(TARGET_IS_THE_WORD).toContain('echo hi > ');
+    expect(PREFIXES.map(([prefix]) => prefix)).toEqual(expect.arrayContaining(['A="b c" ', '2>&1 ', 'sudo ', 'A=1 > out.log ']));
+  });
+});

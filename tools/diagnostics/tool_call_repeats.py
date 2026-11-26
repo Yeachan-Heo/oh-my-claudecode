@@ -239,13 +239,22 @@ def is_polling(tool, inp, commands, extra_tools):
     return None
 
 
+def check_tree(dir_path):
+    """Raises OSError that names a directory below dir_path that cannot be read: glob would skip it without a word."""
+    def stop(error):
+        raise error
+    for _dirpath, _dirs, _files in os.walk(dir_path, onerror=stop):
+        pass
+
+
 def load_contexts(dir_path, rng, poll_commands, extra_tools):
     """Sessions and subagents from the transcripts directory as separate contexts. Returns
     (contexts, stats). Context: {'context': label, 'file': path, 'calls': [c]}.
-    A call: dict with fields id, tool, input, ts, position (line number in the file),
+    A call: dict with fields id, tool, input, ts, position (line number in the file), block (its place in the row),
     sig (call signature), result_sig (result digest or None without a received result),
     error (is_error), result_pos (tool_result line number or None), polling (bool),
     polling_kind, subagent_type, prompt. Call order: file line order."""
+    check_tree(dir_path)
     patterns = [
         os.path.join(dir_path, '*', '*', 'subagents', '**', 'agent-*.jsonl'),
         os.path.join(dir_path, '*', '*.jsonl'),
@@ -293,7 +302,7 @@ def load_contexts(dir_path, rng, poll_commands, extra_tools):
                             ts = parse_ts(row.get('timestamp'))
                             if ts is None:
                                 stats['calls_without_ts'] += 1
-                            for block in content:
+                            for block_index, block in enumerate(content):
                                 if not (isinstance(block, dict) and block.get('type') == 'tool_use'):
                                     continue
                                 tool_use_id = block.get('id')
@@ -313,6 +322,7 @@ def load_contexts(dir_path, rng, poll_commands, extra_tools):
                                     'ts': ts,
                                     'ts_raw': row.get('timestamp') if isinstance(row.get('timestamp'), str) else '',
                                     'position': position,
+                                    'block': block_index,
                                     'sig': call_signature(str(tool), inp),
                                     'result_sig': None,
                                     'error': None,
@@ -331,7 +341,7 @@ def load_contexts(dir_path, rng, poll_commands, extra_tools):
                                     if tid and tid not in results:
                                         results[tid] = (position, block.get('content'), block.get('is_error') is True)
             except OSError:
-                continue
+                raise  # a transcript that cannot be read stops the run: it is not left out of the counts
             for w in calls:
                 result = results.get(w['id'])
                 if result is not None:
@@ -545,6 +555,7 @@ def collect(calls_by_context, options):
                 pairs_after_result += 1
                 kind = 'b_after_result'
             duplicate_calls.add((label, agents_with_prompt[pair['j']]['position'],
+                                 agents_with_prompt[pair['j']]['block'],
                                  agents_with_prompt[pair['j']]['id'],
                                  agents_with_prompt[pair['j']]['tool']))
             pairs_by_tool[agents_with_prompt[pair['i']]['tool']] += 1
@@ -747,7 +758,7 @@ def collect(calls_by_context, options):
               'pairs': pairs_no_result + pairs_after_result,
               'duplicate_calls': len(duplicate_calls),
               'pairs_by_tool': dict(pairs_by_tool),
-              'duplicates_by_tool': dict(Counter(tool_name for _, _, _, tool_name in duplicate_calls)),
+              'duplicates_by_tool': dict(Counter(call[-1] for call in duplicate_calls)),
               'denominator': dict(b_denominator),
               'agent_without_prompt': agent_without_prompt},
         'c': {'subsequence': {'series': c_total['subsequence'][0], 'calls': c_total['subsequence'][1],
@@ -888,7 +899,10 @@ def main():
         'min_support': args.min_support,
     }
 
-    contexts, stats = load_contexts(args.transcripts, (o, d), poll_commands, extra_tools)
+    try:
+        contexts, stats = load_contexts(args.transcripts, (o, d), poll_commands, extra_tools)
+    except OSError as err:
+        usage_error(f'cannot read {err.filename or args.transcripts}: {err.strerror}')
     ranged = calls_in_range(contexts, (o, d))
     total_calls = sum(len(v) for v in ranged.values())
     stats['calls'] = total_calls

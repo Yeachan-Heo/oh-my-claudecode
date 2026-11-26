@@ -27,6 +27,7 @@ The control arm n is the number of drops in files without any compact row in the
 """
 
 import argparse
+import codecs
 import json
 import math
 import os
@@ -268,17 +269,30 @@ def default_projects_dir():
     return os.path.join(base, "projects")
 
 
+def raise_error(error):
+    raise error
+
+
+def reject_dangling(path):
+    """A link to a transcript that is gone is a read error, never a file that is left out or only counted: os.stat follows the
+    link and raises OSError, which names the link."""
+    if os.path.islink(path):
+        os.stat(path)
+
+
 def find_transcripts(projects):
     """List of (path, agent_id) transcript files under --projects, sorted by path.
 
-    Main: <projects>/<dir>/<id>.jsonl; subagents: <projects>/<dir>/<id>/subagents/agent-*.jsonl.
+    Main: <projects>/<dir>/<id>.jsonl; subagents: <projects>/<dir>/<id>/subagents/agent-*.jsonl. A directory below
+    --projects that cannot be read raises OSError: it is not skipped.
     """
     found = []
-    for parent, _dirs, files in os.walk(projects):
+    for parent, _dirs, files in os.walk(projects, onerror=raise_error):
         for name in files:
             if not name.endswith(".jsonl"):
                 continue
             path = os.path.join(parent, name)
+            reject_dangling(path)
             rel = os.path.relpath(path, projects)
             parts = rel.split(os.sep)
             if len(parts) == 2 and parts[1].endswith(".jsonl"):
@@ -867,6 +881,23 @@ def agent_from_path(path):
     return None
 
 
+def input_problem(path):
+    """Why a file named on the command line cannot be used (it cannot be read, or its bytes are not UTF-8), or None.
+    The files found in a directory are read leniently, but a file the caller named is checked whole before any result."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1 << 20)
+                decoder.decode(chunk, final=not chunk)
+                if not chunk:
+                    return None
+    except OSError as error:
+        return error.strerror or str(error)
+    except UnicodeDecodeError:
+        return "not valid UTF-8"
+
+
 def main(argv):
     args = parse_args(argv)
     if args.to:
@@ -880,23 +911,43 @@ def main(argv):
     if not os.path.isfile(args.compact):
         print("error: missing --compact file: " + args.compact, file=sys.stderr)
         return 2
+    problem = input_problem(args.compact)
+    if problem is not None:
+        print(f"error: --compact {args.compact}: {problem}", file=sys.stderr)
+        return 2
     files = []
     if args.transcript:
         for path in args.transcript:
             if not os.path.isfile(path):
                 print("error: missing --transcript file: " + path, file=sys.stderr)
                 return 2
+            problem = input_problem(path)
+            if problem is not None:
+                print(f"error: --transcript {path}: {problem}", file=sys.stderr)
+                return 2
             files.append((path, agent_from_path(path)))
     else:
         if not os.path.isdir(args.projects):
             print("error: missing --projects dir: " + args.projects, file=sys.stderr)
             return 2
-        for path, agent_id in find_transcripts(args.projects):
+        try:
+            found = find_transcripts(args.projects)
+        except OSError as error:
+            print(f"error: cannot read {error.filename or args.projects}: {error.strerror}", file=sys.stderr)
+            return 2
+        for path, agent_id in found:
             try:
                 if os.path.getmtime(path) >= from_f:
                     files.append((path, agent_id))
             except OSError:
                 continue
+    try:
+        for path, _agent_id in files:  # a transcript that cannot be read stops the run, it is not left out of the counts
+            with open(path, "rb"):
+                pass
+    except OSError as error:
+        print(f"error: cannot read {error.filename or 'a transcript'}: {error.strerror}", file=sys.stderr)
+        return 2
     files.sort(key=lambda p: p[0])
     journal_data = load_journal(args.compact)
     journal_dict = {}

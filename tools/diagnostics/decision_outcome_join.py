@@ -231,8 +231,8 @@ def read_journal(directory, prefix, period):
     rotated_pattern = re.compile(rf'^{re.escape(prefix)}-\d{{8}}-\d{{6}}(?:-\d+)?\.jsonl$')
     try:
         rotated = sorted(f for f in os.listdir(directory) if rotated_pattern.match(f))
-    except OSError:
-        return [], 0
+    except OSError as e:  # a journal directory that cannot be listed would leave its rotated files out of the counts
+        usage_error(f'cannot read {e.filename or directory}: {e.strerror}')
     paths = [os.path.join(directory, f) for f in rotated] + [os.path.join(directory, prefix + '.jsonl')]
     rows = []
     bad_ts = 0
@@ -257,8 +257,8 @@ def read_journal(directory, prefix, period):
                     if not in_period(ts, period):
                         continue
                     rows.append(r)
-        except OSError:
-            continue
+        except OSError as e:  # an existing journal file that cannot be read is never left out of the counts
+            usage_error(f'cannot read {path}: {e.strerror}')
     return rows, bad_ts
 
 
@@ -288,11 +288,15 @@ def text_of_content(content):
     return ' '.join(b['text'] for b in content if isinstance(b, dict) and isinstance(b.get('text'), str))
 
 
+def raise_error(error):
+    raise error
+
+
 def scan_transcript(path, prices):
     """Scan of an agent transcript: tokens and cache (sums over all turns with usage), turns (unique message.id),
     tool calls (tool_use blocks), characters of thinking blocks, reasoning (usage or block lengths), the last
     stop_reason, is_error and api_error_status, and the list of priced requests (family in the price table).
-    Returns None when the file is missing."""
+    Returns None when the file is missing; a file that exists and cannot be read raises OSError."""
     if not os.path.isfile(path):
         return None
     last = {}                # message.id -> (model, usage after merging)
@@ -360,7 +364,7 @@ def scan_transcript(path, prices):
                 else:
                     last[key] = (msg.get('model'), merge_usage({}, u))
     except OSError:
-        return None
+        raise  # a transcript that exists and cannot be read stops the run: it is not counted as a missing one
     if ended_with_api_error:
         is_error = True
         if api_error_status is None:
@@ -666,6 +670,11 @@ def main():
         usage_error(f'--journal is not a directory: {a.journal}')
     if not os.path.isdir(a.transcripts):
         usage_error(f'--transcripts is not a directory: {a.transcripts}')
+    try:
+        for _dirpath, _dirs, _files in os.walk(a.transcripts, onerror=raise_error):  # glob skips an unreadable directory
+            pass
+    except OSError as e:
+        usage_error(f'cannot read {e.filename or a.transcripts}: {e.strerror}')
     o = parse_ts(a.date_from) if a.date_from else None
     d = parse_ts(a.date_to) if a.date_to else None
     if a.date_from and o is None:
@@ -702,6 +711,8 @@ def main():
             try:
                 with open(p, encoding='utf8') as f:
                     m = json.load(f)
+            except OSError as e:  # a meta file that cannot be read stops the run; only a file that is no JSON is left out
+                usage_error(f'cannot read {p}: {e.strerror}')
             except Exception:
                 continue
             tid = m.get('toolUseId')
@@ -729,7 +740,10 @@ def main():
         seen.add(tid)
         p, m = found
         transcript_path = p[:-len('.meta.json')] + '.jsonl'
-        tr = scan_transcript(transcript_path, prices)
+        try:
+            tr = scan_transcript(transcript_path, prices)
+        except OSError as e:
+            usage_error(f'cannot read {e.filename or transcript_path}: {e.strerror}')
         if tr is None:
             distribution['no_transcript'] += 1
             continue
@@ -839,12 +853,18 @@ def main():
         'prices': {key: list(rates) for key, rates in prices.items()},
     }
     if a.tsv:
-        write_tsv(a.tsv, agents)
+        try:
+            write_tsv(a.tsv, agents)
+        except OSError as e:
+            usage_error(f'cannot write --tsv {a.tsv}: {e.strerror}')
         print()
         print(f'TSV: {a.tsv} ({len(agents)} agents)')
     if a.json:
-        with open(a.json, 'w', encoding='utf8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=1)
+        try:
+            with open(a.json, 'w', encoding='utf8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=1)
+        except OSError as e:
+            usage_error(f'cannot write --json {a.json}: {e.strerror}')
         print()
         print(f'JSON: {a.json}')
     return 0

@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import codecs
 import json
 import os
 import re
@@ -55,9 +56,64 @@ ERROR_FIELD_STATUS = {}  # error field value -> HTTP status; empty by default, e
 MODEL_SUFFIX = re.compile(r"\[[^\]]*\]$")  # context-window suffix such as "[1m]"
 # a final answer whose trimmed end is a dangling operator or opener, or a declaration or return keyword
 DANGLING_END = re.compile(r"(?:,|&&|\|\||=>|[+\-*/%=]|[(\[{]|:|\b(?:const|let|var|function|return))$")
-ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-SECONDS_ARG = re.compile(r"^\d+(?:\.\d+)?[a-zA-Z]?$")
-NICE_ARG = re.compile(r"^-?\d+$")
+ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
+REDIRECTION_OPERATOR = re.compile(r"^(?:&>>?|>>|>\||>&|<&|<>|<<<|<<-?|>|<)$")
+FILE_DESCRIPTOR = re.compile(r"^(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})$")
+# Launch wrappers that are taken off in front of the command word. A wrapper does not change what the command behind it does, so
+# `sudo pytest` and `timeout 60 pytest` read like the bare command. The table below is the same text in check_classifier.mjs and
+# in the Python tools of this directory that look for a command word (each tool is a standalone script, and a test compares the
+# copies). One line per kind of option of a wrapper: `flag` takes no value, `value` takes the next word or the rest of the word
+# (`-uroot`, `--user=root`), `optional` takes a value only as `--name=value`, `number` is an option that is a number (`nice
+# -5`), `stop` means that the wrapper then runs no command (`sudo -l`, `command -v`, `--help`), `assign` that `NAME=VALUE` words
+# may follow the options (`env`, `sudo`, `time`: behind the others the shell would run `NAME=VALUE`), `duration` that a duration
+# comes before the command (a number as strtod reads it, with an optional s, m, h or d). The options are those of `--help` of
+# sudo 1.9.16, GNU coreutils 9.7 (timeout, nice, env, nohup), bash 5.2 (`help command`, `help exec`) and GNU time (the man page
+# of time(1)). Short options may be glued (`-nu root`), a long option may be abbreviated to a name that is unique in the wrapper
+# (`--adj=3`), and `--` ends the options. A wrapper with no command behind it, a `stop` option, a bad duration and an assignment
+# behind a wrapper that takes none end the reading: no command runs, so none is read. At most eight wrappers in a row are taken
+# off. An option that is not in the table ends the reading too: the wrapper stays the program word and nothing is guessed.
+LAUNCH_TABLE_TEXT = """sudo assign
+sudo flag -A -b -B -E -H -i -k -N -n -P -S -s --askpass --background --bell --login --no-update --non-interactive --preserve-groups --reset-timestamp --set-home --shell --stdin
+sudo value -C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user
+sudo optional --preserve-env
+sudo stop -e -K -l -V -v --edit --help --list --remove-timestamp --validate --version
+nohup stop --help --version
+command flag -p
+command stop -V -v
+exec flag -c -l
+exec value -a
+nice number
+nice value -n --adjustment
+nice stop --help --version
+time assign
+time flag -a -p -q -v --append --portability --quiet --verbose
+time value -f -o --format --output
+time stop -V -h --help --version
+timeout duration
+timeout flag -f -p -v --foreground --preserve-status --verbose
+timeout value -k -s --kill-after --signal
+timeout stop --help --version
+env assign
+env flag - -i -S -v --debug --ignore-environment --list-signal-handling --split-string
+env value -a -C -u --argv0 --chdir --unset
+env optional --block-signal --default-signal --ignore-signal
+env stop -0 --help --null --version"""
+LAUNCH_TABLE = {}
+for _line in LAUNCH_TABLE_TEXT.split("\n"):
+    _name, _kind, *_options = _line.split(" ")
+    _spec = LAUNCH_TABLE.setdefault(_name, {"flag": set(), "value": set(), "optional": set(), "stop": set(), "long": [], "assign": False, "duration": False, "number": False})
+    if _kind in ("assign", "duration", "number"):
+        _spec[_kind] = True
+    else:
+        _spec[_kind].update(_options)
+        _spec["long"].extend(option for option in _options if option.startswith("--"))
+# A duration as strtod reads it (a decimal or hex number, `inf`) with an optional unit; no nested repeats, so it matches in linear time.
+DURATION_RE = re.compile(r"\+?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?)[smhd]?\Z")
+NUMBER_OPTION_RE = re.compile(r"--?[0-9]+\Z")
+MAX_WRAPPERS = 8
+SHLEX_MAX_LENGTH = 100000  # only a command longer than this is checked for a very long word
+SHLEX_MAX_WORD = 50000  # a command with a longer word is split on whitespace and operators, without reading quotes
+WORD_RE = re.compile(r"""(?:[^\s'"\\]|\\.|'[^']*'|"(?:[^"\\]|\\.)*")+""", re.DOTALL)
 SEGMENT_OPERATORS = ("&&", "||", ";", "|", "&")
 AGENT_FILE = re.compile(r"^agent-(.+)\.jsonl$")
 SUBAGENT_DIR = "subagents"
@@ -72,6 +128,23 @@ METRIC_KEYS = [
 ]
 DICT_METRIC_KEYS = ["exhaustion_api_by_status", "api_errors_by_error_field"]  # not summed per provider
 FINAL_FLAGS = ("empty", "cut_off", "odd_fences", "repeated_line", "ended_with_api_error")
+
+
+def input_problem(path):
+    """Why a file named on the command line cannot be used (it cannot be read, or its bytes are not UTF-8), or None.
+    The files found in a directory are read leniently, but a file the caller named is checked whole before any result."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1 << 20)
+                decoder.decode(chunk, final=not chunk)
+                if not chunk:
+                    return None
+    except OSError as error:
+        return error.strerror or str(error)
+    except UnicodeDecodeError:
+        return "not valid UTF-8"
 
 
 def fail(message):
@@ -474,7 +547,105 @@ def strip_comments(line):
     return line
 
 
-HEREDOC = re.compile(r"<<-?\s*(?!<)(['\"]?)([A-Za-z0-9_][A-Za-z0-9_-]*)\1")
+HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*")  # not a here-string (<<<)
+HEREDOC_WORD_END = re.compile(r"[\s;&|()<>]")
+
+
+def heredoc_delimiter(line, start):
+    """The delimiter word of a here-document operator whose word starts at `start`, as the shell reads it: unquoted characters up
+    to a blank or one of ;&|()<>, a backslash taking the next character literally, and '...' or "..." pieces (the quotes are
+    removed: <<'EOF-TEXT', <<"A B" and <<E\\OF have the delimiters EOF-TEXT, A B and EOF). Returns (delimiter, end), or None when
+    there is no word or a quote has no end on the line."""
+    tag = []
+    at = start
+    length = len(line)
+    while at < length:
+        char = line[at]
+        if char == "\\":
+            if at + 1 >= length:
+                break
+            tag.append(line[at + 1])
+            at += 2
+        elif char == "'":
+            close = line.find("'", at + 1)
+            if close == -1:
+                return None
+            tag.append(line[at + 1:close])
+            at = close + 1
+        elif char == '"':
+            inner = at + 1
+            while inner < length and line[inner] != '"':
+                if line[inner] == "\\" and inner + 1 < length and line[inner + 1] in '"\\$`':
+                    inner += 1
+                tag.append(line[inner])
+                inner += 1
+            if inner >= length:
+                return None
+            at = inner + 1
+        elif HEREDOC_WORD_END.match(char):
+            break
+        else:
+            tag.append(char)
+            at += 1
+    word = "".join(tag)
+    return (word, at) if word else None
+
+
+class QuoteScan:
+    """Reads shell text forward and tells whether a position holds text, not shell: inside single quotes, inside double quotes
+    (a `$(` there opens a command again, so `"$(cat <<EOF ...)"` keeps its here-document) or in a `#` comment. Positions come in
+    increasing order, and the ranges given to skip() (cut here-document bodies) are not read, so a quote in a body opens no string."""
+
+    def __init__(self, text):
+        self.text = text
+        self.at = 0
+        self.frames = []  # "'", '"' or "(" for each open construct
+        self.comment_end = 0
+        self.jumps = []  # (start, end) ranges that are not read
+
+    def skip(self, start, end):
+        self.jumps.append((start, end))
+
+    def inert(self, to):
+        text = self.text
+        frames = self.frames
+        if to < self.comment_end:
+            return True
+        while self.at < to:
+            if self.jumps and self.at >= self.jumps[0][0]:
+                self.at = max(self.at, self.jumps.pop(0)[1])
+                continue
+            char = text[self.at]
+            top = frames[-1] if frames else ""
+            if top == "'":
+                if char == "'":
+                    frames.pop()
+            elif top == '"':
+                if char == "\\":
+                    self.at += 1
+                elif char == '"':
+                    frames.pop()
+                elif char == "$" and text[self.at + 1:self.at + 2] == "(":
+                    frames.append("(")
+                    self.at += 1
+            elif char == "\\":
+                self.at += 1
+            elif char in "'\"":
+                frames.append(char)
+            elif char == "(":
+                frames.append("(")
+            elif char == ")":
+                if frames:
+                    frames.pop()
+            elif char == "#" and (self.at == 0 or text[self.at - 1].isspace() or text[self.at - 1] in ";&|("):
+                newline = text.find("\n", self.at)
+                self.comment_end = len(text) if newline == -1 else newline
+                self.at = self.comment_end
+                if to < self.comment_end:
+                    return True
+                continue
+            self.at += 1
+        return bool(frames) and frames[-1] in ("'", '"')
 
 
 def drop_heredocs(command):
@@ -490,23 +661,121 @@ def drop_heredocs(command):
             if comparable == delimiter:
                 expected.popleft()
             continue
+        # The operators are found from the end of the previous one, and the line is joined once: no operator costs a pass over the line.
+        pieces = []
+        position = 0
+        search = 0
+        quotes = QuoteScan(line)
         while True:
-            match = HEREDOC.search(line)
+            match = HEREDOC.search(line, search)
             if not match:
                 break
-            expected.append((match.group(2), match.group(1) == "-"))
-            line = line[:match.start()] + line[match.end():]
-        kept.append(line)
+            search = match.end()
+            if quotes.inert(match.start()):
+                continue  # `echo "<<EOF"` and `# <<EOF` hold text, not an operator
+            word = heredoc_delimiter(line, match.end())
+            if word is None:
+                continue
+            search = word[1]
+            expected.append((word[0], match.group(1) == "-"))
+            pieces.append(line[position:match.start()])
+            position = word[1]
+        pieces.append(line[position:])
+        kept.append("".join(pieces))
     return "\n".join(kept)
+
+
+def closing_backtick(text, index):
+    """Index of the first unescaped backtick at or after index, or len(text) when there is none."""
+    length = len(text)
+    while index < length:
+        if text[index] == "\\":
+            index += 2
+        elif text[index] == "`":
+            return index
+        else:
+            index += 1
+    return length
+
+
+def matching_parenthesis(text, index):
+    """Index of the ")" that closes a "$(" whose body starts at text[index], or len(text) when none does. Quotes,
+    escapes and backticks inside hold no parenthesis."""
+    length = len(text)
+    depth = 1
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 1
+        elif char == "'":
+            close = text.find("'", index + 1)
+            if close == -1:
+                return length
+            index = close
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+        elif char == "`":
+            index = closing_backtick(text, index + 1)
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return length
+
+
+def mask_substitutions(text):
+    """Text with every command substitution outside quotes ("$(...)", a backtick pair) replaced by "_", so the
+    substitution is one part of the word it stands in (`A=$(date) pytest` has the assignment value `A=_`) and its
+    end opens no command position (`echo $(date) pytest` runs only echo). The body is not read as a command. A
+    substitution with an empty body expands to nothing and leaves no word. A substitution with no end runs to the
+    end of the text."""
+    out = []
+    length = len(text)
+    start = 0
+    index = 0
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 2
+        elif char == "'":
+            close = text.find("'", index + 1)
+            index = length if close == -1 else close + 1
+        elif char == '"':
+            index += 1
+            while index < length and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+            index += 1
+        elif char == "`" or (char == "$" and text[index + 1:index + 2] == "("):
+            end = closing_backtick(text, index + 1) if char == "`" else matching_parenthesis(text, index + 2)
+            body = text[index + (1 if char == "`" else 2):end]
+            out.append(text[start:index] + ("_" if body.strip() else ""))  # an empty substitution expands to nothing
+            index = end + 1
+            start = index
+        else:
+            index += 1
+    out.append(text[start:])
+    return "".join(out)
+
+
+def longest_word(text):
+    """The length of the longest shell word of the text (a quoted string is part of its word), read in one pass."""
+    return max((match.end() - match.start() for match in WORD_RE.finditer(text)), default=0)
 
 
 def command_segments(command):
     """Segments of a Bash command as word lists, split at && || ; | & and new lines.
     Comments and heredoc bodies are removed first. shlex is used; on a shlex error a plain split is used."""
     text = "\n".join(strip_comments(line) for line in command.replace("\r", "\n").split("\n"))
-    text = drop_heredocs(text)
+    text = mask_substitutions(drop_heredocs(text))
     text = text.replace("\n", ";")
     try:
+        if len(text) > SHLEX_MAX_LENGTH and longest_word(text) > SHLEX_MAX_WORD:
+            raise ValueError("word too long for shlex")  # shlex is quadratic in the length of a word: such a command is split plainly
         lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         lexer.commenters = ""
@@ -527,37 +796,91 @@ def command_segments(command):
     return segments
 
 
+def option_width(word, spec):
+    """How many words the option word of the wrapper takes: 1, or 2 when its value is the next word; 0 when the wrapper then runs
+    no command; -1 when the option is not in the table."""
+    if spec["number"] and NUMBER_OPTION_RE.match(word):
+        return 1
+    if word.startswith("--"):
+        given, equals, _value = word.partition("=")
+        named = [given] if given in spec["long"] else [full for full in spec["long"] if full.startswith(given)]
+        if len(named) != 1:
+            return -1
+        if named[0] in spec["stop"]:
+            return 0
+        return 2 if not equals and named[0] in spec["value"] else 1
+    for at in range(1, len(word)):
+        option = "-" + word[at]
+        if option in spec["stop"]:
+            return 0
+        if option in spec["value"]:
+            return 1 if at + 1 < len(word) else 2
+        if option not in spec["flag"]:
+            return -1
+    return 1
+
+
+# As before the table, `env` and `timeout` take any option that starts with a dash as a flag; the others end the reading at one
+# that is not in the table.
+SKIP_UNKNOWN_OPTION = frozenset(("env", "timeout"))
+
+
+def launch_command_index(words, at, skip_unknown=False):
+    """The index of the command word behind the launch wrapper of LAUNCH_TABLE at words[at] and its options, or None when no
+    command runs behind it. A word that is None (a boundary) ends the command. An option that is not in the table ends the
+    reading, or is skipped as a flag without a value when `skip_unknown` is set."""
+    spec = LAUNCH_TABLE[os.path.basename(words[at])]
+    durations = 1 if spec["duration"] else 0
+    options = True
+    count = len(words)
+    index = at + 1
+    while index < count and words[index] is not None:
+        word = words[index]
+        if options and word == "--":
+            options = False
+            index += 1
+        elif options and word.startswith("-") and (len(word) > 1 or word in spec["flag"]):
+            width = option_width(word, spec)
+            if width < 0:
+                if not skip_unknown:
+                    return None
+                width = 1
+            if width == 0 or (width == 2 and (index + 1 >= count or words[index + 1] is None)):
+                return None
+            index += width
+        elif durations > 0:
+            if DURATION_RE.match(word) is None:
+                return None
+            durations -= 1
+            options = False
+            index += 1
+        elif ENV_ASSIGNMENT.match(word) and not spec["assign"]:
+            return None
+        else:
+            return index  # an assignment behind a wrapper that takes one is read by the caller, which skips assignments
+    return None
+
+
 def program_of_segment(words):
-    """(program, arguments) after removing prefixes: environment assignments, env with options, timeout with
-    options and seconds, nice with a value, time, command, exec."""
+    """(program, arguments) after removing prefixes: environment assignments, redirections (`> out`, `2>&1`, `< in`) and the
+    launch wrappers of LAUNCH_TABLE with their options. A wrapper behind which no command runs stays the program."""
     i = 0
     count = len(words)
+    wrappers = 0
     while i < count:
         word = words[i]
         if ENV_ASSIGNMENT.match(word):
             i += 1
-        elif word == "env":
-            i += 1
-            while i < count:
-                token = words[i]
-                if token in ("-u", "--unset"):
-                    i += 2
-                elif token.startswith("-") or ENV_ASSIGNMENT.match(token):
-                    i += 1
-                else:
-                    break
-        elif word in ("time", "command", "exec"):
-            i += 1
-        elif word == "timeout":
-            i += 1
-            while i < count and (words[i].startswith("-") or SECONDS_ARG.match(words[i])):
-                i += 1
-        elif word == "nice":
-            i += 1
-            if i < count and words[i] == "-n":
-                i += 2
-            elif i < count and NICE_ARG.match(words[i]):
-                i += 1
+        elif REDIRECTION_OPERATOR.match(word):  # the operator and its target are no command word
+            i += 2
+        elif FILE_DESCRIPTOR.match(word) and i + 1 < count and REDIRECTION_OPERATOR.match(words[i + 1]):
+            i += 3
+        elif os.path.basename(word) in LAUNCH_TABLE:
+            wrappers += 1
+            behind = None if wrappers > MAX_WRAPPERS else launch_command_index(words, i, os.path.basename(word) in SKIP_UNKNOWN_OPTION)
+            if behind is None:
+                break
+            i = behind
         else:
             break
     if i < count:
@@ -956,6 +1279,9 @@ def main(argv):
     for path in args.transcript:
         if not os.path.isfile(path):
             return fail(f"transcript file does not exist: {path}")
+        problem = input_problem(path)
+        if problem is not None:
+            return fail(f"transcript file {path}: {problem}")
     for label, value in (("--from", args.date_from), ("--to", args.date_to)):
         if value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
             return fail(f"{label} expects YYYY-MM-DD, got: {value}")
