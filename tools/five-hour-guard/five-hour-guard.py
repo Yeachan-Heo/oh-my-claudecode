@@ -458,11 +458,15 @@ def strip_comments(command):
 SUBSTITUTION_STARTS = ('$(', '$[', '$?', '$$', '$!', '$#', '$*', '$@', '$-')   # a command substitution, an arithmetic expansion, and the special parameters without braces (the status of the last command, the PID of the shell, the PID of the last job, the number of arguments, the arguments, the options)
 
 
+EXTGLOB_STARTS = ('?(', '*(', '+(', '@(', '!(')   # the operators of an extended glob pattern, which Bash reads where `extglob` is on (`bash -O extglob`, `shopt -s extglob` on an earlier line, `BASHOPTS` in the environment)
+
+
 def has_substitution(command):
-    """Whether the text has a command substitution `$(...)`, an arithmetic expansion `$((...))` or `$[...]`, a backtick, or a special parameter
-    without braces (`$?`, `$$`, `$!`, `$#`, `$*`, `$@`, `$-`) that a shell would expand: outside single quotes (also those of `$'...'`, where a
-    backslash escapes) and not after a backslash, so also inside double quotes. The result of a program, and the value of a special parameter
-    of the shell of the session, cannot be known or modelled, so the file that it names is not found by reading the words."""
+    """Whether the text has a command substitution `$(...)`, an arithmetic expansion `$((...))` or `$[...]`, a backtick, a special parameter
+    without braces (`$?`, `$$`, `$!`, `$#`, `$*`, `$@`, `$-`) that a shell would expand, or an operator of an extended glob pattern (`@(`, `?(`,
+    `*(`, `+(`, `!(`): outside single quotes (also those of `$'...'`, where a backslash escapes) and not after a backslash (the substitutions also
+    inside double quotes, a pattern only outside quotes). The result of a program, the value of a special parameter of the shell of the session
+    and the files that an extended pattern matches cannot be known or modelled, so the file that they name is not found by reading the words."""
     quote, i = None, 0
     while i < len(command):
         c = command[i]
@@ -484,7 +488,7 @@ def has_substitution(command):
         elif command.startswith("$'", i):
             quote = "$'"
             i += 1
-        elif c == '`' or command.startswith(SUBSTITUTION_STARTS, i):
+        elif c == '`' or command.startswith(SUBSTITUTION_STARTS, i) or command.startswith(EXTGLOB_STARTS, i):
             return True
         i += 1
     return False
@@ -779,7 +783,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     exclude = [] if exclude is None else exclude
     command = join_continuations(command) if depth == 0 and isinstance(command, str) else command   # (the text of a quoted word has had its continuations removed with the command around it)
     if has_substitution(command if depth > 0 else strip_comments(command)):   # at depth 0 a comment is no command (as in command_tokens); a quoted command is read as it is
-        raise ScanIncomplete('command has a command substitution or a special parameter of the shell, whose value cannot be known')
+        raise ScanIncomplete('command has a command substitution, a special parameter of the shell or an extended glob pattern, whose result cannot be known')
     tokens = command_tokens(command, depth > 0)
     if tokens is None:
         return []   # a command with a NUL character (no process can be started with one in its arguments) or one the shell cannot parse runs nothing

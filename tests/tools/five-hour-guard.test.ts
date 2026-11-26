@@ -2342,6 +2342,41 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start(`python3 "${hooks}/a$FHG_NOBODY"`, a2).status, 'a variable of the session ends the word').toBe(2);
   });
 
+  it('an extended glob pattern (@(a|b), ?(a), *(a), +(a), !(a)) outside quotes in the command of another hook is a word that the scan cannot expand, so the command is not read to its end: the guard refuses to start; a quoted pattern and the plain * and ? are read as before', () => {
+    const f = fixture('foreign-extglob', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, file: string) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: file, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, '# the script that the command runs\n', 'utf8');
+    if (HAS_BASH) {   // what Bash makes of the patterns where the option is on, and what it does not do with them
+      for (const word of ['a@(udit|safe)', 'a?(x)udit', 'a*(x)udit', 'au+(d)it', '!(x)udit']) {
+        expect(spawnSync('bash', ['-O', 'extglob', '-c', `printf %s ${hooks}/${word}`], { encoding: 'utf8' }).stdout, `the file that Bash runs for ${word}`).toBe(audit);
+      }
+      expect(spawnSync('bash', ['-c', `printf %s ${hooks}/'a@(udit|safe)'`], { encoding: 'utf8' }).stdout, 'a quoted pattern is text').toBe(`${hooks}/a@(udit|safe)`);
+    }
+    for (const command of [`bash -O extglob -c 'python3 ${hooks}/a@(udit|safe)'`, `python3 ${hooks}/a@(udit|safe)`, `python3 ${hooks}/a?(x)udit`, `python3 ${hooks}/a*(x)udit`, `python3 ${hooks}/au+(d)it`, `python3 ${hooks}/!(x)udit`, `bash -c 'shopt -s extglob\npython3 ${hooks}/a@(udit|safe)'`, `true; python3 "${hooks}"/a@(udit|safe)`]) {
+      const r = start(command, audit);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(command)).toMatch(/not read to its end/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+    for (const command of [`python3 ${hooks}/a*it`, `python3 ${hooks}/a?dit`]) {   // the plain patterns are still expanded: the file is found and is the state file
+      const r = start(command, audit);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(command)).toMatch(/are the same file/);
+    }
+    for (const command of [`python3 '${hooks}/a@(udit|safe)'`, `python3 "${hooks}/a@(udit|safe)"`, `python3 ${hooks}/a\\@\\(udit\\|safe\\)`, `python3 ${hooks}/other`, `echo '(a)' x`]) {
+      const r = start(command, audit);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a relative entry of a PATH (of the command, of the env of settings.json) is looked up from each directory that the command names (cd DIR; PATH=bin audit), also with env -C, an entry of . or an empty one; a directory that does not exist adds nothing', () => {
     const f = fixture('foreign-relative-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
