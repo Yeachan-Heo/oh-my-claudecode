@@ -268,6 +268,88 @@ assert_contains "reports warning about failed injection" "warn|" "$result"
 assert_contains "prints recovery instructions" "tmux attach-session" "$result"
 assert_contains "launch reports launched| despite injection failure" "launched|" "$result"
 
+# ── psm_launch_claude with literal prompt (feature-session path) ─────────────────
+
+echo ""
+echo "=== psm_launch_claude with literal prompt (feature-session path) ==="
+
+# Reload real functions to test literal prompt behavior
+source "${PSM_LIB_DIR}/tmux.sh"
+
+# Mock state for literal prompt tests
+MOCK_PANE=""
+TMUX_SEND_CALLS=()
+WAIT_FOR_PROMPT_CALLED=false
+
+# Mock tmux: capture-pane returns MOCK_PANE, send-keys records calls, has-session succeeds
+tmux() {
+    local subcmd="$1"
+    case "$subcmd" in
+        capture-pane)
+            [[ $# -ge 3 ]] && shift 2  # Skip -t and session name
+            [[ $# -ge 1 ]] && shift    # Skip -p
+            printf '%s' "$MOCK_PANE"
+            ;;
+        has-session) return 0 ;;
+        send-keys)
+            TMUX_SEND_CALLS+=("$*")
+            ;;
+        display-message)
+            # Return a path that does NOT contain the literal prompt as a file
+            # This triggers the literal prompt path (else branch)
+            echo "${TMPDIR_TEST}"
+            ;;
+        *)           : ;;
+    esac
+}
+
+# Mock sleep to avoid delays in tests
+sleep() { :; }
+
+# 22. Literal prompt waits for REPL before sending (issue #5149 thread a)
+# Set MOCK_PANE to a ready REPL prompt
+MOCK_PANE=$'Welcome to Claude Code
+>'
+TMUX_SEND_CALLS=()
+psm_launch_claude "test-session" "Feature complete!" 2>&1 > /dev/null
+# Note: TMUX_SEND_CALLS[0] is the initial "claude" launch, [1] is the literal prompt, [2] is the Enter
+assert_contains "literal prompt sent when REPL ready" "send-keys -t test-session -l -- Feature complete!" "${TMUX_SEND_CALLS[1]:-}"
+assert_contains "Enter sent after literal prompt" "send-keys -t test-session Enter" "${TMUX_SEND_CALLS[2]:-}"
+
+# 23. Literal prompt times out if no REPL prompt (issue #5149 thread a)
+# Set MOCK_PANE to show a trust dialog (has '?' but no '>')
+MOCK_PANE=$'Do you trust the files in this folder?
+?'
+TMUX_SEND_CALLS=()
+result=$(psm_launch_claude "trust-session" "Feature in progress" 2>&1)
+exit_code=$?
+# The launch should still return 0 (success), but no literal prompt should be sent
+if [[ $exit_code -eq 0 ]]; then
+    pass "literal prompt timeout keeps session registered"
+else
+    fail "literal prompt timeout keeps session registered" "returned $exit_code"
+fi
+assert_equals "no keys sent while dialog pending (literal prompt)" "0" "${#TMUX_SEND_CALLS[@]}"
+
+# 24. Timeout prints recovery instructions (issue #5149 thread b)
+assert_contains "timeout warns about failed literal prompt" "warn|" "$result"
+assert_contains "recovery: mentions trust dialog" "trust this folder" "$result"
+assert_contains "recovery: prints the prompt to send" "Feature in progress" "$result"
+assert_contains "recovery: tmux attach session name" "trust-session" "$result"
+
+# 25. Session reports 'launched|' despite literal prompt timeout (guarded failure)
+assert_contains "launch reports launched| despite literal timeout" "launched|" "$result"
+
+# 26. Literal prompt with PSM_SKIP_PERMISSIONS (should bypass trust dialog)
+PSM_SKIP_PERMISSIONS=1
+MOCK_PANE=$'>'
+TMUX_SEND_CALLS=()
+psm_launch_claude "skip-perm-session" "Task started" 2>&1 > /dev/null
+assert_contains "dangerously-skip-permissions honored" "claude --dangerously-skip-permissions" "${TMUX_SEND_CALLS[0]:-}"
+unset PSM_SKIP_PERMISSIONS
+
+unset -f tmux sleep
+
 # ── Context file creation (cmd_review simulation) ──────────────────────────────
 
 echo ""

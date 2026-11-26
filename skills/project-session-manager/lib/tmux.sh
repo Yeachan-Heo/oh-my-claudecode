@@ -110,12 +110,20 @@ psm_launch_claude() {
                 echo "warn|Use: tmux attach-session -t '$session_name'" >&2
             fi
         else
-            local startup_delay="${PSM_CLAUDE_STARTUP_DELAY:-5}"
-            (
-                sleep "$startup_delay"
+            # For literal prompts, also wait for the REPL to be ready before sending.
+            # This prevents the prompt from being delivered while a trust dialog is pending.
+            # If the wait fails, keep the session registered and print recovery instructions.
+            if ! psm_wait_for_claude_prompt "$session_name"; then
+                echo "warn|Timed out waiting for Claude prompt; literal context not sent" >&2
+                echo "warn|If Claude is asking whether to trust this folder, answer it in tmux session: $session_name" >&2
+                echo "warn|Then send this prompt yourself: $initial_context" >&2
+                echo "warn|Use: tmux attach-session -t '$session_name'" >&2
+            else
+                # Use literal mode (-l) to prevent tmux from interpreting key names in the text
                 tmux send-keys -t "$session_name" -l -- "$initial_context" 2>/dev/null || true
+                sleep 0.15
                 tmux send-keys -t "$session_name" Enter 2>/dev/null || true
-            ) &
+            fi
         fi
     fi
 
