@@ -174,6 +174,9 @@ const BLOCKED: string[] = [
   'true && >/tmp/log time -f %e rm /dev/null', '>/tmp/log time -- rm /dev/null', 'time -p >/tmp/log rm /dev/null', '! >/tmp/log time -p rm /dev/null', 'if >/tmp/log time -f %e rm /dev/null; then true; fi',
   // only the extraction to the standard output is free; the command pipe of the archive extractor and the other cases keep their members
   'tar --to-command=cat -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null --totals', 'tar -C / --to-command cat -xf a.tar dev/null',
+  // -C applies from its place on: the members after it go into its directory, the ones before the first -C stay where the command runs
+  'tar -xf a.tar tmp/out -C / dev/null', 'tar -C / -xf a.tar dev/null tmp/out', 'tar -C /tmp -xf a.tar x -C / dev/null', 'tar -C /tmp -xf a.tar x -C .. dev/null', 'tar xCf / a.tar dev/null', 'tar -xf a.tar -C / dev/null',
+  'tar -xf a.tar x -C /dev y', 'tar -xC / -f a.tar dev/null', 'tar -C /tmp -xf a.tar dev/null -C / x dev/zero', 'tar -x -C / -f a.tar x dev/null', 'bsdtar -C / -xf a.tar tmp/out dev/null',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -287,6 +290,9 @@ const ALLOWED: string[] = [
   // extraction to the standard output creates no file
   'tar -O -C / -xf /tmp/a.tar dev/null', 'tar --to-stdout -C / -xf a.tar dev/null', 'tar --to-s -C / -xf a.tar dev/null', 'tar -xOf a.tar dev/null', 'tar -C / -xOf a.tar dev/null', 'tar xOf a.tar dev/null', 'tar -xf a.tar -O',
   'tar -O -C /dev -xf a.tar x', 'tar -C /dev --to-stdout -xf a.tar x', 'bsdtar -O -C / -xf a.tar dev/null', 'bsdtar --to-stdout -C / -xf a.tar dev/null', 'gtar -O -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null -O',
+  // members before the -C that leads to /dev stay in the current directory; the directory after the last member is not applied to anything
+  'tar -xf a.tar dev/null -C / tmp/out', 'tar -xf a.tar dev/null -C /', 'tar -C / -xf a.tar tmp/out -C /tmp dev/null', 'tar -xf a.tar dev/null dev/zero -C / tmp/out tmp/x', 'tar -C /tmp -xf a.tar x -C / tmp/out',
+  'tar -x -f a.tar dev/null -C /', 'tar -xf a.tar dev/null --directory=/ tmp/out',
 ];
 
 describe('/dev guard: Bash commands', () => {

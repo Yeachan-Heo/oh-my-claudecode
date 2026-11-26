@@ -356,16 +356,10 @@ function tarExtractDir(args, name) {
   const parsed = parseGetopt(rest, valueLetters, (name) => longIs(name, '--directory', 5) || name === '--cd' || longIs(name, '--strip-components', 5) || TAR_LONG_VALUE.has(name)); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
   if (!extract || toStdout || parsed.shorts.includes('O') || parsed.longs.some((l) => longIs(l, '--to-stdout', 6))) return null; // -O and --to-stdout write the members to the standard output, not to files
-  for (const [key, value] of parsed.values) if (key === 'C' || key === '--cd' || longIs(key, '--directory', 5)) dirs.push(value);
-  let current = null;
-  let found = null;
-  const resolved = [];
-  for (const d of dirs) {
-    current = d.startsWith('/') ? posix.normalize(d) : current === null ? d : posix.join(current, d);
-    found ??= devChangedIn(current);
-    if (current.startsWith('/')) resolved.push(current);
-  }
-  const strip = Math.max(0, ...parsed.values.filter(([key]) => longIs(key, '--strip-components', 5)).slice(-1).map(([, n]) => Number(n) || 0)); // the last one counts; a bad number strips nothing
+  // each -C applies from its place on: a member is joined with the directory that the last -C before it names (each relative one resolves against the
+  // previous), one before every -C stays in the current directory, which is no path under /dev; the directories of the old style first word come first
+  const steps = dirs.map((d) => [-1, d]);
+  for (const [key, value, at] of parsed.values) if (key === 'C' || key === '--cd' || longIs(key, '--directory', 5)) steps.push([at, value]);
   // a named member that a literal --exclude pattern matches is not extracted: the whole name or a tail that starts after a slash (only the whole name
   // with --anchored); a wildcard pattern is not applied, and bsdtar reads an option after the members as one more member, so it excludes none there
   const anchored = parsed.longs.some((l) => longIs(l, '--anchored', 4));
@@ -375,10 +369,21 @@ function tarExtractDir(args, name) {
     if (!anchored) for (let k = m.indexOf('/'); k >= 0; k = m.indexOf('/', k + 1)) if (excluded.has(m.slice(k + 1))) return true;
     return false;
   };
-  const named = parsed.operands.filter((m) => !isExcluded(m));
+  const strip = Math.max(0, ...parsed.values.filter(([key]) => longIs(key, '--strip-components', 5)).slice(-1).map(([, n]) => Number(n) || 0)); // the last one counts; a bad number strips nothing
   // the strip counts the components of the name without its leading slash; bsdtar counts that slash as the first one for a name with a leading slash
-  const members = named.map((m) => (strip === 0 ? m : m.split('/').filter(Boolean).slice(m.startsWith('/') && name === 'bsdtar' ? strip - 1 : strip).join('/'))).filter(Boolean); // a member with no component left is skipped
-  return found ?? archiveMemberInDev(resolved, members); // a named member lands in each directory, whatever order -C and the members come in
+  const stripped = (m) => (strip === 0 ? m : m.split('/').filter(Boolean).slice(m.startsWith('/') && name === 'bsdtar' ? strip - 1 : strip).join('/'));
+  parsed.operands.forEach((m, k) => { if (!isExcluded(m)) steps.push([parsed.operandAt[k], null, stripped(m)]); });
+  steps.sort((x, y) => x[0] - y[0]);
+  let current = null;
+  let found = null;
+  let inArchive = null;
+  for (const [, dir, member] of steps) {
+    if (dir !== null) {
+      current = dir.startsWith('/') ? posix.normalize(dir) : current === null ? dir : posix.join(current, dir);
+      found ??= devChangedIn(current);
+    } else if (member && current?.startsWith('/')) inArchive ??= archiveMemberInDev([current], [member]); // a member with no component left is skipped
+  }
+  return found ?? inArchive;
 }
 
 // Commands the guard judges by one argument pattern each (disk tools, archives, in-place awk, line editors): undefined when `name` is none of them, else a finding or null.
