@@ -132,12 +132,15 @@
  * autoCompactWindow of settings.json under CLAUDE_CONFIG_DIR (or ~/.claude), capped at the model's window,
  * else the model's window; the threshold is that window less HOST_BUFFER. With the switch on, the own
  * threshold reads the same window. The tokens before are the host's usage in the main loop, else an
- * estimate of the API form by class (listTokens, RATE_* constants); the tokens after are predicted from the
- * removed text and from the blocks and messages that go with it (shapeOf) by the same rates. OMC_JEV_COMPACT_MAX_WINDOW_TOKENS (positive integer, unset: no cap) caps the
+ * estimate of the API form by class (listTokens, RATE_* constants) with the thinking it holds (RATE_SIG tokens a character of
+ * thinking text or signature; listTokens counts a block of thinking and not what is in it); the tokens after are predicted from the
+ * removed text, from the blocks and messages that go with it (shapeOf) by the same rates, and less the thinking of the assistant rows that build
+ * rebuilds without it (every assistant row before the tail; signatureRows places the thinking of the API form on the rows, the thinking of the tail stays). OMC_JEV_COMPACT_MAX_WINDOW_TOKENS (positive integer, unset: no cap) caps the
  * kept target at that window divided by 1 + PREDICTION_SHORTFALL (tokenCeiling). The rates and PREDICTION_SHORTFALL come from one measurement of
  * one model on one host; OMC_JEV_COMPACT_RATES (a JSON object of rate name to number) overrides them one by one (ratesFrom). These figures go to the
  * compaction record only (target_tokens, target_tokens_capped, tokens_before, tokens_after, window, threshold,
- * window_source, tokens_source); the cut itself still follows the character budget of allocate.
+ * window_source, tokens_source; api_messages, sig_chars_total and sig_chars_mapped, the thinking characters that the API form holds, all and on a row;
+ * rebuilt_thinking, the assistant rows rebuilt, which the thinking goes with); the cut itself still follows the character budget of allocate.
  *
  * Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT, two digits from 20 to 80 enable it; unset: off. The name stays as it is although the value is a share of the window, not a switch). The cut then follows tokens: the target is that
  * share of the window, at most TARGET_OF_THRESHOLD of the threshold, times TARGET_UNCALIBRATED (the rule's target), and cascade (passes forced, short_or_trace, trace_all) steps the results down from the least needed, predicting the tokens
@@ -2587,7 +2590,8 @@ const TRACE_LINE = new RegExp(`(?:^|\\n)(?:\\[compacted\\] |${escapeRegExp(REPLY
 // The API list in tokens by class: a call costs RATE_IN a character of its name and input, a result RATE_OUT, a reminder or a text beside a result
 // RATE_NOTE, the user's words RATE_OWN (a text that userWords reads as the user's: not a summary, a notice or a host block), the assistant's text
 // RATE_ATXT, a trace of any of the module's stages RATE_TRACE, each non-ASCII character RATE_NON_ASCII more, RATE_BLOCK a block and RATE_MESSAGE a message spread over its blocks,
-// an image RATE_IMAGE. Thinking, signatures and server blocks are not counted here.
+// an image RATE_IMAGE. A block of thinking costs its overhead only: the characters of thinking text and signatures (RATE_SIG, which tokensBeforeOf adds to an estimate and the predictions
+// take off for the rows build rebuilds, signatureRows) and server blocks are not counted here.
 export function listTokens(api, rates = DEFAULT_RATES) {
   const { RATE_IN, RATE_OUT, RATE_NOTE, RATE_OWN, RATE_ATXT, RATE_TRACE, RATE_NON_ASCII, RATE_BLOCK, RATE_IMAGE } = rates;
   let tok = 0;
