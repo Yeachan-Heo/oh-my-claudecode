@@ -215,6 +215,8 @@ const DEV_WRAPPERS = {
   timeout: { val: ['-s', '--signal', '-k', '--kill-after'], skip: 1 }, stdbuf: { val: ['-i', '-o', '-e', '--input', '--output', '--error'] }, setsid: { val: [] }, time: { val: ['-f', '-o', '--format', '--output'] }, coproc: { val: [] },
   xargs: { val: ['-n', '-I', '-L', '-P', '-d', '-E', '-s', '-a', '--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file', '--process-slot-var'], opt: 'lei' }, // opt: -l, -e and -i (and their long forms) take an attached value only, so the rest of a cluster after them is that value
 };
+const DEV_GROUP_OPEN = new Set(['{', 'if', 'while', 'until', 'for', 'case']);
+const DEV_GROUP_CLOSE = new Set(['}', 'fi', 'done', 'esac']);
 const DEV_OPENERS = new Set(['{', 'if', 'while', 'until']); // the words that may follow a pipe and open a command list
 const DEV_LEADING = new Set(['then', 'do', 'else', 'elif', '{', '!', 'if', 'while', 'until']);
 const baseName = (value) => String(value).replace(/\/+$/, '').split('/').pop();
@@ -724,7 +726,10 @@ function devScanTokens(tokens, heredocs, depth) {
   let chainBase = NO_DIR; // the directory before the first cd of a chain of && (NO_DIR: none yet)
   let afterPipeOp = false; // the current command follows a pipe operator (unlike afterPipe, a group or a condition does not clear it)
   const dirStack = []; // the directory in force at each open parenthesis: a subshell leaves it behind
+  const groupDirs = []; // the same at each open group or compound command ({, if, while, until, for, case): one that is piped or put in the background runs in a subshell
   const flush = (op) => {
+    for (const w of words) { if (DEV_GROUP_OPEN.has(w)) groupDirs.push(devCwd); else if (!DEV_LEADING.has(w)) break; }
+    if (DEV_GROUP_CLOSE.has(words[0]) && groupDirs.length) { const outer = groupDirs.pop(); if (op === '|' || op === '|&' || op === '&') devCwd = outer; }
     const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
     let found = null;
     if (unwrapped) {

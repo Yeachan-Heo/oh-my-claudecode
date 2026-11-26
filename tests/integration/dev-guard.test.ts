@@ -1091,4 +1091,16 @@ describe('/dev guard: spellings of round 6', () => {
   ])('keeps the directory after a cd in a substitution: %s (session in %s) is %s', (command, cwd, expected) => {
     expect(check(command, cwd).decision).toBe(expected);
   });
+
+  // a group or a compound command that is piped or put in the background runs in a subshell (measured with bash 5.2: { cd B; } | cat; pwd and if true; then cd B; fi &
+  // keep the directory, { cd B; } && true does not)
+  it.each([
+    ['cd /dev; { cd /tmp; } | cat; rm null', 'deny'], ['cd /dev; { cd /tmp; } & rm null', 'deny'], ['cd /dev; { cd /tmp; } |& cat; rm null', 'deny'], ['cd /dev; if true; then cd /tmp; fi | cat; rm null', 'deny'],
+    ['cd /dev; for i in 1; do cd /tmp; done | cat; rm null', 'deny'], ['cd /dev; while true; do cd /tmp; break; done & rm null', 'deny'], ['cd /dev; case x in x) cd /tmp;; esac | cat; rm null', 'deny'],
+    ['cd /dev; { { cd /tmp; } | cat; }; rm null', 'deny'], ['cd /dev; { { cd /tmp; }; } | cat; rm null', 'deny'],
+    ['cd /dev; { cd /tmp; } && true; rm null', 'allow'], ['cd /dev; { cd /tmp; }; rm null', 'allow'], ['cd /dev; { cd /tmp; } > out.txt; rm null', 'allow'], ['cd /dev; { cd /tmp; rm null; } | cat', 'allow'],
+    ['cd /dev; if cd /tmp; then rm null; fi', 'allow'], ['cd /dev; { cd /tmp; } || true; rm null', 'allow'],
+  ])('keeps the directory after a piped or background group: %s is %s', (command, expected) => {
+    expect(check(command, '/tmp').decision).toBe(expected);
+  });
 });
