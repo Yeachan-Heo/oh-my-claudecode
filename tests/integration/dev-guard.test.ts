@@ -316,6 +316,8 @@ const ALLOWED: string[] = [
   'true >/tmp/log && time -f %e rm /dev/null', 'true >/tmp/log; time -f %e rm /dev/null',
   // the old style first word with O and a directory letter: the members go to the standard output wherever the directory is
   'tar xOCf / a.tar dev/null', 'tar xCOf / a.tar dev/null',
+  // a letter that takes a value before the S: the text after the cluster is the program name, not text to split
+  "env -uS 'rm /dev/null'",
 ];
 
 describe('/dev guard: Bash commands', () => {
