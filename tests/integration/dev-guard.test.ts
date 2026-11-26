@@ -195,7 +195,7 @@ const BLOCKED: string[] = [
   'tar -xPf a.tar /dev/zz-x', 'tar -xPf a.tar -C /tmp /dev/zz-x', 'tar -C /tmp -xPf a.tar /dev/null', 'tar --absolute-names -xf a.tar rel/x /dev/zz-x', 'bsdtar -xPf a.tar -C /tmp /dev/zz-x',
   // GNU tar runs the --to-command text for each member
   "tar -xf a.tar --to-command='rm /dev/null'", "tar -xf a.tar --to-command 'rm /dev/null'", "tar -xf a.tar --to-c='rm /dev/null'", "tar -xf a.tar --to-c 'rm /dev/null'", "gtar -C /tmp -xf a.tar --to-command='truncate -s 0 /dev/null'",
-  "tar -xOf a.tar --to-command='rm /dev/null'", "tar -xf a.tar rel/x --to-command='echo x; rm /dev/null'", "tar -xf a.tar --to-command='sh -c \"rm /dev/null\"'",
+  "tar -xf a.tar rel/x --to-command='echo x; rm /dev/null'", "tar -xf a.tar --to-command='sh -c \"rm /dev/null\"'",
   // the other ways in which tar runs a command text: the compress program (-I, --use-compress-program, also abbreviated), the exec action of a checkpoint
   // and the scripts at the end of a volume (-F, --info-script, --new-volume-script, also abbreviated), in every mode and in every form of the value
   "tar -xf a.tar -I 'rm /dev/null'", "tar -xf a.tar -I'rm /dev/null'", "tar -cf a.tar -I 'rm /dev/null' f", "tar -tf a.tar -I 'rm /dev/null'", "gtar -tf a.tar -I 'truncate -s 0 /dev/null'", "tar xIf 'rm /dev/null' a.tar",
@@ -214,6 +214,8 @@ const BLOCKED: string[] = [
   'unzip a.zip -t dev/null -d /', 'unzip a.zip -p dev/null -d /', 'unzip a.zip -c dev/null -d /', 'unzip a.zip -z dev/null -d /', 'unzip a.zip -Z dev/null -d /', 'unzip a.zip -- dev/null -d /', 'unzip a.zip -P secret dev/null -d /',
   'unzip a.zip -i dev/null -d /', 'unzip a.zip -O cp437 dev/null -d /', 'unzip a.zip -d / -o dev/null', 'unzip a.zip dev/null -d / -o', 'unzip a.zip -d/ dev/null', 'unzip a.zip -x etc/x -o -d / dev/null',
   'unzip a.zip -x etc/x -P dev/null -d /', 'sudo unzip -o a.zip -P dev/null -d /',
+  // --to-command runs for the members of an extraction to files, in every spelling of the extraction
+  "tar --get -f a.tar --to-command='rm /dev/null'", "tar xf a.tar --to-command='rm /dev/null'", "tar --extract -f a.tar --to-command 'rm /dev/null'", "tar -xf a.tar rel/x --to-command='rm /dev/null'", "tar -xvf a.tar --to-c='rm /dev/null'",
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -366,6 +368,9 @@ const ALLOWED: string[] = [
   "env -S 'time -f %e true'", "env -S 'time -f %e echo /dev/null'", "env -S 'time -p true'",
   // ... and the options before the archive still count: -j drops the directories, -l lists, and a password before the archive is no member
   'unzip -j a.zip dev/null -d /', 'unzip -l a.zip dev/null -d /', 'unzip -P dev/null a.zip -d /', 'unzip a.zip -o rel/x -d /tmp/out', 'unzip -o a.zip -P secret -d /tmp/out', 'unzip a.zip -d /tmp/out -o dev/null',
+  // ... and never otherwise: not when listing, creating, comparing, appending, deleting, or when the members go to the standard output
+  "tar -tf a.tar --to-command='rm /dev/null'", "tar -cf a.tar --to-command='rm /dev/null' f", "tar -xOf a.tar --to-command='rm /dev/null'", "tar -xf a.tar --to-stdout --to-command='rm /dev/null'", "tar -xf a.tar --to-command='rm /dev/null' -O",
+  "tar xOf a.tar --to-command='rm /dev/null'", "tar -df a.tar --to-command='rm /dev/null'", "tar -rf a.tar --to-command='rm /dev/null' f", "tar --delete -f a.tar --to-command='rm /dev/null' f", "tar -tf a.tar --to-command 'rm /dev/null'",
 ];
 
 describe('/dev guard: Bash commands', () => {
