@@ -83,11 +83,15 @@ const GLOBAL_FIRST_ARG_PATTERNS = [
   /^(?:path\.)?join\(\s*CLAUDE_CONFIG_DIR\s*,/,
   /^(?:path\.)?join\(\s*configDir\s*,/,
 ];
+// Hook scripts that honor USERPROFILE/HOME resolve the home directory into a
+// local `home` first. Accept that name only for the global config file itself,
+// so `join(home, '.omc', 'state', ...)` is still reported.
+const HOME_CONFIG_FILE_PATTERN = /^(?:path\.)?join\(\s*home\s*,\s*(['"])\.omc\1\s*,\s*(['"])config\.json\2\s*\)$/;
 function isGlobalConfigMatch(matchText) {
   // matchText looks like: join(homedir(), '.omc', 'state', ...) or path.join(os.homedir(), '.omc', ...)
   // Args may span lines — normalize whitespace before matching.
-  const normalized = matchText.replace(/\s+/g, ' ').trimStart();
-  return GLOBAL_FIRST_ARG_PATTERNS.some(re => re.test(normalized));
+  const normalized = matchText.replace(/\s+/g, ' ').trim();
+  return GLOBAL_FIRST_ARG_PATTERNS.some(re => re.test(normalized)) || HOME_CONFIG_FILE_PATTERN.test(normalized);
 }
 
 const req = createRequire(resolve(REPO_ROOT, 'package.json'));

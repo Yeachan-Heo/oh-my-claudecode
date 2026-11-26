@@ -19,3 +19,13 @@ export function intentionallyWrong(dir) {
   // ↓ This is the construction the gate is designed to catch.
   return join(dir, '.omc', 'state', 'fixture.json');
 }
+
+export function homeStateIsStillWorkspaceState(home) {
+  // ↓ Caught too: only `join(home, '.omc', 'config.json')` is the global config.
+  return join(home, '.omc', 'state', 'fixture.json');
+}
+
+export function homeGlobalConfig(home) {
+  // Not reported: the per-user global config file.
+  return join(home, '.omc', 'config.json');
+}
