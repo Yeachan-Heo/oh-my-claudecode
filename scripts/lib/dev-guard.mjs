@@ -113,6 +113,14 @@ const devChangedIn = (value, follow = true, strict = false) => { const p = devPa
 const devLexicalIn = (value) => { const p = devPathOf(value, true, false); return p && !DEV_SCRATCH.test(p) && p !== '/dev/shm' ? p : null; }; // the text of an absolute path only: for the words of a command that are no operation target
 const devWritten = (value) => { const p = devPathOf(value); return p && !DEV_SINK.test(p) && !DEV_SCRATCH.test(p) ? p : null; }; // a path a redirect, tee or dd may not write
 
+// The directory that env -C TARGET starts its command in: TARGET (relative to base, or to the directory in force), null when it cannot be told.
+function devWrapperDir(target, base) {
+  if (target === undefined || target.includes('\u0000') || target.startsWith('~')) return null;
+  if (target.startsWith('/')) return posix.normalize(target).replace(/\/+$/, '') || '/';
+  const from = base === undefined ? devCwd : base;
+  return typeof from === 'string' ? posix.normalize(`${from}/${target}`).replace(/\/+$/, '') || '/' : from;
+}
+
 // cd, pushd and popd: the directory in force for the relative paths that follow, until the end of the command (a group or a subshell is read as if it did not end).
 function devChangeDir(name, args) {
   if (name === 'popd') { devCwd = null; return; }
@@ -204,16 +212,18 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
   let keyword = true; // still at the start of the command, where time is the keyword of the shell (only -p and -- follow it)
   let xargs = false;
   let replace;
+  let dir; // the directory env -C or --chdir puts the wrapped command in (a path, null when unknown); undefined: the directory in force
   for (;;) {
     while (at < values.length && (isAssignment(values[at]) || DEV_LEADING.has(values[at]) || values[at] === 'function')) { if (isAssignment(values[at])) keyword = false; at += values[at] === 'function' ? 2 : 1; } // function NAME { ...
     if (at >= values.length) return null;
     const name = baseName(values[at]);
     const spec = Object.hasOwn(DEV_WRAPPERS, name) ? DEV_WRAPPERS[name] : null;
-    if (!spec) return { name, args: values.slice(at + 1), xargs, replace };
+    if (!spec) return { name, args: values.slice(at + 1), xargs, replace, dir };
     const timeKeyword = keyword && name === 'time' && keywords.has(at);
     if (!timeKeyword) keyword = false;
     let i = at + 1;
     let split;
+    let chdir; // the last -C or --chdir of this env: it counts alone and relative to the directory env started in
     for (; i < values.length; i++) {
       const a = values[i];
       if (a === '--') { i++; break; }
@@ -225,6 +235,12 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
         const eq = a.indexOf('=');
         split = envS ? (a.length > envS[0].length ? a.slice(envS[0].length) : values[++i]) : (eq > 0 ? a.slice(eq + 1) : values[++i]);
         continue;
+      }
+      if (name === 'env') { // -C DIR, -CDIR, --chdir=DIR and every prefix of --chdir (the value of a prefix in the next word is skipped here)
+        const longC = a.startsWith('--') && longIs(a.split('=')[0], '--chdir', 3);
+        const shortC = !a.startsWith('--') ? /^-[^uCaS]*C/.exec(a) : null;
+        if (longC) { chdir = a.includes('=') ? a.slice(a.indexOf('=') + 1) : values[i + 1]; if (!a.includes('=') && a !== '--chdir') i++; }
+        else if (shortC) chdir = a.length > shortC[0].length ? a.slice(shortC[0].length) : values[i + 1];
       }
       if (name === 'xargs') {
         if (a === '-I') replace = values[i + 1];
@@ -238,11 +254,12 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
         if (k === a.length - 1 && !spec.opt?.includes(a[k])) i++;
       }
     }
+    if (chdir !== undefined) dir = devWrapperDir(chdir, dir);
     if (split !== undefined) {
       const text = envSplitText(split);
       const words = tokenizeBash(text).tokens.filter((t) => t.type === 'word').map(devWordText);
       if (words[0]?.startsWith('-') || words[0] === 'time') { values = ['env', ...words, ...values.slice(i)]; at = 0; continue; } // env reads the words again as its own options, then assignments, then the command; time is a program to it, not the keyword of the shell
-      return { name: 'eval', args: [text, ...values.slice(i)], xargs, replace };
+      return { name: 'eval', args: [text, ...values.slice(i)], xargs, replace, dir };
     }
     if (name === 'command' && values.slice(at + 1, i).some((o) => /^-[a-z]*[vV]/.test(o))) return null; // command -v only looks the name up
     if (name === 'xargs') xargs = true;
@@ -667,10 +684,13 @@ function devScanTokens(tokens, heredocs, depth) {
     const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
     let found = null;
     if (unwrapped) {
+      const inForce = devCwd;
+      if (unwrapped.dir !== undefined) devCwd = unwrapped.dir; // env -C: the directory of the wrapped command only
       found = devCommand(unwrapped.name, unwrapped.args, fed, depth);
       // the path from the pipe lands at the end of the arguments, or in the place of the replace string of xargs -I
       const piped = unwrapped.replace ? unwrapped.args.map((a) => a.split(unwrapped.replace).join('/dev/\u0000')) : [...unwrapped.args, '/dev/\u0000'];
       if (!found && unwrapped.xargs && pipeDev && devCommand(unwrapped.name, piped, [], depth)) found = { what: `xargs ${unwrapped.name}`, path: pipeDev };
+      devCwd = inForce;
     }
     if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd')) { if (afterOr) devCwd = null; else devChangeDir(unwrapped.name, unwrapped.args); } // after || either directory may be in force
     pipeDev = (op === '|' || op === '|&') && unwrapped && DEV_FEEDERS.has(unwrapped.name) ? wordDev : null;

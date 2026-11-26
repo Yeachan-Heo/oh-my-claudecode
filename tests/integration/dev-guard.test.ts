@@ -952,3 +952,24 @@ describe('/dev guard: working directory and symbolic links', () => {
     }
   });
 });
+
+// Round 6: wrapper directories, cd in pipelines and conditionals, abbreviated options, bsdtar members and options that do not follow a link. Text only, nothing is run.
+describe('/dev guard: spellings of round 6', () => {
+  const check = (command: string, cwd?: string) => shell.checkBashCommand(command, { platform: 'linux', syntax: false, env: {}, devNullProbe: probeOf('healthy'), cwd });
+  // env -C and --chdir (any prefix of the long option, the last one counts alone) put the wrapped command in another directory
+  it.each([
+    ['env -C /dev rm null', '/tmp'], ['env -C /dev -i rm null', '/tmp'], ['env -iC /dev rm null', '/tmp'], ['env -C/dev rm null', '/tmp'], ['env --chdir=/dev rm null', '/tmp'], ['env --chdir /dev rm null', '/tmp'],
+    ['env --chd /dev rm null', '/tmp'], ['env --c=/dev rm null', '/tmp'], ['env --ch=/dev rm ./null', '/tmp'], ['env -C /tmp -C /dev rm null', '/tmp'], ['env -C / env -C dev rm null', '/tmp'],
+    ['cd /tmp && env -C /dev rm null', '/tmp'], ['env -C /dev FOO=1 rm null', '/tmp'], ['env -C /dev sudo rm null', '/tmp'], ['env -C /dev mv null /tmp/x', '/tmp'], ['env -C /dev truncate -s 0 null', undefined],
+    ['env -C dev rm null', '/'], ['env -C "$X" rm foo', '/tmp'], ['env -C /dev -S "rm null"', '/tmp'], ["env -C /dev -S 'rm null'", '/tmp'], ['env -C /dev env rm null', '/tmp'],
+  ])('refuses %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('deny');
+  });
+
+  it.each([
+    ['env -C /dev -C /tmp rm null', '/dev'], ['env -C /tmp rm null', '/dev'], ['env -C /dev rm /tmp/x', '/tmp'], ['env -C dev rm null', '/tmp'], ['env -C /dev ls', '/tmp'], ['env -C /dev echo hi; rm null', '/tmp'],
+    ['env -C /tmp -C / env -C tmp rm null', '/dev'], ['env -C / -C dev rm null', '/tmp'], ['cd /dev && env -C /tmp rm null', '/tmp'], ['env -C "$X" rm /tmp/x', '/tmp'], ['env -C /dev cat null', '/tmp'], ['env --chdir=/tmp rm null', '/dev'],
+  ])('allows %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('allow');
+  });
+});
