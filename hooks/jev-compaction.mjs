@@ -467,8 +467,11 @@ const NOT_USER_PREFIXES = [
 // The traces the module's own stages leave in a user row (an agent's message moved to a file, a removed item) are not the user's words either, but
 // only while one of those stages is on (OMC_JEV_COMPACT_AGENT_TRIM, _NOTIFICATIONS, _LONG_REPLIES, _PASTES): without them a row that opens with
 // one of these is the user's text, as before. The stages themselves always count them; readConfig adds them to the list userTask reads.
-const STAGE_NOT_USER_PREFIXES = ['[agent message moved at compaction', '[block moved at compaction', '[compaction trace files: ', '[compacted] '];
+const STAGE_NOT_USER_PREFIXES = ['[agent message moved at compaction', '[compacted] '];
 const STAGE_NOT_USER = [...NOT_USER_PREFIXES, ...STAGE_NOT_USER_PREFIXES];
+// While the blocks act (readConfig: `blockTraces`) a row that opens with a moved block or the header of the trace files is no user's text either.
+const STAGE_NOT_USER_BLOCKS = [...STAGE_NOT_USER, '[block moved at compaction', '[compaction trace files: '];
+const notUserOf = (blockTraces) => (blockTraces ? STAGE_NOT_USER_BLOCKS : STAGE_NOT_USER);
 // Rows a hook or the host puts in as a user message are not the user's words for the paste and reply stages, which protect the user's newest messages and
 // the replies to them: a row the host flags isMeta, and a row that opens with one of these prefixes (the host's rows for a stop hook, a goal, a CI monitor
 // event, another session, an image, a re-invoked skill and a usage limit) or with one of OMC_JEV_COMPACT_HOOK_ROW_PREFIXES (empty by default).
@@ -828,6 +831,9 @@ export async function readConfig($) {
   const pastes = pasteMode(env.OMC_JEV_COMPACT_PASTES);
   const replies = pasteMode(env.OMC_JEV_COMPACT_LONG_REPLIES);
   const blocks = pasteMode(env.OMC_JEV_COMPACT_BLOCKS);
+  // The lines of moved blocks and the header of the trace files are read as traces of the module (the long replies, the direct replies, the estimate of tokens, the user's words) only while
+  // the blocks act (`active`, with the point active); `shadow` only counts and every other value leaves them as plain text, as in the module without the blocks.
+  const blockTraces = blocks === 'active' && mode === 'active';
   return {
     mode,
     key: env.TYPESAFE_API_KEY,
@@ -841,7 +847,7 @@ export async function readConfig($) {
     tokenAccounting: String(env.OMC_JEV_COMPACT_TOKEN_ACCOUNTING ?? '').trim() === '1',
     maxWindowTokens: windowInt(env.OMC_JEV_COMPACT_MAX_WINDOW_TOKENS),
     // Token rates and the prediction shortfall (the defaults of DEFAULT_RATES unless OMC_JEV_COMPACT_RATES overrides some).
-    rates: ratesFrom(env.OMC_JEV_COMPACT_RATES),
+    rates: { ...ratesFrom(env.OMC_JEV_COMPACT_RATES), blockTraces },
     // Token cascade (off unless set to a two-digit share from 20 to 80).
     targetPercent: /^\d{2}$/.test(String(env.OMC_JEV_COMPACT_TARGET_PERCENT ?? '').trim()) ? fraction(env.OMC_JEV_COMPACT_TARGET_PERCENT, undefined, 20, 80) : undefined,
     // Switches: 1 and active turn them on; 0, off, any other value and unset leave them off.
@@ -860,7 +866,7 @@ export async function readConfig($) {
     // removed with a trace) instead of staying word for word.
     notifications,
     // The user's-words check reads the stages' trace prefixes only while one of the four stages is on (STAGE_NOT_USER_PREFIXES).
-    notUserPrefixes: agentTrim || notifications || pastes !== 'off' || replies !== 'off' || blocks !== 'off' ? STAGE_NOT_USER : NOT_USER_PREFIXES,
+    notUserPrefixes: blockTraces ? STAGE_NOT_USER_BLOCKS : agentTrim || notifications || pastes !== 'off' || replies !== 'off' ? STAGE_NOT_USER : NOT_USER_PREFIXES,
     autoCompactWindow: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     configDir: env.CLAUDE_CONFIG_DIR ? slash(env.CLAUDE_CONFIG_DIR) : undefined,
     home: homeForState ? slash(homeForState) : undefined,
@@ -879,8 +885,7 @@ export async function readConfig($) {
     // shared puts the wording of the question once in the state of a request, `windowChars` is the window of Jev in bytes (8000 or more), `fullInput` bounds the user's words in the
     // header of a request by the window alone, `jevStages` lets the verdicts decide what the paste and reply stages and the agent messages to files decide by fixed lengths.
     blocks,
-    // The long replies and the direct replies read the lines of moved blocks and the header of the trace files as traces only while the blocks act (`active`, with the point active).
-    blockTraces: blocks === 'active' && mode === 'active',
+    blockTraces,
     verdicts: String(env.OMC_JEV_COMPACT_VERDICTS ?? '').trim().toLowerCase() === 'off' ? 'off' : 'active',
     blockQuestions: String(env.OMC_JEV_COMPACT_BLOCK_QUESTIONS ?? '').trim().toLowerCase() === 'shared' ? 'shared' : 'full',
     windowChars: /^[1-9]\d{3,6}$/.test(String(env.OMC_JEV_COMPACT_WINDOW_CHARS ?? '').trim()) && Number(env.OMC_JEV_COMPACT_WINDOW_CHARS) >= 8000 ? Number(env.OMC_JEV_COMPACT_WINDOW_CHARS) : undefined,
@@ -2379,10 +2384,10 @@ function onlyNoteEnvelopes(t, envelopes) {
   }
   return !t.slice(at).trim();
 }
-export function isNotification(m) {
+export function isNotification(m, blockTraces = false) {
   if (m.role !== 'user' || (m.toolResults && m.toolResults.length) || typeof m.text !== 'string' || !m.text) return false;
   // The marker first: a row without one is no notification, and its words are not read at all.
-  if (!DELIVERY_NOTES.some((k) => m.text.includes(k)) || userWords(m, STAGE_NOT_USER).length) return false;
+  if (!DELIVERY_NOTES.some((k) => m.text.includes(k)) || userWords(m, notUserOf(blockTraces)).length) return false;
   const t = m.text.trim();
   const envelopes = envelopesOf(t);
   return envelopes.length ? onlyNoteEnvelopes(t, envelopes) : isNoteBody(t);
@@ -2423,7 +2428,7 @@ export function noteSummary(text) {
 
 // Candidates: tool results outside the first message and the last KEEP_LAST messages whose call is
 // in an earlier assistant message.
-function findCandidates(messages, privatePaths, notifications = false) {
+function findCandidates(messages, privatePaths, notifications = false, blockTraces = false) {
   const outputs = backgroundOutputFiles(messages, privatePaths);
   const uses = new Map();
   messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) uses.set(u.tool_use_id, { i, u }); });
@@ -2431,7 +2436,7 @@ function findCandidates(messages, privatePaths, notifications = false) {
   const out = [];
   for (let i = 1; i < tailStart; i++) {
     const m = messages[i];
-    if (notifications && isNotification(m)) {
+    if (notifications && isNotification(m, blockTraces)) {
       // A notification that names the output file of a call on a secret path takes on the secrecy of that call (a trace, never sent to Jev).
       const bySource = sourceByTask(m.text, outputs);
       const c = {
@@ -2671,7 +2676,9 @@ function ruleTargetOf(win, cfg) {
 
 // A one-line trace of the module, wherever it stands in a text: at its start or after a line break. A removed item (traceLine), a reply moved to a file and
 // an agent's message moved to a file each fill their line; the trace of a pasted text stands inside a line (PASTE_TRACE_PREFIX, see withoutPasteMarks).
-const TRACE_LINE = new RegExp(`(?:^|\\n)(?:\\[compacted\\] |${escapeRegExp(REPLY_TRACE_PREFIX)}|${escapeRegExp(AGENT_TRACE_PREFIX)}|${escapeRegExp(BLOCK_TRACE_PREFIX)}|${escapeRegExp(TRACE_HEADER_PREFIX)})[^\\n]*`, 'g');
+const TRACE_LINE = new RegExp(`(?:^|\\n)(?:\\[compacted\\] |${escapeRegExp(REPLY_TRACE_PREFIX)}|${escapeRegExp(AGENT_TRACE_PREFIX)})[^\\n]*`, 'g');
+// With `rates.blockTraces` (the blocks act) the lines of moved blocks and the header of the trace files are traces too.
+const TRACE_LINE_BLOCKS = new RegExp(`(?:^|\\n)(?:\\[compacted\\] |${escapeRegExp(REPLY_TRACE_PREFIX)}|${escapeRegExp(AGENT_TRACE_PREFIX)}|${escapeRegExp(BLOCK_TRACE_PREFIX)}|${escapeRegExp(TRACE_HEADER_PREFIX)})[^\\n]*`, 'g');
 // The API list in tokens by class: a call costs RATE_IN a character of its name and input, a result RATE_OUT, a reminder or a text beside a result
 // RATE_NOTE, the user's words RATE_OWN (a text that userWords reads as the user's: not a summary, a notice or a host block), the assistant's text
 // RATE_ATXT, a trace of any of the module's stages RATE_TRACE, each non-ASCII character RATE_NON_ASCII more, RATE_BLOCK a block and RATE_MESSAGE a message spread over its blocks,
@@ -2690,7 +2697,7 @@ export function listTokens(api, rates = DEFAULT_RATES) {
       if (b.type === 'text') {
         const t = strOf(b.text);
         let inTraces = 0;
-        const lines = t.replace(TRACE_LINE, (x) => { inTraces += x.length; return ''; });
+        const lines = t.replace(rates.blockTraces ? TRACE_LINE_BLOCKS : TRACE_LINE, (x) => { inTraces += x.length; return ''; });
         const rest = withoutPasteMarks(lines);
         inTraces += lines.length - rest.length;
         // Whose the text is, is read from what stands outside the trace lines: a trace of the module at the start of a row does not make the text after it the user's own.
@@ -2719,7 +2726,7 @@ export function listTokens(api, rates = DEFAULT_RATES) {
 function besideResultGap(texts, rates) {
   let gap = 0;
   for (const t of texts) {
-    const lines = t.replace(TRACE_LINE, '');
+    const lines = t.replace(rates.blockTraces ? TRACE_LINE_BLOCKS : TRACE_LINE, '');
     if (userWords({ role: 'user', text: lines }).length) gap += (rates.RATE_NOTE - rates.RATE_OWN) * withoutPasteMarks(lines).length;
   }
   return gap;
@@ -3725,11 +3732,11 @@ function nonTextUserRows(messages, api) {
 
 // The rows that hold the user's words for the paste and reply stages: a user row with words of the user's own that is no hook or host row (isMeta, or
 // opening with one of `prefixes`).
-function ownerRows(messages, prefixes) {
+function ownerRows(messages, prefixes, blockTraces = false) {
   const rows = [];
   messages.forEach((m, i) => {
     if (m.isMeta === true || typeof m.text !== 'string' || prefixes.some((p) => m.text.trimStart().startsWith(p))) return;
-    if (userWords(m, STAGE_NOT_USER).length) rows.push(i);
+    if (userWords(m, notUserOf(blockTraces)).length) rows.push(i);
   });
   return rows;
 }
@@ -3743,7 +3750,7 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new
   if (!api) { stats.reason = 'no_api_form'; return []; }
   const images = nonTextUserRows(messages, api);
   if (images.unmatched) { stats.reason = 'image_unmatched'; return []; }
-  const users = ownerRows(messages, cfg.hookRowPrefixes);
+  const users = ownerRows(messages, cfg.hookRowPrefixes, cfg.blockTraces);
   const before = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
   const limit = cfg.pasteMaxChars;
   const found = [];
@@ -4015,7 +4022,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return []; }
   if (!sessionId) { stats.reason = 'no_session'; return []; }
   if (!api) { stats.reason = 'no_api_form'; return []; }
-  const users = ownerRows(messages, cfg.hookRowPrefixes);
+  const users = ownerRows(messages, cfg.hookRowPrefixes, cfg.blockTraces);
   // A message the user typed during a tool turn is a user message too, though no row shows it: it stands after the row it is anchored to (queuedOf).
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
@@ -4099,7 +4106,7 @@ function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionI
   const from = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
   if (skip && !skip.unmatched) {
     try {
-      trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates, deadline });
+      trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates, deadline, blockTraces: cfg.blockTraces });
       stats = trim.stats;
     } catch (error) { trim = undefined; stats = { error: clip(oneLine(String(error?.message ?? error)), 200) }; }
   }
@@ -4288,7 +4295,7 @@ export function trimAgentRows(messages, opts = {}) {
     const row = m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS ? m.text : undefined;
     const lead = row === undefined ? '' : row.trimStart();
     const agent = (lead.startsWith(TRIM_HEAD) || lead.startsWith('<teammate-message')) && /<\/(?:teammate-message|agent-message|cross-session-message)>/.test(row);
-    if (!agent || skip.has(i) || queued.has(i) || userWords(m, STAGE_NOT_USER).length || row.includes(QUEUED_PREFIX)) {
+    if (!agent || skip.has(i) || queued.has(i) || userWords(m, notUserOf(opts.blockTraces)).length || row.includes(QUEUED_PREFIX)) {
       if (agent && (skip.has(i) || queued.has(i))) stats.anchored++; // anchored: kept with its frame
       learn(m);
       continue;
@@ -4459,7 +4466,7 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
       if (i === 0 || i >= tail) continue;
       const m = messages[i];
       if (skip.has(i)) { stats.skipped_blocks++; continue; }
-      if (userWords(m, STAGE_NOT_USER).length || m.text.includes(QUEUED_PREFIX) || AGENT_BARE.test(m.text) || !framingOnly(m.text)) { stats.owner_words++; continue; }
+      if (userWords(m, notUserOf(cfg.blockTraces)).length || m.text.includes(QUEUED_PREFIX) || AGENT_BARE.test(m.text) || !framingOnly(m.text)) { stats.owner_words++; continue; }
       if (queued.has(i)) { stats.queued_anchor++; continue; }
       if (senders.get(i).some((x) => x.json && !x.idle)) { stats.pending_json++; continue; }
       if (i >= limit) continue;
@@ -4698,7 +4705,7 @@ function blockRows(cfg, rows, ctx) {
 // rows as they came). Returns {rows, items, stats, messages: trimmed, sessionId, verdicts: Map key -> verdict, potential}.
 function planBlocks(cfg, messages, trimmed, api, queued, keepFrom, sessionId, agent = false) {
   const images = nonTextUserRows(messages, api);
-  const users = ownerRows(messages, cfg.hookRowPrefixes);
+  const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const found = blockRows(cfg, trimmed, { limit: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skipUser: images.rows, userUnmatched: images.unmatched, skipAssistant: nonTextAssistantRows(messages, api), queued, users, delivered, agent });
   const potential = found.items.reduce((sum, it) => (it.chars <= cfg.pasteMaxChars && !namesSecretPath(it.body, cfg.privatePaths) ? sum + blockGain(cfg, it) * it.count : sum), 0);
@@ -5398,7 +5405,7 @@ export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) 
   if (images.unmatched) return { reason: 'image_unmatched' };
   const fixed = new Set([...nonTextAssistantRows(messages, api), ...images.rows]);
   for (const [row] of queued) if (messages[row]?.role === 'user') fixed.add(row);
-  const users = ownerRows(messages, cfg.hookRowPrefixes);
+  const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
   return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
@@ -5570,7 +5577,7 @@ async function decide($, e, cfg, record, started) {
   // text, which would split the kept message: the summary runs instead.
   if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
-  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
+  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
   record.candidates = candidates.length;
   if (cfg.notifications) record.notifications = candidates.filter((c) => c.note).length;
   const envelopes = envelopeChars(messages, queued, candidates);
@@ -6106,7 +6113,7 @@ async function ownThreshold($, e, next) {
     session.lastAttempt = session.turnCount;
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
-    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
+    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces);
     // The blocks and messages that the cuts take off the list count with the costs of the candidates, as in decide (shapeOf), from the API form once it is read.
     const shapeIn = (apiForm, rows) => {
       const group = groupsOf(messages, apiForm);

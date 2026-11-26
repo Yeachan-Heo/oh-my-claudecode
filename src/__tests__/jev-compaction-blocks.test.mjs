@@ -360,6 +360,19 @@ describe('blocks of text: the switch', () => {
   });
 });
 
+describe('blocks of text: a row that opens with a moved block', () => {
+  it('is no message of the user, so none of its words is put to Jev, whether the blocks act or only count', async () => {
+    const asks = (i) => (i === 3 ? `[block moved at compaction: 900 chars in b/x.txt]\nKeep OWNERWORDS ${fill('owner', 600)}` : undefined);
+    for (const blocks of ['active', 'shadow']) {
+      const run = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: blocks }, session(40, { said, asks }));
+      expect(run.asked.length, blocks).toBeGreaterThan(0);
+      expect(run.asked.some((text) => text.includes('OWNERWORDS')), blocks).toBe(false);
+    }
+    const words = await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active' }, session(40, { said, asks: (i) => (i === 3 ? `Keep OWNERWORDS ${fill('owner', 600)}` : undefined) }));
+    expect(words.asked.some((text) => text.includes('OWNERWORDS'))).toBe(true);
+  });
+});
+
 describe('blocks of text: the stages that decide by fixed lengths (OMC_JEV_COMPACT_JEV_STAGES)', () => {
   const replies = { OMC_JEV_COMPACT_LONG_REPLIES: 'active', OMC_JEV_COMPACT_PASTES: 'active' };
   const longReply = (i) => `Step ${i} (ZERO) ${fill(`reply${i}`, 6000)}`;
