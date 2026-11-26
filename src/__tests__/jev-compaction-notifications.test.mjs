@@ -470,6 +470,88 @@ describe('a notification of a background task that reads the output file of a ta
     expect(held.record).toMatchObject({ result: 'jev', secret_held: 1 });
     expect(held.bodies.join('')).not.toContain('PLAINBODY');
   });
+
+  // The same two passes when the Agent reads the files of the task directory with a glob: the glob may name the output file of the task whose start the first pass cut, so
+  // the read is held like the exact name of an unknown file, whatever the first task read (a path that is secret by default or one configured as private).
+  const FIRST = [
+    ['a path that is secret by default', {}, 'cat ~/.ssh/id_rsa'],
+    ['a configured private path', { OMC_JEV_COMPACT_PRIVATE_PATHS: '/sensitive/prices.txt' }, 'cat /sensitive/prices.txt'],
+  ];
+  const twoPasses = async (extra, command, prompt) => {
+    const env = { ...NOTE_ENV, ...extra };
+    const w = talk(30);
+    const first = await compactRun(env, [...w.slice(0, 3), start('c0', 'Bash', { command }), launched('c0', 'bk7x2mq9'), ...[1, 2, 3].flatMap(reads), ...w.slice(3)]);
+    expect(first.record).toMatchObject({ result: 'jev' });
+    expect(JSON.stringify(first.out.messages)).not.toContain('bk7x2mq9');
+    const rows = [start('c1', 'Agent', { prompt }), launched('c1', 'ag1b2c3d')];
+    return compactRun(env, [...first.out.messages.slice(0, 4), ...rows, ...[4, 5, 6].flatMap(reads), report('ag1b2c3d', 'SECRETBODY'), ...first.out.messages.slice(4)]);
+  };
+  const GLOBS = [
+    ['a star', 'Summarize /tmp/work/tasks/*.output for the report.'],
+    ['a star after a cd', 'Run cd /tmp/work/tasks && cat *.output and summarize it for the report.'],
+    ['a path relative to the task directory with a star', 'Summarize tasks/*.output for the report.'],
+    ['question marks', 'Summarize /tmp/work/tasks/??.output for the report.'],
+    ['a bracket range and a star', 'Summarize /tmp/work/tasks/[a-z]*.output for the report.'],
+    ['a bracket range alone', 'Summarize /tmp/work/tasks/[0-9].output for the report.'],
+    ['a star and an upper case extension', 'Summarize /tmp/work/tasks/*.OUTPUT for the report.'],
+    ['a run of two hundred stars', `Summarize /tmp/work/tasks/${'*'.repeat(200)}.output for the report.`],
+    ['a brace list', 'Summarize /tmp/work/tasks/{bk7x2mq9,zz9y8x7w}.output for the report.'],
+  ];
+  for (const [firstLabel, extra, command] of FIRST) {
+    for (const [label, prompt] of GLOBS) {
+      it(`is traced and never sent to Jev when the first task (${firstLabel}) was removed by an earlier compaction and an Agent reads the files by ${label}`, async () => {
+        const second = await twoPasses(extra, command, prompt);
+        expect(second.bodies.join('')).not.toContain('SECRETBODY');
+        expect(JSON.stringify(second.out.messages)).not.toContain('SECRETBODY');
+        // The launch result of the Agent and the report are held, as when the file is named exactly.
+        expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 2 });
+      });
+    }
+    it(`controls (${firstLabel}): the exact name of the file is held as before, and a glob that does not end in .output is read as any file`, async () => {
+      const exact = await twoPasses(extra, command, 'Summarize /tmp/work/tasks/bk7x2mq9.output for the report.');
+      expect(exact.bodies.join('')).not.toContain('SECRETBODY');
+      expect(exact.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 2 });
+      for (const prompt of ['Summarize /tmp/work/tasks/*.txt for the report.', 'Summarize /tmp/work/*.log and /tmp/work/notes?.md for the report.', 'Summarize /tmp/work/tasks/*.outputs for the report.']) {
+        const plain = await twoPasses(extra, command, prompt);
+        expect(plain.record, prompt).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
+      }
+    });
+  }
+
+  it('a glob in the call of an Agent that is not a read of task files, and a name that only looks like a glob, are read as before', async () => {
+    const w = talk(30);
+    const readOf = (command) => [
+      { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: 'rf1', tool: 'Bash', input: { command } }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'rf1', text: `PLAINBODY ${'f'.repeat(7000)}`, isError: false }] },
+    ];
+    for (const command of ['cd /tmp/work && cat notes.txt', 'cd /tmp/work && ls *; cat build.log', 'cd /tmp/work && grep -c a* b.txt', 'cd /tmp/work && cat ab.output']) {
+      const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...readOf(command), ...w.slice(3)]);
+      expect(run.record, command).toMatchObject({ result: 'jev', secret_held: 0 });
+      expect(run.bodies.join(''), command).toContain('PLAINBODY');
+    }
+    // The read of a glob of task files is held in a call of its own too, in the foreground, like a name of that shape.
+    const held = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...readOf('cd /tmp/work/tasks && cat *.output'), ...w.slice(3)]);
+    expect(held.record).toMatchObject({ result: 'jev', secret_held: 1 });
+    expect(held.bodies.join('')).not.toContain('PLAINBODY');
+  });
+
+  it('reads a run of a million wildcard characters before .output in linear time', async () => {
+    const w = talk(30);
+    const prompts = [
+      `Summarize ${'*'.repeat(1_000_000)}.output`,
+      `Summarize ${'*'.repeat(1_000_000)}`,
+      `Summarize ${`${'*?['.repeat(21)}x `.repeat(15_000)}`,
+      `Summarize ${`${'a*'.repeat(32)}.outpu `.repeat(15_000)}`,
+      `Summarize ${'[]{},*?.-_'.repeat(100_000)}`,
+      `Summarize ${'.output'.repeat(150_000)}`,
+    ];
+    for (const prompt of prompts) {
+      const t0 = performance.now();
+      const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), start('c1', 'Agent', { prompt }), launched('c1', 'ag1b2c3d'), ...[1, 2, 3].flatMap(reads), ...w.slice(3)]);
+      expect(performance.now() - t0, prompt.slice(0, 40)).toBeLessThan(4000);
+      expect(run.record, prompt.slice(0, 40)).toMatchObject({ result: 'jev' });
+    }
+  });
 });
 
 describe('the envelopes of the deliveries after a notification', () => {
