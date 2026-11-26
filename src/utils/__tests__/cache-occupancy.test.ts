@@ -9,6 +9,28 @@ import { processStartIdentities, publishCacheOccupancy, readOccupiedPluginRoots 
 
 const readFailures = vi.hoisted(() => new Map<string, string>());
 const lstatFailures = vi.hoisted(() => new Map<string, string>());
+// What the machine id file holds while a test plays another machine; empty reads the real file.
+const machineId = vi.hoisted(() => ({ value: '' }));
+// The host name a test plays; empty reads the real one.
+const hostName = vi.hoisted(() => ({ value: '' }));
+// The network interfaces a test plays; undefined reads the real ones.
+const interfaces = vi.hoisted(() => ({ value: undefined as Record<string, unknown[]> | undefined }));
+// The operating system a test plays, and what the one program that names the machine answers; an empty kind is the real system.
+const system = vi.hoisted(() => ({ kind: '', stdout: '', status: 0, runs: 0 }));
+vi.mock('os', async () => {
+  const actual = await vi.importActual<typeof import('os')>('os');
+  return { ...actual, type: () => system.kind || actual.type(), hostname: () => hostName.value || actual.hostname(), networkInterfaces: () => (interfaces.value ?? actual.networkInterfaces()) as ReturnType<typeof actual.networkInterfaces> };
+});
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawnSync: ((command: string, ...rest: unknown[]) => {
+      if (system.kind && /reg\.exe$|ioreg$/i.test(String(command).replace(/\\/g, '/'))) { system.runs++; return { status: system.status, stdout: system.stdout }; }
+      return (actual.spawnSync as (...args: unknown[]) => unknown)(command, ...rest);
+    }) as typeof actual.spawnSync,
+  };
+});
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -21,6 +43,7 @@ vi.mock('fs', async () => {
     readFileSync: vi.fn((...args: Parameters<typeof actual.readFileSync>) => {
       const code = readFailures.get(String(args[0]));
       if (code) throw Object.assign(new Error(code), { code });
+      if (machineId.value && String(args[0]) === '/etc/machine-id') return `${machineId.value}\n`;
       return actual.readFileSync(...args);
     }),
   };
@@ -48,6 +71,261 @@ describe('cache occupancy registry', () => {
     expect.soft(read(dir).unavailable).toBe(true);
     expect.soft(existsSync(recordPath)).toBe(true);
     readFailures.clear();
+    expect(read(dir).roots).toEqual(new Set([root]));
+  });
+
+  // The place of this machine as the publisher writes it; a record without it has an unknown origin and counts as foreign.
+  const localHost = async (publish: (root: string, configDir: string) => unknown) => {
+    const root = join(dir, 'host-probe');
+    mkdirSync(root, { recursive: true });
+    expect(await publish(root, dir)).toBe(true);
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    const file = join(registry, readdirSync(registry)[0]);
+    const { host } = JSON.parse(readFileSync(file, 'utf8')) as { host: string };
+    rmSync(file);
+    return host;
+  };
+
+  // A record carries where its owner runs (host name and, on Linux, PID namespace). A profile shared over NFS or mounted into a container
+  // holds records of owners this machine cannot probe: a local "no such process" or another start time proves nothing about them.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps the record of an owner that runs elsewhere or at an unknown place (no field), and judges only the record of this place locally, for %s', async (_name, path) => {
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const host = await localHost(path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy);
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    const exited = spawnSync(process.execPath, ['-e', '']).pid;
+    const write = (letter: string, fields: Record<string, unknown>) => {
+      const file = join(registry, `${letter.repeat(64)}.json`);
+      writeFileSync(file, JSON.stringify({ version: 1, pid: exited, processStartIdentity: 'start', pluginRoot: join(dir, `root-${letter}`), updatedAt: new Date().toISOString(), ...fields }));
+      return file;
+    };
+    const foreign = write('a', { host: 'another-machine|pid:[4026539999]' });
+    const foreignOtherStart = write('b', { host: 'another-machine|pid:[4026539999]', pid: process.pid });
+    // The previous publisher wrote no field: it may be a record of another machine of a shared profile, so it is never probed here.
+    const noField = write('c', {});
+    const local = write('d', { host });
+
+    const roots = read(dir).roots;
+
+    expect([...roots].sort()).toEqual([join(dir, 'root-a'), join(dir, 'root-b'), join(dir, 'root-c')]);
+    expect({ foreign: existsSync(foreign), foreignOtherStart: existsSync(foreignOtherStart), noField: existsSync(noField), local: existsSync(local) }).toEqual({ foreign: true, foreignOtherStart: true, noField: true, local: false });
+  });
+
+  // A record of another host names its plugin root as that host sees it (a profile can be mounted under another path there). One that lies in no
+  // plugin cache of this configuration directory cannot be matched with a version here: the registry is unavailable, so no cleanup runs on it.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('reports the registry unavailable for a record of another host whose root lies in no cache here, for %s', async (_name, path) => {
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    const answers: Record<string, boolean> = {};
+    for (const [label, fields, root] of [
+      ['another host, root spelled as that host sees it', { host: 'another-machine|id|pid:[4026539999]' }, '/Users/b/.claude/plugins/cache/omc/oh-my-claudecode/4.4.1'],
+      ['another host, root in the cache here', { host: 'another-machine|id|pid:[4026539999]' }, join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.4.1')],
+      ['no host field, root outside the cache', {}, join(dir, 'checkout')],
+    ] as [string, Record<string, unknown>, string][]) {
+      for (const name of readdirSync(registry)) rmSync(join(registry, name));
+      writeFileSync(join(registry, `${'a'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: 'start', pluginRoot: root, updatedAt: new Date().toISOString(), ...fields }));
+      answers[label] = read(dir).unavailable;
+    }
+    expect(answers).toEqual({
+      'another host, root spelled as that host sees it': true,
+      'another host, root in the cache here': false,
+      'no host field, root outside the cache': true,
+    });
+  });
+
+  // The syntax of a root is read before it is resolved: a Windows path is relative to a POSIX reader, and a reader whose working directory lies in the
+  // cache would map it underneath the cache and take it for a root of this system.
+  it.skipIf(process.platform === 'win32').each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('reports the registry unavailable for a record of another host with a root in another path syntax, whatever the working directory, for %s', async (_name, path) => {
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    const cache = join(dir, 'plugins', 'cache');
+    mkdirSync(join(cache, 'omc', 'oh-my-claudecode'), { recursive: true });
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(cache);
+    try {
+      const answers: Record<string, boolean> = {};
+      for (const root of ['C:\\Users\\b\\.claude\\plugins\\cache\\omc\\oh-my-claudecode\\4.4.1', '\\\\server\\share\\4.4.1', 'omc/oh-my-claudecode/4.4.1']) {
+        for (const name of readdirSync(registry)) rmSync(join(registry, name));
+        writeFileSync(join(registry, `${'a'.repeat(64)}.json`), JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: 'start', pluginRoot: root, host: 'another-machine|id|pid:[4026539999]', updatedAt: new Date().toISOString() }));
+        answers[root] = read(dir).unavailable;
+      }
+      expect(Object.values(answers)).toEqual([true, true, true]);
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
+  // The clock of another host is not judged: a record of another place or of none dated more than 5 minutes ahead is kept, one of this place is not.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps a record of another host dated ten minutes ahead, and drops the same record of this host, for %s', async (_name, path) => {
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    mkdirSync(registry, { recursive: true });
+    const root = join(dir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.4.1');
+    const ahead = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const host = await localHost(path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy);
+    const answers: Record<string, boolean> = {};
+    for (const [label, fields] of [['another host', { host: 'another-machine|id|pid:[4026539999]' }], ['no host field', {}], ['this host', { host }]] as [string, Record<string, unknown>][]) {
+      const file = join(registry, `${'b'.repeat(64)}.json`);
+      writeFileSync(file, JSON.stringify({ version: 1, pid: process.pid, processStartIdentity: 'start', pluginRoot: root, updatedAt: ahead, ...fields }));
+      read(dir);
+      answers[label] = existsSync(file);
+      rmSync(file, { force: true });
+    }
+    expect(answers).toEqual({ 'another host': true, 'no host field': true, 'this host': false });
+  });
+
+  // Two machines can report the same PID namespace text (the namespace of init is the same everywhere on Linux); the machine id tells them apart.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps the record of an owner whose namespace matches but whose machine id differs, for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    expect(await publish(root, dir)).toBe(true);
+    const file = join(dir, '.omc', 'cache-occupancy', readdirSync(join(dir, '.omc', 'cache-occupancy'))[0]);
+    const record = JSON.parse(readFileSync(file, 'utf8')) as { host: string; pid: number };
+    const [, namespace] = record.host.split('|');
+    writeFileSync(file, JSON.stringify({ ...record, pid: spawnSync(process.execPath, ['-e', '']).pid, host: `another-machine-id|${namespace ?? ''}` }));
+
+    expect(read(dir).roots).toEqual(new Set([root]));
+    expect(existsSync(file)).toBe(true);
+  });
+
+  // A host can be renamed (a workstation, a container, a laptop whose name follows the network) without a change of its machine id or PID
+  // namespace. The place is the same machine, so a record written under the previous name is still judged by a local probe and goes when its owner has exited.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps the place of a machine when its host name changes: the record of an owner that has exited goes, for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    const firstRecord = (configDir: string) => {
+      const registry = join(configDir, '.omc', 'cache-occupancy');
+      const file = join(registry, readdirSync(registry)[0]);
+      return { file, record: JSON.parse(readFileSync(file, 'utf8')) as { host: string } };
+    };
+    try {
+      machineId.value = 'id-of-this-machine';
+      hostName.value = 'before-the-rename';
+      expect(await (path ? publish(root, dir, process.pid, 'same-start') : publish(root, dir, 'same-start'))).toBe(true);
+      const before = firstRecord(dir);
+      // The owner exits, then the machine is renamed.
+      writeFileSync(before.file, JSON.stringify({ ...before.record, pid: spawnSync(process.execPath, ['-e', '']).pid }));
+      hostName.value = 'after-the-rename';
+      const otherConfig = join(dir, 'other-config');
+      expect(await (path ? publish(root, otherConfig, process.pid, 'same-start') : publish(root, otherConfig, 'same-start'))).toBe(true);
+      expect(firstRecord(otherConfig).record.host).toBe(before.record.host);
+      expect(read(dir).roots).toEqual(new Set());
+      expect(existsSync(before.file)).toBe(false);
+    } finally {
+      machineId.value = '';
+      hostName.value = '';
+    }
+  });
+
+  // Where no machine id file can be read, Windows and macOS name the machine through one program (MachineGuid, IOPlatformUUID), run once per process;
+  // a machine that nothing names is unknown, so every record is foreign to it and none is judged by a local process probe. The network adapters play no part.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('names a machine without a machine id file by the program of its system, and takes one that nothing names as unknown, for %s', async (_name, path) => {
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    const windows = (guid: string) => ({ kind: 'Windows_NT', status: 0, stdout: `\r\n    MachineGuid    REG_SZ    ${guid}\r\n` });
+    const mac = (uuid: string) => ({ kind: 'Darwin', status: 0, stdout: `    "IOPlatformUUID" = "${uuid}"\n` });
+    const worlds = [windows('guid-a'), windows('guid-b'), mac('uuid-a'), { kind: 'Windows_NT', status: 1, stdout: '' }, { kind: 'Darwin', status: 0, stdout: 'no id here' }];
+    readFailures.set('/etc/machine-id', 'ENOENT');
+    readFailures.set('/var/lib/dbus/machine-id', 'ENOENT');
+    const outcome: { host: string; kept: boolean; runs: number }[] = [];
+    try {
+      for (const world of worlds) {
+        Object.assign(system, world, { runs: 0 });
+        vi.resetModules();
+        const mod = path ? await import(path) : await import('../cache-occupancy.js');
+        rmSync(join(dir, '.omc'), { recursive: true, force: true });
+        expect(await (path ? mod.publishCacheOccupancy(root, dir, process.pid, 'same-start') : mod.publishCacheOccupancy(root, dir, 'same-start'))).toBe(true);
+        const registry = join(dir, '.omc', 'cache-occupancy');
+        const file = join(registry, readdirSync(registry)[0]);
+        const published = JSON.parse(readFileSync(file, 'utf8')) as { host: string };
+        // The owner has exited: where the machine is named the record is its own and goes; where it is unknown the record is foreign and stays.
+        writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), pid: spawnSync(process.execPath, ['-e', '']).pid }));
+        mod.readOccupiedPluginRoots(dir);
+        mod.readOccupiedPluginRoots(dir);
+        outcome.push({ host: published.host.split('|')[0], kept: existsSync(file), runs: system.runs });
+      }
+    } finally {
+      Object.assign(system, { kind: '', stdout: '', status: 0, runs: 0 });
+      readFailures.clear();
+      vi.resetModules();
+    }
+    expect(outcome).toEqual([
+      { host: 'Windows_NT:guid-a', kept: false, runs: 1 },
+      { host: 'Windows_NT:guid-b', kept: false, runs: 1 },
+      { host: 'Darwin:uuid-a', kept: false, runs: 1 },
+      { host: '', kept: true, runs: 1 },
+      { host: '', kept: true, runs: 1 },
+    ]);
+  });
+
+  // The place of the owner is part of the name of its record: two sessions of a shared profile that have the same root, the same PID (of
+  // their own PID table) and the same start identity must not write the same file, or the later one replaces the record of the first.
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('keeps one record for each of two owners that differ only in the machine, for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    try {
+      for (const id of ['id-of-machine-a', 'id-of-machine-b']) {
+        machineId.value = id;
+        expect(await (path ? publish(root, dir, process.pid, 'same-start') : publish(root, dir, 'same-start'))).toBe(true);
+      }
+    } finally {
+      machineId.value = '';
+    }
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    expect(readdirSync(registry).filter((name) => name.endsWith('.json'))).toHaveLength(2);
+  });
+
+  it.each([
+    ['typescript', null],
+    ['script', '../../../scripts/lib/cache-occupancy.mjs'],
+    ['template', '../../../templates/hooks/lib/cache-occupancy.mjs'],
+  ])('writes the place of its owner into a record, so the record stays a local one for %s', async (_name, path) => {
+    const publish = path ? (await import(path)).publishCacheOccupancy : publishCacheOccupancy;
+    const read = path ? (await import(path)).readOccupiedPluginRoots : readOccupiedPluginRoots;
+    const root = join(dir, 'plugins', '1.0.0');
+    mkdirSync(root, { recursive: true });
+    expect(await publish(root, dir)).toBe(true);
+    const registry = join(dir, '.omc', 'cache-occupancy');
+    const record = JSON.parse(readFileSync(join(registry, readdirSync(registry)[0]), 'utf8')) as { host?: unknown };
+    expect(typeof record.host === 'string' && record.host.length > 0).toBe(true);
     expect(read(dir).roots).toEqual(new Set([root]));
   });
 
@@ -386,19 +664,24 @@ describe('cache occupancy registry', () => {
       spawnSync(ps, ['warmup'], { env: { PATH: probeDirectory, PS_LOG: '/dev/null' }, timeout: 30000 });
       const script = `
         import { createHash } from 'node:crypto';
-        import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+        import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
         import { join } from 'node:path';
         const helper = await import(process.argv[1]);
         const configDir = process.argv[2];
         const lstart = new Date(process.argv[3]).getTime();
         const registryDir = join(configDir, '.omc', 'cache-occupancy');
         mkdirSync(registryDir, { recursive: true });
+        // The records are of this machine: a record without the place of its owner is foreign and never probed.
+        const scratch = join(configDir, 'scratch');
+        helper.publishCacheOccupancy(join(scratch, 'root'), scratch, process.pid, 'scratch-identity');
+        const scratchRegistry = join(scratch, '.omc', 'cache-occupancy');
+        const host = JSON.parse(readFileSync(join(scratchRegistry, readdirSync(scratchRegistry)[0]), 'utf8')).host;
         // pid 1 is the "gone" pid: the fake ps never prints it.
         const stored = new Map([[process.pid, String(lstart)], [process.ppid, 'stale-identity'], [1, 'unverifiable-identity']]);
         for (const [pid, processStartIdentity] of stored) {
           const pluginRoot = join(configDir, 'plugins', String(pid));
           const name = createHash('sha256').update([pluginRoot, pid, processStartIdentity].join('\\0')).digest('hex');
-          writeFileSync(join(registryDir, name + '.json'), JSON.stringify({ version: 1, pid, processStartIdentity, pluginRoot, updatedAt: new Date().toISOString() }));
+          writeFileSync(join(registryDir, name + '.json'), JSON.stringify({ version: 1, pid, processStartIdentity, pluginRoot, host, updatedAt: new Date().toISOString() }));
         }
         Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
         const result = helper.readOccupiedPluginRoots(configDir);

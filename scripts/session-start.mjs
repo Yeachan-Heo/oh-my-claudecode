@@ -1233,7 +1233,27 @@ function getClaudeMdVersion() {
     const claudeMdPath = join(configDir, 'CLAUDE.md');
     if (!existsSync(claudeMdPath)) return null;  // File doesn't exist
     const content = readFileSync(claudeMdPath, 'utf-8');
-    const version = extractOmcVersion(content);
+    let version = extractOmcVersion(content);
+    if (!version) {
+      // The file-split layout keeps the marker in a companion file, found as the doctor finds it: the CLAUDE-*.md files that CLAUDE.md
+      // references (every name that ends at white space, a closing parenthesis or the end of the text, in order), otherwise CLAUDE-omc.md and then every other
+      // CLAUDE-*.md in name order; the first marker decides.
+      const referenced = content.match(/CLAUDE-[^\s)]*[.]md(?![^\s)])/g) || [];
+      let names = referenced;
+      if (!referenced.length) {
+        names = ['CLAUDE-omc.md'];
+        try { names.push(...readdirSync(configDir).filter(name => /^CLAUDE-.*[.]md(?![^])/i.test(name)).sort()); } catch { /* no directory listing */ }
+      }
+      for (const name of new Set(names)) {
+        try {
+          // Only a regular file is opened: reading a FIFO or a device would wait for a writer and hold the whole hook.
+          const companionPath = join(configDir, name);
+          if (!statSync(companionPath).isFile()) continue;
+          version = extractOmcVersion(readFileSync(companionPath, 'utf-8'));
+        } catch { /* not there, or not readable */ }
+        if (version) break;
+      }
+    }
     return version || 'unknown';  // File exists but no marker = 'unknown'
   } catch { return null; }
 }
@@ -1867,7 +1887,8 @@ ${cleanBlock(cleanContent)}
           }
         }) ?? null;
 
-        if (latest && versions.length > 2) {
+        // Every change below (a link repointed, a directory replaced by a link) is held back while the registry cannot say which version another host still reads.
+        if (latest && versions.length > 2 && !occupancy.unavailable) {
           const toSymlink = versions.slice(2).filter(v => v !== latest);
           for (const version of toSymlink) {
             try {
@@ -1900,7 +1921,7 @@ ${cleanBlock(cleanContent)}
                   }
                 }
               } else if (stat.isDirectory()) {
-                if (occupancy.unavailable || occupancy.roots.has(pathIdentity(versionPath))) continue;
+                if (occupancy.roots.has(pathIdentity(versionPath))) continue;
                 // Directory → symlink: cannot be atomic, but run.cjs now
                 // handles missing targets gracefully (issue #1007).
                 rmSync(versionPath, { recursive: true, force: true });

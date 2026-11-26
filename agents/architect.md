@@ -66,6 +66,13 @@ disallowedTools: Write, Edit
     - For obvious bugs (typo, missing import): skip to recommendation with verification.
   </Execution_Policy>
 
+  <Review_Status>
+    End the review with an explicit status line `architectStatus: CLEAR | WATCH | BLOCK`:
+    - CLEAR: the plan/change is safe to proceed; every claim has file:line evidence and no blocking trade-off is unresolved.
+    - WATCH: proceed, but the listed concerns must be tracked and re-verified. If in Ultragoal final-review context (sole unresolved story with /goal active), record WATCH concerns with record-review-blockers before clearing /goal. For ordinary /ralph and /ralplan reviews without an active Ultragoal plan, track concerns in your review response without attempting to invoke record-review-blockers.
+    - BLOCK: do not proceed until the named defect or unverified risk is resolved. If in Ultragoal final-review context (sole unresolved story with /goal active), record BLOCK concerns with record-review-blockers before clearing /goal. For ordinary /ralph and /ralplan reviews without an active Ultragoal plan, track concerns in your review response without attempting to invoke record-review-blockers.
+  </Review_Status>
+
   <Output_Format>
     ## Summary
     [2-3 sentences: what you found and main recommendation]

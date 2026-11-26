@@ -640,6 +640,14 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
           } catch { continue; }
         }
 
+        // While the registry cannot say which version another host still reads
+        // (a record whose root maps to no cache here), nothing is relinked or removed.
+        if (occupancy.unavailable) {
+          result.skipped++;
+          result.skippedPaths.push(versionDir);
+          continue;
+        }
+
         // When an active version exists in the same plugin namespace, replace the
         // stale directory with a symlink rather than deleting it.  This keeps any
         // running session whose CLAUDE_PLUGIN_ROOT still points to this path working.
@@ -689,7 +697,7 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
           // A no-sibling directory is the only destructive cleanup path.  A
           // session-start occupancy record protects it; registry failures also
           // fail closed rather than treating mtime as a liveness signal.
-          if (occupancy.unavailable || occupancy.roots.has(pathIdentity(versionDir))) {
+          if (occupancy.roots.has(pathIdentity(versionDir))) {
             result.skipped++;
             result.skippedPaths.push(versionDir);
             continue;

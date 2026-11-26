@@ -1,8 +1,9 @@
-import { existsSync, readdirSync, lstatSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync } from 'fs';
+import { type as osType } from 'os';
 import { mkdir, writeFile, rename, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
-import { execFileSync } from 'node:child_process';
-import { dirname, join, resolve } from 'path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { getClaudeConfigDir } from './config-dir.js';
 
 const REGISTRY_VERSION = 1;
@@ -67,11 +68,58 @@ function processAlive(pid: number): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
+// Where this process runs: the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; Windows: MachineGuid, macOS:
+// IOPlatformUUID, each read once per process by one subprocess with a short limit; empty where there is none)
+// and, on Linux, the PID namespace; the host name is no part of it; the same text as scripts/lib/cache-occupancy.mjs, where the reason is given. A record that names another
+// place, or none (a record of the previous publisher), belongs to an owner this machine cannot probe, so a local process probe never proves it gone.
+// Where no machine id can be read at all the machine is unknown (empty) and every record is foreign. The hardware addresses of the network interfaces
+// are no stand-in: they change when an adapter comes or goes.
+function machineId(): string {
+  let machine = '';
+  for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+    try { machine = readFileSync(file, 'utf8').trim(); } catch { /* no such file */ }
+    if (machine) break;
+  }
+  return machine || systemMachineId();
+}
+
+let systemMachine: string | undefined;
+function systemMachineId(): string {
+  if (systemMachine !== undefined) return systemMachine;
+  systemMachine = '';
+  try {
+    const kind = osType();
+    const windows = kind === 'Windows_NT';
+    if (windows || kind === 'Darwin') {
+      // Absolute paths: a bare name would also be searched for in the working directory on Windows.
+      const command = windows ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe') : '/usr/sbin/ioreg';
+      const args = windows ? ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'] : ['-rd1', '-c', 'IOPlatformExpertDevice'];
+      const result = spawnSync(command, args, { encoding: 'utf8', timeout: 1000, windowsHide: true });
+      const found = result.status === 0 && (windows ? /MachineGuid\s+REG_SZ\s+(\S+)/ : /"IOPlatformUUID" = "([^"]+)"/).exec(result.stdout ?? '');
+      if (found) systemMachine = `${kind}:${found[1]}`;
+    }
+  } catch { /* no id: the machine is unknown */ }
+  return systemMachine;
+}
+
+function placeId(): string {
+  const machine = machineId();
+  let namespace = '';
+  try { namespace = readlinkSync('/proc/self/ns/pid'); } catch { /* not Linux, or not readable */ }
+  return `${machine}|${namespace}`;
+}
+
+function isForeignOwner(record: CacheOccupancyRecord): boolean {
+  return typeof record.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
+}
+
 export interface CacheOccupancyRecord {
   version: 1;
   pid: number;
   processStartIdentity: string;
   pluginRoot: string;
+  /** Where the owner runs; absent in records made before the field existed (a local record). */
+  host?: string;
   updatedAt: string;
 }
 
@@ -79,12 +127,13 @@ export function getCacheOccupancyDir(configDir = getClaudeConfigDir()): string {
   return join(configDir, '.omc', 'cache-occupancy');
 }
 
-function recordName(pluginRoot: string, pid: number, identity: string): string {
-  return `${createHash('sha256').update(`${pluginRoot}\0${pid}\0${identity}`).digest('hex')}.json`;
+// The place of the owner is part of the name, as in scripts/lib/cache-occupancy.mjs: a record made without it has the older name and is still read.
+function recordName(pluginRoot: string, pid: number, identity: string, host: string): string {
+  return `${createHash('sha256').update(`${pluginRoot}\0${pid}\0${identity}\0${host}`).digest('hex')}.json`;
 }
 
-function recordPath(pluginRoot: string, pid: number, identity: string, configDir?: string): string {
-  return join(getCacheOccupancyDir(configDir), recordName(pluginRoot, pid, identity));
+function recordPath(pluginRoot: string, pid: number, identity: string, host: string, configDir?: string): string {
+  return join(getCacheOccupancyDir(configDir), recordName(pluginRoot, pid, identity, host));
 }
 
 export async function publishCacheOccupancy(pluginRoot: string, configDir?: string, precomputedIdentity?: string): Promise<boolean> {
@@ -95,14 +144,16 @@ export async function publishCacheOccupancy(pluginRoot: string, configDir?: stri
   // PowerShell spawn instead of paying for two hosts on one startup path.
   const identity = precomputedIdentity ?? processStartIdentity(process.pid);
   if (!identity) return false;
+  const host = placeId();
   const record: CacheOccupancyRecord = {
     version: REGISTRY_VERSION,
     pid: process.pid,
     processStartIdentity: identity,
     pluginRoot: normalizedRoot,
+    host,
     updatedAt: new Date().toISOString(),
   };
-  const target = recordPath(normalizedRoot, process.pid, identity, configDir);
+  const target = recordPath(normalizedRoot, process.pid, identity, host, configDir);
   const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await mkdir(getCacheOccupancyDir(configDir), { recursive: true, mode: 0o700 });
@@ -151,6 +202,18 @@ function runsThroughDanglingLink(path: string): boolean {
   }
 }
 
+// The plugin root of a record of another host is spelled as that host sees it (a profile can be mounted under another path there); one that
+// does not lie in the plugin cache of this configuration directory cannot be matched with a version here, so the registry is reported
+// unavailable while such a record exists, as in scripts/lib/cache-occupancy.mjs.
+function isUnmappableForeignRoot(record: CacheOccupancyRecord, configDir: string): boolean {
+  if (!isForeignOwner(record)) return false;
+  // A root that is no absolute path here (another platform's syntax, such as C:\... on POSIX, or a relative one) would be resolved against the working directory, which can lie in the cache.
+  if (typeof record.pluginRoot !== 'string' || !isAbsolute(record.pluginRoot)) return true;
+  const cache = pathIdentity(join(configDir, 'plugins', 'cache'));
+  const root = pathIdentity(record.pluginRoot);
+  return root !== cache && !root.startsWith(cache + sep);
+}
+
 export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), options: ReadOccupiedPluginRootsOptions = {}): { roots: Set<string>; unavailable: boolean; identities: Map<number, string> } {
   const directory = getCacheOccupancyDir(configDir);
   let names: string[];
@@ -185,22 +248,27 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), option
     try { record = JSON.parse(content); } catch { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     if (!validRecord(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     const age = now - Date.parse(record.updatedAt);
-    if (age < -5 * 60 * 1000) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
-    if (!processAlive(record.pid)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
+    // The clock of another host is not judged here: a record of another place cannot be told invalid by its date.
+    if (age < -5 * 60 * 1000 && !isForeignOwner(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
+    if (!isForeignOwner(record) && !processAlive(record.pid)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     records.push({ path, record });
   }
   // A precomputed map (same-process reuse, issue #3995) verifies records
   // without a second PowerShell host; the fresh batched probe runs otherwise.
   const currentIdentities = options.identities instanceof Map
     ? options.identities
-    : processStartIdentities([...records.map(({ record }) => record.pid), ...(options.includePids ?? [])]);
+    : processStartIdentities([...records.filter(({ record }) => !isForeignOwner(record)).map(({ record }) => record.pid), ...(options.includePids ?? [])]);
   for (const { path, record } of records) {
-    const currentIdentity = process.platform === 'win32'
-      ? currentIdentities.get(record.pid)
-      : processStartIdentity(record.pid);
-    if (currentIdentity && currentIdentity !== record.processStartIdentity) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
+    // A record of another host or PID namespace is not probed: no local probe can judge its owner (the readers of the helper ask only for the others).
+    const currentIdentity = isForeignOwner(record)
+      ? null
+      : process.platform === 'win32'
+        ? currentIdentities.get(record.pid)
+        : processStartIdentity(record.pid);
+    if (currentIdentity && currentIdentity !== record.processStartIdentity && !isForeignOwner(record)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     // A live process whose identity cannot be read (including EPERM) is retained
     // conservatively; only a proven-dead PID or proven mismatch self-invalidates.
+    if (isUnmappableForeignRoot(record, configDir)) unavailable = true;
     roots.add(pathIdentity(record.pluginRoot));
   }
   return { roots, unavailable, identities: currentIdentities };

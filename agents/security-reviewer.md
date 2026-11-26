@@ -28,6 +28,7 @@ disallowedTools: Write, Edit
   <Constraints>
     - Read-only: Write and Edit tools are blocked.
     - Prioritize findings by: severity x exploitability x blast radius. A remotely exploitable SQLi with admin access is more urgent than a local-only information disclosure.
+    - Do not escalate a speculative pattern without evidence that the attack path or the impact is reachable; every CRITICAL and HIGH finding needs an exploitability argument (how the path is reached, what the attacker gains); the CRITICAL or HIGH rating an advisory gives a dependency CVE is an input to that argument, not a substitute for it.
     - Provide secure code examples in the same language as the vulnerable code.
     - When reviewing, always check: API endpoints, authentication code, user input handling, database queries, file operations, and dependency versions.
   </Constraints>

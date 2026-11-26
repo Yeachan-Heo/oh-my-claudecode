@@ -1558,7 +1558,7 @@ ${'- oversized startup guidance\n'.repeat(700)}
   });
 
   describe('CLAUDE.md version drift and claudeMdEnabled', () => {
-    function runDriftSession(claudeMdEnabled: boolean | undefined): string {
+    function runDriftSession(claudeMdEnabled: boolean | undefined, files: Record<string, string> = { 'CLAUDE.md': '# My own global config without OMC markers\n' }, fifos: string[] = []): string {
       const claudeDir = join(fakeHome, '.claude');
       const pluginRoot = join(tempDir, 'local-plugin-4.15.4');
       mkdirSync(join(claudeDir, '.omc'), { recursive: true });
@@ -1567,7 +1567,8 @@ ${'- oversized startup guidance\n'.repeat(700)}
       writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ version: '4.15.4', type: 'module' }));
       writeFileSync(join(claudeDir, 'hud', 'omc-hud.mjs'), '');
       writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ statusLine: 'node ~/.claude/hud/omc-hud.mjs' }));
-      writeFileSync(join(claudeDir, 'CLAUDE.md'), '# My own global config without OMC markers\n');
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(claudeDir, name), text);
+      for (const name of fifos) expect(spawnSync('mkfifo', [join(claudeDir, name)]).status).toBe(0);
       if (claudeMdEnabled !== undefined) {
         writeFileSync(join(claudeDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled }));
       }
@@ -1605,6 +1606,37 @@ ${'- oversized startup guidance\n'.repeat(700)}
 
     it('reports CLAUDE.md drift when claudeMdEnabled is true', () => {
       const combined = runDriftSession(true);
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    // The file-split layout: CLAUDE.md only references the companion file that carries the marker, and the doctor reads the marker there too.
+    it('reads the version marker from the companion file that CLAUDE.md references', () => {
+      const matching = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-omc.md\n', 'CLAUDE-omc.md': '<!-- OMC:VERSION:4.15.4 -->\n' });
+      expect(matching).not.toContain('CLAUDE.md instructions');
+      const outdated = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-omc.md\n', 'CLAUDE-omc.md': '<!-- OMC:VERSION:4.15.0 -->\n' });
+      expect(outdated).toContain('CLAUDE.md instructions: 4.15.0');
+    });
+
+    // A FIFO has no writer here: opening it for reading would wait for one, and the hook would end without any output at all.
+    it.skipIf(process.platform === 'win32')('does not open a companion file that is a FIFO named CLAUDE-omc.md', () => {
+      const combined = runDriftSession(undefined, { 'CLAUDE.md': '# no marker\n' }, ['CLAUDE-omc.md']);
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    it.skipIf(process.platform === 'win32')('does not open a companion file that is a FIFO referenced by CLAUDE.md', () => {
+      const combined = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-other.md\n' }, ['CLAUDE-other.md']);
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    // Without a reference the doctor scans CLAUDE-omc.md and then every other CLAUDE-*.md in name order, and SessionStart does the same, so the
+    // verdict of the doctor and the drift of the session agree; a FIFO among them is skipped, not read.
+    it.skipIf(process.platform === 'win32')('finds the marker in another CLAUDE-*.md when CLAUDE.md has no reference, and skips a FIFO among them', () => {
+      const found = runDriftSession(undefined, { 'CLAUDE.md': '# no marker\n', 'CLAUDE-custom.md': '<!-- OMC:VERSION:4.15.4 -->\n' }, ['CLAUDE-a.md']);
+      expect(found).not.toContain('CLAUDE.md instructions');
+    });
+
+    it('does not scan other CLAUDE-*.md files when CLAUDE.md references one', () => {
+      const combined = runDriftSession(undefined, { 'CLAUDE.md': '@CLAUDE-empty.md\n', 'CLAUDE-empty.md': '# no marker\n', 'CLAUDE-custom.md': '<!-- OMC:VERSION:4.15.4 -->\n' });
       expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
     });
 

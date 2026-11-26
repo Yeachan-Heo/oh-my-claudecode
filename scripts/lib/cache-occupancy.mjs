@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, lstatSync, readFileSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { existsSync, readdirSync, lstatSync, readFileSync, readlinkSync, unlinkSync, mkdirSync, writeFileSync, renameSync } from 'fs';
+import { type as osType } from 'os';
+import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
 
@@ -89,13 +90,63 @@ function identities(pids, probeTimeoutMs = 3000) {
   }
   return result;
 }
+// Where this process runs: the machine id (Linux: /etc/machine-id, else /var/lib/dbus/machine-id; Windows: MachineGuid, macOS:
+// IOPlatformUUID, each read once per process by one subprocess with a short limit; empty where there is none)
+// and, on Linux, the PID namespace. Two machines can report the same namespace text (the namespace of init is the same everywhere), so the
+// machine id tells them apart. The host name is no part of the place: it changes while the machine stays the same (a rename, a name that
+// follows the network), and a record of the machine written under its previous name must stay judgeable. Machines that share a machine id
+// (clones of one image) and the namespace of init are taken for one. A profile shared over NFS or mounted into a container holds records of owners that this machine cannot probe, so a record that
+// names another place is never judged by a local process probe. A record made before the machine id was added has the other format and
+// is taken for another place (kept, never judged by a local probe).
+// Where no machine id can be read at all, the machine is unknown (empty) and every record is then foreign, never judged by a local probe (see
+// isForeignOwner). The hardware addresses of the network interfaces are no stand-in: they change when an adapter comes or goes.
+function machineId() {
+  let machine = '';
+  for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+    try { machine = readFileSync(file, 'utf8').trim(); } catch {}
+    if (machine) break;
+  }
+  return machine || systemMachineId();
+}
+let systemMachine;
+function systemMachineId() {
+  if (systemMachine !== undefined) return systemMachine;
+  systemMachine = '';
+  try {
+    const kind = osType();
+    const windows = kind === 'Windows_NT';
+    if (windows || kind === 'Darwin') {
+      // Absolute paths: a bare name would also be searched for in the working directory on Windows.
+      const command = windows ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe') : '/usr/sbin/ioreg';
+      const args = windows ? ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'] : ['-rd1', '-c', 'IOPlatformExpertDevice'];
+      const result = spawnSync(command, args, { encoding: 'utf8', timeout: 1000, windowsHide: true });
+      const found = result.status === 0 && (windows ? /MachineGuid\s+REG_SZ\s+(\S+)/ : /"IOPlatformUUID" = "([^"]+)"/).exec(result.stdout ?? '');
+      if (found) systemMachine = `${kind}:${found[1]}`;
+    }
+  } catch {}
+  return systemMachine;
+}
+function placeId() {
+  const machine = machineId();
+  let namespace = '';
+  try { namespace = readlinkSync('/proc/self/ns/pid'); } catch {}
+  return `${machine}|${namespace}`;
+}
+// Only a record that names this very place is local. A record without the field (made by the previous publisher, possibly on another machine
+// of a shared profile during a rolling update) has an unknown origin and is foreign: never judged by a local probe, never removed as gone.
+// When this machine cannot name itself, no record can be compared with it, so every record is foreign.
+export function isForeignOwner(record) {
+  return typeof record?.host !== 'string' || record.host === '' || machineId() === '' || record.host !== placeId();
+}
 function alive(pid) {
   try { process.kill(pid, 0); return true; }
   catch (error) { return error?.code === 'EPERM'; }
 }
 
 function registryDir(configDir) { return join(configDir, '.omc', 'cache-occupancy'); }
-function fileName(root, pid, start) { return `${createHash('sha256').update(`${root}\0${pid}\0${start}`).digest('hex')}.json`; }
+// The place of the owner is part of the name: two owners on a shared profile can have the same root, PID and start identity (a PID of each machine's own table).
+// A record made without the place has the older name; readers take every name of this form, so it is still read.
+function fileName(root, pid, start, place) { return `${createHash('sha256').update(`${root}\0${pid}\0${start}\0${place}`).digest('hex')}.json`; }
 
 // Issue #3995: on win32 every identity probe is a PowerShell host (~1.6-2.0s),
 // so SessionStart must not need two. publishCacheOccupancy() accepts an
@@ -111,11 +162,12 @@ export function publishCacheOccupancy(pluginRoot, configDir, pid = process.ppid,
     : precomputedIdentity === null ? null : identity(pid, probeTimeoutMs);
   if (!root || !start) return false;
   const dir = registryDir(configDir);
-  const target = join(dir, fileName(root, pid, start));
+  const host = placeId();
+  const target = join(dir, fileName(root, pid, start, host));
   const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(temp, JSON.stringify({ version: 1, pid, processStartIdentity: start, pluginRoot: root, updatedAt: new Date().toISOString() }), { mode: 0o600 });
+    writeFileSync(temp, JSON.stringify({ version: 1, pid, processStartIdentity: start, pluginRoot: root, host, updatedAt: new Date().toISOString() }), { mode: 0o600 });
     renameSync(temp, target);
     return true;
   } catch { try { unlinkSync(temp); } catch {} return false; }
@@ -136,6 +188,18 @@ function runsThroughDanglingLink(path) {
     }
     if (dirname(current) === current) return false;
   }
+}
+
+// The plugin root of a record of another host is spelled as that host sees it, and a profile can be mounted under another path there. One that
+// does not lie in the plugin cache of this configuration directory cannot be matched with a version here, so the registry is reported unavailable
+// (nothing is cleaned or relinked) while such a record exists, as scripts/omc-doctor.mjs stops the repair commands.
+function isUnmappableForeignRoot(record, configDir) {
+  if (!isForeignOwner(record)) return false;
+  // A root that is no absolute path here (another platform's syntax, such as C:\... on POSIX, or a relative one) would be resolved against the working directory, which can lie in the cache.
+  if (typeof record.pluginRoot !== 'string' || !isAbsolute(record.pluginRoot)) return true;
+  const cache = pathIdentity(join(configDir, 'plugins', 'cache'));
+  const root = pathIdentity(record.pluginRoot);
+  return root !== cache && !root.startsWith(cache + sep);
 }
 
 export function readOccupiedPluginRoots(configDir, options = {}) {
@@ -167,7 +231,7 @@ export function readOccupiedPluginRoots(configDir, options = {}) {
     }
     try { record = JSON.parse(content); } catch { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     const age = Date.now() - Date.parse(record?.updatedAt);
-    if (record?.version !== 1 || !Number.isSafeInteger(record?.pid) || !record?.processStartIdentity || !record?.pluginRoot || !Number.isFinite(Date.parse(record?.updatedAt)) || age < -300000 || !alive(record.pid)) {
+    if (record?.version !== 1 || !Number.isSafeInteger(record?.pid) || !record?.processStartIdentity || !record?.pluginRoot || !Number.isFinite(Date.parse(record?.updatedAt)) || (age < -300000 && !isForeignOwner(record)) || (!isForeignOwner(record) && !alive(record.pid))) {
       try { unlinkSync(path); } catch {}
       continue;
     }
@@ -180,15 +244,16 @@ export function readOccupiedPluginRoots(configDir, options = {}) {
     : (options.identities instanceof Map
       ? options.identities
       : identities(
-        [...(Array.isArray(options.includePids) ? options.includePids : []), ...records.map(({ record }) => record.pid)],
+        [...(Array.isArray(options.includePids) ? options.includePids : []), ...records.filter(({ record }) => !isForeignOwner(record)).map(({ record }) => record.pid)],
         remainingProbeMs(),
       ));
   for (const { path, record } of records) {
     const current = currentIdentities.get(record.pid);
-    if (current && current !== record.processStartIdentity) {
+    if (current && current !== record.processStartIdentity && !isForeignOwner(record)) {
       try { unlinkSync(path); } catch {}
       continue;
     }
+    if (isUnmappableForeignRoot(record, configDir)) unavailable = true;
     roots.add(pathIdentity(record.pluginRoot));
   }
   return { roots, unavailable, identities: currentIdentities };
