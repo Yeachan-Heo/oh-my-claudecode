@@ -1479,12 +1479,12 @@ const leadable = (dir, name) => {
 // publishes its record only after the last read of the records still opens it. Every link leads to the one version `target` that this command
 // does not move: the newest protected version of the cache that can be led to (leadable), chosen once before the first move. A link to a version
 // that is moved later would make the links a chain, and a path through a long chain fails (ELOOP). The link is made the way the cleanup of
-// SessionStart makes it (a relative link; a junction with an absolute target on Windows). With no target nothing is left. Returns true when
-// the link could not be made.
+// SessionStart makes it (a relative link; a junction with an absolute target on Windows). A moved link that led to a directory gets the same link
+// back, to its own target. With no target nothing is left. Returns true when the link could not be made.
 const redirectFailed = (dir, original, target) => {
   try {
     const windows = process.platform == 'win32';
-    if (target) fs.symlinkSync(windows ? path.join(dir, target) : target, original, windows ? 'junction' : undefined);
+    if (target) fs.symlinkSync(windows ? path.resolve(dir, target) : target, original, windows ? 'junction' : undefined);
     return false;
   } catch {
     return true;
@@ -1602,12 +1602,16 @@ const cacheRepair = (kind) => {
               // while the version still has an identity to compare.
               const alias = path.join(path.dirname(dir), path.basename(dir).toUpperCase(), name);
               const foldCase = !!identity(original) && identity(alias) == identity(original);
-              // Only a real directory leaves a link behind: moving a link away (one of SessionStart) must not leave another for every run.
-              let wasDirectory;
+              // What takes the place of the version once it is moved: a real directory leaves a link to the newest protected version (redirectTo), a link
+              // that leads to a directory is put back as it was (linkText, the same target), and a link that leads nowhere leaves nothing.
+              let wasDirectory = false;
+              let linkText;
               try {
-                wasDirectory = fs.lstatSync(original).isDirectory();
+                const info = fs.lstatSync(original);
+                wasDirectory = info.isDirectory();
+                linkText = info.isSymbolicLink() && fs.statSync(original).isDirectory() ? fs.readlinkSync(original) : undefined;
               } catch {
-                wasDirectory = false;
+                // Not a link that leads to a directory: nothing is put back.
               }
               fs.renameSync(original, backup);
               // A destination that was redirected in that instant no longer holds the copy at this path: there is nothing to read or to put back, and
@@ -1626,7 +1630,7 @@ const cacheRepair = (kind) => {
               } else {
                 moved++;
                 // After the last read, so that a record published after it finds the path open: the link does not depend on that read seeing the record.
-                if (wasDirectory && redirectFailed(dir, original, redirectTo)) unlinked++;
+                if (redirectFailed(dir, original, wasDirectory ? redirectTo : linkText)) unlinked++;
               }
             }
           }

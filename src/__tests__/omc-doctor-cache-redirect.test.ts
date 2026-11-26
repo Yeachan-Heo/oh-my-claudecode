@@ -103,7 +103,7 @@ fs.readdirSync = function (target, ...rest) {
     }
   });
 
-  test('the link is dated by itself: it stays for 10 minutes, then the next run moves it as a link and leaves no new one', () => {
+  test('the link is dated by itself: it stays for 10 minutes, then the next run moves it as a link and puts the same link back', () => {
     for (const command of commands) {
       const { dir, cache } = setup(['5.8.0', '5.9.0']);
       try {
@@ -115,12 +115,12 @@ fs.readdirSync = function (target, ...rest) {
         expect(again.stdout).toMatch(/Moved 0 unprotected version/);
         expect(again.stdout).toMatch(/Left 1 version\(s\) modified in the last 10 minutes alone/);
         expect({ command, versions: digitEntries(cache), moved: movedAside(dir) }).toEqual({ command, versions: '5.8.0,5.9.0', moved: 1 });
-        // An hour later: the link is moved as the link, the tree it led to is not touched, and no link takes its place.
+        // An hour later: the link is moved as the link, the tree it led to is not touched, and the same link is put back at its name.
         age(path.join(cache, '5.8.0'));
         const later = runCommand(command, dir, { timeout: 60_000 });
         expect(later.status).toBe(0);
         expect(later.stdout).toMatch(/Moved 1 unprotected version/);
-        expect({ command, versions: digitVersions(cache), moved: movedAside(dir), target: opens(path.join(cache, '5.9.0')) }).toEqual({ command, versions: '5.9.0', moved: 2, target: true });
+        expect({ command, versions: digitVersions(cache), moved: movedAside(dir), target: opens(path.join(cache, '5.9.0')), link: isLink(path.join(cache, '5.8.0')) }).toEqual({ command, versions: '5.9.0', moved: 2, target: true, link: true });
         const moved = readdirSync(backupDir(dir)).filter((name) => name.startsWith('5.8.0-')).map((name) => lstatSync(path.join(backupDir(dir), name)).isSymbolicLink());
         expect({ command, moved: moved.sort() }).toEqual({ command, moved: [false, true] });
       } finally {
@@ -145,6 +145,47 @@ fs.readdirSync = function (target, ...rest) {
         expect({ command, versions: digitEntries(cache), opens: opens(path.join(cache, '5.8.0')), moved: movedAside(dir) }).toEqual({ command, versions: '5.8.0,5.9.0', opens: true, moved: 1 });
       } finally {
         clean(dir);
+      }
+    }
+  });
+
+  // A link in the cache that leads to a directory is moved to the backup like any version, and a session may have taken its path as its root: the same link is
+  // put back at its name (the same target), so a record published after the last read still finds its root, as with a real directory. A link that leads nowhere
+  // cannot load the plugin and leaves nothing.
+  test('a moved link to a directory is put back with the same target, so a record published right after the last read finds its root open; a dangling link leaves nothing', () => {
+    const kinds = process.platform === 'win32' ? ['link', 'outside', 'directory'] : ['link', 'outside', 'dangling', 'directory'];
+    for (const command of commands) {
+      for (const kind of kinds) {
+        const { dir, cache } = setup(kind == 'directory' ? ['5.8.0', '5.9.0'] : ['5.9.0']);
+        try {
+          const entry = path.join(cache, '5.8.0');
+          const aim = kind == 'outside' ? path.join('..', '..', '..', '..', 'outside') : '5.9.0';
+          if (kind == 'link') link(aim, entry);
+          if (kind == 'outside') {
+            mkdirSync(path.join(dir, 'outside'));
+            writeFileSync(path.join(dir, 'outside', 'package.json'), JSON.stringify({ version: '5.8.0' }));
+            link(aim, entry);
+          }
+          if (kind == 'dangling') symlinkSync('no-such-version', entry);
+          age(entry);
+          const preload = preloadOf(dir, 'publish-after-last-read.cjs', publishAfterRead(5));
+          const result = runCommand(command, dir, { preloads: [preload], env: { HELD_DIR: entry }, timeout: 60_000 });
+          const there = kind != 'dangling';
+          const at = { command, kind };
+          expect({ ...at, status: result.status, moved: movedAside(dir), says: /Moved 1 unprotected version/.test(result.stdout), entries: digitEntries(cache), link: isLink(entry), opens: opens(entry) }).toEqual({
+            ...at,
+            status: 0,
+            moved: 1,
+            says: true,
+            entries: there ? '5.8.0,5.9.0' : '5.9.0',
+            link: there,
+            opens: there,
+          });
+          if (process.platform !== 'win32' && (kind == 'link' || kind == 'outside')) expect(readlinkSync(entry)).toBe(aim);
+          expect(result.stdout).not.toMatch(/Left no link/);
+        } finally {
+          clean(dir);
+        }
       }
     }
   });
@@ -318,15 +359,16 @@ fs.readdirSync = function (target, ...rest) {
     }
   });
 
-  test('a link that is moved away (one of SessionStart) leaves no new link, and the version it led to is not moved', () => {
+  test('a link that is moved away (one of SessionStart) is put back with the same target, and the version it led to is not moved', () => {
     for (const command of commands) {
       const { dir, cache } = setup(['5.9.0']);
       try {
         link('5.9.0', path.join(cache, '5.7.0'));
         age(path.join(cache, '5.7.0'));
         const result = runCommand(command, dir, { timeout: 60_000 });
-        expect({ command, status: result.status, left: readdirSync(cache), moved: movedAside(dir) }).toEqual({ command, status: 0, left: ['5.9.0'], moved: 1 });
+        expect({ command, status: result.status, left: readdirSync(cache), moved: movedAside(dir) }).toEqual({ command, status: 0, left: ['5.7.0', '5.9.0'], moved: 1 });
         expect(lstatSync(path.join(backupDir(dir), readdirSync(backupDir(dir))[0])).isSymbolicLink()).toBe(true);
+        expect({ command, link: isLink(path.join(cache, '5.7.0')), target: leadsTo(path.join(cache, '5.7.0')) }).toEqual({ command, link: true, target: realpathSync(path.join(cache, '5.9.0')) });
       } finally {
         clean(dir);
       }
@@ -412,6 +454,38 @@ fs.symlinkSync = function (target, at, type) {
             command,
             platform,
             made: [{ target: windows ? path.join(cache, '5.9.0') : '5.9.0', at: path.join(cache, '5.8.0'), type: windows ? 'junction' : null }],
+          });
+        } finally {
+          clean(dir);
+        }
+      }
+    }
+  });
+
+  // A junction reads back as an absolute path on Windows: the link put back keeps that target, it is not read against the cache directory again.
+  test('a moved link with an absolute target is put back with that same target, a junction on Windows', () => {
+    const watch = `const fs = require('fs'); const real = fs.symlinkSync;
+Object.defineProperty(process, 'platform', { value: process.env.REPORT_AS });
+fs.symlinkSync = function (target, at, type) {
+  fs.appendFileSync(process.env.LINK_LOG, JSON.stringify({ target, at, type: type === undefined ? null : type }) + '\\n');
+  return real.call(fs, target, at, type);
+};
+`;
+    for (const command of commands) {
+      for (const platform of process.platform === 'win32' ? ['win32'] : ['linux', 'win32']) {
+        const { dir, cache } = setup(['5.9.0']);
+        try {
+          link(path.join(cache, '5.9.0'), path.join(cache, '5.8.0'));
+          age(path.join(cache, '5.8.0'));
+          const preload = preloadOf(dir, 'watch-link.cjs', watch);
+          const log = path.join(dir, 'links.log');
+          const result = runCommand(command, dir, { preloads: [preload], env: { REPORT_AS: platform, LINK_LOG: log }, timeout: 60_000 });
+          expect({ command, platform, status: result.status }).toEqual({ command, platform, status: 0 });
+          const made = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+          expect({ command, platform, made }).toEqual({
+            command,
+            platform,
+            made: [{ target: path.join(cache, '5.9.0'), at: path.join(cache, '5.8.0'), type: platform === 'win32' ? 'junction' : null }],
           });
         } finally {
           clean(dir);

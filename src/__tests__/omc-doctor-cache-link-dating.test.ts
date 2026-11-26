@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { existsSync, lstatSync, lutimesSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, lutimesSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { backupDir, commands, makeCache, movedAside, PLUGIN_ID, runCommand, scriptSection, scriptText, writeRegistry } from './helpers/omc-doctor-cache-fixture.js';
 
@@ -7,7 +7,7 @@ import { backupDir, commands, makeCache, movedAside, PLUGIN_ID, runCommand, scri
 // (`5.7.0 -> 5.8.0`) so that a running session whose path points at the old name keeps working. The commands date such an
 // entry by the link itself (`lstatSync`), never by the tree it points to: a redirect created a moment ago is new, whatever
 // the dates in its target, and is not moved before the race guard (10 minutes) has passed; an old redirect is moved as the
-// link only and its target is not touched. A POSIX symlink is a relative link; Windows gets a junction with an absolute
+// link alone and its target is not touched, and the same link is put back at its name (a session may hold its path as its root). A POSIX symlink is a relative link; Windows gets a junction with an absolute
 // target (no privilege needed), which is also what SessionStart creates there.
 describe('omc-doctor: a version directory that is a link is dated by the link itself', { timeout: 120_000 }, () => {
   const THRESHOLD = 600_000;
@@ -72,8 +72,10 @@ describe('omc-doctor: a version directory that is a link is dated by the link it
         date(path.join(cache, '5.7.0'), THRESHOLD + 60_000);
       });
       try {
-        // The moved real directory 5.8.0 leaves a link to 5.9.0 in its place; the old link 5.7.0 is moved as a link and leaves none.
-        expect(aged.left).toEqual(['5.8.0', '5.9.0']);
+        // The moved real directory 5.8.0 leaves a link to 5.9.0 in its place; the old link 5.7.0 is moved as a link and put back with the same target.
+        expect(aged.left).toEqual(['5.7.0', '5.8.0', '5.9.0']);
+        expect(lstatSync(path.join(aged.cache, '5.7.0')).isSymbolicLink()).toBe(true);
+        if (process.platform !== 'win32') expect(readlinkSync(path.join(aged.cache, '5.7.0'))).toBe('5.9.0');
         expect(lstatSync(path.join(aged.cache, '5.8.0')).isSymbolicLink()).toBe(true);
         expect(aged.moved).toEqual(['5.7.0', '5.8.0']);
         const backup = readdirSync(backupDir(aged.dir)).find((n) => n.startsWith('5.7.0-')) ?? '';
@@ -99,7 +101,9 @@ describe('omc-doctor: a version directory that is a link is dated by the link it
           if (age) date(path.join(cache, '5.7.0'), age);
         });
         try {
-          expect({ age, kept: out.left.includes('5.7.0'), moved: out.moved.includes('5.7.0') }).toEqual({ age, kept: age === 0, moved: age !== 0 });
+          // The old link is moved to the backup and put back at its name, so it stays listed either way.
+          expect({ age, kept: out.left.includes('5.7.0'), moved: out.moved.includes('5.7.0') }).toEqual({ age, kept: true, moved: age !== 0 });
+          expect(lstatSync(path.join(out.cache, '5.7.0')).isSymbolicLink()).toBe(true);
           expect(existsSync(path.join(out.dir, 'outside', 'file.txt'))).toBe(true);
         } finally {
           clean(out.dir);
@@ -118,7 +122,8 @@ describe('omc-doctor: a version directory that is a link is dated by the link it
       });
       try {
         expect(out.moved).toEqual(['5.7.0']);
-        expect(out.left).toEqual(['5.8.0', '5.9.0']);
+        expect(out.left).toEqual(['5.7.0', '5.8.0', '5.9.0']);
+        expect(lstatSync(path.join(out.cache, '5.7.0')).isSymbolicLink()).toBe(true);
       } finally {
         clean(out.dir);
       }
