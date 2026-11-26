@@ -540,6 +540,7 @@ function devScanTokens(tokens, heredocs, depth) {
   let isFind = false; // the current command has find among its words
   let timeWords = new Set(); // indexes of the words that are a plain unquoted time
   let afterPipe = false; // the current command follows a pipe, where time is no keyword
+  let redirected = false; // the current command has a redirection before the word: time is no keyword after it
   const flush = (op) => {
     const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
     let found = null;
@@ -555,6 +556,7 @@ function devScanTokens(tokens, heredocs, depth) {
     wordDev = null;
     isFind = false;
     timeWords = new Set();
+    redirected = false;
     afterPipe = op === '|' || op === '|&';
     return found;
   };
@@ -566,7 +568,7 @@ function devScanTokens(tokens, heredocs, depth) {
       const found = subs(t);
       if (found) return found;
       const text = devWordText(t);
-      if (!afterPipe && text === 'time' && t.parts.length === 1 && t.parts[0].kind === 'lit' && t.parts[0].text === 'time') timeWords.add(words.length);
+      if (!afterPipe && !redirected && text === 'time' && t.parts.length === 1 && t.parts[0].kind === 'lit' && t.parts[0].text === 'time') timeWords.add(words.length);
       words.push(text);
       if (t.parts.length === 1 && t.parts[0].kind === 'lit' && DEV_OPENERS.has(text)) afterPipe = false; // a group or a condition after a pipe starts a list of its own, where time is the keyword again
       if (baseName(text) === 'find') isFind = true;
@@ -574,6 +576,7 @@ function devScanTokens(tokens, heredocs, depth) {
       continue;
     }
     if (t.type !== 'redir') continue;
+    redirected = true;
     if (t.value === '<<' || t.value === '<<-') {
       const doc = heredocAt(heredocs, t.start);
       if (doc) fed.push(doc.body);

@@ -169,6 +169,9 @@ const BLOCKED: string[] = [
   // the list of -x of the zip extractor ends at the next option, and the words after that option are members again (the real tool reads none of them, but the whole archive then goes into the directory)
   'unzip a.zip -x etc/x -d / dev/null', 'unzip a.zip -x etc/x -d / -x tmp/out -q dev/null', 'unzip a.zip -x etc/x -o dev/null -d /', 'unzip a.zip top.txt -x etc/x -d / dev/null', 'unzip a.zip dev/null -x etc/x -d /',
   'unzip -d / a.zip -x etc/x -q dev/null', 'unzip a.zip -x etc/x -d / -- dev/null',
+  // after a redirection time is no keyword: the shell runs the external utility, whose options take a value
+  '>/tmp/log time -f %e rm /dev/null', '>/tmp/log time -p rm /dev/null', '2>/tmp/log time -f %e rm /dev/null', '</tmp/in time -p rm /dev/null', 'FOO=1 >/tmp/log time -p rm /dev/null', '{ >/tmp/log time -f %e rm /dev/null; }',
+  'true && >/tmp/log time -f %e rm /dev/null', '>/tmp/log time -- rm /dev/null', 'time -p >/tmp/log rm /dev/null', '! >/tmp/log time -p rm /dev/null', 'if >/tmp/log time -f %e rm /dev/null; then true; fi',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -277,6 +280,8 @@ const ALLOWED: string[] = [
   'tar --strip-components=2 -C / -xf a.tar /foo/dev/null', 'tar --strip-components=1 -C / -xf a.tar /dev/null', 'gtar --strip-components=3 -C / -xf a.tar /foo/dev/null', 'bsdtar --strip-components=3 -C / -xf a.tar /foo/dev/null',
   // a list of exclusions that swallows everything up to the option, and members after it that stay outside /dev
   'unzip a.zip -x dev/null -d /', 'unzip a.zip -x dev/null -d /tmp/out', 'unzip a.zip -x etc/x -d / tmp/out', 'unzip a.zip top.txt -x etc/x -d / tmp/out', 'unzip a.zip -x dev/null etc/x tmp/out -d /', 'unzip -x etc/x a.zip -d /',
+  // a redirection after the keyword time does not change it
+  'time -f %e >/tmp/log rm /dev/null', 'time -f %e 2>/tmp/log rm /dev/null', '{ time -f %e rm /dev/null; } >/tmp/log',
 ];
 
 describe('/dev guard: Bash commands', () => {
