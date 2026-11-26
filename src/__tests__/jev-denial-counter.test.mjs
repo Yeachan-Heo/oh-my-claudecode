@@ -571,6 +571,88 @@ describe('denial counter: shell-checks refusal in the hook', () => {
   }, 60_000);
 });
 
+describe('denial counter: agent-type refusal in the hook', () => {
+  const hookEnv = { OMC_JEV_POOL: '0', OMC_AGENT_TYPE_DENY: 'executor', OMC_AGENT_TYPE_DENY_MODE: 'deny' };
+  const agentTypeReason = '[AGENT TYPE] "executor" is not allowed by OMC_AGENT_TYPE_DENY; choose another agent type.';
+
+  it('counter on: three refusals of one session count #1, #2, #3 and escalate at the third with a journal row of the agent-type guard', () => {
+    const root = tempDir();
+    const env = { ...hookEnv, OMC_JEV_DENIAL_COUNTER: '1' };
+    const runs = [1, 2, 3].map((i) => runGuardDeny(env, 'agent-type-seq', 'Agent', { subagent_type: 'executor', prompt: 'x' }, { root, tool_use_id: `tool-${i}` }));
+    for (const [i, run] of runs.entries()) expect(run.permissionDecision, `call ${i + 1}: exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
+    const hash = keyHash(denialKey('agent-type', agentTypeReason));
+    expect(runs[0].reason.startsWith(agentTypeReason)).toBe(true);
+    expect(runs[0].reason).toContain(`[denial ${hash} #1]`);
+    expect(runs[0].reason).not.toContain('[DENIAL COUNTER]');
+    expect(runs[1].reason).toContain(`[denial ${hash} #2]`);
+    expect(runs[2].reason).toContain(`[denial ${hash} #3]`);
+    expect(runs[2].reason).toContain('[DENIAL COUNTER] The same denial of guard agent-type has come 3 times');
+    const decision = journal(runs[0].logDir).find((row) => row.kind === 'denial' && row.guard === 'agent-type');
+    expect(decision).toMatchObject({ action: 'escalation-1', n: 3, key: hash });
+  }, 60_000);
+
+  it('counter on: the refusal ends with the three common sentences, the third being the way out (the refused tool is not a poll tool)', () => {
+    const run = runGuardDeny({ ...hookEnv, OMC_JEV_DENIAL_COUNTER: '1' }, 'agent-type-sentences', 'Agent', { subagent_type: 'executor', prompt: 'x' });
+    expect(run.permissionDecision, `exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
+    expect(run.reason).toContain('Action NOT performed: do not write that it succeeded.');
+    expect(run.reason).toContain('Do not repeat the same call: do independent work or change the plan.');
+    expect(run.reason).toContain('Use the existing result and change the plan.');
+    expect(run.reason).not.toContain('Arm a monitor');
+  }, 60_000);
+
+  it('counter off: the refusal keeps its text (no marker) and writes no counter files', () => {
+    for (const value of [undefined, '0', 'true']) {
+      const run = runGuardDeny({ ...hookEnv, OMC_JEV_DENIAL_COUNTER: value }, `agent-type-off-${value ?? 'unset'}`, 'Agent', { subagent_type: 'executor', prompt: 'x' });
+      expect(run.permissionDecision, `exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
+      expect(run.reason).toBe(agentTypeReason);
+      expect(listRecursive(run.home).some((name) => name.includes('denials-'))).toBe(false);
+      expect(listRecursive(run.logDir).some((name) => name.includes('denials'))).toBe(false);
+    }
+  }, 60_000);
+});
+
+describe('denial counter: plan write guard refusal in the hook', () => {
+  const hookEnv = { OMC_JEV_POOL: '0', OMC_PLANNER_WRITE_GUARD: '1' };
+  const planWriteInput = { file_path: 'notes.txt', content: 'x' };
+  const planWriteExtra = { agent_type: 'oh-my-claudecode:planner' };
+
+  it('counter on: three refusals of one session count #1, #2, #3 and escalate at the third with a journal row of the plan-write-guard guard', () => {
+    const root = tempDir();
+    const env = { ...hookEnv, OMC_JEV_DENIAL_COUNTER: '1' };
+    const runs = [1, 2, 3].map((i) => runGuardDeny(env, 'plan-write-seq', 'Write', planWriteInput, { ...planWriteExtra, root, tool_use_id: `tool-${i}` }));
+    for (const [i, run] of runs.entries()) expect(run.permissionDecision, `call ${i + 1}: exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
+    const base = runs[0].reason.slice(0, runs[0].reason.indexOf('\n\n'));
+    expect(base).toMatch(/^\[PLAN WRITE GUARD\] The planner may write only Markdown files under /);
+    const hash = keyHash(denialKey('plan-write-guard', base));
+    expect(runs[0].reason).toContain(`[denial ${hash} #1]`);
+    expect(runs[0].reason).not.toContain('[DENIAL COUNTER]');
+    expect(runs[1].reason).toContain(`[denial ${hash} #2]`);
+    expect(runs[2].reason).toContain(`[denial ${hash} #3]`);
+    expect(runs[2].reason).toContain('[DENIAL COUNTER] The same denial of guard plan-write-guard has come 3 times');
+    const decision = journal(runs[0].logDir).find((row) => row.kind === 'denial' && row.guard === 'plan-write-guard');
+    expect(decision).toMatchObject({ action: 'escalation-1', n: 3, key: hash });
+  }, 60_000);
+
+  it('counter on: the refusal gets the two common sentences and no way-out sentence', () => {
+    const run = runGuardDeny({ ...hookEnv, OMC_JEV_DENIAL_COUNTER: '1' }, 'plan-write-sentences', 'Write', planWriteInput, planWriteExtra);
+    expect(run.permissionDecision, `exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
+    expect(run.reason).toContain('Action NOT performed: do not write that it succeeded.');
+    expect(run.reason).toContain('Do not repeat the same call: do independent work or change the plan.');
+    expect(run.reason).not.toContain('Use the existing result and change the plan.');
+  }, 60_000);
+
+  it('counter off: the refusal keeps its text (no marker) and writes no counter files', () => {
+    for (const value of [undefined, '0', 'true']) {
+      const run = runGuardDeny({ ...hookEnv, OMC_JEV_DENIAL_COUNTER: value }, `plan-write-off-${value ?? 'unset'}`, 'Write', planWriteInput, planWriteExtra);
+      expect(run.permissionDecision, `exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
+      expect(run.reason.startsWith('[PLAN WRITE GUARD] ')).toBe(true);
+      expect(run.reason).not.toContain('[denial ');
+      expect(listRecursive(run.home).some((name) => name.includes('denials-'))).toBe(false);
+      expect(listRecursive(run.logDir).some((name) => name.includes('denials'))).toBe(false);
+    }
+  }, 60_000);
+});
+
 // --- hook helpers -------------------------------------------------------------------------------
 
 function listRecursive(dir) {
@@ -659,6 +741,31 @@ function runBashDeny(extraEnv, sid, extraInput = {}) {
     hook_event_name: 'PreToolUse',
     tool_name: 'Bash',
     tool_input: { command: BASH_UNCLOSED },
+    session_id: sid,
+    tool_use_id: toolUseId,
+    transcript_path: transcript,
+    cwd,
+    ...input,
+  });
+  return { ...run, home, logDir, root };
+}
+
+/** One call of toolName with toolInput that a switched-on guard refuses, with a fresh session and its own transcript; extraInput.root and the other extraInput fields work as in runBashDeny. */
+function runGuardDeny(extraEnv, sid, toolName, toolInput, extraInput = {}) {
+  const { root: sharedRoot, ...input } = extraInput;
+  const root = sharedRoot ?? tempDir();
+  const home = join(root, 'home');
+  const cwd = join(root, 'proj');
+  const logDir = join(root, 'jev');
+  mkdirSync(home, { recursive: true });
+  mkdirSync(cwd, { recursive: true });
+  const toolUseId = String(input.tool_use_id ?? 'tool-1');
+  const transcript = join(root, `transcript-${toolUseId}.jsonl`);
+  writeFileSync(transcript, `{"type":"assistant","message":{"id":"msg-${toolUseId}","content":[]}}\n`);
+  const run = runHook(home, cwd, { ...extraEnv, OMC_JEV_LOG_DIR: logDir }, {
+    hook_event_name: 'PreToolUse',
+    tool_name: toolName,
+    tool_input: toolInput,
     session_id: sid,
     tool_use_id: toolUseId,
     transcript_path: transcript,

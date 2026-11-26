@@ -2907,7 +2907,7 @@ async function resolveJevSessionFiles(data, directory) {
 const DENIAL_POLL_TOOLS = new Set(['BashOutput', 'TaskOutput']);
 const DENIAL_TEXT_NOT_DONE = 'Action NOT performed: do not write that it succeeded.';
 const DENIAL_TEXT_NO_REPEAT = 'Do not repeat the same call: do independent work or change the plan.';
-const DENIAL_WAY_OUT_GUARDS = new Set(['agent-pool', 'ultragoal-goal', 'ultragoal-goal-missing']);
+const DENIAL_WAY_OUT_GUARDS = new Set(['agent-pool', 'agent-type', 'ultragoal-goal', 'ultragoal-goal-missing']);
 function denialWayOut(toolName) {
   return DENIAL_POLL_TOOLS.has(String(toolName || '').trim())
     ? 'Arm a monitor or wait for the notification.'
@@ -3209,6 +3209,7 @@ async function main() {
     if (PLAN_WRITE_TOOLS.has(toolName)) {
       const planWriteDeny = evaluatePlanWriteGuard(toolName, data, directory, stateDir);
       if (planWriteDeny) {
+        planWriteDeny.hookSpecificOutput.permissionDecisionReason = denialReasonWithCounter('plan-write-guard', planWriteDeny.hookSpecificOutput.permissionDecisionReason, data, stateDir);
         emitPreToolUseOutput(planWriteDeny, data);
         return;
       }
@@ -3333,6 +3334,7 @@ async function main() {
       // Agent-type deny list (OMC_AGENT_TYPE_DENY): before any Jev query and before model routing.
       const agentTypeDeny = evaluateForbiddenAgentType(toolName, data, stateDir);
       if (agentTypeDeny) {
+        agentTypeDeny.hookSpecificOutput.permissionDecisionReason = denialReasonWithCounter('agent-type', agentTypeDeny.hookSpecificOutput.permissionDecisionReason, data, stateDir);
         emitPreToolUseOutput(agentTypeDeny, data);
         return;
       }
