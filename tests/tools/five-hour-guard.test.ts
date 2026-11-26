@@ -3131,6 +3131,46 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a cd, a pushd or a chdir option moves the directory that a relative path is run from only when its target is known at that place: cd "$DIR/other" with DIR only in the session does not, so ./audit is checked against the directory of the session however many other directories the command names; a target that the command, the settings or the words give is settled as before', () => {
+    const f = fixture('foreign-chdir-target', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project');   // what only the session has in FHG_DIR
+    const other = join(project, 'other');
+    const unrelated = join(f.dir, 'unrelated');   // a directory that the command names, and that has no audit
+    mkdirSync(other, { recursive: true });
+    mkdirSync(unrelated);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(other, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>, settingsEnv: Record<string, string> = {}) => {
+      writeFileSync(f.settings, JSON.stringify({ env: settingsEnv, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const shellRuns = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd: f.dir, env: { ...process.env, FHG_DIR: project } }).stdout.includes('ran');
+    const unknown = [`cd "$FHG_DIR/other"; ./audit ${unrelated}`, `env -C "$FHG_DIR/other" ./audit ${unrelated}`, `env --chdir="$FHG_DIR/other" ./audit ${unrelated}`, `cd "\${FHG_DIR:-/nonexistent}/other"; ./audit ${unrelated}`, `cd ${unrelated}; cd "$FHG_DIR/other"; ./audit ${unrelated}`];
+    for (const command of unknown) expect(shellRuns(command), `${command}: the shell runs the file that the session finds`).toBe(true);
+    for (const command of [...unknown, `pushd "$FHG_DIR/other"; ./audit ${unrelated}`]) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // the target is known: the directory is a candidate for the relative path, so the file is found and is the same file
+    for (const [command, env] of [[`cd ${other}; ./audit ${unrelated}`, {}], [`env -C ${other} ./audit ${unrelated}`, {}], [`FHG_DIR=${project}; cd "$FHG_DIR/other"; ./audit ${unrelated}`, {}],
+      [`cd "$FHG_DIR/other"; ./audit ${unrelated}`, { FHG_DIR: project }]] as Array<[string, Record<string, string>]>) {
+      const r = start(command, { state_file: audit }, env);
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    // another file name is no file of the guard
+    expect(start(`cd "$FHG_DIR/other"; ./other ${unrelated}`, { state_file: audit }).status).toBe(0);
+  });
+
   it('a PATH that the command or the settings give is the PATH of the hook only when no component of it holds a parameter that nothing gives a value to (PATH=$DIR:$PATH, DIR only in the session), and only in the simple command that has it (PATH=dir true; audit): the guard cannot tell which file a bare name runs, so it refuses to start; a PATH whose parameters the settings, the command or a default word fill in settles it as before', () => {
     const f = fixture('foreign-session-path-component', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // the directory that only the session has in FHG_DIR
