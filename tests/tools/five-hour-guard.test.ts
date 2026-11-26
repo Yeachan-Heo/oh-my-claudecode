@@ -3208,6 +3208,50 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start(`cd "$FHG_DIR/other"; ./other ${unrelated}`, { state_file: audit }).status).toBe(0);
   });
 
+  it('a cd, a pushd or a chdir option with a relative target moves nothing that is known: the target is run from a directory that is not known (cd child, and cd child after cd /dir), so ./audit is checked against the directory of the session however many other directories the command names; a target that is an absolute path in every way its parameters are filled in, after an option such as -P or --, is settled as before', () => {
+    const f = fixture('foreign-chdir-relative', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project');   // the directory of the session
+    const child = join(project, 'child');
+    const unrelated = join(f.dir, 'unrelated');   // a directory that the command names, and that has no audit
+    mkdirSync(child, { recursive: true });
+    mkdirSync(unrelated);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(child, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const shellRuns = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd: project }).stdout.includes('ran');
+    const relative = [`cd child; ./audit ${unrelated}`, `cd ${project}; cd child; ./audit ${unrelated}`, `env -C child ./audit ${unrelated}`, `env --chdir=child ./audit ${unrelated}`, `env --chdir child ./audit ${unrelated}`,
+      `cd -P child; ./audit ${unrelated}`, `cd ./child; ./audit ${unrelated}`];
+    for (const command of relative) expect(shellRuns(command), `${command}: the shell runs the file under the directory of the session`).toBe(true);
+    for (const command of [...relative, `cd child; python3 ./audit ${unrelated}`, `env --directory child ./audit ${unrelated}`, `pushd child; ./audit ${unrelated}`, `cd; ./audit ${unrelated}`, `cd -; ./audit ${unrelated}`]) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // the target is an absolute path: the directory is a candidate for the relative path, so the file is found and is the same file
+    for (const command of [`cd ${child}; ./audit ${unrelated}`, `env -C ${child} ./audit ${unrelated}`, `cd -P ${child}; ./audit ${unrelated}`, `cd -- ${child}; ./audit ${unrelated}`, `env --directory=${child} ./audit ${unrelated}`, `D=${child}; cd "$D"; ./audit ${unrelated}`]) {
+      const r = start(command, { state_file: audit });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    // a variable that makes the target relative is a relative target
+    const viaName = start(`D=child; cd "$D"; ./audit ${unrelated}`, { state_file: audit });
+    expect(viaName.status, `${viaName.stdout}${viaName.stderr}`).toBe(2);
+    expect(viaName.stderr, 'a name that is set to a relative path').toMatch(/not read to its end/);
+    // another file name is no file of the guard
+    expect(start(`cd child; ./other ${unrelated}`, { state_file: audit }).status).toBe(0);
+  });
+
   it('a PATH that the command or the settings give is the PATH of the hook only when no component of it holds a parameter that nothing gives a value to (PATH=$DIR:$PATH, DIR only in the session), and only in the simple command that has it (PATH=dir true; audit): the guard cannot tell which file a bare name runs, so it refuses to start; a PATH whose parameters the settings, the command or a default word fill in settles it as before', () => {
     const f = fixture('foreign-session-path-component', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // the directory that only the session has in FHG_DIR

@@ -323,12 +323,18 @@ def has_unsettled(text, settled):
     return any((m.group(1) or m.group(2) or m.group(5)) not in settled for m in PARAMETER.finditer(scan))
 
 
+def is_absolute(text, assigned):
+    """Whether the text is an absolute path in every way its parameters can be filled in (parameter_variants): a target that is relative is a
+    place under a directory that is not known here, whatever it names."""
+    return all(os.path.isabs(variant) for variant in parameter_variants(text, assigned))
+
+
 def session_dependent(piece, runs, directories, named, moved, settled, path_values):
     """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
     neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command does not move its working
     directory (`moved`: no `-C`, `--directory` or `--chdir` option in front of the word that its own simple command runs (an option of a wrapper, `env -C DIR prog`;
     after that word it is an argument of the program) and no simple command that runs `cd` or `pushd` before it in its chain of
-    commands, none of them with a target that only the session knows (`cd "$DIR"`), so the shell runs it from the directory of the session, whatever directories the words of the command name as arguments; a cd in a
+    commands, none of them with a target that only the session knows (`cd "$DIR"`) or one that is relative (`cd child`: it is run from a directory that is not known either), so the shell runs it from the directory of the session, whatever directories the words of the command name as arguments; a cd in a
     subshell, a pipe, the background or before `||` moves nothing after it) and that ends the path of a file the guard writes; a word without a
     directory part that stands in a simple command that runs something (`runs`: any bare word, as a wrapper such as `timeout 5 audit` or `sudo audit` runs the operand that follows its own, and which operands a wrapper takes is not read here; an operator is no word) and that is the name of a file the guard writes: the shell looks it up on the PATH of
     the session, which the guard does not know, so a file that the guard finds on its own PATH does not tell which one runs; only a PATH that a
@@ -827,8 +833,9 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
             chain = False   # a subshell, a pipe, `&` or `||` cuts the chain: a cd before it does not move what comes after it
         run = command_word(words)   # only the word that the simple command runs is a cd, and only an option in front of it is the option of a wrapper (`env -C DIR prog`): after it, `--chdir` is an argument of the program
         if join not in ('|', '||', '&&') and run is not None and words[run] in ('cd', 'pushd'):
-            chain = not any(has_unsettled(w, settled_at[k][j]) for j, w in enumerate(words) if j > run)   # (a cd that follows a pipe, `||` or `&&` may not run, or runs in a pipe: it counts for nothing; one whose target only the session knows, `cd "$DIR"`, moves to a place that is not known: nothing after it, a cd before it included, tells where a relative path is run from)
-        moved_at.append(moved or chain or any((w in CHDIR_WORDS and j + 1 < len(words) and not has_unsettled(words[j + 1], settled_at[k][j + 1])) or (w.startswith(('--directory=', '--chdir=')) and not has_unsettled(w, settled_at[k][j])) for j, w in enumerate(words[:run if run is not None else 0])))
+            target = next((j for j in range(run + 1, len(words)) if not (words[j].startswith('-') and len(words[j]) > 1)), None)   # (the first word that is no option: `cd -P dir`, `cd -- dir`; none, or `-`, is the HOME or the last directory of the session)
+            chain = target is not None and is_absolute(words[target], assigned) and not any(has_unsettled(w, settled_at[k][j]) for j, w in enumerate(words) if j > run)   # (a target that is relative, `cd child`, is run from a directory that is not known, so it moves nothing that is known; a cd that follows a pipe, `||` or `&&` may not run, or runs in a pipe: it counts for nothing; one whose target only the session knows, `cd "$DIR"`, moves to a place that is not known: nothing after it, a cd before it included, tells where a relative path is run from)
+        moved_at.append(moved or chain or any((w in CHDIR_WORDS and j + 1 < len(words) and not has_unsettled(words[j + 1], settled_at[k][j + 1]) and is_absolute(words[j + 1], assigned)) or (w.startswith(('--directory=', '--chdir=')) and not has_unsettled(w, settled_at[k][j]) and is_absolute(w.partition('=')[2], assigned)) for j, w in enumerate(words[:run if run is not None else 0])))
     named = list(inherited)   # the directories that a word of the command names (cd DIR, env -C DIR, --directory DIR) and of the command it is quoted in: the shell may run a later word from there
     for words in simple:
         for word in words:
