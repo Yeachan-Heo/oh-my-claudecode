@@ -332,7 +332,7 @@ function tarExtractDir(args) {
     }
     rest = args.slice(next);
   }
-  const parsed = parseGetopt(rest, valueLetters, (name) => longIs(name, '--directory', 5) || name === '--cd'); // bsdtar: --cd is --directory
+  const parsed = parseGetopt(rest, valueLetters, (name) => longIs(name, '--directory', 5) || name === '--cd' || longIs(name, '--strip-components', 5)); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
   if (!extract) return null;
   for (const [key, value] of parsed.values) if (key === 'C' || key === '--cd' || longIs(key, '--directory', 5)) dirs.push(value);
@@ -344,7 +344,9 @@ function tarExtractDir(args) {
     found ??= devChangedIn(current);
     if (current.startsWith('/')) resolved.push(current);
   }
-  return found ?? archiveMemberInDev(resolved, parsed.operands); // a named member lands in each directory, whatever order -C and the members come in
+  const strip = Math.max(0, ...parsed.values.filter(([key]) => longIs(key, '--strip-components', 5)).slice(-1).map(([, n]) => Number(n) || 0)); // the last one counts; a bad number strips nothing
+  const members = parsed.operands.map((m) => (strip === 0 || m.startsWith('/') ? m : m.split('/').filter(Boolean).slice(strip).join('/'))).filter(Boolean); // a member with no component left is skipped
+  return found ?? archiveMemberInDev(resolved, members); // a named member lands in each directory, whatever order -C and the members come in
 }
 
 // Commands the guard judges by one argument pattern each (disk tools, archives, in-place awk, line editors): undefined when `name` is none of them, else a finding or null.

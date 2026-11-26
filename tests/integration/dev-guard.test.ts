@@ -95,6 +95,9 @@ const BLOCKED: string[] = [
   // the options of xargs whose value is optional and attached: the next word is the command
   'echo /dev/null | xargs -rl rm', 'echo /dev/null | xargs -l rm', 'echo /dev/null | xargs -rl2 rm', 'echo /dev/null | xargs --max-lines rm', 'echo /dev/null | xargs --max-lines=2 rm',
   'echo /dev/null | xargs --eof rm', 'echo /dev/null | xargs -e rm', 'echo /dev/null | xargs -re rm', 'echo /dev/null | xargs -rt -l rm',
+  // tar writes a member under its name with the first components stripped
+  'tar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar --strip-components 1 -C / -xf /tmp/a.tar foo/dev/null', 'tar --strip=1 -C / -xf /tmp/a.tar foo/dev/null', 'gtar --strip-components=2 -C / -xf /tmp/a.tar a/b/dev/null',
+  'bsdtar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar -C / --strip-components=1 -xf /tmp/a.tar ./dev/null', 'tar --strip-components=1 -C / -xf /tmp/a.tar /dev/null', 'tar --strip-components=x -C / -xf /tmp/a.tar dev/null',
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
   'echo `bash <<B\nrm /dev/null\nB\n`', 'x=`bash <<B\nrm -f /dev/sda\nB\n`', 'echo `echo \\`rm /dev/null\\``',
   // a path from the pipe lands in the place of the replace string of xargs -I
@@ -183,6 +186,8 @@ const ALLOWED: string[] = [
   'unzip -o /tmp/a.zip dev/null -d /tmp', 'unzip /tmp/a.zip dev/null', 'unzip -j /tmp/a.zip dev/null -d /', 'unzip -l /tmp/a.zip dev/null -d /', 'unzip -o /tmp/a.zip etc/x -d /',
   // the options of xargs whose value is the next word still take it
   'echo /dev/null | xargs -L 1 ls', 'echo /dev/null | xargs -rL 1 ls', 'echo /dev/null | xargs -E rm ls', 'echo /dev/null | xargs -rE rm ls', 'echo /dev/null | xargs --max-args 1 ls',
+  // a member that is empty after the strip is skipped, and one that lands outside /dev stays outside
+  'tar --strip-components=1 -C / -xf /tmp/a.tar dev/null', 'tar --strip-components 2 -C / -xf /tmp/a.tar dev/null', 'tar --strip-components=1 -C / -xf /tmp/a.tar foo/etc/x', 'tar --strip-components=1 -C /tmp -xf /tmp/a.tar foo/dev/null',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
