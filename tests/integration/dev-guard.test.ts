@@ -95,6 +95,8 @@ const BLOCKED: string[] = [
   'tar -C / -xf /tmp/a.tar dev/null', 'gtar -C / -xf /tmp/a.tar dev/null', 'bsdtar -C / -xf /tmp/a.tar dev/null', 'tar xf /tmp/a.tar -C / dev/null', 'tar -xf /tmp/a.tar -C / ./dev/null',
   'tar --directory=/ -xf /tmp/a.tar dev/null', 'tar -C / --extract --file=/tmp/a.tar dev/null', 'tar -C / -xf /tmp/a.tar dev', 'tar -C /tmp -xf /tmp/a.tar ../dev/null', 'tar -C / -C tmp -xf /tmp/a.tar ../dev/null',
   'unzip -o /tmp/a.zip dev/null -d /', 'unzip /tmp/a.zip dev/null -d /', 'unzip -d / /tmp/a.zip dev/null', 'unzip -d/ /tmp/a.zip dev/null', 'unzip -o /tmp/a.zip x ../dev/null -d /tmp',
+  // the options of xargs whose value is the next word still take it, so the command comes after it
+  'echo /dev/null | xargs -L 1 rm', 'echo /dev/null | xargs -rL 1 rm', 'echo /dev/null | xargs -E x rm', 'echo /dev/null | xargs -rE x rm',
   // the options of xargs whose value is optional and attached: the next word is the command
   'echo /dev/null | xargs -rl rm', 'echo /dev/null | xargs -l rm', 'echo /dev/null | xargs -rl2 rm', 'echo /dev/null | xargs --max-lines rm', 'echo /dev/null | xargs --max-lines=2 rm',
   'echo /dev/null | xargs --eof rm', 'echo /dev/null | xargs -e rm', 'echo /dev/null | xargs -re rm', 'echo /dev/null | xargs -rt -l rm',
