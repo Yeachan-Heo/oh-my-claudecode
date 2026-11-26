@@ -921,6 +921,16 @@ describe('/dev guard: working directory and symbolic links', () => {
     for (const option of ['--f', '--follow-symlinkz', '--fx']) expect(check(`sed ${option} -i s/a/b/ ${nulllink}`, '/tmp').decision, option).toBe('allow');
   });
 
+  // the same for the other long options of sed that the guard reads (measured with sed 4.9: --i, --e, --li and --fi are the shortest; --expression=TEXT with
+  // the text attached leaves the first operand a file)
+  it.each([
+    ['sed --i s/a/b/ /dev/null', 'deny'], ['sed --in s/a/b/ /dev/null', 'deny'], ['sed --e=s/a/b/ --in /dev/null', 'deny'], ['sed --exp=s/a/b/ --in-place /dev/null', 'deny'],
+    ['sed --fi=/tmp/s.sed -i /dev/null', 'deny'], ['sed --fil /tmp/s.sed -i /dev/null', 'deny'], ['sed --lin=5 -i s/a/b/ /dev/null', 'deny'], ['sed --li 5 -i s/a/b/ /dev/null', 'deny'],
+    ['sed --i s/a/b/ /tmp/x', 'allow'], ['sed --e=p --in /tmp/x', 'allow'], ['sed --fi /tmp/s.sed --i /tmp/x', 'allow'], ['sed --li 5 -i s/a/b/ /tmp/x', 'allow'],
+  ])('reads the abbreviated long options of sed in place: %s is %s', (command, expected) => {
+    expect(check(command, '/tmp').decision).toBe(expected);
+  });
+
   it('reads cd like the shell: -P and -- are options, a group does not end the cd and a subshell or a pipeline does, a cd after || is unknown, an empty target stays', () => {
     expect(check('(cd /dev); rm null', '/tmp').decision).toBe('allow');
     expect(check('{ cd /dev; }; rm null', '/tmp').decision).toBe('deny');

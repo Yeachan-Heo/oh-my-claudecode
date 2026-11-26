@@ -279,9 +279,9 @@ function sedInPlaceFiles(args) {
     if (a === '--') { literal = true; continue; }
     if (a.startsWith('--')) {
       const name = a.split('=')[0];
-      if (name.length >= 4 && '--in-place'.startsWith(name)) inPlace = true;
-      else if (name === '--expression' || name === '--file') { scripted = true; if (!a.includes('=')) i++; }
-      else if (name === '--line-length' && !a.includes('=')) i++;
+      if (longIs(name, '--in-place', 3)) inPlace = true; // sed takes any unambiguous prefix: --i, --e, --li and --fi are the shortest (measured with sed 4.9)
+      else if (longIs(name, '--expression', 3) || longIs(name, '--file', 4)) { scripted = true; if (!a.includes('=')) i++; }
+      else if (longIs(name, '--line-length', 3) && !a.includes('=')) i++;
       continue;
     }
     for (let k = 1; k < a.length; k++) { // a cluster of short options: -n, -ni, -i.bak, -ie ...
