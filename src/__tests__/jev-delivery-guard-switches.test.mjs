@@ -1,13 +1,13 @@
 /**
  * Tests for the opt-in sub-switches of the Jev delivery guard's daily computation
- * (OMC_JEV_GUARD_EFFORT, OMC_JEV_GUARD_USE_MARKER, OMC_JEV_GUARD_TIMEOUTS_ALARM in
- * scripts/lib/jev-delivery-guard.mjs). Without them the daily result is unchanged.
+ * (OMC_JEV_GUARD_EFFORT, OMC_JEV_GUARD_USE_MARKER, OMC_JEV_GUARD_TIMEOUTS_ALARM, OMC_JEV_GUARD_BLIND_ALARM in
+ * scripts/lib/jev-delivery-guard.mjs) and of OMC_JEV_GUARD_PROJECT_DIRS. Without them the daily result is unchanged.
  */
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import {
   countOpenings,
   deliveryMessage,
   levelFromScore,
+  projectDirs,
   timeoutsMessage,
 } from '../../scripts/lib/jev-delivery-guard.mjs';
 
@@ -89,7 +90,7 @@ describe('daily result without the switches', () => {
     writeLogs();
     const result = await computeDelivery({ logDir, configDir, now: NOW, env: {} });
     expect(result).toMatchObject({ decisions: 5, withAgent: 5, delivered: 5 });
-    for (const field of ['markerDecisions', 'namedAgents', 'namedModelMatching', 'breakerOpenings', 'breakerHeldMinutes']) {
+    for (const field of ['markerDecisions', 'namedAgents', 'namedModelMatching', 'breakerOpenings', 'breakerHeldMinutes', 'noMeta']) {
       expect(field in result).toBe(false);
     }
     expect(deliveryMessage({ ...result, interruptedAgentHooks: 0, deliveredPercent: 100 })).toBeNull();
@@ -227,6 +228,89 @@ describe('OMC_JEV_GUARD_TIMEOUTS_ALARM', () => {
     expect(existsSync(join(dir, `${NOW - 8 * 24 * HOUR}-x.json`))).toBe(true);
     countOpenings(dir, NOW - 24 * HOUR, NOW, { prune: true, wall: NOW });
     expect(existsSync(join(dir, `${NOW - 8 * 24 * HOUR}-x.json`))).toBe(false);
+  });
+});
+
+describe('OMC_JEV_GUARD_BLIND_ALARM', () => {
+  // `count` decisions, of which the first `withMeta` have an agent meta.json
+  const decisions = (count, withMeta) => {
+    writeFileSync(join(logDir, 'shadow.jsonl'), Array.from({ length: count }, (_, i) => decision(`b${i}`, 'opus', 2)).join('\n') + '\n');
+    for (let i = 0; i < withMeta; i++) meta(`b${i}`, { model: 'opus', effort: 'high' });
+  };
+  const resultOf = (fields) => ({ ts: NOW, windowHours: 24, decisions: 12, withAgent: 0, delivered: 0, deliveredPercent: null, interruptedAgentHooks: 0, interruptedOtherHooks: 0, ...fields });
+
+  it('leaves the daily result without a noMeta field when the switch is off, whatever the agents are', async () => {
+    decisions(12, 0);
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: {} });
+    expect(result).toMatchObject({ decisions: 12, withAgent: 0 });
+    expect('noMeta' in result).toBe(false);
+    expect(deliveryMessage(result)).toBeNull();
+  });
+
+  it('counts the decisions with no agent meta.json, in the model-only path', async () => {
+    decisions(12, 4);
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: { OMC_JEV_GUARD_BLIND_ALARM: '1' } });
+    expect(result).toMatchObject({ decisions: 12, withAgent: 4, delivered: 4, noMeta: 8 });
+  });
+
+  it('counts them in the path of the effort check too, and a marker call is not one of them', async () => {
+    decisions(12, 4);
+    writeFileSync(join(logDir, 'applied.jsonl'), [applied('b10', 'marker'), applied('b11', 'marker')].join('\n') + '\n');
+    const env = { OMC_JEV_GUARD_BLIND_ALARM: '1', OMC_JEV_GUARD_EFFORT: '1', OMC_JEV_GUARD_USE_MARKER: '1' };
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env });
+    expect(result).toMatchObject({ withAgent: 4, markerDecisions: 2, noMeta: 6 });
+  });
+
+  it('alarms when of 10 or more decisions more than half have no meta.json, and not otherwise', () => {
+    const blind = deliveryMessage(resultOf({ noMeta: 7, withAgent: 5 }));
+    expect(blind).toContain('of 12 decisions in the last 24 h the guard cannot see the agents (5 evaluated, 7 without meta.json)');
+    expect(blind).toContain('OMC_JEV_GUARD_PROJECT_DIRS');
+    expect(blind).toContain('PreToolUse:Agent hooks interrupted: 0');
+    expect(deliveryMessage(resultOf({ decisions: 10, noMeta: 5, withAgent: 5 }))).toBeNull(); // exactly half
+    expect(deliveryMessage(resultOf({ decisions: 10, noMeta: 6, withAgent: 4 }))).toContain('cannot see the agents');
+    expect(deliveryMessage(resultOf({ decisions: 9, noMeta: 9 }))).toBeNull(); // too few decisions
+    expect(deliveryMessage(resultOf({ decisions: 12 }))).toBeNull(); // the field exists only with the switch
+    expect(deliveryMessage(resultOf({ noMeta: 0, withAgent: 12, delivered: 12, deliveredPercent: 100 }))).toBeNull();
+  });
+
+  it('does not take a day of marker or named calls for a blind guard (no meta.json is what counts)', () => {
+    expect(deliveryMessage(resultOf({ noMeta: 0, withAgent: 0, markerDecisions: 12 }))).toBeNull();
+  });
+
+  it('keeps the delivery message for an interrupted hook and adds the blind alarm to it', () => {
+    const message = deliveryMessage(resultOf({ noMeta: 12, interruptedAgentHooks: 3 }));
+    expect(message).toContain('cannot see the agents');
+    expect(message).toContain('PreToolUse:Agent hooks interrupted: 3');
+  });
+});
+
+describe('OMC_JEV_GUARD_PROJECT_DIRS', () => {
+  it('lists the projects directory of the configuration first, then the listed ones, without duplicates', () => {
+    const configProjects = join(configDir, 'projects');
+    expect(projectDirs(configDir, {})).toEqual([configProjects]);
+    const env = { OMC_JEV_GUARD_PROJECT_DIRS: ['/a/projects', ' /b/projects ', '', configProjects, '/a/projects'].join(delimiter) };
+    expect(projectDirs(configDir, env)).toEqual([configProjects, '/a/projects', '/b/projects']);
+  });
+
+  it('reads the agents of a listed directory, and nothing of it without the variable', async () => {
+    const extra = join(root, 'other-projects');
+    mkdirSync(join(extra, 'proj', 'sess', 'subagents'), { recursive: true });
+    writeFileSync(join(logDir, 'shadow.jsonl'), [decision('c1', 'opus', 2), decision('c2', 'opus', 2)].join('\n') + '\n');
+    writeFileSync(join(extra, 'proj', 'sess', 'subagents', 'agent-c1.meta.json'), JSON.stringify({ toolUseId: 'c1', model: 'opus' }));
+    meta('c2', { model: 'haiku' });
+    const alone = await computeDelivery({ logDir, configDir, now: NOW, env: { OMC_JEV_GUARD_BLIND_ALARM: '1' } });
+    expect(alone).toMatchObject({ withAgent: 1, delivered: 0, noMeta: 1 });
+    const listed = await computeDelivery({ logDir, configDir, now: NOW, env: { OMC_JEV_GUARD_BLIND_ALARM: '1', OMC_JEV_GUARD_PROJECT_DIRS: extra } });
+    expect(listed).toMatchObject({ withAgent: 2, delivered: 1, noMeta: 0 });
+  });
+
+  it('counts the interrupted hooks of the transcripts under a listed directory', async () => {
+    const extra = join(root, 'other-projects');
+    mkdirSync(join(extra, 'proj'), { recursive: true });
+    const row = JSON.stringify({ type: 'attachment', timestamp: iso(NOW - 2 * HOUR), attachment: { type: 'hook_cancelled', hookName: 'PreToolUse:Agent', toolUseID: 'tu-1', command: 'node "/plugins/omc/scripts/pre-tool-enforcer.mjs"', timedOut: true } });
+    writeFileSync(join(extra, 'proj', 'session.jsonl'), row + '\n');
+    expect((await computeDelivery({ logDir, configDir, now: NOW, env: {} })).interruptedAgentHooks).toBe(0);
+    expect((await computeDelivery({ logDir, configDir, now: NOW, env: { OMC_JEV_GUARD_PROJECT_DIRS: extra } })).interruptedAgentHooks).toBe(1);
   });
 });
 
