@@ -2385,21 +2385,6 @@ async function main() {
       resolved = resolved.filter((m) => !CODE_EDITING_SKILLS.has(m.name));
     }
 
-    // Apply ralplan gate: redirect underspecified execution requests to ralplan (issue #5151)
-    // The gate is the one bridge.ts applies; a missing build is an error, not a reason to skip it.
-    if (resolved.length > 0) {
-      const { applyRalplanGate, removeCodeBlocks } = await import('../dist/hooks/keyword-detector/index.js');
-      // Use removeCodeBlocks like bridge.ts does, not sanitizeForKeywordDetection
-      // (which also strips file paths, breaking concrete specifications)
-      const cleanedForGate = removeCodeBlocks(prompt);
-      const gateKeywords = resolved.map((m) => m.name);
-      const gateResult = applyRalplanGate(gateKeywords, cleanedForGate);
-      if (gateResult.gateApplied) {
-        // Replace execution keywords with ralplan
-        resolved = resolveConflicts(gateResult.keywords.map((kw) => ({ name: kw, args: "" })));
-      }
-    }
-
     const permissionMode = data.permission_mode;
     if (isJevShadowOptedIn('skill-trigger', process.env, permissionMode)) {
       const keywords = resolved.map((match) => match.name);
