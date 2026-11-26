@@ -74,7 +74,8 @@ psm_create_tmux_session() {
 # both directory-trust and per-tool approval prompts). This may cause unattended
 # sessions to block indefinitely if the directory is untrusted or tools require
 # approval (issue #2508). Only use this flag in a trusted directory context.
-# Set PSM_CLAUDE_STARTUP_DELAY (default: 5s) to tune literal-prompt delivery.
+# The initial prompt is sent only once Claude shows its REPL prompt; PSM never
+# answers the directory-trust dialog (issue #5149).
 psm_launch_claude() {
     local session_name
     session_name=$(psm_tmux_safe_name "$1")

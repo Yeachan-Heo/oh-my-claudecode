@@ -264,9 +264,10 @@ Parse `{{ARGUMENTS}}` to determine:
    [[ "${PSM_SKIP_PERMISSIONS:-0}" == "1" ]] && claude_cmd="claude --dangerously-skip-permissions"
    tmux send-keys -t "psm_${project_alias}_pr-$pr_number" "$claude_cmd" Enter
 
-   # After claude boots (PSM_CLAUDE_STARTUP_DELAY, default 5s), deliver the task.
+   # Deliver the task only once Claude shows its `>` REPL prompt. Never answer
+   # the directory-trust dialog for the user (issue #5149); if it is showing,
+   # tell the user to answer it in the session first.
    # Use -l (literal) so special characters are not misinterpreted by tmux.
-   sleep "${PSM_CLAUDE_STARTUP_DELAY:-5}"
    tmux send-keys -t "psm_${project_alias}_pr-$pr_number" -l \
      "Review PR #$pr_number: \"$pr_title\" by @$pr_author ($head_branch → $base_branch). URL: $pr_url." Enter
    ```
@@ -319,7 +320,7 @@ Parse `{{ARGUMENTS}}` to determine:
    claude_cmd="claude"
    [[ "${PSM_SKIP_PERMISSIONS:-0}" == "1" ]] && claude_cmd="claude --dangerously-skip-permissions"
    tmux send-keys -t "psm_${project_alias}_issue-$issue_number" "$claude_cmd" Enter
-   # After claude boots, deliver the task (see PSM_CLAUDE_STARTUP_DELAY):
+   # Once Claude shows its `>` REPL prompt (never answer the trust dialog), deliver the task:
    tmux send-keys -t "psm_${project_alias}_issue-$issue_number" -l \
      "Fix issue #$issue_number: \"$issue_title\". URL: $issue_url. Branch: $branch_name." Enter
    ```

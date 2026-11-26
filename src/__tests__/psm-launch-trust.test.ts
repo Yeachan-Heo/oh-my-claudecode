@@ -43,13 +43,9 @@ describe('PSM launch trust fix (issue #2508)', () => {
       expect(source).toContain('psm_inject_prompt "$session_name" "$initial_context"');
     });
 
-    it('delivers literal prompts via tmux send-keys in a background subshell', () => {
-      expect(source).toContain('send-keys -t "$session_name" -l -- "$initial_context"');
-      expect(source).toMatch(/\(\s*[\s\S]*?sleep[\s\S]*?send-keys[\s\S]*?\)\s*&/m);
-    });
-
-    it('documents PSM_CLAUDE_STARTUP_DELAY env var for tuning', () => {
-      expect(source).toContain('PSM_CLAUDE_STARTUP_DELAY');
+    it('sends literal prompts only after the Claude REPL prompt is ready (#5149)', () => {
+      expect(source).toMatch(/if ! psm_wait_for_claude_prompt "\$session_name"; then[\s\S]*?else[\s\S]*?send-keys -t "\$session_name" -l -- "\$initial_context"/);
+      expect(source).not.toContain('PSM_CLAUDE_STARTUP_DELAY');
     });
   });
 
