@@ -317,6 +317,22 @@ def command_word(words):
     return None
 
 
+NAME_SETTERS = frozenset({'read', 'mapfile', 'readarray', 'getopts', 'let'})   # builtins that set the variable they are given by name, from input, from the options of the command or from an arithmetic expression (`let A=1+1`)
+
+
+def sets_by_name(words, run):
+    """Whether the simple command runs a builtin that assigns to a variable it is given by name, so that what the variable holds afterwards is known only to
+    the shell that ran it: `read`, `mapfile`, `readarray`, `getopts`, `let`, `printf -v NAME` and `declare`, `typeset`, `local` with the option `-n` (a name
+    reference, through which another variable is assigned). `words[run]` is the word that the command runs."""
+    options = []
+    for word in words[run + 1:]:
+        if not word.startswith('-') or word in ('-', '--'):
+            break
+        options.append(word)
+    return words[run] in NAME_SETTERS or (words[run] == 'printf' and any(o.startswith('-v') for o in options)) or (
+        words[run] in ('declare', 'typeset', 'local') and any(re.fullmatch(r'-[A-Za-z]*n[A-Za-z]*', o) for o in options))
+
+
 def has_unsettled(text, settled):
     """Whether the text holds a parameter that nothing gives a value to at its place (`settled`: the names that have one there), or a leading `~` (the
     HOME of the session): what it names is known only to the session."""
@@ -763,6 +779,8 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     settled = set(assigned)   # the names that have a value at the place that is looked at (settled_at below): the settings and the command it is quoted in, then what an assignment that stands alone (`A=x; cmd`) or after export, declare, typeset, readonly or local, and ${NAME:=word}, give from there on; an assignment in front of a command (`A=x cmd`, `env A=x cmd`) is that command's alone, but it stays a candidate for every word
     for words in simple:
         run = command_word(words)
+        if run is not None and sets_by_name(words, run):
+            raise ScanIncomplete('command runs a builtin that assigns to a variable it is given by name (printf -v, read, mapfile, readarray, getopts, let, declare -n), so what the variable holds cannot be known without running it')
         for word in words:
             name, equals, value = word.partition('=')
             if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name):

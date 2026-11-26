@@ -2420,6 +2420,41 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a builtin that assigns to a variable it is given by name (printf -v, read, let, mapfile, readarray, getopts, declare -n) in the command of another hook leaves the variable unknown, so the command is not read to its end: the guard refuses to start, also where the builtin stands in a quoted command; a command without such a builtin is read as before', () => {
+    const f = fixture('foreign-name-setters', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, settingsEnv: Record<string, string> = {}) => {
+      writeFileSync(f.settings, JSON.stringify({ env: settingsEnv, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    if (HAS_BASH) {   // what Bash does: the variable that the settings give is replaced by the builtin, with a text that is not written in the command
+      expect(spawnSync('bash', ['-c', `printf -v A "${hooks}/a\\x75dit"; printf %s "$A"`], { encoding: 'utf8', env: { ...process.env, A: '/tmp/safe' } }).stdout, 'printf -v computes the value').toBe(audit);
+      expect(spawnSync('bash', ['-c', 'let A=1+1; printf %s "$A"'], { encoding: 'utf8', env: { ...process.env, A: '/tmp/safe' } }).stdout, 'let computes the value').toBe('2');
+    }
+    const settingsEnv = { A: '/tmp/safe' };
+    const refused = [`bash -c 'printf -v A "${hooks}/a\\x75dit"; python3 "$A"'`, `printf -v A "${hooks}/a\\x75dit"; python3 "$A"`, `printf -vA "${hooks}/a\\x75dit"; python3 "$A"`, `printf -- -v; read A; python3 "$A"`,
+      `read A; python3 "$A"`, `read -r A < input.txt; python3 "$A"`, `command read A; python3 "$A"`, `mapfile A; python3 "$A"`, `readarray -t A; python3 "$A"`, `getopts ab A; python3 "$A"`, `let A=1+1; python3 "$A"`,
+      `declare -n R=A; R=${hooks}/audit; python3 "$A"`, `typeset -gn R=A; python3 "$A"`, `local -n R=A; python3 "$A"`, `true && read A`, `bash -c 'read A'`];
+    for (const command of refused) {
+      const r = start(command, settingsEnv);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(command)).toMatch(/not read to its end/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+      expect(readText(audit), `${JSON.stringify(command)}: the file is intact`).toBe(text);
+    }
+    // no such builtin, or no option that names a variable: read as before (the first of these runs the program that the settings name, so the file is not the state file here)
+    for (const command of [`python3 "$A"`, `printf '%s\\n' -v`, `printf %s x`, `echo read A`, `python3 read.py`, `declare A=x; python3 other`, `declare -x A=x; python3 other`, `readonly B=x; python3 other`, `export A; python3 other`, `python3 ${hooks}/other`]) {
+      const r = start(command, settingsEnv);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a relative entry of a PATH (of the command, of the env of settings.json) is looked up from each directory that the command names (cd DIR; PATH=bin audit), also with env -C, an entry of . or an empty one; a directory that does not exist adds nothing', () => {
     const f = fixture('foreign-relative-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
