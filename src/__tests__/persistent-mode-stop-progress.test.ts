@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
@@ -236,5 +237,32 @@ describe("persistent-mode Stop progress release", () => {
     expect(r9.status).toBe(0);
     expect(json(r9).decision).toBe("block");
     expect((readState(await stateRoot(), sid).stopProgress as Record<string, unknown>).blocks).toBe(0);
+  });
+
+  it("re-entry with the switch on keeps the dev block when the named workflow advances and releases with the message otherwise", async () => {
+    const sid = "reentry-workflow";
+    spawnSync("git", ["init", "-q", PROJECT]);
+    const root = await stateRoot();
+    const transcript = path.join(HOME_DIR, ".claude", "projects", sid + ".jsonl");
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    fs.writeFileSync(transcript, "");
+    const st = fs.lstatSync(transcript, { bigint: true });
+    const descriptor = { descriptorVersion: 1, profileVersion: 1, stages: ["ralplan", "execution"], workflowName: "release-flow" };
+    const now = new Date().toISOString();
+    const stages = descriptor.stages.map((id, i) => ({ id, status: i === 0 ? "active" : "pending", iterations: 0, ...(i === 0 ? { startedAt: now } : {}) }));
+    const boundary = { transcriptPath: transcript, transcriptRoot: path.dirname(transcript), transcriptBasename: sid + ".jsonl", sessionId: sid, byteOffset: 0, fileIdentity: { device: Number(st.dev), inode: Number(st.ino), size: 0, mtimeNs: st.mtimeNs.toString(), ctimeNs: st.ctimeNs.toString(), contentSha256: createHash("sha256").update("").digest("hex") } };
+    const state = { active: true, mode: "autopilot", prompt: "ship the release", phase: "ralplan", directory: PROJECT, project_path: PROJECT, session_id: sid, workflowRunId: "11111111-1111-4111-8111-111111111111", started_at: now, updated_at: now, last_checked_at: now, workflow: { ...descriptor, profileHash: createHash("sha256").update(JSON.stringify(descriptor)).digest("hex") }, pipelineTracking: { stages, currentStageIndex: 0, trackingRevision: 0, activationBoundary: boundary, completionObservations: [] } };
+    const dir = path.join(root, "state", "sessions", sid);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "autopilot-state.json"), JSON.stringify(state));
+    const scenario = { OMC_JEV_STOP_PROGRESS: "1" };
+    const released = json(runHook(scenario, sid, { transcript_path: transcript, stop_hook_active: true }));
+    expect(released.continue).toBe(true);
+    expect(String(released.systemMessage ?? "")).toMatch(/stop_hook_active/);
+    fs.appendFileSync(transcript, JSON.stringify({ sessionId: sid, type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Signal: PIPELINE_RALPLAN_COMPLETE" }] } }) + "\n");
+    const advanced = json(runHook(scenario, sid, { transcript_path: transcript, stop_hook_active: true }));
+    expect(advanced.decision).toBe("block");
+    expect(advanced.continue).toBeUndefined();
+    expect(advanced.systemMessage).toBeUndefined();
   });
 });
