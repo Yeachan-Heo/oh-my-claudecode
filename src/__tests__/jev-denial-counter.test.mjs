@@ -674,6 +674,30 @@ describe('denial counter: agent-type refusal in the hook', () => {
       expect(listRecursive(run.logDir).some((name) => name.includes('denials'))).toBe(false);
     }
   }, 60_000);
+
+  it('texts switch off: the refusal text is the fixed text for every value but 1', () => {
+    for (const value of [undefined, '', '0', 'true', 'on']) {
+      const run = runGuardDeny({ ...hookEnv, OMC_JEV_DENIAL_TEXTS: value }, `agent-type-texts-off-${value ?? 'unset'}`, 'Agent', { subagent_type: 'executor', prompt: 'x' });
+      expect(run.permissionDecision, `exit ${run.status}: ${run.stdout.slice(0, 300)}`).toBe('deny');
+      expect(run.reason).toBe(agentTypeReason);
+    }
+  }, 60_000);
+
+  it('texts switch on: the refusal ends with the BLOCKED line, with and without the counter', () => {
+    const variant = '[AGENT TYPE] "executor" is not allowed by OMC_AGENT_TYPE_DENY; choose another agent type; if none fits the task, end this step without the call: end your turn with a line `BLOCKED: <reason, at least 20 characters>`.';
+    const plain = runGuardDeny({ ...hookEnv, OMC_JEV_DENIAL_TEXTS: '1' }, 'agent-type-texts-on', 'Agent', { subagent_type: 'executor', prompt: 'x' });
+    expect(plain.permissionDecision, `exit ${plain.status}: ${plain.stdout.slice(0, 300)}`).toBe('deny');
+    expect(plain.reason).toBe(variant);
+    const counted = runGuardDeny({ ...hookEnv, OMC_JEV_DENIAL_TEXTS: '1', OMC_JEV_DENIAL_COUNTER: '1' }, 'agent-type-texts-counted', 'Agent', { subagent_type: 'executor', prompt: 'x' });
+    expect(counted.permissionDecision, `exit ${counted.status}: ${counted.stdout.slice(0, 300)}`).toBe('deny');
+    expect(counted.reason.startsWith(variant)).toBe(true);
+    expect(counted.reason).toContain(`[denial ${keyHash(denialKey('agent-type', variant))} #1]`);
+  }, 60_000);
+
+  it('texts switch on: an allowed type is still not refused', () => {
+    const run = runGuardDeny({ ...hookEnv, OMC_JEV_DENIAL_TEXTS: '1' }, 'agent-type-texts-allowed', 'Agent', { subagent_type: 'planner', prompt: 'x' });
+    expect(run.permissionDecision).not.toBe('deny');
+  }, 60_000);
 });
 
 describe('denial counter: plan write guard refusal in the hook', () => {

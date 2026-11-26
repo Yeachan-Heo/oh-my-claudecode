@@ -546,12 +546,16 @@ function evaluateForbiddenAgentType(toolName, data, stateDir) {
     // Best-effort logging: a logging failure never affects the call.
   }
   if (decision !== 'deny') return null;
+  // OMC_JEV_DENIAL_TEXTS=1 ends the refusal with the recognized way out (a BLOCKED line), like the /goal refusal.
+  const agentTypeEnding = isDenialSwitchOn('OMC_JEV_DENIAL_TEXTS')
+    ? 'choose another agent type; if none fits the task, end this step without the call: end your turn with a line `BLOCKED: <reason, at least 20 characters>`.'
+    : 'choose another agent type.';
   return {
     continue: true,
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
-      permissionDecisionReason: `[AGENT TYPE] "${rawType || '(no subagent_type)'}" is not allowed by OMC_AGENT_TYPE_DENY; choose another agent type.`,
+      permissionDecisionReason: `[AGENT TYPE] "${rawType || '(no subagent_type)'}" is not allowed by OMC_AGENT_TYPE_DENY; ${agentTypeEnding}`,
     },
   };
 }
@@ -2916,7 +2920,7 @@ async function resolveJevSessionFiles(data, directory) {
 // reason with the counter marker, the three common sentences (not done, do not repeat, the executable way out for the
 // guards that have one) and the escalation text appended, or null when the counter releases the guard (only the /goal
 // guard, see lib/jev-denial-counter.mjs). With the switch off it returns the reason unchanged. OMC_JEV_DENIAL_TEXTS=1
-// only selects the /goal refusal text variant (see the ultragoal guard).
+// only selects the /goal and agent-type refusal text variants (see the ultragoal and agent-type guards).
 const DENIAL_POLL_TOOLS = new Set(['BashOutput', 'TaskOutput']);
 const DENIAL_TEXT_NOT_DONE = 'Action NOT performed: do not write that it succeeded.';
 const DENIAL_TEXT_NO_REPEAT = 'Do not repeat the same call: do independent work or change the plan.';
