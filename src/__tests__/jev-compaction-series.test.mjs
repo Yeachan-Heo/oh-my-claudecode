@@ -156,12 +156,50 @@ describe('series of traces: the trace of a block', () => {
 });
 
 describe('series of traces: the rows a series may stand in', () => {
-  it('the last KEEP_LAST rows and the rows from keepFrom are the tail; the tail is no place for a series', async () => {
+  it('the rows from keepFrom (the open tool loop) are the tail and no place for a series; the newest rows before it are', async () => {
     const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([`${call(1)}\n${call(2)}`]);
-    expect(seriesContext(cfg, messages, apiOf(messages), messages.length).tail).toBe(messages.length - 6);
+    expect(seriesContext(cfg, messages, apiOf(messages), messages.length).tail).toBe(messages.length);
+    expect(seriesContext(cfg, messages, apiOf(messages), messages.length + 5).tail).toBe(messages.length);
     expect(seriesContext(cfg, messages, apiOf(messages), 3).tail).toBe(3);
     expect(seriesContext(cfg, messages, apiOf(messages), 0).tail).toBe(0);
+  });
+
+  it('a series in the last row before the open tool loop is an item and is merged, one from keepFrom on is neither', async () => {
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
+    const LAST = `${call(3)}\n${call(4)}\n${call(5)}`;
+    const messages = frozen([user('Task.'), assistant(`${call(1)}\n${call(2)}`), user('go on'), assistant(LAST)]);
+    const rowsAt = (keepFrom) => seriesItems(cfg, messages, seriesContext(cfg, messages, apiOf(messages), keepFrom), SESSION).map((x) => x.rows);
+    expect(rowsAt(4)).toEqual([[1], [3]]);
+    expect(rowsAt(3)).toEqual([[1]]);
+    expect(rowsAt(1)).toEqual([]);
+    const ctx = seriesContext(cfg, messages, apiOf(messages), 4);
+    const fake = fakeDollar();
+    const record = {};
+    const edited = await mergeSeries(fake.$, cfg, record, messages, ctx, new Set([LAST]), SESSION, FAR);
+    const path = `${PASTES}${SESSION}/${sha32(`${LAST}\n`)}.txt`;
+    expect([...edited.keys()]).toEqual([3]);
+    expect(edited.get(3)).toBe(`[compacted] traces merged: 3 calls, 0 replies, 0 others; list in ${path}`);
+    expect(fake.files().get(path)).toBe(`${LAST}\n`);
+    expect(record.series).toMatchObject({ series: 1, traces: 3, files: 1, written: 1, secret: 0 });
+    const held = await mergeSeries(fakeDollar().$, cfg, {}, messages, seriesContext(cfg, messages, apiOf(messages), 3), new Set([LAST]), SESSION, FAR);
+    expect(held.size).toBe(0);
+  });
+
+  it('a series in the last row that holds a secret value is held and stays whole, the series beside it in that row is merged', async () => {
+    const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
+    const CLEAR = `${call(6)}\n${call(7)}`;
+    const SECRET = `${call(8)}\n[compacted] Bash(export API_TOKEN=abc123def456) - result of 20 chars removed`;
+    const messages = frozen([user('Task.'), assistant('Looking.'), assistant(`${CLEAR}\nthen\n${SECRET}`)]);
+    const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
+    const fake = fakeDollar();
+    const record = {};
+    const edited = await mergeSeries(fake.$, cfg, record, messages, ctx, new Set([CLEAR, SECRET]), SESSION, FAR);
+    const path = `${PASTES}${SESSION}/${sha32(`${CLEAR}\n`)}.txt`;
+    expect(edited.get(2)).toBe(`[compacted] traces merged: 2 calls, 0 replies, 0 others; list in ${path}\nthen\n${SECRET}`);
+    expect([...fake.files().keys()]).toEqual([path]);
+    expect([...fake.files().values()].join('')).not.toContain('abc123def456');
+    expect(record.series).toMatchObject({ series: 1, secret: 1, written: 1 });
   });
 
   it('without the API form nothing is known, and a user message with an image that matches no row stops it too', async () => {
@@ -392,7 +430,7 @@ describe('series of traces: merging', () => {
     expect(noApi.series.reason).toBe('no_api_form');
   });
 
-  it('the rows of the tail and the rows that were skipped are never edited', async () => {
+  it('the rows from keepFrom on and the rows that were skipped are never edited', async () => {
     const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([SERIES_B, SERIES_B]);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
@@ -401,8 +439,10 @@ describe('series of traces: merging', () => {
     const edited = await mergeSeries(fakeDollar().$, cfg, record, messages, ctx, new Set([SERIES_B]), SESSION, FAR);
     expect([...edited.keys()]).toEqual([rowOf(1)]);
     const tailRow = messages.length - 2;
-    const tail = await mergeSeries(fakeDollar().$, cfg, {}, messages.map((m, i) => (i === tailRow ? { ...m, text: SERIES_B } : m)), ctx, new Set([SERIES_B]), SESSION, FAR);
+    const open = seriesContext(cfg, messages, apiOf(messages), tailRow);
+    const tail = await mergeSeries(fakeDollar().$, cfg, {}, messages.map((m, i) => (i === tailRow ? { ...m, text: SERIES_B } : m)), open, new Set([SERIES_B]), SESSION, FAR);
     expect(tail.has(tailRow)).toBe(false);
+    expect(tail.has(rowOf(1))).toBe(true);
   });
 
   it('a series merged twice in two compactions folds into one line with the sum of the counts', async () => {

@@ -5433,7 +5433,8 @@ export function seriesRuns(text, protect = false, archive = false) {
 
 /**
  * Which rows a series may stand in: [0, tail) less `fixed` (the rows the host cannot rebuild from text: server blocks in an assistant row, an image or a file in a user row,
- * a user row a delivered message is anchored to), and `direct`, the direct replies. `reason` says that nothing can be told: no API form, or a message with an image that matches no row.
+ * a user row a delivered message is anchored to), and `direct`, the direct replies. `tail` is the first row that keeps its handle (`keepFrom`, the open tool loop), not the start of the
+ * last KEEP_LAST rows: a series in the newest rows before the open loop is merged too. `reason` says that nothing can be told: no API form, or a message with an image that matches no row.
  */
 export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) {
   if (!api) return { reason: 'no_api_form' };
@@ -5444,7 +5445,7 @@ export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) 
   const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
-  return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
+  return { tail: Math.min(keepFrom, messages.length), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
 }
 
 /**
