@@ -384,9 +384,9 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
   }
   const label = (real) => '\n\n[source file: ' + real + ', head of file]\n';
   /** Runs the hook with `prompt` and returns the task of the single routing request, and its shadow row. */
-  async function taskSentFor(context, prompt, overrides = ON(context)) {
+  async function taskSentFor(context, prompt, overrides = ON(context), input = {}) {
     const before = receivedBodies.length;
-    const output = await runHook(context, AGENT_CALL('executor', { prompt, model: 'sonnet' }), overrides);
+    const output = await runHook(context, { ...AGENT_CALL('executor', { prompt, model: 'sonnet' }), ...input }, overrides);
     const requests = routingRequests(before);
     expect(requests).toHaveLength(1);
     return { task: requests[0].state.task, output, row: readLog(context, 'shadow.jsonl').findLast((x) => x.point === 'model-routing') };
@@ -674,6 +674,42 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       const { task, row } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: '' }));
       expect(task).toBe(prompt);
       expect(row?.pointer_unexpanded).toBe('outside-allowed-dirs');
+    });
+
+    it('the root is the working directory of the hook input, not the directory of the hook process', async () => {
+      const context = makeContext();
+      const other = join(context.root, 'other-project');
+      mkdirSync(other);
+      writeFileSync(join(other, 'notes.md'), 'OTHER-MARKER', 'utf8');
+      const inOther = cwdFile(context, 'notes.md', 'PROCESS-MARKER');
+      const off = ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: '' });
+      const otherPrompt = TASK + ' Details in ' + join(other, 'notes.md');
+      const expanded = await taskSentFor(context, otherPrompt, off, { cwd: other });
+      expect(expanded.task).toBe(otherPrompt + label(realpathSync(join(other, 'notes.md'))) + 'OTHER-MARKER');
+      const processPrompt = TASK + ' Details in ' + inOther;
+      const refused = await taskSentFor(context, processPrompt, off, { cwd: other });
+      expect(refused.task).toBe(processPrompt);
+      expect(refused.row?.pointer_unexpanded).toBe('outside-allowed-dirs');
+    });
+
+    it('a working directory given as a link to a directory still allows the files under its real path', async () => {
+      const context = makeContext();
+      const file = cwdFile(context, 'notes.md', 'LINKED-MARKER');
+      const linked = join(context.root, 'project-link');
+      symlinkSync(context.cwd, linked);
+      const prompt = TASK + ' Details in ' + file;
+      const { task } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: '' }), { cwd: linked });
+      expect(task).toBe(prompt + label(realpathSync(file)) + 'LINKED-MARKER');
+    });
+
+    it('a switch value other than 1 leaves the working directory file unexpanded', async () => {
+      const context = makeContext();
+      const file = cwdFile(context, 'notes.md', 'CWD-MARKER');
+      const prompt = TASK + ' Details in ' + file;
+      for (const value of ['0', 'true', 'on']) {
+        const { task } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND: value, OMC_JEV_POINTER_EXPAND_DIRS: '' }));
+        expect(task).toBe(prompt);
+      }
     });
 
     it('switch unset: a file in the working directory is not expanded and the prompt is sent as it was', async () => {
