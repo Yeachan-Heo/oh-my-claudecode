@@ -1,18 +1,21 @@
 // /dev guard for the shell checks (opt-in: OMC_SHELL_CHECKS=1, no switch of its own; it runs wherever the shell checks run).
 //
 // Denies a Bash command, or a Write, Edit, MultiEdit or NotebookEdit call, that deletes, moves, overwrites, truncates, re-owns or
-// recreates a path under /dev: a deleted or replaced /dev/null breaks the whole machine. Redirects to /dev/null, /dev/stdout,
-// /dev/stderr, /dev/tty, /dev/fd/N, /dev/tcp/... and /dev/udp/..., reads from /dev and /dev as the source of cp, install and ln
-// stay allowed. It reads the tokens of tokenizeBash. Every function is fail-open at the call site: the hook catches anything thrown.
+// recreates a path under /dev: a deleted or replaced /dev/null breaks the whole machine. Redirects to /dev/null, /dev/zero, /dev/full,
+// /dev/random, /dev/urandom, /dev/stdout, /dev/stderr, /dev/tty, /dev/fd/N, /dev/tcp/... and /dev/udp/..., reads from /dev and /dev as
+// the source of cp, install and ln stay allowed (/dev/stdin, other terminals and serial ports are refused: a write can reach something real).
+// It reads the tokens of tokenizeBash. Every function is fail-open at the call site: the hook catches anything thrown.
 //
 // Recognized: every simple command of a list (; && || | |& & newline), ( ) { } $( ) ` ` <( ), bash -c and sh -c (any shell, -lc too),
 // eval with literal arguments, a script given to a shell as here-document or here-string, ssh with a remote command, and the
-// wrappers sudo, doas, env, command, builtin, exec, nice, ionice, nohup, timeout, stdbuf, setsid, time and xargs.
+// wrappers sudo, doas, env, command, builtin, exec, nice, ionice, nohup, timeout, stdbuf, setsid, time, coproc and xargs.
 // Also refused with a path under /dev: mkfs*, mke2fs, wipefs (erasing forms), fdisk, sfdisk, gdisk and parted (not their listing forms),
 // tar and bsdtar extracting with -C or --directory, unzip -d, awk and gawk with -i inplace, ed, ex and red.
 // One exception: the atomic repair recipe for /dev/null passes when it is the whole command and /dev/null is not the character device 1:3.
 // Not resolved (known limits): variables and command substitutions inside the path, relative paths after cd /dev, scripts read from a
-// file, interpreters (python -c ...), unknown wrappers, symbolic links to /dev, a script piped into a shell.
+// file, interpreters (python -c ...), unknown wrappers, symbolic links to /dev, a script piped into a shell, wildcards, braces, ANSI-C
+// escapes and tildes in the path, a here-document for sudo -i, sudo -s and su, coproc NAME { ...; }, flock FILE COMMAND, runuser -u USER --
+// COMMAND, a filter between a feeder and xargs, commands that are not listed (mkswap, blkdiscard, losetup, cryptsetup, mdadm, ...).
 
 import { lstatSync } from 'node:fs';
 import { posix } from 'node:path';
