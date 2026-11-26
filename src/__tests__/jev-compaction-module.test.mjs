@@ -2883,6 +2883,15 @@ describe('jev-compaction module: settings fallback for the options of the stages
   const READ_BEFORE = ['OMC_JEV', 'TYPESAFE_API_KEY', 'OMC_JEV_ENDPOINT', 'OMC_JEV_LOG_DIR', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_EXCERPT_CHARS_COMPACTION', 'OMC_JEV_COMPACT_AT_PERCENT', 'OMC_JEV_COMPACT_TARGET', 'OMC_JEV_COMPACT_TOAST', 'OMC_JEV_COMPACT_PRIVATE_PATHS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_BREAKER_DIR', 'OS', 'USERPROFILE', 'HOME'];
   const configFor = (env, settingsEnv) => { const fake = fakeDollar({ env, settingsEnv }); return readConfig(fake.$).then((cfg) => ({ cfg, calls: fake.calls })); };
 
+  it('blockTraces (the lines of moved blocks read as traces by the long replies and the direct replies) is on only for the blocks switch active with the point active', async () => {
+    const point = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key' };
+    const traces = async (env) => (await configFor(env)).cfg.blockTraces;
+    expect(await traces({ ...point, OMC_JEV_COMPACT_BLOCKS: 'active' })).toBe(true);
+    expect(await traces({ ...point, OMC_JEV_COMPACT_BLOCKS: ' ACTIVE ' })).toBe(true);
+    for (const value of [undefined, 'off', 'shadow', '1', 'bogus']) expect(await traces({ ...point, ...(value === undefined ? {} : { OMC_JEV_COMPACT_BLOCKS: value }) }), String(value)).toBe(false);
+    expect(await traces({ OMC_JEV_COMPACT_BLOCKS: 'active' })).toBe(false);
+  });
+
   it('lists every option readConfig reads beyond the ones it read before', () => {
     const source = readFileSync(join(root, 'hooks', 'jev-compaction.mjs'), 'utf8');
     const body = source.slice(source.indexOf('export async function readConfig'), source.indexOf('// --- shared breaker and request limit'));
@@ -4442,6 +4451,41 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
       const runs = replyRuns(text);
       expect(runs.map((r) => text.slice(r.start, r.end).length)).toEqual([602, 500]);
       expect(replyRuns(text, 100).map((r) => text.slice(r.start, r.end).length)).toEqual([602, 100, 500]);
+    });
+
+    it('a moved block and the header of the trace files end a run only when the caller says the blocks act', () => {
+      const moved = '[block moved at compaction: 5000 chars in b/abc.txt]';
+      const header = '[compaction trace files: b/ = /p]';
+      const text = `${'a'.repeat(300)}\n${moved}\n${'b'.repeat(300)}\n${header}\n${'c'.repeat(300)}\n`;
+      const sizes = (runs) => runs.map((r) => text.slice(r.start, r.end).length);
+      expect(sizes(replyRuns(text))).toEqual([300 + 1 + moved.length + 1 + 300 + 1 + header.length + 1 + 300]);
+      expect(sizes(replyRuns(text, 200, false))).toEqual([300 + 1 + moved.length + 1 + 300 + 1 + header.length + 1 + 300]);
+      expect(sizes(replyRuns(text, 200, true))).toEqual([300, 300, 300]);
+    });
+
+    it('a row of a moved block alone is a reply row for directReplyRows until the caller says the blocks act', () => {
+      const moved = '[block moved at compaction: 5000 chars in b/abc.txt]';
+      const rows = [U('first'), A('answer'), A(moved), A('final'), A(moved)];
+      expect([...directReplyRows(rows, [0])].sort((a, b) => a - b)).toEqual([1, 4]);
+      expect([...directReplyRows(rows, [0], [], false)].sort((a, b) => a - b)).toEqual([1, 4]);
+      expect([...directReplyRows(rows, [0], [], true)].sort((a, b) => a - b)).toEqual([1, 3]);
+    });
+
+    it('the long replies split a reply at the lines of moved blocks only while the blocks switch acts: unset, off and any other value read as in the module without blocks', async () => {
+      const part = (name) => long(name, 700);
+      const line = '[block moved at compaction: 5000 chars in b/abc.txt]';
+      const mixed = `${part('one')}\n${line}\n${part('two')}\n[compaction trace files: b/ = /p]\n${part('three')}`;
+      const messages = replyConversation(8, { middle: (k) => (k === 1 ? mixed : long(`reply${k}`)) });
+      const runFor = async (blocks) => compactPastes(messages, { env: { ...REPLIES, OMC_JEV_COMPACT_VERDICTS: 'off', ...(blocks === undefined ? {} : { OMC_JEV_COMPACT_BLOCKS: blocks }) } });
+      const movedBlockLines = (run) => [...run.files.values()].filter((text) => text.includes('[block moved at compaction') || text.includes('[compaction trace files')).length;
+      for (const blocks of [undefined, 'off', 'bogus', '1', 'shadow']) {
+        const run = await runFor(blocks);
+        expect(movedBlockLines(run), String(blocks)).toBe(1);
+        expect(run.record.replies.moved, String(blocks)).toBe(2);
+      }
+      const active = await runFor('active');
+      expect(movedBlockLines(active)).toBe(0);
+      expect(active.record.replies.moved).toBe(4);
     });
 
     it('keeps a run that names a secret or that masking changes, and a reply that saves less than 150 characters', async () => {

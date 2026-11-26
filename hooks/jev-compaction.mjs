@@ -879,6 +879,8 @@ export async function readConfig($) {
     // shared puts the wording of the question once in the state of a request, `windowChars` is the window of Jev in bytes (8000 or more), `fullInput` bounds the user's words in the
     // header of a request by the window alone, `jevStages` lets the verdicts decide what the paste and reply stages and the agent messages to files decide by fixed lengths.
     blocks,
+    // The long replies and the direct replies read the lines of moved blocks and the header of the trace files as traces only while the blocks act (`active`, with the point active).
+    blockTraces: blocks === 'active' && mode === 'active',
     verdicts: String(env.OMC_JEV_COMPACT_VERDICTS ?? '').trim().toLowerCase() === 'off' ? 'off' : 'active',
     blockQuestions: String(env.OMC_JEV_COMPACT_BLOCK_QUESTIONS ?? '').trim().toLowerCase() === 'shared' ? 'shared' : 'full',
     windowChars: /^[1-9]\d{3,6}$/.test(String(env.OMC_JEV_COMPACT_WINDOW_CHARS ?? '').trim()) && Number(env.OMC_JEV_COMPACT_WINDOW_CHARS) >= 8000 ? Number(env.OMC_JEV_COMPACT_WINDOW_CHARS) : undefined,
@@ -3886,17 +3888,18 @@ export function replyTrace(chars, text, path) {
   return `${REPLY_TRACE_PREFIX}${chars} chars, full text in ${path}; start: ${quoted(text.slice(0, REPLY_TRACE_HEAD))}; end: ${quoted(text.slice(-REPLY_TRACE_TAIL))}]`;
 }
 
-// A line that starts a trace of this module or of the compaction (a removed call, pasted text, a moved reply).
-const isTraceLine = (line) => line.startsWith('[compacted] ') || line.startsWith(PASTE_TRACE_PREFIX) || line.startsWith(REPLY_TRACE_PREFIX) || line.startsWith(BLOCK_TRACE_PREFIX) || line.startsWith(TRACE_HEADER_PREFIX);
+// A line that starts a trace of this module or of the compaction (a removed call, pasted text, a moved reply; with `blockTraces` also a moved block and the header of the trace files,
+// which the stages that act without the blocks switch (the long replies, the direct replies) do not read as traces while that switch is off).
+const isTraceLine = (line, blockTraces = false) => line.startsWith('[compacted] ') || line.startsWith(PASTE_TRACE_PREFIX) || line.startsWith(REPLY_TRACE_PREFIX) || (blockTraces && (line.startsWith(BLOCK_TRACE_PREFIX) || line.startsWith(TRACE_HEADER_PREFIX)));
 
 // Whether a text holds nothing but such traces and blank lines: the row a tool-only assistant message becomes once its calls are removed.
-const onlyTraceLines = (text) => text.split('\n').every((line) => !line.trim() || isTraceLine(line));
+const onlyTraceLines = (text, blockTraces) => text.split('\n').every((line) => !line.trim() || isTraceLine(line, blockTraces));
 
 /**
  * Runs of text between trace lines (a line that starts a trace of this module or of the compaction), from a non-empty line to a
  * non-empty line, of at least `minChars` characters: [{start, end}].
  */
-export function replyRuns(text, minChars = REPLY_MIN_CHARS) {
+export function replyRuns(text, minChars = REPLY_MIN_CHARS, blockTraces = false) {
   const runs = [];
   let start = -1;
   let end = -1;
@@ -3905,7 +3908,7 @@ export function replyRuns(text, minChars = REPLY_MIN_CHARS) {
     const nl = text.indexOf('\n', i);
     const lineEnd = nl === -1 ? text.length : nl;
     const line = text.slice(i, lineEnd);
-    if (isTraceLine(line)) close();
+    if (isTraceLine(line, blockTraces)) close();
     else if (line.trim()) { if (start < 0) start = i; end = lineEnd; }
     i = lineEnd + 1;
   }
@@ -3968,7 +3971,7 @@ export function withoutPasteMarks(text) {
  * The interval runs to the next user message, so a notification in the middle does not end it. Over-protection costs tokens, never text.
  * Only the structure decides; whether the reply confirms or corrects what the user said is not for the code to read.
  */
-export function directReplyRows(messages, users, delivered = []) {
+export function directReplyRows(messages, users, delivered = [], blockTraces = false) {
   const rows = new Set();
   const sent = new Set(delivered);
   const bounds = [...new Set([...users, ...sent])].sort((a, b) => a - b);
@@ -3979,7 +3982,7 @@ export function directReplyRows(messages, users, delivered = []) {
     let last = -1;
     for (let j = row + 1; j < stop; j++) {
       const m = messages[j];
-      if (m.role === 'assistant' && typeof m.text === 'string' && m.text.trim() && !onlyTraceLines(m.text)) { if (first < 0) first = j; last = j; }
+      if (m.role === 'assistant' && typeof m.text === 'string' && m.text.trim() && !onlyTraceLines(m.text, blockTraces)) { if (first < 0) first = j; last = j; }
     }
     if (first >= 0) { rows.add(first); rows.add(last); }
   });
@@ -4025,7 +4028,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   );
   stats.limit_row = limit;
   const skip = nonTextAssistantRows(messages, api);
-  const direct = directReplyRows(messages, users, delivered);
+  const direct = directReplyRows(messages, users, delivered, cfg.blockTraces);
   const jobs = [];
   const budget = { left: SCAN_BUDGET_CHARS, deadline };
   for (let row = 0; row < limit; row++) {
@@ -4035,7 +4038,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
     if (skip.has(row)) { stats.skipped_blocks++; continue; }
     if (direct.has(row)) { stats.direct_replies++; continue; }
     stats.considered++;
-    for (const run of replyRuns(m.text)) {
+    for (const run of replyRuns(m.text, REPLY_MIN_CHARS, cfg.blockTraces)) {
       stats.runs++;
       const text = m.text.slice(run.start, run.end);
       const held = secretCheck(text, cfg.privatePaths, budget);
@@ -4542,7 +4545,7 @@ const BLOCK_QUESTION_VERSION = contentHash([BLOCK_QUESTION, BLOCK_FOCUS, BLOCK_L
 
 const BLOCK_FENCE = /^ {0,3}(```|~~~)/;
 // A line that starts a trace of this module or of the compaction (a removed call, pasted text, a moved reply or block, an agent message).
-const isStageTraceLine = (line) => isTraceLine(line) || line.startsWith(AGENT_TRACE_PREFIX);
+const isStageTraceLine = (line) => isTraceLine(line, true) || line.startsWith(AGENT_TRACE_PREFIX);
 // Whether a closing fence of the same kind stands in [from, to).
 function closedFence(text, from, to, mark) {
   for (let i = from; i < to;) {
@@ -4645,7 +4648,7 @@ function blockRows(cfg, rows, ctx) {
   const owners = new Set(ctx.users);
   const userRows = [...new Set([...ctx.users, ...ctx.delivered])].sort((a, b) => a - b);
   const { age, tail } = turnFacts(rows, userRows);
-  const direct = directReplyRows(rows, ctx.users, ctx.delivered);
+  const direct = directReplyRows(rows, ctx.users, ctx.delivered, true);
   for (let i = 0; i < Math.min(ctx.limit, rows.length); i++) {
     const m = rows[i];
     if (m.trimDrop === true || typeof m.text !== 'string' || !m.text.trim() || (m.toolResults || []).length) continue;
@@ -5398,7 +5401,7 @@ export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) 
   const users = ownerRows(messages, cfg.hookRowPrefixes);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
-  return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), fixed, direct: directReplyRows(messages, users, delivered), facts: turnFacts(messages, userRows) };
+  return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
 }
 
 /**
