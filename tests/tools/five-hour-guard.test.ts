@@ -4706,6 +4706,30 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
   });
 
+  it('where hard links are not supported and the pause cannot be put in place, the reservation is removed only while it is still the reservation: a foreign file that takes its place in the last moment before the removal is kept', () => {
+    // the cleanup that follows a failed publication looks at the path (the second look of write_json: the first is the check of the reservation) and then takes the reservation away; the foreign file comes in right after that look
+    const driver = ['import ctypes, errno, os, runpy, sys', 'target, late, real_lstat, looks = sys.argv[1], sys.argv[2] == "1", os.lstat, []',
+      'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',
+      'def none(*args, **kw):', '    raise OSError("no such library")',
+      'def look(path, *args, **kw):', '    found = real_lstat(path, *args, **kw)',
+      '    if str(path) == target and sys._getframe(1).f_code.co_name == "write_json":', '        looks.append(1)', '        if late and len(looks) == 2:', '            os.unlink(target)', '            open(target, "w").write("foreign file\\n")',
+      '    return found',
+      'os.link, os.lstat, ctypes.CDLL = nolink, look, none', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('no-link-reservation-cleanup-swap', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const r = runPyCode(driver, [f.pause, '1', GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*cannot be put in place/);
+    const left = [f.pause, ...readdirSync(f.dir).filter((n) => n.endsWith('.gone')).map((n) => join(f.dir, n))].filter((n) => existsSync(n));
+    expect(left.map((n) => readText(n)), 'the foreign file that took the place of the reservation is still there, at the path or under its new name').toEqual(['foreign file\n']);
+    expect(r.stdout, 'and the log says where it is').toMatch(/is not the reservation and is kept as .*\.gone/);
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    // the same failure with nobody coming in: the reservation is removed, and nothing is left behind
+    const g = fixture('no-link-reservation-cleanup-clean', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const clean = runPyCode(driver, [g.pause, '0', GUARD, ...guardArgs(g, ['--once'])]);
+    expect(clean.stdout, `${clean.stdout}${clean.stderr}`).toMatch(/ERROR: tick failed.*cannot be put in place/);
+    expect(existsSync(g.pause), 'the reservation is removed').toBe(false);
+    expect(readdirSync(g.dir).filter((n) => n.endsWith('.gone') || n.endsWith('.tmp')), 'nothing is left aside').toEqual([]);
+  });
+
   it('where hard links are not supported a foreign file that was moved aside by the removal of a pause is kept under its new name, whether the path is free or another file is there again, and also where a rename back would be refused: no rename puts it back', () => {
     // the foreign file takes the place after the last look of unpublish(), as in the test of the swap; the other runs put another file at the path after the move aside, or refuse the rename back
     const driver = ['import errno, os, runpy, sys', 'real_lstat, real_rename, pause, mode, looks = os.lstat, os.rename, sys.argv[1], sys.argv[2], []',

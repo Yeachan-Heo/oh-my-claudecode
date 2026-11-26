@@ -1071,6 +1071,26 @@ def file_identity(st):
     return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
 
 
+def take_away(path, identity, what):
+    """Remove the file at `path` only while it has `identity`: the path is moved aside in one step, to a name that is new every time (a rename must not
+    replace a file that was kept under one), and what was moved is compared with `identity`. A file that took the place in the instant between the
+    look and the removal is put back by a hard link (nothing is overwritten; where links are not supported, or another file is at the path again, it is
+    kept under its new name and the log says so, `what` being what it is not). True when the file was removed, False when it was another one;
+    FileNotFoundError when there was none."""
+    gone = f'{path}.{os.getpid()}.{os.urandom(6).hex()}.gone'
+    os.rename(path, gone)
+    if file_identity(os.lstat(gone)) == identity:
+        os.unlink(gone)
+        return True
+    try:
+        os.link(gone, path)
+    except OSError:   # FileExistsError: another file is there again; any other error: no hard links on this file system. A rename would put the file back too, and replace one that comes in that very instant, so there is none
+        log(f'the file that was at {path} is not {what} and is kept as {gone}')   # the one that was moved aside is kept under its new name, and the log says so
+    else:
+        os.unlink(gone)
+    return False
+
+
 def exchange(first, second):
     """Make two paths change places in one step (Linux `renameat2` with RENAME_EXCHANGE): True when done; False, with nothing changed, where
     the system, the C library or the file system has no such call."""
@@ -1149,7 +1169,7 @@ def write_json(path, obj, no_clobber=False, replaces=None):
                 except BaseException:
                     try:
                         if file_identity(os.lstat(path)) == reserved:
-                            os.unlink(path)   # the reservation is still ours
+                            take_away(path, reserved, 'the reservation')   # the reservation as far as the look tells; what is moved aside is compared again
                     except OSError:
                         pass
                     raise
@@ -1402,19 +1422,8 @@ def unpublish(strict=False):
         log(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: left alone')
         return True
     if ours:
-        gone = f'{PAUSE_FILE}.{os.getpid()}.{os.urandom(6).hex()}.gone'   # a name no earlier file has: the rename must not replace a file that was kept under one
         try:
-            os.rename(PAUSE_FILE, gone)
-            ours = file_identity(os.lstat(gone)) == file_identity(before)
-            if ours:
-                os.unlink(gone)
-            else:
-                try:
-                    os.link(gone, PAUSE_FILE)
-                except OSError:   # FileExistsError: another file is there again; any other error: no hard links on this file system. A rename would put the file back too, and replace one that comes in that very instant, so there is none
-                    log(f'the file that was at {PAUSE_FILE} is not a pause file of this guard and is kept as {gone}')   # the one that was moved aside is kept under its new name, and the log says so
-                else:
-                    os.unlink(gone)
+            ours = take_away(PAUSE_FILE, file_identity(before), 'a pause file of this guard')
         except FileNotFoundError:
             pass
         except Exception as e:
