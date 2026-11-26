@@ -214,15 +214,23 @@ function stripTrailingComment(value: string): string {
       continue;
     }
     if (char === '"' || char === "'") {
-      // A quote opens a scalar only at the start of the value, of a flow item
-      // (after `[`, `{` or `,`) or of a flow mapping value (after `:` and
-      // whitespace, or right after the `:` of a quoted key, as in JSON-style
-      // `{"k":"v"}`). A tag or anchor may come first (`!!str "a # b"`).
-      // In `[a:", b]` the quote is part of the plain scalar `a:"`.
+      // A quote opens a scalar only where a flow node can start:
+      // - at the start of the value, after `[`, `{` or `,`, or after the `? `
+      //   of an explicit key (`{? "k # x": v}`);
+      // - after the `:` of a mapping value, when whitespace follows it, or
+      //   right after a key that ends with a quote or a collection, as in
+      //   JSON-style `{"k":"v"}` or `{[k]:"v"}`.
+      // A tag or anchor may come first (`!!str "a # b"`). In `[a:", b]` the
+      // quote is part of the plain scalar `a:"`.
       const before = value.slice(0, i).replace(NODE_PROPERTIES, "");
       const afterQuotedKey =
         closedAt >= 0 && /^\s*:\s*$/.test(value.slice(closedAt + 1, i).replace(NODE_PROPERTIES, ""));
-      if (before.trim() === "" || /[[{,]\s*$/.test(before) || /:\s+$/.test(before) || afterQuotedKey) {
+      if (
+        /(?:^|[[{,])\s*(?:\?\s+)?$/.test(before) ||
+        /:\s+$/.test(before) ||
+        /[\]}]\s*:$/.test(before) ||
+        afterQuotedKey
+      ) {
         quote = char;
       }
       continue;
