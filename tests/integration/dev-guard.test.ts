@@ -74,6 +74,8 @@ const BLOCKED: string[] = [
   'sudo --user root rm /dev/null', 'sudo --chdir /tmp rm /dev/null', 'env --unset X rm /dev/null', 'env --chdir /tmp rm /dev/null', "env -S 'rm -f /dev/null'", 'env --split-string="rm /dev/null"', "env -S'rm /dev/null'",
   "env -S 'rm -f' /dev/null", "env -i -S 'sh -c \"rm /dev/null\"'", 'stdbuf --output L rm /dev/null', 'ionice --class 3 rm /dev/null', 'echo /dev/null | xargs --max-args 1 rm', `${'sudo '.repeat(11)}rm /dev/null`,
   'sudo --group wheel --user root env --unset X nice --adjustment 3 rm /dev/null', 'coproc rm /dev/null',
+  // devices that may carry a write to something real: the input of a terminal session, terminals and serial ports
+  'echo x > /dev/stdin', 'echo x > /dev/pts/3', 'echo x > /dev/ttyUSB0', 'echo x > /dev/tty1', 'echo x | tee /dev/stdin', 'dd if=x of=/dev/pts/0', 'rm /dev/zero', 'mv x /dev/zero',
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
   'echo `bash <<B\nrm /dev/null\nB\n`', 'x=`bash <<B\nrm -f /dev/sda\nB\n`', 'echo `echo \\`rm /dev/null\\``',
   // a path from the pipe lands in the place of the replace string of xargs -I
@@ -148,6 +150,8 @@ const ALLOWED: string[] = [
   'echo /dev/null | xargs -i cp {} ./e', 'echo /dev/null | xargs --replace=@ cp @ ./e', 'echo /dev/null | xargs -I @ cp @ ./e',
   // a here-document of cat inside backticks, and a top-level one whose offset happens to match the one inside the backticks
   'echo `cat <<B\nrm /dev/null\nB\n`', "cats <<'A'\nrm -f /dev/null\nA\necho `bash <<B`", 'echo `ls /tmp`',
+  // writes to pseudo devices that discard or ignore them
+  'echo x > /dev/zero', 'echo x > /dev/full', 'echo x > /dev/urandom', 'echo x > /dev/random', 'echo x > /dev/stderr', 'echo x | tee /dev/zero', 'dd if=x of=/dev/zero', 'echo x >> /dev/full',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
@@ -251,6 +255,18 @@ describe('/dev guard: Bash commands', () => {
       const v = verdict(command);
       expect(Date.now() - started, `slow on ${command.slice(0, 24)}`).toBeLessThan(3000);
       expect(v.decision, command.slice(0, 24)).toBe(expected);
+    }
+  });
+
+  it('beyond the nesting limit refuses a path to change and passes the plain redirect of a harmless device', () => {
+    const nest = (inner: string, levels: number): string => (levels === 0 ? inner : nest(`bash -c '${inner.replace(/'/g, `'"'"'`)}'`, levels - 1));
+    for (const levels of [6, 7]) {
+      for (const command of ['rm /dev/null', 'echo x > /dev/sda', 'echo x > /dev/stdin']) {
+        expect(verdict(nest(command, levels)).decision, `${levels} levels: ${command}`).toBe('deny');
+      }
+    }
+    for (const command of ['ls /tmp 2>/dev/null', 'echo x > /dev/zero', 'ls /tmp < /dev/null']) {
+      expect(verdict(nest(command, 7)).decision, command).toBe('allow');
     }
   });
 

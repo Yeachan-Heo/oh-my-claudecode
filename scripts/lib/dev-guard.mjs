@@ -20,7 +20,7 @@ import { tokenizeBash } from './shell-checks.mjs'; // import cycle: tokenizeBash
 
 export const DEV_GUARD_CLASS = 'dev-path';
 export const DEV_FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
-const DEV_SINK = /^\/dev\/(?:null|stdout|stderr|tty|fd\/\d+|tcp\/.+|udp\/.+)$/; // pseudo devices that redirects, tee and dd of= may write
+const DEV_SINK = /^\/dev\/(?:null|zero|full|random|urandom|stdout|stderr|tty|fd\/\d+|tcp\/.+|udp\/.+)$/; // pseudo devices that redirects, tee and dd of= may write
 const DEV_SCRATCH = /^\/dev\/shm\/./; // tmpfs scratch space: ordinary files of the session
 const DEV_MAX_DEPTH = 6; // nested bash -c, eval, ssh, here-documents and find -exec
 const DEV_SHELLS = new Set(['bash', 'sh', 'dash', 'zsh', 'ksh', 'ash']);
@@ -82,7 +82,14 @@ function devPartText(part) {
 const devWordText = (word) => word.parts.map((p) => devPartText(p)).join('');
 const DEV_MENTION = /\/dev(?:[/*?[\u0000]|$)/;
 // Whether any word of the command list, however deeply nested, shows a /dev path (used where the guard stops following nesting).
-const devMentions = (tokens) => tokens.some((t) => t.type === 'word' && (DEV_MENTION.test(devWordText(t)) || devSubLists(t.parts).some(devMentions)));
+// The file a redirect reads is no mention, and the file it writes only when devWritten refuses it, so 2>/dev/null stays fine.
+const devMentions = (tokens) => tokens.some((t, i) => {
+  if (t.type !== 'word') return false;
+  const redirect = tokens[i - 1]?.type === 'redir' ? tokens[i - 1].value : null;
+  const text = devWordText(t);
+  const hit = redirect === null ? DEV_MENTION.test(text) : !['<', '<<', '<<-'].includes(redirect) && !!devWritten(text);
+  return hit || devSubLists(t.parts).some(devMentions);
+});
 
 // Splits arguments into options and operands. valueOpts take a value (separate, attached to a short option, or after = in a long one).
 function splitArgs(args, valueOpts = []) {
@@ -407,7 +414,7 @@ function devCommand(name, args, fed, depth) {
   }
   const nests = name === 'eval' || name === 'ssh' || name === 'su' || name === 'runuser' || name === 'flock' || DEV_SHELLS.has(name);
   if (!nests) return null;
-  if (depth >= DEV_MAX_DEPTH) return DEV_MENTION.test(args.join(' ')) ? { what: `${name} (nested too deep to inspect)`, path: '/dev' } : null; // beyond the depth limit a visible /dev path is refused, anything else passes
+  if (depth >= DEV_MAX_DEPTH) return devMentions(tokenizeBash(args.join(' ')).tokens) ? { what: `${name} (nested too deep to inspect)`, path: '/dev' } : null; // beyond the depth limit a visible /dev path is refused, anything else passes
   if (name === 'eval') return args.length ? shellOf(args.join(' '), depth) : null;
   if (name === 'su' || name === 'runuser' || name === 'flock') {
     const { values } = splitArgs(args, ['-c', '--command']);
