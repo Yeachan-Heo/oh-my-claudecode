@@ -5,9 +5,9 @@
  * /dev stay allowed. No case is ever executed: every command is a string handed to checkBashCommand or to the hook
  * as tool input, and the state of /dev/null is always a stub or a fake lstat, so no test changes the real /dev.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -663,7 +663,7 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
     rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   });
 
-  function hook(toolName: string, toolInput: Record<string, unknown>, extraEnv: Record<string, string> = { OMC_SHELL_CHECKS: '1' }) {
+  function hook(toolName: string, toolInput: Record<string, unknown>, extraEnv: Record<string, string> = { OMC_SHELL_CHECKS: '1' }, inputCwd?: string) {
     const env = {
       PATH: process.env.PATH,
       SystemRoot: process.env.SystemRoot,
@@ -680,7 +680,7 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
     };
     const sid = `dev-guard-${process.pid}-${++counter}`;
     const result = spawnSync(process.execPath, [join(ROOT, 'scripts', 'pre-tool-enforcer.mjs')], {
-      input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, tool_use_id: `toolu_${sid}`, cwd, session_id: sid, permission_mode: 'bypassPermissions' }),
+      input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, tool_use_id: `toolu_${sid}`, cwd: inputCwd ?? cwd, session_id: sid, permission_mode: 'bypassPermissions' }),
       cwd,
       env,
       encoding: 'utf8',
@@ -701,6 +701,17 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
     const rows = logRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ decision: 'deny', checks: ['dev-path'], tool_name: 'Bash' });
+  });
+
+  it('reads the directory of the session from the cwd field of the hook input', () => {
+    const inDev = hook('Bash', { command: 'rm null' }, { OMC_SHELL_CHECKS: '1' }, '/dev');
+    expect(inDev.code, inDev.stderr).toBe(0);
+    expect(inDev.denied, inDev.stdout).toBe(true);
+    expect(inDev.reason).toMatch(/Blocked: `rm` would change \/dev\/null/);
+    expect(hook('Bash', { command: 'rm null' }, { OMC_SHELL_CHECKS: '1' }, '/tmp').denied).toBe(false);
+    expect(hook('Bash', { command: 'cd /dev && rm null' }).denied).toBe(true);
+    expect(hook('Write', { file_path: 'null' }, { OMC_SHELL_CHECKS: '1' }, '/dev').denied).toBe(true);
+    expect(hook('Bash', { command: 'rm null' }, {}, '/dev').denied).toBe(false); // without OMC_SHELL_CHECKS=1 nothing is read
   });
 
   it('denies sed -i, perl -i, bash -c, sudo and a pipeline into xargs', () => {
@@ -781,5 +792,158 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
 
   it('does not cover PowerShell', () => {
     expect(hook('PowerShell', { command: 'rm /dev/null' }).denied).toBe(false);
+  });
+});
+
+// The working directory of the session, cd in the command and symbolic links to /dev. Text only: nothing is ever run, the links below are only looked at.
+describe('/dev guard: working directory and symbolic links', () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'dev-guard-links-'));
+    mkdirSync(join(dir, 'plain'));
+    symlinkSync('/dev', join(dir, 'devlink'));
+    symlinkSync('/dev/null', join(dir, 'nulllink'));
+    symlinkSync(join(dir, 'plain'), join(dir, 'plainlink'));
+  });
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const DEVICES = ['null', 'zero', 'full', 'random', 'urandom', 'tty'];
+  // the operations that replace or change a file, with <P> for the path
+  const OPERATIONS = [
+    'rm <P>', 'mv <P> /tmp/x', 'mv /tmp/x <P>', 'cp --remove-destination /tmp/x <P>', 'ln -sf /tmp/x <P>', 'install /tmp/x <P>',
+    'sed -i s/a/b/ <P>', "perl -i -pe 's/a/b/' <P>", 'truncate -s 0 <P>',
+  ];
+  const each = (spell: (device: string) => string, wrap: (command: string) => string = (c) => c) =>
+    OPERATIONS.flatMap((op) => DEVICES.map((d) => wrap(op.split('<P>').join(spell(d)))));
+  const check = (command: string, cwd?: string) => shell.checkBashCommand(command, { platform: 'linux', syntax: false, env: {}, devNullProbe: probeOf('healthy'), cwd });
+
+  it('refuses the operations on a bare name or a ./ name when the session is in /dev', () => {
+    for (const command of [...each((d) => d), ...each((d) => `./${d}`)]) expect(check(command, '/dev').decision, command).toBe('deny');
+  });
+
+  it('refuses them after cd /dev in the same command, with or without a directory of the session', () => {
+    for (const command of [...each((d) => d, (c) => `cd /dev && ${c}`), ...each((d) => `./${d}`, (c) => `cd /dev && ${c}`)]) {
+      expect(check(command).decision, command).toBe('deny');
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+    }
+  });
+
+  it('refuses them through a symbolic link to /dev, also after .. behind the link', () => {
+    const link = join(dir, 'devlink');
+    for (const command of [...each((d) => `${link}/${d}`), ...each((d) => `${link}/..${link}/${d}`)]) expect(check(command, '/tmp').decision, command).toBe('deny');
+    expect(check('rm null', link).decision).toBe('deny');
+    expect(check(`cd ${link} && rm null`, '/tmp').decision).toBe('deny');
+    expect(check('cd devlink && rm null', dir).decision).toBe('deny');
+    expect(check('rm devlink/null', dir).decision).toBe('deny');
+    expect(check('rm ./devlink/null', dir).decision).toBe('deny');
+  });
+
+  it.each([
+    ['cd /dev; rm null', '/tmp'], ['cd /dev/ && rm null', '/tmp'], ['cd //dev && rm null', '/tmp'], ['cd -P /dev && rm null', '/tmp'], ['cd -- /dev && rm null', '/tmp'],
+    ['cd /tmp && cd /dev && rm null', '/tmp'], ['cd / && cd dev && rm null', '/tmp'], ['cd /dev/.. && rm dev/null', '/tmp'], ['cd /dev && cd .. && rm dev/null', '/tmp'],
+    ['cd .. && rm dev/null', '/dev'], ['rm ../dev/null', '/dev'], ['cd /dev/pts && rm 0', '/tmp'], ['cd /dev && find . -delete', '/tmp'],
+    ["bash -c 'cd /dev && rm null'", '/tmp'], ['(cd /dev && rm null)', '/tmp'], ['{ cd /dev; rm null; }', '/tmp'], ['cd /dev && bash -c "rm null"', '/tmp'], ['cd /dev || true; rm null', '/tmp'],
+    ['cd /dev && echo x | tee sda', '/tmp'], ['cd /dev && echo x > sda', '/tmp'], ['cd /dev && dd of=sda if=x', '/tmp'], ['echo x > sda', '/dev'], ['chmod 600 null', '/dev'], ['touch null', '/dev'],
+    ['cd /dev && chmod 600 null', undefined],
+    // an extraction without -C or -d goes to the directory of the session, a relative -C or -d is read from it
+    ['tar -xf a.tar', '/dev'], ['unzip a.zip', '/dev'], ['tar -xf a.tar -C sub', '/dev'], ['unzip a.zip -d sub', '/dev'], ['tar -C . -xf a.tar', '/dev'], ['tar -xf a.tar dev/null', '/'], ['unzip a.zip dev/null', '/'],
+    ['cd /dev && tar -xf a.tar', '/tmp'], ['cd /dev && unzip a.zip', '/tmp'], ['cd /dev && tar -xf a.tar', undefined], ['cd /dev && unzip a.zip dev/null', undefined],
+  ])('refuses %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('deny');
+  });
+
+  it('refuses a replacing operation on a relative path after a cd that it cannot follow, and nothing else', () => {
+    for (const command of ['cd "$X"; rm foo', 'cd "$X" && rm ./foo', 'cd; rm foo', 'cd -; rm foo', 'cd ~; rm foo', 'cd ~/x; rm foo', 'pushd "$X"; rm foo', 'pushd; rm foo', 'popd; rm foo', 'cd $(pwd)/x; rm foo',
+      'cd "$X"; mv a b', 'cd "$X"; sed -i s/a/b/ f', 'cd /dev && cd "$X" && rm foo', 'cd "$X"; chmod 600 f', 'cd "$X"; truncate -s 0 f', 'cd "$X"; ln -sf a b']) {
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+      expect(check(command).decision, command).toBe('deny');
+    }
+    expect(check('cd "$X"; rm foo', '/tmp').reason).toMatch(/a relative path after a cd that the guard cannot follow/);
+  });
+
+  it.each([
+    'cd "$X"; ls', 'cd "$X"; rm /tmp/foo', 'cd "$X"; echo x > foo', 'cd "$X"; echo x > null', 'cd "$X"; cp a b', 'cd "$X"; cat foo', 'cd "$X"; rm "$f"', 'cd "$X"; rm "a$f"', 'cd "$X"; find . -name x',
+    'cd "$X"; tar -xf a.tar -C out', 'cd "$X"; unzip a.zip -d out', 'cd "$X"; git rm foo', 'cd "$X"; ls | xargs echo', 'cd "$X"; echo foo | tee out',
+    'cd /tmp && rm null', 'cd /tmp; rm null', 'cd /tmp/x && rm ./null', 'cd /dev/shm && rm x', 'cd /dev/shm/ && rm null', 'cd /dev && cd /tmp && rm null', 'cd /dev && cd .. && rm null',
+    'cd /dev && ls null', 'cd /dev && cat null', 'cd /dev && echo x > null', 'cd /dev && echo x >> null', 'cd /dev && cp x null', 'cd /dev && ls | xargs echo', 'cd /dev && echo hello | xargs echo', 'cd /dev && stat null',
+    'cd /dev && rm /tmp/x', 'cd /dev && rm ../tmp/x', 'cd /dev && rm shm/x', 'cd /dev && rm ./shm/x',
+    'cd /dev && tar -xf a.tar -C /tmp', 'cd /dev && tar -xf a.tar -C /tmp b', 'cd /dev/shm && tar -xf a.tar', 'cd /dev && tar -tf a.tar', 'cd /dev && tar -xOf a.tar', 'cd /dev && unzip -l a.zip', 'cd /dev && unzip a.zip -d /tmp', 'cd /tmp && tar -xf a.tar', 'tar -xf a.tar', 'unzip a.zip',
+  ])('allows %j', (command) => {
+    expect(check(command, '/tmp').decision).toBe('allow');
+    expect(check(command).decision).toBe('allow');
+  });
+
+  it('allows the same operations when the session is outside /dev, in /dev/shm, or the hook gave no directory', () => {
+    for (const command of each((d) => d)) {
+      expect(check(command, '/tmp').decision, command).toBe('allow');
+      expect(check(command, '/dev/shm').decision, command).toBe('allow');
+      expect(check(command).decision, command).toBe('allow');
+    }
+    for (const command of ['rm null', 'rm ./null', 'ls', 'cat null', 'echo x > null', 'mv null /tmp/x']) expect(check(command, '/dev').decision === 'deny', command).toBe(command.startsWith('rm') || command.startsWith('mv'));
+    for (const cwd of ['', 'relative/dir', 'C:\\Users\\x', '/dev/\u0000']) expect(check('rm null', cwd).decision, JSON.stringify(cwd)).toBe('allow');
+  });
+
+  it('allows the redirects of a harmless device through a link, in a relative name and after cd, and refuses the others', () => {
+    const link = join(dir, 'devlink');
+    for (const command of [`echo x > ${link}/null`, `echo x >> ${link}/zero`, `echo x | tee ${link}/null`, `dd if=x of=${link}/null`, `cat x > ${join(dir, 'nulllink')}`]) expect(check(command, '/tmp').decision, command).toBe('allow');
+    for (const command of [`echo x > ${link}/sda`, `echo x | tee ${link}/sda`, `dd if=x of=${link}/sda`, `echo x > ${link}/../dev/sda`]) expect(check(command, '/tmp').decision, command).toBe('deny');
+  });
+
+  it('allows a link to an ordinary directory, and a link to a device that the command removes or replaces as a link', () => {
+    const nulllink = join(dir, 'nulllink');
+    const plainlink = join(dir, 'plainlink');
+    for (const command of [`rm ${plainlink}/f`, `rm ${plainlink}`, `mv /tmp/x ${plainlink}`, `mv /tmp/x ${plainlink}/f`, `cp /tmp/x ${plainlink}/f`, `ln -sf /tmp/x ${plainlink}/f`, `sed -i s/a/b/ ${plainlink}/f`, `find ${plainlink} -name x`,
+      `rm ${nulllink}`, `rm -f ${nulllink}`, `unlink ${nulllink}`, `mv ${nulllink} /tmp/x`, `mv /tmp/x ${nulllink}`, `cp --remove-destination /tmp/x ${nulllink}`, `ln -sf /tmp/x ${nulllink}`, `install /tmp/x ${nulllink}`,
+      `sed -i s/a/b/ ${nulllink}`, `perl -i -pe 's/a/b/' ${nulllink}`, `cp /tmp/x ${nulllink}`, `rm ${join(dir, 'devlink')}`, `unlink ${join(dir, 'devlink')}`, `find ${join(dir, 'devlink')} -delete`, `find ${join(dir, 'devlink')} -name x`]) {
+      expect(check(command, '/tmp').decision, command).toBe('allow');
+    }
+  });
+
+  it('refuses what the tools do to the device behind a link: they follow it, or enter it when it names a directory', () => {
+    const nulllink = join(dir, 'nulllink');
+    const devlink = join(dir, 'devlink');
+    for (const command of [`truncate -s 0 ${nulllink}`, `chmod 600 ${nulllink}`, `chown nobody ${nulllink}`, `touch ${nulllink}`, `sed -i --follow-symlinks s/a/b/ ${nulllink}`, `rm ${devlink}/`, `rm -r ${devlink}/`,
+      `mv /tmp/x ${devlink}`, `cp --remove-destination /tmp/x ${devlink}`, `ln -sf /tmp/x ${devlink}`, `install /tmp/x ${devlink}`, `cp -t ${devlink} /tmp/x`, `mv -t ${devlink} /tmp/x`, `find ${devlink}/ -delete`, `find -L ${devlink} -delete`, `find -H ${devlink} -delete`]) {
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+    }
+  });
+
+  it('reads cd like the shell: -P and -- are options, a group or a subshell is read as if it did not end, an empty target stays', () => {
+    expect(check('(cd /dev); rm null', '/tmp').decision).toBe('deny');
+    expect(check('cd /dev | cat; rm null', '/tmp').decision).toBe('deny');
+    expect(check('cd ""; rm null', '/dev').decision).toBe('deny');
+    expect(check('cd "" && rm null', '/tmp').decision).toBe('allow');
+    expect(check('cd -L /tmp && rm null', '/dev').decision).toBe('allow');
+    expect(check('cd -- /tmp && rm null', '/dev').decision).toBe('allow');
+  });
+
+  it('still reads a path with a variable as unknown, and a relative path without a directory of the session as before', () => {
+    expect(check('rm "$X/null"', '/dev').decision).toBe('allow');
+    expect(check('rm "null$X"', '/dev').decision).toBe('allow');
+    expect(check('cd /dev && rm "$X"').decision).toBe('allow');
+    expect(check('rm ~/null', '/dev').decision).toBe('allow');
+  });
+
+  it('resolves at most a few hundred paths per command and keeps reading the rest as text', () => {
+    const many = Array.from({ length: 5000 }, (_, i) => `f${i}`).join(' ');
+    const started = Date.now();
+    expect(check(`rm ${many}`, '/tmp').decision).toBe('allow');
+    expect(check(`rm ${many} /dev/null`, '/tmp').decision).toBe('deny');
+    expect(check(`rm ${many} ${join(dir, 'devlink')}/null`, '/tmp').decision).toBe('allow'); // beyond the budget only the text counts
+    expect(check(`rm ${Array.from({ length: 100 }, (_, i) => `f${i}`).join(' ')} ${join(dir, 'devlink')}/null`, '/tmp').decision).toBe('deny');
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it('refuses a file tool on a relative path when the session is in /dev, or on a path through a link', () => {
+    const call = (tool: string, field: string, path: string, cwd?: string) => shell.runShellChecks(tool, { session_id: 's', tool_name: tool, cwd, tool_input: { [field]: path } }, { platform: 'linux', env: {}, logDir: undefined });
+    for (const [tool, field] of [['Write', 'file_path'], ['Edit', 'file_path'], ['MultiEdit', 'file_path'], ['NotebookEdit', 'notebook_path']]) {
+      expect(call(tool, field, 'null', '/dev').decision, tool).toBe('deny');
+      expect(call(tool, field, './zero', '/dev').decision, tool).toBe('deny');
+      expect(call(tool, field, `${join(dir, 'devlink')}/null`, '/tmp').decision, tool).toBe('deny');
+      expect(call(tool, field, 'devlink/null', dir).decision, tool).toBe('deny');
+      expect(call(tool, field, 'null', '/tmp').decision, tool).toBe('allow');
+      expect(call(tool, field, 'null').decision, tool).toBe('allow');
+      expect(call(tool, field, `${join(dir, 'plainlink')}/f`, '/dev').decision, tool).toBe('allow');
+    }
   });
 });
