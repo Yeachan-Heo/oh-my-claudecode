@@ -433,6 +433,9 @@ SUBSTITUTION_STARTS = ('$(', '$[', '$?', '$$', '$!', '$#', '$*', '$@', '$-')   #
 EXTGLOB_STARTS = ('?(', '*(', '+(', '@(', '!(')   # the operators of an extended glob pattern, which Bash reads where `extglob` is on (`bash -O extglob`, `shopt -s extglob` on an earlier line, `BASHOPTS` in the environment)
 
 
+APPEND_ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\+=')   # a word `NAME+=value`: it adds to the value that NAME has, which the scan does not combine
+
+
 GLOB_MODES = ('nocaseglob', 'dotglob', 'globstar')   # shell options (`bash -O NAME`, `shopt -s NAME`, `BASHOPTS`) that change which files a pattern matches: the scan does not model them
 
 
@@ -442,7 +445,8 @@ def has_substitution(command):
     `*(`, `+(`, `!(`): outside single quotes (also those of `$'...'`, where a backslash escapes) and not after a backslash (the substitutions also
     inside double quotes, a pattern only outside quotes). The result of a program, the value of a special parameter of the shell of the session
     and the files that an extended pattern matches cannot be known or modelled, so the file that they name is not found by reading the words. The
-    name of an option that changes what a pattern matches (GLOB_MODES) anywhere in the text does the same."""
+    name of an option that changes what a pattern matches (GLOB_MODES) anywhere in the text does the same, and so does an append assignment
+    `NAME+=value` at the start of a word outside quotes."""
     if any(mode in command for mode in GLOB_MODES):
         return True
     quote, i = None, 0
@@ -466,7 +470,7 @@ def has_substitution(command):
         elif command.startswith("$'", i):
             quote = "$'"
             i += 1
-        elif c == '`' or command.startswith(SUBSTITUTION_STARTS, i) or command.startswith(EXTGLOB_STARTS, i):
+        elif c == '`' or command.startswith(SUBSTITUTION_STARTS, i) or command.startswith(EXTGLOB_STARTS, i) or ((i == 0 or command[i - 1] in ' \t\n;&|(') and APPEND_ASSIGNMENT.match(command, i)):
             return True
         i += 1
     return False
@@ -761,7 +765,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     exclude = [] if exclude is None else exclude
     command = join_continuations(command) if depth == 0 and isinstance(command, str) else command   # (the text of a quoted word has had its continuations removed with the command around it)
     if has_substitution(command if depth > 0 else ENTRY.strip_comments(command)):   # at depth 0 a comment is no command (as in command_tokens); a quoted command is read as it is
-        raise ScanIncomplete('command has a command substitution, a special parameter of the shell, an extended glob pattern or the name of a shell option that changes what a glob pattern matches, whose result cannot be known')
+        raise ScanIncomplete('command has a command substitution, a special parameter of the shell, an extended glob pattern, the name of a shell option that changes what a glob pattern matches or an append assignment (NAME+=value), whose result cannot be known')
     tokens = command_tokens(command, depth > 0)
     if tokens is None:
         return []   # a command with a NUL character (no process can be started with one in its arguments) or one the shell cannot parse runs nothing

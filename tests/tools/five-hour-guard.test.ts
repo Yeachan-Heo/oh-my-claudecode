@@ -2486,6 +2486,39 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('an append assignment NAME+=value in a command of another hook is not modelled, so the command is not read to its end: the guard refuses to start, also where it stands in a quoted command or after export or declare; a +=, outside quotes, in the middle of a word or in a word that is quoted, is read as before', () => {
+    const f = fixture('foreign-append-assignment', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    const appended = `${audit}.py`;
+    writeFileSync(appended, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: appended, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    if (HAS_BASH) {   // what Bash makes of the append: the variable holds the two parts together
+      expect(spawnSync('bash', ['-c', 'FHG_A=/x/audit; FHG_A+=.py; printf %s "$FHG_A"'], { encoding: 'utf8' }).stdout, 'the suffix is appended').toBe('/x/audit.py');
+    }
+    const refused = [`FHG_A=${audit}; FHG_A+=.py; python3 "$FHG_A"`, `bash -c 'FHG_A=${audit}; FHG_A+=.py; python3 "$FHG_A"'`, `FHG_A=${audit}\nFHG_A+=.py\npython3 "$FHG_A"`, `export FHG_A+=.py; python3 "$FHG_A"`,
+      `declare FHG_A+=.py; python3 other`, `FHG_A+=.py python3 other`, `true && FHG_A+=x`, 'echo a+=b'];   // (the last is data to echo, which the scan cannot tell from an assignment: a false alarm)
+    for (const command of refused) {
+      const r = start(command);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(command)).toMatch(/not read to its end/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+      expect(readText(appended), `${JSON.stringify(command)}: the file is intact`).toBe(text);
+    }
+    // no append, or a += that is no assignment word: read as before
+    for (const command of [`FHG_A=${audit}; python3 other`, 'echo "FHG_A+=.py"', "echo 'FHG_A+=.py'", `python3 ${hooks}/dir/FHG_A+=.py`, `python3 ${hooks}/other`, 'echo x']) {
+      const r = start(command);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a relative entry of a PATH (of the command, of the env of settings.json) is looked up from each directory that the command names (cd DIR; PATH=bin audit), also with env -C, an entry of . or an empty one; a directory that does not exist adds nothing', () => {
     const f = fixture('foreign-relative-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
