@@ -89,12 +89,13 @@ describe('recordSessionMetrics agent counts', () => {
     fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(
       path.join(stateDir, 'subagent-tracking.json'),
-      JSON.stringify({ agents: [{ status: 'completed' }, { status: 'running' }] }),
+      JSON.stringify({ agents: [{ status: 'completed' }, { status: 'running' }, { status: 'failed' }] }),
     );
 
     const metrics = recordSessionMetrics(tmpDir, makeInput('current-session'));
 
-    expect(metrics.agents_spawned).toBe(2);
+    // A failed agent is spawned but not completed.
+    expect(metrics.agents_spawned).toBe(3);
     expect(metrics.agents_completed).toBe(1);
   });
 
