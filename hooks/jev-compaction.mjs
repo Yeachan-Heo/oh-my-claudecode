@@ -116,7 +116,7 @@
  * acts only while the point itself is active. OMC_JEV_COMPACT_VERDICTS=off asks no question, OMC_JEV_COMPACT_BLOCK_QUESTIONS=shared states the wording of the
  * question once per request, OMC_JEV_COMPACT_WINDOW_CHARS sets the window of Jev in bytes (8000 or more), OMC_JEV_COMPACT_FULL_INPUT=active bounds the user's
  * words in a request by that window alone, and OMC_JEV_COMPACT_JEV_STAGES=active lets the verdicts decide what the stages of pasted text, long replies and agent messages to files decide by
- * fixed lengths while the verdicts run (the agent trim stays). The record gets `blocks` (counts and levels) and, with the switch set, `jev_stages`; the
+ * fixed lengths while the verdicts run (the agent trim stays). The record gets `blocks` (counts and levels) and, with the switch set while the blocks switch is not off, `jev_stages`; the
  * background and preflight passes write a `verdicts_fill` record. See the section "verdicts of Jev on blocks of text" below for the rules.
  *
  * Second round (with the verdicts applied and the token cascade): when the prediction is still above the target after the second pass of the cascade, the results Jev rated and the
@@ -5594,7 +5594,7 @@ async function decide($, e, cfg, record, started) {
   const blocksMode = cfg.blocks !== 'off' && api && cfg.pasteDir && record.session_id ? (cfg.blocks === 'active' && cfg.mode !== 'active' ? 'shadow' : cfg.blocks) : 'off';
   const blockOn = blocksMode !== 'off' && cfg.verdicts !== 'off' && cfg.mode === 'active';
   const jevStagesOn = cfg.jevStages && blocksMode === 'active' && blockOn;
-  if (cfg.jevStages) record.jev_stages = { applied: jevStagesOn };
+  if (cfg.jevStages && cfg.blocks !== 'off') record.jev_stages = { applied: jevStagesOn };
   if (jevStagesOn) cfg = { ...cfg, pastes: 'off', replies: 'off' };
   const stageRead = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline, takeAgentChecks(record.session_id, cfg));
   const stage = jevStagesOn ? { ...stageRead, opts: undefined } : stageRead;

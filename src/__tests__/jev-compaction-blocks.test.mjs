@@ -388,12 +388,18 @@ describe('blocks of text: the stages that decide by fixed lengths (OMC_JEV_COMPA
     expect(without.record.replies).toBeTruthy();
   });
 
-  it('without the blocks active the switch changes nothing and says it was not applied', async () => {
+  it('with the blocks switch off the option changes nothing and leaves no trace in the record; with shadow it says it was not applied', async () => {
     const off = await compactRun({ ...ACTIVE_ENV, ...replies }, session(40, { said: longReply }));
-    const set = await compactRun({ ...ACTIVE_ENV, ...replies, OMC_JEV_COMPACT_JEV_STAGES: 'active' }, session(40, { said: longReply }));
-    expect(set.record.jev_stages).toEqual({ applied: false });
-    expect(set.record.replies).toBeTruthy();
-    expect(JSON.stringify(set.out?.messages)).toBe(JSON.stringify(off.out?.messages));
+    for (const blocks of [undefined, 'off', 'bogus']) {
+      const set = await compactRun({ ...ACTIVE_ENV, ...replies, ...(blocks === undefined ? {} : { OMC_JEV_COMPACT_BLOCKS: blocks }), OMC_JEV_COMPACT_JEV_STAGES: 'active' }, session(40, { said: longReply }));
+      expect(set.record, String(blocks)).not.toHaveProperty('jev_stages');
+      expect(Object.keys(set.record).sort(), String(blocks)).toEqual(Object.keys(off.record).sort());
+      expect(set.record.replies).toBeTruthy();
+      expect(JSON.stringify(set.out?.messages)).toBe(JSON.stringify(off.out?.messages));
+    }
+    const shadow = await compactRun({ ...ACTIVE_ENV, ...replies, OMC_JEV_COMPACT_BLOCKS: 'shadow', OMC_JEV_COMPACT_JEV_STAGES: 'active' }, session(40, { said: longReply }));
+    expect(shadow.record.jev_stages).toEqual({ applied: false });
+    expect(shadow.record.replies).toBeTruthy();
   });
 });
 
