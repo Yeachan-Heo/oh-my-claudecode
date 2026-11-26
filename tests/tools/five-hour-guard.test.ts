@@ -4,7 +4,7 @@
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, truncateSync, linkSync, lstatSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, closeSync, constants as fsConstants, copyFileSync, existsSync, openSync, truncateSync, linkSync, lstatSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, SETTINGS_TOOL, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
@@ -4541,6 +4541,54 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(alone.exited, 'the single guard stopped').toBe(true);
       expect(existsSync(g.pause), 'its pause is taken down').toBe(false);
     } finally { await stopGuard(alone); }
+  });
+
+  it('a guard whose tick is held up in the read of the usage cache, after it looked at its lock files, looks at them again before it leaves the pause: the state and the pause of the guard that holds the new lock files are left alone', async () => {
+    const f = fixture('lock-files-replaced-in-tick', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const cacheB = join(f.dir, 'usage-cache-b.json');
+    const cacheLow = join(f.dir, 'usage-cache-low.json');
+    const cfgB = join(f.dir, 'config-b.json');
+    const config = (cfg: string, cache: string) => writeFileSync(cfg, JSON.stringify({ usage_cache: cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings }), 'utf8');
+    config(f.cfg, f.cache);
+    config(cfgB, cacheB);   // the second guard reads a cache of its own: the first one is held up on the file of the first
+    writeCache({ ...f, cache: cacheB }, { pct: 98, resetMs: Date.now() + HOUR_MS });
+    const locks = [`${f.state}.lock`, `${f.pause}.lock`];
+    const replace = () => { for (const lock of locks) { rmSync(lock); writeFileSync(lock, '', 'utf8'); } };
+    const first = startGuard(f);
+    let second: Proc | undefined;
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start of the first guard');
+      writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
+      await waitFor(() => existsSync(f.pause) && readJson(f.pause).pid === first.child.pid, 20000, 'the pause of the first guard');
+      // the cache is a named pipe now: the next tick of the first guard looks at its locks, then waits in the open of the cache until somebody writes to it
+      rmSync(f.cache);
+      expect(spawnSync('mkfifo', [f.cache]).status, 'mkfifo').toBe(0);
+      let beat = -1;
+      let since = Date.now();
+      await waitFor(() => {
+        const seen = readJson(f.pause).valid_until;
+        if (seen !== beat) { beat = seen; since = Date.now(); return false; }
+        return Date.now() - since > 1500;
+      }, 20000, 'the first guard waiting in the read of the cache (its heartbeat stands still)');
+      replace();
+      second = startGuard({ ...f, cfg: cfgB });
+      await waitFor(() => existsSync(f.pause) && readJson(f.pause).pid === second?.child.pid, 20000, 'the pause of the second guard');
+      // the first guard goes on: the window is over in its cache, so it leaves the pause, and its locks are not the ones that are held now
+      writeCache({ ...f, cache: cacheLow }, { pct: 5, resetMs: Date.now() + HOUR_MS });
+      writeFileSync(f.cache, readFileSync(cacheLow));
+      await Promise.race([first.done, sleep(10000)]);
+      expect(first.exited, 'the first guard stopped').toBe(true);
+      expect(first.code, 'it exits with an error, so that a service manager starts it again').toBe(1);
+      const log = readText(f.log);
+      expect(log, 'it saw that the locks were lost before it wrote or removed anything').toMatch(/ERROR: tick failed.*a lock file of this guard was removed or replaced and another guard holds the new one: no state is written and no pause is removed/);
+      expect(log, 'it did not leave the pause of the second guard').not.toMatch(/RESUMED \(window reset seen early/);
+      await sleep(600);
+      expect(readJson(f.pause).pid, 'the pause of the second guard is still there').toBe(second.child.pid);
+    } finally {
+      try { closeSync(openSync(f.cache, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK)); } catch { /* nobody waits in the open of the pipe */ }
+      await stopGuard(first);
+      if (second) await stopGuard(second);
+    }
   });
 
   it('a timeout that is NaN or Infinity (raw tokens that Python reads and standard JSON does not) is a wiring problem, like a missing one', () => {

@@ -1421,7 +1421,11 @@ def leave_pause(state, why):
     changed (the pause stays in force, in memory, on disk and as a file) and the next tick tries again; when the removal fails
     the state is already unpaused and the removal is retried by the next tick (and by the next start, as a leftover). Where no lock names the
     owner, a pause file of a live process that is not this one is its pause (see live_owner): the state is not written then and the file is
-    left alone, since a state of "not paused" under a live pause would have the next start remove that pause as a leftover."""
+    left alone, since a state of "not paused" under a live pause would have the next start remove that pause as a leftover. The locks are looked at
+    again first, right before anything is written or removed (the tick looked at them before it read the cache, and another guard may have taken
+    new lock files since): where another guard holds them, its pause and state are left alone and the next tick stops this guard."""
+    if not keep_locks():
+        raise OSError('a lock file of this guard was removed or replaced and another guard holds the new one: no state is written and no pause is removed')
     owner = live_owner()
     if owner is not None:
         state.update(paused=False, since=None, resume_at=None)   # this guard has no pause to keep any more
@@ -1700,7 +1704,7 @@ def main():
                     log('RESUMED (guard stopping): pause file removed')
             except Exception as e:
                 log(f'ERROR: cannot clean up on exit: {e!r}')
-            if (state.get('paused') or state.get('unlink_pending')) and unpublish():
+            if (state.get('paused') or state.get('unlink_pending')) and not LOCK_LOST[0] and unpublish():
                 # the unpaused state could not be written, or the first removal failed: the sessions are still released (a restart
                 # reads a stored pause and keeps it only while it lasts)
                 log('RESUMED (guard stopping, state not saved): pause file removed' if state.get('paused') else 'RESUMED (guard stopping, second try): pause file removed')
