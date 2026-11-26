@@ -588,6 +588,26 @@ describe('permission-handler', () => {
         expect(result.hookSpecificOutput?.decision?.behavior).not.toBe('allow');
       });
 
+      it('should respect ask rules in the project .claude/settings.json', () => {
+        const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+        process.env.CLAUDE_CONFIG_DIR = path.join(testDir, 'claude-config');
+        try {
+          fs.mkdirSync(path.join(testDir, '.claude'), { recursive: true });
+          fs.writeFileSync(
+            path.join(testDir, '.claude', 'settings.json'),
+            JSON.stringify({ permissions: { ask: ['Bash(git status)'] } }, null, 2),
+          );
+
+          const result = processPermissionRequest(createInput('git status'));
+
+          expect(result.continue).toBe(true);
+          expect(result.hookSpecificOutput?.decision?.behavior).not.toBe('allow');
+        } finally {
+          if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+          else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+        }
+      });
+
       it.each([
         `git commit -m "$(cat <<'EOF'\nfeat: add new feature\nEOF\n)"`,
         `git commit -m "$(cat << 'EOF'\nfeat: add new feature\nEOF\n)"`,

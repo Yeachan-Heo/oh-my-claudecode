@@ -89,6 +89,7 @@ export function getClaudePermissionAllowEntries(directory: string): string[] {
   const globalConfigDir = getClaudeConfigDir();
   const candidatePaths = [
     projectSettingsPath,
+    path.join(directory, '.claude', 'settings.json'),
     path.join(globalConfigDir, 'settings.local.json'),
     path.join(globalConfigDir, 'settings.json'),
   ];
@@ -136,6 +137,7 @@ export function getClaudePermissionAskEntries(directory: string): string[] {
   const globalConfigDir = getClaudeConfigDir();
   const candidatePaths = [
     projectSettingsPath,
+    path.join(directory, '.claude', 'settings.json'),
     path.join(globalConfigDir, 'settings.local.json'),
     path.join(globalConfigDir, 'settings.json'),
   ];
