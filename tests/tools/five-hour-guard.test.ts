@@ -3092,6 +3092,43 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('an assignment gives its name a value for the commands after it only where the shell has made it: one that stands first or after a semicolon or a new line and that no pipe or ampersand follows, not one after && or || (that may be notMade), in a subshell, in a pipeline or in the background: the name is then still the one the session has, so the guard refuses to start', () => {
+    const f = fixture('foreign-assignment-control', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const later = '/nonexistent/later';
+    const ran = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { ...process.env, FHG_AUDIT: audit } }).stdout.includes('ran');
+    const notMade = [`false && FHG_AUDIT=${later}; "$FHG_AUDIT"`, `(FHG_AUDIT=${later}); "$FHG_AUDIT"`, `FHG_AUDIT=${later} | cat; "$FHG_AUDIT"`, `FHG_AUDIT=${later} & "$FHG_AUDIT"`, `false && : "\${FHG_AUDIT:=${later}}/"; "$FHG_AUDIT"`, `true | FHG_AUDIT=${later}; "$FHG_AUDIT"`];
+    const afterAnd = [`true && FHG_AUDIT=${later}; "$FHG_AUDIT"`, `true && export FHG_AUDIT=${later}; "$FHG_AUDIT"`];   // the shell makes these (the command in front succeeds); the scan reads only the operator, so it does not know: a false alarm
+    const made = [`FHG_AUDIT=${later}; "$FHG_AUDIT"`, `FHG_AUDIT=${later}\n"$FHG_AUDIT"`, `export FHG_AUDIT=${later} && "$FHG_AUDIT"`, `true; FHG_AUDIT=${later}; "$FHG_AUDIT"`, `: "\${FHG_AUDIT:=${later}}/"; "$FHG_AUDIT"`];
+    // what the shell does: an assignment that it does not make (after a false &&, in a subshell, in a pipeline or in the background) leaves the file of the session; one that is made, the name that was set
+    for (const command of notMade) expect(ran(command), `${JSON.stringify(command)}: the session's file runs`).toBe(true);
+    for (const command of [...made, ...afterAnd].filter((c) => !c.includes(':='))) expect(ran(command), `${JSON.stringify(command)}: the name was set before the use`).toBe(false);   // (`:=` leaves a name that has a value: the scan counts it as set anyway)
+    for (const command of [...notMade, ...afterAnd]) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${JSON.stringify(command)} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // an assignment that is made settles the name, as before
+    for (const command of made) {
+      const r = start(command, { state_file: audit });
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a default or error operator (-, :-, =, :=, ?, :?) does not settle a parameter: where nothing at that place gives the name a value, the session may have one and the shell then uses it, so the guard refuses to start when the word is the whole expansion or ends the path of a file it writes; a name that the settings or an earlier assignment give, and an expansion with something else after it, are read as before', () => {
     const f = fixture('foreign-default-operator', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
