@@ -1176,11 +1176,11 @@ function recordJevForkSkipRow(data, toolInput, stateDir) {
 // that contains an absolute path to a .md file, the head (up to 8000 characters) of the file named
 // by the first such path is appended to the prompt in the Jev state; the prompt itself and the call
 // are not changed. Only files
-// under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (separated by the platform path
-// delimiter, empty by default, so nothing is read) are expanded. A file whose canonical path looks secret
+// under the working directory of the session and under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS
+// (separated by the platform path delimiter, empty by default) are expanded. A file whose canonical path looks secret
 // (scripts/lib/jev-pointer-secret-path.mjs: SSH keys, env files, credential and token files, key stores), a
 // settings*.json file, and any file under a directory listed in OMC_JEV_POINTER_EXPAND_SECRET_DIRS is never
-// read. The excerpt is part of the state, so it goes through the state mask (scripts/lib/jev-state-mask.mjs)
+// read, whichever root it lies under. The excerpt is part of the state, so it goes through the state mask (scripts/lib/jev-state-mask.mjs)
 // in the resolver like the rest of the state; that removes the shapes it knows and no more.
 // Any failure leaves the prompt unchanged and sets the reason in the pointer telemetry (written to
 // the shadow line with OMC_JEV_ROW_TELEMETRY).
@@ -1202,8 +1202,15 @@ function pointerDirList(value) {
       }
     });
 }
-function pointerExpandRoots(env = process.env) {
-  return pointerDirList(env.OMC_JEV_POINTER_EXPAND_DIRS);
+// The roots a pointer file may lie under: the listed directories and the working directory of the session.
+function pointerExpandRoots(directory, env = process.env) {
+  const roots = pointerDirList(env.OMC_JEV_POINTER_EXPAND_DIRS);
+  try {
+    roots.push(realpathSync(directory || process.cwd()));
+  } catch {
+    // No usable working directory: only the listed directories apply.
+  }
+  return roots;
 }
 // Directories whose files are never expanded, in addition to the built-in secret path patterns
 // (OMC_JEV_POINTER_EXPAND_SECRET_DIRS, same format as OMC_JEV_POINTER_EXPAND_DIRS, empty by default).
@@ -1220,7 +1227,7 @@ function isPathInDirectory(canonicalPath, directory) {
 
 // `pointer` is the telemetry object of the row ({ expanded, unexpanded }); undefined when the
 // switch is off, in which case the prompt passes through untouched.
-function expandTaskPointer(prompt, pointer) {
+function expandTaskPointer(prompt, pointer, directory) {
   if (!pointer || typeof prompt !== 'string' || prompt.length === 0 || prompt.length >= POINTER_MAX_PROMPT_CHARS) return prompt;
   const named = prompt.match(POINTER_PATH_RE)?.[0];
   if (!named) return prompt;
@@ -1240,7 +1247,7 @@ function expandTaskPointer(prompt, pointer) {
       pointer.unexpanded = 'secret-path';
       return prompt;
     }
-    const roots = pointerExpandRoots();
+    const roots = pointerExpandRoots(directory);
     if (!roots.some((root) => isPathInDirectory(real, root))) {
       pointer.unexpanded = 'outside-allowed-dirs';
       return prompt;
@@ -1346,7 +1353,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     state: {
       tool_name: toolName,
       subagent_type: originalInput.subagent_type || '',
-      task: expandTaskPointer(originalInput.prompt || '', pointer),
+      task: expandTaskPointer(originalInput.prompt || '', pointer, directory),
       ...context,
     },
     questions,
