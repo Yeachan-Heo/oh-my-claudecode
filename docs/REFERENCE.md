@@ -1415,6 +1415,14 @@ stopomc
 
 > **Note**: AST tools use [@ast-grep/napi](https://ast-grep.github.io/) for structural code matching. Supports meta-variables like `$VAR` (single node) and `$$$` (multiple nodes).
 
+### Task List Tool (opt-in)
+
+| Tool        | Status                       | Description                                                                                                                             |
+| ----------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_list` | ✅ Implemented (off by default) | Task list of a subagent: send the whole list as `items`, or `advance`, `done` or `start` as in `update_plan`. The tool checks the shape of the call and confirms it. |
+
+> **Note**: `task_list` is registered only when `OMC_TASK_LIST=1` is set when the MCP server starts, in the standalone server, in the in-process server (`omcToolsServer`, `getOmcToolNames()` and so `createOmcSession()`) and in the exported `allCustomTools` aggregate (the tool surface `omc capabilities` reports; the aggregate reads the variable when its module loads, and a capabilities lockfile made with the variable set differs from one made without it); without it the tool does not exist and the servers and the aggregate expose the same tools as before. With the variable set, `OMC_DISABLE_TOOLS=task-list` hides the tool again in the two MCP servers; the aggregate, like the LSP, AST and Python tools in it, is not filtered by `OMC_DISABLE_TOOLS`. The list itself is saved per agent by the `PostToolUse` hook `scripts/jev-task-list-state.mjs`, which you register yourself and which writes nothing when `OMC_TASK_LIST` is unset (also turned off by `OMC_SKIP_HOOKS=task-list` or `DISABLE_OMC=1`). Details, storage layout and the log files: [HOOKS.md](./HOOKS.md#task-list-scriptslibjev-task-listmjs).
+
 ---
 
 ## Performance Monitoring

@@ -1,0 +1,1019 @@
+/* global process, console, Buffer */
+// Task lists of agents: storage, update semantics and the PostToolUse entry point.
+// Opt-in: the state hooks do nothing unless OMC_TASK_LIST=1 (see scripts/jev-task-list-state.mjs).
+// The list of every agent is what the agent itself sent to a list tool (source of truth: the tool_input of a call that ran, as the
+// PostToolUse hook gets it); nothing here judges the work.
+//   <logdir>/lists/<session_id>/<agent_id|main>.json   the list of one agent (main = the main thread, no agent_id in the hook input)
+//   <logdir>/lists/<session_id>/<key>.events/*.json    the list calls of the last seconds, and those no fold has taken yet (event journal, see foldEvents)
+//   <lists>/<session_id>/_task/<id>.json               which agent created a Task* task (the Task* store is one per session, without owner)
+// <logdir> is OMC_TASK_LIST_LOG_DIR or, for the hooks, <state root>/state/task-list (see hookEnv); ~/.omc/state/task-list only where no hook resolved it. Every function is fail-open: it returns null/false and never throws.
+
+import { createHash, randomBytes } from 'node:crypto';
+import { homedir } from 'node:os';
+import { appendFileSync, closeSync, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { atomicWriteFileSync } from './atomic-write.mjs';
+import { rotateJevLog } from '../jev-resolve.mjs';
+import { resolveOmcStateRoot } from './state-root.mjs';
+
+export const LIST_TOOL_RE = /^mcp__(?:plugin_oh-my-claudecode_)?t__task_list$/; // also the bare server name without the plugin prefix
+export const MAIN = 'main';
+export const LIST_RECORD_VERSION = 1;
+export const ITEMS_MAX = 50;
+export const CONTENT_MAX = 500;
+export const NOTE_MAX = 600;
+export const LISTS_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+export const RECORD_MAX_BYTES = 1024 * 1024; // the largest list or event file the reader accepts; the writers stay below it
+export const LOG_MAX_BYTES = 50 * 1024 * 1024; // size at which task-list.jsonl and batches.jsonl are rotated
+const SWEEP_EVERY_MS = 3600 * 1000;
+const STATUSES = new Set(['pending', 'in_progress', 'completed']);
+const SESSION_ID = /^(?!\.)[A-Za-z0-9._-]{1,200}$/; // a safe session id, never "." or ".." or a name starting with a dot
+const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
+const TASK_ID = /^[A-Za-z0-9_-]{1,40}$/;
+// Own lock file (open 'wx' with a random token). The hook runner gives a 3 s hook 2.5 s, so the wait ends after 1.5 s;
+// a lock older than 3 s belongs to a dead holder (a hook holds it for milliseconds).
+const LOCK_WAIT_MS = 1500;
+const LOCK_STALE_MS = 3000;
+// The fold of the event journal (syncList) treats its lock as stale only after 60 s: a fold descheduled for seconds on a busy
+// machine must not have its lock broken and then overwrite a newer fold; a held lock only delays folding.
+const SYNC_STALE_MS = 60_000;
+const LOCK_STEP_MS = 20;
+
+// Tools whose call changes the list of the calling agent (the PostToolUse matcher shown in docs/HOOKS.md names exactly these).
+// update_plan and wrap_up count only in the main thread: the host rejects them in subagents before they run.
+export const LIST_TOOL_NAMES = ['mcp__plugin_oh-my-claudecode_t__task_list', 'mcp__t__task_list', 'TaskCreate', 'TaskUpdate', 'TodoWrite', 'mcp__ccd_turn__update_plan', 'mcp__ccd_turn__wrap_up'];
+export function isListTool(name, key = MAIN) {
+  if (typeof name !== 'string' || !LIST_TOOL_NAMES.includes(name)) return false;
+  return key === MAIN || !name.startsWith('mcp__ccd_turn__');
+}
+
+// The log directory: OMC_TASK_LIST_LOG_DIR overrides the default under the user's state directory.
+export const taskListLogDir = (env = process.env) => env.OMC_TASK_LIST_LOG_DIR || join(homedir(), '.omc', 'state', 'task-list');
+// The environment the hooks hand to the storage: without OMC_TASK_LIST_LOG_DIR the log directory is task-list under the state root the
+// project of the call resolves to (worktree, OMC_STATE_DIR and workspace marker, the root every other state file of the session uses).
+export async function hookEnv(data, env = process.env) {
+  if (env.OMC_TASK_LIST_LOG_DIR) return env;
+  try {
+    const root = await resolveOmcStateRoot(typeof data?.cwd === 'string' && data.cwd ? data.cwd : process.cwd());
+    return root ? { ...env, OMC_TASK_LIST_LOG_DIR: join(root, 'state', 'task-list') } : env;
+  } catch {
+    return env;
+  }
+}
+export const listsDir = (env = process.env) => join(taskListLogDir(env), 'lists');
+// The file key of an agent: main only when the hook input has no agent_id; an agent_id outside the safe pattern keeps its own key
+// (unsafe characters as "_" plus a short sha256 of the original), so it never writes the main thread's list.
+export function agentKey(data) {
+  const raw = data?.agent_id;
+  if (raw === undefined || raw === null || raw === '') return MAIN;
+  const id = String(raw);
+  if (AGENT_ID.test(id) && id !== MAIN) return id;
+  return `${id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80)}-${createHash('sha256').update(id).digest('hex').slice(0, 10)}`;
+}
+const sessionDir = (sessionId, env) => (typeof sessionId === 'string' && SESSION_ID.test(sessionId) ? join(listsDir(env), sessionId) : null);
+export function listPath(sessionId, key, env = process.env) {
+  const dir = sessionDir(sessionId, env);
+  return dir && (key === MAIN || AGENT_ID.test(key)) ? join(dir, `${key}.json`) : null;
+}
+
+// { record, broken }: record null and broken false when the file does not exist; broken true when it exists but cannot be read.
+function readRecord(path) {
+  try {
+    if (!path || !existsSync(path)) return { record: null, broken: false };
+    const link = lstatSync(path);
+    if (link.isSymbolicLink() || !link.isFile() || link.size > RECORD_MAX_BYTES) return { record: null, broken: true };
+    const record = JSON.parse(readFileSync(path, 'utf8'));
+    return record && typeof record === 'object' && !Array.isArray(record) ? { record, broken: false } : { record: null, broken: true };
+  } catch {
+    return { record: null, broken: true };
+  }
+}
+
+// Appends one JSON row to a file of the log directory; a file above LOG_MAX_BYTES is rotated first. Never throws.
+function appendLog(name, row, env = process.env) {
+  try {
+    const dir = taskListLogDir(env);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, name);
+    rotateJevLog(path, LOG_MAX_BYTES);
+    appendFileSync(path, JSON.stringify(row) + '\n', 'utf8');
+  } catch { /* logging never breaks the hook */ }
+}
+
+// A failed lock or write leaves a row in task-list.jsonl; the row never breaks the hook.
+function storeEvent(event, path, env, extra = {}) {
+  appendLog('task-list.jsonl', { ts: new Date().toISOString(), event, file: basename(String(path)), ...extra }, env);
+}
+
+const readToken = (lockPath) => { try { return readFileSync(lockPath, 'utf8'); } catch { return null; } };
+
+// A file by what survives a replacement: device, inode, modification time (ns) and size. A recycled inode alone proves nothing.
+const statExact = (path) => { try { return lstatSync(path, { bigint: true }); } catch { return null; } };
+const sameFile = (a, b) => a.ino === b.ino && a.mtimeNs === b.mtimeNs && a.size === b.size && (process.platform === 'win32' || a.dev === b.dev);
+
+// Removes the lock file only when isTarget(movedPath) confirms that the file moved is the one meant. The lock is moved to a unique name
+// first (a rename has one winner, so one process judges and removes it); the moved file is judged, never the path, which another process
+// may have taken since it was read. A lock that is another holder's is linked back (link never overwrites) and its holder keeps it.
+function removeLockIf(lockPath, isTarget) {
+  const aside = `${lockPath}.${randomBytes(6).toString('hex')}.moved`;
+  try { renameSync(lockPath, aside); } catch { return; }
+  let meant = false;
+  try { meant = isTarget(aside); } catch { /* not judged to be the file meant */ }
+  if (!meant) { try { linkSync(aside, lockPath); } catch { /* a third process holds the lock now */ } }
+  try { unlinkSync(aside); } catch { /* already gone */ }
+}
+
+// A lock older than staleMs belongs to a dead holder. The age, the token and the identity of the file are read from one open handle,
+// so none of them comes from a later file that took the path. Right before the rename the path must still name that file; after it, the
+// moved file must be that file again (removeLockIf). A lock that a new holder took in between has another inode, modification time and
+// token, and is put back. Mutual exclusion stays best effort for the instant between the move and the put back (a third contender can
+// take the free path then); what the fold relies on is its own check before it publishes (see syncList).
+function breakStaleLock(lockPath, staleMs = LOCK_STALE_MS) {
+  let seen;
+  let token;
+  let fd;
+  try {
+    fd = openSync(lockPath, 'r');
+    seen = fstatSync(fd, { bigint: true });
+    if (!seen.isFile() || Date.now() - Number(seen.mtimeMs) <= staleMs) return;
+    token = readFileSync(fd, 'utf8');
+  } catch {
+    return; // gone or unreadable: nothing to break
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } }
+  }
+  const named = statExact(lockPath);
+  if (!named || !sameFile(named, seen)) return;
+  removeLockIf(lockPath, (moved) => {
+    const now = statExact(moved);
+    return Boolean(now) && sameFile(now, seen) && readToken(moved) === token;
+  });
+}
+
+// Writes all of `text` to the open file. writeSync may store fewer bytes than it was given without an error (a disk that is filling up, an
+// interrupted call), and a file closed after that is cut short: a lock token that is not its owner's, a claim that is not JSON, and an event
+// that would be published truncated and skipped by every reader for good. The count it returns is checked and the rest is written.
+function writeAll(fd, text) {
+  const bytes = Buffer.from(text, 'utf8');
+  for (let at = 0; at < bytes.length;) {
+    const written = writeSync(fd, bytes, at, bytes.length - at);
+    if (!(written > 0)) throw new Error('write stored no bytes');
+    at += written;
+  }
+}
+
+// Runs fn under <path>.lock (the lock file holds a random token; only its owner removes it). false when the lock was not taken in time
+// or fn threw; the call then changes nothing. fn gets owned(): true while the lock file still holds this token. staleMs: the age after
+// which a lock counts as a dead holder's.
+export function withFileLock(path, fn, env = process.env, staleMs = LOCK_STALE_MS) {
+  const lockPath = `${path}.lock`;
+  const token = `${process.pid}-${randomBytes(8).toString('hex')}`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      const fd = openSync(lockPath, 'wx', 0o600);
+      try { writeAll(fd, token); } finally { closeSync(fd); }
+      break;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') { storeEvent('lock_error', path, env); return false; }
+      breakStaleLock(lockPath, staleMs);
+      if (Date.now() > deadline) { storeEvent('lock_timeout', path, env); return false; }
+      Atomics.wait(sleeper, 0, 0, LOCK_STEP_MS);
+    }
+  }
+  try {
+    fn(() => readToken(lockPath) === token);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    // a lock taken over as stale is another holder's now: it is not touched. The move below checks the file again, so a lock that
+    // changes hands between this read and the move is put back.
+    if (readToken(lockPath) === token) removeLockIf(lockPath, (moved) => readToken(moved) === token);
+  }
+}
+
+function writeJson(path, value, env = process.env) {
+  try {
+    atomicWriteFileSync(path, JSON.stringify(value, null, 1));
+    return true;
+  } catch {
+    storeEvent('write_failed', path, env);
+    return false;
+  }
+}
+
+// Publishes the list of a fold (path-based writes cannot be bound to a directory, so the order of the steps does it). The temporary file is
+// written first, then stillCurrent() is asked (the lock is still this fold's and the list is the one it folded from), and only then is the
+// file renamed over the list. The retention sweep may move the session directory away after the check of a fold, and another hook may make
+// the directory again, fold a newer call and remove its event: a write that checked before it began would then put the older list over the
+// newer one, for good. Here a directory that changed hands after the check has no such temporary file (it stays in the moved tree, which
+// the merge of a put back does not take along: the name ends in .tmp), so the rename finds no source and fails; and one that changed hands
+// before the temporary file was made fails the check, because the lock file this fold holds is in the moved tree. The directory is never
+// made here: a fold whose directory is gone publishes nothing, and its events are folded by the next fold. false when nothing was
+// published; a refusal by stillCurrent() is silent (the newer fold writes), a failed write is a row.
+function publishJson(path, value, stillCurrent, env = process.env) {
+  const temp = `${path}.${randomBytes(6).toString('hex')}.tmp`;
+  let fd;
+  let published = false;
+  try {
+    fd = openSync(temp, 'wx', 0o600);
+    writeAll(fd, JSON.stringify(value, null, 1));
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    if (stillCurrent()) {
+      renameSync(temp, path);
+      published = true;
+      try { const dirFd = openSync(dirname(path), 'r'); try { fsyncSync(dirFd); } finally { closeSync(dirFd); } } catch { /* a platform without directory fsync */ }
+    }
+  } catch {
+    storeEvent('write_failed', path, env);
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* closed */ } }
+    if (!published) { try { unlinkSync(temp); } catch { /* never made, or moved away with its directory */ } }
+  }
+  return published;
+}
+
+// --- record shape -------------------------------------------------------------------------
+
+// Narrow masking for the task texts: the full secret masking of the shell checks also hides long words and plain "name: value"
+// pairs, which destroys task names ("Passed: 26 tests"). Here: private key blocks (PEM, PGP, SSH2), known key prefixes, a Bearer token,
+// and the value after "=" or ":" only when a segment of the name (split by _ . -) is KEY, TOKEN, SECRET, PASS (PASSWD, PASSWORD) or PWD.
+const LIST_SECRET_RULES = [
+  [/(-{4,5} ?BEGIN (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5})[\s\S]*?(-{4,5} ?END (?:[A-Z0-9]+[ -])*PRIVATE KEY(?: BLOCK)? ?-{4,5}|$)/g, '$1***'],
+  [/\b(sk-(?:ant-)?)[A-Za-z0-9_-]{8,}/g, '$1***'],
+  [/\b(gh[pousr]_)[A-Za-z0-9_]{8,}/g, '$1***'],
+  [/\b(glpat-)[A-Za-z0-9_-]{8,}/g, '$1***'],
+  [/\b((?:sk|rk|pk)_(?:live|test)_|hf_|npm_)[A-Za-z0-9]{16,}/g, '$1***'],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, 'eyJ***'],
+  [/\b(github_pat_)[A-Za-z0-9_]{8,}/g, '$1***'],
+  [/\b(xox[a-z]-)[A-Za-z0-9-]{8,}/g, '$1***'], // also xoxe- and the other letters
+  [/\b(AKIA)[0-9A-Z]{12,}/g, '$1***'],
+  [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***'],
+];
+// "name = value" pairs. The head is matched only where a name starts (the character before is not a name character), so the work
+// per text is linear: a rule that may start inside a name and read on to its end costs the square of the length of "a-a-a-...".
+// The name is a whole run of name characters, optionally quoted (a JSON field); a segment test decides whether it hides its value.
+const ASSIGNMENT_HEAD = /(?<![A-Za-z0-9_.-])(["']?)([A-Za-z0-9_.-]+)(["']?)(\s*[=:]\s*)/g;
+// The value: a quoted string through its closing quote (spaces, commas and semicolons included); a quote that is never closed takes the
+// rest of its line; else a run up to whitespace, a quote, a comma or a semicolon. An empty quoted value is not a value. Sticky: it is
+// read at the end of the head, never searched for.
+const ASSIGNMENT_VALUE = /"(?:[^"\\]|\\.)+"|'(?:[^'\\]|\\.)+'|"(?!")[^\n]+|'(?!')[^\n]+|[^\s"',;]+/y;
+const SECRET_SEGMENT = /^(?:key|token|secret|pass|passwd|password|pwd)$/i;
+function maskAssignments(text) {
+  let out = '';
+  let from = 0;
+  ASSIGNMENT_HEAD.lastIndex = 0;
+  for (let head = ASSIGNMENT_HEAD.exec(text); head; head = ASSIGNMENT_HEAD.exec(text)) {
+    const valueAt = head.index + head[0].length;
+    // a name that hides nothing (or ends in a separator, which no name does): the scan goes on inside its value, which may hold a
+    // name that does ("status:password=x")
+    if (/[_.-]$/.test(head[2]) || !head[2].split(/[_.-]+/).some((segment) => SECRET_SEGMENT.test(segment))) continue;
+    ASSIGNMENT_VALUE.lastIndex = valueAt;
+    const value = ASSIGNMENT_VALUE.exec(text);
+    if (!value) continue;
+    const quote = value[0][0] === '"' || value[0][0] === "'" ? value[0][0] : '';
+    const closed = quote && value[0].length > 1 && value[0].endsWith(quote);
+    out += `${text.slice(from, valueAt)}${quote}***${closed ? quote : ''}`;
+    from = valueAt + value[0].length;
+    ASSIGNMENT_HEAD.lastIndex = from;
+  }
+  return out + text.slice(from);
+}
+export function maskListText(text) {
+  let s = String(text ?? '');
+  for (const [re, to] of LIST_SECRET_RULES) s = s.replace(re, to);
+  return maskAssignments(s);
+}
+
+const cut = (text, max) => {
+  const s = maskListText(String(text ?? '').trim());
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+};
+
+// A model sometimes sends an array argument of an MCP tool as a JSON string.
+function arrayOf(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : null; } catch { return null; }
+  }
+  return null;
+}
+
+// A task number sent as text is at most NUMBER_TEXT_MAX long, checked before the text is trimmed or matched: task_list refuses a longer
+// one (src/tools/task-list-tools.ts), so a call it accepts is read as sent, and an enormous string of digits is not walked.
+const NUMBER_TEXT_MAX = 16;
+const intOf = (value) => {
+  const n = typeof value === 'string' && value.length <= NUMBER_TEXT_MAX && /^\d+$/.test(value.trim()) ? Number(value) : value;
+  return Number.isInteger(n) && n >= 1 ? n : null;
+};
+
+// One item: { content, status, note?, id? } or null when the content is missing.
+function itemOf(raw, noteField) {
+  if (!raw || typeof raw !== 'object') return null;
+  const content = cut(raw.content ?? raw.subject ?? '', CONTENT_MAX);
+  if (!content) return null;
+  const status = STATUSES.has(raw.status) ? raw.status : 'pending';
+  const item = { content, status };
+  const note = noteField ? raw[noteField] : undefined;
+  if (typeof note === 'string' && note.trim()) item.note = cut(note, NOTE_MAX);
+  return item;
+}
+
+// Is an update call well formed: items (a non-empty array of tasks) or at least one of advance, done, start. With a noteField (the
+// task_list tool) an item is held to the schema of the tool, as its handler checks it: content a string, note absent or a string; so the
+// hook never saves a call as something other than it was sent (a note of another type dropped, a number turned into text).
+export function updateShape(input, noteField = null) {
+  const items = input?.items === undefined ? undefined : arrayOf(input.items);
+  const typed = (x) => !noteField || (typeof x.content === 'string' && (x[noteField] === undefined || typeof x[noteField] === 'string'));
+  if (input?.items !== undefined && (!items || items.length === 0 || items.length > ITEMS_MAX || items.some((x) => !itemOf(x, null) || !STATUSES.has(x.status) || !typed(x)))) return { ok: false, why: 'items' };
+  const done = input?.done === undefined ? undefined : arrayOf(input.done);
+  // a list has at most ITEMS_MAX tasks: more numbers than that, or a number above it, change nothing and would only make the event large
+  if (input?.done !== undefined && (!done || done.length > ITEMS_MAX || done.some((n) => intOf(n) === null || intOf(n) > ITEMS_MAX))) return { ok: false, why: 'done' };
+  if (input?.start !== undefined && (intOf(input.start) === null || intOf(input.start) > ITEMS_MAX)) return { ok: false, why: 'start' };
+  if (input?.advance !== undefined && typeof input.advance !== 'boolean') return { ok: false, why: 'advance' };
+  if (!items && !done && input?.start === undefined && input?.advance !== true) return { ok: false, why: 'empty' };
+  return { ok: true, items, done: done?.map(intOf), start: input?.start === undefined ? undefined : intOf(input.start), advance: input?.advance === true };
+}
+
+// update_plan / task_list semantics (update_plan's own description): items replace the list; done marks 1-based numbers completed; start
+// marks one in_progress and, as "Keep exactly one step in_progress" says, puts any other task in progress back to pending; advance
+// completes the task in progress and starts the next pending one (the first pending after it, else the first pending).
+// A note of a task sent again without a note is kept only when the content is the same and the task was and still is in progress.
+// advance, done or start without an existing list change nothing (null), so an unreadable file never ends as an empty list.
+export function applyUpdate(items, input, noteField) {
+  const shape = updateShape(input, noteField);
+  if (!shape.ok) return null;
+  if (!shape.items && items.length === 0) return null;
+  let list = items.map((x) => ({ ...x }));
+  if (shape.items) {
+    const old = new Map(list.map((x) => [x.content, x]));
+    list = shape.items.map((raw) => itemOf(raw, noteField)).filter(Boolean).map((x) => {
+      const before = old.get(x.content);
+      return before?.note && !x.note && before.status === 'in_progress' && x.status === 'in_progress' ? { ...x, note: before.note } : x;
+    });
+  }
+  for (const n of shape.done ?? []) if (list[n - 1]) list[n - 1].status = 'completed';
+  if (shape.start && list[shape.start - 1]) {
+    list.forEach((x, i) => { if (i !== shape.start - 1 && x.status === 'in_progress') x.status = 'pending'; });
+    list[shape.start - 1].status = 'in_progress';
+  }
+  if (shape.advance) {
+    const current = list.findIndex((x) => x.status === 'in_progress');
+    if (current >= 0) list[current].status = 'completed';
+    let next = list.findIndex((x, i) => i > current && x.status === 'pending');
+    if (next < 0) next = list.findIndex((x) => x.status === 'pending');
+    if (next >= 0) list[next].status = 'in_progress';
+  }
+  return list;
+}
+
+// The id of a task from the TaskCreate result: an object with an id (task.id, taskId, id) or the text "Task #<id> created successfully".
+export function taskIdOf(response) {
+  const fromObject = (o) => {
+    if (!o || typeof o !== 'object') return null;
+    for (const v of [o.task?.id, o.taskId, o.task_id, o.id]) if ((typeof v === 'string' || typeof v === 'number') && TASK_ID.test(String(v))) return String(v);
+    return null;
+  };
+  const direct = fromObject(response);
+  if (direct) return direct;
+  let text = '';
+  try { text = typeof response === 'string' ? response : JSON.stringify(response ?? ''); } catch { text = ''; }
+  const m = /Task #([A-Za-z0-9_-]{1,40}) created/.exec(text);
+  return m ? m[1] : null;
+}
+
+// --- ownership of Task* tasks -------------------------------------------------------------
+
+// The retention sweep may move a session directory away between the mkdir of a writer and its next file operation (it judged the
+// directory idle before the writer wrote anything in it), and the writer then gets ENOENT. The writer repeats the whole step from its
+// mkdir, which makes the directory anew; the sweep runs at most once an hour, so a few tries are enough. Any other error is thrown at once.
+const DIR_TRIES = 3;
+function inSessionDir(step) {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return step(); } catch (error) { if (error?.code !== 'ENOENT' || attempt >= DIR_TRIES) throw error; }
+  }
+}
+
+function claimTask(sessionId, taskId, key, env) {
+  const dir = sessionDir(sessionId, env);
+  if (!dir || !TASK_ID.test(taskId)) return false;
+  try {
+    inSessionDir(() => {
+      mkdirSync(join(dir, '_task'), { recursive: true });
+      const fd = openSync(join(dir, '_task', `${taskId}.json`), 'wx', 0o600); // the first creator wins; the store numbers tasks once per session
+      try { writeAll(fd, JSON.stringify({ agent: key })); } finally { closeSync(fd); }
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// --- the PostToolUse entry point ----------------------------------------------------------
+
+// Does the call replace the whole list (items of the list tools, TodoWrite) instead of changing part of it.
+const replacesList = (tool, input) => ((LIST_TOOL_RE.test(tool) || tool === 'mcp__ccd_turn__update_plan') ? input?.items !== undefined : tool === 'TodoWrite');
+
+// New list of one agent after a list-tool call, or null when the call does not change it. `record` is the current file (or null);
+// `broken` (the file exists but cannot be read): only a call that replaces the whole list (items, TodoWrite) is saved.
+export function nextList(record, data, env = process.env, broken = false) {
+  const tool = data?.tool_name;
+  const input = data?.tool_input && typeof data.tool_input === 'object' ? data.tool_input : {};
+  const items = Array.isArray(record?.items) ? record.items : [];
+  if (broken && !replacesList(tool, input)) return null;
+  if (LIST_TOOL_RE.test(tool)) return applyUpdate(items, input, 'note');
+  if (tool === 'mcp__ccd_turn__update_plan') return applyUpdate(items, input, null);
+  if (tool === 'mcp__ccd_turn__wrap_up') return items.length ? items.map((x) => ({ ...x, status: 'completed' })) : null; // wrap_up checks off the task list (its description)
+  if (tool === 'TodoWrite') {
+    const todos = arrayOf(input.todos);
+    return todos ? todos.map((raw) => itemOf(raw, null)).filter(Boolean) : null;
+  }
+  if (tool === 'TaskCreate') {
+    // a journal event carries the task id claimed when it was written (the claim is not repeated when the journal is folded again)
+    const claimed = typeof data.task_id === 'string';
+    const id = claimed ? data.task_id : taskIdOf(data.tool_response);
+    const item = itemOf({ content: input.subject, status: 'pending', note: input.description }, 'note');
+    if (!id || !item || (!claimed && !claimTask(data.session_id, id, agentKey(data), env))) return null;
+    return [...items.filter((x) => x.id !== id), { id, ...item }];
+  }
+  if (tool === 'TaskUpdate') {
+    const id = input.taskId === undefined ? '' : String(input.taskId);
+    const at = items.findIndex((x) => x.id === id);
+    if (at < 0) return null; // a task of another agent (the store is shared) never moves to this agent's list
+    const list = items.map((x) => ({ ...x }));
+    if (input.status === 'deleted') return list.filter((_, i) => i !== at);
+    if (STATUSES.has(input.status)) list[at].status = input.status;
+    if (typeof input.subject === 'string' && input.subject.trim()) list[at].content = cut(input.subject, CONTENT_MAX);
+    if (typeof input.description === 'string' && input.description.trim()) list[at].note = cut(input.description, NOTE_MAX);
+    return list;
+  }
+  return null;
+}
+
+// The newest modification time in a session directory: the directory, its entries and the entries of its folders (<key>.events, _task).
+// An event is written into a folder, which does not change the modification time of the session directory itself, so the directory
+// alone does not tell that a hook wrote there lately.
+function lastActivityMs(dir) {
+  let newest = lstatSync(dir).mtimeMs;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    newest = Math.max(newest, lstatSync(path).mtimeMs);
+    if (entry.isDirectory()) for (const inner of readdirSync(path)) newest = Math.max(newest, lstatSync(join(path, inner)).mtimeMs);
+  }
+  return newest;
+}
+
+// A session directory goes only when nothing in it was touched for LISTS_MAX_AGE_MS. The age read from the path is not enough: a hook may
+// write there between that read and the removal. The directory is moved to a unique hidden name first (a hook that arrives later makes a
+// new directory instead of writing into the one being removed) and the moved tree is judged. A tree with recent activity is put back
+// (putBack); a hook may have made the directory again by then, and the tree is then merged into it.
+const SWEEPING = '.sweeping';
+const HIDDEN_NAME = /^\.(.+)\.[0-9a-f]{12}\.sweeping$/; // the hidden name of a moved tree: .<session id>.<12 hex digits>.sweeping
+
+// A list file of the top level of a moved tree: linked when the live tree has none, else the moved base is adopted or the list set aside
+// (see mergeTree). `held`: the owned() check of a lock on the live list this call already runs under (mergeEvents), else adoptMovedBase takes it.
+function mergeListFile(source, target, env, adopted, held = null) {
+  try {
+    linkSync(source, target);
+    adopted.push(target); // the restored list is a snapshot: it is folded again when the merge is done, for the events it is merged with
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    if (adoptMovedBase(source, target, env, held)) {
+      adopted.push(target);
+    } else {
+      // a refusal is not a lost lock: with the lock gone the live directory is another one, the snapshot is neither adopted nor parked, and the
+      // caller keeps it in the moved tree for the next sweep (checked again after the link, since the lock can go between the two)
+      if (held && !held()) throw new Error('lock lost');
+      try { linkSync(source, `${target}.moved`); } catch { /* an earlier merge left one: that one stays */ }
+      if (held && !held()) throw new Error('lock lost');
+      storeEvent('moved_list_set_aside', target, env);
+    }
+  }
+}
+
+// Moves what `from` holds into `to` without overwriting anything `to` has: link never replaces a file, so an event or a task claim that the
+// live tree has stays the live tree's, and every other file arrives, the events of the moved tree first of all. A folder both trees have is
+// merged the same way. A list file (a file of the top level, `top`) the live tree has stays the live tree's too: the two lists were folded
+// from different events. The list of the moved tree is the base the live events are replayed on when the live list has settled nothing yet
+// (adoptMovedBase; a list that has an events folder goes with it, in one step under the lock of the live list, see mergeEvents; the other
+// list files go before the folders); when it cannot be adopted it is
+// kept next to the live list as <name>.moved (no reader looks at that name) and a row with `event: "moved_list_set_aside"` goes to
+// task-list.jsonl. The events of the moved tree arrive in both cases and are replayed into the live list: the calls that made the moved list
+// are there as long as they are in their window (an event the live list has settled past does not arrive, see mergeEvents). Lock files and
+// temporary files are not moved: a lock a dead holder left would only stall the next fold, and a temporary file is never read. true when
+// every entry was moved or deliberately left, false when one could not be moved (the moved tree is kept then). `adopted` collects the list
+// files that took a moved base: their lists are folded again when the merge is done. `skip(name)` leaves a file out of the merge (mergeEvents).
+function mergeTree(from, to, env, top = true, adopted = [], skip = null) {
+  let complete = true;
+  const entries = readdirSync(from, { withFileTypes: true }).sort((a, b) => Number(a.isDirectory()) - Number(b.isDirectory()));
+  for (const entry of entries) {
+    const source = join(from, entry.name);
+    const target = join(to, entry.name);
+    try {
+      if (entry.isDirectory()) {
+        mkdirSync(target, { recursive: true });
+        const merged = top && entry.name.endsWith('.events')
+          ? mergeEvents(source, target, join(to, `${entry.name.slice(0, -'.events'.length)}.json`), env, adopted)
+          : mergeTree(source, target, env, false, adopted);
+        if (!merged) complete = false;
+      } else if (entry.isFile() && !/\.(?:lock|tmp)$/.test(entry.name)) {
+        if (top && entry.name.endsWith('.json') && existsSync(join(from, `${entry.name.slice(0, -'.json'.length)}.events`))) continue; // mergeEvents takes it with its events
+        if (!skip?.(entry.name)) {
+          if (top && entry.name.endsWith('.json')) {
+            mergeListFile(source, target, env, adopted);
+          } else {
+            try { linkSync(source, target); } catch (error) { if (error?.code !== 'EEXIST') throw error; }
+          }
+        }
+        unlinkSync(source);
+      }
+    } catch { complete = false; }
+  }
+  return complete;
+}
+
+// The events of one list in a moved tree, merged into the live events folder under the lock of the live list (`livePath`), together with the
+// list file of the moved tree when it has one (a file of the top level that mergeTree leaves to this call): adopting the moved base and
+// judging the events are one step, so no fold publishes between them and the events are judged against the base they were made on. The live
+// record read here is the one the events arrive under, since no fold publishes between that read and the links. An event the live list has settled
+// past (behind its record, see isBehind) is not linked: the calls after it are settled into the live base and their events removed, so its
+// place in the order of the calls cannot be restored, and foldEvents would apply it last, as a call of the moment, over calls that were made
+// after it (an older list replacing a newer one). It is dropped with the moved tree, which counts as merged, and a row with
+// `event: "moved_events_behind_settled"` says so; the list of the moved tree is kept next to the live one (see mergeTree). false when the
+// lock was not taken or an event could not be moved: the moved tree is kept and the next sweep tries again.
+function mergeEvents(from, to, livePath, env, adopted) {
+  let complete = false;
+  let behind = 0;
+  const movedList = join(dirname(from), basename(livePath));
+  withFileLock(livePath, (owned) => {
+    // Everything below judges the events against the live record read here, so it holds only while the lock is still this call's: when another
+    // sweep moved the live directory away and a hook made it again (its lock file is another file, with another token), the record is another
+    // one and an older event linked now would be applied last by the next fold. The tree is then kept under its hidden name and the next sweep
+    // merges it against the record it finds.
+    if (existsSync(movedList)) {
+      // the snapshot is the only copy of what the moved tree settled: it is linked or parked, and removed from the moved tree, only under a lock
+      // that is still this call's (else the tree is kept as it is, snapshot included)
+      if (!owned()) return;
+      mergeListFile(movedList, livePath, env, adopted, owned);
+      unlinkSync(movedList);
+    }
+    const marks = settledMarks(readRecord(livePath).record);
+    complete = mergeTree(from, to, env, false, adopted, (name) => {
+      if (!owned()) throw new Error('lock lost'); // before the event is linked or dropped: the entry stays in the moved tree
+      const skipped = EVENT_NAME.test(name) && isBehind(marks, name);
+      if (skipped) behind += 1;
+      return skipped;
+    });
+    if (!owned()) complete = false;
+    if (complete && !adopted.includes(livePath)) adopted.push(livePath); // the events that arrived are folded into the list file when the merge is done
+  }, env, SYNC_STALE_MS);
+  if (behind > 0) storeEvent('moved_events_behind_settled', livePath, env, { session: basename(dirname(livePath)), dropped: behind });
+  return complete;
+}
+
+// The list of a moved tree and the list the live tree made after the move. The live list holds calls later than any the moved one holds,
+// so while it has settled nothing (every call it holds is an event of its folder) the moved list is the base those events are replayed on:
+// the moved base, its settled names and its clock replace the live ones. The clock is the moved one alone: the events the moved tree still
+// held are in its window, and a clock moved on to the live calls would make them calls of a clock set back, applied after the live ones; the
+// next fold takes the time of the newest call from the events it replays. Under the lock of the live list, so no fold publishes meanwhile
+// (and none has published since the list was read: the same generation check as a fold); false when the lock was not taken, a list is
+// unreadable, or the live list has settled calls of its own (then the moved list is kept next to it).
+function adoptMovedBase(moved, live, env, held = null) {
+  let adopted = false;
+  const adopt = (owned) => {
+    const m = readRecord(moved).record;
+    const read = readRecord(live);
+    const l = read.record;
+    if (!Array.isArray(m?.items) || !Array.isArray(l?.items)) return;
+    if (l.base_name || (Array.isArray(l.folded) && l.folded.length > 0)) {
+      adopted = rebaseOnMoved(m, l, live, read, owned, env);
+      return;
+    }
+    const legacy = !('base' in m);
+    const base = legacy ? m : m.base;
+    adopted = publishJson(live, {
+      ...l,
+      base: base && Array.isArray(base.items) ? listFields(base) : null,
+      base_name: legacy ? (typeof m.last_event_name === 'string' ? m.last_event_name : '') : (typeof m.base_name === 'string' ? m.base_name : ''),
+      last_event_ms: Number.isFinite(m.last_event_ms) ? m.last_event_ms : 0,
+      folded: Array.isArray(m.folded) ? m.folded : [],
+      rev: revOf(l) + 1,
+    }, () => owned() && generationOf(readRecord(live)) === generationOf(read), env);
+  };
+  if (held) adopt(held);
+  else withFileLock(live, adopt, env, SYNC_STALE_MS);
+  return adopted;
+}
+
+// The live list has settled calls of its own, and its events are gone: they cannot be replayed on the moved base. When none of them replaced
+// the list (the record says so: `replaced`; a record without the field and without a base is judged by its tasks, all with an id and at least
+// one), they were made by task id (TaskCreate, TaskUpdate of its own tasks), so the tasks the moved list holds are still there, also when those
+// calls net to nothing (a task made and deleted), and the live tasks are put over them by id, the later calls on top (a TaskCreate of a known id
+// moves the task to the end, as nextList does). The moved list is taken as it is shown, with the events of its window applied: they are older
+// than the settled live calls, so they would be dropped as behind (see mergeEvents) and the effect must already be in the base. The marks, the
+// clock and the names of the live record stay, and the events of its window are replayed on the new base by the next fold. When a settled
+// call replaced the list, the moved list is the older list and stays set aside. A settled call on a task only the moved list holds changed
+// nothing in the live directory and is not part of the result (the event was settled and removed; see syncList). Same lock and generation
+// checks as adoptMovedBase; the caller holds the lock.
+function rebaseOnMoved(m, l, live, read, owned, env) {
+  const hasBase = 'base' in l;
+  const liveBase = hasBase ? l.base : l;
+  const liveTasks = Array.isArray(liveBase?.items) ? liveBase.items : [];
+  const byId = liveTasks.length > 0 && liveTasks.every((x) => typeof x?.id === 'string');
+  if (hasBase ? liveBase?.replaced === true : !byId) return false;
+  const ids = new Set(liveTasks.map((x) => x.id));
+  const settledOver = (items) => [...items.filter((x) => !ids.has(x?.id)), ...liveTasks].slice(-ITEMS_MAX);
+  const liveIds = new Set(l.items.filter((x) => typeof x?.id === 'string').map((x) => x.id));
+  return publishJson(live, {
+    ...l,
+    base: { ...listFields(liveBase ?? { ...l, replaced: undefined }), items: settledOver(m.items) }, // no base: only calls that changed nothing settled
+    base_name: settledMarks(l).settledName,
+    items: [...m.items.filter((x) => !liveIds.has(x?.id)), ...l.items].slice(-ITEMS_MAX),
+    rev: revOf(l) + 1,
+  }, () => owned() && generationOf(readRecord(live)) === generationOf(read), env);
+}
+
+// Is a tree of the session under its hidden name (see removeIfIdle), left there by a sweep that was stopped before it put the tree back.
+function hasHiddenTree(sessionId, env) {
+  try { return readdirSync(listsDir(env)).some((name) => HIDDEN_NAME.exec(name)?.[1] === sessionId); } catch { return false; }
+}
+
+// A moved tree with recent activity goes back to its own name: one rename when the name is free. When a hook has made the directory
+// again, the rename fails and the tree is merged into the new one, so an event published into the old tree stays visible to the readers of
+// the live path. A tree that cannot be merged completely stays under its hidden name; the next sweep tries again (see sweep). The lists
+// that took a moved base are folded once the merge is done, so the list file shows what the events give; so are the lists of a tree that
+// went back by the one rename, since the directory may have been moved after an event was published and before its fold wrote the list.
+function putBack(aside, dir, env) {
+  let renamed = false;
+  try { renameSync(aside, dir); renamed = true; } catch { /* the name is taken: merge */ }
+  if (renamed) {
+    try {
+      for (const name of readdirSync(dir)) if (name.endsWith('.events')) syncList(basename(dir), name.slice(0, -'.events'.length), env);
+    } catch { /* the next call folds them */ }
+    return;
+  }
+  const adopted = [];
+  try { if (mergeTree(aside, dir, env, true, adopted)) rmSync(aside, { recursive: true, force: true }); } catch { /* kept under its hidden name */ }
+  for (const path of adopted) syncList(basename(dir), basename(path, '.json'), env);
+}
+
+function removeIfIdle(root, name, now, env) {
+  const dir = join(root, name);
+  const aside = join(root, `.${name}.${randomBytes(6).toString('hex')}${SWEEPING}`);
+  try { renameSync(dir, aside); } catch { return; }
+  let idle = false;
+  try { idle = now - lastActivityMs(aside) > LISTS_MAX_AGE_MS; } catch { /* not judged idle */ }
+  if (idle) { rmSync(aside, { recursive: true, force: true }); return; }
+  putBack(aside, dir, env);
+}
+
+export function sweep(env, now) {
+  try {
+    const root = listsDir(env);
+    const marker = join(root, '.sweep');
+    if (existsSync(marker) && now - statSync(marker).mtimeMs < SWEEP_EVERY_MS) return;
+    mkdirSync(root, { recursive: true });
+    writeJson(marker, { ts: new Date(now).toISOString() });
+    for (const name of readdirSync(root)) {
+      try {
+        if (name.startsWith('.') && name.endsWith(SWEEPING)) { // a tree that could not be moved back (never a session id: those do not start with a dot)
+          const aside = join(root, name);
+          if (now - lastActivityMs(aside) > LISTS_MAX_AGE_MS) rmSync(aside, { recursive: true, force: true }); // removed once idle
+          else if (HIDDEN_NAME.test(name)) putBack(aside, join(root, name.replace(HIDDEN_NAME, '$1')), env); // in use: back to its own name
+        } else if (!name.startsWith('.') && now - statSync(join(root, name)).mtimeMs > LISTS_MAX_AGE_MS) {
+          removeIfIdle(root, name, now, env);
+        }
+      } catch { /* next */ }
+    }
+  } catch { /* cleanup never breaks the hook */ }
+}
+
+// --- event journal ------------------------------------------------------------------------
+// Every list call is one file <key>.events/<ms>-<tick>-<pid>-<id>.json, written without a lock (temp file, then rename), so a lock that is not
+// taken in time loses nothing. The list <key>.json is what the events give when they are replayed in the order of their names (the order of
+// the calls); it is written under the lock. One file per event instead of one appended journal: trimming an appended file while other
+// processes append to it loses lines.
+// An event is named after the time of its call, but it becomes visible only when its hook has written it: a hook held up in between
+// (descheduled, masking a large payload) publishes after a hook with a later call has been seen. So the list is not edited call by call.
+// The record keeps `base`, the list as it was before the events that are not older than LATE_EVENT_MS, and an event stays in its folder until
+// it is older than that: every fold replays the events that stayed on `base`, and a call that becomes visible late takes its place among
+// the later ones, whatever the order in which the hooks published. How much older than a visible event a held-up hook can be is bounded by
+// the host, which stops a hook after 3 s. An event that comes after the list was already settled past its time (older than the last
+// settled call, or more than LATE_EVENT_MS older than the newest call seen) comes from a clock that was set back, not from a held-up hook:
+// the fold settles what it has and applies that call last, as a call of the moment.
+export const EVENTS_KEPT = 500;
+const EVENTS_READ_MAX = 5000;
+export const LATE_EVENT_MS = 10_000;
+// <tick> is the monotonic clock of the host in nanoseconds (shared by the processes of the machine), so that two calls of one millisecond
+// have a fixed order in their names; a name without it (an event of an earlier version) is still read.
+const EVENT_NAME = /^\d{13}-(?:\d{20}-)?\d{1,10}-[0-9a-f]{8}\.json$/;
+export const eventsDir = (path) => (path ? path.replace(/\.json$/, '.events') : null);
+
+// What of a tool input goes to disk in an event: only the fields nextList reads (and of a task only content, subject, status and note),
+// strings masked (arrays sent as JSON text parsed first, so masking cannot break them) and then cut to the longest text a list keeps
+// (NOTE_MAX; the cut comes after the masking, so a secret is never cut in half). An event stays small and holds nothing unmasked.
+const LIST_INPUT_KEYS = ['items', 'todos', 'done', 'start', 'advance', 'subject', 'description', 'taskId', 'status'];
+// The arguments that are arrays (a model may send any of them as JSON text, and nextList reads them as arrays): parsed before they are kept,
+// since text cut to KEEP_CHARS is no array any more and the call would change nothing when the journal is replayed.
+const ARRAY_KEYS = new Set(['items', 'todos', 'done']);
+const TASK_KEYS = ['content', 'subject', 'status', 'note'];
+const KEEP_CHARS = Math.max(CONTENT_MAX, NOTE_MAX);
+// The most of a text the masking walks: the text of a call is cut to this before the masking rules run, so a call with an enormous text cannot
+// hold the hook up. task_list refuses a text longer than this (src/tools/task-list-tools.ts), so a call it accepts is read whole.
+const RAW_TEXT_MAX = 2000;
+const idText = (value) => (typeof value === 'string' ? value.slice(0, 200) : null);
+function boundedValue(value) {
+  if (typeof value === 'string') {
+    const masked = maskListText(value.length > RAW_TEXT_MAX ? value.slice(0, RAW_TEXT_MAX) : value);
+    return masked.length > KEEP_CHARS ? `${masked.slice(0, KEEP_CHARS - 1)}…` : masked;
+  }
+  if (Array.isArray(value)) return value.map(boundedValue);
+  return value === null || typeof value !== 'object' ? value : null;
+}
+const boundedTask = (raw) => (raw && typeof raw === 'object' && !Array.isArray(raw)
+  ? Object.fromEntries(TASK_KEYS.filter((k) => raw[k] !== undefined).map((k) => [k, boundedValue(raw[k])]))
+  : boundedValue(raw));
+
+// The input of a list call as its event keeps it, small enough for the reader (RECORD_MAX_BYTES). The call changes the list as it did
+// before: more than ITEMS_MAX items make task_list and update_plan refuse the call, so the first ITEMS_MAX + 1 are enough to refuse it
+// again. A TodoWrite call replaces the list and the list keeps its newest ITEMS_MAX tasks (applyEvent): the event keeps those, in the form
+// the list stores them, and `todos_total`, the number of tasks the call held. The retention is applied after the whole call is normalized.
+function persistedInput(tool, input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const kept = {};
+  for (const k of LIST_INPUT_KEYS) {
+    if (source[k] === undefined) continue;
+    const list = ARRAY_KEYS.has(k) ? arrayOf(source[k]) : null;
+    kept[k] = list ? list.map(k === 'done' ? boundedValue : boundedTask) : boundedValue(source[k]);
+  }
+  if (Array.isArray(kept.items)) kept.items = kept.items.slice(0, ITEMS_MAX + 1);
+  if (tool === 'TodoWrite' && Array.isArray(kept.todos)) {
+    const tasks = kept.todos.map((raw) => itemOf(raw, null)).filter(Boolean);
+    if (tasks.length > ITEMS_MAX) return { ...kept, todos: tasks.slice(-ITEMS_MAX), todos_total: tasks.length };
+  }
+  return kept;
+}
+
+// Writes the event of one list call; the TaskCreate claim happens here once, the event keeps the claimed id. false when nothing was written.
+function writeEvent(dir, data, key, env, now) {
+  const tick = process.hrtime.bigint().toString().padStart(20, '0'); // taken at the start of the call, before anything that can hold the hook up
+  let taskId;
+  if (data.tool_name === 'TaskCreate') {
+    taskId = taskIdOf(data.tool_response);
+    if (!taskId || !claimTask(data.session_id, taskId, key, env)) return false;
+  }
+  const id = randomBytes(4).toString('hex');
+  const event = {
+    ts: new Date(now).toISOString(), pid: process.pid, id, session_id: data.session_id, tool_name: data.tool_name,
+    tool_input: persistedInput(data.tool_name, data.tool_input),
+    agent_type: idText(data.agent_type),
+    tool_use_id: idText(data.tool_use_id),
+    prompt_id: idText(data.prompt_id),
+    ...(taskId ? { task_id: taskId } : {}),
+  };
+  const name = `${String(now).padStart(13, '0')}-${tick}-${process.pid}-${id}.json`;
+  try {
+    const body = JSON.stringify(event);
+    // an event the reader would refuse is never written: it would stay on disk, unread, for good
+    if (Buffer.byteLength(body) > RECORD_MAX_BYTES) { storeEvent('event_too_large', join(dir, name), env); return false; }
+    // the name (the time and the tick of the call) stays the same across the tries: the order of the calls is the order of the names
+    inSessionDir(() => {
+      mkdirSync(dir, { recursive: true });
+      const tmp = join(dir, `${name}.tmp`);
+      try {
+        const fd = openSync(tmp, 'wx', 0o600);
+        try { writeAll(fd, body); } finally { closeSync(fd); }
+        renameSync(tmp, join(dir, name));
+      } catch (error) {
+        try { unlinkSync(tmp); } catch { /* never created, or moved away with its directory */ }
+        throw error;
+      }
+    });
+    return true;
+  } catch {
+    storeEvent('event_write_failed', join(dir, name), env);
+    return false;
+  }
+}
+
+// The events in the folder, oldest first: [{ name, event }]. A file that cannot be read is skipped (it is retried later).
+function pendingEvents(dir) {
+  let names;
+  try { names = readdirSync(dir).filter((n) => EVENT_NAME.test(n)).sort(); } catch { return []; }
+  const out = [];
+  for (const name of names.slice(0, EVENTS_READ_MAX)) {
+    const { record: event } = readRecord(join(dir, name));
+    if (event) out.push({ name, event });
+  }
+  return out;
+}
+
+// The record after one event, or the same record when the event changes nothing (null stays null).
+function applyEvent(record, event, key, env, broken) {
+  const changed = nextList(record, event, env, broken);
+  if (!changed) return record;
+  // a completed task has no note; above ITEMS_MAX the newest tasks stay, the record counts the dropped ones
+  const all = changed.map((x) => (x.status === 'completed' && x.note !== undefined ? (({ note, ...rest }) => rest)(x) : x));
+  const items = all.slice(-ITEMS_MAX);
+  // a TodoWrite event keeps only the newest ITEMS_MAX tasks of the call and the number it held (persistedInput)
+  const sent = event.tool_name === 'TodoWrite' && Number.isInteger(event.tool_input?.todos_total) ? Math.max(all.length, event.tool_input.todos_total) : all.length;
+  return {
+    v: LIST_RECORD_VERSION,
+    session_id: event.session_id,
+    agent: key,
+    agent_type: event.agent_type ?? null,
+    tool: event.tool_name,
+    tool_use_id: event.tool_use_id ?? null,
+    prompt_id: event.prompt_id ?? null,
+    updated: event.ts,
+    updates: (Number.isInteger(record?.updates) ? record.updates : 0) + 1,
+    items,
+    ...(sent > items.length ? { dropped: sent - items.length } : {}),
+    // some call settled into this record replaced the whole list: a moved list cannot be put under it by task id (see rebaseOnMoved)
+    ...(record?.replaced === true || replacesList(event.tool_name, event.tool_input) ? { replaced: true } : {}),
+  };
+}
+
+// The part of a list record that describes the list; the rest of the file is what a fold keeps to replay the events.
+const listFields = ({ v, session_id, agent, agent_type, tool, tool_use_id, prompt_id, updated, updates, items, dropped, replaced }) => ({
+  v, session_id, agent, agent_type, tool, tool_use_id, prompt_id, updated, updates, items, ...(dropped !== undefined ? { dropped } : {}), ...(replaced === true ? { replaced } : {}),
+});
+
+// The generation of the list file as a fold read it: the number of times it was written (`rev`; the `updates` of a file of an earlier version),
+// or that it is unreadable or missing. A fold publishes only while the file still has the generation it folded from. `updates` is no generation:
+// a call that becomes visible late can leave it as it was while the list changes.
+const revOf = (record) => (Number.isInteger(record?.rev) ? record.rev : Number.isInteger(record?.updates) ? record.updates : 0);
+const generationOf = ({ record, broken }) => (broken ? 'broken' : record ? String(revOf(record)) : 'none');
+
+// The time of the call an event name starts with (13 digits of milliseconds).
+const eventMs = (name) => Number(name.slice(0, 13));
+
+// What a list record says about the calls it has settled: the name of the last one and the time of the newest call it has seen. An event is
+// behind a record when the record has settled past it: its name is not above the last settled one, or its time is more than LATE_EVENT_MS
+// older than the newest call. foldEvents applies such an event last, as a call of a clock set back; the merge of a moved tree (mergeEvents)
+// asks the same question, so the two cannot disagree on what is behind.
+function settledMarks(snap) {
+  const legacy = Boolean(snap) && !('base' in snap); // a file of an earlier version: its last event name is the last settled one
+  return {
+    settledName: typeof snap?.base_name === 'string' ? snap.base_name : (legacy && typeof snap.last_event_name === 'string' ? snap.last_event_name : ''),
+    lastEvent: Number.isFinite(snap?.last_event_ms) ? snap.last_event_ms : 0,
+  };
+}
+const isBehind = ({ settledName, lastEvent }, name) => name <= settledName || eventMs(name) + LATE_EVENT_MS < lastEvent;
+
+// What a file holds that is not the list nor the clock of the fold: if two files have the same, writing the second changes nothing.
+const signature = (record) => JSON.stringify({ ...record, rev: undefined, folded: undefined, last_event_ms: undefined });
+
+// The list the events give: { record, broken, absorbed, changed, done, generation }. `start` is the list file as readRecord gave it ({ record,
+// broken }), `events` the folder as pendingEvents gave it, `now` the clock.
+// The events are replayed in the order of their names on `base`, the list before the window. The ones older than the window (more than
+// LATE_EVENT_MS behind the clock and the newest call seen) are settled: they go into `base` for good (`absorbed`, removed by syncList, their
+// names kept in `folded`); the others are replayed on top of it for the list, every time, and stay in the folder. A call that edits tasks
+// and finds nothing to change is no special case: it stays in the window like any other and takes effect when an older call it depends on
+// becomes visible, and not before a later TaskCreate it never saw. An event that is not in the window any more when it becomes visible (its
+// name is not above the last settled one, or it is more than LATE_EVENT_MS older than the newest call the file holds) comes from a clock set
+// back, not from a held-up hook: the window is settled and the event is applied last. `record` is null when the events give no list;
+// `changed` is false when the file already holds what they give. A file that cannot be read gives no base: only a call that replaces
+// the list is saved (see nextList).
+export function foldEvents(start, events, key, env, now = Date.now()) {
+  const snap = start.record;
+  const done = new Set(Array.isArray(snap?.folded) ? snap.folded : []);
+  const legacy = Boolean(snap) && !('base' in snap); // a file of an earlier version: its list is the base
+  const marks = settledMarks(snap);
+  const lastEvent = marks.lastEvent;
+  const stored = legacy ? snap : snap?.base;
+  const initial = stored && Array.isArray(stored.items) ? stored : null;
+  const fresh = events.filter(({ name }) => !done.has(name)); // the others are leftovers of a fold that did not remove them
+  const generation = generationOf(start);
+  if (!fresh.length) return { record: snap ?? null, broken: start.broken, absorbed: [], changed: false, done, generation }; // the file is what the events give
+  const newest = fresh.reduce((ms, { name }) => Math.max(ms, eventMs(name)), lastEvent);
+  const horizon = Math.max(now, newest);
+  const behind = ({ name }) => isBehind(marks, name);
+  const late = fresh.filter(behind);
+  const ordered = fresh.filter((event) => !behind(event));
+  let settled = 0;
+  while (settled < ordered.length && eventMs(ordered[settled].name) + LATE_EVENT_MS < horizon) settled += 1;
+  const toBase = late.length ? ordered : ordered.slice(0, settled);
+  const step = (state, { event }) => {
+    const record = applyEvent(state.record, event, key, env, state.broken);
+    return record === state.record ? state : { record, broken: false };
+  };
+  let atBase = { record: initial, broken: start.broken };
+  for (const event of [...toBase, ...late]) atBase = step(atBase, event);
+  let atEnd = atBase;
+  for (const event of ordered.slice(toBase.length)) atEnd = step(atEnd, event);
+  const absorbed = [...toBase, ...late].map(({ name }) => name);
+  if (!atEnd.record) return { record: snap ?? null, broken: atEnd.broken, absorbed, changed: false, done, generation };
+  const record = {
+    ...listFields(atEnd.record),
+    base: atBase.record ? listFields(atBase.record) : null,
+    base_name: atBase.record !== initial && toBase.length ? toBase[toBase.length - 1].name : marks.settledName,
+    last_event_ms: newest,
+    rev: revOf(snap),
+  };
+  const changed = !snap || signature(record) !== signature(snap);
+  // A fold that writes the file puts every call it settles in the marks, those that changed nothing too: they are named in `folded` and removed
+  // with the write, and an older call that becomes visible after it (a moved tree) is behind them, as it is behind a call that changed the list.
+  if (changed && toBase.length) record.base_name = toBase[toBase.length - 1].name;
+  if (changed) record.rev += 1;
+  return { record, broken: false, absorbed, changed, done, generation };
+}
+
+// Folds the events of the folder into a list: what the events give, and what a reader sees.
+function fold(path, key, env) {
+  const events = pendingEvents(eventsDir(path)); // listed before the list file is read: a fold in between has its names in `folded` there
+  return foldEvents(readRecord(path), events, key, env);
+}
+
+// The list file after a fold that changed it: the record and the names of the events settled so far (the newest EVENTS_KEPT).
+export const foldedRecord = (f) => ({ ...f.record, folded: [...f.done, ...f.absorbed].slice(-Math.max(EVENTS_KEPT, f.absorbed.length)) });
+
+// Under the lock: fold, write the list, then remove the events that went into `base` (retention: the folder holds the events of the window, and
+// whatever no fold under the lock has taken yet). An event file whose name is already in `folded` is a leftover of a fold that was interrupted
+// between the write of the list and the removal: it is removed too, always, before 500 newer names push its name out of `folded` and the file
+// replays a second time. false when the lock was not taken; the events then stay for the next fold or reader.
+export function syncList(sessionId, key, env = process.env) {
+  const path = listPath(sessionId, key, env);
+  if (!path) return false;
+  let waiting = [];
+  try { waiting = readdirSync(eventsDir(path)).filter((n) => EVENT_NAME.test(n)); } catch { /* no events folder */ }
+  if (!waiting.length) return readRecord(path).record; // nothing to fold: no lock (most batches)
+  let saved = null;
+  const ok = withFileLock(path, (owned) => {
+    const f = fold(path, key, env);
+    saved = f.record;
+    // What this fold decided rests on the list it read. It acts only while the lock is still its own and no other fold has published
+    // since (the generation of the file is the one it folded from): a lock lost in a window no check closes must not let an older fold
+    // overwrite the newer list, or delete events the newer list does not hold. The lock file is in the session directory, so it also tells
+    // that the path still names the directory the fold started in: the retention sweep may move that directory away and another hook may
+    // make it again. The check stands behind the removal of every event (a file of the moved tree that was merged into the new directory
+    // is not removed, it is folded again there) and, after the temporary file is written, behind the publication (see publishJson).
+    const current = () => owned() && generationOf(readRecord(path)) === f.generation;
+    const remove = (names) => { for (const name of names) { if (!owned()) return; try { unlinkSync(join(eventsDir(path), name)); } catch { /* removed by an earlier fold */ } } };
+    if (!current()) return; // the lock was taken over or another fold published: the newer fold writes
+    remove(waiting.filter((name) => f.done.has(name)));
+    // Events that change nothing settle without a write of the list file, so no mark of the list says that they were seen. They stay while a
+    // tree of the session is still hidden (a sweep that was stopped after it moved the directory): it may hold the task they are about, and it
+    // is merged against marks that know nothing of them. Once it is merged or removed, the next fold settles them. They do not stay past
+    // EVENTS_KEPT files in the folder: every fold reads the folder, and a tree that cannot be merged or removed must not make it grow.
+    if (!f.changed) { if (current() && !(f.absorbed.length && waiting.length <= EVENTS_KEPT && hasHiddenTree(sessionId, env))) remove(f.absorbed); return; }
+    const next = foldedRecord(f);
+    if (!publishJson(path, next, current, env)) return;
+    saved = next;
+    remove(f.absorbed);
+  }, env, SYNC_STALE_MS);
+  return ok ? saved : false;
+}
+
+// Saves the list change of one PostToolUse call: the event first (no lock), then a fold under the lock. Returns the folded record (also
+// when the lock was not taken: then the fold of a reader) or null when the call is not a list call of this agent.
+export function recordListCall(data, env = process.env, now = Date.now()) {
+  try {
+    const key = agentKey(data);
+    if (!isListTool(data?.tool_name, key)) return null;
+    const path = listPath(data.session_id, key, env);
+    if (!path) return null;
+    if (!writeEvent(eventsDir(path), data, key, env, now)) return null;
+    const saved = syncList(data.session_id, key, env);
+    sweep(env, now);
+    return saved === false ? readList(data.session_id, key, env) : saved;
+  } catch {
+    return null;
+  }
+}
+
+// The list of one agent as the fold of its file and the events not yet folded (no write). null without a list.
+export function readList(sessionId, key, env = process.env) {
+  try {
+    const path = listPath(sessionId, key, env);
+    if (!path) return null;
+    return fold(path, key, env).record;
+  } catch {
+    return null;
+  }
+}
+
+// A log row is small by design: every string of it (also in a list of strings) is cut to 200 characters, so an identifier the host sends
+// cannot make a row of batches.jsonl large.
+const rowText = (value) => (typeof value === 'string' ? value.slice(0, 200) : Array.isArray(value) ? value.map(rowText) : value);
+export const logRow = (name, row, env = process.env) => appendLog(name, { ts: new Date().toISOString(), ...Object.fromEntries(Object.entries(row).map(([k, v]) => [k, rowText(v)])) }, env);
+
+// Kill switches of OMC hooks: DISABLE_OMC=1|true, or OMC_SKIP_HOOKS with the event token or "task-list".
+export function skipped(eventToken, env = process.env) {
+  const tokens = String(env.OMC_SKIP_HOOKS || '').split(',').map((s) => s.trim());
+  return env.DISABLE_OMC === '1' || env.DISABLE_OMC === 'true' || tokens.includes(eventToken) || tokens.includes('task-list');
+}
+
+// Parses the hook input read from stdin; null when it is not a JSON object.
+export function parseHookInput(raw) {
+  try {
+    const data = JSON.parse(raw);
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}

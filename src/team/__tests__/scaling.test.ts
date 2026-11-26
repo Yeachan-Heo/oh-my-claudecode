@@ -160,6 +160,10 @@ const tmuxSessionMocks = vi.hoisted(() => {
       tmuxUtilsMocks.tmuxExec(['kill-pane', '-t', ownership.paneId], { stdio: 'pipe' });
     }),
     waitForPaneReady: vi.fn(),
+    capturePaneProcessTree: vi.fn(),
+    terminatePaneProcessTree: vi.fn(),
+    // The proof that a pane is still a pane of the team's provider target, asked before a pane tree is read; owned unless a test says otherwise.
+    verifyTeamTargetOwnership: vi.fn(async (_target: { paneId: string }): Promise<{ kind: string }> => ({ kind: 'owned' })),
   };
 });
 
@@ -173,11 +177,17 @@ const gitWorktreeMocks = vi.hoisted(() => ({
 }));
 
 const workerLaunchMocks = vi.hoisted(() => ({
+  addToWorkerLaunchFencedCapture: vi.fn(async (_attempt: unknown, _items: unknown[]) => true),
+  discardWorkerLaunchFencedCapture: vi.fn(async (_attempt: unknown) => undefined),
   loadWorkerLaunchAttempt: vi.fn(async () => ({ attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' })),
   isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
   terminateWorkerLaunchProvider: vi.fn(async () => true),
-  retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup()),
+  // The real function runs the optional last argument under the launch lock, right before it terminates the provider, and then the cleanup.
+  retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>, beforeProviderTermination?: () => Promise<void>) => {
+    await beforeProviderTermination?.();
+    return cleanup();
+  }),
 }));
 
 vi.mock('../../cli/tmux-utils.js', () => ({
@@ -234,6 +244,9 @@ vi.mock('../tmux-session.js', () => ({
   spawnOwnedWorkerInPane: tmuxSessionMocks.spawnOwnedWorkerInPane,
   killOwnedWorkerPane: tmuxSessionMocks.killOwnedWorkerPane,
   waitForPaneReady: tmuxSessionMocks.waitForPaneReady,
+  capturePaneProcessTree: tmuxSessionMocks.capturePaneProcessTree,
+  terminatePaneProcessTree: tmuxSessionMocks.terminatePaneProcessTree,
+  verifyTeamTargetOwnership: tmuxSessionMocks.verifyTeamTargetOwnership,
 }));
 
 vi.mock('../git-worktree.js', () => ({
@@ -1062,10 +1075,110 @@ describe('scaleUp duplicate worker guard', () => {
       expect.objectContaining({ attempt_id: 'attempt-%12' }),
       'scale_up_rollback',
       expect.any(Function),
+      expect.any(Function),
     );
     expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
     expect(gitWorktreeMocks.removeWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-2', resolve(cwd));
     expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
+  });
+
+  // OMC_TEAM_KILL_PANE_TREE: the rollback of a scale up reads the pane tree right before the provider is terminated (the real retirement runs its
+  // last argument there) and signals it first in its cleanup, also when the pane is dead by then: once the provider is gone a descendant that
+  // left its process group is no longer below the pane's root, and the kill of the pane would read the tree only after that.
+  it.each([['the pane is still alive when the provider is gone', false], ['the pane is already dead when the provider is gone', true]])('a rolled back scale up signals the pane tree read before the provider was terminated first when %s', async (_what, paneDeadWithProvider) => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    const events: string[] = [];
+    let providerGone = false;
+    let paneKilled = false;
+    config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'named' });
+    const worktreePath = join(cwd, '.omc', 'team', 'demo-team', 'worktrees', 'worker-2');
+    gitWorktreeMocks.ensureWorkerWorktree.mockReturnValue({ path: worktreePath, branch: 'worker-2',
+      detached: false, created: true });
+    gitWorktreeMocks.installWorktreeRootAgents.mockReturnValue(undefined);
+    teamOpsMocks.teamWriteWorkerIdentity.mockRejectedValue(new Error('identity write failed'));
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => ((paneDeadWithProvider ? providerGone : paneKilled) ? 'dead' : 'alive'));
+    tmuxSessionMocks.killOwnedWorkerPane.mockImplementationOnce(async () => { events.push('kill-pane'); paneKilled = true; });
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+      events.push('capture');
+      return providerGone ? null : tree;
+    });
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    tmuxSessionMocks.terminatePaneProcessTree.mockImplementation(async () => { events.push('terminate'); });
+    workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementationOnce(async (_attempt, _reason, cleanup, beforeProviderTermination) => {
+      await beforeProviderTermination?.();
+      providerGone = true;
+      events.push('provider-ended');
+      return cleanup();
+    });
+    try {
+      const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd,
+        { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' } as NodeJS.ProcessEnv);
+
+      expect(result).toMatchObject({ ok: false });
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledWith(tmuxSessionMocks.tmuxServerIdentity, '%12');
+      expect(tmuxSessionMocks.terminatePaneProcessTree).toHaveBeenCalledWith(tree);
+      expect(events).toEqual(paneDeadWithProvider ? ['capture', 'provider-ended', 'terminate'] : ['capture', 'provider-ended', 'terminate', 'kill-pane']);
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
+  // The tree is read only of a pane the kill of the pane would not refuse: not the pane of the leader, not a reserved one, and one that still
+  // shows to be a pane of the team's provider target when it is read. The mocked adoption reports the new pane (%12) as such a pane (and the
+  // mocked proof of membership holds), and the mocked tree would be signalled if it were read.
+  it.each([
+    ['the pane of the leader', { leaderPaneId: '%12' }, 'owned'],
+    ['a reserved pane', { reservedPaneIds: ['%12'] }, 'owned'],
+    ['a pane that left the target of the team', {}, 'foreign'],
+  ])('a rolled back scale up reads and signals no pane tree of %s', async (_what, excluded, membership) => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'named' });
+    const worktreePath = join(cwd, '.omc', 'team', 'demo-team', 'worktrees', 'worker-2');
+    gitWorktreeMocks.ensureWorkerWorktree.mockReturnValue({ path: worktreePath, branch: 'worker-2',
+      detached: false, created: true });
+    gitWorktreeMocks.installWorktreeRootAgents.mockReturnValue(undefined);
+    teamOpsMocks.teamWriteWorkerIdentity.mockRejectedValue(new Error('identity write failed'));
+    tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+    const adoptDefault = tmuxSessionMocks.adoptWorkerPaneOwnership.getMockImplementation()!;
+    tmuxSessionMocks.adoptWorkerPaneOwnership.mockImplementation(async (input) => {
+      const adopted = await adoptDefault(input);
+      return input.paneId === '%12'
+        ? { ...adopted, ownership: { ...adopted.ownership, ...excluded } as typeof adopted.ownership }
+        : adopted;
+    });
+    tmuxSessionMocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: membership });
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockResolvedValue(tree);
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    let hookRan = false;
+    workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementationOnce(async (_attempt, _reason, cleanup, beforeProviderTermination) => {
+      await beforeProviderTermination?.();
+      hookRan = true;
+      return cleanup();
+    });
+    try {
+      const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd,
+        { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' } as NodeJS.ProcessEnv);
+
+      expect(result).toMatchObject({ ok: false });
+      expect(hookRan).toBe(true);
+      expect(tmuxSessionMocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: 'owned' });
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
   });
 
   it('cleans the exact partial worktree and worker directory when worktree creation throws', async () => {
@@ -1164,6 +1277,112 @@ describe('scaleUp duplicate worker guard', () => {
     expect(config.active_scale_down).toMatchObject({ phase: 'failed', failure_reason: 'scale_down_fence_lost_before_effects' });
     expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'),
       expect.stringContaining('scale_down_fence_lost_before_effects'));
+  });
+
+  it('removes the pane trees saved before the drain request when the scale down stops before it terminates any provider', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => 'alive');
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => tree);
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    const loaded = { attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' };
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue(loaded);
+    workerLaunchMocks.discardWorkerLaunchFencedCapture.mockClear();
+    let recoveryInjected = false;
+    teamOpsMocks.teamReadWorkerStatus.mockImplementation(async () => {
+      if (!recoveryInjected) {
+        recoveryInjected = true;
+        const revision = (config.state_revision ?? 0) + 1;
+        const now = new Date().toISOString();
+        config = { ...config, state_revision: revision, active_recovery: {
+          request_id: 'request-race', recovery_id: 'recovery-race', worker_name: 'worker-2',
+          owner_epoch: 2, owner_nonce: 'owner', phase: 'active', state_revision: revision,
+          created_at: now, updated_at: now,
+        } };
+      }
+      return { state: 'idle', updated_at: new Date().toISOString() };
+    });
+    try {
+      const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 25 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+      expect(workerLaunchMocks.discardWorkerLaunchFencedCapture).toHaveBeenCalledWith(loaded);
+      expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
+  it.each<'dead' | 'unknown'>(['dead', 'unknown'])('keeps the pane trees saved for a worker whose pane is %s when the scale down stops before it terminates any provider', async (leftState) => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 3,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+        { name: 'worker-3', index: 3, role: 'claude', assigned_tasks: [], pane_id: '%3', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-3', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    // both panes are alive while the trees are read; worker-2 finishes and its pane is gone (or cannot be read) by the time the scale down stops
+    let finished = false;
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async (paneId?: string) => (finished && paneId === '%2' ? leftState : 'alive'));
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => tree);
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    const loadedFor = (attemptId: string) => ({ attempt_id: attemptId, currentPath: '/tmp/current', decisionPath: `/tmp/decision-${attemptId}`, startedPath: '/tmp/started' });
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockImplementation((async (input: { attemptId: string }) => loadedFor(input.attemptId)) as unknown as () => ReturnType<typeof workerLaunchMocks.loadWorkerLaunchAttempt>);
+    workerLaunchMocks.discardWorkerLaunchFencedCapture.mockClear();
+    let recoveryInjected = false;
+    teamOpsMocks.teamReadWorkerStatus.mockImplementation(async () => {
+      if (!recoveryInjected) {
+        recoveryInjected = true;
+        finished = true;
+        const revision = (config.state_revision ?? 0) + 1;
+        const now = new Date().toISOString();
+        config = { ...config, state_revision: revision, active_recovery: {
+          request_id: 'request-race', recovery_id: 'recovery-race', worker_name: 'worker-3',
+          owner_epoch: 2, owner_nonce: 'owner', phase: 'active', state_revision: revision,
+          created_at: now, updated_at: now,
+        } };
+      }
+      return { state: 'idle', updated_at: new Date().toISOString() };
+    });
+    try {
+      const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2', 'worker-3'], drainTimeoutMs: 25 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+      // the tree of the worker that is known to be alive goes; the one of the worker whose pane is gone or cannot be read stays for a retry
+      expect(workerLaunchMocks.discardWorkerLaunchFencedCapture.mock.calls.map((call) => (call[0] as { attempt_id: string }).attempt_id)).toEqual(['attempt-3']);
+      expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
   });
 
   it('refuses scale-down without positive pane identity before destructive effects', async () => {
@@ -1510,5 +1729,390 @@ describe('scaleUp duplicate worker guard', () => {
     expect(config.workers.map(w => w.name)).toEqual(['worker-1', 'worker-2']);
     // State revision advanced past the stale fence
     expect(config.state_revision).toBeGreaterThan(5);
+  });
+
+  // The leader asks the workers to drain and waits; a worker that finishes exits, and its pane root goes with it. The tree read before the
+  // request (OMC_TEAM_KILL_PANE_TREE) is the only one that still has the descendants, and it is signalled although the pane is gone.
+  it('signals the pane tree read before the drain request when the pane root exits during the drain wait', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    const events: string[] = [];
+    let rootGone = false;
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => (rootGone ? 'dead' : 'alive'));
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+      events.push('capture');
+      return rootGone ? null : tree;
+    });
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    tmuxSessionMocks.terminatePaneProcessTree.mockImplementation(async () => { events.push('terminate'); });
+    teamOpsMocks.writeAtomic.mockReset();
+    teamOpsMocks.writeAtomic.mockImplementation(async (_path: string, text: string) => {
+      if (String(text).includes('"draining"')) events.push('drain-request');
+    });
+    teamOpsMocks.teamReadWorkerStatus.mockImplementation(async () => {
+      rootGone = true; // the worker finished and exited during the wait
+      return { state: 'done', updated_at: new Date().toISOString() };
+    });
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+      attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
+    });
+    try {
+      await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      // the drain wait reads the pane again before it looks at the worker; the tree is the same, so it is held and signalled once
+      expect(events.slice(0, 4)).toEqual(['capture', 'drain-request', 'capture', 'terminate']);
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledTimes(2);
+      expect(tmuxSessionMocks.capturePaneProcessTree).toHaveBeenCalledWith(tmuxSessionMocks.tmuxServerIdentity, '%2');
+      expect(tmuxSessionMocks.terminatePaneProcessTree).toHaveBeenCalledTimes(1);
+      expect(tmuxSessionMocks.terminatePaneProcessTree).toHaveBeenCalledWith(tree);
+      expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled(); // the pane is dead: the tree is all that was left to signal
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
+  // The same drain, looked at from the persisted capture: the pane is gone by the fence, so the read there finds nothing, and the tree read before the
+  // drain request is the only identity set there is. It is persisted with the retirement (what the hook of the fence gives back), so a leader interrupted
+  // after the provider was ended and before the signal does not lose it: a retry cannot read it again from a dead pane.
+  it('persists the pane tree read before the drain request when the pane root exits during the drain wait', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    let rootGone = false;
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => (rootGone ? 'dead' : 'alive'));
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => (rootGone ? null : tree));
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    teamOpsMocks.writeAtomic.mockReset();
+    teamOpsMocks.teamReadWorkerStatus.mockImplementation(async () => {
+      rootGone = true;
+      return { state: 'done', updated_at: new Date().toISOString() };
+    });
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+      attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
+    });
+    let persisted: unknown;
+    workerLaunchMocks.addToWorkerLaunchFencedCapture.mockClear();
+    workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementationOnce(async (_attempt, _reason, cleanup, beforeProviderTermination) => {
+      persisted = await beforeProviderTermination?.();
+      return cleanup();
+    });
+    try {
+      await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(persisted).toEqual([{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'linux:1:4001']] }]);
+      // and the tree read before the drain request is on disk before that request goes out, not only at the fence
+      expect(workerLaunchMocks.addToWorkerLaunchFencedCapture).toHaveBeenCalledWith(
+        expect.objectContaining({ decisionPath: '/tmp/decision' }),
+        [{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'linux:1:4001']] }],
+      );
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
+  // A tree that cannot be written before the drain request is in memory only, and a worker that finishes during the drain exits with its
+  // pane root: no drain request goes out, and the scale down fails as a retryable operation.
+  it('requests no drain and fails the scale down when the pane tree read before the drain request cannot be saved', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => 'alive');
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => tree);
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    teamOpsMocks.writeAtomic.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+      attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
+    });
+    workerLaunchMocks.addToWorkerLaunchFencedCapture.mockResolvedValueOnce(false);
+    try {
+      const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(result).toMatchObject({ ok: false, error: 'pane_tree_capture_unsaved:worker-2' });
+      expect(teamOpsMocks.writeAtomic.mock.calls.some((call) => String(call[1]).includes('"draining"'))).toBe(false); // no draining status, so no request to drain
+      expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
+  // A worker that is drained goes on running until it reports done or its pane dies. What it starts in that window, and then exits with, is in
+  // neither the read before the drain request nor a read at the fence (the pane is gone by then): the drain wait reads the pane as well.
+  it('reads the pane again during the drain wait and signals and persists a descendant the worker started before it exited', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    const startedLater = { panePid: 4000, pids: [4001, 4002], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001'], [4002, 'linux:1:4002']]) };
+    let rootGone = false;
+    let reads = 0;
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => (rootGone ? 'dead' : 'alive'));
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+      if (rootGone) return null;
+      return ++reads === 1 ? tree : startedLater; // the first read is the one before the drain request
+    });
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    teamOpsMocks.writeAtomic.mockReset();
+    teamOpsMocks.teamReadWorkerStatus.mockImplementation(async () => {
+      rootGone = true; // the worker finished, and exited, after the read of the drain wait
+      return { state: 'done', updated_at: new Date().toISOString() };
+    });
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+      attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
+    });
+    workerLaunchMocks.addToWorkerLaunchFencedCapture.mockClear();
+    try {
+      await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([tree, startedLater]);
+      const first = { panePid: 4000, pids: [4001], startIdentities: [[4001, 'linux:1:4001']] };
+      const second = { panePid: 4000, pids: [4001, 4002], startIdentities: [[4001, 'linux:1:4001'], [4002, 'linux:1:4002']] };
+      expect(workerLaunchMocks.addToWorkerLaunchFencedCapture.mock.calls.map((call) => call[1])).toEqual([[first], [first, second]]);
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
+  // A tree read during the drain wait that cannot be written is not a reason to stop once the drain requests are out: it is held, signalled in
+  // phase 3 and written with the fence (which stops before it terminates a provider when that fails too).
+  it('goes on and signals a descendant read during the drain wait when its write failed, and writes it again at the next read', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    const startedLater = { panePid: 4000, pids: [4001, 4002], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001'], [4002, 'linux:1:4002']]) };
+    let rootGone = false;
+    let reads = 0;
+    let statusReads = 0;
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => (rootGone ? 'dead' : 'alive'));
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+      if (rootGone) return null;
+      return ++reads === 1 ? tree : startedLater;
+    });
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    teamOpsMocks.writeAtomic.mockReset();
+    teamOpsMocks.teamReadWorkerStatus.mockImplementation(async () => {
+      statusReads += 1;
+      if (statusReads === 1) return { state: 'working', updated_at: new Date().toISOString() }; // one more poll: the write is tried again
+      rootGone = true;
+      return { state: 'done', updated_at: new Date().toISOString() };
+    });
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+      attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
+    });
+    workerLaunchMocks.addToWorkerLaunchFencedCapture.mockReset();
+    workerLaunchMocks.addToWorkerLaunchFencedCapture
+      .mockResolvedValueOnce(true) // before the drain request
+      .mockResolvedValueOnce(false) // the descendant read in the first poll
+      .mockResolvedValue(true);
+    try {
+      const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 10_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(result).not.toMatchObject({ ok: false, error: expect.stringContaining('pane_tree_capture_unsaved') });
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toContainEqual(startedLater);
+      expect(workerLaunchMocks.addToWorkerLaunchFencedCapture.mock.calls.length).toBe(3); // the write that failed was tried again at the next read
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      workerLaunchMocks.addToWorkerLaunchFencedCapture.mockReset();
+      workerLaunchMocks.addToWorkerLaunchFencedCapture.mockResolvedValue(true);
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  }, 30_000);
+
+  // A live worker whose launch attempt cannot be loaded (missing, of an earlier version, another identity) cannot have its tree saved either.
+  it('requests no drain and fails the scale down when the launch attempt of a worker with a read tree cannot be loaded', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => 'alive');
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => tree);
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    teamOpsMocks.writeAtomic.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue(null as never);
+    try {
+      const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(result).toMatchObject({ ok: false, error: 'pane_tree_capture_unsaved:worker-2' });
+      expect(teamOpsMocks.writeAtomic.mock.calls.some((call) => String(call[1]).includes('"draining"'))).toBe(false);
+      expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
+  // The pane stays alive through the drain wait. A descendant the worker starts after the read before the provider is ended (the second
+  // read; the provider is ended under the launch lock, which the scale down may have to wait for) is in neither of the first two reads: the
+  // read at the fence, right before the provider is ended, is the one that has it.
+  it('signals a descendant started after the read before the provider is ended: it is read at the fence of the launch attempt', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const tree = { panePid: 4000, pids: [4001], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001']]) };
+    const startedLater = { panePid: 4000, pids: [4001, 4002], startIdentities: new Map<number, string | null>([[4001, 'linux:1:4001'], [4002, 'linux:1:4002']]) };
+    const events: string[] = [];
+    let killed = false;
+    let fenced = false;
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => (killed ? 'dead' : 'alive'));
+    tmuxSessionMocks.killOwnedWorkerPane.mockImplementationOnce(async () => { events.push('kill-pane'); killed = true; });
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.capturePaneProcessTree.mockImplementation(async () => {
+      events.push(fenced ? 'capture-at-fence' : 'capture');
+      return fenced ? startedLater : tree;
+    });
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    tmuxSessionMocks.terminatePaneProcessTree.mockImplementation(async () => { events.push('terminate'); });
+    teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'done', updated_at: new Date().toISOString() });
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+      attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
+    });
+    workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementationOnce(async (_attempt, _reason, cleanup, beforeProviderTermination) => {
+      events.push('fence');
+      fenced = true; // from here on the worker has started a second descendant
+      await beforeProviderTermination?.();
+      events.push('provider-ended');
+      return cleanup();
+    });
+    try {
+      await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(events).toEqual(['capture', 'capture', 'capture', 'fence', 'capture-at-fence', 'provider-ended', 'terminate', 'terminate', 'terminate', 'kill-pane']);
+      expect(tmuxSessionMocks.terminatePaneProcessTree.mock.calls.map((call) => call[0])).toEqual([tree, tree, startedLater]);
+    } finally {
+      if (previousSwitch === undefined) delete process.env.OMC_TEAM_KILL_PANE_TREE;
+      else process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+      tmuxSessionMocks.capturePaneProcessTree.mockReset();
+      tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    }
+  });
+
+  it('reads and signals no pane tree in a scale down without OMC_TEAM_KILL_PANE_TREE', async () => {
+    const previousSwitch = process.env.OMC_TEAM_KILL_PANE_TREE;
+    delete process.env.OMC_TEAM_KILL_PANE_TREE;
+    config = makeConfig({
+      state_revision: 4,
+      worker_count: 2,
+      workers: [
+        { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+        { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+          launch_attempt_id: 'attempt-2', launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR },
+      ],
+    });
+    let killed = false;
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockImplementation(async () => (killed ? 'dead' : 'alive'));
+    tmuxSessionMocks.killOwnedWorkerPane.mockImplementationOnce(async () => { killed = true; });
+    tmuxSessionMocks.capturePaneProcessTree.mockReset();
+    tmuxSessionMocks.terminatePaneProcessTree.mockReset();
+    teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'done', updated_at: new Date().toISOString() });
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+    workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+      attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started',
+    });
+    try {
+      await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 1_000 },
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+      expect(tmuxSessionMocks.capturePaneProcessTree).not.toHaveBeenCalled();
+      expect(tmuxSessionMocks.terminatePaneProcessTree).not.toHaveBeenCalled();
+      expect(tmuxSessionMocks.killOwnedWorkerPane).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousSwitch !== undefined) process.env.OMC_TEAM_KILL_PANE_TREE = previousSwitch;
+    }
   });
 });

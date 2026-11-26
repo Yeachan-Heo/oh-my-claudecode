@@ -140,6 +140,8 @@ const gitWorktreeMocks = vi.hoisted(() => ({
 }));
 
 const workerLaunchMocks = vi.hoisted(() => ({
+  addToWorkerLaunchFencedCapture: vi.fn(async (_attempt: unknown, _items: unknown[]) => true),
+  discardWorkerLaunchFencedCapture: vi.fn(async (_attempt: unknown) => undefined),
   loadWorkerLaunchAttempt: vi.fn(async () => ({ attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' })),
   isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
   retireWorkerLaunchAttempt: vi.fn(async () => true),
@@ -757,6 +759,7 @@ describe('scaleUp launch config', () => {
       expect.objectContaining({ attempt_id: 'attempt-loaded' }),
       'scale_down',
       expect.any(Function),
+      expect.any(Function), // the read of the pane tree at the fence
     );
     expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
   });

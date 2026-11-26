@@ -32,6 +32,7 @@ export const TOOL_CATEGORIES = {
   SHARED_MEMORY: 'shared-memory',
   DEEPINIT: 'deepinit',
   WIKI: 'wiki',
+  TASK_LIST: 'task-list',
 } as const;
 export type ToolCategory = typeof TOOL_CATEGORIES[keyof typeof TOOL_CATEGORIES];
 

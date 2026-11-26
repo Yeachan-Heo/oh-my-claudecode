@@ -33,6 +33,8 @@ const paneMocks = vi.hoisted(() => {
   setServerIdentity: (identity: { socket_path: string; server_pid: number; process_started_at: string }) => {
     state.serverIdentity = identity;
   },
+  capturePaneProcessTree: vi.fn(async (_identity: unknown, _paneId: string): Promise<unknown> => null),
+  terminatePaneProcessTree: vi.fn(async (_tree: unknown): Promise<void> => undefined),
   splitTeamWorkerPane: vi.fn(async () => '%2'),
   splitTeamWorkerPaneWithEvidence: vi.fn(async () => ({ commandSucceeded: true, provider: 'tmux' as const,
     splitTarget: '%0', direction: 'right' as const, rawOutput: '%2\n', stderr: '', paneId: '%2' as string | null,
@@ -256,6 +258,7 @@ async function activatePersistedTeamInstance(teamName: string, cwd: string, inst
 }
 
 afterEach(() => {
+  delete process.env.OMC_TEAM_KILL_PANE_TREE;
   vi.clearAllMocks();
   paneMocks.clearPaneLiveness();
   paneMocks.blockPane(undefined);
@@ -392,7 +395,11 @@ describe('recovery pane rollback evidence', () => {
     await expectRecoveryLockReleased(teamName, 'worker-1', 'cleanup-failure');
   });
 
-  it('preserves the recovery pane when provider containment cannot be verified', async () => {
+  // With OMC_TEAM_KILL_PANE_TREE the rollback of a recovery pane reads the tree of the pane through the hook of the real retirement, which
+  // runs it under the launch lock right before the provider is terminated: a read after that cannot find a descendant that left the
+  // provider's process group.
+  it.each([['without', false], ['with', true]])('preserves the recovery pane when provider containment cannot be verified, %s OMC_TEAM_KILL_PANE_TREE', async (_what, treeKill) => {
+    if (treeKill) process.env.OMC_TEAM_KILL_PANE_TREE = '1';
     cwd = mkdtempSync(join(tmpdir(), 'recovery-provider-unverified-'));
     const teamName = 'provider-unverified-team';
     const requestId = 'provider-unverified-request';
@@ -449,6 +456,116 @@ describe('recovery pane rollback evidence', () => {
       reason: 'activation record failed:provider_cleanup_unverified',
       liveness: 'alive',
     });
+    if (treeKill) expect(paneMocks.capturePaneProcessTree).toHaveBeenCalledWith(fixtureTmuxServerIdentity(), '%2');
+    else expect(paneMocks.capturePaneProcessTree).not.toHaveBeenCalled();
+  });
+
+  // The rollback of a recovery pane whose provider is live and whose launch is accepted runs its cleanup: with OMC_TEAM_KILL_PANE_TREE the tree of
+  // the pane is read while the provider is still live (the hook of the real retirement), and signalled first in the cleanup, once the provider is
+  // gone and before the pane is killed. The cleanup asks for the kill of the pane without looking at the liveness of the pane first, so a pane
+  // that died with its provider is still asked for a kill, and its tree is signalled all the same.
+  // A pane that has left the target of the team by then (and may have been repurposed) is not read: its tree is neither read nor signalled.
+  it.each([
+    ['with the switch, the pane alive when the provider is gone', true, false, false],
+    ['with the switch, the pane dead when the provider is gone', true, true, false],
+    ['without the switch', false, false, false],
+    ['with the switch, the pane no longer a pane of the team', true, false, true],
+  ])('signals the tree of a rolled back recovery pane first, before the kill of the pane, %s', async (_what, treeKill, paneDiesWithProvider, paneLeftTheTeam) => {
+    if (treeKill) process.env.OMC_TEAM_KILL_PANE_TREE = '1';
+    const verifyDefault = paneMocks.verifyTeamTargetOwnership.getMockImplementation()!;
+    if (paneLeftTheTeam) {
+      paneMocks.verifyTeamTargetOwnership.mockImplementation(async target => (
+        target.paneId === '%2' ? { kind: 'foreign' } as unknown as Awaited<ReturnType<typeof verifyDefault>> : verifyDefault(target)
+      ));
+    }
+    cwd = mkdtempSync(join(tmpdir(), 'recovery-rollback-tree-'));
+    const teamName = 'rollback-tree-team';
+    const requestId = 'rollback-tree-request';
+    const recoveryId = 'rollback-tree-recovery';
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    await reservePersistedTeamInstance(teamName, cwd);
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName,
+      worker_count: 1,
+      workers: [{ name: 'worker-1', index: 1, ...launchMetadata, replacement_generation: 1 }],
+      agent_type: 'claude',
+      created_at: new Date().toISOString(),
+      tmux_session: `${teamName}:0`,
+      lifecycle_state: 'active',
+      state_revision: 1,
+      leader_pane_id: '%leader',
+    }));
+    await activatePersistedTeamInstance(teamName, cwd);
+    await attachPersistedPriorLaunch(teamName, configPath);
+    reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: TEAM_INSTANCE_ID }, recoveryId);
+    paneMocks.setPaneLiveness('%1', 'dead');
+    paneMocks.setPaneLiveness('%2', 'alive');
+    const events: string[] = [];
+    const detached = { panePid: 4000, pids: [4001], startIdentities: new Map([[4001, 'start-4001']]) };
+    const stopPath = join(cwd, `${teamName}-new-provider-stop`);
+    const providerScript = [
+      "const fs=require('node:fs')",
+      `const stopPath=${JSON.stringify(stopPath)}`,
+      'const deadline=Date.now()+20000',
+      'const timer=setInterval(()=>{if(fs.existsSync(stopPath)||Date.now()>deadline){clearInterval(timer);process.exit(0)}},10)',
+    ].join(';');
+    let providerPid = 0;
+    let bootstrap: Promise<unknown> = Promise.resolve();
+    const providerState = (): string => (isProcessAlive(providerPid) ? 'live' : 'gone');
+    paneMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (_sessionName, ownership) => {
+      const attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: ownership.paneId,
+        instanceId: TEAM_INSTANCE_ID, provider: 'claude', runtimeCliPath: '/runtime-cli.cjs', context: { kind: 'recovery',
+          recovery_id: recoveryId, replacement_generation: 2, pane_attempt_id: 'test-pane-attempt' } });
+      bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(attempt, [process.execPath, '-e', providerScript], cwd));
+      await expect(awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 1_000, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+      await expect(awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 })).resolves.toBe(true);
+      providerPid = JSON.parse(readFileSync(attempt.startedPath, 'utf8')).pid as number;
+      let reads = 0;
+      return Object.defineProperty({ ownership }, 'attempt', {
+        enumerable: true,
+        get: () => {
+          if (reads++ === 0) throw new Error('activation record failed');
+          return attempt;
+        },
+      });
+    });
+    const defaultKill = paneMocks.killOwnedWorkerPane.getMockImplementation()!;
+    // The replaced pane (%1) is retired before the new pane (%2) is allocated, and its tree is not the subject here.
+    paneMocks.capturePaneProcessTree.mockImplementation(async (_identity: unknown, paneId: string) => {
+      if (paneId !== '%2') return null;
+      events.push(`capture:${providerState()}`);
+      return detached;
+    });
+    paneMocks.terminatePaneProcessTree.mockImplementation(async (captured: unknown) => {
+      events.push(`terminate:${providerState()}${captured === detached ? '' : ':other'}`);
+      if (paneDiesWithProvider) paneMocks.setPaneLiveness('%2', 'dead');
+    });
+    paneMocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: string }) => {
+      events.push('kill-pane');
+      paneMocks.setPaneLiveness(ownership.paneId, 'dead');
+    });
+    try {
+      await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId, instanceId: TEAM_INSTANCE_ID }))
+        .resolves.toMatchObject({ outcome: 'failed', error: 'spawn_failed', recoveryId });
+
+      // The kill of the pane comes twice: from the cleanup of the retirement and from the loop that confirms the pane is gone.
+      const treeRead = treeKill && !paneLeftTheTeam;
+      expect(events).toEqual(treeRead ? ['capture:live', 'terminate:gone', 'kill-pane', 'kill-pane'] : ['kill-pane', 'kill-pane']);
+      if (treeRead) expect(paneMocks.capturePaneProcessTree).toHaveBeenCalledWith(fixtureTmuxServerIdentity(), '%2');
+      else expect(paneMocks.capturePaneProcessTree).not.toHaveBeenCalledWith(fixtureTmuxServerIdentity(), '%2');
+      expect(providerState()).toBe('gone');
+      // The rollback ran to its end: nothing is retained as evidence of a pane that could not be cleaned.
+      expect(existsSync(absPath(cwd, `.omc/state/team/${teamName}/recovery/rollback-failures/${recoveryId}`))).toBe(false);
+    } finally {
+      writeFileSync(stopPath, 'stop');
+      await bootstrap.catch(() => undefined);
+      paneMocks.killOwnedWorkerPane.mockImplementation(defaultKill);
+      paneMocks.verifyTeamTargetOwnership.mockImplementation(verifyDefault);
+      paneMocks.capturePaneProcessTree.mockReset();
+      paneMocks.terminatePaneProcessTree.mockReset();
+    }
   });
 
   it('reconciles an accepted initial launch pointer before treating the worker as already running', async () => {

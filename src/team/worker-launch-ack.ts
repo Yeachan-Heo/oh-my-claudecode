@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
-import { link, lstat, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, open, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Writable } from 'node:stream';
@@ -604,6 +604,62 @@ async function writeExclusiveTextAtomic(path: string, value: string): Promise<vo
   } finally {
     await unlink(candidate).catch(() => undefined);
   }
+}
+
+/**
+ * Persists the pane process tree capture of a launch attempt next to its retirement record (see retireAndCleanupCurrentWorkerLaunchAttempt),
+ * replacing an earlier one in one step. A caller that reads the tree before it asks the worker to exit calls this too, so the capture is on
+ * disk before the worker can exit and leave it as the only copy. false when it could not be written.
+ */
+export async function persistWorkerLaunchFencedCapture(attempt: WorkerLaunchAttempt, capture: unknown): Promise<boolean> {
+  const path = `${attempt.decisionPath}.retired.fenced-capture`;
+  const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    const handle = await open(candidate, 'wx', 0o600);
+    try {
+      await handle.writeFile(JSON.stringify({
+        ...identityOf(attempt), kind: 'worker_launch_fenced_capture', capture, written_at: new Date().toISOString(),
+      }), 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(candidate, path);
+    return true;
+  } catch {
+    await unlink(candidate).catch(() => undefined);
+    return false;
+  }
+}
+
+/**
+ * Adds to the persisted capture of a launch attempt (a list) what it does not hold yet, keeping what it holds: a caller that reads the tree
+ * before it asks the worker to exit adds it here, and a retry of a shutdown must not drop what an earlier run persisted. false when the
+ * persisted capture is not a list or the write failed.
+ */
+export async function addToWorkerLaunchFencedCapture(attempt: WorkerLaunchAttempt, items: unknown[]): Promise<boolean> {
+  const earlier = await readJson(`${attempt.decisionPath}.retired.fenced-capture`);
+  let held: unknown[] = [];
+  if (earlier.kind === 'malformed') return false;
+  if (earlier.kind === 'value') {
+    const record = earlier.value as { kind?: unknown; capture?: unknown };
+    if (!identityMatches(earlier.value, attempt) || record.kind !== 'worker_launch_fenced_capture' || !Array.isArray(record.capture)) return false;
+    held = record.capture;
+  }
+  const known = new Set(held.map((item) => JSON.stringify(item)));
+  const added = items.filter((item) => !known.has(JSON.stringify(item)));
+  return added.length === 0 || await persistWorkerLaunchFencedCapture(attempt, [...held, ...added]);
+}
+
+/**
+ * Removes the capture a caller persisted for an attempt that was not retired: the operation that wrote it ended without the provider being
+ * terminated (a rejected shutdown, a scale down that stopped before its effects), so a later run must not signal what it names. Once the
+ * attempt is retired the capture is what a retry needs and stays.
+ */
+export async function discardWorkerLaunchFencedCapture(attempt: WorkerLaunchAttempt): Promise<void> {
+  if (existsSync(`${attempt.decisionPath}.retired`)) return;
+  await unlink(`${attempt.decisionPath}.retired.fenced-capture`).catch(() => undefined);
 }
 
 const DECIMAL_INTEGER_TEXT = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
@@ -1218,12 +1274,28 @@ export async function retireWorkerLaunchAttempt(
   }
 }
 
+/**
+ * `beforeProviderTermination` runs under the launch lock once the attempt is current and accepted and its retirement is recorded, right
+ * before the provider is terminated, and only on the path that reaches the termination: the boundary a caller reads the process tree of the
+ * worker's pane at, because a descendant that left the provider's process group is no longer below the pane's root once the provider is
+ * gone, and one the worker started while the caller waited for this lock is in no read taken before it. It is awaited, and an error it
+ * throws changes nothing: a failed read must not keep the provider alive or fail the retirement.
+ * What it returns (JSON data, undefined or null for nothing) is the capture to persist: it is written next to the retirement record before the
+ * provider is terminated, so a leader interrupted after the termination and before `cleanup` has used the capture does not lose it. A capture
+ * a caller persisted earlier (persistWorkerLaunchFencedCapture, before it asked the worker to exit) or a run before this one left is passed
+ * back to the hook as its argument: the provider may be gone by then, so a read taken now can miss the descendants that left its process
+ * group, and it may still be live (the termination failed), so the hook reads again and returns what is to replace the file, the old
+ * identities included. A capture that cannot be written stops the retirement before the provider is terminated. The file goes once
+ * `cleanup` has succeeded.
+ */
 export async function retireAndCleanupCurrentWorkerLaunchAttempt(
   attempt: WorkerLaunchAttempt,
   reason: string,
   cleanup: () => Promise<boolean>,
+  beforeProviderTermination?: (persisted?: unknown) => Promise<unknown>,
 ): Promise<boolean> {
   const retiredPath = `${attempt.decisionPath}.retired`;
+  const fencedCapturePath = `${retiredPath}.fenced-capture`;
   const cleanupCompletePath = `${retiredPath}.cleanup-complete`;
   const finalizeCleanupUnlocked = (): Promise<WorkerLaunchRetirementFinalizeState> =>
     finishWorkerLaunchRetirementCleanupUnlocked(attempt);
@@ -1259,8 +1331,22 @@ export async function retireAndCleanupCurrentWorkerLaunchAttempt(
           ...identityOf(attempt), kind: 'worker_launch_retired', reason, written_at: new Date().toISOString(),
         });
       }
+      if (beforeProviderTermination) {
+        const earlier = await readJson(fencedCapturePath);
+        const persisted = earlier.kind === 'value'
+          && identityMatches(earlier.value, attempt)
+          && (earlier.value as { kind?: unknown }).kind === 'worker_launch_fenced_capture'
+          ? (earlier.value as { capture?: unknown }).capture
+          : undefined;
+        let capture: unknown;
+        try { capture = await beforeProviderTermination(persisted); } catch { /* a failed read does not hold up the termination */ }
+        if (capture !== undefined && capture !== null && !await persistWorkerLaunchFencedCapture(attempt, capture)) {
+          return false; // a capture that could be lost is not taken into the termination of the provider
+        }
+      }
       if (!await terminateWorkerLaunchProvider(attempt)) return false;
       if (!await cleanup()) return false;
+      await unlink(fencedCapturePath).catch(() => undefined);
       if (!await cleanupWorkerLaunchTransportUnlocked(attempt, reason)) return false;
       const completed = await readJson(cleanupCompletePath);
       if (completed.kind === 'absent') {

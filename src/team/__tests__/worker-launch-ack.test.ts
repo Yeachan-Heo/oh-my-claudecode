@@ -24,6 +24,8 @@ import {
   runWorkerLaunchBootstrap,
   readAndConsumeWorkerLaunchDescriptor,
   retireWorkerLaunchAttempt,
+  addToWorkerLaunchFencedCapture,
+  discardWorkerLaunchFencedCapture,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   terminateWorkerLaunchProvider,
   revokeWorkerLaunchAttempt,
@@ -848,9 +850,145 @@ describe('worker launch acknowledgement', () => {
       provider: accepted.provider, runtimeCliPath: accepted.runtimeCliPath,
     });
     const cleanup = vi.fn(async () => true);
-    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(accepted, 'stale_cleanup', cleanup)).resolves.toBe(false);
-    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(successor, 'expected_only_cleanup', cleanup)).resolves.toBe(false);
+    const beforeProviderTermination = vi.fn(async () => undefined);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(accepted, 'stale_cleanup', cleanup, beforeProviderTermination)).resolves.toBe(false);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(successor, 'expected_only_cleanup', cleanup, beforeProviderTermination)).resolves.toBe(false);
     expect(cleanup).not.toHaveBeenCalled();
+    expect(beforeProviderTermination).not.toHaveBeenCalled(); // only the path that reaches the termination runs it
+  });
+
+  it('runs the hook before the provider termination once the retirement is recorded, ahead of the cleanup, and an error it throws changes nothing', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: 999_999, process_start_identity: '1',
+      ...(process.platform !== 'win32' ? { process_group_id: 999_999 } : {}),
+      written_at: new Date().toISOString() }), 'utf8');
+    const order: string[] = [];
+    const beforeProviderTermination = vi.fn(async () => {
+      order.push(`hook (retirement recorded: ${existsSync(`${launchAttempt.decisionPath}.retired`)})`);
+      throw new Error('the read failed');
+    });
+    let cleanups = 0;
+    const cleanup = vi.fn(async () => {
+      order.push('cleanup');
+      cleanups += 1;
+      return cleanups > 1;
+    });
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'hook_order', cleanup, beforeProviderTermination)).resolves.toBe(false);
+    expect(order).toEqual(['hook (retirement recorded: true)', 'cleanup']);
+    expect(beforeProviderTermination).toHaveBeenCalledOnce();
+    // the retirement is recorded now and the cleanup is not complete (a shutdown that is retried): the hook runs again, before the provider is terminated
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'hook_order', cleanup, beforeProviderTermination)).resolves.toBe(true);
+    expect(order).toEqual(['hook (retirement recorded: true)', 'cleanup', 'hook (retirement recorded: true)', 'cleanup']);
+    expect(beforeProviderTermination).toHaveBeenCalledTimes(2);
+  });
+
+  // The capture the hook takes right before the provider is terminated is persisted before the termination: a leader interrupted between the
+  // termination and the cleanup would otherwise lose it, and a retry (the provider gone) could only read a tree without the descendants that left
+  // its process group.
+  it('persists what the hook returned before the provider is terminated, hands it back to the hook of a retry, and removes it once the cleanup succeeded', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: 999_999, process_start_identity: '1',
+      ...(process.platform !== 'win32' ? { process_group_id: 999_999 } : {}),
+      written_at: new Date().toISOString() }), 'utf8');
+    const captured = { panePid: 4000, pids: [4001], startIdentities: [[4001, 'start-4001']] };
+    const capturePath = `${launchAttempt.decisionPath}.retired.fenced-capture`;
+    const seen: unknown[] = [];
+    const hook = vi.fn(async (persisted?: unknown) => {
+      seen.push(persisted);
+      return persisted === undefined ? captured : undefined;
+    });
+    let onDiskAtCleanup: unknown;
+    let cleanups = 0;
+    const cleanup = vi.fn(async () => {
+      onDiskAtCleanup = existsSync(capturePath) ? (JSON.parse(await readFile(capturePath, 'utf8')) as { capture: unknown }).capture : null;
+      cleanups += 1;
+      return cleanups > 1; // the leader is interrupted after the provider is gone: the first cleanup does not complete
+    });
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'persist_capture', cleanup, hook)).resolves.toBe(false);
+    expect(onDiskAtCleanup).toEqual(captured); // written before the provider was terminated, so it is there when the cleanup runs
+    expect(existsSync(capturePath)).toBe(true);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'persist_capture', cleanup, hook)).resolves.toBe(true);
+    expect(seen).toEqual([undefined, captured]); // the retry gets the capture of the first run back
+    expect(existsSync(capturePath)).toBe(false);
+  });
+
+  it('adds to the persisted capture without dropping what it holds or repeating it, and refuses a capture that is not a list or is of another attempt', async () => {
+    const launchAttempt = await attempt();
+    const capturePath = `${launchAttempt.decisionPath}.retired.fenced-capture`;
+    const first = { panePid: 4000, pids: [4001], startIdentities: [[4001, 'start-4001']] };
+    const second = { panePid: 4000, pids: [4001, 4002], startIdentities: [[4001, 'start-4001'], [4002, null]] };
+    const held = async (): Promise<unknown> => (JSON.parse(await readFile(capturePath, 'utf8')) as { capture: unknown }).capture;
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [first])).resolves.toBe(true);
+    await expect(held()).resolves.toEqual([first]);
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [second, first])).resolves.toBe(true);
+    await expect(held()).resolves.toEqual([first, second]);
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [first])).resolves.toBe(true);
+    await expect(held()).resolves.toEqual([first, second]);
+    // not a list, or the record of another attempt: nothing is overwritten, and the caller is told
+    await writeFile(capturePath, JSON.stringify({ kind: 'worker_launch_fenced_capture', capture: first }), 'utf8');
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [second])).resolves.toBe(false);
+    await expect(readFile(capturePath, 'utf8')).resolves.toContain('"capture":{');
+    await writeFile(capturePath, '{not json', 'utf8');
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [second])).resolves.toBe(false);
+  });
+
+  it('discards a persisted capture of an attempt that was not retired, and keeps it once the attempt is retired', async () => {
+    const launchAttempt = await attempt();
+    const capturePath = `${launchAttempt.decisionPath}.retired.fenced-capture`;
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'start-4001']] }])).resolves.toBe(true);
+    await discardWorkerLaunchFencedCapture(launchAttempt);
+    expect(existsSync(capturePath)).toBe(false);
+    await discardWorkerLaunchFencedCapture(launchAttempt); // nothing there: no error
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [{ panePid: 4000, pids: [4001], startIdentities: [[4001, 'start-4001']] }])).resolves.toBe(true);
+    await writeFile(`${launchAttempt.decisionPath}.retired`, '{}', 'utf8'); // the provider is being terminated: a retry needs the capture
+    await discardWorkerLaunchFencedCapture(launchAttempt);
+    expect(existsSync(capturePath)).toBe(true);
+  });
+
+  it('replaces the persisted capture with what the hook returns, and does not terminate the provider when that cannot be written', async () => {
+    const launchAttempt = await attempt();
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({ ...expected, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
+    await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({ ...expected,
+      kind: 'worker_launch_provider_terminal', outcome: 'exit', cleanup_verified: true,
+      pid: 999_999, process_start_identity: '1',
+      ...(process.platform !== 'win32' ? { process_group_id: 999_999 } : {}),
+      written_at: new Date().toISOString() }), 'utf8');
+    const capturePath = `${launchAttempt.decisionPath}.retired.fenced-capture`;
+    const early = { panePid: 4000, pids: [4001], startIdentities: [[4001, 'start-4001']] };
+    const fenced = { panePid: 4000, pids: [4001, 4002], startIdentities: [[4001, 'start-4001'], [4002, 'start-4002']] };
+    await expect(addToWorkerLaunchFencedCapture(launchAttempt, [early])).resolves.toBe(true);
+    const seen: unknown[] = [];
+    let onDiskAtCleanup: unknown;
+    const cleanup = vi.fn(async () => {
+      onDiskAtCleanup = (JSON.parse(await readFile(capturePath, 'utf8')) as { capture: unknown }).capture;
+      return false;
+    });
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'replace_capture', cleanup, async (persisted) => {
+      seen.push(persisted);
+      return [early, fenced];
+    })).resolves.toBe(false);
+    expect(seen).toEqual([[early]]); // what was persisted before is handed to the hook
+    expect(onDiskAtCleanup).toEqual([early, fenced]); // and what the hook returns replaces it
+    expect(cleanup).toHaveBeenCalledOnce();
+
+    // a capture that cannot be written (a directory is in the way) stops the retirement before the provider is terminated and before the cleanup
+    await rm(capturePath, { force: true });
+    await mkdir(join(capturePath, 'occupied'), { recursive: true });
+    const skipped = vi.fn(async () => true);
+    await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'replace_capture', skipped, async () => [fenced])).resolves.toBe(false);
+    expect(skipped).not.toHaveBeenCalled();
   });
 
   it('reuses exact durable cleanup-complete evidence without touching a successor or pane again', async () => {

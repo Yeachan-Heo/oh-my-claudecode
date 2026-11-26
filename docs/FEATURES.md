@@ -10,6 +10,8 @@
 5. [Agent Templates](#agent-templates)
 6. [Autopilot](#autopilot)
 7. [lookout](#lookout)
+8. [Task List](#task-list)
+9. [Team Task Escalation Marker](#team-task-escalation-marker)
 
 ---
 
@@ -681,3 +683,48 @@ Optional switch for the active `model-routing` point (`OMC_JEV=model-routing:act
 
 - Script: `scripts/pre-tool-enforcer.mjs` (`recordModelRoutingShadow`)
 - See `HOOKS.md` [Model routing: what Jev sees and which calls are asked](HOOKS.md#model-routing-what-jev-sees-and-which-calls-are-asked) for the full behavior and the provider check
+
+---
+
+## Task List
+
+Opt-in task lists of agents: an MCP tool the agent sends its list to, and a `PostToolUse` hook that saves the list of every agent. Off unless `OMC_TASK_LIST=1`; without it the tool does not exist and the hook writes nothing.
+
+### API
+
+- Tool: `taskListTool` (`task_list`, `src/tools/task-list-tools.ts`). Arguments: `items` (the whole list: `content`, `status` of `pending`, `in_progress` or `completed`, optional `note`), or `advance`, `done` (1-based numbers) or `start` (a 1-based number), as in `update_plan`. The tool checks the shape of the call and confirms it; it stores nothing itself.
+- Registered, when `OMC_TASK_LIST=1` is set as the module or the server loads, in the standalone MCP server, in the in-process server (`omcToolsServer`, `createOmcSession()`) and in the `allCustomTools` aggregate that `omc capabilities` reports. `OMC_DISABLE_TOOLS=task-list` hides it again in the two MCP servers.
+- Storage and hook: `scripts/lib/jev-task-list.mjs` (`recordListCall`, `readList`, `syncList`, `sweep`, `nextList`, `updateShape`, `listPath`), entry point `scripts/jev-task-list-state.mjs` (and `scripts/jev-task-list-batch.mjs`, which logs one row per batch). The hooks are not registered in `hooks/hooks.json`; register them yourself (see HOOKS.md).
+
+### Storage model
+
+- One file per agent and session: `<log dir>/lists/<session id>/<agent id or main>.json`. `<log dir>` is `OMC_TASK_LIST_LOG_DIR` or `<state root>/state/task-list`, the state root of the project of the call (`OMC_STATE_DIR`, worktrees and a workspace marker apply).
+- Every list call is first written as one event file in `<key>.events/` (no lock), then folded into the list file under a lock; the list is what the events give when they are replayed in the order of their calls, so a hook that was held up cannot put an older list over a newer one. Task ownership of the built-in `Task*` tools is kept in `_task/<id>.json`.
+- A list keeps its newest 50 tasks; every text is masked and cut (the tool refuses a content or note over 2000 characters). Session directories idle for 7 days are removed by an hourly sweep that moves a directory aside before it judges it and merges it back when it is in use.
+- Every function fails open: it returns `null` or `false` and never breaks the hook.
+
+### Rules
+
+- The list is what the agent itself sent to a list tool; nothing here judges the work.
+- Details, the event journal, retention and the log files: [HOOKS.md](./HOOKS.md#task-list-scriptslibjev-task-listmjs). Tool and enablement: [REFERENCE.md](./REFERENCE.md).
+
+---
+
+## Team Task Escalation Marker
+
+A worker that cannot go on with a team task can say so in the first line of its terminal text: `ESCALATE: <lane>`. The task then records the lane, so the leader and other internal consumers can route the task without parsing free text.
+
+### Types
+
+- `TeamTaskEscalation` (`src/team/types.ts`, exported from the `oh-my-claudecode/team` entry point like `TeamTaskV2`): `lane` (the text after the marker, trimmed), `source` (always `terminal_result`) and `recorded_at` (ISO time of the transition).
+- `TeamTaskV2.escalation?: TeamTaskEscalation`: set on the task file by the terminal transition (`src/team/state/tasks.ts`, `extractEscalationLane`).
+
+### Marker contract
+
+- The marker counts only on the first non-empty line of the text, after optional leading white space: `ESCALATE:`, optional white space, then a lane. Blank lines before the marker are skipped; the lane is the rest of that line, trimmed, and may itself hold colons.
+- A marker on a later line, a marker without a lane or with a blank lane, and text that is not a string record nothing.
+
+### Terminal transitions
+
+- A transition to `completed` reads the marker from `result`; a transition to `failed` reads it from `error`. Each terminal transition replaces the field: a transition whose text has no valid marker clears an `escalation` an earlier transition recorded. Transitions to other statuses leave it unchanged.
+- The marker changes nothing else: the task still ends `completed` or `failed` and the claim is released as before.

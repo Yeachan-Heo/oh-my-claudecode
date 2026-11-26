@@ -191,6 +191,7 @@ export type {
 export type {
   TeamTask,
   TeamTaskV2,
+  TeamTaskEscalation,
   TeamTaskClaim,
   TeamLeader,
   TeamTransportPolicy,

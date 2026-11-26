@@ -116,6 +116,8 @@ import {
   workerPaneBelongsToOwnedProviderTarget,
   observeTmuxServerIdentity,
   killOwnedWorkerPane,
+  capturePaneProcessTree,
+  terminatePaneProcessTree,
   verifyTeamTargetOwnership,
   observeTeamSessionTargetPresence,
   redactBoundedDiagnostic,
@@ -128,12 +130,20 @@ import {
   type WorkerPaneConfig,
   type WorkerPaneLiveness,
   type WorkerPaneOwnership,
+  type PaneProcessTree,
   type WorkerPaneSplitEvidence,
   type TeamSessionMode,
   TeamSessionCreationError,
   isHerdrSessionTarget,
   providerForTeamTarget,
 } from "./tmux-session.js";
+import {
+  capturePaneProcessTreeOfWorkerPane,
+  readFencedPaneTree,
+  revivePaneTrees,
+  serializePaneTree,
+  uniquePaneTrees,
+} from "./pane-tree-read.js";
 import { herdrWorkspaceIdFromSessionTarget, herdrCloseWorkspace, herdrWorkspaceExists } from "./herdr-session.js";
 import { classifyPane, observePane } from "./pane-readiness.js";
 import {
@@ -294,6 +304,8 @@ import {
   type RecoveryActivationGate,
 } from "./worker-activation-gate.js";
 import {
+  addToWorkerLaunchFencedCapture,
+  discardWorkerLaunchFencedCapture,
   isWorkerLaunchAttemptCurrent,
   isWorkerLaunchAttemptAccepted,
   isValidCurrentWorkerLaunchRecord,
@@ -301,6 +313,7 @@ import {
   loadWorkerLaunchAttempt,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   withWorkerLaunchAttemptFence,
+  type WorkerLaunchAttempt,
 } from "./worker-launch-ack.js";
 import { getWorkerProviderLiveness } from "./worker-provider-liveness.js";
 import { isProcessIdentityLive } from "../platform/process-utils.js";
@@ -1174,6 +1187,92 @@ function configuredPaneOwnership(
       .map((candidate) => candidate.pane_id as string),
     source: "adopted",
     ...(identity ? { tmuxServerIdentity: identity } : {}),
+  };
+}
+
+/** The read of the pane process tree for a cleanup that signals it (see capturePaneProcessTreeOfWorkerPane for what it requires of the pane). */
+const paneTreeReadOps = {
+  verifyTeamTargetOwnership: (target: Parameters<typeof verifyTeamTargetOwnership>[0]) =>
+    verifyTeamTargetOwnership(target),
+  capturePaneProcessTree: (
+    identity: Parameters<typeof capturePaneProcessTree>[0],
+    paneId: string,
+  ) => capturePaneProcessTree(identity, paneId),
+};
+function readWorkerPaneProcessTree(
+  ownership: WorkerPaneOwnership | null | undefined,
+): Promise<PaneProcessTree | null> {
+  return capturePaneProcessTreeOfWorkerPane(ownership, paneTreeReadOps);
+}
+
+/** The read at the launch fence, the hook of retireAndCleanupCurrentWorkerLaunchAttempt: the capture an interrupted run persisted comes back as `persisted`. */
+function readFencedWorkerPaneTree(
+  ownership: WorkerPaneOwnership | null | undefined,
+  persisted?: unknown,
+  earlier: ReadonlyArray<PaneProcessTree | null | undefined> = [],
+) {
+  return readFencedPaneTree(ownership, paneTreeReadOps, persisted, earlier);
+}
+
+/**
+ * The two halves of the opt-in tree kill (OMC_TEAM_KILL_PANE_TREE) for a rollback that retires a launch attempt and then kills the pane: `read`
+ * is the last argument of retireAndCleanupCurrentWorkerLaunchAttempt, which runs it right before the provider is terminated, and `terminate` runs
+ * first in the cleanup, before anything asks whether the pane is still alive. A descendant that left the provider's process group is no longer
+ * below the pane's root once the provider is gone, and the kill of the pane reads the tree only after that. The tree is read only of a pane that
+ * the kill of the pane would not refuse (not the pane of the leader, not a reserved one, one that shows to be a pane of the team when it is read:
+ * readWorkerPaneProcessTree) and, when `proved` is given, that it also proves to be the pane of the team in that way; what is not read is
+ * not signalled.
+ */
+function paneTreeFence(
+  ownership: WorkerPaneOwnership | null | undefined,
+  proved?: () => Promise<boolean>,
+): {
+  read: (persisted?: unknown) => Promise<unknown>;
+  terminate: () => Promise<void>;
+} {
+  let trees: PaneProcessTree[] = [];
+  return {
+    read: async (persisted?: unknown) => {
+      // what an earlier run (or the caller, before the requests to exit) persisted is kept: the provider may be gone. The pane is read again
+      // all the same: the provider may still be live (its termination failed) and have started descendants since.
+      // (a capture left by a run with the switch on is not used with it off: nothing is signalled then)
+      const kept = process.env.OMC_TEAM_KILL_PANE_TREE === "1" ? revivePaneTrees(persisted) : [];
+      let fresh: PaneProcessTree | null = null;
+      if (
+        process.env.OMC_TEAM_KILL_PANE_TREE === "1" &&
+        ownership?.tmuxServerIdentity &&
+        (!proved || (await proved()))
+      )
+        fresh = await readWorkerPaneProcessTree(ownership);
+      const same = (a: PaneProcessTree, b: PaneProcessTree) =>
+        JSON.stringify(serializePaneTree(a)) === JSON.stringify(serializePaneTree(b));
+      trees = fresh && !kept.some((tree) => same(tree, fresh)) ? [...kept, fresh] : kept;
+      return trees.length > kept.length ? trees.map(serializePaneTree) : undefined;
+    },
+    terminate: async () => {
+      for (const tree of trees) await terminatePaneProcessTree(tree);
+    },
+  };
+}
+
+/** The arguments with which a worker's pane is adopted (its ownership proved) from the config of the team. */
+function workerPaneOwnershipInput(
+  config: TeamConfig,
+  workerName: string,
+  paneId: string,
+) {
+  return {
+    provider: providerForTeamTarget(config.tmux_session, paneId),
+    providerTarget: config.tmux_session,
+    paneId,
+    leaderPaneId: config.leader_pane_id ?? "",
+    reservedPaneIds: config.workers
+      .filter((candidate) => candidate.name !== workerName)
+      .map((candidate) => candidate.pane_id)
+      .filter((id): id is string => Boolean(id)),
+    ...(config.tmux_server_identity
+      ? { tmuxServerIdentity: config.tmux_server_identity }
+      : {}),
   };
 }
 
@@ -2221,11 +2320,13 @@ async function spawnV2Worker(
     startupContext.attempt.attempt_id,
   );
   const cleanupStartedLaunch = async (reason: string): Promise<void> => {
+    const fence = paneTreeFence(ownership);
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
       startupContext.attempt,
       reason,
       async () => {
         try {
+          await fence.terminate();
           if ((await getOwnedWorkerLiveness(ownership)) === "dead") return true;
           await killOwnedWorkerPane(ownership);
           return (await getOwnedWorkerLiveness(ownership)) === "dead";
@@ -2233,6 +2334,7 @@ async function spawnV2Worker(
           return false;
         }
       },
+      fence.read,
     ).catch(() => false);
     if (!cleaned)
       throw new Error(
@@ -2659,17 +2761,20 @@ async function cleanupRecoveryPaneAttempt(
   // containment is unproven and the pane must be retained for investigation.
   let providerStopped = false;
   if (pending.startupContext) {
+    const fence = paneTreeFence(pending.ownership);
     providerStopped = await retireAndCleanupCurrentWorkerLaunchAttempt(
       pending.startupContext.attempt,
       reason,
       async () => {
         try {
+          await fence.terminate();
           await killOwnedWorkerPane(pending.ownership);
           return (await getOwnedWorkerLiveness(pending.ownership)) === "dead";
         } catch {
           return false;
         }
       },
+      fence.read,
     ).catch(() => false);
   }
   if (!providerStopped) {
@@ -5128,47 +5233,51 @@ async function runRecoverDeadWorkerV2OwnerAttempt(
           return { ok: false, error: "worker_cleanup_incomplete" };
         }
         for (const priorLaunch of priorLaunches) {
+          const priorOwnership = configuredPaneOwnership(owner.config, {
+            pane_id: priorLaunch.pane_id,
+          });
+          const adoptPrior = async () =>
+            owner.config.tmux_session && leaderPaneId
+              ? adoptWorkerPaneOwnership({
+                  provider: providerForTeamTarget(
+                    owner.config.tmux_session,
+                    priorLaunch.pane_id,
+                  ),
+                  providerTarget: owner.config.tmux_session,
+                  paneId: priorLaunch.pane_id,
+                  leaderPaneId,
+                  reservedPaneIds,
+                  ...(tmuxServerIdentityForTarget(
+                    owner.config.tmux_session,
+                    owner.config.tmux_server_identity,
+                  )
+                    ? {
+                        tmuxServerIdentity: tmuxServerIdentityForTarget(
+                          owner.config.tmux_session,
+                          owner.config.tmux_server_identity,
+                        ),
+                      }
+                    : {}),
+                })
+              : null;
+          const fence = paneTreeFence(
+            priorOwnership,
+            async () => (await adoptPrior())?.ok === true,
+          );
           const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
             priorLaunch,
             "recovery_replacement",
             async () => {
-              const priorOwnership = configuredPaneOwnership(owner.config, {
-                pane_id: priorLaunch.pane_id,
-              });
+              await fence.terminate();
               let paneLiveness = priorOwnership
                 ? await getOwnedWorkerLiveness(priorOwnership).catch(
                     () => "unknown" as const,
                   )
                 : ("unknown" as const);
               if (paneLiveness === "dead") return true;
-              if (
-                paneLiveness !== "alive" ||
-                !owner.config.tmux_session ||
-                !leaderPaneId
-              )
-                return false;
-              const adopted = await adoptWorkerPaneOwnership({
-                provider: providerForTeamTarget(
-                  owner.config.tmux_session,
-                  priorLaunch.pane_id,
-                ),
-                providerTarget: owner.config.tmux_session,
-                paneId: priorLaunch.pane_id,
-                leaderPaneId,
-                reservedPaneIds,
-                ...(tmuxServerIdentityForTarget(
-                  owner.config.tmux_session,
-                  owner.config.tmux_server_identity,
-                )
-                  ? {
-                      tmuxServerIdentity: tmuxServerIdentityForTarget(
-                        owner.config.tmux_session,
-                        owner.config.tmux_server_identity,
-                      ),
-                    }
-                  : {}),
-              });
-              if (!adopted.ok) return false;
+              if (paneLiveness !== "alive") return false;
+              const adopted = await adoptPrior();
+              if (!adopted?.ok) return false;
               for (
                 let cleanupAttempt = 0;
                 cleanupAttempt < 2;
@@ -5185,6 +5294,7 @@ async function runRecoverDeadWorkerV2OwnerAttempt(
               }
               return false;
             },
+            fence.read,
           );
           if (!cleaned)
             return { ok: false, error: "worker_cleanup_incomplete" };
@@ -6162,30 +6272,31 @@ async function rollbackStartedNativeWorktreeStartup(args: {
           `worker_cleanup_incomplete:${worker.name}:launch_attempt_identity_unverified`,
         );
       }
+      const ownership: WorkerPaneOwnership = {
+        provider: providerForTeamTarget(args.sessionName, worker.paneId),
+        providerTarget: args.sessionName,
+        paneId: worker.paneId,
+        splitTarget: "",
+        leaderPaneId: args.leaderPaneId ?? "",
+        reservedPaneIds: args.workerPaneIds.filter((p) => p !== worker.paneId),
+        source: "adopted",
+        ...(worker.paneId.startsWith("%") && args.tmuxServerIdentity
+          ? { tmuxServerIdentity: args.tmuxServerIdentity }
+          : {}),
+      };
+      const fence = paneTreeFence(ownership);
       const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
         attempt,
         "startup_rollback",
         async () => {
-          const ownership: WorkerPaneOwnership = {
-            provider: providerForTeamTarget(args.sessionName, worker.paneId),
-            providerTarget: args.sessionName,
-            paneId: worker.paneId,
-            splitTarget: "",
-            leaderPaneId: args.leaderPaneId ?? "",
-            reservedPaneIds: args.workerPaneIds.filter(
-              (p) => p !== worker.paneId,
-            ),
-            source: "adopted",
-            ...(worker.paneId.startsWith("%") && args.tmuxServerIdentity
-              ? { tmuxServerIdentity: args.tmuxServerIdentity }
-              : {}),
-          };
+          await fence.terminate();
           if ((await getOwnedWorkerLiveness(ownership)) === "dead") return true;
           await killOwnedWorkerPane({
             ...ownership,
           });
           return (await getOwnedWorkerLiveness(ownership)) === "dead";
         },
+        fence.read,
       );
       if (cleaned !== true) {
         await writeStartedStartupRollbackEvidence({
@@ -9479,6 +9590,87 @@ export async function shutdownTeamV2(
     ).catch(logEventFailure);
   }
 
+  // Opt-in tree kill (OMC_TEAM_KILL_PANE_TREE): the process tree of each live worker pane is read here, before any request to exit goes out.
+  // A worker that follows the request exits during the wait below, and a descendant that left its process group is then no longer below the
+  // pane's root: a read taken after the wait does not find it. Whatever the way out of the wait (acknowledgements, a rejection under --force,
+  // the timeout), the trees were read while the panes were live; nothing is signalled until the launch fence is held in step 4.
+  const startConfig = config;
+  // The trees of a worker read while its pane was live, the first before the requests to exit and the later ones while it is waited for
+  // (a worker that has not exited yet may still start a descendant that leaves its process group), each one once.
+  const earlyPaneTrees = new Map<string, { paneId: string; trees: PaneProcessTree[] }>();
+  // workers whose tree was read but could not be written to disk: no request to exit goes out while one is listed (see below)
+  const captureUnsaved: string[] = [];
+  // the launch attempts a capture was written for: the capture of a worker that rejected the shutdown is removed again when it is rolled back
+  // before any provider was terminated; the others stay until their attempt is retired (a worker that accepted may have exited)
+  const capturedAttempts = new Map<string, WorkerLaunchAttempt>();
+  const captureEarlyPaneTree = async (worker: (typeof startConfig.workers)[number]): Promise<void> => {
+    try {
+      const initialOwnership = configuredPaneOwnership(startConfig, worker);
+      if (
+        !worker.pane_id?.startsWith("%") ||
+        !initialOwnership ||
+        (await getOwnedWorkerLiveness(initialOwnership)) === "dead"
+      )
+        return;
+      const ownership = await adoptWorkerPaneOwnership(
+        workerPaneOwnershipInput(startConfig, worker.name, worker.pane_id),
+      );
+      if (!ownership.ok || !ownership.ownership.tmuxServerIdentity) return;
+      const tree = await readWorkerPaneProcessTree(ownership.ownership);
+      if (!tree) return;
+      const known = earlyPaneTrees.get(worker.name);
+      const held = known?.paneId === ownership.ownership.paneId ? known.trees : [];
+      const isNew = uniquePaneTrees([...held, tree]).length !== held.length;
+      // a tree held and on disk is nothing to do; one that could not be written is written again at the next read
+      if (!isNew && !captureUnsaved.includes(worker.name)) return;
+      const trees = isNew ? [...held, tree] : held;
+      if (isNew) earlyPaneTrees.set(worker.name, { paneId: ownership.ownership.paneId, trees });
+      // On disk before the request to exit goes out: a worker that follows it exits, and this is then the only copy of what it
+      // had started, so a leader interrupted from here on must not lose it (the fence merges it into its own capture). A tree
+      // that cannot be saved, for want of a launch attempt to save it with as much as for a failed write, counts as unsaved.
+      const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
+      const attempt =
+        capturedAttempts.get(worker.name) ??
+        (provider && worker.launch_attempt_id
+          ? await loadWorkerLaunchAttempt({
+              cwd,
+              teamName: sanitized,
+              instanceId: shutdownInstance.instance_id,
+              workerName: worker.name,
+              paneId: worker.pane_id,
+              provider,
+              attemptId: worker.launch_attempt_id,
+              runtimeCliPath: resolveRuntimeCliPath(),
+            })
+          : null);
+      if (attempt) capturedAttempts.set(worker.name, attempt);
+      const saved =
+        !!attempt &&
+        (await addToWorkerLaunchFencedCapture(attempt, trees.map(serializePaneTree)).catch(() => false));
+      const at = captureUnsaved.indexOf(worker.name);
+      if (saved && at >= 0) captureUnsaved.splice(at, 1);
+      else if (!saved && at < 0) captureUnsaved.push(worker.name);
+    } catch {
+      /* reading a tree must not hold up the shutdown: the read before the launch fence is still taken */
+    }
+  };
+  const treeKillSwitch = process.env.OMC_TEAM_KILL_PANE_TREE === "1";
+  if (treeKillSwitch) await Promise.all(startConfig.workers.map(captureEarlyPaneTree));
+  const preserveForUnsavedCapture = async (): Promise<ShutdownTeamV2Result> => {
+    // The tree of a worker that follows the request to exit is then in memory only: a leader interrupted after the worker exited would
+    // retry with neither a live pane to read nor a persisted tree. The shutdown is preserved for a retry.
+    process.stderr.write(
+      `[team/runtime-v2] preserving panes/worktrees/state because the pane process tree could not be saved: ${captureUnsaved.join(", ")}\n`,
+    );
+    if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+    return {
+      outcome: "preserved",
+      reason: "provider_cleanup_unverified",
+      workers: [...captureUnsaved],
+    };
+  };
+  if (captureUnsaved.length > 0) return preserveForUnsavedCapture(); // nothing was requested yet
+
   // 2. Send shutdown request to each worker
   const shutdownRequestTimes = new Map<string, string>();
   for (const w of config.workers) {
@@ -9506,6 +9698,8 @@ export async function shutdownTeamV2(
   const ackedWorkers = new Set<string>();
 
   while (Date.now() < deadline) {
+    // A worker that is waited for keeps running until it exits: what it starts meanwhile is read here, while its pane is live.
+    if (treeKillSwitch) await Promise.all(startConfig.workers.map(captureEarlyPaneTree));
     for (const w of config.workers) {
       if (ackedWorkers.has(w.name)) continue;
       const ack = await readShutdownAck(
@@ -9536,6 +9730,12 @@ export async function shutdownTeamV2(
 
     if (rejected.length > 0 && !force) {
       const detail = rejected.map((r) => `${r.worker}:${r.reason}`).join(",");
+      // no provider was terminated: what was saved for the cleanup that does not happen is removed, but only for the workers that said they
+      // go on; a worker that accepted (or has not answered) may have exited since, and what it started is then recorded in its capture only
+      for (const { worker } of rejected) {
+        const attempt = capturedAttempts.get(worker);
+        if (attempt) await discardWorkerLaunchFencedCapture(attempt).catch(() => undefined);
+      }
       if (!(await rollbackRejectedShutdownFence(config))) {
         throw new Error(`shutdown_rejected_fence_lost:${detail}`);
       }
@@ -9549,6 +9749,9 @@ export async function shutdownTeamV2(
     await new Promise((r) => setTimeout(r, 2_000));
   }
 
+  // A tree read while the workers were waited for that could not be written (and not at a later read either) is not a reason to stop: the
+  // requests are out, and the trees are held here, signalled in step 4 and written with the fence, which stops before it terminates a
+  // provider when it cannot write them.
   config = await revalidateShutdownFence();
   // 4. Force kill remaining tmux panes
   const recordedWorkerPaneIds = config.workers
@@ -9585,19 +9788,9 @@ export async function shutdownTeamV2(
       : "unknown";
     let paneOwnership: WorkerPaneOwnership | null = null;
     if (initialPaneLiveness !== "dead") {
-      const ownership = await adoptWorkerPaneOwnership({
-        provider: providerForTeamTarget(config.tmux_session, worker.pane_id),
-        providerTarget: config.tmux_session,
-        paneId: worker.pane_id,
-        leaderPaneId: config.leader_pane_id ?? "",
-        reservedPaneIds: config.workers
-          .filter((candidate) => candidate.name !== worker.name)
-          .map((candidate) => candidate.pane_id)
-          .filter((paneId): paneId is string => Boolean(paneId)),
-        ...(config.tmux_server_identity
-          ? { tmuxServerIdentity: config.tmux_server_identity }
-          : {}),
-      });
+      const ownership = await adoptWorkerPaneOwnership(
+        workerPaneOwnershipInput(config, worker.name, worker.pane_id),
+      );
       if (!ownership.ok) {
         // Issue #4261: When ownership cannot be verified (pane doesn't exist),
         // allow --force cleanup to proceed. Otherwise preserve state.
@@ -9608,6 +9801,17 @@ export async function shutdownTeamV2(
       }
       paneOwnership = ownership.ownership;
     }
+    // Opt-in tree kill (OMC_TEAM_KILL_PANE_TREE): the pane's process tree is read once more here, before the launch fence is taken, for
+    // what the worker started after the read before the requests to exit (earlyPaneTrees), and a third time at the fence itself (the last
+    // argument below), right before the provider is terminated. Terminating the provider inside the fence can leave a descendant that left
+    // its process group outside the pane's tree, so the reads come first; nothing is signalled before the fence below is held (see the
+    // cleanup callback).
+    const earlyPaneTree = earlyPaneTrees.get(worker.name);
+    const earlyTrees =
+      earlyPaneTree?.paneId === worker.pane_id ? earlyPaneTree.trees : [];
+    const earlyTree = earlyTrees[0] ?? null;
+    const laterEarlyTrees = earlyTrees.slice(1);
+    const paneTree = await readWorkerPaneProcessTree(paneOwnership);
     const attempt = await loadWorkerLaunchAttempt({
       cwd,
       teamName: sanitized,
@@ -9618,6 +9822,10 @@ export async function shutdownTeamV2(
       attemptId: worker.launch_attempt_id,
       runtimeCliPath: resolveRuntimeCliPath(),
     });
+    // The read at the fence (see retireAndCleanupCurrentWorkerLaunchAttempt): the last one, taken once the launch attempt is current and
+    // accepted and right before the provider is terminated. The worker runs until then, and a descendant it started after the read above
+    // (while the lock of the attempt was awaited, say) is below the pane's root now and is in no earlier read.
+    let fencedTrees: PaneProcessTree[] = [];
     if (
       !attempt ||
       !(await retireAndCleanupCurrentWorkerLaunchAttempt(
@@ -9625,6 +9833,11 @@ export async function shutdownTeamV2(
         "team_shutdown",
         async () => {
           try {
+            // The trees read before the requests and before the fence first: the pane may be gone by now, and the descendants they name still run.
+            await terminatePaneProcessTree(earlyTree);
+            for (const tree of laterEarlyTrees) await terminatePaneProcessTree(tree);
+            await terminatePaneProcessTree(paneTree);
+            for (const tree of fencedTrees) await terminatePaneProcessTree(tree);
             let lastLiveness: WorkerPaneLiveness = paneOwnership
               ? await getOwnedWorkerLiveness(paneOwnership)
               : initialPaneLiveness;
@@ -9645,6 +9858,12 @@ export async function shutdownTeamV2(
             paneCleanupUnknown.push(worker.name);
             return false;
           }
+        },
+        async (persisted) => {
+          // what a worker that exits meanwhile leaves of its pane: the earlier reads are persisted with the one at the fence
+          const read = await readFencedWorkerPaneTree(paneOwnership, persisted, [...earlyTrees, paneTree]);
+          fencedTrees = read.trees;
+          return read.record;
         },
       ))
     )
