@@ -400,6 +400,18 @@ describe('blocks of text: the header of the trace files', () => {
     expect(run.out.messages[0].text).toBe(header);
   });
 
+  it('with the verdicts off the verdict files that exist still move blocks, and the result opens with the header that names their directory', async () => {
+    const first = await compactRun(BLOCKS, session(40, { said }));
+    const files = [...first.files()].filter(([p]) => p.includes('/verdict-block-'));
+    expect(files.length).toBeGreaterThan(8);
+    const run = await compactRun({ ...BLOCKS, OMC_JEV_COMPACT_VERDICTS: 'off' }, session(40, { said }), { seed: files });
+    expect(run.asked).toHaveLength(0);
+    expect(allText(run.out)).toContain('[block moved at compaction: ');
+    expect(run.out.messages[0].text).toBe(header);
+    expect(allText(run.out).split(header).length).toBe(2);
+    expect(allText(run.out)).toBe(allText(first.out));
+  });
+
   it('the header of an earlier compaction, the whole generated row, is replaced by the new one', async () => {
     const earlier = [{ role: 'user', text: traceHeader('/earlier/dir'), toolUses: [] }, ...session(40, { said })];
     const run = await compactRun(BLOCKS, earlier);

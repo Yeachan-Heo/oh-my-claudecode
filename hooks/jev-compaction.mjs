@@ -5833,7 +5833,7 @@ async function decide($, e, cfg, record, started) {
   const currentRows = () => rows.map((m, i) => (seriesEdits.has(i) ? { ...m, text: seriesEdits.get(i) } : blockEdits.get(i) ?? m));
   // The header of the files the traces of blocks name stands in the first row of the result whenever the result holds such a trace (the header of an earlier compaction is replaced by it).
   const holdsBlockTrace = (m) => typeof m.text === 'string' && (m.text.includes(BLOCK_TRACE_PREFIX) || m.text.includes(`${AGENT_TRACE_PREFIX}${BLOCK_LETTER}/`));
-  const headerOf = () => (blocksMode === 'active' && blockOn && blockPlan && currentRows().some(holdsBlockTrace) ? traceHeader(blockDir(cfg, record.session_id)) : undefined);
+  const headerOf = () => (blocksMode === 'active' && blockPlan && currentRows().some(holdsBlockTrace) ? traceHeader(blockDir(cfg, record.session_id)) : undefined);
   const headerTokens = () => {
     const header = headerOf();
     return header === undefined ? 0 : cfg.rates.RATE_TRACE * (header.length - messages.filter(isHeaderRow).reduce((n, m) => n + m.text.length, 0));
