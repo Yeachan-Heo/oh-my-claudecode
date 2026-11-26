@@ -321,15 +321,24 @@ assert_contains "Enter sent after literal prompt" "send-keys -t test-session Ent
 MOCK_PANE=$'Do you trust the files in this folder?
 ?'
 TMUX_SEND_CALLS=()
-result=$(psm_launch_claude "trust-session" "Feature in progress" 2>&1)
+TEST_OUTPUT_23="${TMPDIR_TEST}/test23-output.txt"
+psm_launch_claude "trust-session" "Feature in progress" > "$TEST_OUTPUT_23" 2>&1
 exit_code=$?
+result=$(cat "$TEST_OUTPUT_23")
 # The launch should still return 0 (success), but no literal prompt should be sent
 if [[ $exit_code -eq 0 ]]; then
     pass "literal prompt timeout keeps session registered"
 else
     fail "literal prompt timeout keeps session registered" "returned $exit_code"
 fi
-assert_equals "no keys sent while dialog pending (literal prompt)" "0" "${#TMUX_SEND_CALLS[@]}"
+# Should have exactly 1 element: the initial "claude Enter" launch, with NO literal prompt send
+assert_equals "no literal keys sent while dialog pending" "1" "${#TMUX_SEND_CALLS[@]}"
+# Verify that the literal prompt was NOT sent
+if ! printf '%s' "${TMUX_SEND_CALLS[@]:-}" | grep -q "Feature in progress"; then
+    pass "literal prompt not sent while dialog pending"
+else
+    fail "literal prompt not sent while dialog pending" "found literal send-keys in: ${TMUX_SEND_CALLS[*]}"
+fi
 
 # 24. Timeout prints recovery instructions (issue #5149 thread b)
 assert_contains "timeout warns about failed literal prompt" "warn|" "$result"
@@ -344,7 +353,8 @@ assert_contains "launch reports launched| despite literal timeout" "launched|" "
 PSM_SKIP_PERMISSIONS=1
 MOCK_PANE=$'>'
 TMUX_SEND_CALLS=()
-psm_launch_claude "skip-perm-session" "Task started" 2>&1 > /dev/null
+TEST_OUTPUT_26="${TMPDIR_TEST}/test26-output.txt"
+psm_launch_claude "skip-perm-session" "Task started" > "$TEST_OUTPUT_26" 2>&1
 assert_contains "dangerously-skip-permissions honored" "claude --dangerously-skip-permissions" "${TMUX_SEND_CALLS[0]:-}"
 unset PSM_SKIP_PERMISSIONS
 
