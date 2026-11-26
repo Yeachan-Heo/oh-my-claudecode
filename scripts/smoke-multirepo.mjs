@@ -466,7 +466,9 @@ const driftFixtureFile = join(driftFixtureDir, 'drift-fixture.mjs');
 writeFileSync(
   driftFixtureFile,
   `import {join} from 'path'; const dir = '/tmp'; const p = join(dir, '.omc', 'state', 'foo');\n` +
-    `const home = '/home/u'; const s = join(home, '.omc', 'state', 'foo'); const c = join(home, '.omc', 'config.json');\n`
+    `const home = '/home/u'; const s = join(home, '.omc', 'state', 'foo');\n` +
+    `function getGlobalOmcConfigCandidates() { return [join(home, '.omc', 'config.json')]; }\n` +
+    `const c = join(home, '.omc', 'config.json');\n`
 );
 
 const gateScript = join(__dirname, 'ci', 'check-multirepo-paths.mjs');
@@ -500,11 +502,12 @@ assert(
 );
 
 assert(
-  gateResult.stderr?.includes("join(home, '.omc', 'state'") && !gateResult.stderr?.includes('config.json'),
-  'AST-grep gate accepts only the global config file under home',
+  gateResult.stderr?.includes("join(home, '.omc', 'state'") &&
+    (gateResult.stderr?.match(/config\.json/g) ?? []).length === 1,
+  'AST-grep gate accepts join(home, .omc, config.json) only inside getGlobalOmcConfigCandidates()',
   'AST-grep gate mishandles join(home, .omc, ...)',
   `stderr: ${gateResult.stderr?.slice(0, 500)}`,
-  "join(home, '.omc', 'config.json') is the global config; join(home, '.omc', 'state', ...) is workspace state"
+  "only the resolver's join(home, '.omc', 'config.json') is the global config; the top-level one and join(home, '.omc', 'state', ...) are reported"
 );
 
 rmSync(driftFixtureDir, { recursive: true, force: true });

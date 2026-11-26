@@ -25,7 +25,12 @@ export function homeStateIsStillWorkspaceState(home) {
   return join(home, '.omc', 'state', 'fixture.json');
 }
 
-export function homeGlobalConfig(home) {
-  // Not reported: the per-user global config file.
+export function homeConfigOutsideTheResolver(home) {
+  // ↓ Caught too: `home` may name a workspace root outside getGlobalOmcConfigCandidates().
   return join(home, '.omc', 'config.json');
+}
+
+export function getGlobalOmcConfigCandidates(home) {
+  // Not reported: the hook-side mirror of the per-user global config resolver.
+  return [join(home, '.omc', 'config.json')];
 }
