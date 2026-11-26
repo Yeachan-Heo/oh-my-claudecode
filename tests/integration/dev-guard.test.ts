@@ -1114,4 +1114,12 @@ describe('/dev guard: spellings of round 6', () => {
   ])('reads a prefix of a long option of a wrapper as the option: %s is %s', (command, expected) => {
     expect(check(command, '/dev').decision).toBe(expected);
   });
+
+  // --block-signal, --default-signal and --ignore-signal of env take their list only after an equals sign (measured with env 9.4: env --ignore-signal INT echo runs INT)
+  it.each([
+    ['env --block-signal rm /dev/null', 'deny'], ['env --default-signal rm /dev/null', 'deny'], ['env --ignore-signal rm /dev/null', 'deny'], ['env --ignore-signal=INT rm /dev/null', 'deny'],
+    ['env --block-signal=INT --default-signal rm /dev/null', 'deny'], ['env --ignore-signal rm null', 'deny'], ['env --block-signal ls /dev/null', 'allow'], ['env --argv0 x rm /dev/null', 'deny'],
+  ])('reads the signal options of env as attached only: %s is %s', (command, expected) => {
+    expect(check(command, '/dev').decision).toBe(expected);
+  });
 });
