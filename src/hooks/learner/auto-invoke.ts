@@ -202,12 +202,12 @@ export function getInvocationStats(state: AutoInvokeState): {
 /**
  * Save invocation history to disk for analytics
  */
-export function saveInvocationHistory(state: AutoInvokeState): void {
+export function saveInvocationHistory(state: AutoInvokeState): Promise<void> {
   const historyDir = getGlobalOmcStatePath('analytics', 'invocations');
   const historyFile = path.join(historyDir, `${state.sessionId}.json`);
 
   // Use atomic write to prevent corruption from concurrent sessions (Bug #11 fix)
-  atomicWriteJson(historyFile, {
+  return atomicWriteJson(historyFile, {
     sessionId: state.sessionId,
     config: state.config,
     invocations: state.invocations,
