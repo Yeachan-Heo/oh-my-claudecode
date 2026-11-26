@@ -374,7 +374,7 @@ function tarExtractDir(args, name) {
     }
     rest = args.slice(next);
   }
-  const parsed = parseGetopt(rest, valueLetters, (opt) => longIs(opt, '--directory', 5) || opt === '--cd' || longIs(opt, '--strip-components', 5) || TAR_LONG_VALUE[name === 'bsdtar' ? 'bsd' : 'gnu'].has(opt)); // bsdtar: --cd is --directory
+  const parsed = parseGetopt(rest, valueLetters, (opt) => longIs(opt, '--directory', 5) || opt === '--cd' || longIs(opt, '--strip-components', 5) || TAR_LONG_VALUE[name === 'bsdtar' ? 'bsd' : 'gnu'].has(opt) || (name !== 'bsdtar' && longIs(opt, '--to-command', 6))); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
   if (parsed.shorts.includes('P') || parsed.longs.some((l) => longIs(l, '--absolute-names', 4) || longIs(l, '--absolute-paths', 4))) absolute = true; // the second name is the one of bsdtar
   if (!extract || toStdout || parsed.shorts.includes('O') || parsed.longs.some((l) => longIs(l, '--to-stdout', 6))) return null; // -O and --to-stdout write the members to the standard output, not to files
@@ -473,6 +473,11 @@ function devCommand(name, args, fed, depth) {
   const hit = (path) => (path ? { what: name, path } : null);
   const firstChanged = (list) => { for (const p of list) { const d = devChanged(p); if (d) return d; } return null; };
   if (Object.hasOwn(DEV_EVERY_OPERAND, name)) return hit(firstChanged(splitArgs(args, DEV_EVERY_OPERAND[name]).operands));
+  if (name === 'tar' || name === 'gtar') { // GNU tar runs the --to-command text through a shell for each member
+    const to = parseGetopt(args, '', (opt) => longIs(opt, '--to-command', 6)).values.find(([key]) => longIs(key, '--to-command', 6));
+    const inner = to && shellOf(to[1], depth);
+    if (inner) return inner;
+  }
   const extra = devExtraCommand(name, args);
   if (extra !== undefined) return extra;
   if (name === 'mv') {

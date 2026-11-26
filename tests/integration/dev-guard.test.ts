@@ -193,6 +193,9 @@ const BLOCKED: string[] = [
   'tar -xPf a.tar --strip-components=0', 'sudo tar -xPf a.tar', "bash -c 'tar -xPf a.tar'", 'nice tar --absolute-names -xf a.tar',
   // ... and a named member with a leading slash is judged by its own name, whatever -C and the wrappers say
   'tar -xPf a.tar /dev/zz-x', 'tar -xPf a.tar -C /tmp /dev/zz-x', 'tar -C /tmp -xPf a.tar /dev/null', 'tar --absolute-names -xf a.tar rel/x /dev/zz-x', 'bsdtar -xPf a.tar -C /tmp /dev/zz-x',
+  // GNU tar runs the --to-command text for each member
+  "tar -xf a.tar --to-command='rm /dev/null'", "tar -xf a.tar --to-command 'rm /dev/null'", "tar -xf a.tar --to-c='rm /dev/null'", "tar -xf a.tar --to-c 'rm /dev/null'", "gtar -C /tmp -xf a.tar --to-command='truncate -s 0 /dev/null'",
+  "tar -xOf a.tar --to-command='rm /dev/null'", "tar -xf a.tar rel/x --to-command='echo x; rm /dev/null'", "tar -xf a.tar --to-command='sh -c \"rm /dev/null\"'",
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -327,6 +330,8 @@ const ALLOWED: string[] = [
   // -P and --absolute-names change nothing when the command only creates or lists, or when the strip option makes every name relative again, or a member has a slash and is no device path
   'tar -cPf a.tar /etc/x', 'tar -tPf a.tar', 'tar --absolute-names -cf a.tar /dev/null', 'tar -xPf a.tar --strip-components=1', 'tar -xPf a.tar --strip-components=2', 'tar -xPf a.tar -C /tmp rel/x',
   'tar -xPf a.tar /tmp/x', 'tar -xPf a.tar -C /dev/shm rel/x', 'bsdtar -tf a.tar --absolute-paths', 'tar -xPOf a.tar', 'tar -xPf a.tar -O',
+  // a --to-command text that harms nothing, and the other options of the same family
+  "tar -xf a.tar --to-command='echo x'", "tar -xf a.tar --to-command 'cat /dev/null'", "tar -xf a.tar --to-command='wc -c >/dev/null'", 'tar -xf a.tar --to-stdout', 'tar -tf a.tar --to-command=cat', 'tar -xf a.tar --totals',
 ];
 
 describe('/dev guard: Bash commands', () => {
