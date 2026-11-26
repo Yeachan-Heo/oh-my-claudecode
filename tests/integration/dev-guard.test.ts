@@ -70,6 +70,10 @@ const BLOCKED: string[] = [
   'FOO=1 rm /dev/null', 'command rm /dev/null', 'nice -n 10 rm /dev/null', 'nohup rm /dev/null', 'timeout 5 rm /dev/null',
   'timeout -s KILL 5 rm /dev/null', 'sudo nice -n 5 timeout 9 rm /dev/null', 'echo /dev/null | xargs rm', 'xargs rm /dev/null',
   'ls /dev | xargs rm -rf', 'find /dev -name x | xargs sed -i s/a/b/',
+  // long options of the wrappers with their value in the next argument, env -S, more than ten wrappers, coproc
+  'sudo --user root rm /dev/null', 'sudo --chdir /tmp rm /dev/null', 'env --unset X rm /dev/null', 'env --chdir /tmp rm /dev/null', "env -S 'rm -f /dev/null'", 'env --split-string="rm /dev/null"', "env -S'rm /dev/null'",
+  "env -S 'rm -f' /dev/null", "env -i -S 'sh -c \"rm /dev/null\"'", 'stdbuf --output L rm /dev/null', 'ionice --class 3 rm /dev/null', 'echo /dev/null | xargs --max-args 1 rm', `${'sudo '.repeat(11)}rm /dev/null`,
+  'sudo --group wheel --user root env --unset X nice --adjustment 3 rm /dev/null', 'coproc rm /dev/null',
   // more wrappers, keywords and spellings
   'shred /dev/sda', 'doas rm /dev/null', 'ionice -c3 rm /dev/null', 'stdbuf -oL rm /dev/null', 'setsid rm /dev/null', 'time rm /dev/null',
   'exec rm /dev/null', 'builtin rm /dev/null', 'mv -t /dev/null x', '! rm /dev/null', 'while rm /dev/null; do :; done', 'until rm /dev/null; do :; done', 'if rm /dev/null; then :; else rm /dev/null; fi',
@@ -135,6 +139,8 @@ const ALLOWED: string[] = [
   'echo x | xargs rm', "ls -d x 2>/dev/null | xargs rm -rf", 'sort x | tee /dev/stderr | xargs -r rm -rf', 'cat /dev/null | xargs rm', 'ssh host ls /dev', "ssh host 'cat /dev/null'",
   'echo "rm /dev/null"', "echo 'rm -f /dev/null'", 'git commit -m "rm /dev/null"', "grep -r 'rm /dev/null' .", "cat <<'EOF'\nrm /dev/null\nEOF",
   'bash script.sh', "bash -c 'echo hi > /dev/null'", 'sudo ls /dev', 'sudo -u root ls /dev', "bash <<'EOF'\necho hi > /dev/null\nEOF",
+  // the same wrappers in front of a harmless command
+  'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
   'rm -f /dev/shm/x', 'mv /tmp/a /dev/shm/b', 'rm -rf /dev/shm/*', 'cp x /dev/shm', 'cp x /dev/shm/', 'cp -r a /dev/shm/', 'mv x /dev/shm/', 'cp -t /dev/shm x', 'mv -t /dev/shm x', 'mv -t /dev/shm/ x', 'sed -i p -l /dev/null',
   'find /dev/shm -type f -delete', 'find /dev/shm -mindepth 1 -delete', 'ls /dev/shm | xargs rm -rf',
@@ -215,7 +221,7 @@ describe('/dev guard: Bash commands', () => {
     expect(v.syntax.ran).toBe(false);
   });
 
-  it('stays fast on long runs of blanks and of assignments', () => {
+  it('stays fast on long runs of blanks, assignments and wrappers', () => {
     const recipe = 'mknod -m 666 /dev/null.new c 1 3 && mv -f /dev/null.new /dev/null';
     const table: Array<[string, 'allow' | 'deny']> = [
       ['echo' + ' '.repeat(200000) + 'x', 'allow'],
@@ -224,6 +230,8 @@ describe('/dev guard: Bash commands', () => {
       [`${recipe}${' '.repeat(200000)}x`, 'deny'],
       [`${'x=1 '.repeat(100000)}rm a`, 'allow'],
       [`${'x=1 '.repeat(100000)}rm /dev/null`, 'deny'],
+      [`${'nice '.repeat(10000)}rm /dev/null`, 'deny'],
+      [`${'nice '.repeat(10000)}ls /tmp`, 'allow'],
     ];
     for (const [command, expected] of table) {
       const started = Date.now();

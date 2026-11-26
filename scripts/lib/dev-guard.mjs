@@ -119,43 +119,56 @@ const DEV_EVERY_OPERAND = {
   truncate: ['-s', '-r', '--size', '--reference'], touch: ['-d', '-t', '-r', '--date', '--time', '--reference'], mknod: ['-m', '--mode'], mkfifo: ['-m', '--mode'],
 };
 
-// Wrappers: options with a value, and how many operands to skip before the wrapped command (timeout: the duration).
+// Wrappers: options with a value (a long option with its value in the next argument too), and how many operands to skip before the wrapped
+// command (timeout: the duration). env -S TEXT and env --split-string=TEXT are handled in devUnwrap.
 const DEV_WRAPPERS = {
-  sudo: { val: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'], assign: true },
-  doas: { val: ['-u', '-C'] }, env: { val: ['-u', '-C', '-S'], assign: true }, command: { val: [] }, builtin: { val: [] },
-  exec: { val: ['-a'] }, nice: { val: ['-n', '--adjustment'] }, ionice: { val: ['-c', '-n', '-p', '-P', '-u'] }, nohup: { val: [] },
-  timeout: { val: ['-s', '--signal', '-k', '--kill-after'], skip: 1 }, stdbuf: { val: ['-i', '-o', '-e'] }, setsid: { val: [] }, time: { val: [] },
-  xargs: { val: ['-n', '-I', '-L', '-P', '-d', '-E', '-s', '-a', '-l'] },
+  sudo: { val: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t', '--user', '--group', '--host', '--prompt', '--close-from', '--chdir', '--chroot', '--role', '--type', '--other-user', '--command-timeout'], assign: true },
+  doas: { val: ['-u', '-C'] }, env: { val: ['-u', '-C', '-S', '-a', '--unset', '--chdir', '--argv0', '--block-signal', '--default-signal', '--ignore-signal'], assign: true }, command: { val: [] }, builtin: { val: [] },
+  exec: { val: ['-a'] }, nice: { val: ['-n', '--adjustment'] }, ionice: { val: ['-c', '-n', '-p', '-P', '-u', '--class', '--classdata', '--pid', '--pgid', '--uid'] }, nohup: { val: [] },
+  timeout: { val: ['-s', '--signal', '-k', '--kill-after'], skip: 1 }, stdbuf: { val: ['-i', '-o', '-e', '--input', '--output', '--error'] }, setsid: { val: [] }, time: { val: [] }, coproc: { val: [] },
+  xargs: { val: ['-n', '-I', '-L', '-P', '-d', '-E', '-s', '-a', '-l', '--max-args', '--max-procs', '--max-lines', '--delimiter', '--eof', '--max-chars', '--arg-file', '--process-slot-var'] },
 };
 const DEV_LEADING = new Set(['then', 'do', 'else', 'elif', '{', '!', 'if', 'while', 'until']);
 const baseName = (value) => String(value).replace(/\/+$/, '').split('/').pop();
 const isAssignment = (value) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
 
-// [name, ...args] without leading keywords, assignments and wrappers: { name, args, xargs }, or null when nothing is left.
+// [name, ...args] without leading keywords, assignments and wrappers: { name, args, xargs, replace }, or null when nothing is left.
+// xargs: the command is fed by a pipe; replace: the replace string of xargs -I, -i or --replace. env -S TEXT is a command line of its own: it
+// comes back as eval with TEXT followed by the remaining arguments.
 function devUnwrap(values) {
-  let rest = values;
+  let at = 0;
   let xargs = false;
-  for (let guard = 0; guard < 10; guard++) {
-    let skip = 0;
-    while (skip < rest.length && (isAssignment(rest[skip]) || DEV_LEADING.has(rest[skip]) || rest[skip] === 'function')) skip += rest[skip] === 'function' ? 2 : 1; // function NAME { ...
-    rest = rest.slice(skip);
-    if (!rest.length) return null;
-    const name = baseName(rest[0]);
+  let replace;
+  for (;;) {
+    while (at < values.length && (isAssignment(values[at]) || DEV_LEADING.has(values[at]) || values[at] === 'function')) at += values[at] === 'function' ? 2 : 1; // function NAME { ...
+    if (at >= values.length) return null;
+    const name = baseName(values[at]);
     const spec = Object.hasOwn(DEV_WRAPPERS, name) ? DEV_WRAPPERS[name] : null;
-    if (!spec) return { name, args: rest.slice(1), xargs };
-    let i = 1;
-    for (; i < rest.length; i++) {
-      const a = rest[i];
+    if (!spec) return { name, args: values.slice(at + 1), xargs, replace };
+    let i = at + 1;
+    let split;
+    for (; i < values.length; i++) {
+      const a = values[i];
       if (a === '--') { i++; break; }
       if (spec.assign && isAssignment(a)) continue;
       if (!a.startsWith('-') || a === '-') break;
+      if (name === 'env' && (a.startsWith('-S') || longIs(a.split('=')[0], '--split-string', 3))) { // the text to split follows, attached or as the next argument
+        const eq = a.indexOf('=');
+        split = a.startsWith('--') ? (eq > 0 ? a.slice(eq + 1) : values[++i]) : (a.length > 2 ? a.slice(2) : values[++i]);
+        continue;
+      }
+      if (name === 'xargs') {
+        if (a === '-I') replace = values[i + 1];
+        const m = /^(?:-I(.+)|-i(.*)|--replace(?:=(.*))?)$/.exec(a);
+        if (m) replace = m[1] ?? (m[2] || m[3] || '{}');
+      }
       if (spec.val.includes(a)) i++;
     }
-    if (name === 'command' && rest.slice(1, i).some((o) => /^-[a-z]*[vV]/.test(o))) return null; // command -v only looks the name up
+    if (split !== undefined) return { name: 'eval', args: [split, ...values.slice(i)], xargs, replace };
+    if (name === 'command' && values.slice(at + 1, i).some((o) => /^-[a-z]*[vV]/.test(o))) return null; // command -v only looks the name up
     if (name === 'xargs') xargs = true;
-    rest = rest.slice(i + (spec.skip ?? 0));
+    at = i + (spec.skip ?? 0);
   }
-  return null;
 }
 
 function sedInPlaceFiles(args) {
