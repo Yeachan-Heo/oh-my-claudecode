@@ -1145,9 +1145,17 @@ def swap_in(tmp, path, expected, mine):
     paths are exchanged and what came out is looked at. The expected file is removed. Another file (it came in after the look) is put back by an
     exchange again, and what comes out of that is removed only when it is the new file; another one (a second arrival) stays under the temporary
     name (KeptAside, naming it). When the exchange back itself fails, the new file stays at the path (it is never empty) and the file that came in
-    stays under the temporary name (KeptAside, naming both). Where the two paths cannot be exchanged nothing is replaced: OSError."""
-    if not exchange(tmp, path):
-        raise OSError(f'the file {path} cannot be put in place without replacing a file that was not looked at (this system or its file system cannot exchange two paths, or nothing is at the path any more): nothing is replaced')
+    stays under the temporary name (KeptAside, naming both). Where the two paths cannot be exchanged the file is looked at once more and replaced by a plain replace, when it
+    still has the identity `expected`, and not replaced (OSError) when it has not."""
+    if not exchange(tmp, path):   # this system or its file system cannot exchange two paths (macOS, Windows), or nothing is at the path any more: a plain replace, after one more look at the file that is expected
+        try:
+            unchanged = file_identity(os.lstat(path)) == expected
+        except FileNotFoundError:
+            unchanged = False
+        if not unchanged:
+            raise OSError(f'the file {path} cannot be put in place: it changed since it was validated, or is gone, and is not replaced')
+        os.replace(tmp, path)   # atomic for one file; a file that comes in between the look and this call is replaced, a window of microseconds that exists only where there is no exchange
+        return
     try:   # what was at the path is under the temporary name now: whatever fails from here on, it is not removed with the new file
         if file_identity(os.lstat(tmp)) == expected:
             os.unlink(tmp)   # the file that was looked at, replaced
@@ -1170,10 +1178,10 @@ def write_json(path, obj, no_clobber=False, replaces=None):
     instead of a rename; where links are not supported the destination is reserved exclusively first). replaces: the lstat result of the
     file that this write renews; a file that is not that one any more when the file is put in place (somebody replaced the path since
     the validation) is kept and the write fails; a file that is gone is written like a first publication (no_clobber), so a file that comes in meanwhile is kept. A renewal and the replacing of the reservation (see
-    swap_in) put the new file in place by exchanging it with the file at the path, and where two paths cannot be exchanged they fail: the path
-    is never empty (the hook reads no pause file as no pause), and a file that came in after the validation is put back, not destroyed. A write
-    with neither (the state file) renews the file that is at the path when the write starts, or is a first publication where there is none: there is no
-    plain replace, so no file that comes in after the check of the settings is destroyed."""
+    swap_in) put the new file in place by exchanging it with the file at the path; where two paths cannot be exchanged they look at the file once more and
+    replace it with a plain replace. The path is never empty (the hook reads no pause file as no pause), and with the exchange a file that came in after the validation is put back, not destroyed. A write
+    with neither (the state file) renews the file that is at the path when the write starts, or is a first publication where there is none: it is
+    exchanged like the pause file, so where the exchange works no file that comes in after the check of the settings is destroyed."""
     if A.dry_run:
         return
     tmp = f'{path}.{os.getpid()}.{os.urandom(8).hex()}.tmp'   # a name that no other process can have made: nothing is removed to make room for it
