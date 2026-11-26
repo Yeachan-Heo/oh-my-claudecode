@@ -792,6 +792,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                 if m.group(3) in (':=', '='):   # ${NAME:=word} and ${NAME=word} assign NAME for the words that follow: the word is a value of NAME in the whole command, as an assignment is
                     if own_value(m.group(2), m.group(4)) not in assigned.setdefault(m.group(2), []):
                         assigned[m.group(2)].append(own_value(m.group(2), m.group(4)))
+    branched = []   # for each simple command: whether a branch word came before it (below), which the `cd` rule of moved_at reads too
     settled_at = []   # for each simple command, for each word and once more after the last: the names that have a value for the whole command at that place, in the order of the words (the settings, an assignment that stands alone or after export, declare, typeset, readonly or local, and ${NAME:=word} count from the word after theirs on, but only in a simple command that stands first or after `;` or a new line, that no pipe or `&` follows and that no `then`, `else`, `elif`, `do` or `case` has come before in the command, `unset NAME` takes the name away from the next command on): `"$A"; A=/x` runs the A of the session, `A=/x; "$A"` does not, and neither does `false && A=/x; "$A"` or `if false; then A=/x; fi; "$A"`. The operators around the simple command and those five words are read, no other word of control flow and no reachability: from the first of them on nothing settles a name (the branch or the body may not run, and the command does not tell where it ends), so an assignment after the `fi` or `done` that closes it counts as not made too
     branch = False   # set at the first `then`, `else`, `elif`, `do` or `case` that starts a simple command, and for the rest of the command: it does not tell where the branch ends
     for k, words in enumerate(simple):
@@ -812,13 +813,14 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
             settled.difference_update(w for w in words[run + 1:] if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', w))   # (`unset -v NAME`: the option is no name)
         row.append(frozenset(settled))
         settled_at.append(row)
+        branched.append(branch)
     chain, moved_at = False, []   # for each simple command: whether it moves its own working directory (-C, --directory, --chdir) or a cd stands before it in its chain, or the command it is quoted in moved: the shell runs a relative path from there
     for k, words in enumerate(simple):
         join = (words[0] if words and is_operator(words[0]) else '').strip('\n')   # the operator in front of the simple command
         if join not in ('', ';', '&&'):
             chain = False   # a subshell, a pipe, `&` or `||` cuts the chain: a cd before it does not move what comes after it
         run = command_word(words)   # only the word that the simple command runs is a cd, and only an option in front of it is the option of a wrapper (`env -C DIR prog`): after it, `--chdir` is an argument of the program
-        if join not in ('|', '||', '&&') and run is not None and words[run] in ('cd', 'pushd'):
+        if join not in ('|', '||', '&&') and not branched[k] and run is not None and words[run] in ('cd', 'pushd'):   # (after a branch word the cd may not run: it moves nothing that is known, and the directory it names is one more candidate through `named`)
             target = next((j for j in range(run + 1, len(words)) if not (words[j].startswith('-') and len(words[j]) > 1)), None)   # (the first word that is no option: `cd -P dir`, `cd -- dir`; none, or `-`, is the HOME or the last directory of the session)
             chain = target is not None and is_absolute(words[target], assigned) and not any(has_unsettled(w, settled_at[k][j]) for j, w in enumerate(words) if j > run)   # (a target that is relative, `cd child`, is run from a directory that is not known, so it moves nothing that is known; a cd that follows a pipe, `||` or `&&` may not run, or runs in a pipe: it counts for nothing; one whose target only the session knows, `cd "$DIR"`, moves to a place that is not known: nothing after it, a cd before it included, tells where a relative path is run from)
         moved_at.append(moved or chain or any((w in CHDIR_WORDS and j + 1 < len(words) and not has_unsettled(words[j + 1], settled_at[k][j + 1]) and is_absolute(words[j + 1], assigned)) or (w.startswith(('--directory=', '--chdir=')) and not has_unsettled(w, settled_at[k][j]) and is_absolute(w.partition('=')[2], assigned)) for j, w in enumerate(words[:run if run is not None else 0])))

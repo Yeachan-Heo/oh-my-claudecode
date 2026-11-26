@@ -3039,6 +3039,50 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a cd that stands after then, else, elif, do or case may not run, so it moves nothing that is known: the file of the directory of the session stays a candidate and the guard refuses to start, while the directory it names is one more candidate; a cd before the branch, and one in no branch, still move the chain', () => {
+    const f = fixture('foreign-session-directory-branch', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
+    const other = join(f.dir, 'other');   // a directory that a cd names
+    mkdirSync(project);
+    mkdirSync(other);
+    const text = '# the script that the command runs\n';
+    const file = join(project, 'audit');
+    writeFileSync(file, text, 'utf8');
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const shell = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', cwd: project }).stdout;
+    const notRun = (cd: string) => [`if false; then cd ${cd}; fi; python3 ./audit`, `if true; then :; else cd ${cd}; fi; python3 ./audit`, `while false; do cd ${cd}; done; python3 ./audit`, `case x in y) cd ${cd};; esac; python3 ./audit`,
+      `if false; then :; elif false; then cd ${cd}; fi; python3 ./audit`, `if false; then pushd ${cd}; fi; python3 ./audit`];
+    const moved = (cd: string) => [`cd ${cd}; python3 ./audit`, `cd ${cd}; if true; then :; fi; python3 ./audit`];
+    // what the shell does: a cd that does not run leaves ./audit in the directory of the session, one that is made moves it
+    for (const command of notRun(other).filter((c) => !c.includes('pushd')).map((c) => c.replace('python3', 'cat'))) expect(shell(command), `${command}: the shell runs ./audit of the directory of the session`).toBe(text);
+    for (const command of moved(other).map((c) => c.replace('python3', 'cat'))) expect(shell(command), `${command}: the shell runs ./audit of the directory that the cd names`).toBe('');
+    for (const command of notRun(other)) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: file });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(file), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // a cd that is made names the file of the directory it moves to: with the directory of the session there is a collision, with another one the file is not the one that runs
+    for (const command of moved(project)) {
+      const r = start(command, { state_file: file });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    for (const command of moved(other)) {
+      const r = start(command, { state_file: file });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('an option or a cd word that stands after the word a simple command runs is an argument of the program and moves nothing (python3 ./audit --chdir DIR, -C DIR, --directory=DIR, echo cd; ./audit, python3 ./audit cd DIR): the guard keeps the directory of the session as a candidate and refuses to start; a wrapper option in front of the word (env -C DIR, env --chdir DIR, env --chdir=DIR) and a cd that the shell runs settle it as before', () => {
     const f = fixture('foreign-session-directory-position', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
