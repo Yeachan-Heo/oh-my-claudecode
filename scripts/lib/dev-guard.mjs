@@ -240,6 +240,8 @@ function parseGetopt(args, shortValue = '', longValue = [], shortAttached = '') 
 }
 // A long option written in full or abbreviated (GNU getopt takes any unambiguous prefix; min is the shortest unambiguous one).
 const longIs = (name, full, min) => name.length >= min && full.startsWith(name);
+// -t DIR and --target-directory=DIR (also abbreviated: --target DIR) of mv, cp, install and ln; -t may end a cluster of short options (-sft DIR).
+const isTargetDirOption = (key) => key === 't' || longIs(key, '--target-directory', 3);
 
 // Partitioners: the options with which the command only lists, dumps or verifies; without one it edits (fdisk and gdisk are interactive).
 const DEV_DISK_LISTING = {
@@ -339,19 +341,21 @@ function devCommand(name, args, fed, depth) {
   const extra = devExtraCommand(name, args);
   if (extra !== undefined) return extra;
   if (name === 'mv') {
-    const { operands, values } = splitArgs(args, ['-t', '--target-directory', '-S', '--suffix']);
-    const dir = values['-t'] ?? values['--target-directory'];
-    const sources = dir === undefined ? operands.slice(0, -1) : operands;
-    const target = dir === undefined ? operands[operands.length - 1] : dir;
-    return hit(firstChanged(sources) ?? (target === undefined ? null : devChangedIn(target)));
+    const { operands, values } = parseGetopt(args, 'tS', (n) => isTargetDirOption(n) || longIs(n, '--suffix', 4));
+    const dirs = values.filter(([key]) => isTargetDirOption(key)).map(([, value]) => value);
+    const sources = dirs.length ? operands : operands.slice(0, -1);
+    const targets = dirs.length ? dirs : operands.slice(-1);
+    return hit(firstChanged(sources) ?? targets.map(devChangedIn).find(Boolean));
   }
   if (name === 'cp' || name === 'install' || name === 'ln' || name === 'link' || name === 'rsync') {
-    const { opts, operands, values } = splitArgs(args, ['-t', '--target-directory', '-S', '--suffix', ...(name === 'install' ? ['-m', '-o', '-g'] : [])]);
-    const dir = values['-t'] ?? values['--target-directory'];
-    const directories = name === 'install' && opts.some((o) => o === '--directory' || /^-[A-Za-z]*d/.test(o));
-    const targets = dir !== undefined ? [dir] : directories ? operands : operands.length >= 2 ? [operands[operands.length - 1]] : [];
+    // rsync has no target directory option (-t is --times there), so no option of it takes a value here.
+    const valueLetters = name === 'rsync' ? '' : `tS${name === 'install' ? 'mog' : ''}`;
+    const { shorts, longs, operands, values } = parseGetopt(args, valueLetters, (n) => name !== 'rsync' && (isTargetDirOption(n) || longIs(n, '--suffix', 4)));
+    const dirs = values.filter(([key]) => isTargetDirOption(key)).map(([, value]) => value);
+    const directories = name === 'install' && (shorts.includes('d') || longs.some((l) => longIs(l, '--directory', 5)));
+    const targets = dirs.length ? dirs : directories ? operands : operands.length >= 2 ? [operands[operands.length - 1]] : [];
     // A plain cp onto /dev/null and the other pseudo devices only writes data into them, like a redirect. Options that attach attributes or replace the target (-a, -p, --preserve, -l, -s, -b, --remove-destination) stay refused.
-    const plainCopy = name === 'cp' && !opts.some((o) => (o.startsWith('--') ? /^--(?:archive|preserve|attributes-only|remove-destination|link|symbolic-link|backup)/.test(o) : /^-[A-Za-z]*[aplsb]/.test(o)));
+    const plainCopy = name === 'cp' && !shorts.some((c) => 'aplsb'.includes(c)) && !longs.some((o) => /^--(?:archive|preserve|attributes-only|remove-destination|link|symbolic-link|backup)/.test(o));
     for (const p of targets) { const d = devChangedIn(p); if (d && !(plainCopy && DEV_SINK.test(d))) return { what: name, path: d }; }
     return null;
   }

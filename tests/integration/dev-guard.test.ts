@@ -38,6 +38,9 @@ const BLOCKED: string[] = [
   'cp -f a /dev/sda', 'cp -t /dev a', 'cp x /dev/sda', 'cp -a x /dev/null', 'cp -p x /dev/null', 'cp -ap x /dev/null', 'cp --preserve=all x /dev/null', 'cp --remove-destination x /dev/null',
   'cp -l x /dev/null', 'cp -s x /dev/null', 'cp -b x /dev/null', 'cp --link x /dev/null', 'cp x /dev/null.bak', 'cp --archive x /dev/null', 'cp --backup x /dev/null', 'cp --attributes-only x /dev/null', 'install -m 644 x /dev/null', 'install -d /dev/foo',
   'ln -sf x /dev/null', 'ln -s a /dev/b', 'ln -sfT x /dev/null',
+  // the target directory as the last letter of a cluster of short options, or as an abbreviated long option
+  'ln -sft /dev /tmp/null', 'install -Dt /dev /tmp/null', 'cp -at /dev /tmp/null', 'cp -rt /dev x', 'cp -vt /dev/ x y', 'install -Dt /dev x', 'mv -vt /dev x', 'mv --target=/dev x', 'mv --target-directory /dev x',
+  'cp --target=/dev /tmp/null', 'cp --target-d=/dev x', 'ln -sf --target=/dev /tmp/null', 'install --target /dev /tmp/null', 'install -t /dev /tmp/null', 'ln -sf --target-directory=/dev /tmp/null', 'rsync -avt x /dev/foo',
   // sed -i and perl -i in every spelling
   'sed -i s/a/b/ /dev/null', 'sed -i.bak s/a/b/ /dev/null', 'sed --in-place s/a/b/ /dev/null', 'sed -ni p /dev/null',
   "sed -i -e 's/a/b/' /dev/null", "sed --in-place=.bak -e 's/a/b/' /dev/null", "sed -i 's/a/b/' x /dev/null",
@@ -116,6 +119,8 @@ const ALLOWED: string[] = [
   'cat /dev/urandom | head -c 8', 'head -c 8 /dev/urandom', 'cat /dev/zero | head -c 4', 'diff a /dev/null', 'git diff --no-index /dev/null file',
   'grep x /dev/null', 'ls /dev', 'ls -la /dev/null', 'stat -c %F /dev/null', 'test -c /dev/null', '[ -e /dev/null ]',
   'read x < /dev/urandom', 'dd if=/dev/urandom of=/tmp/x bs=1 count=4', 'dd if=x of=/dev/null', 'sed s/a/b/ /dev/null', 'ls /dev | wc -l',
+  // target directories outside /dev, in the same spellings
+  'cp -a x y', 'ln -sf a b', 'mv --target=/tmp/x /tmp/y', 'cp -rt /tmp/d x', 'mv -t /dev/shm x', 'cp -t /dev/shm x', 'rsync -avt x /tmp/y', 'install -Dt /tmp/z x',
   // /dev as a source, not a target
   'cp x /dev/null', 'cp -n a /dev/null', 'cp -r a /dev/null', 'cp -fv a /dev/null', 'cp x /dev/null 2>&1', 'cp /dev/null /dev/null', 'cp x /dev/stdout', 'cp /dev/null f', 'install -m 644 /dev/null f', 'ln -sf /dev/null link', 'touch -r /dev/null f', 'truncate -r /dev/null f',
   // tee to /dev/null
