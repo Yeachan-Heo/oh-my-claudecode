@@ -241,7 +241,34 @@ tmux() {
 result=$(psm_launch_claude "missing-session" 2>&1) || true
 assert_contains "error reported for missing session" "error|" "$result"
 
-# ── Context file creation (cmd_review simulation) ─────────────────────────────
+# 21. psm_inject_prompt failure does NOT fail psm_launch_claude (issue #5149 thread)
+# Reset tmux mock to normal behavior
+tmux() {
+    local subcmd="$1"
+    case "$subcmd" in
+        has-session) return 0 ;;
+        send-keys)   : ;;
+        display-message) echo "${TMPDIR_TEST}" ;;
+        *)           : ;;
+    esac
+}
+# Override psm_inject_prompt to simulate failure
+psm_inject_prompt() {
+    return 1  # Simulate failure (trust timeout or other error)
+}
+# Call with context file that exists (triggers inject)
+result=$(psm_launch_claude "test-session" ".psm/review.md" 2>&1)
+exit_code=$?
+if [[ $exit_code -eq 0 ]]; then
+    pass "psm_launch_claude returns success even when inject fails"
+else
+    fail "psm_launch_claude returns success even when inject fails" "returned $exit_code"
+fi
+assert_contains "reports warning about failed injection" "warn|" "$result"
+assert_contains "prints recovery instructions" "tmux attach-session" "$result"
+assert_contains "launch reports launched| despite injection failure" "launched|" "$result"
+
+# ── Context file creation (cmd_review simulation) ──────────────────────────────
 
 echo ""
 echo "=== Context file creation (cmd_review simulation) ==="

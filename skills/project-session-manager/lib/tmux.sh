@@ -101,7 +101,14 @@ psm_launch_claude() {
         # If the second arg resolves to a file in the worktree, preserve the
         # existing context-file flow. Otherwise treat it as a literal prompt.
         if [[ -n "$session_path" && -f "$session_path/$initial_context" ]]; then
-            psm_inject_prompt "$session_name" "$initial_context"
+            # Guard the inject call: if it fails (timeout or other error), keep the
+            # session registered and return success anyway, since the session was
+            # successfully created and Claude is running. The only failure is prompt
+            # injection, which is secondary to the session lifecycle.
+            if ! psm_inject_prompt "$session_name" "$initial_context"; then
+                echo "warn|Prompt injection failed; session remains registered for manual recovery" >&2
+                echo "warn|Use: tmux attach-session -t '$session_name'" >&2
+            fi
         else
             local startup_delay="${PSM_CLAUDE_STARTUP_DELAY:-5}"
             (
