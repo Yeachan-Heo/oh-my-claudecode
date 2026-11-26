@@ -845,6 +845,8 @@ describe('/dev guard: working directory and symbolic links', () => {
     ["bash -c 'cd /dev && rm null'", '/tmp'], ['(cd /dev && rm null)', '/tmp'], ['{ cd /dev; rm null; }', '/tmp'], ['cd /dev && bash -c "rm null"', '/tmp'], ['cd /dev || true; rm null', '/tmp'],
     ['cd /dev && echo x | tee sda', '/tmp'], ['cd /dev && echo x > sda', '/tmp'], ['cd /dev && dd of=sda if=x', '/tmp'], ['echo x > sda', '/dev'], ['chmod 600 null', '/dev'], ['touch null', '/dev'],
     ['cd /dev && chmod 600 null', undefined],
+    // a subshell leaves its cd behind, a cd after || may not have run, and a path that a feeder hands to xargs is read from the directory in force
+    ['cd /dev && (cd /tmp; true); rm null', '/tmp'], ['cd /dev || cd /tmp; rm null', '/tmp'], ['(cd /tmp); rm null', '/dev'], ['cd /dev && echo null | xargs rm', '/tmp'], ['echo null | xargs rm', '/dev'],
     // an extraction without -C or -d goes to the directory of the session, a relative -C or -d is read from it
     ['tar -xf a.tar', '/dev'], ['unzip a.zip', '/dev'], ['tar -xf a.tar -C sub', '/dev'], ['unzip a.zip -d sub', '/dev'], ['tar -C . -xf a.tar', '/dev'], ['tar -xf a.tar dev/null', '/'], ['unzip a.zip dev/null', '/'],
     ['cd /dev && tar -xf a.tar', '/tmp'], ['cd /dev && unzip a.zip', '/tmp'], ['cd /dev && tar -xf a.tar', undefined], ['cd /dev && unzip a.zip dev/null', undefined],
@@ -867,6 +869,7 @@ describe('/dev guard: working directory and symbolic links', () => {
     'cd /tmp && rm null', 'cd /tmp; rm null', 'cd /tmp/x && rm ./null', 'cd /dev/shm && rm x', 'cd /dev/shm/ && rm null', 'cd /dev && cd /tmp && rm null', 'cd /dev && cd .. && rm null',
     'cd /dev && ls null', 'cd /dev && cat null', 'cd /dev && echo x > null', 'cd /dev && echo x >> null', 'cd /dev && cp x null', 'cd /dev && ls | xargs echo', 'cd /dev && echo hello | xargs echo', 'cd /dev && stat null',
     'cd /dev && rm /tmp/x', 'cd /dev && rm ../tmp/x', 'cd /dev && rm shm/x', 'cd /dev && rm ./shm/x',
+    '(cd /dev; ls); rm null', '(cd /dev && ls) && rm null', 'cd /dev && echo null | xargs echo', 'cd /tmp && echo null | xargs rm', 'echo null | xargs rm', 'cd /dev && sudo echo null | xargs rm', 'cd /tmp || cd /dev; rm /tmp/x',
     'cd /dev && tar -xf a.tar -C /tmp', 'cd /dev && tar -xf a.tar -C /tmp b', 'cd /dev/shm && tar -xf a.tar', 'cd /dev && tar -tf a.tar', 'cd /dev && tar -xOf a.tar', 'cd /dev && unzip -l a.zip', 'cd /dev && unzip a.zip -d /tmp', 'cd /tmp && tar -xf a.tar', 'tar -xf a.tar', 'unzip a.zip',
   ])('allows %j', (command) => {
     expect(check(command, '/tmp').decision).toBe('allow');
@@ -908,8 +911,10 @@ describe('/dev guard: working directory and symbolic links', () => {
     }
   });
 
-  it('reads cd like the shell: -P and -- are options, a group or a subshell is read as if it did not end, an empty target stays', () => {
-    expect(check('(cd /dev); rm null', '/tmp').decision).toBe('deny');
+  it('reads cd like the shell: -P and -- are options, a group does not end the cd and a subshell does, a cd after || is unknown, an empty target stays', () => {
+    expect(check('(cd /dev); rm null', '/tmp').decision).toBe('allow');
+    expect(check('{ cd /dev; }; rm null', '/tmp').decision).toBe('deny');
+    expect(check('cd /dev && cd /tmp || true; rm null', '/tmp').decision).toBe('allow');
     expect(check('cd /dev | cat; rm null', '/tmp').decision).toBe('deny');
     expect(check('cd ""; rm null', '/dev').decision).toBe('deny');
     expect(check('cd "" && rm null', '/tmp').decision).toBe('allow');
