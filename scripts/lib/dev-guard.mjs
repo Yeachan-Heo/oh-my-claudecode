@@ -679,6 +679,7 @@ function devScanTokens(tokens, heredocs, depth) {
   let afterPipe = false; // the current command follows a pipe, where time is no keyword
   let redirected = false; // the current command has a redirection before the word: time is no keyword after it
   let afterOr = false; // the current command follows ||: it runs only when the one before failed
+  let afterPipeOp = false; // the current command follows a pipe operator (unlike afterPipe, a group or a condition does not clear it)
   const dirStack = []; // the directory in force at each open parenthesis: a subshell leaves it behind
   const flush = (op) => {
     const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
@@ -692,7 +693,11 @@ function devScanTokens(tokens, heredocs, depth) {
       if (!found && unwrapped.xargs && pipeDev && devCommand(unwrapped.name, piped, [], depth)) found = { what: `xargs ${unwrapped.name}`, path: pipeDev };
       devCwd = inForce;
     }
-    if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd')) { if (afterOr) devCwd = null; else devChangeDir(unwrapped.name, unwrapped.args); } // after || either directory may be in force
+    // A cd in a pipeline or in the background runs in a subshell, so the directory stays (the last command of a pipeline too: lastpipe is off in a script).
+    if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd') && !afterPipeOp && op !== '|' && op !== '|&' && op !== '&') {
+      if (afterOr) devCwd = null; // after || either directory may be in force
+      else devChangeDir(unwrapped.name, unwrapped.args);
+    }
     pipeDev = (op === '|' || op === '|&') && unwrapped && DEV_FEEDERS.has(unwrapped.name) ? wordDev : null;
     words = [];
     fed = [];
@@ -702,6 +707,7 @@ function devScanTokens(tokens, heredocs, depth) {
     redirected = false;
     afterPipe = op === '|' || op === '|&';
     afterOr = op === '||';
+    afterPipeOp = op === '|' || op === '|&';
     return found;
   };
   const subs = (word) => { for (const list of devSubLists(word.parts)) { const found = devScanTokens(list, heredocs, depth + 1); if (found) return found; } return null; };
