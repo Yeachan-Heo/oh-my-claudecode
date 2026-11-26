@@ -1517,12 +1517,13 @@ const unknownFile = (word, known) => {
 // as the host writes it (`.../tasks/<name>.output`) or as an agent in the task directory reads it, by its name alone (`cd <dir> && cat <id>.output`) or by a path relative to
 // it (`tasks/<id>.output`, `./<id>.output`): a name that is an id (4 to 64 word characters and hyphens, as TASK_ID_IN_RESULT reads one) and the extension .output is the file
 // of a task whatever stands before it. The files of the host are not known here, so a file of another kind with such a name is held too. A glob of such names
-// (`tasks/*.output`, `??.output`, `[a-z]*.output`, `{a,b}.output`) may name the file of a task whose start was cut, so it is held whatever the index holds.
-const GLOB_OUTPUT = /\.output\b(?<=[*?[{][\w.*?[\]{},-]{0,64}\.output)/i;
+// (`tasks/*.output`, `??.output`, `[a-z]*.output`, `{a,b}.output`) may name the file of a task whose start was cut, so it is held whatever the index holds, and so is a glob of the
+// directory itself, a wildcard among the at most 64 name characters after a directory called tasks (`tasks/*`, `tasks/?x`, `tasks/[a-z]*`, `tasks/{a,b}`), with no extension named.
+const GLOB_OUTPUT = /\.output\b(?<=[*?[{][\w.*?[\]{},-]{0,64}\.output)|(?<![\w.-])tasks\/[\w.-]{0,64}[*?[{]/i;
 function readsUnknownOutput(input, known) {
   // Every run of slashes and backslashes as one slash first (a Windows path, its JSON form with doubled backslashes, mixed separators), as the index of the files
   // is kept. Then only the file's own name is what the index holds, so that the read is linear whatever the input holds (a name starts where no name character stands before it;
-  // the glob is looked for from each `.output`, back over at most 64 name characters for a wildcard, so no run of characters is read twice).
+  // the glob is looked for from each `.output`, back over at most 64 name characters for a wildcard, and from each `tasks/`, forward over at most 64, so no start reads more than a bounded run).
   const text = inputJson(input).replace(/[\\/]+/g, '/');
   if (GLOB_OUTPUT.test(text)) return true;
   for (const m of text.matchAll(/\/tasks\/[\w.-]+\.output\b|(?<![\w.-])[\w-]{4,64}\.output\b/gi)) if (!known.has(m[0].slice(m[0].lastIndexOf('/') + 1).toLowerCase())) return true;

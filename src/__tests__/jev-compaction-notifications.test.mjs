@@ -497,6 +497,19 @@ describe('a notification of a background task that reads the output file of a ta
     ['a run of two hundred stars', `Summarize /tmp/work/tasks/${'*'.repeat(200)}.output for the report.`],
     ['a brace list', 'Summarize /tmp/work/tasks/{bk7x2mq9,zz9y8x7w}.output for the report.'],
   ];
+  // A glob of the task directory need not name the extension at all: a wildcard among the name characters right after a directory called tasks may name any file of a task.
+  const DIR_GLOBS = [
+    ['a star', 'Run cat /tmp/work/tasks/* and summarize it for the report.'],
+    ['a star in a path relative to the current directory', 'Summarize tasks/* for the report.'],
+    ['a question mark', 'Summarize /tmp/work/tasks/?x for the report.'],
+    ['a bracket range and a star', 'Summarize /tmp/work/tasks/[a-z]* for the report.'],
+    ['a brace list', 'Summarize /tmp/work/tasks/{bk7x2mq9,zz9y8x7w} for the report.'],
+    ['a star after the start of a name', 'Summarize /tmp/work/tasks/bk7x* for the report.'],
+    ['a star after a name with a hyphen and a dot', 'Summarize /tmp/work/tasks/ab-c.d* for the report.'],
+    ['a star in a directory in capitals', 'Summarize /tmp/work/TASKS/* for the report.'],
+    ['a star in a path with backslashes', 'Summarize C:\\work\\tasks\\* for the report.'],
+    ['a star after a name of 64 characters', `Summarize /tmp/work/tasks/${'a'.repeat(64)}* for the report.`],
+  ];
   for (const [firstLabel, extra, command] of FIRST) {
     for (const [label, prompt] of GLOBS) {
       it(`is traced and never sent to Jev when the first task (${firstLabel}) was removed by an earlier compaction and an Agent reads the files by ${label}`, async () => {
@@ -507,11 +520,29 @@ describe('a notification of a background task that reads the output file of a ta
         expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 2 });
       });
     }
+    for (const [label, prompt] of DIR_GLOBS) {
+      it(`is traced and never sent to Jev when the first task (${firstLabel}) was removed by an earlier compaction and an Agent reads the whole task directory by ${label}`, async () => {
+        const second = await twoPasses(extra, command, prompt);
+        expect(second.bodies.join('')).not.toContain('SECRETBODY');
+        expect(JSON.stringify(second.out.messages)).not.toContain('SECRETBODY');
+        expect(second.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 2 });
+      });
+    }
     it(`controls (${firstLabel}): the exact name of the file is held as before, and a glob that does not end in .output is read as any file`, async () => {
       const exact = await twoPasses(extra, command, 'Summarize /tmp/work/tasks/bk7x2mq9.output for the report.');
       expect(exact.bodies.join('')).not.toContain('SECRETBODY');
       expect(exact.record).toMatchObject({ result: 'jev', notifications: 1, secret_held: 2 });
-      for (const prompt of ['Summarize /tmp/work/tasks/*.txt for the report.', 'Summarize /tmp/work/*.log and /tmp/work/notes?.md for the report.', 'Summarize /tmp/work/tasks/*.outputs for the report.']) {
+      // The directory is called tasks only where the host keeps its tasks: another name, a name that only ends in tasks, a read with no wildcard and a name past the length of an id are read as any file.
+      const plains = [
+        'Summarize /tmp/work/reports/*.txt for the report.',
+        'Summarize /tmp/work/*.log and /tmp/work/notes?.md for the report.',
+        'Summarize /tmp/work/reports/*.outputs for the report.',
+        'Summarize /tmp/work/reports/* and /tmp/work/reports/[a-z]? for the report.',
+        'Summarize /tmp/work/subtasks/* for the report.',
+        'Summarize /tmp/work/tasks/ and /tmp/work/tasks/notes.txt for the report.',
+        `Summarize /tmp/work/tasks/${'a'.repeat(65)}* for the report.`,
+      ];
+      for (const prompt of plains) {
         const plain = await twoPasses(extra, command, prompt);
         expect(plain.record, prompt).toMatchObject({ result: 'jev', notifications: 1, secret_held: 0 });
       }
@@ -524,18 +555,20 @@ describe('a notification of a background task that reads the output file of a ta
       { role: 'assistant', text: 'Reading.', toolUses: [{ tool_use_id: 'rf1', tool: 'Bash', input: { command } }] },
       { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'rf1', text: `PLAINBODY ${'f'.repeat(7000)}`, isError: false }] },
     ];
-    for (const command of ['cd /tmp/work && cat notes.txt', 'cd /tmp/work && ls *; cat build.log', 'cd /tmp/work && grep -c a* b.txt', 'cd /tmp/work && cat ab.output']) {
+    for (const command of ['cd /tmp/work && cat notes.txt', 'cd /tmp/work && ls *; cat build.log', 'cd /tmp/work && grep -c a* b.txt', 'cd /tmp/work && cat ab.output', 'cd /tmp/work && cat reports/* subtasks/*']) {
       const run = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...readOf(command), ...w.slice(3)]);
       expect(run.record, command).toMatchObject({ result: 'jev', secret_held: 0 });
       expect(run.bodies.join(''), command).toContain('PLAINBODY');
     }
     // The read of a glob of task files is held in a call of its own too, in the foreground, like a name of that shape.
-    const held = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...readOf('cd /tmp/work/tasks && cat *.output'), ...w.slice(3)]);
-    expect(held.record).toMatchObject({ result: 'jev', secret_held: 1 });
-    expect(held.bodies.join('')).not.toContain('PLAINBODY');
+    for (const command of ['cd /tmp/work/tasks && cat *.output', 'cd /tmp/work && cat tasks/*']) {
+      const held = await compactRun(NOTE_ENV, [...w.slice(0, 3), ...readOf(command), ...w.slice(3)]);
+      expect(held.record, command).toMatchObject({ result: 'jev', secret_held: 1 });
+      expect(held.bodies.join(''), command).not.toContain('PLAINBODY');
+    }
   });
 
-  it('reads a run of a million wildcard characters before .output in linear time', async () => {
+  it('reads a run of a million wildcard characters before .output, and long runs of names after a task directory, in linear time', async () => {
     const w = talk(30);
     const prompts = [
       `Summarize ${'*'.repeat(1_000_000)}.output`,
@@ -544,6 +577,10 @@ describe('a notification of a background task that reads the output file of a ta
       `Summarize ${`${'a*'.repeat(32)}.outpu `.repeat(15_000)}`,
       `Summarize ${'[]{},*?.-_'.repeat(100_000)}`,
       `Summarize ${'.output'.repeat(150_000)}`,
+      `Summarize ${'/tasks/'.repeat(300_000)}`,
+      `Summarize tasks/${'a'.repeat(1_000_000)}`,
+      `Summarize ${`tasks/${'a'.repeat(64)} `.repeat(25_000)}`,
+      `Summarize ${'tasks/a.-'.repeat(200_000)}`,
     ];
     for (const prompt of prompts) {
       const t0 = performance.now();
