@@ -88,6 +88,10 @@ const BLOCKED: string[] = [
   "env -S 'rm\\_/dev/null'", "env -S 'rm\\_/dev/null' x", "env --split-string='rm\\_/dev/null'", "env -S 'echo hi\\_&&\\_rm /dev/null'", "env -S 'rm\\_\"/dev/null\"'",
   // -- ends the options of eval
   "eval -- 'rm /dev/null'", "eval -- rm /dev/null", "eval -- 'echo x; rm /dev/null'",
+  // a member of an archive that lands under /dev when the extraction directory is /
+  'tar -C / -xf /tmp/a.tar dev/null', 'gtar -C / -xf /tmp/a.tar dev/null', 'bsdtar -C / -xf /tmp/a.tar dev/null', 'tar xf /tmp/a.tar -C / dev/null', 'tar -xf /tmp/a.tar -C / ./dev/null',
+  'tar --directory=/ -xf /tmp/a.tar dev/null', 'tar -C / --extract --file=/tmp/a.tar dev/null', 'tar -C / -xf /tmp/a.tar dev', 'tar -C /tmp -xf /tmp/a.tar ../dev/null', 'tar -C / -C tmp -xf /tmp/a.tar ../dev/null',
+  'unzip -o /tmp/a.zip dev/null -d /', 'unzip /tmp/a.zip dev/null -d /', 'unzip -d / /tmp/a.zip dev/null', 'unzip -d/ /tmp/a.zip dev/null', 'unzip -o /tmp/a.zip x ../dev/null -d /tmp',
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
   'echo `bash <<B\nrm /dev/null\nB\n`', 'x=`bash <<B\nrm -f /dev/sda\nB\n`', 'echo `echo \\`rm /dev/null\\``',
   // a path from the pipe lands in the place of the replace string of xargs -I
@@ -171,6 +175,9 @@ const ALLOWED: string[] = [
   // env -S: a separator after the backslash and underscore, or the pair kept inside quotes (never a command)
   "env -S 'echo\\_hi'", "env -S \"echo 'rm\\_/dev/null'\"", "env -S 'echo \"rm\\_/dev/null\"'", "env -S 'echo \\x\\_y'",
   "eval -- 'echo hi'", 'eval --', "eval -- ''",
+  // members that stay outside /dev, a member without an extraction directory, and -j, which drops the directories of the members
+  'tar -C /tmp -xf /tmp/a.tar dev/null', 'tar -xf /tmp/a.tar dev/null', 'tar -C / -xf /tmp/a.tar etc/x', 'tar -tf /tmp/a.tar dev/null', 'tar -C / -tf /tmp/a.tar dev/null',
+  'unzip -o /tmp/a.zip dev/null -d /tmp', 'unzip /tmp/a.zip dev/null', 'unzip -j /tmp/a.zip dev/null -d /', 'unzip -l /tmp/a.zip dev/null -d /', 'unzip -o /tmp/a.zip etc/x -d /',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
@@ -257,6 +264,9 @@ describe('/dev guard: Bash commands', () => {
     const recipe = 'mknod -m 666 /dev/null.new c 1 3 && mv -f /dev/null.new /dev/null';
     // 12 000 here-documents (about 230 000 characters) took several seconds when each redirection searched the list of here-documents
     const manyHeredocs = Array.from({ length: 12000 }, (_, i) => `cat <<E${i}\nx\nE${i}`).join('\n');
+    // 10 000 extraction directories and 10 000 members, all different, took more than a minute when every member was tried against every directory
+    const manyDirs = Array.from({ length: 10000 }, (_, i) => `/tmp/d${i}`);
+    const manyMembers = Array.from({ length: 10000 }, (_, i) => `m/x${i}`);
     const table: Array<[string, 'allow' | 'deny']> = [
       ['echo' + ' '.repeat(200000) + 'x', 'allow'],
       ['echo' + '\t'.repeat(200000) + 'x', 'allow'],
@@ -268,6 +278,9 @@ describe('/dev guard: Bash commands', () => {
       [manyHeredocs, 'allow'],
       [`${manyHeredocs}\nbash <<'Z'\nrm /dev/null\nZ`, 'deny'],
       [`${'nice '.repeat(10000)}ls /tmp`, 'allow'],
+      [`tar ${manyDirs.map((d) => `-C ${d}`).join(' ')} -xf a.tar ${manyMembers.join(' ')}`, 'allow'],
+      [`unzip ${manyDirs.map((d) => `-d ${d}`).join(' ')} a.zip ${manyMembers.join(' ')}`, 'allow'],
+      [`tar ${manyDirs.map((d) => `-C ${d}`).join(' ')} -C / -xf a.tar ${manyMembers.join(' ')} dev/null`, 'deny'],
     ];
     for (const [command, expected] of table) {
       const started = Date.now();

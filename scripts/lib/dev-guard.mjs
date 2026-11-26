@@ -304,6 +304,27 @@ function partedReadsOnly(commands) {
   return true;
 }
 
+// The first path under /dev (devChangedIn) that one of the named archive members reaches from one of the absolute extraction directories.
+// Only two kinds of directory can lead a member into /dev: those that ".." climbs out of to the root, and those under /dev/shm (one step
+// up from /dev/shm itself is /dev); so the check keeps the smallest depth and the depths below /dev/shm instead of trying every pair.
+function archiveMemberInDev(dirs, members) {
+  let shallowest = Infinity;
+  const shmDepths = new Set();
+  for (const d of dirs) {
+    const depth = d.split('/').filter(Boolean).length;
+    shallowest = Math.min(shallowest, depth);
+    if (d === '/dev/shm' || d.startsWith('/dev/shm/')) shmDepths.add(depth);
+  }
+  for (const member of members) {
+    const name = posix.normalize(member);
+    const ups = /^(?:\.\.\/)*/.exec(name + '/')[0].length / 3;
+    const rest = name.slice(ups * 3);
+    const found = (ups >= shallowest ? devChangedIn(posix.join('/', rest)) : null) ?? (shmDepths.has(ups + 1) ? devChangedIn(posix.join('/dev', rest)) : null);
+    if (found) return found;
+  }
+  return null;
+}
+
 // tar and bsdtar: the directories of -C / --directory (each relative one resolves against the previous), when the command extracts.
 function tarExtractDir(args) {
   const valueLetters = 'bCfFgHIKLNTVX';
@@ -325,11 +346,13 @@ function tarExtractDir(args) {
   for (const [key, value] of parsed.values) if (key === 'C' || key === '--cd' || longIs(key, '--directory', 5)) dirs.push(value);
   let current = null;
   let found = null;
+  const resolved = [];
   for (const d of dirs) {
     current = d.startsWith('/') ? posix.normalize(d) : current === null ? d : posix.join(current, d);
     found ??= devChangedIn(current);
+    if (current.startsWith('/')) resolved.push(current);
   }
-  return found;
+  return found ?? archiveMemberInDev(resolved, parsed.operands); // a named member lands in each directory, whatever order -C and the members come in
 }
 
 // Commands the guard judges by one argument pattern each (disk tools, archives, in-place awk, line editors): undefined when `name` is none of them, else a finding or null.
@@ -356,10 +379,12 @@ function devExtraCommand(name, args) {
   }
   if (name === 'tar' || name === 'gtar' || name === 'bsdtar') return hit(tarExtractDir(args));
   if (name === 'unzip') {
-    const { shorts, values } = parseGetopt(args, 'dPOI');
+    const { shorts, operands, values } = parseGetopt(args, 'dPOI');
     if (shorts.some((c) => 'lvtpczZ'.includes(c))) return null; // listing, testing, writing to stdout: no files are created
-    for (const [key, value] of values) if (key === 'd') { const d = devChangedIn(value); if (d) return { what: name, path: d }; }
-    return null;
+    const members = shorts.includes('j') ? [] : operands.slice(1); // after the archive; -j drops the directories of the members
+    const dirs = values.filter(([key]) => key === 'd').map(([, value]) => value);
+    for (const value of dirs) { const d = devChangedIn(value); if (d) return { what: name, path: d }; }
+    return hit(archiveMemberInDev(dirs.filter((d) => d.startsWith('/')).map((d) => posix.normalize(d)), members));
   }
   if (name === 'awk' || name === 'gawk') { // -i inplace, --include=inplace: the gawk extension that rewrites the files
     const { operands, values } = parseGetopt(args, 'fvFeEilW', (n) => ['--file', '--assign', '--field-separator', '--source', '--exec', '--load'].includes(n) || longIs(n, '--include', 5));
