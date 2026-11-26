@@ -3022,6 +3022,50 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a PATH that the command or the settings give is the PATH of the hook only when no component of it holds a parameter that nothing gives a value to (PATH=$DIR:$PATH, DIR only in the session), and only in the simple command that has it (PATH=dir true; audit): the guard cannot tell which file a bare name runs, so it refuses to start; a PATH whose parameters the settings, the command or a default word fill in settles it as before', () => {
+    const f = fixture('foreign-session-path-component', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project-bin');   // the directory that only the session has in FHG_DIR
+    const usr = join(f.dir, 'usr-bin');   // on the PATH of the guard
+    mkdirSync(project);
+    mkdirSync(usr);
+    const text = '#!/bin/sh\necho session\n';
+    const audit = join(project, 'audit');
+    const known = join(usr, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    writeFileSync(known, '#!/bin/sh\necho guard\n', { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const guardOnly = { ...ENV, PATH: `${usr}:${ENV.PATH}` };
+    const start = (command: string, config: Record<string, string>, settingsEnv: Record<string, string> = {}) => {
+      writeFileSync(f.settings, JSON.stringify({ env: settingsEnv, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once'], { env: guardOnly });
+    };
+    const sessionEnv = { ...process.env, PATH: `${usr}:${process.env.PATH}`, FHG_DIR: project };
+    expect(spawnSync('sh', ['-c', 'PATH=$FHG_DIR:$PATH audit'], { encoding: 'utf8', env: sessionEnv }).stdout, 'the session has the directory in the component').toBe('session\n');
+    expect(spawnSync('sh', ['-c', 'PATH=$FHG_DIR:$PATH audit'], { encoding: 'utf8', env: guardOnly }).stdout, 'the guard has none: it finds the other file').toBe('guard\n');
+    expect(spawnSync('sh', ['-c', `PATH=${project} true; audit`], { encoding: 'utf8', env: guardOnly }).stdout, 'a PATH in front of another command is not the PATH of this one').toBe('guard\n');
+    const refused: Array<[string, Record<string, string>]> = [['PATH=$FHG_DIR:$PATH audit', {}], ['PATH=$PATH:$FHG_DIR audit', {}], ['audit', { PATH: '$FHG_DIR:$PATH' }], ['PATH=${FHG_DIR}:$PATH exec audit', {}], ['true; PATH=$FHG_DIR:$PATH audit', {}],
+      [`PATH=${project} true; audit`, {}], [`PATH=${project} true | audit`, {}], [`PATH=${project} true; env audit`, {}], ['FHG_DIR=x PATH=$FHG_DIR:$PATH audit', {}]];
+    for (const [command, settingsEnv] of refused) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit }, settingsEnv);
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a PATH whose components are all known settles which file is meant: the collision with the file of that directory
+    const settled: Array<[string, Record<string, string>, string]> = [[`PATH=${usr}:$PATH audit`, {}, known], [`PATH=\${FHG_DIR:-${project}}:$PATH audit`, {}, audit], ['PATH=$FHG_DIR:$PATH audit', { FHG_DIR: project }, audit], ['audit', { PATH: `${project}:$PATH` }, audit],
+      ['FHG_DIR=' + project + '; PATH=$FHG_DIR:$PATH audit', {}, audit], [`PATH=${project}; audit`, {}, audit], [`PATH=${usr} audit`, {}, known]];
+    for (const [command, settingsEnv, file] of settled) {
+      const r = start(command, { state_file: file }, settingsEnv);
+      expect(r.status, `${command} with ${JSON.stringify(settingsEnv)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${file}) and "program of another hook" (${file}) are the same file`);
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+  });
+
   it('an unbraced special parameter in the command of another hook (dollar and ?, $, !, #, *, @ or -), also inside double quotes, is a word that the scan cannot know, so the guard refuses to start; single quotes, a backslash, a dollar before a blank or at the end, the braced forms and the other parameters are read as before', () => {
     const f = fixture('foreign-special-parameter', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');

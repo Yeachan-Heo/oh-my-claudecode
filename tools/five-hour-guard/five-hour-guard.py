@@ -316,7 +316,7 @@ def command_word(words):
     return None
 
 
-def session_dependent(piece, runs, directories, named, moved, assigned, settled):
+def session_dependent(piece, runs, directories, named, moved, settled, path_values):
     """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
     neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command does not move its working
     directory (`moved`: no `-C`, `--directory` or `--chdir` option in front of the word that its own simple command runs (an option of a wrapper, `env -C DIR prog`;
@@ -325,7 +325,9 @@ def session_dependent(piece, runs, directories, named, moved, assigned, settled)
     subshell, a pipe, the background or before `||` moves nothing after it) and that ends the path of a file the guard writes; a word without a
     directory part that the command runs (`runs`) and that is the name of a file the guard writes: the shell looks it up on the PATH of
     the session, which the guard does not know, so a file that the guard finds on its own PATH does not tell which one runs; only a PATH that a
-    `PATH=` word or the settings give (`assigned`) is the PATH of the hook, and then the word is settled when a directory the guard looks in has it. A parameter that nothing here gives a value (the command and the settings assign none; what the guard has in its own environment is a
+    `PATH=` word of the simple command itself, an assignment that stands alone or the settings give (`path_values`) is the PATH of the hook, and then
+    the word is settled when a directory the guard looks in has it, unless a component of that PATH holds a parameter that nothing gives a value to
+    (`PATH=$DIR:$PATH`, `DIR` only in the session): the shell may find the program in a directory that is not known here. A parameter that nothing here gives a value (the command and the settings assign none; what the guard has in its own environment is a
     candidate, not the value of the hook, whose session may have none or another one, `HOME` and `~` too) is the session's too, and so is one that only a
     scoped assignment gives (`settled`: the names that settings.json or an assignment of its own, `A=x; cmd`, `export A=x` or `${A:=x}`, give for the whole command; `A=x cmd` and
     `env A=x cmd` give A to `cmd` alone, and `unset A` takes it away): it is refused when what follows it in the word is empty or ends the path of a file the
@@ -337,9 +339,10 @@ def session_dependent(piece, runs, directories, named, moved, assigned, settled)
     key = lambda text: os.path.normcase(text).lower() if sys.platform == 'darwin' else os.path.normcase(text)
     written = [key(path_key(out)) for _label, out in written_files()]
     scan = re.sub(r'^~[^/\\]*', '${HOME}', piece)   # (a leading ~ is the HOME of the session)
+    unknown = lambda m: (m.group(1) or m.group(2) or m.group(5)) not in settled and not ((m.group(1) or m.group(2) or m.group(5)) == 'PATH' and path_values) and m.group(3) not in ('-', ':-', '=', ':=', '+', ':+', '?', ':?')   # a parameter that nothing gives a value to (`$PATH` has one when a PATH is given: the one before it is the guard's candidate)
     for m in PARAMETER.finditer(scan):
         name = m.group(1) or m.group(2) or m.group(5)
-        if name not in settled and m.group(3) not in ('-', ':-', '=', ':=', '+', ':+', '?', ':?'):
+        if unknown(m):
             rest = os.path.expandvars(scan[m.end():])
             if not rest or any(out.endswith(key(rest)) for out in written):
                 return True
@@ -352,7 +355,7 @@ def session_dependent(piece, runs, directories, named, moved, assigned, settled)
         while parts and parts[0] == '..':
             parts.pop(0)
         return bool(parts) and parts != ['.'] and any(out.endswith(os.sep + key(os.sep.join(parts))) for out in written)
-    return bool(runs) and any(os.path.basename(out) == key(path) for out in written) and (not assigned.get('PATH') or not any(os.path.lexists(os.path.join(d, path)) for d in directories))
+    return bool(runs) and any(os.path.basename(out) == key(path) for out in written) and (not path_values or any(unknown(m) for value in path_values for m in PARAMETER.finditer(value)) or not any(os.path.lexists(os.path.join(d, path)) for d in directories))
 
 
 def word_files(word, directories, named=()):
@@ -817,6 +820,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                     named.append(directory)
     for words, here in zip(simple, moved_at):
         run = command_word(words)
+        path_values = (assigned.get('PATH', []) if 'PATH' in settled else []) + [own_value('PATH', w[5:]) for w in words if w.startswith('PATH=')]   # the PATH of this simple command: the one that holds for the whole command, and its own PATH= words (a PATH= in front of another command is not its PATH)
         path_dirs = os.environ.get('PATH', os.defpath).split(os.pathsep) + [os.path.expanduser(os.path.expandvars(d)) for w in words if w.startswith('PATH=') for piece in word_pieces(w, assigned) if piece.startswith('PATH=') for d in piece[5:].split(os.pathsep)] + given_path   # a PATH= word is filled in with the values of its parameters first, then split
         directories = [''] + path_dirs + [os.path.normpath(os.path.join(n, d)) for d in path_dirs if d and not os.path.isabs(d) for n in named] + named   # a PATH=dir word adds its directories for every word of the simple command; a relative PATH entry is also looked up from each directory that the command names (`cd /dir; PATH=bin prog`)
         for index, word in enumerate(words):
@@ -829,7 +833,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                 here_names = {w.partition('=')[0] for w in words if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', w, re.DOTALL)}   # the quoted command gets what is set for the whole command and what stands in front of it in its own simple command (`env A=x sh -c '...'`)
                 found += [t for t in command_programs(word, exclude, depth + 1, named, {n: v for n, v in assigned.items() if n in settled or n in here_names}, here) if t not in found]
             for piece in word_pieces(word, assigned):
-                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, here, assigned, settled):
+                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, here, settled, path_values):
                     raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:
