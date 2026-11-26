@@ -68,15 +68,63 @@ def has_marker(command):
     return before[-1:].isspace() and unescaped(before, len(before) - 1)
 
 
+def strip_comments(command):
+    """The command without its shell comments: a `#` that starts a word (at the start, after a blank or a newline, or after one of ; & | ( ) ),
+    outside quotes and `${...}` and not escaped, up to the end of its line, which stays. A `#` inside a word (`a#b`, `$#`, `${A#x}`) is text. Where
+    this scan could differ from a shell (`$'...'`, a backtick, `<<` of a here document) nothing is removed: removing too much would hide a file, so such a
+    command stays whole, and so does any text that this scan cannot place (it is not a parser: `$(...)`, nested quotes
+    inside `$(...)` are scanned as plain text). The comment that is the marker of the entry of this guard is kept: what follows it
+    is a command to the guard's own entry that a shell would not run, and it stays a candidate."""
+    if "$'" in command or '`' in command or '<<' in command:
+        return command
+    out, quote, depth, boundary, i = [], None, 0, True, 0
+    while i < len(command):
+        c = command[i]
+        if quote:
+            out.append(c)
+            if c == '\\' and quote == '"' and i + 1 < len(command):
+                i += 1
+                out.append(command[i])
+            elif c == quote:
+                quote = None
+        elif c == '\\' and i + 1 < len(command):
+            out.append(command[i:i + 2])
+            i += 1
+            boundary = False
+        elif c in '\'"':
+            quote, boundary = c, False
+            out.append(c)
+        elif c == '#' and boundary and not depth and not command.startswith(ENTRY_MARKER, i):
+            end = command.find('\n', i)
+            i = len(command) if end < 0 else end
+            continue
+        else:
+            if c == '$' and command[i + 1:i + 2] == '{':
+                depth += 1
+                out.append('${')
+                i += 2
+                boundary = False
+                continue
+            if c == '}' and depth:
+                depth -= 1
+            boundary = c in ' \t\r\n;&|()'
+            out.append(c)
+        i += 1
+    return ''.join(out)
+
+
 def is_entry(handler, hook):
     """Whether a hook handler is the entry of this guard: a command handler whose command ends with ENTRY_MARKER (what `add` writes now, see has_marker) or
     the exact path `hook` of the hook script, as a whole word of the command (it starts and ends at a blank, an operator of the shell or an
     end of the command: a character that is valid in a file name, such as `+`, `,`, `@`, `%`, `=`, `:` or `~`, is no boundary, so `hook.py+audit` is
     another file; a quote that opens at the start of the word closes at its end, `'hook'` and `"hook"`, so `'hook'+audit` and `audit'hook'` are other
     words; a quote that opens in front of the path and stays open, as in `sh -c 'hook --pause-file p'`, is the text of a quoted command; the blank or operator in front of it is free, see unescaped: `foo\\ hook` is one word, `foo` and the path together, which no shell runs as the hook): the entries
-    that earlier versions of `add` wrote have no marker, and their command holds the path of the hook."""
+    that earlier versions of `add` wrote have no marker, and their command holds the path of the hook. A path that stands in a comment of the shell (`echo ok # hook`) is
+    no word that runs, so it does not count: the comments are removed first as the guard removes them (strip_comments; where it cannot place a comment, a command with `$'...'`, a
+    backtick or `<<`, the text stays whole, and the path in it still counts)."""
     command = handler.get('command') if isinstance(handler, dict) else None
     if not isinstance(command, str) or handler.get('type') != 'command':
         return False
     path, edge = re.escape(hook), r'[^\s;&|()<>]'
-    return has_marker(command) or any(m.start() == 0 or unescaped(command, m.start() - 1) for m in re.finditer(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', command))
+    text = strip_comments(command)   # a path in a comment of the shell is never run
+    return has_marker(command) or any(m.start() == 0 or unescaped(text, m.start() - 1) for m in re.finditer(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', text))

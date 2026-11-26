@@ -660,6 +660,35 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('the path of the hook in a comment of the shell is no word that runs: a handler of another tool whose command has it after a # is no entry, so check does not count it and add and remove leave it alone; a path that stands in quotes, in the text of a quoted command or before the comment is still the entry', () => {
+    const foreign = [`printf '%s\\n' ok # ${HOOK}`, `printf '%s\\n' ok #${HOOK}`, `printf '%s\\n' ok\n# ${HOOK}`, `printf '%s\\n' ok # sh ${HOOK} --pause-file p`, `printf '%s\\n' "a # b" # ${HOOK}`];
+    for (const command of foreign) {
+      // what the shell does: the comment is not run, the path is not printed or run
+      expect(spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout.split('\n').some((line) => line.includes(HOOK)), `${JSON.stringify(command)}: the path is in a comment`).toBe(false);
+      const f = fixture('settings-comment-path');
+      const doc = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } };
+      write(f, doc);
+      const check = tool(f, 'check');
+      expect(check.status, `${JSON.stringify(command)}: check does not take it for the entry: ${check.stdout}${check.stderr}`).toBe(1);
+      const remove = tool(f, 'remove');
+      expect(remove.stdout, `${JSON.stringify(command)}: remove leaves it`).toMatch(/nothing to do/);
+      expect(readJson(f.settings), `${JSON.stringify(command)}: the only handler is as it was after remove`).toEqual(doc);
+      const add = tool(f, 'add');
+      expect(add.status, `${JSON.stringify(command)}: ${add.stderr}`).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre, `${JSON.stringify(command)}: add appends its own entry`).toHaveLength(2);
+      expect(pre[0], `${JSON.stringify(command)}: and the handler of the other tool stays`).toEqual(doc.hooks.PreToolUse[0]);
+    }
+    const real = [`sh ${HOOK} --pause-file p`, `'${HOOK}'`, `printf '%s\\n' "a # b" ${HOOK}`, `sh -c '${HOOK} --pause-file p'`, `sh ${HOOK} --pause-file p # a note`];
+    for (const command of real) {
+      const f = fixture('settings-comment-path-real');
+      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      const check = tool(f, 'check');
+      expect(check.status, `${JSON.stringify(command)}: check finds it: ${check.stdout}${check.stderr}`).toBe(0);
+      expect(check.stdout, command).toMatch(/1 entry\/entries/);
+    }
+  });
+
   it('a blank or an operator in front of the path of the hook that a backslash escapes (a backslash and a blank, a semicolon, an ampersand, a bar or a new line) makes the path part of a longer word: a handler of another tool whose word is something and the path together is no entry, so check does not count it and add and remove leave it alone; two backslashes leave the boundary free, and a path bare, in quotes or with a blank in it (quoted by add) is found as before', () => {
     const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const foreign = [`printf '%s\\n' foo\\ ${HOOK}`, `printf '%s\\n' foo\\;${HOOK}`, `printf '%s\\n' foo\\&${HOOK}`, `printf '%s\\n' foo\\|${HOOK}`, `printf '%s\\n' foo\\\n${HOOK}`, `printf '%s\\n' foo\\\\\\ ${HOOK}`, `printf '%s\\n' foo\\ '${HOOK}'`];

@@ -411,51 +411,6 @@ def is_operator(token):
     return bool(token) and all(c in PUNCTUATION for c in token)
 
 
-def strip_comments(command):
-    """The command without its shell comments: a `#` that starts a word (at the start, after a blank or a newline, or after one of ; & | ( ) ),
-    outside quotes and `${...}` and not escaped, up to the end of its line, which stays. A `#` inside a word (`a#b`, `$#`, `${A#x}`) is text. Where
-    this scan could differ from a shell (`$'...'`, a backtick, `<<` of a here document) nothing is removed: removing too much would hide a file, so such a
-    command stays whole, and so does any text that this scan cannot place (it is not a parser: `$(...)`, nested quotes
-    inside `$(...)` are scanned as plain text). The comment that is the marker of the entry of this guard is kept: what follows it
-    is a command to the guard's own entry that a shell would not run, and it stays a candidate."""
-    if "$'" in command or '`' in command or '<<' in command:
-        return command
-    out, quote, depth, boundary, i = [], None, 0, True, 0
-    while i < len(command):
-        c = command[i]
-        if quote:
-            out.append(c)
-            if c == '\\' and quote == '"' and i + 1 < len(command):
-                i += 1
-                out.append(command[i])
-            elif c == quote:
-                quote = None
-        elif c == '\\' and i + 1 < len(command):
-            out.append(command[i:i + 2])
-            i += 1
-            boundary = False
-        elif c in '\'"':
-            quote, boundary = c, False
-            out.append(c)
-        elif c == '#' and boundary and not depth and not command.startswith(ENTRY.ENTRY_MARKER, i):
-            end = command.find('\n', i)
-            i = len(command) if end < 0 else end
-            continue
-        else:
-            if c == '$' and command[i + 1:i + 2] == '{':
-                depth += 1
-                out.append('${')
-                i += 2
-                boundary = False
-                continue
-            if c == '}' and depth:
-                depth -= 1
-            boundary = c in ' \t\r\n;&|()'
-            out.append(c)
-        i += 1
-    return ''.join(out)
-
-
 SUBSTITUTION_STARTS = ('$(', '$[', '$?', '$$', '$!', '$#', '$*', '$@', '$-')   # a command substitution, an arithmetic expansion, and the special parameters without braces (the status of the last command, the PID of the shell, the PID of the last job, the number of arguments, the arguments, the options)
 
 
@@ -583,7 +538,7 @@ def command_tokens(command, quoted=False):
     tokens = None
     for text in dict.fromkeys([decode_ansi_c(command), command]):   # the command with its `$'...'` decoded first, then as written: a shell that has no such quote (dash) reads `$` and the text
         if not quoted:   # the text of a quoted word is not told apart from data (`echo "a #b file"`), so no comment is removed from it
-            text = strip_comments(text)
+            text = ENTRY.strip_comments(text)
         try:
             lex = shlex.shlex(text, posix=True, punctuation_chars=PUNCTUATION)
             lex.whitespace, lex.whitespace_split, lex.commenters = ' \t\r', True, ''
@@ -783,7 +738,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     candidates, each once (the words of the entry that this guard generates, see registered_runtime_files)."""
     exclude = [] if exclude is None else exclude
     command = join_continuations(command) if depth == 0 and isinstance(command, str) else command   # (the text of a quoted word has had its continuations removed with the command around it)
-    if has_substitution(command if depth > 0 else strip_comments(command)):   # at depth 0 a comment is no command (as in command_tokens); a quoted command is read as it is
+    if has_substitution(command if depth > 0 else ENTRY.strip_comments(command)):   # at depth 0 a comment is no command (as in command_tokens); a quoted command is read as it is
         raise ScanIncomplete('command has a command substitution, a special parameter of the shell or an extended glob pattern, whose result cannot be known')
     tokens = command_tokens(command, depth > 0)
     if tokens is None:
