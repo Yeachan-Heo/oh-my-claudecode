@@ -191,34 +191,30 @@ psm_render_template() {
     printf '%s\n' "$content"
 }
 
-# Returns 0 if the captured pane text shows Claude's interactive input prompt.
-# Matches '>' (standard prompt) or '?' (trust prompt) as the sole content of a line.
+# Returns 0 if the captured pane text shows Claude's interactive input prompt
+# ('>' as the sole content of a line).
 # Usage: _psm_pane_has_claude_prompt <pane_text>
 _psm_pane_has_claude_prompt() {
     local pane_text="$1"
-    printf '%s' "$pane_text" | grep -qE '^[[:space:]]*(>|\?)[[:space:]]*$'
+    printf '%s' "$pane_text" | grep -qE '^[[:space:]]*>[[:space:]]*$'
 }
 
 # Poll the tmux pane until Claude's REPL prompt appears.
-# DOES NOT auto-answer trust dialogs; user must approve directory trust manually.
+# Never answers dialogs: a pending directory-trust prompt is left for the user.
 # Usage: psm_wait_for_claude_prompt <session_name> [max_seconds]
 # Returns 0 when prompt detected; 1 on timeout.
 psm_wait_for_claude_prompt() {
     local session_name
     session_name=$(psm_tmux_safe_name "$1")
-    local max_wait="${2:-60}"
+    local max_wait="${2:-30}"
     local waited=0
 
     while [[ $waited -lt $max_wait ]]; do
         local pane_content
         pane_content=$(tmux capture-pane -t "$session_name" -p 2>/dev/null) || return 1
-        
-        # Check for Claude's normal REPL prompt (shows as ">")
-        # Note: We do NOT auto-answer trust prompts ("?"); user must approve manually.
-        if printf '%s' "$pane_content" | grep -qE '^[[:space:]]*>[[:space:]]*$'; then
+        if _psm_pane_has_claude_prompt "$pane_content"; then
             return 0
         fi
-        
         sleep 1
         (( waited++ )) || true
     done
@@ -226,76 +222,22 @@ psm_wait_for_claude_prompt() {
     return 1
 }
 
-# Poll the tmux pane until the directory-trust dialog clears.
-# Returns 0 when trust dialog is gone; 1 on timeout.
-# Usage: _psm_wait_for_trust_dialog_to_clear <session_name> [max_seconds]
-_psm_wait_for_trust_dialog_to_clear() {
-    local session_name
-    session_name=$(psm_tmux_safe_name "$1")
-    local max_wait="${2:-600}"  # 10 minutes default for user to manually approve
-    local waited=0
-
-    while [[ $waited -lt $max_wait ]]; do
-        local pane_content
-        pane_content=$(tmux capture-pane -t "$session_name" -p 2>/dev/null) || return 1
-        
-        # If we see "?", the trust dialog is still visible
-        if printf '%s' "$pane_content" | grep -qE '^[[:space:]]*\?[[:space:]]*$'; then
-            sleep 2
-            (( waited += 2 )) || true
-            continue
-        fi
-        
-        # Trust dialog is gone
-        return 0
-    done
-
-    return 1  # Timed out waiting for trust dialog to clear
-}
-
 # Wait for Claude's REPL to be ready then inject a context-file trigger prompt.
-# If directory trust is pending, waits for user to approve it manually (up to 10 min).
-# If timeout occurs before trust is approved or prompt appears, keeps task at context file.
+# If the prompt never appears (for example, Claude is waiting on the directory-trust
+# dialog), nothing is sent and the user is told how to start the task by hand.
 # Usage: psm_inject_prompt <session_name> <context_file_relative_path>
 psm_inject_prompt() {
     local session_name
     session_name=$(psm_tmux_safe_name "$1")
     local context_file="$2"
-    local session_path
-    session_path=$(tmux display-message -p -t "$session_name" '#{pane_current_path}' 2>/dev/null) || session_path=""
+    local trigger="Read ${context_file} for full task context, then begin."
 
-    # First, check if trust dialog is visible and wait for it to clear
-    local pane_content
-    pane_content=$(tmux capture-pane -t "$session_name" -p 2>/dev/null) || pane_content=""
-    
-    if printf '%s' "$pane_content" | grep -qE '^[[:space:]]*\?[[:space:]]*$'; then
-        # Trust dialog is visible. Print instructions and wait for user to approve.
-        echo "info|Directory trust dialog is waiting for approval in tmux session: $session_name" >&2
-        echo "info|Please switch to the session and approve directory trust." >&2
-        echo "info|Waiting up to 10 minutes for trust dialog to clear..." >&2
-        echo "" >&2
-        
-        if ! _psm_wait_for_trust_dialog_to_clear "$session_name" 600; then
-            # Timeout: trust was never approved
-            echo "error|Trust dialog approval timed out after 10 minutes" >&2
-            echo "error|Task context remains in: $context_file" >&2
-            if [[ -n "$session_path" ]]; then
-                echo "error|To manually approve trust and load context, run:" >&2
-                echo "error|  cd '$session_path' && cat '$context_file' | tmux send-keys -t '$session_name' - && tmux send-keys -t '$session_name' Enter" >&2
-            fi
-            return 1
-        fi
-        echo "info|Trust dialog cleared; now waiting for Claude prompt..." >&2
-    fi
-
-    # Now wait for Claude's normal prompt
     if ! psm_wait_for_claude_prompt "$session_name"; then
         echo "error|Timed out waiting for Claude prompt; task context not injected" >&2
-        echo "error|Task context remains in: $context_file" >&2
+        echo "error|If Claude is asking whether to trust this folder, answer it in tmux session: $session_name" >&2
+        echo "error|Then send this prompt yourself: $trigger" >&2
         return 1
     fi
-
-    local trigger="Read ${context_file} for full task context, then begin."
 
     # Use literal mode (-l) to prevent tmux from interpreting key names in the text
     tmux send-keys -t "$session_name" -l -- "$trigger"

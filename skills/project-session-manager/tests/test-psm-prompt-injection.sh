@@ -132,11 +132,11 @@ else
     fail "detects '> ' with trailing space" "returned non-zero"
 fi
 
-# 10. Detects '?' trust prompt
+# 10. A bare '?' line (e.g. inside the directory-trust dialog) is not a ready prompt
 if _psm_pane_has_claude_prompt "?"; then
-    pass "detects '?' trust prompt"
+    fail "rejects bare '?' line" "matched"
 else
-    fail "detects '?' trust prompt" "returned non-zero"
+    pass "rejects bare '?' line"
 fi
 
 # 11. Detects '>' with leading whitespace
@@ -494,25 +494,6 @@ result=$(psm_render_template "$TEMPLATE_TMP" "DATA=$malicious_body")
 assert_not_contains "embedded unescaped delimiter is escaped" "--- END UNTRUSTED DATA ---" "$result"
 assert_contains "embedded delimiter is replaced with escape marker" "---ESCAPED_END---" "$result"
 
-# ── Trust dialog handling (issue #5149 thread c) ────────────────────────────
-
-echo ""
-echo "=== Trust dialog handling ==="
-
-# 46. _psm_pane_has_claude_prompt detects trust prompt (?)
-if _psm_pane_has_claude_prompt "?"; then
-    pass "_psm_pane_has_claude_prompt detects '?' trust prompt"
-else
-    fail "_psm_pane_has_claude_prompt detects '?' trust prompt" "returned non-zero"
-fi
-
-# 47. _psm_pane_has_claude_prompt detects normal prompt (>)
-if _psm_pane_has_claude_prompt ">"; then
-    pass "_psm_pane_has_claude_prompt detects '>' normal prompt"
-else
-    fail "_psm_pane_has_claude_prompt detects '>' normal prompt" "returned non-zero"
-fi
-
 # ── Template wrapper validation ────────────────────────────────────────────────
 
 echo ""
@@ -573,115 +554,41 @@ fi
 # ── Trust dialog handling (issue #5149 thread c) ──────────────────────────────
 
 echo ""
-echo "=== Trust dialog handling (security fix) ==="
+echo "=== psm_inject_prompt never answers dialogs (issue #5149) ==="
 
-# 51. _psm_pane_has_claude_prompt detects '>' prompt
-if _psm_pane_has_claude_prompt ">"; then
-    pass "_psm_pane_has_claude_prompt detects >"
-else
-    fail "_psm_pane_has_claude_prompt detects >" "should return 0 for prompt"
-fi
-
-# 52. _psm_pane_has_claude_prompt detects '?' trust prompt
-if _psm_pane_has_claude_prompt "?"; then
-    pass "_psm_pane_has_claude_prompt detects trust prompt"
-else
-    fail "_psm_pane_has_claude_prompt detects trust prompt" "should return 0 for trust prompt"
-fi
-
-# 53. Code inspection: psm_wait_for_claude_prompt does NOT send T
-# (Verify by checking function does not contain 'send-keys.*T')
-if grep -q "tmux send-keys.*'T'" "${PSM_LIB_DIR}/tmux.sh"; then
-    fail "psm_wait_for_claude_prompt no longer auto-sends T" "SECURITY: auto-send T still in code"
-else
-    pass "psm_wait_for_claude_prompt no longer auto-sends T"
-fi
-
-# 54. Code inspection: _psm_wait_for_trust_dialog_to_clear exists
-if grep -q "_psm_wait_for_trust_dialog_to_clear()" "${PSM_LIB_DIR}/tmux.sh"; then
-    pass "_psm_wait_for_trust_dialog_to_clear function exists"
-else
-    fail "_psm_wait_for_trust_dialog_to_clear function exists" "function not found"
-fi
-
-# 55. Code inspection: _psm_wait_for_trust_dialog_to_clear has polling loop
-if sed -n '225,250p' "${PSM_LIB_DIR}/tmux.sh" | grep -q 'while'; then
-    pass "_psm_wait_for_trust_dialog_to_clear has polling loop"
-else
-    fail "_psm_wait_for_trust_dialog_to_clear has polling loop" "while loop not found"
-fi
-
-# 56. Code inspection: psm_inject_prompt checks for trust dialog with grep
-if sed -n '254,290p' "${PSM_LIB_DIR}/tmux.sh" | grep -q 'pane_content.*grep'; then
-    pass "psm_inject_prompt checks pane content with grep"
-else
-    fail "psm_inject_prompt checks pane content with grep" "grep check not found"
-fi
-
-# 57. Code inspection: psm_inject_prompt prints informational messages
-if grep -q "info|Directory trust dialog" "${PSM_LIB_DIR}/tmux.sh"; then
-    pass "psm_inject_prompt prints trust dialog message"
-else
-    fail "psm_inject_prompt prints trust dialog message" "message text not found"
-fi
-
-# ── Behavioral tests: psm_inject_prompt trust handling ────────────────────────
-# Tests 58-62: Exercise real psm_inject_prompt logic and trust dialog handling
-
-echo ""
-echo "=== Behavioral tests: psm_inject_prompt trust handling ==="
-
-# Source the library for testing
+# Reload the real psm_inject_prompt (the launch tests above replaced it with a mock).
 source "${PSM_LIB_DIR}/tmux.sh"
 
-# 58. Verify psm_inject_prompt function exists and is callable
-if type -t psm_inject_prompt &>/dev/null; then
-    pass "psm_inject_prompt function is defined"
-else
-    fail "psm_inject_prompt function is defined" "function not found"
-fi
+# Pane mock: capture-pane prints $MOCK_PANE; send-keys calls are recorded.
+tmux() {
+    local subcmd="$1"
+    case "$subcmd" in
+        capture-pane) printf '%s\n' "$MOCK_PANE" ;;
+        send-keys)    TMUX_SEND_CALLS+=("$*") ;;
+        *)            : ;;
+    esac
+}
+sleep() { :; }
 
-# 59. Verify trust wait has polling loop and timeout parameter
-if grep -A 30 "^_psm_wait_for_trust_dialog_to_clear()" "${PSM_LIB_DIR}/tmux.sh" | grep -qE "while|until"; then
-    pass "trust wait function has polling loop"
-else
-    fail "trust wait function has polling loop" "loop not found"
-fi
+# Trust dialog text as Claude Code shows it, including a '?' line and a numbered choice.
+MOCK_PANE=$'Do you trust the files in this folder?\n?\n❯ 1. Yes, proceed\n  2. No, exit'
+TMUX_SEND_CALLS=()
+# Not in $(...): TMUX_SEND_CALLS must be recorded in this shell.
+psm_inject_prompt "trust-session" ".psm/review.md" 2>"${TMPDIR_TEST}/inject.err" >/dev/null && inject_rc=0 || inject_rc=$?
+inject_err=$(cat "${TMPDIR_TEST}/inject.err")
+assert_equals "inject fails while a dialog is pending" "1" "$inject_rc"
+assert_equals "no keys sent while a dialog is pending" "0" "${#TMUX_SEND_CALLS[@]}"
+assert_contains "timeout names the session to answer" "trust-session" "$inject_err"
+assert_contains "timeout gives the prompt to send by hand" "Read .psm/review.md for full task context, then begin." "$inject_err"
 
-# 60. Verify trust wait function signature includes timeout
-if grep "_psm_wait_for_trust_dialog_to_clear.*max" "${PSM_LIB_DIR}/tmux.sh" | grep -q "max_seconds\|max_wait\|{2:-"; then
-    pass "trust wait function accepts timeout parameter"
-else
-    pass "trust wait function supports configurable timeout"
-fi
-
-# 61. Verify fallback recovery instructions are in the code
-if grep -q 'To manually approve trust and load context' "${PSM_LIB_DIR}/tmux.sh"; then
-    pass "fallback instructions present in psm_inject_prompt"
-else
-    fail "fallback instructions present in psm_inject_prompt" "instructions not found"
-fi
-
-# 62. Verify context file path is included in fallback
-if grep -A 2 'To manually approve trust and load context' "${PSM_LIB_DIR}/tmux.sh" | grep -q '\$context_file'; then
-    pass "fallback shows context file path"
-else
-    fail "fallback shows context file path" "context file reference not found"
-fi
-
-# 63. Verify function returns error code on issues
-if grep -A 50 "^psm_inject_prompt()" "${PSM_LIB_DIR}/tmux.sh" | grep -q "return 1"; then
-    pass "psm_inject_prompt returns error code on failure"
-else
-    fail "psm_inject_prompt returns error code on failure" "error return not found"
-fi
-
-# 64. Verify no automatic trust approval (security fix)
-if ! grep -A 100 "^psm_inject_prompt()" "${PSM_LIB_DIR}/tmux.sh" | grep -qE "send-keys.*T[^a-z]|auto.*T[^a-z]"; then
-    pass "psm_inject_prompt does not auto-send trust response"
-else
-    fail "psm_inject_prompt does not auto-send trust response" "auto-send found in code"
-fi
+# Ready REPL prompt: the trigger is sent literally, then Enter.
+MOCK_PANE=$'Welcome to Claude Code\n>'
+TMUX_SEND_CALLS=()
+psm_inject_prompt "ready-session" ".psm/review.md" 2>/dev/null && inject_rc=0 || inject_rc=$?
+assert_equals "inject succeeds at the REPL prompt" "0" "$inject_rc"
+assert_contains "trigger sent literally" "send-keys -t ready-session -l -- Read .psm/review.md for full task context, then begin." "${TMUX_SEND_CALLS[0]:-}"
+assert_contains "Enter sent after trigger" "send-keys -t ready-session Enter" "${TMUX_SEND_CALLS[1]:-}"
+unset -f sleep
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 
