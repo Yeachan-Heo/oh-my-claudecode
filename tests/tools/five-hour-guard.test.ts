@@ -4520,30 +4520,79 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readJson(f.pause).valid_until, 'a renewal of an unchanged file still renews it').toBeGreaterThanOrEqual(before);
   });
 
-  it('a pause file that is swapped for a foreign file right after the identity check of a renewal, before the file is put in place, is kept where it is: nothing at the path is destroyed, and a renewal where the system cannot exchange two paths still renews', () => {
+  it('a pause file that is swapped for a foreign file right after the identity check of a renewal, before the file is put in place, is kept where it is: nothing at the path is destroyed, with the exchange of two paths and where the system cannot do it (the renewal then fails, and the pause is not renewed)', () => {
     const f = fixture('renewal-late-swap', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     guardOnce(f);   // enters the pause; the next run renews it
     expect(readJson(f.pause).paused, 'the pause is in force').toBe(true);
     // the swap follows the look at the path that write_json makes to compare it with the file that was validated: whatever puts the new file in place comes after it
-    const driver = ['import os, runpy, sys', 'real, pause, looks = os.lstat, sys.argv[1], []',
+    const swap = ['real, pause, looks = os.lstat, sys.argv[1], []',
       'def swap(path, *args, **kw):', '    found = real(path, *args, **kw)',
       '    if str(path) == pause and sys._getframe(1).f_code.co_name == "write_json" and not looks:', '        looks.append(1)',
       '        open(pause + ".foreign", "w").write("foreign file\\n")', '        os.replace(pause + ".foreign", pause)',
       '    return found',
-      'os.lstat = swap', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
-    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+      'os.lstat = swap'];
+    // the system has no exchange of two paths (the C library cannot be loaded, as on macOS and Windows, or the file system refuses it)
+    const noExchange = ['import ctypes', 'def none(*args, **kw):', '    raise OSError("no such library")', 'ctypes.CDLL = none'];
+    const run = (lines: string[], f2: Fixture) => runPyCode(['import os, runpy, sys', ...lines, 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n'), [f2.pause, GUARD, ...guardArgs(f2, ['--once'])]);
+    const r = run(swap, f);
     expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*changed since it was validated and is not replaced/);
     expect(readText(f.pause), 'the file that came in after the check is still at the path, untouched').toBe('foreign file\n');
     expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
-    // where the two paths cannot be exchanged (no such call in the C library, a file system without it) the renewal replaces the file that was looked at, as before
+    // without the exchange the file is not replaced either: the renewal fails, whether a file came in or not
+    const g = fixture('renewal-no-exchange', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(g);
+    const before = readText(g.pause);
+    const refused = run(noExchange, g);
+    expect(refused.stdout, `${refused.stdout}${refused.stderr}`).toMatch(/ERROR: tick failed.*cannot be put in place without replacing a file that was not looked at/);
+    expect(readText(g.pause), 'the pause file is not touched').toBe(before);
+    const late = run([...noExchange, ...swap], g);
+    expect(late.stdout, `${late.stdout}${late.stderr}`).toMatch(/ERROR: tick failed.*cannot be put in place/);
+    expect(readText(g.pause), 'a file that came in after the check survives where the exchange is missing').toBe('foreign file\n');
+    expect(readdirSync(g.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    // with the exchange and no competing file the renewal goes through, with a later heartbeat
     rmSync(f.pause);
     guardOnce(f);
-    const before = readJson(f.pause).valid_until;
-    const plain = ['import ctypes, runpy, sys', 'def none(*args, **kw):', '    raise OSError("no such library")',
-      'ctypes.CDLL = none', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
-    const again = runPyCode(plain, [GUARD, ...guardArgs(f, ['--once'])]);
-    expect(again.status, `${again.stdout}${again.stderr}`).toBe(0);
-    expect(readJson(f.pause).valid_until, 'a renewal without the exchange still renews').toBeGreaterThanOrEqual(before);
+    const first = readJson(f.pause).valid_until;
+    guardOnce(f);
+    expect(readJson(f.pause).valid_until, 'a renewal that finds the file it validated renews it').toBeGreaterThanOrEqual(first);
+  });
+
+  it('a second foreign file that takes the path of the pause file after the first exchange of a renewal is kept too: the file that the exchange back returns stays under the temporary name, and the log names it', () => {
+    const f = fixture('renewal-two-arrivals', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(f);   // enters the pause; the next run renews it
+    // file A takes the path right after the identity check; file B takes it right after the first exchange of the renewal, so the exchange back returns B
+    const driver = ['import ctypes, os, runpy, sys', 'real_lstat, real_cdll, pause, looks, calls = os.lstat, ctypes.CDLL, sys.argv[1], [], []',
+      'def swap(path, *args, **kw):', '    found = real_lstat(path, *args, **kw)',
+      '    if str(path) == pause and sys._getframe(1).f_code.co_name == "write_json" and not looks:', '        looks.append(1)',
+      '        open(pause + ".a", "w").write("foreign file A\\n")', '        os.replace(pause + ".a", pause)',
+      '    return found',
+      'class Library:', '    def __init__(self, library):', '        self.library = library',
+      '    def renameat2(self, *args):', '        done = self.library.renameat2(*args)', '        calls.append(1)',
+      '        if len(calls) == 1:', '            open(pause + ".b", "w").write("foreign file B\\n")', '            os.replace(pause + ".b", pause)',
+      '        return done',
+      'os.lstat, ctypes.CDLL = swap, lambda *args, **kw: Library(real_cdll(*args, **kw))', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*the file that came in is kept as .*\.tmp/);
+    expect(readText(f.pause), 'the first file is back at the path').toBe('foreign file A\n');
+    const kept = readdirSync(f.dir).filter((n) => n.endsWith('.tmp'));
+    expect(kept, 'the second file is kept under the temporary name').toHaveLength(1);
+    expect(readText(join(f.dir, kept[0])), 'with its content').toBe('foreign file B\n');
+    expect(r.stdout, 'and the message names it').toContain(join(f.dir, kept[0]));
+    expect(readText(f.log), 'the log has the name too').toContain(kept[0]);
+  });
+
+  it('where hard links are not supported a foreign file that takes the place of the reservation after the check of its identity, right before the pause is put in place, is kept: the write fails and nothing is lost', () => {
+    const driver = ['import errno, os, runpy, sys', 'target, real, looks = sys.argv[1], os.lstat, []',
+      'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',
+      'def swap(path, *args, **kw):', '    found = real(path, *args, **kw)',
+      '    if str(path) == target and sys._getframe(1).f_code.co_name == "write_json" and not looks:', '        looks.append(1)',
+      '        os.unlink(target)', '        open(target, "w").write("foreign file\\n")',
+      '    return found',
+      'os.link, os.lstat = nolink, swap', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('no-link-late-reservation-swap', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*changed since it was validated and is not replaced/);
+    expect(readText(f.pause), 'the foreign file that came in at the last moment is not replaced').toBe('foreign file\n');
     expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
   });
 

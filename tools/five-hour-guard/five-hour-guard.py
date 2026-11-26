@@ -1122,16 +1122,41 @@ def exchange(first, second):
         return False
 
 
+class KeptAside(OSError):
+    """A file that is not ours stays under the temporary name of write_json, which does not remove it."""
+
+
+def swap_in(tmp, path, expected, mine):
+    """Put the file `tmp` (identity `mine`) in place of the file at `path` that has the identity `expected`, and never destroy another file: the two
+    paths are exchanged and what came out is looked at. The expected file is removed. Another file (it came in after the look) is put back by an
+    exchange again, and what comes out of that is removed only when it is the new file; another one (a second arrival) stays under the temporary
+    name (KeptAside, naming it). Where the two paths cannot be exchanged nothing is replaced: OSError."""
+    if not exchange(tmp, path):
+        raise OSError(f'the file {path} cannot be put in place without replacing a file that was not looked at (this system or its file system cannot exchange two paths, or nothing is at the path any more): nothing is replaced')
+    try:   # what was at the path is under the temporary name now: whatever fails from here on, it is not removed with the new file
+        if file_identity(os.lstat(tmp)) == expected:
+            os.unlink(tmp)   # the file that was looked at, replaced
+            return
+        exchange(tmp, path)   # another file came in after the look: it goes back
+        ours = file_identity(os.lstat(tmp)) == mine   # what came out of that is the new file, or another file that came in meanwhile
+        if ours:
+            os.unlink(tmp)
+    except Exception as e:
+        raise KeptAside(f'the file {path} changed since it was validated and is not replaced; the file under {tmp} is kept ({e!r})') from e
+    if ours:
+        raise OSError(f'the file {path} changed since it was validated and is not replaced')
+    raise KeptAside(f'the file {path} changed since it was validated and is not replaced; the file that came in is kept as {tmp}')
+
+
 def write_json(path, obj, no_clobber=False, replaces=None):
     """Write atomically. no_clobber: a file that appears at the path meanwhile is kept and the write fails (a hard link is created
     instead of a rename; where links are not supported the destination is reserved exclusively first). replaces: the lstat result of the
     file that this write renews; a file that is not that one any more when the file is put in place (somebody replaced the path since
-    the validation) is kept and the write fails; a file that is gone is written again. Where two paths can be exchanged, the renewal puts
-    the new file in place by exchanging it with the file at the path and looks at what it got: the path is never empty (the hook reads no
-    pause file as no pause), and a file that came in after the validation is put back (exchanged again), not destroyed."""
+    the validation) is kept and the write fails; a file that is gone is written again. A renewal and the replacing of the reservation (see
+    swap_in) put the new file in place by exchanging it with the file at the path, and where two paths cannot be exchanged they fail: the path
+    is never empty (the hook reads no pause file as no pause), and a file that came in after the validation is put back, not destroyed."""
     if A.dry_run:
         return
-    kept = False   # the file that was at the path is under the temporary name and must not be removed with it
     tmp = f'{path}.{os.getpid()}.{os.urandom(8).hex()}.tmp'   # a name that no other process can have made: nothing is removed to make room for it
     refuse_program_overwrite(path)
     # exclusive and without following links: another account that can write to the directory cannot redirect the write
@@ -1139,6 +1164,7 @@ def write_json(path, obj, no_clobber=False, replaces=None):
     try:
         with os.fdopen(fd, 'w') as f:
             json.dump(obj, f)
+        mine = file_identity(os.lstat(tmp))   # the new file, before anything is exchanged with it
         if no_clobber:
             try:
                 os.link(tmp, path)
@@ -1155,15 +1181,19 @@ def write_json(path, obj, no_clobber=False, replaces=None):
                     reserved = file_identity(os.fstat(reservation))
                 finally:
                     os.close(reservation)
-                try:   # whoever may write to the directory can remove the reservation and put another file at the path: the rename must not replace that
-                    if file_identity(os.lstat(path)) != reserved:
-                        raise OSError(f'the file {path} appeared meanwhile and is not replaced')
-                except FileNotFoundError:
-                    pass   # nothing is there any more: the rename makes the file and replaces nothing
-                try:
-                    os.replace(tmp, path)
+                try:   # whoever may write to the directory can remove the reservation and put another file at the path: nothing but the reservation is replaced
+                    try:
+                        if file_identity(os.lstat(path)) != reserved:
+                            raise OSError(f'the file {path} appeared meanwhile and is not replaced')
+                    except FileNotFoundError:
+                        pass   # nothing is there any more: the exchange below fails
+                    swap_in(tmp, path, reserved, mine)
                 except BaseException:
-                    os.unlink(path)   # the reservation is ours
+                    try:
+                        if file_identity(os.lstat(path)) == reserved:
+                            os.unlink(path)   # the reservation is still ours
+                    except OSError:
+                        pass
                     raise
             else:
                 os.unlink(tmp)
@@ -1175,18 +1205,15 @@ def write_json(path, obj, no_clobber=False, replaces=None):
                     now = None
                 if now is not None and file_identity(now) != file_identity(replaces):
                     raise OSError(f'the file {path} changed since it was validated and is not replaced')
-                if now is not None and exchange(tmp, path):
-                    kept = True
-                    if file_identity(os.lstat(tmp)) == file_identity(replaces):
-                        os.unlink(tmp)   # the pause file that was looked at, replaced
-                        return
-                    kept = not exchange(tmp, path)   # another file came in after the look: it goes back, and the new file (now under the temporary name) is removed below
-                    raise OSError(f'the file {path} changed since it was validated and is not replaced' + (f'; the file that came in is kept as {tmp}' if kept else ''))
+                if now is not None:
+                    swap_in(tmp, path, file_identity(replaces), mine)
+                    return
             os.replace(tmp, path)
+    except KeptAside:
+        raise   # the file under the temporary name is not ours
     except BaseException:
         try:
-            if not kept:
-                os.unlink(tmp)
+            os.unlink(tmp)
         except OSError:
             pass
         raise
