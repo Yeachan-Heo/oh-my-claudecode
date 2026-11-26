@@ -1093,3 +1093,52 @@ describe('the thinking of the assistant rows that build rebuilds comes off the p
     expect(record).toMatchObject({ result: 'jev', tokens_source: 'estimate', api_messages: false, sig_chars_total: 0, sig_chars_mapped: 0 });
   });
 });
+
+describe('the class of the words that stay is taken inside the zero floor of their message: a message that costs nothing gives back nothing for its words', () => {
+  // `steps` steps of a text result of 400 characters, with words the user typed during the tool turn (`words` characters) in the row of each result, at a block rate of 10 (under the
+  // 40.5 that the constant of a message takes off). Once the result of a row is traced, the words stay alone in a message of one block, and at the rate of the words of the user (0.287 a
+  // character, where beside a result it is 0.363) 90 characters cost less than the 30.5 that block takes off: the message costs nothing before the change of class and after it, so the
+  // change gives back nothing. The host counts the list plus a prefix (the system prompt and the tools); a handoff to its summary needs a cut of 30 percent.
+  const ENV = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_HOST_HANDOFF: '1' };
+  const MIN_CUT = 0.3;
+  async function layout({ steps = 240, words = 90, raw = '{"RATE_BLOCK":10}', prefix = 1000 }) {
+    const rows = session(steps, { shot: () => false, chars: 400 }).map((m) => ((m.toolResults || []).length && words ? Object.freeze({ ...m, text: `Typed during the tool turn ${m.toolResults[0].tool_use_id}: `.padEnd(words, 'w') }) : m));
+    const rates = ratesFrom(raw);
+    const counted = Math.round(listTokens(apiOf(rows), rates)) + prefix;
+    const { record, out } = await compactRun({ ...ENV, ...(raw ? { OMC_JEV_COMPACT_RATES: raw } : {}) }, rows, { tokens: counted, trigger: 'manual' });
+    return { record, out, counted, installed: listTokens(apiOf(out.messages), rates) + prefix };
+  }
+  // The monitor's prediction and the tokens the host is told are the list that is installed, within the line break before each trace that the prediction leaves out.
+  function agrees({ record, out, installed }, label) {
+    expect(record, label).toMatchObject({ result: 'jev', cascade_pass: 'short_or_trace' });
+    const slack = 0.6 * record.traced + 2;
+    expect(Math.abs(record.tokens_after_pred - installed), `${label}: monitor ${record.tokens_after_pred}, listTokens ${installed}`).toBeLessThanOrEqual(slack);
+    expect(Math.abs(out.tokensAfter - installed), `${label}: told ${out.tokensAfter}, listTokens ${installed}`).toBeLessThanOrEqual(slack);
+  }
+
+  it('the cascade stops when the installed list is under its target, and the cut that the host asks for is made: 48 600 tokens go to 33 900 and the list is 34 000, not 34 300', async () => {
+    const run = await layout({});
+    expect(run.counted).toBeGreaterThan(48000);
+    expect(run.counted).toBeLessThan(49000);
+    agrees(run, 'RATE_BLOCK 10');
+    const slack = 0.6 * run.record.traced + 2;
+    expect(run.record.tokens_after_pred).toBeLessThanOrEqual(run.record.cascade_target_tokens);
+    expect(run.installed).toBeLessThanOrEqual(run.record.cascade_target_tokens + slack);
+    // The words that cost nothing gave back 0.076 a character each, 400 tokens in all: the prediction said a cut of 30.2 percent (33 900) and the list that was installed was cut by 29.4 (34 300),
+    // under the 30 that the host asks for.
+    expect(1 - run.installed / run.counted).toBeGreaterThanOrEqual(MIN_CUT);
+  });
+
+  for (const [words, prefix] of [[40, 6000], [90, 3000], [90, 6000], [100, 4000]]) {
+    it(`the prediction is the installed list: words of ${words} characters, a prefix of ${prefix} tokens`, async () => {
+      agrees(await layout({ words, prefix }), `words ${words}, prefix ${prefix}`);
+    });
+  }
+
+  // The floor is not in play, or the words are above it: the prediction is the list that is installed as it was.
+  for (const [label, c] of [['the default block rate', { raw: null, prefix: 3000 }], ['words of 110 characters (the message costs something after the change of class)', { words: 110, prefix: 3000 }], ['words of 430 characters', { words: 430, prefix: 3000 }], ['no words (nothing changes class)', { words: 0, steps: 480, prefix: 3000 }]]) {
+    it(`unchanged: ${label}`, async () => {
+      agrees(await layout(c), label);
+    });
+  }
+});

@@ -2802,7 +2802,7 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     const sum = runs.map(() => ({ n: 0, t: 0, res: 0, gap: 0, loss: 0 }));
     const up = runs.map((r) => r.k);
     const find = (k) => { while (up[k] !== k) k = up[k] = up[up[k]]; return k; };
-    const cost = (k) => messageTokens(sum[k].n, sum[k].t, rates);
+    const cost = (k) => messageTokens(sum[k].n, sum[k].t - rebate(k), rates);
     const rebate = (k) => (sum[k].res === 0 ? sum[k].gap : -sum[k].loss);
     let alone = 0;
     let total = 0;
@@ -2875,10 +2875,12 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
             const dGap = rows[c.resIdx].trimDrop === true ? 0 : noteOwn(c, keep) - noteOwn(c, was);
             const k = runOf.get(c.resIdx).k;
             const root = find(k);
+            total -= cost(root);
             alone -= rebate(root);
             own[k].gap += dGap;
             sum[root].gap += dGap;
             alone += rebate(root);
+            total += cost(root);
             reread(c.resIdx, resultNow - resultWas);
           }
           return;
@@ -2901,10 +2903,12 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
           st.changed += Number(keep !== 'full') - Number(was !== 'full');
           const k = runOf.get(c.resIdx).k;
           const root = find(k);
+          total -= cost(root);
           alone -= rebate(root);
           own[k].res -= gone(keep) - gone(was);
           sum[root].res -= gone(keep) - gone(was);
           alone += rebate(root);
+          total += cost(root);
           reread(c.resIdx, resultNow - resultWas);
         }
       },
