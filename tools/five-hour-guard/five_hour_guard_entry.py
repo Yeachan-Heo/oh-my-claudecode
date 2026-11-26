@@ -1,11 +1,11 @@
 """The hook entry of the five-hour limit guard: the one definition of the command that is registered in settings.json and of how that
-entry is recognised there (by ENTRY_MARKER, a fixed text at the end of its command, or by the exact path of the hook: no command is analysed). Loaded by five-hour-guard.py
+entry is recognised there (by ENTRY_MARKER, a fixed text that ends its command, or by the exact path of the hook: no command is analysed). Loaded by five-hour-guard.py
 (drift check) and five-hour-guard-settings.py (add, check, remove, probe) from the directory the scripts are in; it is not run by itself
 and the hook script does not need it."""
 import math, re, shlex
 
 MARK = 'five-hour-guard-hook.py'
-ENTRY_MARKER = '# five-hour-guard-entry'   # a comment to the shell, last in the command of the entry that `add` writes: the entry is the handler whose command holds this text
+ENTRY_MARKER = '# five-hour-guard-entry'   # a comment to the shell, last in the command of the entry that `add` writes: the entry is the handler whose command ends with this text after a blank (has_marker)
 PROVIDER_ENV_KEYS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
                      'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_MODEL', 'ANTHROPIC_MODEL', 'OMC_MODEL_MEDIUM', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL',
                      'ANTHROPIC_DEFAULT_SONNET_MODEL', 'OMC_MODEL_HIGH', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
@@ -50,8 +50,16 @@ def entry_command(pause_file, hook, python, hook_log=None):
     return cmd + (f' --log {q(hook_log)}' if hook_log else '') + f' {ENTRY_MARKER}'
 
 
+def has_marker(command):
+    """Whether the command ends with ENTRY_MARKER after a blank, as the command that `add` writes does (a comment to the shell, last in the command;
+    trailing blanks and new lines do not count). The text elsewhere in a command (`echo '# five-hour-guard-entry'`, in quotes, or in the middle) is data or
+    another comment, not the entry."""
+    text = command.rstrip()
+    return text.endswith(ENTRY_MARKER) and text[:-len(ENTRY_MARKER)][-1:].isspace()
+
+
 def is_entry(handler, hook):
-    """Whether a hook handler is the entry of this guard: a command handler whose command holds ENTRY_MARKER (what `add` writes now) or
+    """Whether a hook handler is the entry of this guard: a command handler whose command ends with ENTRY_MARKER (what `add` writes now, see has_marker) or
     the exact path `hook` of the hook script, as a whole word of the command (it starts and ends at a blank, an operator of the shell or an
     end of the command: a character that is valid in a file name, such as `+`, `,`, `@`, `%`, `=`, `:` or `~`, is no boundary, so `hook.py+audit` is
     another file; a quote that opens at the start of the word closes at its end, `'hook'` and `"hook"`, so `'hook'+audit` and `audit'hook'` are other
@@ -61,4 +69,4 @@ def is_entry(handler, hook):
     if not isinstance(command, str) or handler.get('type') != 'command':
         return False
     path, edge = re.escape(hook), r'[^\s;&|()<>]'
-    return ENTRY_MARKER in command or re.search(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', command) is not None
+    return has_marker(command) or re.search(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', command) is not None

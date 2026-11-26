@@ -601,6 +601,36 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('the marker of the entry is a comment that ends the command: the text in quotes or in the middle of the command of another tool is no entry, so check does not count it and add and remove leave it alone; the command that add writes (with and without --log), the marker followed by blanks or a new line, and an older entry without a marker are still found', () => {
+    const marker = '# five-hour-guard-entry';
+    const foreign = [`echo '${marker}'`, `echo "${marker}"`, `true ${marker}; echo x`, `grep -c "${marker}" settings.json`, `echo ${marker} >> /tmp/x`, `echo x ${marker} y`, `cat <<EOF\n${marker}\nEOF\necho done`, `echo '${marker}' ; true`, `echo${marker}`];
+    for (const command of foreign) {
+      const f = fixture('settings-marker-as-data');
+      const doc = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } };
+      write(f, doc);
+      const check = tool(f, 'check');
+      expect(check.status, `${command}: check does not take it for the entry: ${check.stdout}${check.stderr}`).toBe(1);
+      const remove = tool(f, 'remove');
+      expect(remove.stdout, `${command}: remove leaves it`).toMatch(/nothing to do/);
+      expect(readJson(f.settings), `${command}: the only handler is as it was after remove`).toEqual(doc);
+      const add = tool(f, 'add');
+      expect(add.status, `${command}: ${add.stderr}`).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre, `${command}: add appends its own entry`).toHaveLength(2);
+      expect(pre[0], `${command}: and the handler of the other tool stays`).toEqual(doc.hooks.PreToolUse[0]);
+    }
+    const f0 = fixture('settings-marker-real');
+    const generated = entryCommand(f0, PYBIN);
+    const real = [generated, generated.replace(` --log ${quote(f0.hookLog)}`, ''), `${generated}   `, `${generated}\n`, `${generated}\n\n  `, `true ${marker}`, `exec x\t${marker}`, `[ -f /p ] || exit 0; exec python3 -I ${HOOK} --pause-file /p`];
+    for (const command of real) {
+      const f = fixture('settings-marker-real');
+      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      const check = tool(f, 'check');
+      expect(check.status, `${JSON.stringify(command)}: check finds it: ${check.stdout}${check.stderr}`).toBe(0);
+      expect(check.stdout, command).toMatch(/1 entry\/entries/);
+    }
+  });
+
   it('quotes that touch the path of the hook make it part of a longer word of the shell (quote concatenation): a handler of another tool whose word is the path plus something outside the quotes, or something before the quote, is left alone by remove and add, while the path bare, in single or in double quotes, and in the shapes of the older entries is found', () => {
     const foreign = [`'${HOOK}'+audit`, `audit'${HOOK}'`, `"${HOOK}"x`, `'${HOOK}'"x"`, `${HOOK}'x'`, `'${HOOK}'x`, `x"${HOOK}"`, `"${HOOK}'`, `'${HOOK}"`, `exec '${HOOK}'+audit --pause-file /tmp/p`, `sh -c 'x'${HOOK}`];
     for (const command of foreign) {

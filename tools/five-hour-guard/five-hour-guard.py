@@ -907,7 +907,7 @@ def registered_runtime_files():
             found += [('registered hook', BUNDLED_HOOK), ('registered interpreter', sys.executable)]
         for _group, handler in entries:
             try:   # one handler that cannot be read must not hide the ones after it
-                marked = ENTRY.ENTRY_MARKER in handler['command']   # the roles of three words are read in the entry that `add` writes, not in a command found by its exact path
+                marked = ENTRY.has_marker(handler['command'])   # the roles of three words are read in the entry that `add` writes, not in a command found by its exact path
                 hooks, interpreters, logs = entry_roles(handler['command']) if marked else ([], [], [])
                 found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated) + [t for t in logs if os.path.isabs(t)], values=env)]   # the log is a file of its own below, so no other word of the entry may be it
                 if marked:
