@@ -195,6 +195,7 @@ function foldBlockScalarRows(rows: BlockScalarRow[]): string {
  */
 function stripTrailingComment(value: string): string {
   let quote: "'" | '"' | null = null;
+  let closedAt = -1;
   for (let i = 0; i < value.length; i++) {
     const char = value[i];
     if (quote) {
@@ -202,16 +203,21 @@ function stripTrailingComment(value: string): string {
         i++;
       } else if (char === quote) {
         if (quote === "'" && value[i + 1] === "'") i++;
-        else quote = null;
+        else {
+          quote = null;
+          closedAt = i;
+        }
       }
       continue;
     }
     if (char === '"' || char === "'") {
       // A quote opens a scalar only at the start of the value, of a flow item
       // (after `[`, `{` or `,`) or of a flow mapping value (after `:` and
-      // whitespace). In `[a:", b]` the quote is part of the plain scalar `a:"`.
+      // whitespace, or right after the `:` of a quoted key, as in JSON-style
+      // `{"k":"v"}`). In `[a:", b]` the quote is part of the plain scalar `a:"`.
       const before = value.slice(0, i);
-      if (before.trim() === "" || /[[{,]\s*$/.test(before) || /:\s+$/.test(before)) {
+      const afterQuotedKey = closedAt >= 0 && /^\s*:\s*$/.test(value.slice(closedAt + 1, i));
+      if (before.trim() === "" || /[[{,]\s*$/.test(before) || /:\s+$/.test(before) || afterQuotedKey) {
         quote = char;
       }
       continue;

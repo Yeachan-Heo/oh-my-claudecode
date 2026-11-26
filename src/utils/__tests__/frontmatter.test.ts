@@ -630,6 +630,12 @@ describe("parseFrontmatter trailing comments", () => {
     expect(parse('map: {k: "v # x"} # c').map).toBe('{k: "v # x"}');
   });
 
+  it("opens a quote right after the colon of a quoted key", () => {
+    expect(parse('metadata: {"label":"a # b"}').metadata).toBe('{"label":"a # b"}');
+    expect(parse("metadata: {'label':'a # b'} # c").metadata).toBe("{'label':'a # b'}");
+    expect(parse('aliases: [a:", "b # c", working]').aliases).toBe('[a:", "b # c", working]');
+  });
+
   it("reads a commented alias list as a list", () => {
     expect(parseFrontmatterAliases(parse("aliases: [foo, bar] # legacy").aliases)).toEqual([
       "foo",
