@@ -2377,6 +2377,49 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('the name of a shell option that changes what a glob pattern matches (nocaseglob, dotglob, globstar) in the command of another hook is a mode that the scan does not model, so the command is not read to its end: the guard refuses to start, whether the option is given as -O, as shopt or in BASHOPTS; a command without such a name is read as before', () => {
+    const f = fixture('foreign-glob-modes', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    const dots = join(f.dir, 'dots');
+    mkdirSync(hooks);
+    mkdirSync(dots);
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, file: string) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: file, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const audit = join(hooks, 'audit');
+    const hidden = join(dots, '.audit');
+    writeFileSync(audit, '# the script that the command runs\n', 'utf8');
+    writeFileSync(hidden, '# the script that the command runs\n', 'utf8');
+    if (HAS_BASH) {   // what Bash makes of the patterns where the option is on, and without it
+      const bash = (args: string[], env: NodeJS.ProcessEnv = {}) => spawnSync('bash', args, { encoding: 'utf8', env: { ...process.env, ...env } }).stdout;
+      expect(bash(['-O', 'nocaseglob', '-c', `printf %s ${hooks}/AUD*`]), 'nocaseglob picks the file of the other case').toBe(audit);
+      expect(bash(['-c', `printf %s ${hooks}/AUD*`]), 'and without it the pattern stays as it is').toBe(`${hooks}/AUD*`);
+      expect(bash(['-O', 'dotglob', '-c', `printf %s ${dots}/*`]), 'dotglob matches a name that starts with a dot').toBe(hidden);
+      expect(bash(['-O', 'globstar', '-c', `printf %s ${hooks}/**/audit`]), 'globstar lets ** match no directory').toBe(audit);
+      expect(bash(['-c', `printf %s ${hooks}/**/audit`]), 'and without it the pattern stays as it is').toBe(`${hooks}/**/audit`);
+      expect(bash(['-c', `printf %s ${hooks}/AUD*`], { BASHOPTS: 'nocaseglob' }), 'BASHOPTS in the environment turns an option on').toBe(audit);
+    }
+    for (const [command, file] of [[`bash -O nocaseglob -c 'python3 ${hooks}/AUD*'`, audit], [`bash -c 'shopt -s nocaseglob; python3 ${hooks}/AUD*'`, audit], [`env BASHOPTS=nocaseglob bash -c 'python3 ${hooks}/AUD*'`, audit],
+      [`bash -O dotglob -c 'python3 ${dots}/*'`, hidden], [`bash -O globstar -c 'python3 ${hooks}/**/audit'`, audit], [`BASHOPTS=globstar python3 ${hooks}/**/audit`, audit]]) {
+      const r = start(command, file);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(command)).toMatch(/not read to its end/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+    for (const command of [`python3 ${hooks}/a*it`, `python3 ${hooks}/a?dit`]) {   // the plain patterns are still expanded: the file is found and is the state file
+      const r = start(command, audit);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(command)).toMatch(/are the same file/);
+    }
+    for (const command of [`python3 ${hooks}/other`, `bash -c 'python3 ${hooks}/other'`, `echo x`]) {
+      const r = start(command, audit);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a relative entry of a PATH (of the command, of the env of settings.json) is looked up from each directory that the command names (cd DIR; PATH=bin audit), also with env -C, an entry of . or an empty one; a directory that does not exist adds nothing', () => {
     const f = fixture('foreign-relative-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
