@@ -50,6 +50,12 @@ def entry_command(pause_file, hook, python, hook_log=None):
     return cmd + (f' --log {q(hook_log)}' if hook_log else '') + f' {ENTRY_MARKER}'
 
 
+def unescaped(text, i):
+    """Whether the character at text[i] is free of an escape: an even number of backslashes (none too) stands right in front of it. A backslash in front of
+    a blank, a new line or an operator of the shell makes it a part of the word instead of the boundary of one."""
+    return (i - len(text[:i].rstrip('\\'))) % 2 == 0
+
+
 def has_marker(command):
     """Whether the command ends with ENTRY_MARKER after a blank, as the command that `add` writes does (a comment to the shell, last in the command;
     trailing blanks and new lines do not count). The text elsewhere in a command (`echo '# five-hour-guard-entry'`, in quotes, or in the middle) is data or
@@ -59,7 +65,7 @@ def has_marker(command):
     if not text.endswith(ENTRY_MARKER):
         return False
     before = text[:-len(ENTRY_MARKER)]
-    return before[-1:].isspace() and (len(before) - 1 - len(before[:-1].rstrip('\\'))) % 2 == 0
+    return before[-1:].isspace() and unescaped(before, len(before) - 1)
 
 
 def is_entry(handler, hook):
@@ -67,10 +73,10 @@ def is_entry(handler, hook):
     the exact path `hook` of the hook script, as a whole word of the command (it starts and ends at a blank, an operator of the shell or an
     end of the command: a character that is valid in a file name, such as `+`, `,`, `@`, `%`, `=`, `:` or `~`, is no boundary, so `hook.py+audit` is
     another file; a quote that opens at the start of the word closes at its end, `'hook'` and `"hook"`, so `'hook'+audit` and `audit'hook'` are other
-    words; a quote that opens in front of the path and stays open, as in `sh -c 'hook --pause-file p'`, is the text of a quoted command): the entries
+    words; a quote that opens in front of the path and stays open, as in `sh -c 'hook --pause-file p'`, is the text of a quoted command; the blank or operator in front of it is free, see unescaped: `foo\\ hook` is one word, `foo` and the path together, which no shell runs as the hook): the entries
     that earlier versions of `add` wrote have no marker, and their command holds the path of the hook."""
     command = handler.get('command') if isinstance(handler, dict) else None
     if not isinstance(command, str) or handler.get('type') != 'command':
         return False
     path, edge = re.escape(hook), r'[^\s;&|()<>]'
-    return has_marker(command) or re.search(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', command) is not None
+    return has_marker(command) or any(m.start() == 0 or unescaped(command, m.start() - 1) for m in re.finditer(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', command))

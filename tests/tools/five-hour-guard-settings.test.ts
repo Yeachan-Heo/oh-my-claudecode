@@ -660,6 +660,54 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     }
   });
 
+  it('a blank or an operator in front of the path of the hook that a backslash escapes (a backslash and a blank, a semicolon, an ampersand, a bar or a new line) makes the path part of a longer word: a handler of another tool whose word is something and the path together is no entry, so check does not count it and add and remove leave it alone; two backslashes leave the boundary free, and a path bare, in quotes or with a blank in it (quoted by add) is found as before', () => {
+    const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const foreign = [`printf '%s\\n' foo\\ ${HOOK}`, `printf '%s\\n' foo\\;${HOOK}`, `printf '%s\\n' foo\\&${HOOK}`, `printf '%s\\n' foo\\|${HOOK}`, `printf '%s\\n' foo\\\n${HOOK}`, `printf '%s\\n' foo\\\\\\ ${HOOK}`, `printf '%s\\n' foo\\ '${HOOK}'`];
+    for (const command of foreign) {
+      // what the shell does: the path is joined to the word in front of it, so it is no word of its own and nothing runs it
+      const lines = spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout.split('\n');
+      expect(lines.some((line) => line === HOOK), `${JSON.stringify(command)}: the path is no word of its own`).toBe(false);
+      expect(lines.some((line) => new RegExp(`^foo.{0,2}${escape(HOOK)}$`).test(line)), `${JSON.stringify(command)}: the path is joined to foo`).toBe(true);
+      const f = fixture('settings-escaped-boundary');
+      const doc = { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } };
+      write(f, doc);
+      const check = tool(f, 'check');
+      expect(check.status, `${JSON.stringify(command)}: check does not take it for the entry: ${check.stdout}${check.stderr}`).toBe(1);
+      const remove = tool(f, 'remove');
+      expect(remove.stdout, `${JSON.stringify(command)}: remove leaves it`).toMatch(/nothing to do/);
+      expect(readJson(f.settings), `${JSON.stringify(command)}: the only handler is as it was after remove`).toEqual(doc);
+      const add = tool(f, 'add');
+      expect(add.status, `${JSON.stringify(command)}: ${add.stderr}`).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre, `${JSON.stringify(command)}: add appends its own entry`).toHaveLength(2);
+      expect(pre[0], `${JSON.stringify(command)}: and the handler of the other tool stays`).toEqual(doc.hooks.PreToolUse[0]);
+    }
+    // the path after the path is no boundary either (a backslash is no boundary), as before
+    const f1 = fixture('settings-escaped-after');
+    write(f1, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `printf '%s\\n' ${HOOK}\\ foo`, timeout: 21600 }] }] } });
+    expect(tool(f1, 'check').status, 'a path that a backslash joins to a word after it').toBe(1);
+    const real = [`printf '%s\\n' foo\\\\ ${HOOK}`, `printf '%s\\n' foo\\\\\\\\ ${HOOK}`, `sh ${HOOK} --pause-file p`, `'${HOOK}'`, `"${HOOK}"`, `x\\\\;'${HOOK}'`];
+    for (const command of real) {
+      if (command.startsWith('printf')) expect(spawnSync('sh', ['-c', command], { encoding: 'utf8' }).stdout.split('\n'), `${JSON.stringify(command)}: the path is a word of its own`).toContain(HOOK);
+      const f = fixture('settings-escaped-boundary-real');
+      write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+      const check = tool(f, 'check');
+      expect(check.status, `${JSON.stringify(command)}: check finds it: ${check.stdout}${check.stderr}`).toBe(0);
+      expect(check.stdout, command).toMatch(/1 entry\/entries/);
+    }
+    // an entry of an older version has no marker; with a blank in the path of the hook add quotes it, and check still finds it
+    const f2 = fixture('settings-escaped-blank-path');
+    const spaced = join(f2.dir, 'dir with blank', 'five-hour-guard-hook.py');
+    mkdirSync(dirname(spaced));
+    copyFileSync(HOOK, spaced);
+    const old = `[ -f ${quote(f2.pause)} ] && [ -f ${quote(spaced)} ] || exit 0; exec ${quote(PYBIN)} -I ${quote(spaced)} --pause-file ${quote(f2.pause)}`;
+    expect(old, 'the path with a blank is quoted').toContain(`'${spaced}'`);
+    write(f2, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: old, timeout: 21600 }] }] } });
+    const found = tool(f2, 'check', ['--hook', spaced]);
+    expect(found.status, `${found.stdout}${found.stderr}`).toBe(0);
+    expect(found.stdout).toMatch(/1 entry\/entries/);
+  });
+
   it('quotes that touch the path of the hook make it part of a longer word of the shell (quote concatenation): a handler of another tool whose word is the path plus something outside the quotes, or something before the quote, is left alone by remove and add, while the path bare, in single or in double quotes, and in the shapes of the older entries is found', () => {
     const foreign = [`'${HOOK}'+audit`, `audit'${HOOK}'`, `"${HOOK}"x`, `'${HOOK}'"x"`, `${HOOK}'x'`, `'${HOOK}'x`, `x"${HOOK}"`, `"${HOOK}'`, `'${HOOK}"`, `exec '${HOOK}'+audit --pause-file /tmp/p`, `sh -c 'x'${HOOK}`];
     for (const command of foreign) {
