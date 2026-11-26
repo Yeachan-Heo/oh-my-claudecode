@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, cascade, cutInTokens, floorPrediction, listTokens, manualPlan, ratesFrom, register, scoreQuestion, shapeOf } from '../../hooks/jev-compaction.mjs';
+import { QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, cascade, cutInTokens, floorPrediction, listTokens, manualPlan, pasteTrace, ratesFrom, register, scoreQuestion, shapeOf } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
@@ -833,6 +833,95 @@ describe('the blocks and messages of the list in the predictions (shapeOf)', () 
         expect(run([a, 'drop'], [b, 'drop'], [a, 'full'], [b, 'full'])).toBeCloseTo(0, 6);
         expect(run([a, 'drop'], [a, 'full'])).toBeCloseTo(0, 6);
         expect(run([a, 'trace'], [a, 'full'])).toBeCloseTo(0, 6);
+      });
+    });
+
+    // The stages that move text take it out of the rows before the list is built: a tag of pasted text becomes a trace in its row. The host's list holds what they leave, so the words of
+    // the user in a message are read from those rows (`rows` of shapeOf; `messages` are the rows the stages started from): the text that is gone has no class to change, and the
+    // tokens it cost are off the base already.
+    describe('the words of a user row whose tag the paste stage moved are counted from the row that is left', () => {
+      const OWN = 'Please check the report below and tell me what you think of it.';
+      const inner = (n) => 'alpha '.repeat(Math.ceil(n / 6)).slice(0, n);
+      const PATH = '/state/compaction-pastes/sess/0123456789abcdef0123456789abcdef.txt';
+      const asks = (n) => ({ role: 'user', text: `${OWN} <pasted_content id="1">${inner(n)}</pasted_content>`, toolUses: [] });
+      const moved = (n) => ({ role: 'user', text: `${OWN} ${pasteTrace(n, inner(n), PATH)}`, toolUses: [] });
+      const stepRow = (id) => ({ role: 'assistant', text: 'Step 1.', toolUses: [{ tool_use_id: id, tool: 'Bash', input: { command: `cat notes-${id}.txt` } }] });
+      const bare = { role: 'assistant', text: 'Step 1.', toolUses: [] };
+      const think = { role: 'assistant', text: '', toolUses: [] };
+      // The host holds the user rows between two assistant messages as one message.
+      function hostList(rows, rates) {
+        const api = [];
+        for (const m of rows) {
+          const content = m.role === 'assistant'
+            ? [...(m.text ? [{ type: 'text', text: m.text }] : []), ...m.toolUses.map((u) => ({ type: 'tool_use', id: u.tool_use_id, name: u.tool, input: u.input })), ...(!m.text && !m.toolUses.length ? [{ type: 'thinking', thinking: 'Considering the next step.' }] : [])]
+            : [...(m.toolResults || []).map((r) => ({ type: 'tool_result', tool_use_id: r.tool_use_id, content: r.text })), ...(m.text ? [{ type: 'text', text: m.text }] : [])];
+          if (m.role === 'user' && api[api.length - 1]?.role === 'user') api[api.length - 1].content.push(...content); else api.push({ role: m.role, content });
+        }
+        return listTokens(api, rates);
+      }
+      const resultOf = (id, resIdx, extra = {}) => ({ ...item(id, { score: 0, resIdx, ...extra }), useIdx: resIdx - 1 });
+
+      for (const raw of [undefined, '{"RATE_BLOCK":10}']) {
+        const rates = ratesFrom(raw);
+        for (const n of [2000, 10000, 30000]) {
+          it(`the result goes and the words of the row after it stay beside nothing: the prediction is the list that is left: a tag of ${n} characters, ${raw ? 'RATE_BLOCK 10' : 'the default block rate'}`, () => {
+            const messages = [task, stepRow('a'), resultRow('a'), asks(n), done];
+            const left = [task, stepRow('a'), resultRow('a'), moved(n), done];
+            const candidates = [resultOf('a', 2)];
+            const shape = shapeOf(messages, candidates, { rows: left, group: [-1, 0, -1, -1, 1], keepFrom: left.length, rates });
+            expect(floorPrediction(candidates, hostList(left, rates), rates, shape)).toBeCloseTo(hostList([task, bare, moved(n), done], rates), 4);
+          });
+
+          it(`the words of a row that held no result join the message of a result that stays: the prediction is the list that is left: a tag of ${n} characters, ${raw ? 'RATE_BLOCK 10' : 'the default block rate'}`, () => {
+            const messages = [task, callRow('p'), resultRow('p'), think, asks(n), callRow('d'), resultRow('d'), done];
+            const left = [task, callRow('p'), resultRow('p'), think, moved(n), callRow('d'), resultRow('d'), done];
+            const candidates = [resultOf('d', 6), resultOf('p', 2, { task: true })];
+            const shape = shapeOf(messages, candidates, { rows: left, group: [-1, 0, -1, 1, -1, 2, -1, 3], keepFrom: left.length, rates });
+            expect(floorPrediction(candidates, hostList(left, rates), rates, shape)).toBeCloseTo(hostList([task, callRow('p'), { ...resultRow('p'), text: moved(n).text }, done], rates), 4);
+          });
+        }
+      }
+
+      it('the stage moved nothing (the rows are the rows it started from): the words stay as they are and the change of class is theirs', () => {
+        const messages = [task, stepRow('a'), resultRow('a'), asks(10000), done];
+        const candidates = [resultOf('a', 2)];
+        const shape = shapeOf(messages, candidates, { group: [-1, 0, -1, -1, 1], keepFrom: messages.length });
+        expect(floorPrediction(candidates, hostList(messages), undefined, shape)).toBeCloseTo(hostList([task, bare, messages[3], done]), 4);
+        // The same shape from the rows it started from, given as the rows: nothing differs.
+        const same = shapeOf(messages, candidates, { rows: messages, group: [-1, 0, -1, -1, 1], keepFrom: messages.length });
+        expect(same.shed(candidates, 'trace')).toBeCloseTo(shape.shed(candidates, 'trace'), 6);
+      });
+
+      it('the row of the tag is apart from the result by an answer of the assistant: no result stands beside it, before or after the stage', () => {
+        const answer = { role: 'assistant', text: 'Looking at the report.', toolUses: [] };
+        const messages = [task, stepRow('a'), resultRow('a'), answer, asks(10000), done];
+        const left = [task, stepRow('a'), resultRow('a'), answer, moved(10000), done];
+        const candidates = [resultOf('a', 2)];
+        const shape = shapeOf(messages, candidates, { rows: left, group: [-1, 0, -1, 1, -1, 2], keepFrom: left.length });
+        expect(floorPrediction(candidates, hostList(left), undefined, shape)).toBeCloseTo(hostList([task, bare, answer, moved(10000), done]), 4);
+      });
+
+      it('a row of an agent that the stage moved holds no words of the user before or after it: the shape is the same from either row', () => {
+        const agent = { role: 'user', text: `<teammate-message teammate_id="w1">${inner(8000)}</teammate-message>`, toolUses: [] };
+        const trace = { role: 'user', text: `[agent message moved at compaction, not from the user: ${PATH} (8000 chars, 8000 bytes); from w1]`, toolUses: [] };
+        const messages = [task, stepRow('a'), resultRow('a'), agent, done];
+        const candidates = [resultOf('a', 2)];
+        const before = shapeOf(messages, candidates, { group: [-1, 0, -1, -1, 1], keepFrom: messages.length });
+        const left = shapeOf(messages, candidates, { rows: [task, stepRow('a'), resultRow('a'), trace, done], group: [-1, 0, -1, -1, 1], keepFrom: messages.length });
+        expect(left.shed(candidates, 'trace')).toBeCloseTo(before.shed(candidates, 'trace'), 6);
+        expect(left.shed(candidates, 'drop')).toBeCloseTo(before.shed(candidates, 'drop'), 6);
+      });
+
+      it('a row that holds the result and the tag together: the words are counted from the row that is left, as in a row that holds no result', () => {
+        const withText = (text) => ({ ...resultRow('a'), text });
+        const messages = [task, stepRow('a'), withText(asks(10000).text), done];
+        const left = [task, stepRow('a'), withText(moved(10000).text), done];
+        const candidates = [resultOf('a', 2)];
+        const group = [-1, 0, -1, 1];
+        const shape = shapeOf(messages, candidates, { rows: left, group, keepFrom: left.length });
+        const same = shapeOf(left, candidates, { group, keepFrom: left.length });
+        expect(shape.shed(candidates, 'trace')).toBeCloseTo(same.shed(candidates, 'trace'), 6);
+        expect(shape.shed(candidates, 'drop')).toBeCloseTo(same.shed(candidates, 'drop'), 6);
       });
     });
   });

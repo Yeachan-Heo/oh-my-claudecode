@@ -2692,8 +2692,8 @@ function itemTokens(c, rates = DEFAULT_RATES) {
 // deliveries after a row become one block of its text. Parallel calls make this the larger part of what a cut gives back (a message of 25 calls costs 25 blocks,
 // its traces one). So the floor, the cascade, the manual plan, the gates of cutInTokens and the accounting take it from here, in one place, and predict the list
 // as listTokens counts the list build writes. The messages are the host's: an assistant message is the rows of one group (groupsOf), a user message a run of user
-// rows; the rows from `keepFrom` on keep their handles and stay as they are. `rows` are the rows build is given (a row of the trim that goes whole has `trimDrop`),
-// `queued` the deliveries after each row. A user message that no result stands in any more has its text at the rate of the words of the user (besideResultGap). The
+// rows; the rows from `keepFrom` on keep their handles and stay as they are. `rows` are the rows build is given (a row of the trim that goes whole has `trimDrop`; a row whose
+// pasted tag the paste stage moved holds its trace, and the words of the user in a message are read from these rows, not from `messages`), `queued` the deliveries after each row. A user message that no result stands in any more has its text at the rate of the words of the user (besideResultGap). The
 // user rows on both sides of an assistant message that is gone (no text, no trace, every call dropped) are one message of the host: the tracker joins their runs, so they
 // cost one message, and their words keep the rate of a text beside a result while a result stays in either. A notification row that is replaced is one text block with the
 // blocks delivered after it, which costs the rate of the words of the user when a message of the user is among them (noteOwn). The words of a run that held no result, joined to a
@@ -2762,7 +2762,7 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     // any other row as its text and each delivery after it.
     r.results = r.rows.reduce((n, i) => n + (rows[i].trimDrop === true ? 0 : resultsAt(messages[i])), 0);
     r.beside = r.rows.some((i) => resultsAt(messages[i]) > 0);
-    const words = besideResultGap(r.rows.flatMap((i) => (rows[i].trimDrop === true ? [] : resultsAt(messages[i]) ? [carriedText(messages[i], queued.get(i)).text] : [messages[i].text || '', ...(queued.get(i) || [])]).filter(Boolean)), rates);
+    const words = besideResultGap(r.rows.flatMap((i) => (rows[i].trimDrop === true ? [] : resultsAt(messages[i]) ? [carriedText(rows[i], queued.get(i)).text] : [rows[i].text || '', ...(queued.get(i) || [])]).filter(Boolean)), rates);
     r.gap = r.beside ? words : 0;
     r.loss = r.beside ? 0 : words;
   }
@@ -4484,7 +4484,8 @@ async function decide($, e, cfg, record, started) {
   if (stage.stats) record.agent_trim = stage.stats;
   const { trimmed, trimTokens, opts: agentOpts, plan: planAgents } = stage;
   // The blocks and messages that the keep decisions take off the list, which the predictions in tokens count with the costs of the candidates (shapeOf).
-  const shape = tokenMode ? shapeOf(messages, candidates, { rows: trimmed, group, keepFrom, queued, rates: cfg.rates }) : undefined;
+  const shapeFrom = (rows) => (tokenMode ? shapeOf(messages, candidates, { rows, group, keepFrom, queued, rates: cfg.rates }) : undefined);
+  let shape = shapeFrom(trimmed);
   const movedTokens = (st) => movedTokensOf(st, cfg.rates);
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) {
@@ -4668,6 +4669,7 @@ async function decide($, e, cfg, record, started) {
   let replyEdits;
   let pasteSwaps;
   let stageTokens = 0;
+  let rows = agentMoved.size ? trimmed.map((m, i) => agentMoved.get(i) ?? m) : trimmed;
   if (cfg.targetPercent === undefined) allocate(candidates, before, cfg.target, envelopes);
   else {
     // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT): the target and the prediction are in tokens; they start from the host's count,
@@ -4685,7 +4687,12 @@ async function decide($, e, cfg, record, started) {
     }
     if (pasted) {
       pasteSwaps = await movePastes($, pasted.stats.mode, pasted.jobs, messages, pasted.stats, deadline).catch(() => { pasted.stats.error = 1; return new Map(); });
-      if (pasteSwaps.size) stageTokens += movedTokens(pasted.stats);
+      if (pasteSwaps.size) {
+        stageTokens += movedTokens(pasted.stats);
+        // The words of the user in a message are counted from the rows the stage leaves (a tag moved is a trace, no words), as the tokens it moved are off the base.
+        rows = rows.map((m, i) => (pasteSwaps.has(messages[i]) ? pasteSwaps.get(messages[i]) : m));
+        shape = shapeFrom(rows);
+      }
     }
     const base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens - thinking.removed;
     let plan;
@@ -4706,14 +4713,17 @@ async function decide($, e, cfg, record, started) {
     if (cfg.ownSkip && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && e.trigger === 'plugin' && session.ownCompactInFlight) return { fallback: 'cut_below_host_min_skipped', skip: true, tokensBefore: tokens.tokens };
   }
   const stats = {};
-  let rows = agentMoved.size ? trimmed.map((m, i) => agentMoved.get(i) ?? m) : trimmed;
   // What the text stages moved is marked installed (`installed` of their stats) only once the result is certain, at the end: a fallback after the files were
   // written (the cascade's checks above, a build that fails) returns the host's summary, which holds none of it.
   let pastesInstalled = false;
   let repliesInstalled = false;
   if (pasted) {
     const swaps = pasteSwaps ?? (await movePastes($, pasted.stats.mode, pasted.jobs, messages, pasted.stats, deadline).catch(() => { pasted.stats.error = 1; return new Map(); }));
-    if (swaps.size) { rows = rows.map((m, i) => (swaps.has(messages[i]) ? swaps.get(messages[i]) : m)); pastesInstalled = true; }
+    if (swaps.size) {
+      rows = rows.map((m, i) => (swaps.has(messages[i]) ? swaps.get(messages[i]) : m));
+      pastesInstalled = true;
+      if (!pasteSwaps) shape = shapeFrom(rows); // no cascade ran: the accounting reads the rows the stage left
+    }
   }
   let built = build(rows, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };

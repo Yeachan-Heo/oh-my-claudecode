@@ -16,7 +16,7 @@ const TARGET_20 = { ...ACTIVE_ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '20' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
 const IMAGE = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } };
 
-function fakeDollar({ env, usage, messages, api, score = () => 0 }) {
+function fakeDollar({ env, usage, messages, api, score = () => 0, noul = 0.95 }) {
   const store = new Map();
   const requests = [];
   const $ = {
@@ -33,7 +33,7 @@ function fakeDollar({ env, usage, messages, api, score = () => 0 }) {
       fetch: async (url, init) => {
         const body = JSON.parse(init.body);
         requests.push(body);
-        return { ok: true, status: 200, headers: {}, text: JSON.stringify({ answers: Object.fromEntries(Object.keys(body.questions).map((q) => [q, { type: 'score', score: score(body.state.results[q]?.result ?? ''), confidence: 0.9 }])) }) };
+        return { ok: true, status: 200, headers: {}, text: JSON.stringify({ answers: Object.fromEntries(Object.keys(body.questions).map((q) => [q, q === 'pasted' ? { type: 'noul', noul } : { type: 'score', score: score(body.state.results[q]?.result ?? ''), confidence: 0.9 }])) }) };
       },
     },
     clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; }, sleep: async () => { throw new Error('the module must not use $.clock.sleep'); } },
@@ -116,9 +116,10 @@ function taskSession(n) {
 }
 
 // The compaction through register(on): the record, the scoring requests and what the host gets back. `form: false` leaves the API form out (the host answers rows);
-// `api` is the API form the host answers instead of the one made from the rows; `tokens: null` is a host with no usage to give (the tokens before are estimated).
-async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after, api, score } = {}) {
-  const fake = fakeDollar({ env, usage: usageOf(tokens), messages, api: api ?? (form ? apiOf(messages, after) : undefined), score });
+// `api` is the API form the host answers instead of the one made from the rows; `tokens: null` is a host with no usage to give (the tokens before are estimated); `noul` is
+// Jev's answer to the question about a pasted tag (the chance that no part of it is the user's own writing).
+async function compactRun(env, messages, { tokens = 190000, trigger = 'auto', form = true, after, api, score, noul } = {}) {
+  const fake = fakeDollar({ env, usage: usageOf(tokens), messages, api: api ?? (form ? apiOf(messages, after) : undefined), score, noul });
   const handlers = {};
   register((event, hook) => { handlers[event] = hook; });
   const out = await handlers['session.compact'](fake.$, Object.freeze({ trigger, messages }), async () => ({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] }));
@@ -1139,6 +1140,97 @@ describe('the class of the words that stay is taken inside the zero floor of the
   for (const [label, c] of [['the default block rate', { raw: null, prefix: 3000 }], ['words of 110 characters (the message costs something after the change of class)', { words: 110, prefix: 3000 }], ['words of 430 characters', { words: 430, prefix: 3000 }], ['no words (nothing changes class)', { words: 0, steps: 480, prefix: 3000 }]]) {
     it(`unchanged: ${label}`, async () => {
       agrees(await layout(c), label);
+    });
+  }
+});
+
+describe('the words of a message that holds a pasted tag that the paste stage moves: the text that is gone has no class to change', () => {
+  // A row of the user with words and a pasted tag stands right after the result row of a step, so the host holds one message of the result and the text. The paste stage moves the tag to
+  // a file (a trace of a few hundred characters stays in the row) and takes the tokens of the moved text off the base; once the cascade has traced the result, no result stands beside the
+  // words, and what that gives back (0.076 a character: 0.363 beside a result, 0.287 alone) is for the words that stay, not for a tag that is gone. The host counts the list plus a prefix
+  // (the system prompt and the tools); the moved text is counted at the rate of a text beside a result.
+  const ENV = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_HOST_HANDOFF: '1', OMC_JEV_COMPACT_PASTES: 'active' };
+  const RATES = '{"RATE_MOVED":0.363}';
+  const MIN_CUT = 0.3;
+  const OWN = 'Please check the report below and tell me what you think of it.';
+  const tag = (id, n) => `<pasted_content id="${id}">${'alpha '.repeat(Math.ceil(n / 6)).slice(0, n)}</pasted_content>`;
+  // `steps` steps of a text result of 400 characters, and a row with a tag of `size` characters after the result of each step in `at` (right after it, or after the answer of the assistant
+  // that follows it when `apart`).
+  async function layout({ steps = 230, size = 10000, at = [10, 20, 30, 40], env = ENV, raw = RATES, noul, apart = false, score, prefix = 1000 }) {
+    const rows = [];
+    let k = 0;
+    session(steps, { shot: () => false, chars: 400 }).forEach((m) => {
+      rows.push(m);
+      const id = (m.toolResults || []).length ? Number(m.toolResults[0].tool_use_id.slice(1)) : 0;
+      if (!at.includes(id)) return;
+      const paste = Object.freeze({ role: 'user', text: `${OWN} ${tag(++k, size)}`, toolUses: [], handle: `p${k}` });
+      if (apart) rows.push(Object.freeze({ role: 'assistant', text: `Looking at report ${k}.`, toolUses: [], handle: `a${k}` }));
+      rows.push(paste);
+    });
+    const rates = ratesFrom(raw);
+    const counted = Math.round(listTokens(apiOf(rows), rates)) + prefix;
+    const { record, out } = await compactRun({ ...env, ...(raw ? { OMC_JEV_COMPACT_RATES: raw } : {}) }, rows, { tokens: counted, trigger: 'manual', noul, score });
+    return { record, out, counted, tags: k, installed: out?.messages ? listTokens(apiOf(out.messages), rates) + prefix : undefined };
+  }
+  // The monitor's prediction and the tokens the host is told are the list that is installed, within the line break before each trace that the prediction leaves out.
+  function agrees({ record, out, installed }, label, key = 'tokens_after_pred') {
+    expect(record, label).toMatchObject({ result: 'jev' });
+    const slack = 0.6 * record.traced + 2;
+    expect(Math.abs(record[key] - installed), `${label}: monitor ${record[key]}, listTokens ${installed}`).toBeLessThanOrEqual(slack);
+    if (key === 'tokens_after_pred') expect(Math.abs(out.tokensAfter - installed), `${label}: told ${out.tokensAfter}, listTokens ${installed}`).toBeLessThanOrEqual(slack);
+  }
+  const moved = (run, label) => {
+    expect(run.record.pastes, label).toMatchObject({ mode: 'active', tags: run.tags, moved: run.tags, installed: true });
+    expect(JSON.stringify(run.out.messages), label).not.toContain('<pasted_content');
+  };
+
+  it('the layout of the report: four tags of 10 000 characters, 76 100 tokens before; the prediction is the installed list and the cut that the host asks for is made', async () => {
+    const run = await layout({});
+    expect(run.counted).toBeGreaterThan(76000);
+    expect(run.counted).toBeLessThan(76200);
+    moved(run, 'four tags');
+    agrees(run, 'four tags');
+    agrees(run, 'four tags (the accounting of the record)', 'tokens_after');
+    const slack = 0.6 * run.record.traced + 2;
+    expect(run.record.tokens_after_pred).toBeLessThanOrEqual(run.record.cascade_target_tokens);
+    // The gap of the moved text (0.076 a character, 3040 tokens in all) was credited twice: the prediction said 33 900 and the list that was installed was 37 000, above the target.
+    expect(run.installed).toBeLessThanOrEqual(run.record.cascade_target_tokens + slack);
+    expect(1 - run.installed / run.counted).toBeGreaterThanOrEqual(MIN_CUT);
+  });
+
+  for (const [label, c] of [
+    ['one tag of 10 000 characters', { at: [10] }],
+    ['two tags of 25 000 characters', { at: [10, 30], size: 25000, steps: 200 }],
+    ['four tags of 2500 characters', { size: 2500 }],
+    ['four tags of 10 000 characters at a block rate of 10 (under the constant of a message)', { raw: '{"RATE_MOVED":0.363,"RATE_BLOCK":10}', steps: 300 }],
+  ]) {
+    it(`the prediction is the installed list: ${label}`, async () => {
+      const run = await layout(c);
+      moved(run, label);
+      agrees(run, label);
+    });
+  }
+
+  it('without the cascade the accounting of the record is the installed list too: tokens_after of a compaction that moved four tags', async () => {
+    const run = await layout({ env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1', OMC_JEV_COMPACT_PASTES: 'active', OMC_JEV_COMPACT_TARGET: '0.5' } });
+    expect(run.record).not.toHaveProperty('cascade_pass');
+    moved(run, 'accounting');
+    agrees(run, 'accounting', 'tokens_after');
+  });
+
+  // The text stays (the stage is off, in shadow, or Jev says a part of the tag is the user's own), or the words do not stand beside a result: the prediction is the installed list as it was.
+  for (const [label, c] of [
+    ['the stage is off', { env: { ...ENV, OMC_JEV_COMPACT_PASTES: 'off' }, stays: true }],
+    ['the stage is in shadow', { env: { ...ENV, OMC_JEV_COMPACT_PASTES: 'shadow' }, stays: true }],
+    ['Jev says that a part of the tag is the user\'s own', { noul: 0.1, stays: true }],
+    // The text of the moved tag is alone in its message here, at 0.287 a character, so the rate of the moved text is that of the words of the user.
+    ['the row of the tag is apart from the result (an answer of the assistant stands between)', { apart: true, raw: '{"RATE_MOVED":0.287}' }],
+    ['the results beside the tags are needed and stay (no rebate)', { score: (text) => (/^RESULT-(10|20|30|40) /.test(text) ? 3 : 0) }],
+  ]) {
+    it(`unchanged: ${label}`, async () => {
+      const run = await layout(c);
+      agrees(run, label);
+      expect(JSON.stringify(run.out.messages).includes('<pasted_content'), label).toBe(Boolean(c.stays));
     });
   }
 });
