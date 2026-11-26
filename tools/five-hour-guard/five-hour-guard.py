@@ -1375,7 +1375,7 @@ def unpublish(strict=False):
     The file is looked at again right before it is removed: one that is not a regular pause document of this guard any more
     (somebody created or replaced it since the last check) is never removed; strict makes that a configuration error (exit 2).
     The path is then moved aside in one step and what was moved is compared with what was looked at: a file that took the place in the
-    instant between is put back (nothing is overwritten), so the removal can only hit the file that was looked at."""
+    instant between is put back by a hard link (nothing is overwritten; where links are not supported, or another file is at the path again, it is kept under its new name and the log says so), so the removal can only hit the file that was looked at."""
     if A.dry_run:
         return True
     try:
@@ -1402,16 +1402,8 @@ def unpublish(strict=False):
             else:
                 try:
                     os.link(gone, PAUSE_FILE)
-                except OSError as e:   # FileExistsError: another file is there again; any other error: no hard links on this file system
-                    back = False
-                    if not isinstance(e, FileExistsError) and not os.path.lexists(PAUSE_FILE):
-                        try:
-                            os.rename(gone, PAUSE_FILE)   # the name is free: the file goes back by a rename (a file that comes in this very instant would be replaced, which no call here prevents)
-                            back = True
-                        except OSError:
-                            pass
-                    if not back:   # the one that was moved aside is kept under its new name, and the log says so
-                        log(f'the file that was at {PAUSE_FILE} is not a pause file of this guard and is kept as {gone}')
+                except OSError:   # FileExistsError: another file is there again; any other error: no hard links on this file system. A rename would put the file back too, and replace one that comes in that very instant, so there is none
+                    log(f'the file that was at {PAUSE_FILE} is not a pause file of this guard and is kept as {gone}')   # the one that was moved aside is kept under its new name, and the log says so
                 else:
                     os.unlink(gone)
         except FileNotFoundError:

@@ -4557,7 +4557,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
   });
 
-  it('where hard links are not supported a foreign file that was moved aside by the removal of a pause is put back by a rename when the name is free, and kept under its new name when it is not or the rename fails', () => {
+  it('where hard links are not supported a foreign file that was moved aside by the removal of a pause is kept under its new name, whether the path is free or another file is there again, and also where a rename back would be refused: no rename puts it back', () => {
     // the foreign file takes the place after the last look of unpublish(), as in the test of the swap; the other runs put another file at the path after the move aside, or refuse the rename back
     const driver = ['import errno, os, runpy, sys', 'real_lstat, real_rename, pause, mode, looks = os.lstat, os.rename, sys.argv[1], sys.argv[2], []',
       'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',
@@ -4576,19 +4576,42 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       const r = runPyCode(driver, [f.pause, mode, GUARD, ...guardArgs(f, ['--once'])]);
       const kept = readdirSync(f.dir).filter((n) => n.endsWith('.gone'));
       expect(r.status, `${mode}: ${r.stdout}${r.stderr}`).toBe(0);
-      if (mode === 'free') {
-        expect(r.stdout, 'it is told that the file is not a pause of this guard').toMatch(/is not a pause file of this guard any more: left alone/);
-        expect(readText(f.pause), 'the foreign file is where it was').toBe('foreign one\n');
-        expect(kept, 'nothing is left aside').toEqual([]);
-      } else {
-        expect(r.stdout, `${mode}: the file that was moved aside is reported as kept`).toMatch(/is not a pause file of this guard and is kept as .*\.gone/);
-        expect(kept, `${mode}: the file that was moved aside is still there`).toHaveLength(1);
-        expect(readText(join(f.dir, kept[0])), `${mode}: with its content`).toBe('foreign one\n');
-        if (mode === 'occupied') expect(readText(f.pause), 'the file that is at the path is not replaced').toBe('foreign two\n');
-        else expect(existsSync(f.pause), 'the path stays empty').toBe(false);
-      }
+      expect(r.stdout, `${mode}: it is told that the file is not a pause of this guard`).toMatch(/is not a pause file of this guard any more: left alone/);
+      expect(r.stdout, `${mode}: the file that was moved aside is reported as kept`).toMatch(/is not a pause file of this guard and is kept as .*\.gone/);
+      expect(kept, `${mode}: the file that was moved aside is still there`).toHaveLength(1);
+      expect(readText(join(f.dir, kept[0])), `${mode}: with its content`).toBe('foreign one\n');
+      if (mode === 'occupied') expect(readText(f.pause), 'the file that is at the path is not replaced').toBe('foreign two\n');
+      else expect(existsSync(f.pause), `${mode}: the path stays empty`).toBe(false);
       expect(readJson(f.state).paused, `${mode}: the pause itself is over`).toBe(false);
     }
+  });
+
+  it('where hard links are not supported a file that arrives at pause_file in the gap after the path was seen to be free is never replaced: the foreign file that was moved aside stays under its new name, and no rename of it over the pause path is made', () => {
+    // the foreign file takes the place after the last look of unpublish(), as in the test of the swap; a third file arrives the instant after the check that the path is free (the check that the old code made before it renamed the file back)
+    const driver = ['import errno, os, runpy, sys', 'real_lstat, real_rename, real_lexists, pause, looks = os.lstat, os.rename, os.path.lexists, sys.argv[1], []',
+      'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',
+      'def swap(path, *args, **kw):', '    found = real_lstat(path, *args, **kw)',
+      '    if str(path) == pause and sys._getframe(1).f_code.co_name == "unpublish":', '        looks.append(1)',
+      '        if len(looks) == 2:', '            open(pause + ".foreign", "w").write("foreign one\\n")', '            os.replace(pause + ".foreign", pause)',
+      '    return found',
+      'def gap(path):', '    found = real_lexists(path)',
+      '    if str(path) == pause and not found and sys._getframe(1).f_code.co_name == "unpublish":', '        open(pause, "w").write("late arrival\\n")',
+      '    return found',
+      'def moved(src, dst, *args, **kw):', '    if str(dst) == pause and str(src).endswith(".gone"):', '        open(pause + ".attempt", "w").write("a quarantined file is renamed over the pause path")',
+      '    real_rename(src, dst, *args, **kw)',
+      'os.link, os.lstat, os.rename, os.path.lexists = nolink, swap, moved, gap', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('no-link-unlink-gap', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
+    writePause(f, { pid: deadPid() });
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(existsSync(`${f.pause}.attempt`), 'no rename of the quarantined file over the pause path is made').toBe(false);
+    if (existsSync(f.pause)) expect(readText(f.pause), 'a file that arrives at the path is not replaced').toBe('late arrival\n');
+    const kept = readdirSync(f.dir).filter((n) => n.endsWith('.gone'));
+    expect(r.stdout, 'the file that was moved aside is reported as kept').toMatch(/is not a pause file of this guard and is kept as .*\.gone/);
+    expect(kept, 'the file that was moved aside is still there').toHaveLength(1);
+    expect(readText(join(f.dir, kept[0])), 'with its content').toBe('foreign one\n');
+    expect(readJson(f.state).paused, 'the pause itself is over').toBe(false);
   });
 
   it('a link at pause_file that appeared after the start is never replaced, also when its target holds a valid pause document', async () => {
