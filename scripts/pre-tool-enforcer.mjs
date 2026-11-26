@@ -1176,8 +1176,10 @@ function recordJevForkSkipRow(data, toolInput, stateDir) {
 // that contains an absolute path to a .md file, the head (up to 8000 characters) of the file named
 // by the first such path is appended to the prompt in the Jev state; the prompt itself and the call
 // are not changed. Only files
-// under the working directory of the session and under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS
-// (separated by the platform path delimiter, empty by default) are expanded. A file whose canonical path looks secret
+// under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (separated by the platform path delimiter, empty by
+// default, so nothing is read) are expanded; with OMC_JEV_POINTER_EXPAND_CWD=1 the working directory of the session is an
+// allowed root as well, unless it is the filesystem root or the home directory (the reason is then working-dir-too-broad).
+// A file whose canonical path looks secret
 // (scripts/lib/jev-pointer-secret-path.mjs: SSH keys, env files, credential and token files, key stores), a
 // settings*.json file, and any file under a directory listed in OMC_JEV_POINTER_EXPAND_SECRET_DIRS is never
 // read, whichever root it lies under. The excerpt is part of the state, so it goes through the state mask (scripts/lib/jev-state-mask.mjs)
@@ -1202,15 +1204,26 @@ function pointerDirList(value) {
       }
     });
 }
-// The roots a pointer file may lie under: the listed directories and the working directory of the session.
-function pointerExpandRoots(directory, env = process.env) {
-  const roots = pointerDirList(env.OMC_JEV_POINTER_EXPAND_DIRS);
+function pointerExpandRoots(env = process.env) {
+  return pointerDirList(env.OMC_JEV_POINTER_EXPAND_DIRS);
+}
+// The working directory of the session as an extra root (OMC_JEV_POINTER_EXPAND_CWD=1). Returns { root } for a usable
+// directory, { broad } (its real path) for the filesystem root or the home directory, which never become a root, and
+// {} when the switch is off or the directory cannot be resolved.
+function pointerCwdRoot(directory, env = process.env) {
+  if (String(env.OMC_JEV_POINTER_EXPAND_CWD ?? '').trim() !== '1') return {};
   try {
-    roots.push(realpathSync(directory || process.cwd()));
+    const real = realpathSync(directory || process.cwd());
+    let home = null;
+    try {
+      home = realpathSync(homedir());
+    } catch {
+      // No usable home directory: only the filesystem root is too broad.
+    }
+    return real === parse(real).root || real === home ? { broad: real } : { root: real };
   } catch {
-    // No usable working directory: only the listed directories apply.
+    return {};
   }
-  return roots;
 }
 // Directories whose files are never expanded, in addition to the built-in secret path patterns
 // (OMC_JEV_POINTER_EXPAND_SECRET_DIRS, same format as OMC_JEV_POINTER_EXPAND_DIRS, empty by default).
@@ -1247,9 +1260,11 @@ function expandTaskPointer(prompt, pointer, directory) {
       pointer.unexpanded = 'secret-path';
       return prompt;
     }
-    const roots = pointerExpandRoots(directory);
+    const roots = pointerExpandRoots();
+    const cwdRoot = pointerCwdRoot(directory);
+    if (cwdRoot.root) roots.push(cwdRoot.root);
     if (!roots.some((root) => isPathInDirectory(real, root))) {
-      pointer.unexpanded = 'outside-allowed-dirs';
+      pointer.unexpanded = cwdRoot.broad && isPathInDirectory(real, cwdRoot.broad) ? 'working-dir-too-broad' : 'outside-allowed-dirs';
       return prompt;
     }
     const content = readFileSync(real);

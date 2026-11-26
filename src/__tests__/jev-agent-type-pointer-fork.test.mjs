@@ -607,7 +607,9 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
     expect(row?.pointer_expanded).toBe(false);
   });
 
-  describe('the working directory of the session is an allowed root', () => {
+  describe('the working directory of the session as a root (OMC_JEV_POINTER_EXPAND_CWD)', () => {
+    // The working directory switch on, an empty list of directories unless a test gives one.
+    const CWD = (context, extra = {}) => ON(context, { OMC_JEV_POINTER_EXPAND_CWD: '1', OMC_JEV_POINTER_EXPAND_DIRS: '', ...extra });
     const cwdFile = (context, name, text) => {
       const path = join(context.cwd, name);
       mkdirSync(join(path, '..'), { recursive: true });
@@ -621,7 +623,7 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       const prompt = TASK + ' Details in ' + file;
       for (const dirs of ['', join(context.root, 'briefs')]) {
         briefsDir(context);
-        const { task, row } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: dirs }));
+        const { task, row } = await taskSentFor(context, prompt, CWD(context, { OMC_JEV_POINTER_EXPAND_DIRS: dirs }));
         expect(task).toBe(prompt + label(realpathSync(file)) + 'CWD-MARKER');
         expect(row?.pointer_expanded).toBe(true);
       }
@@ -641,7 +643,7 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       mkdirSync(join(context.root, 'project-other'));
       writeFileSync(file, 'NEIGHBOUR-MARKER', 'utf8');
       const prompt = TASK + ' Details in ' + file;
-      const { task, row } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: '' }));
+      const { task, row } = await taskSentFor(context, prompt, CWD(context));
       expect(task).toBe(prompt);
       expect(row?.pointer_unexpanded).toBe('outside-allowed-dirs');
     });
@@ -653,7 +655,7 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       cwdFile(context, '.ssh/notes.md', 'SSH-MARKER');
       symlinkSync(join(context.cwd, '.ssh', 'notes.md'), join(context.cwd, 'ssh-link.md'));
       const vault = cwdFile(context, 'vault/notes.md', 'VAULT-MARKER');
-      const withVault = ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: '', OMC_JEV_POINTER_EXPAND_SECRET_DIRS: join(context.cwd, 'vault') });
+      const withVault = CWD(context, { OMC_JEV_POINTER_EXPAND_SECRET_DIRS: join(context.cwd, 'vault') });
       for (const file of [join(context.cwd, 'link.md'), join(context.cwd, 'ssh-link.md'), vault]) {
         const prompt = TASK + ' Details in ' + file;
         const { task, row } = await taskSentFor(context, prompt, withVault);
@@ -671,7 +673,7 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       writeFileSync(join(context.root, 'elsewhere', 'target.md'), 'OUTSIDE-MARKER', 'utf8');
       symlinkSync(join(context.root, 'elsewhere', 'target.md'), join(context.cwd, 'link.md'));
       const prompt = TASK + ' Details in ' + join(context.cwd, 'link.md');
-      const { task, row } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: '' }));
+      const { task, row } = await taskSentFor(context, prompt, CWD(context));
       expect(task).toBe(prompt);
       expect(row?.pointer_unexpanded).toBe('outside-allowed-dirs');
     });
@@ -682,7 +684,7 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       mkdirSync(other);
       writeFileSync(join(other, 'notes.md'), 'OTHER-MARKER', 'utf8');
       const inOther = cwdFile(context, 'notes.md', 'PROCESS-MARKER');
-      const off = ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: '' });
+      const off = CWD(context);
       const otherPrompt = TASK + ' Details in ' + join(other, 'notes.md');
       const expanded = await taskSentFor(context, otherPrompt, off, { cwd: other });
       expect(expanded.task).toBe(otherPrompt + label(realpathSync(join(other, 'notes.md'))) + 'OTHER-MARKER');
@@ -698,27 +700,98 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       const linked = join(context.root, 'project-link');
       symlinkSync(context.cwd, linked);
       const prompt = TASK + ' Details in ' + file;
-      const { task } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND_DIRS: '' }), { cwd: linked });
+      const { task } = await taskSentFor(context, prompt, CWD(context), { cwd: linked });
       expect(task).toBe(prompt + label(realpathSync(file)) + 'LINKED-MARKER');
     });
 
-    it('a switch value other than 1 leaves the working directory file unexpanded', async () => {
+    it('a master switch value other than 1 leaves the working directory file unexpanded', async () => {
       const context = makeContext();
       const file = cwdFile(context, 'notes.md', 'CWD-MARKER');
       const prompt = TASK + ' Details in ' + file;
       for (const value of ['0', 'true', 'on']) {
-        const { task } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND: value, OMC_JEV_POINTER_EXPAND_DIRS: '' }));
+        const { task } = await taskSentFor(context, prompt, CWD(context, { OMC_JEV_POINTER_EXPAND: value }));
         expect(task).toBe(prompt);
       }
     });
 
-    it('switch unset: a file in the working directory is not expanded and the prompt is sent as it was', async () => {
+    it('master switch unset: a file in the working directory is not expanded and the prompt is sent as it was', async () => {
       const context = makeContext();
       const file = cwdFile(context, 'notes.md', 'CWD-MARKER');
       const prompt = TASK + ' Details in ' + file;
-      const { task, row } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND: '', OMC_JEV_POINTER_EXPAND_DIRS: '' }));
+      const { task, row } = await taskSentFor(context, prompt, CWD(context, { OMC_JEV_POINTER_EXPAND: '' }));
       expect(task).toBe(prompt);
       expect(row?.pointer_expanded).not.toBe(true);
+    });
+
+    it('working directory switch off (unset, empty, 0, true, on, yes): no root is added, as without the feature, with and without a list', async () => {
+      const context = makeContext();
+      const file = cwdFile(context, 'notes.md', 'CWD-MARKER');
+      const prompt = TASK + ' Details in ' + file;
+      for (const value of [undefined, '', '0', 'true', 'on', 'yes']) {
+        for (const dirs of ['', briefsDir(context)]) {
+          const { task, row } = await taskSentFor(context, prompt, ON(context, { OMC_JEV_POINTER_EXPAND_CWD: value, OMC_JEV_POINTER_EXPAND_DIRS: dirs }));
+          expect(task, `value ${String(value)}`).toBe(prompt);
+          expect(row?.pointer_unexpanded).toBe('outside-allowed-dirs');
+        }
+      }
+    });
+
+    it('the filesystem root as the working directory is not a root: one row says so, and the listed directories still work', async () => {
+      const context = makeContext();
+      const outsidePrompt = TASK + ' Details in ' + cwdFile(context, 'notes.md', 'CWD-MARKER');
+      const refused = await taskSentFor(context, outsidePrompt, CWD(context), { cwd: '/' });
+      expect(refused.task).toBe(outsidePrompt);
+      expect(refused.row?.pointer_unexpanded).toBe('working-dir-too-broad');
+      expect(readLog(context, 'shadow.jsonl').filter((x) => x.point === 'model-routing')).toHaveLength(1);
+      const brief = briefFixture(context);
+      const listedPrompt = TASK + ' Details in ' + brief;
+      const listed = await taskSentFor(context, listedPrompt, CWD(context, { OMC_JEV_POINTER_EXPAND_DIRS: join(context.root, 'briefs') }), { cwd: '/' });
+      expect(listed.task).toBe(listedPrompt + label(realpathSync(brief)) + 'BRIEF-MARKER: do the migration step by step.\nSecond line.\n');
+      expect(listed.row?.pointer_expanded).toBe(true);
+    });
+
+    it('the home directory as the working directory is not a root: one row says so, and a subdirectory of it is allowed', async () => {
+      const context = makeContext();
+      const inHome = join(context.home, 'notes.md');
+      writeFileSync(inHome, 'HOME-MARKER', 'utf8');
+      const homePrompt = TASK + ' Details in ' + inHome;
+      const refused = await taskSentFor(context, homePrompt, CWD(context), { cwd: context.home });
+      expect(refused.task).toBe(homePrompt);
+      expect(refused.row?.pointer_unexpanded).toBe('working-dir-too-broad');
+      expect(readLog(context, 'shadow.jsonl').filter((x) => x.point === 'model-routing')).toHaveLength(1);
+      const sub = join(context.home, 'work');
+      mkdirSync(sub);
+      writeFileSync(join(sub, 'notes.md'), 'SUB-MARKER', 'utf8');
+      const subPrompt = TASK + ' Details in ' + join(sub, 'notes.md');
+      const allowed = await taskSentFor(context, subPrompt, CWD(context), { cwd: sub });
+      expect(allowed.task).toBe(subPrompt + label(realpathSync(join(sub, 'notes.md'))) + 'SUB-MARKER');
+    });
+
+    it('a working directory that is a link to the filesystem root or to the home directory is not a root either', async () => {
+      const context = makeContext();
+      const toRoot = join(context.root, 'root-link');
+      const toHome = join(context.root, 'home-link');
+      symlinkSync('/', toRoot);
+      symlinkSync(context.home, toHome);
+      writeFileSync(join(context.home, 'notes.md'), 'HOME-MARKER', 'utf8');
+      const rootPrompt = TASK + ' Details in ' + cwdFile(context, 'notes.md', 'CWD-MARKER');
+      const viaRoot = await taskSentFor(context, rootPrompt, CWD(context), { cwd: toRoot });
+      expect(viaRoot.task).toBe(rootPrompt);
+      expect(viaRoot.row?.pointer_unexpanded).toBe('working-dir-too-broad');
+      const homePrompt = TASK + ' Details in ' + join(context.home, 'notes.md');
+      const viaHome = await taskSentFor(context, homePrompt, CWD(context), { cwd: toHome });
+      expect(viaHome.task).toBe(homePrompt);
+      expect(viaHome.row?.pointer_unexpanded).toBe('working-dir-too-broad');
+    });
+
+    it('with the working directory switch on, a file outside a usable working directory keeps the usual reason', async () => {
+      const context = makeContext();
+      mkdirSync(join(context.root, 'elsewhere'));
+      writeFileSync(join(context.root, 'elsewhere', 'notes.md'), 'OUTSIDE-MARKER', 'utf8');
+      const prompt = TASK + ' Details in ' + join(context.root, 'elsewhere', 'notes.md');
+      const { task, row } = await taskSentFor(context, prompt, CWD(context));
+      expect(task).toBe(prompt);
+      expect(row?.pointer_unexpanded).toBe('outside-allowed-dirs');
     });
   });
 });
