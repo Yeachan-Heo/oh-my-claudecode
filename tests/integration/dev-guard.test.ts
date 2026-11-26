@@ -172,6 +172,8 @@ const BLOCKED: string[] = [
   // after a redirection time is no keyword: the shell runs the external utility, whose options take a value
   '>/tmp/log time -f %e rm /dev/null', '>/tmp/log time -p rm /dev/null', '2>/tmp/log time -f %e rm /dev/null', '</tmp/in time -p rm /dev/null', 'FOO=1 >/tmp/log time -p rm /dev/null', '{ >/tmp/log time -f %e rm /dev/null; }',
   'true && >/tmp/log time -f %e rm /dev/null', '>/tmp/log time -- rm /dev/null', 'time -p >/tmp/log rm /dev/null', '! >/tmp/log time -p rm /dev/null', 'if >/tmp/log time -f %e rm /dev/null; then true; fi',
+  // only the extraction to the standard output is free; the command pipe of the archive extractor and the other cases keep their members
+  'tar --to-command=cat -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null --totals', 'tar -C / --to-command cat -xf a.tar dev/null',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -282,6 +284,9 @@ const ALLOWED: string[] = [
   'unzip a.zip -x dev/null -d /', 'unzip a.zip -x dev/null -d /tmp/out', 'unzip a.zip -x etc/x -d / tmp/out', 'unzip a.zip top.txt -x etc/x -d / tmp/out', 'unzip a.zip -x dev/null etc/x tmp/out -d /', 'unzip -x etc/x a.zip -d /',
   // a redirection after the keyword time does not change it
   'time -f %e >/tmp/log rm /dev/null', 'time -f %e 2>/tmp/log rm /dev/null', '{ time -f %e rm /dev/null; } >/tmp/log',
+  // extraction to the standard output creates no file
+  'tar -O -C / -xf /tmp/a.tar dev/null', 'tar --to-stdout -C / -xf a.tar dev/null', 'tar --to-s -C / -xf a.tar dev/null', 'tar -xOf a.tar dev/null', 'tar -C / -xOf a.tar dev/null', 'tar xOf a.tar dev/null', 'tar -xf a.tar -O',
+  'tar -O -C /dev -xf a.tar x', 'tar -C /dev --to-stdout -xf a.tar x', 'bsdtar -O -C / -xf a.tar dev/null', 'bsdtar --to-stdout -C / -xf a.tar dev/null', 'gtar -O -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null -O',
 ];
 
 describe('/dev guard: Bash commands', () => {

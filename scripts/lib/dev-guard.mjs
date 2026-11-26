@@ -251,7 +251,7 @@ function perlInPlaceFiles(args) {
 }
 
 // Getopt-style arguments: short options (also clustered), long options, operands, and [option, value] pairs of the options that take a value
-// (shortValue: letters; longValue: names or a predicate; shortAttached: letters with an optional argument, which is only ever attached, so
+// (each pair is [option, value, index of the word that holds the option]; shortValue: letters; longValue: names or a predicate; shortAttached: letters with an optional argument, which is only ever attached, so
 // the rest of the cluster after them is their value and not further options). Under- or over-consuming a value only matters when it hides or
 // shows a /dev path.
 function parseGetopt(args, shortValue = '', longValue = [], shortAttached = '') {
@@ -270,16 +270,16 @@ function parseGetopt(args, shortValue = '', longValue = [], shortAttached = '') 
       const eq = a.indexOf('=');
       const name = eq > 0 ? a.slice(0, eq) : a;
       longs.push(name);
-      if (eq > 0) values.push([name, a.slice(eq + 1)]);
-      else if (takesLong(name) && i + 1 < args.length) values.push([name, args[++i]]);
+      if (eq > 0) values.push([name, a.slice(eq + 1), i]);
+      else if (takesLong(name) && i + 1 < args.length) values.push([name, args[i + 1], i++]);
       continue;
     }
     for (let k = 1; k < a.length; k++) {
       shorts.push(a[k]);
-      if (shortAttached.includes(a[k])) { if (k + 1 < a.length) values.push([a[k], a.slice(k + 1)]); break; }
+      if (shortAttached.includes(a[k])) { if (k + 1 < a.length) values.push([a[k], a.slice(k + 1), i]); break; }
       if (!shortValue.includes(a[k])) continue;
-      if (k + 1 < a.length) values.push([a[k], a.slice(k + 1)]);
-      else if (i + 1 < args.length) values.push([a[k], args[++i]]);
+      if (k + 1 < a.length) values.push([a[k], a.slice(k + 1), i]);
+      else if (i + 1 < args.length) values.push([a[k], args[i + 1], i++]);
       break;
     }
   }
@@ -340,12 +340,14 @@ const TAR_LONG_VALUE = new Set(['--file', '--files-from', '--exclude-from', '--e
 function tarExtractDir(args, name) {
   const valueLetters = 'bCfFgHIKLNTVX';
   let extract = false;
+  let toStdout = false;
   const dirs = [];
   let rest = args;
   if (args[0] && !args[0].startsWith('-')) { // old style: tar xCf dir archive
     let next = 1;
     for (const c of args[0]) {
       if (c === 'x') extract = true;
+      if (c === 'O') toStdout = true;
       if (c === 'C' && args[next] !== undefined) dirs.push(args[next]);
       if (valueLetters.includes(c)) next++;
     }
@@ -353,7 +355,7 @@ function tarExtractDir(args, name) {
   }
   const parsed = parseGetopt(rest, valueLetters, (name) => longIs(name, '--directory', 5) || name === '--cd' || longIs(name, '--strip-components', 5) || TAR_LONG_VALUE.has(name)); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
-  if (!extract) return null;
+  if (!extract || toStdout || parsed.shorts.includes('O') || parsed.longs.some((l) => longIs(l, '--to-stdout', 6))) return null; // -O and --to-stdout write the members to the standard output, not to files
   for (const [key, value] of parsed.values) if (key === 'C' || key === '--cd' || longIs(key, '--directory', 5)) dirs.push(value);
   let current = null;
   let found = null;
