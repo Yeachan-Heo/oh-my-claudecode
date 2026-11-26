@@ -73,16 +73,13 @@ const devChangedIn = (value) => { const p = devPathOf(value); return p && !DEV_S
 const devWritten = (value) => { const p = devPathOf(value); return p && !DEV_SINK.test(p) && !DEV_SCRATCH.test(p) ? p : null; }; // a path a redirect, tee or dd may not write
 
 // Text of a word after quote removal; every expansion becomes a NUL, so "$HOME/dev/x" is not read as /dev/x and "/dev/$x" stays under /dev.
-// The tokenizer ends the text of an unquoted part after the expansion that follows it ("/dev$X" is lit "/dev$X" plus param "$X"), so a lit part
-// is cut where the next part starts.
-const devLit = (part, next) => (next && next.start < part.end ? part.text.slice(0, next.start - part.start) : part.text);
-function devPartText(part, next) {
-  if (part.kind === 'lit') return devLit(part, next).replace(/\\(.)/gs, '$1');
+function devPartText(part) {
+  if (part.kind === 'lit') return part.text.replace(/\\(.)/gs, '$1');
   if (part.kind === 'single' || part.kind === 'ansi') return part.text;
-  if (part.kind === 'double') return part.parts.map((q, i) => (q.kind === 'lit' ? devLit(q, part.parts[i + 1]).replace(/\\([$`"\\\n])/g, '$1') : '\u0000')).join('');
+  if (part.kind === 'double') return part.parts.map((q) => (q.kind === 'lit' ? q.text.replace(/\\([$`"\\\n])/g, '$1') : '\u0000')).join('');
   return '\u0000';
 }
-const devWordText = (word) => word.parts.map((p, i) => devPartText(p, word.parts[i + 1])).join('');
+const devWordText = (word) => word.parts.map((p) => devPartText(p)).join('');
 const DEV_MENTION = /\/dev(?:[/*?[\u0000]|$)/;
 // Whether any word of the command list, however deeply nested, shows a /dev path (used where the guard stops following nesting).
 const devMentions = (tokens) => tokens.some((t) => t.type === 'word' && (DEV_MENTION.test(devWordText(t)) || devSubLists(t.parts).some(devMentions)));
