@@ -175,9 +175,10 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
       if (timeKeyword && a !== '-p') break;
       if (spec.assign && isAssignment(a)) continue;
       if (!a.startsWith('-') || (a === '-' && name !== 'env')) break; // for env a lone dash is -i
-      if (name === 'env' && (a.startsWith('-S') || longIs(a.split('=')[0], '--split-string', 3))) { // the text to split follows, attached or as the next argument
+      const envS = name === 'env' && !a.startsWith('--') ? /^-[^uCaS-]*S/.exec(a) : null; // -S inside a cluster, before any letter that takes a value
+      if (envS || (name === 'env' && longIs(a.split('=')[0], '--split-string', 3))) { // the text to split follows, attached or as the next argument
         const eq = a.indexOf('=');
-        split = a.startsWith('--') ? (eq > 0 ? a.slice(eq + 1) : values[++i]) : (a.length > 2 ? a.slice(2) : values[++i]);
+        split = envS ? (a.length > envS[0].length ? a.slice(envS[0].length) : values[++i]) : (eq > 0 ? a.slice(eq + 1) : values[++i]);
         continue;
       }
       if (name === 'xargs') {

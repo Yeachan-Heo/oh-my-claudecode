@@ -181,6 +181,8 @@ const BLOCKED: string[] = [
   'tar -C / -xf a.tar --label x dev/null', 'tar -C / -xf a.tar --transform s,a,b, dev/null', 'tar -C / -xf a.tar --label=x dev/null', 'tar -C / -xf a.tar --label dev/null dev/null',
   'tar -C / -xf a.tar --uid dev/null tmp/out', 'bsdtar -C / -xf a.tar --label dev/null tmp/out', 'bsdtar -C / -xf a.tar --uid 0 dev/null', 'gtar -C / -xf a.tar --owner root dev/null',
   'tar -C / -xf a.tar --backup dev/null', 'tar -C / -xf a.tar --one-top-level dev/null',
+  // env -S inside a cluster of short options reads its text as options of env again, like the separate form
+  "env -iS 'rm /dev/null'", "env -iS'rm /dev/null'", "env -vS 'rm /dev/null'", "env -iS '-i rm /dev/null'", "env -iS '-u HOME rm /dev/null'", "env -iuS rm /dev/null",
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -302,6 +304,8 @@ const ALLOWED: string[] = [
   'tar -C / -xf a.tar --use-compress-program dev/null tmp/out', 'tar -C / -xf a.tar --newer dev/null tmp/out', 'tar -C / -xf a.tar --owner dev/null tmp/out', 'tar -C / -xf a.tar --mode dev/null tmp/out',
   'tar -C / -xf a.tar --format dev/null tmp/out', 'gtar -C / -xf a.tar --to-command dev/null tmp/out', 'bsdtar -C / -xf a.tar --uid dev/null tmp/out', 'bsdtar -C / -xf a.tar --options dev/null tmp/out',
   'bsdtar -C / -xf a.tar --newer-than dev/null tmp/out', 'tar -C / -xf a.tar --suffix dev/null tmp/out',
+  // env -S inside a cluster: a letter that takes a value before the S keeps the S as its value; the text still goes through the checks
+  "env -iS 'true'", "env -iS 'echo /dev/null'", "env -iu S true", "env -iuS true", "env -uS echo x", "env -iC /tmp true",
 ];
 
 describe('/dev guard: Bash commands', () => {
