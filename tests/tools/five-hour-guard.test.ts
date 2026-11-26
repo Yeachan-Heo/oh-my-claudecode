@@ -2455,6 +2455,37 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('a BASHOPTS in the env of settings.json that names a shell option that changes what a glob pattern matches (nocaseglob, dotglob, globstar) makes every command a command that is not read to its end: the guard refuses to start, whatever the text of the command says; a BASHOPTS with other options, and no BASHOPTS, are read as before', () => {
+    const f = fixture('foreign-inherited-bashopts', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, env: Record<string, unknown>) => {
+      writeFileSync(f.settings, JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    if (HAS_BASH) {   // what Bash makes of the pattern with the option in the environment
+      expect(spawnSync('bash', ['-c', `printf %s ${hooks}/AUD*`], { encoding: 'utf8', env: { ...process.env, BASHOPTS: 'nocaseglob' } }).stdout, 'BASHOPTS turns the option on').toBe(audit);
+    }
+    const command = `bash -c 'python3 ${hooks}/AUD*'`;
+    for (const value of ['nocaseglob', 'dotglob', 'globstar', 'extglob:nocaseglob', 'dotglob:globstar']) {
+      const r = start(command, { BASHOPTS: value });
+      expect(r.status, `${value}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, value).toMatch(/not read to its end/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+      expect(readText(audit), `${value}: the file is intact`).toBe(text);
+    }
+    // another option, no BASHOPTS, and a value that is no text name nothing: the command is read as before (its pattern does not match the file of the other case)
+    for (const env of [{ BASHOPTS: 'extglob' }, {}, { BASHOPTS: 7 }, { OTHER: 'nocaseglob' }]) {
+      const r = start(command, env);
+      expect(r.status, `${JSON.stringify(env)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a relative entry of a PATH (of the command, of the env of settings.json) is looked up from each directory that the command names (cd DIR; PATH=bin audit), also with env -C, an entry of . or an empty one; a directory that does not exist adds nothing', () => {
     const f = fixture('foreign-relative-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');

@@ -776,6 +776,8 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     found = []
     assigned = {n: [own_value(n, x) for x in v] for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
     given_path = [os.path.expanduser(os.path.expandvars(d)) for v in assigned.get('PATH', []) for variant in parameter_variants(v, assigned) for d in variant.split(os.pathsep)]   # the PATH that settings.json gives the hook processes: the guard does not have it, the shell of the hook looks a bare word up there
+    if any(mode in v for v in assigned.get('BASHOPTS', []) for mode in GLOB_MODES):   # the `env` of settings.json (and a BASHOPTS= word) gives the shell an option that changes what a pattern matches, whatever the text of the command says
+        raise ScanIncomplete('BASHOPTS gives a shell option that changes what a glob pattern matches, which the scan does not model')
     settled = set(assigned)   # the names that have a value at the place that is looked at (settled_at below): the settings and the command it is quoted in, then what an assignment that stands alone (`A=x; cmd`) or after export, declare, typeset, readonly or local, and ${NAME:=word}, give from there on; an assignment in front of a command (`A=x cmd`, `env A=x cmd`) is that command's alone, but it stays a candidate for every word
     for words in simple:
         run = command_word(words)
