@@ -495,6 +495,32 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
     expect(h.reason).toMatch(/repair recipe/);
   });
 
+  it('finishes its work, as without the guard, when a path field is not text', () => {
+    // A path field that cannot be turned into text (an object whose toString is not a function) must not end the hook early,
+    // with or without OMC_SHELL_CHECKS=1: the output is that of the same call with an ordinary path.
+    const odd = { toString: 1 };
+    const ordinary = join(cwd, 'x.txt');
+    const calls: Array<[string, string, Record<string, unknown>]> = [
+      ['Write', 'file_path', { content: 'x' }],
+      ['Edit', 'file_path', { old_string: 'a', new_string: 'b' }],
+      ['MultiEdit', 'file_path', { edits: [] }],
+      ['NotebookEdit', 'notebook_path', { new_source: 'x' }],
+    ];
+    for (const [tool, field, rest] of calls) {
+      for (const extra of [{}, { OMC_SHELL_CHECKS: '1' }]) {
+        const expected = hook(tool, { [field]: ordinary, ...rest }, extra);
+        expect(expected.code, expected.stderr).toBe(0);
+        for (const value of [odd, [odd], 5, null]) {
+          const h = hook(tool, { [field]: value, ...rest }, extra);
+          expect(h.code, h.stderr).toBe(0);
+          expect(h.denied).toBe(false);
+          expect(h.stdout, `${tool} ${field}=${JSON.stringify(value)} ${JSON.stringify(extra)}`).toBe(expected.stdout);
+        }
+      }
+    }
+    expect(existsSync(logDir)).toBe(false);
+  });
+
   it('does not cover PowerShell', () => {
     expect(hook('PowerShell', { command: 'rm /dev/null' }).denied).toBe(false);
   });

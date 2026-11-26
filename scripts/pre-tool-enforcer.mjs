@@ -2701,6 +2701,15 @@ function isCodexPreToolUse(input) {
     Boolean(input && typeof input === 'object' && typeof input.turn_id === 'string');
 }
 
+// The file writers reach the opt-in shell checks only when a path field shows /dev (other writes never load them).
+function isDevFileCall(toolName, data) {
+  try {
+    if (!['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)) return false;
+    const input = data?.tool_input || data?.toolInput;
+    return [input?.file_path, input?.notebook_path].some((path) => typeof path === 'string' && /\/dev(?:\/|$)/.test(path));
+  } catch { return false; }
+}
+
 // Warnings of the opt-in shell checks (OMC_SHELL_CHECKS=1) ride on whatever output the hook emits, unless it denies.
 let shellCheckContext = '';
 function withShellCheckContext(output) {
@@ -2982,9 +2991,8 @@ async function main() {
     }
 
     // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands, and for the file writers whose path field
-    // shows /dev (other writes never load the checks). Fail-open: any error here leaves the hook behaving as without the checks.
-    const devFileCall = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName) && /\/dev(?:\/|\s|$)/.test(`${(data?.tool_input ?? data?.toolInput)?.file_path ?? ''} ${(data?.tool_input ?? data?.toolInput)?.notebook_path ?? ''}`);
-    if ((toolName === 'Bash' || toolName === 'PowerShell' || devFileCall) && process.env.OMC_SHELL_CHECKS === '1') {
+    // shows /dev. Fail-open: any error here leaves the hook behaving as without the checks.
+    if (process.env.OMC_SHELL_CHECKS === '1' && (toolName === 'Bash' || toolName === 'PowerShell' || isDevFileCall(toolName, data))) {
       try {
         const { runShellChecks } = await import('./lib/shell-checks.mjs');
         const verdict = runShellChecks(toolName, data, { logDir: join(stateDir, 'shell-checks') });
