@@ -423,7 +423,7 @@ describe('series of traces: the switch', () => {
     expect((await configOf({ OMC_JEV_COMPACT_TRESC: 'on' })).blocks).toBe('off');
   });
 
-  it('a compaction without the token cascade leaves neighbouring traces as they are whatever the switch says (series merge only in the second round of F2)', async () => {
+  it('a compaction without the token cascade leaves neighbouring traces as they are whatever the switch says (series merge only in the second round)', async () => {
     const SERIES = `${call(1)}\n${call(2)}\n${call(3)}`;
     const rows = [user('Task: look at the notes and report.')];
     for (let k = 0; k < 8; k++) rows.push({ role: 'assistant', text: `Step ${k}.`, toolUses: [{ tool_use_id: `t${k}`, tool: 'Bash', input: { command: `cat n-${k}.txt` } }] }, { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${k}`, text: `RESULT-${k} ${'x'.repeat(5000)}`, isError: false }] });

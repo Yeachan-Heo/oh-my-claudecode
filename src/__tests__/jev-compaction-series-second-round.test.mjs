@@ -1,7 +1,7 @@
 /* global setTimeout, clearTimeout */
 /**
  * Tests for the series of traces in the compaction run (hooks/jev-compaction.mjs, OMC_JEV_COMPACT_TRESC=active with the token cascade): the series stand in the queue of the second round
- * of F2 with the results and the blocks, Jev rates them with the question of the round, the ones that come down merge into one line and a file, the floor counts them, and the block
+ * with the results and the blocks, Jev rates them with the question of the round, the ones that come down merge into one line and a file, the floor counts them, and the block
  * traces join a series. The calls of Jev are a fake `$.http.fetch`; no network.
  */
 
@@ -76,7 +76,7 @@ const frozen = (list) => list.map((x, k) => Object.freeze({ ...x, handle: `h${k}
 const call = (n) => `[compacted] Read(file-${n}.txt) - result of ${1000 + n} chars removed`;
 const SERIES = (from) => [call(from), call(from + 1), call(from + 2), call(from + 3)].join('\n');
 
-/** The same session as the F2 tests have (a task, `steps` steps of a call and its result, a last request), with `extra(i)` added to the text of step i. */
+/** The same session as the second-round tests have (a task, `steps` steps of a call and its result, a last request), with `extra(i)` added to the text of step i. */
 function session(steps, extra = () => '', asks = () => undefined) {
   const m = [{ role: 'user', text: 'Task: look at the notes and report.', toolUses: [] }];
   for (let i = 1; i <= steps; i++) {
@@ -99,7 +99,7 @@ async function compactRun(env, messages, options = {}) {
 }
 const allText = (out) => (out?.messages ?? []).map((m) => m.text ?? '').join('\n');
 
-describe('series of traces in the compaction run: the queue of the second round of F2', () => {
+describe('series of traces in the compaction run: the queue of the second round', () => {
   it('puts the series to Jev with the question of the round, once per text, and merges the one it rates lowest into one line and a file', async () => {
     const run = await compactRun(CASCADE(60), session(40, withSeries), { rate: (item) => (item.text.includes('file-11.txt') ? 0 : 3) });
     expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 0, unchecked: 0, answered: 2 });

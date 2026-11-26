@@ -1,6 +1,6 @@
 /* global setTimeout, clearTimeout */
 /**
- * Tests for the second round of F2 in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_TRESC=active with the token cascade): the results and the blocks Jev kept in one queue in the order of
+ * Tests for the second round in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_TRESC=active with the token cascade): the results and the blocks Jev kept in one queue in the order of
  * Jev's ratings, the stop at the target, the owner's blocks last (OMC_JEV_COMPACT_OWNER_LAST), the question about a tie, the scan budget of the blocks and the trace of a block.
  * The calls of Jev are a fake `$.http.fetch`; no network.
  */
@@ -130,7 +130,7 @@ const results06 = { resultScore: () => 0.6 };
 const entry = (id, score, gain, more = {}) => ({ id, kind: 'block', score, gain, tokens: gain * 2, ...more });
 const farDeadline = () => Date.now() + 60000;
 
-describe('F2: the order of Jev and the stop at the target', () => {
+describe('second round: the order of Jev and the stop at the target', () => {
   it('takes from the lowest score until the gains cover what has to come off, equal scores in the order of entry, nothing else orders them', () => {
     const list = [entry('a', 0.9, 500), entry('b', 0.1, 10), entry('c', 0.5, 300), entry('d', 0.1, 20), entry('e', 0.5, 1)];
     expect(chooseByRank(list, 25).chosen.map((x) => x.id)).toEqual(['b', 'd']);
@@ -193,7 +193,7 @@ describe('F2: the order of Jev and the stop at the target', () => {
   });
 });
 
-describe('F2: the owner blocks last (OMC_JEV_COMPACT_OWNER_LAST)', () => {
+describe('second round: the owner blocks last (OMC_JEV_COMPACT_OWNER_LAST)', () => {
   it('the entries marked late wait behind every other entry and come down only when nothing else is left', async () => {
     const entries = [entry('own', 0.0, 50, { late: true }), entry('other', 0.9, 50)];
     const one = await reduceToLimit({ entries, pred: 100, goal: 50, deadline: farDeadline() });
@@ -220,8 +220,8 @@ describe('F2: the owner blocks last (OMC_JEV_COMPACT_OWNER_LAST)', () => {
   });
 });
 
-describe('F2: the second round in a compaction (OMC_JEV_COMPACT_TRESC=active, the token cascade)', () => {
-  it('lowers the results and the blocks Jev kept, in one pass called F2, and the prediction ends at the target', async () => {
+describe('second round: in a compaction (OMC_JEV_COMPACT_TRESC=active, the token cascade)', () => {
+  it('lowers the results and the blocks Jev kept, in one pass of its own, and the prediction ends at the target', async () => {
     const run = await compactRun(CASCADE(54), session(40, { said, asks: ask }), results06);
     expect(run.record).toMatchObject({ result: 'jev', cascade_pass: 'F2' });
     const f2 = run.record.f2;
@@ -273,7 +273,7 @@ describe('F2: the second round in a compaction (OMC_JEV_COMPACT_TRESC=active, th
     expect(run.record.cascade_pass).toBe('short_or_trace');
   });
 
-  it('puts a tie group to Jev once with the question of F2, and the answers decide which blocks come down first', async () => {
+  it('puts a tie group to Jev once with the question of the second round, and the answers decide which blocks come down first', async () => {
     // Every block in the group has level 2; Jev rates the steps 2, 10, 18 ... low, the steps 6, 14 ... high and the rest between.
     const number = (item) => Number(/Step (\d+)/.exec(item.text ?? '')?.[1] ?? /Owner request (\d+)/.exec(item.text ?? '')?.[1]);
     const rate = (item) => (number(item) % 8 === 2 ? 0.1 : number(item) % 8 === 6 ? 0.9 : 0.5);

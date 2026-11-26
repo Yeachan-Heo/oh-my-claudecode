@@ -119,13 +119,13 @@
  * fixed lengths while the verdicts run (the agent trim stays). The record gets `blocks` (counts and levels) and, with the switch set, `jev_stages`; the
  * background and preflight passes write a `verdicts_fill` record. See the section "verdicts of Jev on blocks of text" below for the rules.
  *
- * Second round of F2 (with the verdicts applied and the token cascade): when the prediction is still above the target after the second pass of the cascade, the results Jev rated and the
+ * Second round (with the verdicts applied and the token cascade): when the prediction is still above the target after the second pass of the cascade, the results Jev rated and the
  * blocks Jev kept (level 2-3) stand in one queue in the order of Jev's ratings and come down from the lowest until the target is reached (a result to a trace and then removed, a block to
  * level 1); a tie at the edge of the choice is put to Jev once, and the passes of the cascade after the second one run as the reserve. OMC_JEV_COMPACT_OWNER_LAST=active puts the owner's
- * blocks last in that queue. The checks of the blocks for a secret have their own budget, BLOCK_SCAN_BUDGET_CHARS. The record gets `f2`; see "second round of F2" below.
+ * blocks last in that queue. The checks of the blocks for a secret have their own budget, BLOCK_SCAN_BUDGET_CHARS. The record gets `f2`; see "second round" below.
  *
  * Series of traces (the same switch, OMC_JEV_COMPACT_TRESC). Two or more traces of the module on neighbouring lines of one row (a removed call, a moved reply, a moved agent
- * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round of F2 every series of the rows before the tail
+ * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round every series of the rows before the tail
  * (the rows the blocks left, less the rows another stage changes) that the check for a secret lets through is rated by Jev with the question of the round and stands in the queue
  * with the results and the blocks; a series that comes down merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces
  * go word for word to a file in the pastes directory (with the header of the block files when a block trace is among them), written and read back like the other files. The series
@@ -884,7 +884,7 @@ export async function readConfig($) {
     windowChars: /^[1-9]\d{3,6}$/.test(String(env.OMC_JEV_COMPACT_WINDOW_CHARS ?? '').trim()) && Number(env.OMC_JEV_COMPACT_WINDOW_CHARS) >= 8000 ? Number(env.OMC_JEV_COMPACT_WINDOW_CHARS) : undefined,
     fullInput: String(env.OMC_JEV_COMPACT_FULL_INPUT ?? '').trim() === 'active',
     jevStages: String(env.OMC_JEV_COMPACT_JEV_STAGES ?? '').trim() === 'active',
-    // In the second round of F2 the owner's blocks that Jev kept (level 2-3) go after every other candidate; they come down only when nothing else is left (default off).
+    // In the second round the owner's blocks that Jev kept (level 2-3) go after every other candidate; they come down only when nothing else is left (default off).
     ownerLast: String(env.OMC_JEV_COMPACT_OWNER_LAST ?? '').trim() === 'active',
   };
 }
@@ -2488,7 +2488,7 @@ function findCandidates(messages, privatePaths, notifications = false) {
 // non-text result to a trace), pass `short_or_trace` (a result Jev scored under SHORT_COPY_MIN_SCORE to a trace, the others to a short copy when that
 // saves tokens), pass `trace_all` (every remaining result to a trace), pass `drop` (every result still at a trace, least needed first, removed with its call). A pinned
 // result (a task-list call, or a trace that saves no tokens) stays whole. The keep decisions go to `keep` as allocate sets them. Returns the
-// pass reached, the target and the predicted tokens after. `opts.stopAfterA` ends after the second pass (the second round of F2 goes on from there, in Jev's order), and
+// pass reached, the target and the predicted tokens after. `opts.stopAfterA` ends after the second pass (the second round goes on from there, in Jev's order), and
 // `opts.resume` goes on from the keep decisions the candidates hold (what the second round set) and runs only the passes that follow it.
 // A forced result (a secret, or a non-text result) goes to a trace first, whatever its score; a pinned one is never cut by the cascade and is
 // not counted in the floor.
@@ -5114,7 +5114,7 @@ async function backgroundBlockVerdicts($, cfg) {
 }
 // --- end of verdicts of Jev on blocks of text -----------------------------------------------------------------------------------------------
 
-// --- second round of F2: Jev's order, one queue for the results and the blocks (OMC_JEV_COMPACT_TRESC=active) -------------------------------------------------------------
+// --- second round: Jev's order, one queue for the results and the blocks (OMC_JEV_COMPACT_TRESC=active) -------------------------------------------------------------
 //
 // After the second pass of the cascade (a secret or non-text result to a trace, a result Jev scored low to a trace) the prediction may still be above the target. The second
 // round (`reduceToLimit`) then puts every item that Jev rated and that can still come down into one queue, in the order of Jev's ratings (a low rating is the least needed word for
@@ -5320,7 +5320,7 @@ async function askTie($, cfg, group, ctx) {
   await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker));
   noteFailures(failures, Date.now());
 }
-// --- end of the second round of F2 ------------------------------------------------------------------------------------------------------------------------------------------
+// --- end of the second round ------------------------------------------------------------------------------------------------------------------------------------------
 
 // --- series of traces (OMC_JEV_COMPACT_TRESC) --------------------------------------------------
 // Two or more traces of the module on neighbouring lines of one row (SERIES_MIN; only white space between them) are a series, and a series that is asked for merges into one
@@ -5496,7 +5496,7 @@ function planSeries(cfg, messages, rows, api, queued, keepFrom, sessionId, agent
   return { ctx, items, potential };
 }
 
-// The series as entries of the second round of F2: one per series, with its gain and the tokens it holds; a series that the check for a secret holds (it would stay whole) is not asked
+// The series as entries of the second round: one per series, with its gain and the tokens it holds; a series that the check for a secret holds (it would stay whole) is not asked
 // about and is no entry. The ratings come from Jev (askTie with `rateOnly`); an entry without one is left out of the queue. {entries, stats: {items, secret, unchecked}}.
 function seriesEntries(cfg, items, deadline) {
   const stats = { items: items.length, secret: 0, unchecked: 0 };
@@ -5858,7 +5858,7 @@ async function decide($, e, cfg, record, started) {
     let base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens - thinking.removed + headerTokens();
     let plan;
     if (blocksMode === 'active' && blockOn) {
-      // The second round of F2 (OMC_JEV_COMPACT_TRESC=active): the first pass (or the scores alone, for a manual compaction) comes first, and a prediction still above the target goes to the
+      // The second round (OMC_JEV_COMPACT_TRESC=active): the first pass (or the scores alone, for a manual compaction) comes first, and a prediction still above the target goes to the
       // round that lowers the results and the blocks in Jev's order; the cascade then goes on as the reserve (the passes after the second one, from the state the round left).
       const first = manual ? manualPlan(candidates, base, cfg.rates, shape) : cascade(candidates, base, target, cfg.rates, shape, { stopAfterA: true });
       plan = first;
