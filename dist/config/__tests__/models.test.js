@@ -24,6 +24,42 @@ const ALL_KEYS = [
     ...TIER_MODEL_ENV_KEYS,
 ];
 // ---------------------------------------------------------------------------
+// isBedrock() with truthy flag behavior — issue #5131
+// ---------------------------------------------------------------------------
+describe('isBedrock() — CLAUDE_CODE_USE_BEDROCK with truthy flag behavior', () => {
+    let saved;
+    beforeEach(() => { saved = saveAndClear(BEDROCK_KEYS); });
+    afterEach(() => { restore(saved); });
+    it('returns true when CLAUDE_CODE_USE_BEDROCK=1', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+        expect(isBedrock()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_BEDROCK=true (string) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = 'true';
+        expect(isBedrock()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_BEDROCK=TRUE (uppercase) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = 'TRUE';
+        expect(isBedrock()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_BEDROCK=True (mixed case) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = 'True';
+        expect(isBedrock()).toBe(true);
+    });
+    it('returns false when CLAUDE_CODE_USE_BEDROCK=0', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = '0';
+        expect(isBedrock()).toBe(false);
+    });
+    it('returns false when CLAUDE_CODE_USE_BEDROCK=false', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = 'false';
+        expect(isBedrock()).toBe(false);
+    });
+    it('returns false when CLAUDE_CODE_USE_BEDROCK is empty string', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = '';
+        expect(isBedrock()).toBe(false);
+    });
+});
+// ---------------------------------------------------------------------------
 // isBedrock()
 // ---------------------------------------------------------------------------
 describe('isBedrock()', () => {
@@ -59,6 +95,10 @@ describe('isBedrock()', () => {
         process.env.ANTHROPIC_MODEL = 'ap.anthropic.claude-sonnet-4-6-v1:0';
         expect(isBedrock()).toBe(true);
     });
+    it('detects apac. region prefix', () => {
+        process.env.ANTHROPIC_MODEL = 'apac.anthropic.claude-sonnet-4-6-v1:0';
+        expect(isBedrock()).toBe(true);
+    });
     it('detects bare anthropic.claude prefix (legacy Bedrock IDs)', () => {
         process.env.ANTHROPIC_MODEL = 'anthropic.claude-3-haiku-20240307-v1:0';
         expect(isBedrock()).toBe(true);
@@ -85,6 +125,42 @@ describe('isBedrock()', () => {
     });
     it('returns false when no relevant env var is set', () => {
         expect(isBedrock()).toBe(false);
+    });
+});
+// ---------------------------------------------------------------------------
+// isVertexAI() with truthy flag behavior — issue #5131
+// ---------------------------------------------------------------------------
+describe('isVertexAI() — CLAUDE_CODE_USE_VERTEX with truthy flag behavior', () => {
+    let saved;
+    beforeEach(() => { saved = saveAndClear(VERTEX_KEYS); });
+    afterEach(() => { restore(saved); });
+    it('returns true when CLAUDE_CODE_USE_VERTEX=1', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = '1';
+        expect(isVertexAI()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_VERTEX=true (string) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = 'true';
+        expect(isVertexAI()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_VERTEX=TRUE (uppercase) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = 'TRUE';
+        expect(isVertexAI()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_VERTEX=True (mixed case) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = 'True';
+        expect(isVertexAI()).toBe(true);
+    });
+    it('returns false when CLAUDE_CODE_USE_VERTEX=0', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = '0';
+        expect(isVertexAI()).toBe(false);
+    });
+    it('returns false when CLAUDE_CODE_USE_VERTEX=false', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = 'false';
+        expect(isVertexAI()).toBe(false);
+    });
+    it('returns false when CLAUDE_CODE_USE_VERTEX is empty string', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = '';
+        expect(isVertexAI()).toBe(false);
     });
 });
 // ---------------------------------------------------------------------------
@@ -191,6 +267,54 @@ describe('isNonClaudeProvider()', () => {
     });
 });
 // ---------------------------------------------------------------------------
+// shouldAutoForceInherit() with truthy flag behavior — issue #5131
+// ---------------------------------------------------------------------------
+describe('shouldAutoForceInherit() — Bedrock/Vertex truthy flag behavior', () => {
+    let saved;
+    beforeEach(() => { saved = saveAndClear(ALL_KEYS); });
+    afterEach(() => { restore(saved); });
+    it('returns true when CLAUDE_CODE_USE_BEDROCK=1', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+        expect(shouldAutoForceInherit()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_BEDROCK=true (string) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = 'true';
+        expect(shouldAutoForceInherit()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_BEDROCK=TRUE (uppercase) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = 'TRUE';
+        expect(shouldAutoForceInherit()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_VERTEX=1', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = '1';
+        expect(shouldAutoForceInherit()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_VERTEX=true (string) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = 'true';
+        expect(shouldAutoForceInherit()).toBe(true);
+    });
+    it('returns true when CLAUDE_CODE_USE_VERTEX=TRUE (uppercase) — issue #5131', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = 'TRUE';
+        expect(shouldAutoForceInherit()).toBe(true);
+    });
+    it('returns false when CLAUDE_CODE_USE_BEDROCK=0', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = '0';
+        expect(shouldAutoForceInherit()).toBe(false);
+    });
+    it('returns false when CLAUDE_CODE_USE_BEDROCK=false', () => {
+        process.env.CLAUDE_CODE_USE_BEDROCK = 'false';
+        expect(shouldAutoForceInherit()).toBe(false);
+    });
+    it('returns false when CLAUDE_CODE_USE_VERTEX=0', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = '0';
+        expect(shouldAutoForceInherit()).toBe(false);
+    });
+    it('returns false when CLAUDE_CODE_USE_VERTEX=false', () => {
+        process.env.CLAUDE_CODE_USE_VERTEX = 'false';
+        expect(shouldAutoForceInherit()).toBe(false);
+    });
+});
+// ---------------------------------------------------------------------------
 // resolveInheritedModelFromEnv()
 // ---------------------------------------------------------------------------
 describe('resolveInheritedModelFromEnv()', () => {
@@ -224,6 +348,8 @@ describe('isProviderSpecificModelId()', () => {
         expect(isProviderSpecificModelId('global.anthropic.claude-opus-4-6-v1:0')).toBe(true);
         expect(isProviderSpecificModelId('eu.anthropic.claude-haiku-4-5-v1:0')).toBe(true);
         expect(isProviderSpecificModelId('ap.anthropic.claude-sonnet-4-6-v1:0')).toBe(true);
+        expect(isProviderSpecificModelId('apac.anthropic.claude-sonnet-4-6-v1:0')).toBe(true);
+        expect(isProviderSpecificModelId('APAC.ANTHROPIC.CLAUDE-SONNET-4-6-V1:0')).toBe(true);
     });
     it('detects Bedrock bare anthropic.claude prefix (legacy)', () => {
         expect(isProviderSpecificModelId('anthropic.claude-3-haiku-20240307-v1:0')).toBe(true);

@@ -20,9 +20,13 @@ export interface DirectoryOperations {
     readDir(): string[];
     realpath(): string;
     sync(): void;
+    /** Removes an empty directory relative to this one. Absent where the platform has no such operation (the native module has none). */
+    rmdir?(name: string): void;
 }
 /** Path callbacks are a Linux-only compatibility API. Darwin requires *at. */
 export declare function containedFdPath(fd: number, platform: NodeJS.Platform, child?: string): string;
 export declare function containedFsPlatformSupported(platform: NodeJS.Platform): boolean;
 export declare function directoryOperations(fd: number, platform?: NodeJS.Platform): DirectoryOperations;
+/** Operations for an open directory, or null where the platform has none: no pathname fallback is offered. */
+export declare function directoryOperationsIfSupported(fd: number, platform?: NodeJS.Platform): DirectoryOperations | null;
 //# sourceMappingURL=contained-fd.d.ts.map

@@ -3,16 +3,30 @@
  */
 
 import { join } from 'path';
-import { homedir } from 'os';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { getGlobalOmcConfigPath, getGlobalOmcConfigCandidates } from '../../utils/paths.js';
 import { OmcPaths } from '../../lib/worktree-paths.js';
 import { isDebugEnabled } from '../../utils/debug-flag.js';
 
 /** User-level skills directory (read by skill-injector.mjs hook) */
 export const USER_SKILLS_DIR = join(getClaudeConfigDir(), 'skills', 'omc-learned');
 
-/** Global skills directory (new preferred location: ~/.omc/skills) */
-export const GLOBAL_SKILLS_DIR = join(homedir(), '.omc', 'skills');
+/** Get global skills directory path (writes go to this, reads check candidates) */
+export function getGlobalSkillsDirPath(): string {
+  return getGlobalOmcConfigPath('skills');
+}
+
+/** Get candidate paths for reading global skills (supports legacy ~/.omc/skills) */
+export function getGlobalSkillsDirCandidates(): string[] {
+  return getGlobalOmcConfigCandidates('skills');
+}
+
+/**
+ * Legacy export for backward compatibility in tests.
+ * Use getGlobalSkillsDirPath() for writes and getGlobalSkillsDirCandidates() for reads.
+ * @deprecated Use getGlobalSkillsDirPath() or getGlobalSkillsDirCandidates() instead
+ */
+export const GLOBAL_SKILLS_DIR = getGlobalOmcConfigPath('skills');
 
 /** Project-level skills subdirectory */
 export const PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;

@@ -5,7 +5,7 @@
  * here; all execution logic lives in src/graph/runtime/.
  */
 
-import { Command } from 'commander';
+import { Command, type CommanderError } from 'commander';
 import chalk from 'chalk';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +22,10 @@ import {
 } from '../graph/runtime/types.js';
 import type { RunOptions, RunResult } from '../graph/runtime/types.js';
 import { AgentNodeExecutor } from '../graph/runtime/executors/agent.js';
-import { CommandNodeExecutor } from '../graph/runtime/executors/command.js';
+import {
+  CommandNodeExecutor,
+  installGraphSignalCleanup,
+} from '../graph/runtime/executors/command.js';
 import { createStdinApprovalGate } from '../graph/runtime/approval.js';
 import {
   createRemoteApprovalGate,
@@ -31,6 +34,8 @@ import {
 } from '../graph/runtime/remote-approval.js';
 import { createAsciiProgressReporter } from '../graph/runtime/progress.js';
 import { resolveRunDirHandle } from '../graph/runtime/run-dir.js';
+import { runGraphGc } from '../graph/runtime/run-gc.js';
+import { readRunStatus } from '../graph/runtime/run-status.js';
 import type { RunDirHandle } from '../graph/runtime/run-dir.js';
 import {
   assertContainedFsSupported,
@@ -195,11 +200,14 @@ async function runAction(
     prompter = createStdinApprovalGate();
   }
 
+  const signal = installGraphSignalCleanup();
   const options: RunOptions = {
     runsRoot,
     executors: [new CommandNodeExecutor(), new AgentNodeExecutor()],
     prompter,
     reporter: createAsciiProgressReporter(),
+    // AbortSignal only when OMC_GRAPH_SIGNAL_CLEANUP=1 (see installGraphSignalCleanup).
+    ...(signal === undefined ? {} : { signal }),
   };
 
   try {
@@ -376,6 +384,67 @@ Exit codes:
             fail(`decision recorded, but rollback failed: ${errorMessage(error)}`, 1);
           }
         }
+      },
+    );
+
+  // Commander usage failures exit 2 for these two read/maintenance commands (their documented
+  // usage code); help and version stay 0. The rethrown CommanderError is caught by the program
+  // parse wrapper in cli/index.ts.
+  const remapUsageExit = (error: CommanderError): never => {
+    error.exitCode =
+      error.code === 'commander.helpDisplayed' || error.code === 'commander.version' || error.code === 'commander.help'
+        ? 0
+        : 2;
+    throw error;
+  };
+
+  command
+    .command('status <runId>')
+    .description('Print the derived state of one graph run as JSON (read-only)')
+    .option('--runs-root <dir>', 'Directory holding per-run state', '.omc/graph-runs')
+    .exitOverride(remapUsageExit)
+    .action((runId: string, options: { runsRoot: string }) => {
+      const outcome = readRunStatus({ runId, runsRoot: options.runsRoot });
+      if (outcome.stderr !== '') process.stderr.write(outcome.stderr);
+      if (outcome.stdout !== '') process.stdout.write(outcome.stdout);
+      process.exitCode = outcome.exitCode;
+    });
+
+  command
+    .command('gc')
+    .description('Remove expired final graph runs (dry run unless OMC_GRAPH_GC=1)')
+    .option(
+      '--runs-root <dir>',
+      'Runs root, must be named .omc/graph-runs (default: OMC_GRAPH_RUNS_ROOT or .omc/graph-runs)',
+    )
+    .option('--retention-days <N>', 'Days a final run is kept, positive integer (default: OMC_GRAPH_RETENTION_DAYS or 7)')
+    .option('--current <runId>', 'Run id that is never removed')
+    .option(
+      '--repair-torn-wal',
+      'Move a torn last journal line to a copy beside the journal (also OMC_GRAPH_REPAIR_TORN_WAL=1)',
+    )
+    .option('--json', 'Print the result as JSON')
+    .exitOverride(remapUsageExit)
+    .action(
+      (options: {
+        runsRoot?: string;
+        retentionDays?: string;
+        current?: string;
+        repairTornWal?: boolean;
+        json?: boolean;
+      }) => {
+        process.exitCode = runGraphGc(
+          {
+            runsRoot: options.runsRoot,
+            retentionDays: options.retentionDays,
+            current: options.current ?? null,
+            repairTornWal: options.repairTornWal === true,
+            json: options.json === true,
+          },
+          process.env,
+          process.stdout,
+          process.stderr,
+        );
       },
     );
 

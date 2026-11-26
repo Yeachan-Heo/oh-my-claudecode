@@ -24,6 +24,8 @@ export interface DirectoryOperations {
   readDir(): string[];
   realpath(): string;
   sync(): void;
+  /** Removes an empty directory relative to this one. Absent where the platform has no such operation (the native module has none). */
+  rmdir?(name: string): void;
 }
 
 function component(name: string): void {
@@ -60,6 +62,7 @@ export function directoryOperations(fd: number, platform: NodeJS.Platform = proc
       lstat: (name) => fs.lstatSync(path(name)),
       rename: (source, destination) => fs.renameSync(path(source), path(destination)),
       unlink: (name) => fs.unlinkSync(path(name)),
+      rmdir: (name) => fs.rmdirSync(path(name)),
       link: (source, destination) => fs.linkSync(path(source), path(destination)),
       readDir: () => fs.readdirSync(containedFdPath(fd, platform)),
       realpath: () => fs.realpathSync(containedFdPath(fd, platform)),
@@ -93,4 +96,9 @@ export function directoryOperations(fd: number, platform: NodeJS.Platform = proc
     realpath: () => native.realpathFd(fd),
     sync: () => fs.fsyncSync(fd),
   };
+}
+
+/** Operations for an open directory, or null where the platform has none: no pathname fallback is offered. */
+export function directoryOperationsIfSupported(fd: number, platform: NodeJS.Platform = process.platform): DirectoryOperations | null {
+  return containedFsPlatformSupported(platform) ? directoryOperations(fd, platform) : null;
 }
