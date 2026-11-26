@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { archiveSegment } from '../../hooks/jev-compaction.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
 import { afterSessionStart, archiveDays, foldRegistry, MISSING_MESSAGE, pastesDays, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry, sweepArchive, sweepPastes } from '../../scripts/lib/jev-compaction-state.mjs';
 import * as writers from '../../scripts/lib/context-text-sanitize.mjs';
@@ -408,6 +409,27 @@ describe('jev-compaction-state: archive of calls and results kept for the traces
     expect(sweepArchive('my-session', Date.now(), env)).toMatchObject({ removed_dirs: 1 });
     expect(existsSync(join(live, 'toolu_a.txt'))).toBe(true);
     expect(existsSync(idle)).toBe(false);
+  });
+
+  it('the current session is found by the name the module gives its directory, also for ids with a dot, a slash or a device name, and a directory that only looks like it goes', () => {
+    const ids = ['a/b', 'a.b', 'a b', 'CON', 'nul', 'x'.repeat(100), '123e4567-e89b-12d3-a456-426614174000'];
+    for (const id of ids) {
+      const { env } = setup();
+      const mine = archive(env, archiveSegment(id), 40);
+      const lookalike = archive(env, id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80), 40);
+      const other = archive(env, 'other-session', 40);
+      expect(sweepArchive(id, Date.now(), env), id).toMatchObject({ stopped: false });
+      expect(existsSync(mine), id).toBe(true);
+      expect(existsSync(other), id).toBe(false);
+      expect(existsSync(lookalike), id).toBe(lookalike === mine);
+    }
+    const { env } = setup();
+    const a = archive(env, archiveSegment('a/b'), 40);
+    const b = archive(env, archiveSegment('a_b'), 40);
+    expect(archiveSegment('a/b')).not.toBe(archiveSegment('a_b'));
+    sweepArchive('a_b', Date.now(), env);
+    expect(existsSync(b)).toBe(true);
+    expect(existsSync(a)).toBe(false);
   });
 
   it('keeps a directory that holds anything but plain files, and finishes a directory that was renamed to be removed, whatever its age', () => {

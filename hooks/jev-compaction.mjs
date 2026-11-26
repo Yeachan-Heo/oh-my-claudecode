@@ -5658,7 +5658,12 @@ function archiveIdOf(c) {
   return String(c.id ?? '');
 }
 
-const archiveDirOf = (cfg, sessionId) => (cfg.archiveDir && sessionId ? `${cfg.archiveDir}/${safeName(sessionId)}` : undefined);
+// The directory of a session: its id as a path segment (archiveSegment), so session ids that differ only in characters outside the set, or that are device names, never share one.
+// scripts/lib/jev-compaction-state.mjs names the directory the same way.
+function archiveDirOf(cfg, sessionId) {
+  const segment = archiveSegment(sessionId);
+  return cfg.archiveDir && segment ? `${cfg.archiveDir}/${segment}` : undefined;
+}
 
 // The path of a candidate's archive (pure: no file is touched), undefined without a state directory, a session id or an id.
 export function archivePathOf(cfg, sessionId, c) {

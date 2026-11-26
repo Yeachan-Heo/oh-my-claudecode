@@ -95,6 +95,20 @@ describe('archive: the switch and the paths', () => {
     expect(archivePathOf(CFG, SESSION, noteA)).not.toBe(archivePathOf(CFG, SESSION, noteB));
     expect(archivePathOf(CFG, SESSION, noteA)).toBe(archivePathOf(CFG, SESSION, { ...noteA, id: 'notification-9' }));
   });
+
+  it('the session directory is named by the same rule as a tool_use id: session ids that differ only in characters outside the set, a device name or a long id never share a directory', () => {
+    const dirOf = (id) => archivePathOf(CFG, id, cand('t1', 'x')).split('/').slice(-2)[0];
+    const ids = ['a/b', 'a_b', 'a.b', 'a b', 'CON', 'nul', 'x'.repeat(100), `${'x'.repeat(99)}y`];
+    expect(new Set(ids.map(dirOf)).size).toBe(ids.length);
+    expect(dirOf(SESSION)).toBe(SESSION);
+    expect(dirOf('a_b')).toBe('a_b');
+    for (const id of ids) {
+      expect(dirOf(id)).toBe(archiveSegment(id));
+      expect(dirOf(id)).toMatch(/^[A-Za-z0-9_-]{1,80}$/);
+    }
+    expect(dirOf('CON')).not.toBe('CON');
+    expect(dirOf('nul')).not.toBe('nul');
+  });
 });
 
 describe('archive: what goes to a file and what does not', () => {

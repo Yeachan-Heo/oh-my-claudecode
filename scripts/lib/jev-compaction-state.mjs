@@ -92,6 +92,21 @@ export function stateDirOf(env = process.env) {
 }
 
 const safeName = (s) => String(s ?? '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
+
+// The directory name of a session in compaction-archive: the same as archiveSegment of hooks/jev-compaction.mjs (an id that had to change, a Windows device name or an id of
+// more than 80 characters gets a hash of the original, so two ids never share a directory).
+const archiveFnv = (text, seed = 0x811c9dc5) => {
+  let h = seed;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+};
+function archiveSegment(id) {
+  const raw = String(id ?? '');
+  if (!raw) return '';
+  const clean = raw.replace(/[^A-Za-z0-9_-]/g, '_');
+  if (clean === raw && clean.length <= 80 && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(clean)) return clean;
+  return `${clean.slice(0, 63)}-${archiveFnv(raw) + archiveFnv(raw, 0x050c5d1f)}`;
+}
 const oneLine = (s, max) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
 const sleepSync = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no wait */ } };
 
@@ -364,7 +379,7 @@ export function sweepArchive(sessionId, now = Date.now(), env = process.env, bud
   } catch { return undefined; }
   const out = { days, removed_dirs: 0, removed_files: 0, removed_bytes: 0, links_skipped: 0, stopped: false, ms: 0 };
   const over = () => performance.now() - t0 >= budgetMs;
-  const current = safeName(sessionId);
+  const current = archiveSegment(sessionId);
   const cutoff = now - days * 24 * 3600_000;
   let names = [];
   try { names = readdirSync(root).sort(); } catch { return undefined; }
