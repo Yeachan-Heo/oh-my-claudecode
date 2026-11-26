@@ -3280,6 +3280,43 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
+  it('an assignment that stands in a case arm (after case) settles no name for the commands after it, as one in a branch does: the arm may not run, so the name is still the one the session has and the guard refuses to start; an assignment before the case, and a command with no case, are read as before', () => {
+    const f = fixture('foreign-assignment-case', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const later = '/nonexistent/later';
+    const ran = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { ...process.env, FHG_AUDIT: audit } }).stdout.includes('ran');
+    const notMade = [`case x in y) true; FHG_AUDIT=${later};; esac; "$FHG_AUDIT"`, `case x in y) FHG_AUDIT=${later};; esac; "$FHG_AUDIT"`, `case x in\\n  y)\\n    FHG_AUDIT=${later}\\n    ;;\\nesac\\n"$FHG_AUDIT"`.replace(/\\n/g, '\n'),
+      `case x in y) export FHG_AUDIT=${later};; esac; "$FHG_AUDIT"`];
+    const made = [`FHG_AUDIT=${later}; case x in y) true;; esac; "$FHG_AUDIT"`, `FHG_AUDIT=${later}; "$FHG_AUDIT"`];
+    // what the shell does: an assignment in an arm that does not run leaves the file of the session; one that is made before the case, the name that was set
+    for (const command of notMade) expect(ran(command), `${JSON.stringify(command)}: the session's file runs`).toBe(true);
+    for (const command of made) expect(ran(command), `${JSON.stringify(command)}: the name was set before the use`).toBe(false);
+    for (const command of notMade) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${JSON.stringify(command)} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // an assignment before the case settles the name, as before
+    for (const command of made) {
+      const r = start(command, { state_file: audit });
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
   it('a default or error operator (-, :-, =, :=, ?, :?) does not settle a parameter: where nothing at that place gives the name a value, the session may have one and the shell then uses it, so the guard refuses to start when the word is the whole expansion or ends the path of a file it writes; a name that the settings or an earlier assignment give, and an expansion with something else after it, are read as before', () => {
     const f = fixture('foreign-default-operator', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
