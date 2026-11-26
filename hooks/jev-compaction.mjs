@@ -5386,19 +5386,19 @@ export function seriesRuns(text, protect = false) {
 }
 
 /**
- * Which rows a series may stand in: [0, tail) less `skip` (the rows the host cannot rebuild from text: server blocks in an assistant row, an image or a file in a user row,
+ * Which rows a series may stand in: [0, tail) less `fixed` (the rows the host cannot rebuild from text: server blocks in an assistant row, an image or a file in a user row,
  * a user row a delivered message is anchored to), and `direct`, the direct replies. `reason` says that nothing can be told: no API form, or a message with an image that matches no row.
  */
 export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) {
   if (!api) return { reason: 'no_api_form' };
   const images = nonTextUserRows(messages, api);
   if (images.unmatched) return { reason: 'image_unmatched' };
-  const skip = new Set([...nonTextAssistantRows(messages, api), ...images.rows]);
-  for (const [row] of queued) if (messages[row]?.role === 'user') skip.add(row);
+  const fixed = new Set([...nonTextAssistantRows(messages, api), ...images.rows]);
+  for (const [row] of queued) if (messages[row]?.role === 'user') fixed.add(row);
   const users = ownerRows(messages, cfg.hookRowPrefixes);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
-  return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skip, direct: directReplyRows(messages, users, delivered), facts: turnFacts(messages, userRows) };
+  return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), fixed, direct: directReplyRows(messages, users, delivered), facts: turnFacts(messages, userRows) };
 }
 
 /**
@@ -5412,7 +5412,7 @@ export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
   const planned = seriesPath(cfg, sessionId, '0'.repeat(32));
   for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
     const m = messages[i];
-    if (!seriesRowOk(m) || ctx.skip.has(i)) continue;
+    if (!seriesRowOk(m) || ctx.fixed.has(i)) continue;
     for (const run of seriesRuns(m.text, ctx.direct.has(i))) {
       const seen = byKey.get(run.text);
       const signals = { age_turns: ctx.facts.age[i], current_turn: ctx.facts.age[i] === 0, in_tail: i >= ctx.facts.tail };
@@ -5450,7 +5450,7 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
     const paths = new Set();
     for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
       const m = messages[i];
-      if (!seriesRowOk(m) || ctx.skip.has(i)) continue;
+      if (!seriesRowOk(m) || ctx.fixed.has(i)) continue;
       const runs = seriesRuns(m.text, ctx.direct.has(i)).filter((r) => keys.has(r.text));
       let text = m.text;
       for (const run of [...runs].reverse()) {
@@ -5868,7 +5868,7 @@ async function decide($, e, cfg, record, started) {
         const seriesCtx = seriesPlan?.ctx && !seriesPlan.ctx.reason ? seriesContext(cfg, messages, api, keepFrom, queued) : undefined;
         let seriesRated = { entries: [], stats: { items: 0, secret: 0, unchecked: 0 } };
         if (seriesCtx && !seriesCtx.reason) {
-          for (const r of blockHold) seriesCtx.skip.add(r);
+          for (const r of blockHold) seriesCtx.fixed.add(r);
           seriesRated = seriesEntries(cfg, seriesItems(cfg, currentRows(), seriesCtx, record.session_id, e.agentId !== undefined), deadline);
           if (seriesRated.entries.length) await askTie($, cfg, seriesRated.entries, { user: blockUser, goal: target, restNeed: first.predicted - target, deadline, rateOnly: true });
         }

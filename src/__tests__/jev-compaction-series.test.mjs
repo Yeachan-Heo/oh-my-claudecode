@@ -185,11 +185,11 @@ describe('series of traces: the rows a series may stand in', () => {
     const anchored = rowOf(3) - 2; // the user row of step 3
     const ctx = seriesContext(cfg, messages, api, messages.length, new Map([[anchored, [{ kind: 'x' }]]]));
     expect(ctx.reason).toBeUndefined();
-    expect(ctx.skip.has(rowOf(1))).toBe(true);
-    expect(ctx.skip.has(rowOf(2) - 2)).toBe(true);
-    expect(ctx.skip.has(anchored)).toBe(true);
-    expect(ctx.skip.has(rowOf(0))).toBe(false);
-    expect(ctx.skip.has(rowOf(2))).toBe(false);
+    expect(ctx.fixed.has(rowOf(1))).toBe(true);
+    expect(ctx.fixed.has(rowOf(2) - 2)).toBe(true);
+    expect(ctx.fixed.has(anchored)).toBe(true);
+    expect(ctx.fixed.has(rowOf(0))).toBe(false);
+    expect(ctx.fixed.has(rowOf(2))).toBe(false);
     const items = seriesItems(cfg, messages, ctx, SESSION);
     expect(items.map((x) => x.rows)).toEqual([[rowOf(0)], [rowOf(2)], [rowOf(3)]]);
   });
@@ -396,7 +396,7 @@ describe('series of traces: merging', () => {
     const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
     const messages = conversation([SERIES_B, SERIES_B]);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
-    ctx.skip.add(rowOf(0));
+    ctx.fixed.add(rowOf(0));
     const record = {};
     const edited = await mergeSeries(fakeDollar().$, cfg, record, messages, ctx, new Set([SERIES_B]), SESSION, FAR);
     expect([...edited.keys()]).toEqual([rowOf(1)]);
