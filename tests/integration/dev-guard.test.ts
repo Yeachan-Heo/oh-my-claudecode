@@ -332,6 +332,8 @@ const ALLOWED: string[] = [
   'tar -xPf a.tar /tmp/x', 'tar -xPf a.tar -C /dev/shm rel/x', 'bsdtar -tf a.tar --absolute-paths', 'tar -xPOf a.tar', 'tar -xPf a.tar -O',
   // a --to-command text that harms nothing, and the other options of the same family
   "tar -xf a.tar --to-command='echo x'", "tar -xf a.tar --to-command 'cat /dev/null'", "tar -xf a.tar --to-command='wc -c >/dev/null'", 'tar -xf a.tar --to-stdout', 'tar -tf a.tar --to-command=cat', 'tar -xf a.tar --totals',
+  // the value of --to-command in the next word is a command, not a member (also abbreviated)
+  'tar -C / -xf a.tar --to-c dev/null', 'tar -C / -xf a.tar --to-command dev/null', 'tar -C / -xf a.tar --to-co=dev/null',
 ];
 
 describe('/dev guard: Bash commands', () => {
