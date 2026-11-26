@@ -85,6 +85,7 @@ describe('context-guard-stop safe recovery messaging (issue #1373)', () => {
     expect(out.decision).toBe('block');
     expect(String(out.reason)).toContain('Run /compact immediately');
     expect(String(out.reason)).toContain('.omc/state');
+    expect(out.continue).toBeUndefined();
   });
 
   it('blocks using HUD cache when transcript and hook payload omit context_window', () => {
@@ -122,9 +123,9 @@ describe('context-guard-stop safe recovery messaging (issue #1373)', () => {
       },
     );
 
-    expect(out.continue).toBe(false);
     expect(out.decision).toBe('block');
     expect(String(out.reason)).toContain('Run /compact immediately');
+    expect(out.continue).toBeUndefined();
   });
 
   it.each(['abc', '', '0', '-5', '150', '95', '7.5'])(
@@ -142,9 +143,9 @@ describe('context-guard-stop safe recovery messaging (issue #1373)', () => {
         { OMC_CONTEXT_GUARD_THRESHOLD: threshold },
       );
 
-      expect(out.continue).toBe(false);
       expect(out.decision).toBe('block');
       expect(String(out.reason)).toContain('threshold: 75%');
+      expect(out.continue).toBeUndefined();
     },
   );
 
@@ -177,6 +178,7 @@ describe('context-guard-stop safe recovery messaging (issue #1373)', () => {
 
     expect(out.continue).toBe(true);
     expect(out.decision).toBeUndefined();
+    expect(out.suppressOutput).toBe(true);
   });
 
   it('ignores invalid session_id values when tracking block retries', () => {

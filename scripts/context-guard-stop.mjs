@@ -242,7 +242,6 @@ async function main() {
       incrementBlockCount(sessionId);
 
       console.log(JSON.stringify({
-        continue: false,
         decision: 'block',
         reason: buildStopRecoveryAdvice(pct, blockCount + 1)
       }));

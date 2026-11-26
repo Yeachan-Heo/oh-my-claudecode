@@ -693,7 +693,13 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
         OMC_JEV_SIMPLIFIER_APPLY: '1',
         ...overrides,
       });
-      expect(output.continue).toBe(skipped);
+      if (skipped) {
+        expect(output.continue).toBe(true);
+      } else {
+        expect(output.decision).toBe('block');
+        // #5147: the file list must reach the agent, so the turn must not be ended.
+        expect(output.continue).toBeUndefined();
+      }
       expect(readLog(context, 'applied.jsonl')).toEqual([]);
     }, 60_000);
   });

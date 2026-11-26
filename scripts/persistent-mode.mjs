@@ -494,9 +494,9 @@ function reportLockFailure(operation) {
 
 function workflowStopResponse(state) {
   const stage = state?.workflow?.stages?.[state?.pipelineTracking?.currentStageIndex];
-  if (!stage) return { continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." };
+  if (!stage) return { decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." };
   const prompt = resolveWorkflowStagePrompt(state, stage);
-  return { continue: false, decision: "block", reason: prompt || "[AUTOPILOT WORKFLOW] workflow_stage_dispatch_failed. Run /cancel and re-invoke the workflow." };
+  return { decision: "block", reason: prompt || "[AUTOPILOT WORKFLOW] workflow_stage_dispatch_failed. Run /cancel and re-invoke the workflow." };
 }
 
 function commitWorkflowAdvance(path, advance) {
@@ -1607,6 +1607,10 @@ function adaptBridgeOutput(stdout) {
   if (parsed.continue === true) {
     return { continue: true, suppressOutput: true };
   }
+  // If continue:false with stopReason, pass it through (workflow failure case)
+  if (parsed.continue === false && typeof parsed.stopReason === "string") {
+    return { continue: false, stopReason: parsed.stopReason };
+  }
   if (typeof parsed.message === "string" && parsed.message.trim()) {
     return { decision: "block", reason: parsed.message };
   }
@@ -1818,6 +1822,48 @@ async function main() {
           }
         }
       }
+
+      // Process named workflow advancement/completion on re-entry without re-blocking.
+      // The initial Stop already emitted a block; this re-entry must consume completion
+      // or advancement without triggering safety overrides for repeated blocks.
+      const autopilot = readStateFileWithSession(
+        stateDir,
+        globalStateDir,
+        "autopilot-state.json",
+        sessionId,
+      );
+      const currentAutopilot = isCurrentAutopilotState(autopilot.state, directory, autopilot.isGlobal, hasValidSessionId, sessionId)
+        ? autopilot.state
+        : null;
+
+      // Check for pending cancellation before advancing the workflow on re-entry.
+      // A fresh cancel-signal-state.json must win over stage-completion advancement.
+      if (currentAutopilot && autopilot.state?.active === true && hasNamedWorkflowMarkers(currentAutopilot)) {
+        const cancellation = isSessionCancelInProgress(stateDir, sessionId, autopilot.path, { directory, isGlobal: autopilot.isGlobal, hasValidSessionId });
+        if (cancellation.currentAutopilot) autopilot.state = cancellation.currentAutopilot;
+        if (cancellation.active) {
+          emit({ continue: true, suppressOutput: true });
+          return;
+        }
+      }
+
+      if (currentAutopilot && autopilot.state?.active === true && hasNamedWorkflowMarkers(currentAutopilot)) {
+        // Check if workflow has advanced to a new stage or completed
+        const workflowAdvance = advanceWorkflowOnStop(currentAutopilot, data, sessionId);
+        if (workflowAdvance) {
+          const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);
+          if (commit.committed) {
+            // Workflow advanced; dispatch the newly activated stage's prompt
+            if (workflowAdvance.nextStage) {
+              emit({ decision: "block", reason: workflowAdvance.nextStagePrompt });
+            } else {
+              emit({ decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." });
+            }
+            return;
+          }
+        }
+      }
+
       emit({ continue: true, suppressOutput: true });
       return;
     }
@@ -1867,7 +1913,7 @@ async function main() {
       const reason = transcriptFailure === "workflow_transcript_record_too_large"
         ? `[AUTOPILOT WORKFLOW] ${transcriptFailure}. Run /cancel and re-invoke the workflow.`
         : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow.";
-      emit({ continue: false, decision: "block", reason });
+      emit({ continue: false, stopReason: reason });
       return;
     }
     if (currentAutopilot && hasNamedWorkflowMarkers(currentAutopilot) && !isWorkflowRuntimeSupported()) {
@@ -2132,7 +2178,7 @@ async function main() {
       if (sessionMatches) {
         if (hasNamedWorkflowMarkers(autopilot.state) && !isValidNamedWorkflowState(autopilot.state, sessionId)) {
           const transcriptFailure = takeWorkflowTranscriptFailure(sessionId);
-          emit({ continue: false, decision: "block", reason: transcriptFailure === 'workflow_transcript_record_too_large' ? '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
+          emit({ continue: false, stopReason: transcriptFailure === 'workflow_transcript_record_too_large' ? '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' : "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
           return;
         }
         if (hasNamedWorkflowMarkers(autopilot.state) && !isWorkflowRuntimeSupported()) {
@@ -2143,24 +2189,26 @@ async function main() {
         if (workflowAdvance) {
           const commit = commitWorkflowAdvance(autopilot.path, workflowAdvance);
           if (commit.committed) {
-            emit({ continue: false, decision: "block", reason: workflowAdvance.nextStage
-              ? workflowAdvance.nextStagePrompt
-              : "[AUTOPILOT WORKFLOW] All selected stages are complete." });
+            if (workflowAdvance.nextStage) {
+              emit({ decision: "block", reason: workflowAdvance.nextStagePrompt });
+            } else {
+              emit({ decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." });
+            }
           } else if (takeWorkflowTranscriptFailure(sessionId) === 'workflow_transcript_record_too_large') {
-            emit({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' });
+            emit({ continue: false, stopReason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' });
           } else if (hasNamedWorkflowMarkers(commit.state) && (!isValidWorkflowDescriptor(commit.state.workflow) || !isValidWorkflowTrackingState(commit.state, sessionId))) {
-            emit({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
+            emit({ continue: false, stopReason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
           } else {
             emit(hasNamedWorkflowMarkers(commit.state) ? workflowStopResponse(commit.state) : SAFE_CONTINUE);
           }
           return;
         }
         if (takeWorkflowTranscriptFailure(sessionId) === 'workflow_transcript_record_too_large') {
-          emit({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' });
+          emit({ continue: false, stopReason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' });
           return;
         }
         if (hasNamedWorkflowMarkers(autopilot.state) && (!isValidWorkflowDescriptor(autopilot.state.workflow) || !isValidWorkflowTrackingState(autopilot.state, sessionId))) {
-          emit({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
+          emit({ continue: false, stopReason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
           return;
         }
         if (hasNamedWorkflowMarkers(autopilot.state)) {
@@ -2175,7 +2223,7 @@ async function main() {
           };
           const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
           if (refresh.integrityFailed || (hasNamedWorkflowMarkers(refresh.state) && (!isValidWorkflowDescriptor(refresh.state.workflow) || !isValidWorkflowTrackingState(refresh.state, sessionId)))) {
-            emit({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
+            emit({ continue: false, stopReason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." });
           } else {
             emit(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE);
           }
