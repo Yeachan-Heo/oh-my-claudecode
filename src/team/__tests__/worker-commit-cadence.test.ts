@@ -305,6 +305,51 @@ describe('startFallbackPoller – debounce', () => {
   });
 });
 
+describe('startFallbackPoller – .git filter', () => {
+  let worktreePath: string;
+
+  beforeEach(() => {
+    worktreePath = mkWorktree();
+  });
+
+  afterEach(() => {
+    rmSync(worktreePath, { recursive: true, force: true });
+  });
+
+  it.each(['.github/workflows/ci.yml', '.gitignore', '.gitattributes'])(
+    'commits a change to %s',
+    async (file) => {
+      const { exec } = await import('child_process');
+      const execMock = vi.mocked(exec);
+      execMock.mockClear();
+      mkdirSync(join(worktreePath, '.github', 'workflows'), { recursive: true });
+
+      const handle = startFallbackPoller(worktreePath, 'writer', { intervalMs: 50 });
+      try {
+        writeFileSync(join(worktreePath, file), 'edited');
+        await vi.waitFor(() => expect(execMock).toHaveBeenCalled(), { timeout: 2000 });
+      } finally {
+        handle.stop();
+      }
+    },
+  );
+
+  it('ignores a change inside .git', async () => {
+    const { exec } = await import('child_process');
+    const execMock = vi.mocked(exec);
+    execMock.mockClear();
+
+    const handle = startFallbackPoller(worktreePath, 'writer', { intervalMs: 50 });
+    try {
+      writeFileSync(join(worktreePath, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(execMock).not.toHaveBeenCalled();
+    } finally {
+      handle.stop();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 4. Empty-diff branch — hook command structure
 // ---------------------------------------------------------------------------

@@ -296,8 +296,9 @@ export function startFallbackPoller(
   // On macOS/Linux this uses FSEvents/inotify.
   const watcher = fsWatch(worktreePath, { recursive: true }, (eventType, filename) => {
     if (stopped) return;
-    // Ignore .git internal changes to avoid feedback loops.
-    if (filename && (filename.startsWith('.git') || filename.startsWith('.git/'))) return;
+    // Ignore .git internal changes to avoid feedback loops. Compare the first path segment,
+    // so `.github/` and `.gitignore` still trigger a commit.
+    if (filename && filename.split(/[\\/]/)[0] === '.git') return;
     scheduleDebounce();
   });
 
