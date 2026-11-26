@@ -209,6 +209,11 @@ const BLOCKED: string[] = [
   // env -S text that starts with time: env runs time as a program (its -f takes a value), not as the keyword of the shell
   "env -S 'time -f %e rm /dev/null'", "env -S 'time -p rm /dev/null'", "env -S'time -f %e rm /dev/null'", "env --split-string='time -f %e rm /dev/null'", "env -S 'time -o out.tmp rm /dev/null'",
   "env -S '\"time\" -f %e rm /dev/null'", "env -i -S 'time -f %e rm /dev/null'", "sudo env -S 'time -f %e rm /dev/null'", "env -S 'time -f %e rm /dev/null' extra", "env -S 'nice time -f %e rm /dev/null'",
+  // unzip: after the archive every word is a pattern for a member, even one that looks like an option (only -x with its list and -d with its directory stay options)
+  'unzip -o a.zip -P dev/null -d /', 'unzip a.zip -o dev/null -d /', 'unzip a.zip -q dev/null -d /', 'unzip a.zip -j dev/null -d /', 'unzip a.zip -n dev/null -d /', 'unzip a.zip -l dev/null -d /', 'unzip a.zip -v dev/null -d /',
+  'unzip a.zip -t dev/null -d /', 'unzip a.zip -p dev/null -d /', 'unzip a.zip -c dev/null -d /', 'unzip a.zip -z dev/null -d /', 'unzip a.zip -Z dev/null -d /', 'unzip a.zip -- dev/null -d /', 'unzip a.zip -P secret dev/null -d /',
+  'unzip a.zip -i dev/null -d /', 'unzip a.zip -O cp437 dev/null -d /', 'unzip a.zip -d / -o dev/null', 'unzip a.zip dev/null -d / -o', 'unzip a.zip -d/ dev/null', 'unzip a.zip -x etc/x -o -d / dev/null',
+  'unzip a.zip -x etc/x -P dev/null -d /', 'sudo unzip -o a.zip -P dev/null -d /',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -359,6 +364,8 @@ const ALLOWED: string[] = [
   "tar -xf a.tar --checkpoint=1 --checkpoint-action='echo=rm /dev/null'", "bsdtar -tf a.tar --to-command='rm /dev/null'", "bsdtar -xf a.tar --info-script 'rm /dev/null'",
   // ... and a time program that wraps something harmless
   "env -S 'time -f %e true'", "env -S 'time -f %e echo /dev/null'", "env -S 'time -p true'",
+  // ... and the options before the archive still count: -j drops the directories, -l lists, and a password before the archive is no member
+  'unzip -j a.zip dev/null -d /', 'unzip -l a.zip dev/null -d /', 'unzip -P dev/null a.zip -d /', 'unzip a.zip -o rel/x -d /tmp/out', 'unzip -o a.zip -P secret -d /tmp/out', 'unzip a.zip -d /tmp/out -o dev/null',
 ];
 
 describe('/dev guard: Bash commands', () => {

@@ -466,20 +466,25 @@ function devExtraCommand(name, args) {
   }
   if (name === 'tar' || name === 'gtar' || name === 'bsdtar') return hit(tarExtractDir(args, name));
   if (name === 'unzip') {
-    const { shorts, operands, operandAt, values } = parseGetopt(args, 'dPOI');
+    // the options come before the archive (the first word that is no option); after it every word is a pattern for a member, even one that looks like an option,
+    // except -x with the patterns to leave out up to the next word with a dash, and -d with its directory
+    const at = parseGetopt(args, 'dPOI').operandAt[0];
+    if (at === undefined) return null;
+    const { shorts, values } = parseGetopt(args.slice(0, at), 'dPOI');
     if (shorts.some((c) => 'lvtpczZ'.includes(c))) return null; // listing, testing, writing to stdout: no files are created
-    // the words from -x up to the next option are patterns to leave out and what follows that option is a member again; a -x before the archive does not count
-    let skipping = false;
-    const left = new Set();
-    args.forEach((a, j) => {
-      if (a === '-x' && j > operandAt[0]) skipping = true;
-      else if (skipping && !a.startsWith('-')) left.add(j);
-      else skipping = false;
-    });
-    const members = shorts.includes('j') ? [] : operands.filter((m, k) => k > 0 && !left.has(operandAt[k])); // after the archive; -j drops the directories of the members
     const dirs = values.filter(([key]) => key === 'd').map(([, value]) => value);
+    const members = [];
+    let skipping = false;
+    for (let j = at + 1; j < args.length; j++) {
+      const a = args[j];
+      if (a === '-x') skipping = true;
+      else if (a === '-d' && j + 1 < args.length) { dirs.push(args[++j]); skipping = false; }
+      else if (a.startsWith('-d') && a.length > 2) { dirs.push(a.slice(2)); skipping = false; }
+      else if (skipping && !a.startsWith('-')) continue;
+      else { skipping = false; members.push(a); }
+    }
     for (const value of dirs) { const d = devChangedIn(value); if (d) return { what: name, path: d }; }
-    return hit(archiveMemberInDev(dirs.filter((d) => d.startsWith('/')).map((d) => posix.normalize(d)), members));
+    return hit(archiveMemberInDev(dirs.filter((d) => d.startsWith('/')).map((d) => posix.normalize(d)), shorts.includes('j') ? [] : members)); // -j drops the directories of the members
   }
   if (name === 'awk' || name === 'gawk') { // -i inplace, --include=inplace: the gawk extension that rewrites the files
     const { operands, values } = parseGetopt(args, 'fvFeEilW', (n) => ['--file', '--assign', '--field-separator', '--source', '--exec', '--load'].includes(n) || longIs(n, '--include', 5));
