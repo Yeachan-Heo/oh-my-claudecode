@@ -332,9 +332,27 @@ function archiveMemberInDev(dirs, members) {
   return null;
 }
 
-// The long options of tar and bsdtar whose value may be the next word and is neither a directory nor a member (the archive, a list of names, a list of
-// patterns, a pattern); exact names only, because --f, --fi and --fil are ambiguous for both.
-const TAR_LONG_VALUE = new Set(['--file', '--files-from', '--exclude-from', '--exclude']);
+// The long options of tar and of bsdtar with a mandatory value, which may be the next word and is not a member (an archive, a list, a pattern, a date, a
+// text...); exact names only, because the abbreviations are ambiguous, and one set per tool, because a name that a tool does not know ends the command
+// with an error and would swallow a real member if it were listed for the other. Options with an optional value (--backup, --checkpoint, --occurrence,
+// --one-top-level, --totals) take it only after an equals sign.
+const TAR_LONG_VALUE = {
+  gnu: new Set([
+  '--add-file', '--after-date', '--blocking-factor', '--checkpoint-action', '--directory', '--exclude', '--exclude-from', '--exclude-ignore',
+  '--exclude-ignore-recursive', '--exclude-tag', '--exclude-tag-all', '--exclude-tag-under', '--file', '--files-from', '--format', '--group',
+  '--group-map', '--hole-detection', '--index-file', '--info-script', '--label', '--level', '--listed-incremental', '--mode', '--mtime',
+  '--newer', '--newer-mtime', '--new-volume-script', '--no-quote-chars', '--owner', '--owner-map', '--pax-option', '--quote-chars',
+  '--quoting-style', '--record-size', '--rmt-command', '--rsh-command', '--sort', '--sparse-version', '--starting-file', '--strip-components',
+  '--suffix', '--tape-length', '--to-command', '--transform', '--use-compress-program', '--volno-file', '--warning', '--xattrs-exclude',
+  '--xattrs-include', '--xform',
+  ]),
+  bsd: new Set([
+  '--blocking-factor', '--cd', '--directory', '--exclude', '--exclude-from', '--file', '--files-from', '--format', '--gid', '--gname',
+  '--group', '--include', '--newer', '--newer-ctime', '--newer-ctime-than', '--newer-mtime', '--newer-mtime-than', '--newer-than', '--older',
+  '--older-ctime', '--older-ctime-than', '--older-mtime', '--older-mtime-than', '--options', '--owner', '--passphrase', '--strip-components',
+  '--uid', '--uname', '--use-compress-program',
+  ]),
+};
 
 // tar and bsdtar: the directories of -C / --directory (each relative one resolves against the previous), when the command extracts.
 function tarExtractDir(args, name) {
@@ -353,7 +371,7 @@ function tarExtractDir(args, name) {
     }
     rest = args.slice(next);
   }
-  const parsed = parseGetopt(rest, valueLetters, (name) => longIs(name, '--directory', 5) || name === '--cd' || longIs(name, '--strip-components', 5) || TAR_LONG_VALUE.has(name)); // bsdtar: --cd is --directory
+  const parsed = parseGetopt(rest, valueLetters, (opt) => longIs(opt, '--directory', 5) || opt === '--cd' || longIs(opt, '--strip-components', 5) || TAR_LONG_VALUE[name === 'bsdtar' ? 'bsd' : 'gnu'].has(opt)); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
   if (!extract || toStdout || parsed.shorts.includes('O') || parsed.longs.some((l) => longIs(l, '--to-stdout', 6))) return null; // -O and --to-stdout write the members to the standard output, not to files
   // each -C applies from its place on: a member is joined with the directory that the last -C before it names (each relative one resolves against the

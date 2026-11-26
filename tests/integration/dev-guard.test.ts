@@ -177,6 +177,10 @@ const BLOCKED: string[] = [
   // -C applies from its place on: the members after it go into its directory, the ones before the first -C stay where the command runs
   'tar -xf a.tar tmp/out -C / dev/null', 'tar -C / -xf a.tar dev/null tmp/out', 'tar -C /tmp -xf a.tar x -C / dev/null', 'tar -C /tmp -xf a.tar x -C .. dev/null', 'tar xCf / a.tar dev/null', 'tar -xf a.tar -C / dev/null',
   'tar -xf a.tar x -C /dev y', 'tar -xC / -f a.tar dev/null', 'tar -C /tmp -xf a.tar dev/null -C / x dev/zero', 'tar -x -C / -f a.tar x dev/null', 'bsdtar -C / -xf a.tar tmp/out dev/null',
+  // the value of an option that the tool takes with a next word is not a member, and the members that follow still count; the sets differ per tool
+  'tar -C / -xf a.tar --label x dev/null', 'tar -C / -xf a.tar --transform s,a,b, dev/null', 'tar -C / -xf a.tar --label=x dev/null', 'tar -C / -xf a.tar --label dev/null dev/null',
+  'tar -C / -xf a.tar --uid dev/null tmp/out', 'bsdtar -C / -xf a.tar --label dev/null tmp/out', 'bsdtar -C / -xf a.tar --uid 0 dev/null', 'gtar -C / -xf a.tar --owner root dev/null',
+  'tar -C / -xf a.tar --backup dev/null', 'tar -C / -xf a.tar --one-top-level dev/null',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -293,6 +297,11 @@ const ALLOWED: string[] = [
   // members before the -C that leads to /dev stay in the current directory; the directory after the last member is not applied to anything
   'tar -xf a.tar dev/null -C / tmp/out', 'tar -xf a.tar dev/null -C /', 'tar -C / -xf a.tar tmp/out -C /tmp dev/null', 'tar -xf a.tar dev/null dev/zero -C / tmp/out tmp/x', 'tar -C /tmp -xf a.tar x -C / tmp/out',
   'tar -x -f a.tar dev/null -C /', 'tar -xf a.tar dev/null --directory=/ tmp/out',
+  // an option of the archive extractor with a value in the next word: the value is no member
+  'tar -C / -xf a.tar --label dev/null tmp/out', 'tar -C / -xf a.tar --label=dev/null tmp/out', 'tar -C / -xf a.tar --transform dev/null tmp/out', 'tar -C / -xf a.tar --blocking-factor dev/null tmp/out',
+  'tar -C / -xf a.tar --use-compress-program dev/null tmp/out', 'tar -C / -xf a.tar --newer dev/null tmp/out', 'tar -C / -xf a.tar --owner dev/null tmp/out', 'tar -C / -xf a.tar --mode dev/null tmp/out',
+  'tar -C / -xf a.tar --format dev/null tmp/out', 'gtar -C / -xf a.tar --to-command dev/null tmp/out', 'bsdtar -C / -xf a.tar --uid dev/null tmp/out', 'bsdtar -C / -xf a.tar --options dev/null tmp/out',
+  'bsdtar -C / -xf a.tar --newer-than dev/null tmp/out', 'tar -C / -xf a.tar --suffix dev/null tmp/out',
 ];
 
 describe('/dev guard: Bash commands', () => {
