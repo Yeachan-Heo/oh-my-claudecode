@@ -185,6 +185,8 @@ const BLOCKED: string[] = [
   "env -iS 'rm /dev/null'", "env -iS'rm /dev/null'", "env -vS 'rm /dev/null'", "env -iS '-i rm /dev/null'", "env -iS '-u HOME rm /dev/null'", "env -iuS rm /dev/null",
   // busybox runs the applet named by its first argument
   'busybox rm /dev/null', 'busybox env -i rm /dev/null', 'env busybox rm /dev/null', "busybox sh -c 'rm /dev/null'", 'busybox sed -i s/a/b/ /dev/null', 'sudo busybox rm /dev/null',
+  // ... and the external utility again when the redirection belongs to its own command or it follows a pipe
+  'true >/tmp/log && >/tmp/log time -f %e rm /dev/null', 'true >/tmp/log | time -f %e rm /dev/null',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -310,6 +312,8 @@ const ALLOWED: string[] = [
   "env -iS 'true'", "env -iS 'echo /dev/null'", "env -iu S true", "env -iuS true", "env -uS echo x", "env -iC /tmp true",
   // busybox with an applet that only reads, and without an applet
   'busybox ls /dev', 'busybox cat /dev/null', 'busybox echo /dev/null', 'busybox --list', 'busybox true', 'env busybox ls /dev',
+  // time after a redirection of an earlier command is the keyword again after the list operator
+  'true >/tmp/log && time -f %e rm /dev/null', 'true >/tmp/log; time -f %e rm /dev/null',
 ];
 
 describe('/dev guard: Bash commands', () => {
