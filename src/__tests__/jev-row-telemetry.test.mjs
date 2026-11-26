@@ -210,3 +210,66 @@ describe('resolveRequest shadow line', () => {
     for (const key of Object.keys(JEV_ROW_NO_ANSWER)) expect(row[key]).toBeNull();
   });
 });
+
+describe('resolveRequest shadow line: the state mask and the telemetry', () => {
+  const GHP = 'ghp_' + 'A'.repeat(36);
+
+  it('what the mask replaces is no cut: a masked token inside the excerpt limit leaves cut_chars 0 and the input complete', async () => {
+    const state = { task: 'use ' + GHP };
+    const { row } = await judge({ env: TELEMETRY_ENV, state });
+    expect(row.state.task).toBe('use ghp_***');
+    expect(row.source_chars).toBe(JSON.stringify(state).length);
+    expect(row.sent_chars).toBe(row.source_chars);
+    expect(row.cut_chars).toBe(0);
+    expect(row.input_complete).toBe(true);
+  });
+
+  it('a mask that makes the state longer is no cut either: sent_chars never exceeds source_chars', async () => {
+    const { row } = await judge({ env: TELEMETRY_ENV, state: { password: 'x' } });
+    expect(row.state).toEqual({ password: '***' });
+    expect(row.sent_chars).toBeLessThanOrEqual(row.source_chars);
+    expect(row.cut_chars).toBe(0);
+    expect(row.input_complete).toBe(true);
+  });
+
+  it('a cut counts the characters the excerpt limit removed, the same with or without a secret in the state', async () => {
+    const env = { ...TELEMETRY_ENV, OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '50' };
+    const plain = await judge({ env, state: { task: 'z'.repeat(400) } });
+    const masked = await judge({ env, state: { task: 'z'.repeat(400), password: 'hunter2zzQ' } });
+    for (const { row } of [plain, masked]) {
+      expect(row.cut_chars).toBe(350);
+      expect(row.input_complete).toBe(false);
+    }
+    expect(masked.row.state.password).toBe('***');
+  });
+
+  it('a state that was not sent (a secret path whole) logs a degraded line with the telemetry fields empty, never zero', async () => {
+    const bodies = [];
+    const { result, row } = await judge({
+      env: { ...TELEMETRY_ENV, OMC_JEV_QUIET: '1' },
+      state: { task: 'cat .env' },
+      fetchFn: async (_url, init) => {
+        bodies.push(init.body);
+        return { ok: true, json: async () => ANSWER_BODY };
+      },
+    });
+    expect(bodies).toHaveLength(0);
+    expect(result.mode).toBe('degraded');
+    expect(result.jevModel).toBeNull();
+    expect(row).toMatchObject({ mode: 'degraded', state: '[state not sent: secret path]', jev: null, answers: null });
+    for (const key of Object.keys(JEV_ROW_NO_ANSWER)) expect(row[key], key).toBeNull();
+    expect(row.usage).toBeNull();
+    expect(row.model).toBeNull();
+  });
+
+  it('a state that could not be masked has the same empty fields, and without the variable the line has the keys of any degraded line', async () => {
+    const deep = JSON.parse('{"a":'.repeat(65) + '"leaf"' + '}'.repeat(65));
+    const withTelemetry = await judge({ env: { ...TELEMETRY_ENV, OMC_JEV_QUIET: '1' }, state: deep });
+    expect(withTelemetry.row.state).toBe('[state not sent: mask failed]');
+    for (const key of Object.keys(JEV_ROW_NO_ANSWER)) expect(withTelemetry.row[key], key).toBeNull();
+    const without = await judge({ env: { OMC_JEV_QUIET: '1' }, state: deep });
+    const http = await judge({ fetchFn: async () => ({ ok: false, status: 500, json: async () => ({}) }) });
+    expect(Object.keys(without.row).sort()).toEqual(Object.keys(http.row).sort());
+    expect(without.result).not.toHaveProperty('jevModel');
+  });
+});

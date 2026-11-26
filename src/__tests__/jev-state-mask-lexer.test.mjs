@@ -1,0 +1,211 @@
+/**
+ * scripts/lib/jev-state-mask.mjs: the one shell lexer. Every option of the table (CREDENTIAL_OPTIONS) x the way its value is written
+ * (bare, in double quotes, in single quotes, with an escaped quote inside, in ANSI-C quotes, next to other quotes) x what stands before
+ * it in the command (a command boundary inside quotes, escaped or not, or inside a substitution), with the exact result of every cell,
+ * and the rule that a window never shows more than the text without one.
+ */
+import { performance } from 'node:perf_hooks';
+import { describe, expect, it } from 'vitest';
+
+import { CREDENTIAL_OPTIONS, PROGRAMS, WINDOW_MARGIN, maskJevState } from '../../scripts/lib/jev-state-mask.mjs';
+
+const SECRET = 'hunter2zzQ';
+const MAX = 200;
+const asText = (value, options) => maskJevState({ t: value }, options).t;
+
+const rows = CREDENTIAL_OPTIONS.flatMap((option) => (option.names ?? [option.letter]).map((name) => ({
+  opt: option.names ? `--${name}` : `-${name}`,
+  kind: option.value,
+  program: option.program,
+  command: option.program ? PROGRAMS[option.program][0] : 'tool',
+})));
+
+// [name, the value as written, what it becomes]: a `name:password` value keeps its name and its quotes, any other goes whole
+function valueForms(kind) {
+  const user = kind === 'user';
+  const u = user ? 'u:' : '';
+  const kept = (open, quote) => (user ? `${open}${quote}u:***${quote}` : '***');
+  return [
+    ['bare', `${u}${SECRET}`, `${u}***`],
+    ['double quotes', `"${u}a b ${SECRET}"`, kept('', '"')],
+    ['single quotes', `'${u}a b ${SECRET}'`, kept('', "'")],
+    ['double quotes with an escaped quote', `"${u}a\\" b ${SECRET}"`, kept('', '"')],
+    ['double quotes with a backslash before the closing quote', `"${u}a b ${SECRET}\\\\"`, kept('', '"')],
+    ['double quotes with separators', `"${u}a;b && c | ${SECRET}"`, kept('', '"')],
+    ['single quotes with a backslash', `'${u}a\\ b ${SECRET}'`, kept('', "'")],
+    ['ANSI-C quotes with an escaped quote', `$'${u}a\\' b ${SECRET}'`, kept('$', "'")],
+    ['a quote in the middle of a word', `${u}a"b c"${SECRET}`, `${u}***`],
+    ['quotes next to other quotes', `"${u}a"'b c'${SECRET}`, user ? '"u:***"' : '***'],
+    ['an escaped space', `${u}a\\ b\\ ${SECRET}`, `${u}***`],
+  ];
+}
+
+// what can stand before the option in its command, and keeps the program of the command (a boundary inside quotes, escaped or not,
+// or inside a substitution, is no end of the command)
+const BEFORE = [
+  '',
+  '-H "x;y"', '-H "x&&y"', '-H "x|y"', "-H 'x;y'", "-H 'x\\;y'",
+  '-H "x\\";y"', '-H "x\\"&&y"', '-H "x\\"|y"', '-H "x\\\\" -H "y;z"', "-H $'x\\';y'", '-H "a\\"" -H "b;"',
+  '-H "x $(a; b) y"', '$(a; b)', '`a; b`', '"$(a; "b c"; d)"', '(a; b)', '$(a; $(c; d); e)',
+];
+
+describe('the lexer of maskJevState: every option x every way to write its value x what stands before it', () => {
+  it.each(rows.map((row) => [row.opt, row]))('%s', (_opt, row) => {
+    let cells = 0;
+    for (const [name, raw, masked] of valueForms(row.kind)) {
+      for (const before of BEFORE) {
+        const text = `${row.command} ${before} ${row.opt} ${raw} tail`;
+        const expected = `${row.command} ${before} ${row.opt} ${masked} tail`;
+        const label = `${name} after [${before}]: ${text}`;
+        expect(asText(text), label).toBe(expected);
+        expect(asText(text, { maxChars: MAX }), `${label} (window)`).toBe(expected);
+        expect(asText(expected), `${label} (second pass)`).toBe(expected);
+        cells++;
+      }
+    }
+    expect(cells).toBe(valueForms(row.kind).length * BEFORE.length);
+  });
+
+  // how the option and its value are joined: stuck or with `=` to the option, or the whole option inside quotes (the quote then closes
+  // the value, and an escaped quote inside it does not)
+  it.each(rows.map((row) => [row.opt, row]))('%s is masked joined to its value, and as a whole option in quotes, with an escaped quote inside', (_opt, row) => {
+    const user = row.kind === 'user';
+    const u = user ? 'u:' : '';
+    const m = user ? 'u:***' : '***';
+    const long = row.opt.startsWith('--');
+    const cells = [
+      // [the text of the option and its value, what it becomes]
+      [`${row.opt}${long ? '=' : ''}"${u}a\\" b ${SECRET}"`, user ? `${row.opt}${long ? '=' : ''}"${m}"` : `${row.opt}${long ? '=' : ''}***`],
+      [`${row.opt}${long ? '=' : ''}$'${u}a\\' b ${SECRET}'`, user ? `${row.opt}${long ? '=' : ''}$'${m}'` : `${row.opt}${long ? '=' : ''}***`],
+      [`"${row.opt}${long ? '=' : ''}${u}a\\" b ${SECRET}"`, `"${row.opt}${long ? '=' : ''}${m}"`],
+      [`'${row.opt}${long ? '=' : ''}${u}a" b ${SECRET}'`, `'${row.opt}${long ? '=' : ''}${m}'`],
+    ];
+    for (const before of ['', '-H "x\\";y"']) {
+      for (const [value, masked] of cells) {
+        const text = `${row.command} ${before} ${value} tail`;
+        const expected = `${row.command} ${before} ${masked} tail`;
+        expect(asText(text), text).toBe(expected);
+        expect(asText(text, { maxChars: MAX }), `${text} (window)`).toBe(expected);
+        expect(asText(expected), `${text} (second pass)`).toBe(expected);
+      }
+    }
+  });
+
+  it.each(rows.filter((row) => row.program).map((row) => [row.opt, row]))('%s counts only in the command of its program, and the end of the command is found outside quotes only', (_opt, row) => {
+    const same = (text) => expect(asText(text), text).toBe(text);
+    const word = `${row.opt} ${row.kind === 'user' ? 'u:' : ''}${SECRET}`;
+    // the command has ended, whatever stood in quotes before it
+    same(`${row.command} -H "a\\";b" ; tool ${word} tail`);
+    same(`${row.command} -H 'a;b' && tool ${word} tail`);
+    same(`${row.command} -H "a\\\\" | tool ${word} tail`);
+    same(`${row.command} $'a\\'b' ; tool ${word} tail`);
+    same(`${row.command} $(a; b) ; tool ${word} tail`);
+    same(`(${row.command} x)\ntool ${word} tail`);
+  });
+
+  it.each(rows.map((row) => [row.opt, row]))('%s: a window shows no more than the text without one, at every distance from its edge', (_opt, row) => {
+    for (const [name, raw] of valueForms(row.kind)) {
+      for (const before of ['', '-H "x\\";y"']) {
+        const cell = `${row.command} ${before} ${row.opt} ${raw} tail`;
+        for (let offset = MAX - 60; offset <= MAX + WINDOW_MARGIN + 60; offset += 41) {
+          const filler = 'w '.repeat(Math.ceil(offset / 2)).slice(0, offset);
+          const sent = asText(`${filler}\n${cell} ${'w '.repeat(100)}`, { maxChars: MAX }).slice(0, MAX);
+          expect(sent, `${name} at ${offset}`).not.toContain('hunte');
+        }
+      }
+    }
+  });
+});
+
+describe('the lexer of maskJevState: where a word ends', () => {
+  it.each([
+    // the findings: an escaped quote does not end an argument in quotes, and a separator inside it does not end the command
+    [`curl --user "name:pre\\"suffix ${SECRET}"`, 'curl --user "name:***"'],
+    [`curl -H "X-Note: foo\\";bar" -U u:${SECRET} https://host`, 'curl -H "X-Note: foo\\";bar" -U u:*** https://host'],
+    // a quote that never closes takes the rest of the text
+    [`curl -u "u:a b ${SECRET}`, 'curl -u "u:***'],
+    [`curl -u $'u:a b ${SECRET}`, "curl -u $'u:***"],
+    [`curl -u 'u:a ${SECRET} \\' tail`, "curl -u 'u:***' tail"],
+    // an option that is a quote of an outer shell: its value stops at the close of that quote, and an inner quote takes the rest of it
+    [`sh -c "mysql -p ${SECRET}" tail`, 'sh -c "mysql -p ***" tail'],
+    [`sh -c "mysql -p 'a b ${SECRET}' -e x" tail`, 'sh -c "mysql -p ***" tail'],
+    [`sh -c "curl -u \\"u:a b ${SECRET}\\" h" tail`, 'sh -c "curl -u \\"u:***" tail'],
+    [`bash -c 'mysql -u r -p"a b ${SECRET}" db' tail`, "bash -c 'mysql -u r -p***' tail"],
+    [`sh -c "curl -H \\"a;b\\" -U u:${SECRET} h"`, 'sh -c "curl -H \\"a;b\\" -U u:*** h"'],
+    // a substitution and a group are commands of their own, and give the outer command back
+    [`curl $(a; b) -U u:${SECRET}`, 'curl $(a; b) -U u:***'],
+    [`curl \`a; b\` -U u:${SECRET}`, 'curl `a; b` -U u:***'],
+    [`curl "$(a "b;c" d)" -U u:${SECRET}`, 'curl "$(a "b;c" d)" -U u:***'],
+    [`tool $(curl x) -U u:${SECRET}`, `tool $(curl x) -U u:${SECRET}`],
+    [`mysql -p$(a b) tail`, 'mysql -p*** tail'],
+    [`mysql -p"$(a b)" tail`, 'mysql -p*** tail'],
+  ])('%s', (input, expected) => {
+    expect(asText(input)).toBe(expected);
+    expect(asText(input, { maxChars: MAX }), 'with a window').toBe(expected);
+  });
+
+  it('keeps the nesting bounded: a text nested deeper than the lexer reads is read to its end (fail closed), in time', () => {
+    const deep = `curl ${'"$('.repeat(500)} x ${')"'.repeat(500)} -U u:${SECRET}`;
+    expect(asText(deep)).not.toContain(SECRET);
+    const started = performance.now();
+    asText(`${'$('.repeat(2_000_000)} -U x`);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+});
+
+describe('the lexer of maskJevState: the cost is the window, not the input', () => {
+  const repeatTo = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+  // shapes that a scan that backtracks, reads on from every start or nests without a bound would take quadratic time or memory on
+  const shapes = {
+    'nested substitutions': (n) => `curl ${repeatTo('"$(', n)}`,
+    'nested substitutions that close': (n) => `curl -U u:x ${repeatTo('$(', n / 2)}${repeatTo(')', n / 2)}`,
+    'single quotes': (n) => `curl -U ${repeatTo("'", n)}`,
+    'double quotes': (n) => `curl -U ${repeatTo('"', n)}`,
+    'escaped quotes': (n) => `curl -u "${repeatTo('\\"', n)}`,
+    'backslashes': (n) => `curl -u ${repeatTo('\\', n)}`,
+    'ANSI-C quotes': (n) => `curl -u ${repeatTo("$'", n)}`,
+    'groups': (n) => `curl -U ${repeatTo('(', n)}`,
+    'command boundaries': (n) => `curl ${repeatTo(';', n)} -U u:x`,
+    'many options with escapes': (n) => repeatTo('curl -H "x\\";y" -U a:b ', n),
+    'many programs and boundaries': (n) => `${repeatTo('curl x ; mysql y | ', n)}-p z`,
+    'cookie quotes': (n) => repeatTo('Cookie: "', n),
+    'cookie lines': (n) => repeatTo('Cookie: a="b c"; d\n', n),
+    'headers and quotes': (n) => repeatTo("-H 'X-Api-Key: \"", n),
+    'many quoted headers on one line': (n) => repeatTo("-H 'Cookie: a' ", n),
+    'many quoted headers on one line, double quotes': (n) => repeatTo('-H "X-Api-Key: a" ', n),
+    'authorization and quotes': (n) => repeatTo('Authorization: Bearer "', n),
+    'url slashes': (n) => repeatTo('//', n),
+    'url with an empty user': (n) => repeatTo('//:', n),
+    'url with a long password and no @': (n) => `//u:${repeatTo('a', n)}`,
+    'url with many @': (n) => `//u:${repeatTo('p@', n)}`,
+    'many urls': (n) => repeatTo('http://u:p@h/x ', n),
+  };
+  it.each(Object.keys(shapes))('reads %s of 8 MiB to its window and no further', (name) => {
+    const text = shapes[name](8 * 1024 * 1024);
+    const times = [];
+    for (let i = 0; i < 3; i++) {
+      const started = performance.now();
+      maskJevState({ t: text }, { maxChars: MAX });
+      times.push(performance.now() - started);
+    }
+    expect(Math.min(...times)).toBeLessThan(300);
+  });
+
+  it.each(Object.keys(shapes))('takes time in proportion to the text without a window: %s', (name) => {
+    // 0.5 MiB then 4 MiB: eight times the text takes well under sixty-four times as long (a quadratic rule would take sixty-four; the
+    // bound leaves room for a machine that is busy with other work)
+    const time = (n) => {
+      const text = shapes[name](n);
+      const best = [];
+      for (let i = 0; i < 3; i++) {
+        const started = performance.now();
+        maskJevState({ t: text });
+        best.push(performance.now() - started);
+      }
+      return Math.min(...best);
+    };
+    const small = time(512 * 1024);
+    const large = time(4 * 1024 * 1024);
+    expect(large, `${small.toFixed(0)} ms, then ${large.toFixed(0)} ms`).toBeLessThan(Math.max(small, 50) * 24);
+  });
+});

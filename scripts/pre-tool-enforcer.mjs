@@ -1148,8 +1148,8 @@ function recordJevForkSkipRow(data, toolInput, stateDir) {
 // delimiter, empty by default, so nothing is read) are expanded. A file whose canonical path looks secret
 // (scripts/lib/jev-pointer-secret-path.mjs: SSH keys, env files, credential and token files, key stores), a
 // settings*.json file, and any file under a directory listed in OMC_JEV_POINTER_EXPAND_SECRET_DIRS is never
-// read. The excerpt is sent UNMASKED to the configured Jev endpoint: state masking is a separate change, so
-// the content leaves the machine as is.
+// read. The excerpt is part of the state, so it goes through the state mask (scripts/lib/jev-state-mask.mjs)
+// in the resolver like the rest of the state; that removes the shapes it knows and no more.
 // Any failure leaves the prompt unchanged and sets the reason in the pointer telemetry (written to
 // the shadow line with OMC_JEV_ROW_TELEMETRY).
 const POINTER_MAX_PROMPT_CHARS = 600;

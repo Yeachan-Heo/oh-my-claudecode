@@ -404,7 +404,9 @@ export function sanitizeUsage(usage) {
  * Telemetry fields of a row without an answer (degraded, skipped, breaker):
  * they are present with null, never zero. The hook-side writers spread it too.
  * Field names: source_chars is the state length before the resolver's cut,
- * sent_chars the length the classifier saw, cut_chars the characters the cut
+ * sent_chars the length after the cut (both measured on the state as the point
+ * built it, so what the secret mask replaces is not counted: it is no longer
+ * the length of the state the classifier saw), cut_chars the characters the cut
  * removed, input_complete true when nothing was cut, pointer_expanded and
  * pointer_unexpanded the pointer telemetry of the request, questions_version
  * a hash of the questions sent, usage_status reported | partial | unavailable.
@@ -590,6 +592,11 @@ export function resolveRequestTimeoutMs(env = process.env, now = Date.now()) {
   return Math.max(200, Math.min(timeoutMs, deadline - now));
 }
 
+/** The logged state of a request whose state could not be masked. */
+const STATE_NOT_SENT = "[state not sent: mask failed]";
+/** The logged state of a request with a string that is a secret path whole. */
+const STATE_NOT_SENT_PATH = "[state not sent: secret path]";
+
 /**
  * Mirror of the resolver's shadow-log entry (ShadowLogEntry): the jev-eval
  * tool compares lines regardless of which side wrote them. maxBytes is the
@@ -629,22 +636,68 @@ export async function resolveRequest(
   // the line's `jev` and confidence from the first question only (null when
   // Jev did not answer it).
   const logContext = isJevLogContextEnabled(env) ? jevLogContextOf(request.context) : undefined;
+  // Secrets are masked before the state is bounded, so before it is sent or logged; a string is cut to the
+  // window that is sent (plus a margin) first, so the cost of the mask does not grow with the prompt. A state
+  // that cannot be masked, a string that is a secret path whole, or a missing mask module sends nothing: fail
+  // closed, the caller uses its twin.
+  let maskedState;
+  // OMC_JEV_ROW_TELEMETRY: a row without an answer carries the telemetry fields empty (JEV_ROW_NO_ANSWER), as the
+  // other degraded rows of the resolver do.
+  const rowTelemetry = isJevRowTelemetryEnabled(env);
+  try {
+    const { maskJevState } = await import("./lib/jev-state-mask.mjs");
+    maskedState = maskJevState(request.state, { maxChars: resolveExcerptChars(request.point, env) });
+  } catch (error) {
+    const omitted = error?.name === "JevStateFieldOmittedError";
+    if (String(env.OMC_JEV_QUIET ?? "").trim() !== "1") {
+      console.error("[jev] " + request.point + ": degraded - state not sent: " + (omitted ? "secret path" : "mask failed") + " (" + (error?.name ?? "Error") + ")");
+    }
+    const durationMs = Date.now() - startedAt;
+    await writeShadowLog(
+      {
+        ts: new Date().toISOString(),
+        point: request.point,
+        ...logContext,
+        mode: "degraded",
+        state: omitted ? STATE_NOT_SENT_PATH : STATE_NOT_SENT,
+        heuristic: comparableHeuristic(request.heuristic, request.questions),
+        jev: null,
+        answers: null,
+        durationMs,
+        ...(rowTelemetry ? { usage: null, model: null, ...JEV_ROW_NO_ANSWER } : {}),
+        ...(request.tool_use_id ? { tool_use_id: request.tool_use_id } : {}),
+      },
+      await logDirFor(env),
+      resolveJevLogMaxBytes(env),
+    );
+    return {
+      mode: "degraded",
+      answer: null,
+      answers: null,
+      ...(logContext?.request_id ? { request_id: logContext.request_id } : {}),
+      confidence: undefined,
+      durationMs,
+      ...(rowTelemetry ? { jevModel: null } : {}),
+    };
+  }
   // Only the state carries user text. Question definitions are static text
   // written by the hook scripts and go out whole: bounding them would cut the
   // model-routing effort instructions (295 characters) and the intent
   // criterion (209). A question must never embed user text.
   const bound = {
-    state: boundExcerpts(request.state, resolveExcerptChars(request.point, env)),
+    state: boundExcerpts(maskedState, resolveExcerptChars(request.point, env)),
     questions: request.questions,
   };
   // OMC_JEV_ROW_TELEMETRY: lengths of the state before and after the cut, and
   // the pointer telemetry the caller sends in request.pointer as
-  // {expanded, unexpanded} (false and null when it sends none).
-  const rowTelemetry = isJevRowTelemetryEnabled(env);
+  // {expanded, unexpanded} (false and null when it sends none). The lengths are
+  // those of the state as the point built it and of its excerpt cut, so what the
+  // secret mask replaces is not counted as a cut (a masked token is shorter or
+  // longer than its mask, and that says nothing about what the cut removed).
   const telemetryInput = rowTelemetry
     ? {
         sourceChars: stateCharsOf(request.state),
-        sentChars: stateCharsOf(bound.state),
+        sentChars: stateCharsOf(boundExcerpts(request.state, resolveExcerptChars(request.point, env))),
         pointer: {
           expanded: request.pointer?.expanded === true,
           unexpanded: typeof request.pointer?.unexpanded === "string" && request.pointer.unexpanded !== "" ? request.pointer.unexpanded : null,

@@ -20,6 +20,7 @@ import { existsSync, renameSync, statSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type * as JevBreaker from '../../../scripts/lib/jev-breaker.mjs';
+import type * as JevStateMask from '../../../scripts/lib/jev-state-mask.mjs';
 import { JevClientError, queryJev } from './client.js';
 import { ACTIVATED_POINTS, boundExcerpts, excerptCharsFor, parseJevConfig, pointState } from './config.js';
 import type { JevConfig } from './config.js';
@@ -33,6 +34,12 @@ interface SharedBreaker {
 }
 
 let breakerModule: Promise<typeof JevBreaker> | undefined;
+let stateMaskModule: Promise<typeof JevStateMask> | undefined;
+
+/** The logged state of a call whose state could not be masked. */
+const STATE_NOT_SENT = '[state not sent: mask failed]';
+/** The logged state of a call with a string that is a secret path whole. */
+const STATE_NOT_SENT_PATH = '[state not sent: secret path]';
 
 /**
  * The breaker and request limit shared with the hook scripts
@@ -52,7 +59,7 @@ async function loadSharedBreaker(endpoint: string, apiKey: string | null): Promi
   }
 }
 
-/** Whether OMC_JEV_BREAKER=1 or OMC_JEV_MAX_RPM asks for the shared breaker. Synchronous, so a call without them never yields before it sends. */
+/** Whether OMC_JEV_BREAKER=1 or OMC_JEV_MAX_RPM asks for the shared breaker. Synchronous (the state mask below yields once per call, before this check). */
 function sharedBreakerWanted(): boolean {
   const env = process.env;
   return String(env.OMC_JEV_BREAKER ?? '').trim() === '1' || String(env.OMC_JEV_MAX_RPM ?? '').trim() !== '';
@@ -64,6 +71,7 @@ interface ResolverRuntime {
   openCircuits: Set<string>;
   /** env-activated points already warned about (warn once per point per process). */
   envWarned: Set<string>;
+  maskWarned: boolean;
 }
 
 const runtime: ResolverRuntime = {
@@ -71,6 +79,7 @@ const runtime: ResolverRuntime = {
   consecutiveFailures: new Map(),
   openCircuits: new Set(),
   envWarned: new Set<string>(),
+  maskWarned: false,
 };
 
 /** Reset in-process resolver state (request cap, circuit breaker, warnings). Test hook. */
@@ -79,6 +88,7 @@ export function resetJevResolverState(): void {
   runtime.consecutiveFailures.clear();
   runtime.openCircuits.clear();
   runtime.envWarned.clear();
+  runtime.maskWarned = false;
 }
 
 export interface ResolveJudgmentArgs<T> {
@@ -312,11 +322,32 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
   }
 
-  // Only the state carries user text; question definitions are static (they must never embed user text) and go out whole.
-  const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config));
   const startedAt = Date.now();
   // OMC_JEV_LOG_CONTEXT: the call's ids and one request_id for every line of this judgment.
   const logFields = config.logContext ? { ...jevLogContextOf(args.logContext), request_id: randomUUID() } : undefined;
+
+  // Secrets are masked before the state is bounded, so before it is sent or logged; a string is cut to the
+  // window that is sent (plus a margin) first, so the cost of the mask does not grow with the prompt. A state
+  // that cannot be masked, a string that is a secret path whole, or a missing mask module sends nothing: fail
+  // closed, the twin answers. This comes before the shared admission and the request count, so a call that is
+  // not sent takes no slot.
+  let maskedState: unknown;
+  try {
+    stateMaskModule ??= import('../../../scripts/lib/jev-state-mask.mjs');
+    maskedState = (await stateMaskModule).maskJevState(args.state, { maxChars: excerptCharsFor(args.point, config) });
+  } catch (error) {
+    const omitted = error instanceof Error && error.name === 'JevStateFieldOmittedError';
+    if (process.env.OMC_JEV_QUIET !== '1' && !runtime.maskWarned) {
+      runtime.maskWarned = true;
+      console.error('[jev] ' + args.point + ': degraded - state not sent: ' + (omitted ? 'secret path' : 'mask failed') + ' (' + (error instanceof Error ? error.name : 'Error') + ')');
+    }
+    const heuristic = twinAnswer();
+    const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
+    await writeShadowLog(buildLogEntry(args.point, omitted ? STATE_NOT_SENT_PATH : STATE_NOT_SENT, startedAt, 'degraded', loggableHeuristic, null, args.questions, logFields), config);
+    return { answer: heuristic, source: 'twin', mode: 'degraded' };
+  }
+  // Only the state carries user text; question definitions are static (they must never embed user text) and go out whole.
+  const boundedState = boundExcerpts(maskedState, excerptCharsFor(args.point, config));
 
   // Opt-in breaker and request limit shared with every process of the machine.
   const shared = sharedBreakerWanted() ? await loadSharedBreaker(config.endpoint, config.apiKey) : undefined;
