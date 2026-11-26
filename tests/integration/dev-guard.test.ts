@@ -183,6 +183,8 @@ const BLOCKED: string[] = [
   'tar -C / -xf a.tar --backup dev/null', 'tar -C / -xf a.tar --one-top-level dev/null',
   // env -S inside a cluster of short options reads its text as options of env again, like the separate form
   "env -iS 'rm /dev/null'", "env -iS'rm /dev/null'", "env -vS 'rm /dev/null'", "env -iS '-i rm /dev/null'", "env -iS '-u HOME rm /dev/null'", "env -iuS rm /dev/null",
+  // busybox runs the applet named by its first argument
+  'busybox rm /dev/null', 'busybox env -i rm /dev/null', 'env busybox rm /dev/null', "busybox sh -c 'rm /dev/null'", 'busybox sed -i s/a/b/ /dev/null', 'sudo busybox rm /dev/null',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -306,6 +308,8 @@ const ALLOWED: string[] = [
   'bsdtar -C / -xf a.tar --newer-than dev/null tmp/out', 'tar -C / -xf a.tar --suffix dev/null tmp/out',
   // env -S inside a cluster: a letter that takes a value before the S keeps the S as its value; the text still goes through the checks
   "env -iS 'true'", "env -iS 'echo /dev/null'", "env -iu S true", "env -iuS true", "env -uS echo x", "env -iC /tmp true",
+  // busybox with an applet that only reads, and without an applet
+  'busybox ls /dev', 'busybox cat /dev/null', 'busybox echo /dev/null', 'busybox --list', 'busybox true', 'env busybox ls /dev',
 ];
 
 describe('/dev guard: Bash commands', () => {
