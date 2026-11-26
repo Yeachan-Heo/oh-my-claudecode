@@ -78,6 +78,9 @@ const BLOCKED: string[] = [
   'rm "/de\\\nv/null"', 'rm /de\\\nv/null', 'rm /de"\\\n"v/null', 'rm "/dev/nu\\\nll"', 'echo x > "/de\\\nv/sda"',
   // devices that may carry a write to something real: the input of a terminal session, terminals and serial ports
   'echo x > /dev/stdin', 'echo x > /dev/pts/3', 'echo x > /dev/ttyUSB0', 'echo x > /dev/tty1', 'echo x | tee /dev/stdin', 'dd if=x of=/dev/pts/0', 'rm /dev/zero', 'mv x /dev/zero',
+  // the options of time that take a value, in both spellings, and the ones that do not
+  "/usr/bin/time -f '%e' rm /dev/null", 'time -f%e rm /dev/null', "time --format '%e' rm /dev/null", 'time --format=%e rm /dev/null', 'time -o /tmp/t rm /dev/null', 'time -o/tmp/t rm /dev/null',
+  'time --output /tmp/t rm /dev/null', 'time --output=/tmp/t rm /dev/null', 'time -p -a -v rm /dev/null', 'time --portability --append --verbose rm /dev/null',
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
   'echo `bash <<B\nrm /dev/null\nB\n`', 'x=`bash <<B\nrm -f /dev/sda\nB\n`', 'echo `echo \\`rm /dev/null\\``',
   // a path from the pipe lands in the place of the replace string of xargs -I
@@ -156,6 +159,7 @@ const ALLOWED: string[] = [
   "rm '/de\\\nv/null'", "rm $'/de\\\nv/null'", 'rm "/tmp/x\\\\\nv/null"',
   // writes to pseudo devices that discard or ignore them
   'echo x > /dev/zero', 'echo x > /dev/full', 'echo x > /dev/urandom', 'echo x > /dev/random', 'echo x > /dev/stderr', 'echo x | tee /dev/zero', 'dd if=x of=/dev/zero', 'echo x >> /dev/full',
+  "time -f '%e' ls /tmp", 'time --output /tmp/t ls /tmp', 'time -p ls /tmp',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
