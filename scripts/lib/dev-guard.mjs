@@ -136,7 +136,7 @@ const DEV_WRAPPERS = {
   doas: { val: ['-u', '-C'] }, env: { val: ['-u', '-C', '-S', '-a', '--unset', '--chdir', '--argv0', '--block-signal', '--default-signal', '--ignore-signal'], assign: true }, command: { val: [] }, builtin: { val: [] },
   exec: { val: ['-a'] }, nice: { val: ['-n', '--adjustment'] }, ionice: { val: ['-c', '-n', '-p', '-P', '-u', '--class', '--classdata', '--pid', '--pgid', '--uid'] }, nohup: { val: [] },
   timeout: { val: ['-s', '--signal', '-k', '--kill-after'], skip: 1 }, stdbuf: { val: ['-i', '-o', '-e', '--input', '--output', '--error'] }, setsid: { val: [] }, time: { val: ['-f', '-o', '--format', '--output'] }, coproc: { val: [] },
-  xargs: { val: ['-n', '-I', '-L', '-P', '-d', '-E', '-s', '-a', '-l', '--max-args', '--max-procs', '--max-lines', '--delimiter', '--eof', '--max-chars', '--arg-file', '--process-slot-var'] },
+  xargs: { val: ['-n', '-I', '-L', '-P', '-d', '-E', '-s', '-a', '--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file', '--process-slot-var'] }, // -l, -e, -i and their long forms take an attached value only
 };
 const DEV_LEADING = new Set(['then', 'do', 'else', 'elif', '{', '!', 'if', 'while', 'until']);
 const baseName = (value) => String(value).replace(/\/+$/, '').split('/').pop();
