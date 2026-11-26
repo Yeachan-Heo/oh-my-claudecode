@@ -74,6 +74,8 @@ const BLOCKED: string[] = [
   'sudo --user root rm /dev/null', 'sudo --chdir /tmp rm /dev/null', 'env --unset X rm /dev/null', 'env --chdir /tmp rm /dev/null', "env -S 'rm -f /dev/null'", 'env --split-string="rm /dev/null"', "env -S'rm /dev/null'",
   "env -S 'rm -f' /dev/null", "env -i -S 'sh -c \"rm /dev/null\"'", 'stdbuf --output L rm /dev/null', 'ionice --class 3 rm /dev/null', 'echo /dev/null | xargs --max-args 1 rm', `${'sudo '.repeat(11)}rm /dev/null`,
   'sudo --group wheel --user root env --unset X nice --adjustment 3 rm /dev/null', 'coproc rm /dev/null',
+  // a backslash and a newline inside or outside double quotes are removed by the shell, in the middle of the path as well
+  'rm "/de\\\nv/null"', 'rm /de\\\nv/null', 'rm /de"\\\n"v/null', 'rm "/dev/nu\\\nll"', 'echo x > "/de\\\nv/sda"',
   // devices that may carry a write to something real: the input of a terminal session, terminals and serial ports
   'echo x > /dev/stdin', 'echo x > /dev/pts/3', 'echo x > /dev/ttyUSB0', 'echo x > /dev/tty1', 'echo x | tee /dev/stdin', 'dd if=x of=/dev/pts/0', 'rm /dev/zero', 'mv x /dev/zero',
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
@@ -150,6 +152,8 @@ const ALLOWED: string[] = [
   'echo /dev/null | xargs -i cp {} ./e', 'echo /dev/null | xargs --replace=@ cp @ ./e', 'echo /dev/null | xargs -I @ cp @ ./e',
   // a here-document of cat inside backticks, and a top-level one whose offset happens to match the one inside the backticks
   'echo `cat <<B\nrm /dev/null\nB\n`', "cats <<'A'\nrm -f /dev/null\nA\necho `bash <<B`", 'echo `ls /tmp`',
+  // the same pair stays text in single quotes and in $'...', and an escaped backslash before the newline is not a continuation
+  "rm '/de\\\nv/null'", "rm $'/de\\\nv/null'", 'rm "/tmp/x\\\\\nv/null"',
   // writes to pseudo devices that discard or ignore them
   'echo x > /dev/zero', 'echo x > /dev/full', 'echo x > /dev/urandom', 'echo x > /dev/random', 'echo x > /dev/stderr', 'echo x | tee /dev/zero', 'dd if=x of=/dev/zero', 'echo x >> /dev/full',
   // the same wrappers in front of a harmless command

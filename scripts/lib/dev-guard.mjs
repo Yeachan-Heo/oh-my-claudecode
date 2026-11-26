@@ -77,9 +77,9 @@ const devWritten = (value) => { const p = devPathOf(value); return p && !DEV_SIN
 
 // Text of a word after quote removal; every expansion becomes a NUL, so "$HOME/dev/x" is not read as /dev/x and "/dev/$x" stays under /dev.
 function devPartText(part) {
-  if (part.kind === 'lit') return part.text.replace(/\\(.)/gs, '$1');
+  if (part.kind === 'lit') return part.text.replace(/\\(?:\n|(.))/gs, '$1'); // a backslash and a newline are removed
   if (part.kind === 'single' || part.kind === 'ansi') return part.text;
-  if (part.kind === 'double') return part.parts.map((q) => (q.kind === 'lit' ? q.text.replace(/\\([$`"\\\n])/g, '$1') : '\u0000')).join('');
+  if (part.kind === 'double') return part.parts.map((q) => (q.kind === 'lit' ? q.text.replace(/\\(?:\n|([$`"\\]))/g, '$1') : '\u0000')).join('');
   return '\u0000';
 }
 const devWordText = (word) => word.parts.map((p) => devPartText(p)).join('');
