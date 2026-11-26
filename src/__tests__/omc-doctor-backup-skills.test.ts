@@ -149,3 +149,54 @@ describe.runIf(posix)('omc-doctor: the backup directory is kept out of the launc
     for (const name of LAUNCH_DIRS) expect(scriptText).toContain(`'${name}'`);
   });
 });
+
+// The delivery guard of the session start removes a whole session directory of <config>/.omc/state/sessions when its state file is older than 14 days (once a day),
+// and adding a copy there does not renew that file, so a recovery copy under it would be gone with the session. The script imports nothing from scripts/lib, so it
+// writes the path itself; the guard is the one source, read here as text.
+const guard = read('scripts/lib/jev-delivery-guard.mjs');
+const REFUSED_SESSIONS = /Nothing moved: the backup directory \S+ (?:\(really \S+\) )?(?:is, or lies inside,|contains) the session state of the profile \(/;
+const SESSIONS = ['.omc', 'state', 'sessions'];
+
+describe.runIf(posix)('omc-doctor: the backup directory is kept out of the session state of the profile', { timeout: 180_000 }, () => {
+  test.each([['a session directory', ['abc123', 'recovery']], ['the sessions directory itself', []]])('both cache commands refuse, with exit code 1, a named tree and nothing moved, when plugins/backups leads into %s', (_name, below) => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        const recovery = path.join(dir, ...SESSIONS, ...below);
+        mkdirSync(recovery, { recursive: true });
+        link(recovery, path.join(dir, 'plugins', 'backups'));
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, refused: REFUSED_SESSIONS.test(result.stdout), cache: digitVersions(cache), landed: readdirSync(recovery) })
+          .toEqual({ command, status: 1, refused: true, cache: ALL, landed: [] });
+        expect(result.stdout).not.toMatch(/Moved \d/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // Control: session directories that exist are no reason to refuse; a backup directory outside them keeps working.
+  test.each([['the default backup directory', ''], ['a link to a directory beside them', path.join('.omc', 'state', 'other')]])('both cache commands move the free versions as before, with %s and a session directory present', (_name, where) => {
+    for (const command of commands) {
+      const { dir, cache } = profile();
+      try {
+        mkdirSync(path.join(dir, ...SESSIONS, 'abc123'), { recursive: true });
+        if (where) {
+          mkdirSync(path.join(dir, where, 'recovery'), { recursive: true });
+          link(path.join(dir, where, 'recovery'), path.join(dir, 'plugins', 'backups'));
+        }
+        const result = runCommand(command, dir, { timeout: 20_000 });
+        expect({ command, status: result.status, moved: /Moved 2/.test(result.stdout), cache: digitVersions(cache) }).toEqual({ command, status: 0, moved: true, cache: '5.8.0' });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // The path is the guard's: the script has to list the one the guard sweeps.
+  test('the script names the directory the guard sweeps, as the guard spells it', () => {
+    expect(guard).toContain("join(configDir, '.omc', 'state', 'sessions')");
+    expect(guard).toContain('rmSync(sessionDir, { recursive: true, force: true })');
+    expect(scriptText).toContain("path.join(configDir, '.omc', 'state', 'sessions')");
+  });
+});
