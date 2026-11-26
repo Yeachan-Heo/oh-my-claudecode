@@ -360,6 +360,7 @@ function tarExtractDir(args, name) {
   const valueLetters = 'bCfFgHIKLNTVX';
   let extract = false;
   let toStdout = false;
+  let absolute = false; // -P and --absolute-names: a leading slash stays
   const dirs = [];
   let rest = args;
   if (args[0] && !args[0].startsWith('-')) { // old style: tar xCf dir archive
@@ -367,6 +368,7 @@ function tarExtractDir(args, name) {
     for (const c of args[0]) {
       if (c === 'x') extract = true;
       if (c === 'O') toStdout = true;
+      if (c === 'P') absolute = true;
       if (c === 'C' && args[next] !== undefined) dirs.push(args[next]);
       if (valueLetters.includes(c)) next++;
     }
@@ -374,6 +376,7 @@ function tarExtractDir(args, name) {
   }
   const parsed = parseGetopt(rest, valueLetters, (opt) => longIs(opt, '--directory', 5) || opt === '--cd' || longIs(opt, '--strip-components', 5) || TAR_LONG_VALUE[name === 'bsdtar' ? 'bsd' : 'gnu'].has(opt)); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
+  if (parsed.shorts.includes('P') || parsed.longs.some((l) => longIs(l, '--absolute-names', 4) || longIs(l, '--absolute-paths', 4))) absolute = true; // the second name is the one of bsdtar
   if (!extract || toStdout || parsed.shorts.includes('O') || parsed.longs.some((l) => longIs(l, '--to-stdout', 6))) return null; // -O and --to-stdout write the members to the standard output, not to files
   // each -C applies from its place on: a member is joined with the directory that the last -C before it names (each relative one resolves against the
   // previous), one before every -C stays in the current directory, which is no path under /dev; the directories of the old style first word come first
@@ -391,7 +394,16 @@ function tarExtractDir(args, name) {
   const strip = Math.max(0, ...parsed.values.filter(([key]) => longIs(key, '--strip-components', 5)).slice(-1).map(([, n]) => Number(n) || 0)); // the last one counts; a bad number strips nothing
   // the strip counts the components of the name without its leading slash; bsdtar counts that slash as the first one for a name with a leading slash
   const stripped = (m) => (strip === 0 ? m : m.split('/').filter(Boolean).slice(m.startsWith('/') && name === 'bsdtar' ? strip - 1 : strip).join('/'));
-  parsed.operands.forEach((m, k) => { if (!isExcluded(m)) steps.push([parsed.operandAt[k], null, stripped(m)]); });
+  // with the leading slash kept (and no strip option, which makes the name relative again) a member lands under its own name whatever -C says, and without a
+  // named member every member of the archive does, which the guard cannot see
+  const own = absolute && strip === 0;
+  if (own && parsed.operands.length === 0) return '/dev';
+  let ownHit = null;
+  parsed.operands.forEach((m, k) => {
+    if (isExcluded(m)) return;
+    if (own && m.startsWith('/')) ownHit ??= devChanged(m);
+    else steps.push([parsed.operandAt[k], null, stripped(m)]);
+  });
   steps.sort((x, y) => x[0] - y[0]);
   let current = null;
   let found = null;
@@ -402,7 +414,7 @@ function tarExtractDir(args, name) {
       found ??= devChangedIn(current);
     } else if (member && current?.startsWith('/')) inArchive ??= archiveMemberInDev([current], [member]); // a member with no component left is skipped
   }
-  return found ?? inArchive;
+  return found ?? ownHit ?? inArchive;
 }
 
 // Commands the guard judges by one argument pattern each (disk tools, archives, in-place awk, line editors): undefined when `name` is none of them, else a finding or null.

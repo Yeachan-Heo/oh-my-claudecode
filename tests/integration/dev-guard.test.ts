@@ -187,6 +187,12 @@ const BLOCKED: string[] = [
   'busybox rm /dev/null', 'busybox env -i rm /dev/null', 'env busybox rm /dev/null', "busybox sh -c 'rm /dev/null'", 'busybox sed -i s/a/b/ /dev/null', 'sudo busybox rm /dev/null',
   // ... and the external utility again when the redirection belongs to its own command or it follows a pipe
   'true >/tmp/log && >/tmp/log time -f %e rm /dev/null', 'true >/tmp/log | time -f %e rm /dev/null',
+  // -P and --absolute-names keep the leading slash: without a named member every member of the archive lands under its own name
+  'tar -xPf a.tar', 'tar -xPf a.tar -C /tmp', 'tar -C /tmp -xPf a.tar', 'tar xPf a.tar', 'tar -xf a.tar -P', 'tar --absolute-names -xf a.tar', 'tar -x --absolute-n -f a.tar', 'tar -x --ab -f a.tar',
+  'gtar -xf a.tar --absolute-names', 'bsdtar -xPf a.tar', 'bsdtar -xf a.tar --absolute-paths', 'bsdtar -x --ab -f a.tar', 'tar --extract --absolute-names --file a.tar', 'tar -xPf a.tar --exclude=foo',
+  'tar -xPf a.tar --strip-components=0', 'sudo tar -xPf a.tar', "bash -c 'tar -xPf a.tar'", 'nice tar --absolute-names -xf a.tar',
+  // ... and a named member with a leading slash is judged by its own name, whatever -C and the wrappers say
+  'tar -xPf a.tar /dev/zz-x', 'tar -xPf a.tar -C /tmp /dev/zz-x', 'tar -C /tmp -xPf a.tar /dev/null', 'tar --absolute-names -xf a.tar rel/x /dev/zz-x', 'bsdtar -xPf a.tar -C /tmp /dev/zz-x',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -318,6 +324,9 @@ const ALLOWED: string[] = [
   'tar xOCf / a.tar dev/null', 'tar xCOf / a.tar dev/null',
   // a letter that takes a value before the S: the text after the cluster is the program name, not text to split
   "env -uS 'rm /dev/null'",
+  // -P and --absolute-names change nothing when the command only creates or lists, or when the strip option makes every name relative again, or a member has a slash and is no device path
+  'tar -cPf a.tar /etc/x', 'tar -tPf a.tar', 'tar --absolute-names -cf a.tar /dev/null', 'tar -xPf a.tar --strip-components=1', 'tar -xPf a.tar --strip-components=2', 'tar -xPf a.tar -C /tmp rel/x',
+  'tar -xPf a.tar /tmp/x', 'tar -xPf a.tar -C /dev/shm rel/x', 'bsdtar -tf a.tar --absolute-paths', 'tar -xPOf a.tar', 'tar -xPf a.tar -O',
 ];
 
 describe('/dev guard: Bash commands', () => {
