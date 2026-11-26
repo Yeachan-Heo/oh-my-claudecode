@@ -221,8 +221,10 @@ describe('/dev guard: Bash commands', () => {
     expect(v.syntax.ran).toBe(false);
   });
 
-  it('stays fast on long runs of blanks, assignments and wrappers', () => {
+  it('stays fast on long runs of blanks, assignments, wrappers and here-documents', () => {
     const recipe = 'mknod -m 666 /dev/null.new c 1 3 && mv -f /dev/null.new /dev/null';
+    // 12 000 here-documents (about 230 000 characters) took several seconds when each redirection searched the list of here-documents
+    const manyHeredocs = Array.from({ length: 12000 }, (_, i) => `cat <<E${i}\nx\nE${i}`).join('\n');
     const table: Array<[string, 'allow' | 'deny']> = [
       ['echo' + ' '.repeat(200000) + 'x', 'allow'],
       ['echo' + '\t'.repeat(200000) + 'x', 'allow'],
@@ -231,6 +233,8 @@ describe('/dev guard: Bash commands', () => {
       [`${'x=1 '.repeat(100000)}rm a`, 'allow'],
       [`${'x=1 '.repeat(100000)}rm /dev/null`, 'deny'],
       [`${'nice '.repeat(10000)}rm /dev/null`, 'deny'],
+      [manyHeredocs, 'allow'],
+      [`${manyHeredocs}\nbash <<'Z'\nrm /dev/null\nZ`, 'deny'],
       [`${'nice '.repeat(10000)}ls /tmp`, 'allow'],
     ];
     for (const [command, expected] of table) {

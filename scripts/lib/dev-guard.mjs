@@ -432,6 +432,18 @@ function devCommand(name, args, fed, depth) {
   return null;
 }
 
+// The here-document of the redirection that starts at `start`: an index per list of here-documents, built once (a search per redirection is quadratic).
+const heredocIndexes = new WeakMap();
+function heredocAt(heredocs, start) {
+  let index = heredocIndexes.get(heredocs);
+  if (!index) {
+    index = new Map();
+    for (const h of heredocs) if (!index.has(h.redirStart)) index.set(h.redirStart, h);
+    heredocIndexes.set(heredocs, index);
+  }
+  return index.get(start);
+}
+
 // Findings in a command list. The heredocs of the whole text are looked up by the offset of their redirection.
 function devScanTokens(tokens, heredocs, depth) {
   if (depth > DEV_MAX_DEPTH) return devMentions(tokens) ? { what: 'a nested command', path: '/dev' } : null;
@@ -466,7 +478,7 @@ function devScanTokens(tokens, heredocs, depth) {
     }
     if (t.type !== 'redir') continue;
     if (t.value === '<<' || t.value === '<<-') {
-      const doc = heredocs.find((h) => h.redirStart === t.start);
+      const doc = heredocAt(heredocs, t.start);
       if (doc) fed.push(doc.body);
       continue;
     }
