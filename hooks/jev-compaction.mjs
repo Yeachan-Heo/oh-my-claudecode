@@ -4734,8 +4734,8 @@ async function inParallel(list, work) {
 }
 
 // The verdicts the session has: the process's own first, then the files (at most BLOCK_READ_MAX, within `deadline`). A file that does not read, or was made under
-// another question, is none. Returns Map key -> verdict.
-async function readBlockVerdicts($, cfg, sessionId, keys, deadline) {
+// another question, is none. Returns Map key -> verdict; `unread` (a Set) receives the keys left past BLOCK_READ_MAX, whose files were not looked at (the next pass reads them).
+async function readBlockVerdicts($, cfg, sessionId, keys, deadline, unread = new Set()) {
   const cache = sessionMap(session.blockVerdicts, sessionId, () => new Map());
   const settings = blockSettings(cfg);
   const out = new Map();
@@ -4743,6 +4743,7 @@ async function readBlockVerdicts($, cfg, sessionId, keys, deadline) {
   for (const key of keys) { const v = cache.get(key); if (v?.settings === settings) out.set(key, v); else wanted.push(key); }
   if (!wanted.length || !cfg.pasteDir) return out;
   const gate = { deadline, stalled: false };
+  for (const key of wanted.slice(BLOCK_READ_MAX)) unread.add(key);
   await inParallel(wanted.slice(0, BLOCK_READ_MAX), async (key) => {
     const r = await fsCall($, gate, () => $.fs.read(blockVerdictPath(cfg, sessionId, key)));
     if (typeof r.value !== 'string') return;
@@ -4953,13 +4954,14 @@ async function ensureBlockVerdicts($, cfg, plan, ctx) {
       return true;
     });
     stats.eligible = eligible.length;
-    const known = await readBlockVerdicts($, cfg, sessionId, eligible.map((it) => it.key), ctx.deadline);
+    const unread = new Set();
+    const known = await readBlockVerdicts($, cfg, sessionId, eligible.map((it) => it.key), ctx.deadline, unread);
     for (const [key, v] of known) plan.verdicts.set(key, v);
     stats.known = known.size;
     // The checks for a secret run on the blocks to ask about, the largest first (masking has quadratic patterns), within the budget of the check.
     const budget = { left: BLOCK_SCAN_BUDGET_CHARS, deadline: ctx.deadline };
     const toAsk = [];
-    for (const it of eligible.filter((x) => !known.has(x.key)).sort((a, b) => b.chars - a.chars)) {
+    for (const it of eligible.filter((x) => !known.has(x.key) && !unread.has(x.key)).sort((a, b) => b.chars - a.chars)) {
       const why = secretCheck(it.body, cfg.privatePaths, budget, cfg.pasteMaxChars);
       if (why === 'secret') { held.add(it.key); stats.secret++; } else if (why) stats.unchecked++; else toAsk.push(it);
     }

@@ -274,6 +274,40 @@ describe('blocks of text: the verdicts carried out (OMC_JEV_COMPACT_BLOCKS=activ
     expect(first.asked.length).toBe(before);
   });
 
+  it('with more verdict files than one pass reads (600) and an empty process, the blocks past the cap are not asked again, and the next pass reads them', async () => {
+    const small = (steps) => {
+      const m = [{ role: 'user', text: 'Task: look at the notes and report.', toolUses: [] }];
+      for (let i = 1; i <= steps; i++) {
+        m.push({ role: 'assistant', text: `Step ${i} note (ZERO) ${fill(`detail${i}`, 300)}`, toolUses: [{ tool_use_id: `t${i}`, tool: 'Bash', input: { command: `cat notes-${i}.txt` } }] });
+        m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${i}`, text: `RESULT-${i} ${'x'.repeat(3000)}`, isError: false }] });
+      }
+      m.push({ role: 'user', text: 'Good, now sum up the results.', toolUses: [] }, { role: 'assistant', text: 'Summary: done.', toolUses: [] });
+      return frozen(m);
+    };
+    const messages = small(700);
+    const first = fakeDollar({ env: BLOCKS, messages, api: apiOf(messages) });
+    const handlers = {};
+    register((event, hook) => { handlers[event] = hook; });
+    const go = (fake) => handlers['session.compact'](fake.$, Object.freeze({ trigger: 'auto', messages }), async () => ({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] }));
+    await go(first);
+    await go(first);
+    const seed = [...first.files()].filter(([p]) => p.includes('/verdict-block-'));
+    expect(seed.length).toBeGreaterThan(650);
+    expect(first.asked.length).toBe(seed.length);
+    const again = fakeDollar({ env: BLOCKS, messages, api: apiOf(messages), seed, answer: () => 3 });
+    register((event, hook) => { handlers[event] = hook; });
+    await go(again);
+    expect(again.asked).toHaveLength(0);
+    for (const [p, t] of seed) expect(again.store.get(p), p).toBe(t);
+    const firstPass = again.records().filter((r) => r.event === 'compact').at(-1).blocks;
+    await go(again);
+    expect(again.asked).toHaveLength(0);
+    for (const [p, t] of seed) expect(again.store.get(p), p).toBe(t);
+    const secondPass = again.records().filter((r) => r.event === 'compact').at(-1).blocks;
+    expect(firstPass.levels[0] + firstPass.levels[1]).toBeLessThan(seed.length);
+    expect(secondPass.levels[0] + secondPass.levels[1]).toBe(seed.length);
+  });
+
   it('a verdict file made under another wording of the question, or of another level of detail, is none: its block is asked again', async () => {
     const first = await compactRun(BLOCKS, session(40, { said }));
     const files = [...first.files()].filter(([p]) => p.includes('/verdict-block-'));
