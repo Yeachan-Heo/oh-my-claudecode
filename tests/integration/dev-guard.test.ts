@@ -911,6 +911,16 @@ describe('/dev guard: working directory and symbolic links', () => {
     }
   });
 
+  // sed takes any unambiguous prefix of --follow-symlinks (measured with sed 4.9: --fo is the shortest, --f is ambiguous with --file) and then edits the target
+  it('reads an abbreviation of --follow-symlinks like the option', () => {
+    const nulllink = join(dir, 'nulllink');
+    for (const option of ['--follow-symlinks', '--follow-symlink', '--follow', '--foll', '--fol', '--fo']) {
+      expect(check(`sed ${option} -i s/a/b/ ${nulllink}`, '/tmp').decision, option).toBe('deny');
+      expect(check(`sed -i ${option} s/a/b/ ${nulllink}`, '/tmp').decision, option).toBe('deny');
+    }
+    for (const option of ['--f', '--follow-symlinkz', '--fx']) expect(check(`sed ${option} -i s/a/b/ ${nulllink}`, '/tmp').decision, option).toBe('allow');
+  });
+
   it('reads cd like the shell: -P and -- are options, a group does not end the cd and a subshell or a pipeline does, a cd after || is unknown, an empty target stays', () => {
     expect(check('(cd /dev); rm null', '/tmp').decision).toBe('allow');
     expect(check('{ cd /dev; }; rm null', '/tmp').decision).toBe('deny');

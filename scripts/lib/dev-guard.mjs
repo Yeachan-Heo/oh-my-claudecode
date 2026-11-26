@@ -602,7 +602,7 @@ function devCommand(name, args, fed, depth) {
     for (const p of splitArgs(args).operands) { const d = devWritten(p); if (d) return { what: name, path: d }; }
     return null;
   }
-  if (name === 'sed') return hit(firstChanged(sedInPlaceFiles(args), args.includes('--follow-symlinks'))); // without that option sed replaces a link by a file
+  if (name === 'sed') return hit(firstChanged(sedInPlaceFiles(args), args.some((a) => longIs(a, '--follow-symlinks', 4)))); // without that option (or an abbreviation of it: --fo is the shortest) sed replaces a link by a file
   if (name === 'perl') return hit(firstChanged(perlInPlaceFiles(args), false));
   if (name === 'find') {
     const starts = [];
