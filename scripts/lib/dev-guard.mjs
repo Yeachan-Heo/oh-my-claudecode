@@ -77,7 +77,7 @@ const devWritten = (value) => { const p = devPathOf(value); return p && !DEV_SIN
 
 // Text of a word after quote removal; every expansion becomes a NUL, so "$HOME/dev/x" is not read as /dev/x and "/dev/$x" stays under /dev.
 function devPartText(part) {
-  if (part.kind === 'lit') return part.text.replace(/\\(?:\n|(.))/gs, '$1'); // a backslash and a newline are removed
+  if (part.kind === 'lit') return part.text.replace(/\\(.)/gs, '$1');
   if (part.kind === 'single' || part.kind === 'ansi') return part.text;
   if (part.kind === 'double') return part.parts.map((q) => (q.kind === 'lit' ? q.text.replace(/\\(?:\n|([$`"\\]))/g, '$1') : '\u0000')).join('');
   return '\u0000';
@@ -140,19 +140,9 @@ const DEV_LEADING = new Set(['then', 'do', 'else', 'elif', '{', '!', 'if', 'whil
 const baseName = (value) => String(value).replace(/\/+$/, '').split('/').pop();
 const isAssignment = (value) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
 
-// The text of env -S as the shell parser should read it: env turns an unquoted backslash and underscore into a separator of arguments.
-function envSplitText(text) {
-  let quote = '';
-  let out = '';
-  for (let k = 0; k < text.length; k++) {
-    const c = text[k];
-    if (c === '\\' && quote !== "'" && k + 1 < text.length) { out += quote === '' && text[k + 1] === '_' ? ' ' : c + text[k + 1]; k++; continue; }
-    if (quote === c) quote = '';
-    else if (quote === '' && (c === "'" || c === '"')) quote = c;
-    out += c;
-  }
-  return out;
-}
+// The text of env -S as the shell parser should read it: env turns a backslash and underscore into a separator of arguments (inside quotes
+// the blank stays in its argument, which the parser keeps in one word as well, so the quotes need no tracking).
+const envSplitText = (text) => text.replace(/\\(.)/gs, (pair, c) => (c === '_' ? ' ' : pair));
 
 // [name, ...args] without leading keywords, assignments and wrappers: { name, args, xargs, replace }, or null when nothing is left.
 // xargs: the command is fed by a pipe; replace: the replace string of xargs -I, -i or --replace. env -S TEXT is a command line of its own: it
