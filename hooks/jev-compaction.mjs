@@ -2698,7 +2698,8 @@ function itemTokens(c, rates = DEFAULT_RATES) {
 // blocks delivered after it, which costs the rate of the words of the user when a message of the user is among them (noteOwn). The words of a run that held no result, joined to a
 // message that keeps one (an assistant message of thinking alone leaves such a join), stand beside it: they cost more than they did (`loss`). A message costs zero at least (listTokens), its text and its overhead together, so what its structure adds to the text `tok` is
 // no less than -tok; at the default rates it is never negative and the text is not needed (Infinity). The text holds the blocks delivered after its rows, as the host holds them (`tok`)
-// and, once a row of text results is rewritten, as build writes them (`tokBuilt`).
+// and, once a row of text results is rewritten, as build writes them (`tokBuilt`). The floor is held to the text the message has after the cut, the words of the user at the rate their class takes
+// then (`tok` less the rebate, whether a discount for words that no result stands beside any more or the loss of words that one now does), not at the rate they had before it.
 const messageTokens = (blocks, tok, rates) => (blocks > 0 ? Math.max(-tok, blocks * rates.RATE_BLOCK + RATE_MESSAGE) : 0);
 export function shapeOf(messages, candidates, { rows = messages, group, keepFrom, queued = new Map(), rates = DEFAULT_RATES }) {
   const queuedAt = (i) => (queued.get(i) || []).length;
@@ -2797,7 +2798,8 @@ export function shapeOf(messages, candidates, { rows = messages, group, keepFrom
     const nowOf = (s) => (s.first >= keepFrom ? s.before : (s.text || s.traces > 0 ? 1 : 0) + s.calls);
     // A run has its own blocks, text tokens and results left (`own`), and the user message that holds it has their sums (`sum`, kept at its first run, found by `find`) with the
     // tokens that its text costs less for having no result (`gap`) once none is left in the message, or costs more for having one (`loss`, the words of a run that held none).
-    // The runs on both sides of an assistant message that is gone are one message.
+    // The runs on both sides of an assistant message that is gone are one message. The cost of a message is floored with its text after the change of class (`t` less the rebate), and each
+    // decision that changes the rebate takes the cost off the total before and puts it back after.
     const own = runs.map((r) => ({ n: 0, t: r.tokBuilt, res: r.results, gap: r.gap, loss: r.loss }));
     const sum = runs.map(() => ({ n: 0, t: 0, res: 0, gap: 0, loss: 0 }));
     const up = runs.map((r) => r.k);
