@@ -124,6 +124,43 @@ describe('readLastToolError', () => {
 
     expect(result).toBeNull();
   });
+
+  it('reads the session-scoped file post-tool-use-failure writes when a session id is given (#5148)', () => {
+    const sessionPath = join(testDir, '.omc', 'state', 'sessions', 'sess-5148', 'last-tool-error-state.json');
+    const recentError: ToolErrorState = {
+      tool_name: 'Bash',
+      error: 'exit 1',
+      timestamp: new Date().toISOString(),
+      retry_count: 2,
+    };
+    (existsSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((p: string) => p === sessionPath);
+    (readFileSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === sessionPath) return JSON.stringify(recentError);
+      throw new Error(`unexpected read: ${p}`);
+    });
+
+    expect(readLastToolError(testDir, 'sess-5148')).toEqual(recentError);
+    expect(readFileSync).toHaveBeenCalledWith(sessionPath, 'utf-8');
+  });
+
+  it('does not read the root legacy file for a session-bearing stop (#5148)', () => {
+    (existsSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((p: string) => p === errorPath);
+    (readFileSync as unknown as ReturnType<typeof vi.fn>).mockImplementation((p: string) => {
+      if (p === errorPath) {
+        return JSON.stringify({ tool_name: 'Bash', error: 'other session', timestamp: new Date().toISOString(), retry_count: 1 });
+      }
+      throw new Error(`unexpected read: ${p}`);
+    });
+
+    expect(readLastToolError(testDir, 'sess-5148')).toBeNull();
+  });
+
+  it('returns null for an invalid session id instead of resolving a path from it', () => {
+    (existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    expect(readLastToolError(testDir, '../escape')).toBeNull();
+    expect(readFileSync).not.toHaveBeenCalledWith(expect.stringContaining('escape'), 'utf-8');
+  });
 });
 
 describe('clearToolErrorState', () => {
@@ -171,6 +208,17 @@ describe('clearToolErrorState', () => {
     });
 
     expect(() => clearToolErrorState(testDir)).not.toThrow();
+  });
+
+  it('removes the session-scoped file when a session id is given (#5148)', () => {
+    const sessionPath = join(testDir, '.omc', 'state', 'sessions', 'sess-5148', 'last-tool-error-state.json');
+    (existsSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (unlinkSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+
+    clearToolErrorState(testDir, 'sess-5148');
+
+    expect(unlinkSync).toHaveBeenCalledWith(sessionPath);
+    expect(unlinkSync).not.toHaveBeenCalledWith(errorPath);
   });
 });
 

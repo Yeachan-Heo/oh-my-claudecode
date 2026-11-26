@@ -16,7 +16,7 @@ import { join } from 'path';
 import { getHardMaxIterations } from '../../lib/security-config.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { getGlobalOmcConfigCandidates } from '../../utils/paths.js';
-import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, resolveSessionStatePath, resolveSessionStatePaths, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import {
   captureModeStateCleanup,
   captureStateFileGeneration,
@@ -541,14 +541,23 @@ export function hasPendingOwnedAsyncWork(directory: string, sessionId?: string):
 }
 
 /**
- * Read last tool error from state directory.
+ * Path the post-tool-use-failure hook writes for this session (#5148):
+ * session-scoped last-tool-error-state.json when a session id is known,
+ * otherwise the legacy root last-tool-error.json.
+ */
+function resolveToolErrorStatePath(directory: string, sessionId?: string): string {
+  return sessionId
+    ? resolveSessionStatePaths('last-tool-error', sessionId, directory).sessionScoped
+    : resolveSessionStatePaths('last-tool-error', undefined, directory, { fileName: 'last-tool-error.json' }).legacy;
+}
+
+/**
+ * Read the last tool error recorded for this session.
  * Returns null if file doesn't exist or error is stale (>60 seconds old).
  */
-export function readLastToolError(directory: string): ToolErrorState | null {
-  const stateDir = join(getOmcRoot(directory), 'state');
-  const errorPath = join(stateDir, 'last-tool-error.json');
-
+export function readLastToolError(directory: string, sessionId?: string): ToolErrorState | null {
   try {
+    const errorPath = resolveToolErrorStatePath(directory, sessionId);
     if (!existsSync(errorPath)) {
       return null;
     }
@@ -579,11 +588,9 @@ export function readLastToolError(directory: string): ToolErrorState | null {
 /**
  * Clear tool error state file atomically.
  */
-export function clearToolErrorState(directory: string): void {
-  const stateDir = join(getOmcRoot(directory), 'state');
-  const errorPath = join(stateDir, 'last-tool-error.json');
-
+export function clearToolErrorState(directory: string, sessionId?: string): void {
   try {
+    const errorPath = resolveToolErrorStatePath(directory, sessionId);
     if (existsSync(errorPath)) {
       unlinkSync(errorPath);
     }
@@ -1649,7 +1656,7 @@ async function checkRalphLoop(
   }
 
   // Read tool error before generating message
-  const toolError = readLastToolError(workingDir);
+  const toolError = readLastToolError(workingDir, sessionId);
   const errorGuidance = getToolErrorRetryGuidance(toolError);
 
   // Increment and continue

@@ -478,7 +478,8 @@ describe('persistent-mode: the tool error notice and the mode line of every Stop
     const f = makeProject('mode');
     const sessionId = `mode-${Math.random().toString(36).slice(2, 8)}`;
     writeModeState(f, sessionId, file, fields);
-    if (toolError) writeFileSync(join(f.project, '.omc', 'state', 'last-tool-error.json'), JSON.stringify({ timestamp: new Date().toISOString(), retry_count: 1, ...toolError }));
+    // Where post-tool-use-failure writes for a session-bearing failure (#5148).
+    if (toolError) writeFileSync(join(f.project, '.omc', 'state', 'sessions', sessionId, 'last-tool-error-state.json'), JSON.stringify({ timestamp: new Date().toISOString(), retry_count: 1, ...toolError }));
     return runStop(f, sessionId, { switchValue });
   }
 
@@ -863,7 +864,8 @@ describe('capText and cleanHookOutput: a text that must come back whole', () => 
   function stopRun(f, objective, toolError) {
     const sessionId = `ug-${Math.random().toString(36).slice(2, 8)}`;
     writeModeState(f, sessionId, 'ultragoal-state.json', { objective, reinforcement_count: 0, max_reinforcements: 50 });
-    const errorPath = join(f.project, '.omc', 'state', 'last-tool-error.json');
+    // Where post-tool-use-failure writes for a session-bearing failure (#5148).
+    const errorPath = join(f.project, '.omc', 'state', 'sessions', sessionId, 'last-tool-error-state.json');
     if (toolError) writeFileSync(errorPath, JSON.stringify({ timestamp: new Date().toISOString(), retry_count: 1, ...toolError }));
     else rmSync(errorPath, { force: true });
     return { sessionId, output: runStop(f, sessionId, { switchValue: '1' }) };

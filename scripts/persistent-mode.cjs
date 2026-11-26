@@ -410,12 +410,13 @@ function hasPendingScheduledWakeup(stateDir, sessionId) {
   });
 }
 
-function hasRunningSubagent(stateDir) {
-  // subagent-tracking.json is per-directory (not session-scoped), written by the
-  // wired SubagentStart/SubagentStop hooks. A "running" entry means a delegated
+function hasRunningSubagent(trackingPath) {
+  // The subagent tracker (SubagentStart/SubagentStop hooks) writes
+  // subagent-tracking-state.json via resolveSessionStatePaths, so callers pass
+  // the same resolved read path (#5148). A "running" entry means a delegated
   // agent is still working, so persistent modes must not inject a "stalled"
   // reinforcement while we wait for it (mirrors the background-task gate).
-  const tracking = readJsonFile(join(stateDir, "subagent-tracking.json"));
+  const tracking = readJsonFile(trackingPath);
   const agents = Array.isArray(tracking?.agents) ? tracking.agents : [];
   return agents.some((agent) => {
     if (agent?.status !== "running") return false;
@@ -423,10 +424,10 @@ function hasRunningSubagent(stateDir) {
   });
 }
 
-function hasPendingOwnedAsyncWork(stateDir, sessionId) {
+function hasPendingOwnedAsyncWork(stateDir, sessionId, subagentTrackingPath) {
   return (
     hasPendingBackgroundTask(stateDir, sessionId) ||
-    hasRunningSubagent(stateDir) ||
+    hasRunningSubagent(subagentTrackingPath) ||
     hasPendingScheduledWakeup(stateDir, sessionId)
   );
 }
@@ -744,9 +745,9 @@ function isAuthoritativeModeActive(stateDir, mode, loaded, sessionId) {
 }
 
 
-function getActiveSubagentCount(stateDir) {
+function getActiveSubagentCount(trackingPath) {
   try {
-    const tracking = readJsonFile(join(stateDir, "subagent-tracking.json"));
+    const tracking = readJsonFile(trackingPath);
     if (!tracking || !Array.isArray(tracking.agents)) {
       return 0;
     }
@@ -1162,6 +1163,11 @@ async function main() {
     const sessionId = data.session_id || data.sessionId || "";
     const omcRoot = await resolveOmcStateRoot(directory);
     const stateDir = join(omcRoot, "state");
+    const { readPath: subagentTrackingPath } = await resolveSessionStatePathsForHook(
+      directory,
+      "subagent-tracking",
+      sanitizeSessionId(sessionId) || undefined,
+    );
 
     // CRITICAL: Never block context-limit stops.
     // Blocking these causes a deadlock where Claude Code cannot compact.
@@ -1194,7 +1200,7 @@ async function main() {
       return;
     }
 
-    if (hasPendingOwnedAsyncWork(stateDir, sessionId)) {
+    if (hasPendingOwnedAsyncWork(stateDir, sessionId, subagentTrackingPath)) {
       console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
@@ -1584,7 +1590,7 @@ async function main() {
           const maxReinforcements = skillState.state.max_reinforcements || 3;
 
           if (count < maxReinforcements) {
-            if (getActiveSubagentCount(stateDir) > 0) {
+            if (getActiveSubagentCount(subagentTrackingPath) > 0) {
               console.log(JSON.stringify({ continue: true, suppressOutput: true }));
               return;
             }
