@@ -1213,15 +1213,15 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
       writeFileSync(f.settings, entry('five-hour-guard-hook.py'), 'utf8');
       writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
-      await waitFor(() => /ERROR: tick failed.*the hook entry in .* names five-hour-guard-hook\.py, which is the state_file of this guard/.test(readText(f.log)) || readText(state) !== 'the program\n', 20000, 'the refusal');
+      await waitFor(() => /ERROR: tick failed.*(the hook entry in .* names five-hour-guard-hook\.py, which is the state_file of this guard|command runs a file that only the session of the hook can find)/.test(readText(f.log) + g.out) || readText(state) !== 'the program\n', 20000, 'the refusal');
       await sleep(600);
     } finally { await stopGuard(g); }
-    expect(readText(f.log), 'the pause was refused').toMatch(/ERROR: tick failed.*the hook entry in .* names five-hour-guard-hook\.py, which is the state_file of this guard/);
+    expect(readText(f.log) + g.out, 'the pause was refused (the bare word of the entry is a program that the PATH of the session may find: the command is refused, and nothing is appended to the log, so the notice is on stdout)').toMatch(/ERROR: tick failed.*(the hook entry in .* names five-hour-guard-hook\.py, which is the state_file of this guard|command runs a file that only the session of the hook can find)/);
     expect(readText(state), 'the program is intact').toBe('the program\n');
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
     const again = runSync(GUARD, ['--config', f.cfg, '--once'], { cwd: f.dir });   // the same settings at the start
     expect(again.status, `${again.stdout}${again.stderr}`).toBe(2);
-    expect(again.stderr).toMatch(/are the same file/);
+    expect(again.stderr).toMatch(/are the same file|not read to its end/);
     expect(readText(state), 'still intact').toBe('the program\n');
   });
 
@@ -1602,9 +1602,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   });
 
   it('every word of the command of another hook is a file the guard does not write: php -c ini audit and PATH=dir . audit name /opt/audit and the audit in dir, whatever the program does with them', () => {
-    const forms: Array<[(dir: string, audit: string) => string, boolean]> = [[(_dir, audit) => `php -c /tmp/php.ini ${audit}`, false], [(_dir, audit) => `php -d display_errors=1 -f ${audit} -- arg`, false],
-      [(dir) => `PATH=${dir} . audit`, false], [(dir) => `PATH=${dir}:/usr/bin source audit`, false], [() => `. audit`, true], [(dir) => `PATH=${dir} nice -n 5 audit`, false]];
-    for (const [k, [form, onGuardPath]] of forms.entries()) {
+    const forms: Array<[(dir: string, audit: string) => string, boolean, boolean?]> = [[(_dir, audit) => `php -c /tmp/php.ini ${audit}`, false], [(_dir, audit) => `php -d display_errors=1 -f ${audit} -- arg`, false],
+      [(dir) => `PATH=${dir} . audit`, false], [(dir) => `PATH=${dir}:/usr/bin source audit`, false], [() => `. audit`, true, true], [(dir) => `PATH=${dir} nice -n 5 audit`, false]];   // (`. audit` has no PATH: the word is a program that the PATH of the session may find, so it is refused, not read)
+    for (const [k, [form, onGuardPath, refused]] of forms.entries()) {
       const f = fixture(`every-word-${k}`, { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
       const bin = join(f.dir, 'hooks');
       mkdirSync(bin);
@@ -1616,7 +1616,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
       const r = runSync(GUARD, ['--config', f.cfg, '--once'], onGuardPath ? { env: { ...ENV, PATH: `${bin}:${process.env.PATH}` } } : {});
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
-      expect(r.stderr, command).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      if (refused) expect(r.stderr, command).toMatch(/not read to its end/);
+      else expect(r.stderr, command).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
       expect(readText(audit), `${command}: the file is intact`).toBe('# a program of another tool\n');
       expect(existsSync(f.pause), `${command}: no pause was published`).toBe(false);
     }
@@ -1746,7 +1747,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       return runSync(GUARD, ['--config', f.cfg, '--once']);
     };
     // (a bare word that is the program is looked up on the PATH of the session, so a PATH of the command settles the directory; without one the guard refuses to read it: see the PATH tests)
-    for (const command of [`cd ${hooks}; python3 audit`, `cd ${hooks} && PATH=${hooks} audit`, `env -C ${hooks} audit`, `env -C ${hooks} PATH=${hooks} audit`, `PATH=${hooks} audit --directory ${hooks}`, `env -C ${hooks} sh -c 'python3 audit'`]) {
+    for (const command of [`cd ${hooks} && PATH=${hooks} audit`, `env -C ${hooks} PATH=${hooks} audit`, `PATH=${hooks} audit --directory ${hooks}`, `cd ${hooks}; PATH=${hooks} python3 audit`]) {
       writeFileSync(f.settings, settings(command), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: script });
@@ -1755,7 +1756,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe('# the script that the command runs after cd\n');
       }
     }
-    for (const command of [`cd ${hooks} && audit`, `audit --directory ${hooks}`]) {
+    for (const command of [`cd ${hooks} && audit`, `audit --directory ${hooks}`, `env -C ${hooks} audit`, `cd ${hooks}; python3 audit`, `env -C ${hooks} sh -c 'python3 audit'`]) {   // (a bare word that is an argument is a program the wrapper may run: no PATH is given, so the guard refuses to read it)
       writeFileSync(f.settings, settings(command), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: script });
@@ -1764,10 +1765,13 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe('# the script that the command runs after cd\n');
       }
     }
-    // no directory is named: the bare word is no file of that directory
+    // no directory is named: the bare word is no file of that directory, but it may be a program that a wrapper runs from the PATH of the session, so the guard refuses to read it; a name that no file of the guard has is quiet
     writeFileSync(f.settings, settings('python3 audit'), 'utf8');
     const quiet = start({ state_file: script });
-    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(0);
+    expect(quiet.status, `${quiet.stdout}${quiet.stderr}`).toBe(2);
+    expect(quiet.stderr).toMatch(/not read to its end/);
+    writeFileSync(f.settings, settings('python3 other'), 'utf8');
+    expect(start({ state_file: script }).status, 'no file of the guard has the name').toBe(0);
     writeFileSync(script, '# the script that the command runs after cd\n', 'utf8');
 
     // a settings rewrite after the start: the command now changes into the directory of the log file
@@ -2185,7 +2189,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: file });
         expect(r.status, `${expression} of ${value} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        if (made.includes('/')) expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        else expect(r.stderr, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`).toMatch(/not read to its end/);   // (no PATH is given: the guard refuses to read it, as it refuses a collision)
         expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
       }
     }
@@ -2226,7 +2231,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: file });
         expect(r.status, `${expression} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        if (made.includes('/')) expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        else expect(r.stderr, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`).toMatch(/not read to its end/);   // (no PATH is given: the guard refuses to read it, as it refuses a collision)
         expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
       }
     }
@@ -2362,7 +2368,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const name of [';audit', '&&audit', '|audit', '>audit', '(audit', 'audit;']) {
       const script = join(hooks, name);
       writeFileSync(script, text, 'utf8');
-      for (const command of [`cd ${hooks}; python3 '${name}'`, `python3 "${script}"`]) {
+      for (const command of [`cd ${hooks}; PATH=${hooks} python3 '${name}'`, `python3 "${script}"`]) {   // (a bare word that is an operand may be a program of the PATH of the session: the PATH of the command settles it)
         writeFileSync(f.settings, settings(command), 'utf8');
         for (const key of ['log_file', 'state_file', 'pause_file']) {
           const r = start({ [key]: script });
@@ -2548,7 +2554,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: file });
         expect(r.status, `${expression} of ${value} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        if (made.includes('/')) expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        else expect(r.stderr, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`).toMatch(/not read to its end/);   // (no PATH is given: the guard refuses to read it, as it refuses a collision)
         expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
       }
     }
@@ -3063,6 +3070,47 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.status, `${command} with ${JSON.stringify(settingsEnv)}: ${r.stdout}${r.stderr}`).toBe(2);
       expect(r.stderr, command).toContain(`"state_file" (${file}) and "program of another hook" (${file}) are the same file`);
       expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+  });
+
+  it('a bare word anywhere in a simple command that has a command word is looked up on the PATH of the session as the program it may be (timeout 5 audit, nice -n 5 audit, stdbuf -oL audit, sudo audit): the guard cannot tell which words a wrapper runs, so it refuses to start when the word is the name of a file the guard writes and no PATH is given; an absolute path, a PATH of the command or a name that no file of the guard has settles it as before', () => {
+    const f = fixture('foreign-wrapped-operand', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project-bin');   // on the PATH of the session only
+    mkdirSync(project);
+    const text = '#!/bin/sh\necho session\n';
+    const audit = join(project, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once'], { env: ENV });
+    };
+    const sessionEnv = { ...process.env, PATH: `${project}:${process.env.PATH}` };
+    // what the shell does: the wrapper starts the word after its operands from the PATH of the session
+    expect(spawnSync('sh', ['-c', 'timeout 5 audit'], { encoding: 'utf8', env: sessionEnv }).stdout, 'the session finds the file').toBe('session\n');
+    expect(spawnSync('sh', ['-c', 'nice -n 5 audit'], { encoding: 'utf8', env: sessionEnv }).stdout).toBe('session\n');
+    expect(spawnSync('sh', ['-c', 'timeout 5 audit'], { encoding: 'utf8', env: ENV }).stdout, 'the guard does not').toBe('');
+    for (const command of ['timeout 5 audit', 'nice -n 5 audit', 'stdbuf -oL audit', 'sudo audit', 'setsid audit', 'xargs audit', 'timeout 5 env audit', 'true; timeout 5 audit --flag']) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a bare word that is only an argument has the same name: the false alarm that the conservative rule costs
+    expect(start('echo audit', { state_file: audit }).status, 'an argument with the name of a file of the guard').toBe(2);
+    // settled as before: an absolute path, a PATH of the command (the collision of an earlier test), a name that no file of the guard has
+    for (const command of [`timeout 5 ${audit}`, `PATH=${project} timeout 5 audit`, `PATH=${project}:$PATH nice -n 5 audit`]) {
+      const r = start(command, { state_file: audit });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    for (const command of ['timeout 5 audit', 'nice -n 5 audit', 'echo audit', 'sudo audit --flag']) {
+      expect(start(command, { state_file: join(project, 'other') }).status, `${command}: no file of the guard has the name`).toBe(0);
     }
   });
 
@@ -4002,7 +4050,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     copyFileSync(HOOK, copy);
     chmodSync(copy, 0o644);
     const exec644 = `[ -f ${f.pause} ] && [ -f ${copy} ] || exit 0; exec ${copy} --pause-file ${f.pause} # five-hour-guard-entry`;
-    const cases: Array<{ name: string; command: string; paste: string; also?: RegExp }> = [
+    const cases: Array<{ name: string; command: string; paste: string; also?: RegExp; refused?: boolean }> = [
       { name: 'no shell check at all', command: `exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`, paste: gen() },
       { name: 'no check of the interpreter', command: `[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`, paste: gen() },
       { name: 'a stale pause file in the shell check', command: gen().replace(`[ -f ${f.pause} ]`, '[ -f /old/pause.json ]'), paste: gen() },
@@ -4013,7 +4061,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       { name: 'no pause file at all', command: `exec ${PYBIN} -I ${HOOK}`, paste: gen() },
       { name: '--pause-file without a value', command: `exec ${PYBIN} -I ${HOOK} --pause-file`, paste: gen() },
       { name: 'a hook log and no pause file', command: `exec ${PYBIN} -I ${HOOK} --log ${f.dir}/hook.log`, paste: gen() },
-      { name: 'a relative pause file', command: gen({ pause: rel(f.pause) }), paste: gen() },
+      { name: 'a relative pause file', command: gen({ pause: rel(f.pause) }), paste: gen(), refused: true },   // (the bare name of the pause file is a word that the PATH of the session may find: the guard refuses to read the entry, which says more than a warning)
       { name: 'a poll interval written by hand', command: `${gen()} --poll 3600`, paste: gen() },
     ];
     for (const key of [false, true]) {
@@ -4030,6 +4078,14 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
       for (const c of cases) {
         put(c.command);
+        if (c.refused) {
+          const r = runSync(GUARD, guardArgs(f, ['--once']), { cwd: f.dir });
+          expect(r.status, `${c.name}: ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, c.name).toMatch(/not read to its end/);
+          put(c.paste);
+          expect(run(), `${c.name}: the pasted entry`).not.toMatch(/WARNING/);
+          continue;
+        }
         const out = run();
         const warnings = out.split('\n').filter((l) => /is not the entry this guard generates/.test(l));
         expect(warnings, `${c.name}: one drift warning`).toHaveLength(1);

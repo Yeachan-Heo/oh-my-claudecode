@@ -323,7 +323,7 @@ def session_dependent(piece, runs, directories, named, moved, settled, path_valu
     after that word it is an argument of the program) and no simple command that runs `cd` or `pushd` before it in its chain of
     commands, so the shell runs it from the directory of the session, whatever directories the words of the command name as arguments; a cd in a
     subshell, a pipe, the background or before `||` moves nothing after it) and that ends the path of a file the guard writes; a word without a
-    directory part that the command runs (`runs`) and that is the name of a file the guard writes: the shell looks it up on the PATH of
+    directory part that stands in a simple command that runs something (`runs`: any bare word, as a wrapper such as `timeout 5 audit` or `sudo audit` runs the operand that follows its own, and which operands a wrapper takes is not read here; an operator is no word) and that is the name of a file the guard writes: the shell looks it up on the PATH of
     the session, which the guard does not know, so a file that the guard finds on its own PATH does not tell which one runs; only a PATH that a
     `PATH=` word of the simple command itself, an assignment that stands alone or the settings give (`path_values`) is the PATH of the hook, and then
     the word is settled when a directory the guard looks in has it, unless a component of that PATH holds a parameter that nothing gives a value to
@@ -833,7 +833,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                 here_names = {w.partition('=')[0] for w in words if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', w, re.DOTALL)}   # the quoted command gets what is set for the whole command and what stands in front of it in its own simple command (`env A=x sh -c '...'`)
                 found += [t for t in command_programs(word, exclude, depth + 1, named, {n: v for n, v in assigned.items() if n in settled or n in here_names}, here) if t not in found]
             for piece in word_pieces(word, assigned):
-                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, here, settled, path_values):
+                if session_dependent(piece, run is not None and not is_operator(word) and (piece == word or '$' in word), directories, named, here, settled, path_values):
                     raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:
