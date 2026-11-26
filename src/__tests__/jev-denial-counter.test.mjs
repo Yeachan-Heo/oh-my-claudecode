@@ -314,6 +314,71 @@ describe('denial counter: session ceiling and release', () => {
   });
 });
 
+describe('denial counter: provider process at the session ceiling', () => {
+  const CEILING = { OMC_JEV_DENIAL_SESSION_MAX: '4', OMC_JEV_DENIAL_RELEASE: '1' };
+  const toCeiling = (ctx, options = {}) => {
+    let result;
+    for (let i = 0; i < 4; i += 1) result = deny(ctx, T0 + i * 30_000, { reason: 'goal does not match', ...options });
+    return result;
+  };
+
+  it('gets the BLOCKED text and no release at the ceiling, and the blocked action is journaled', () => {
+    const ctx = setup({ ...CEILING, OMC_PROVIDER: 'acme' });
+    const result = toCeiling(ctx, { guard: 'ultragoal-goal' });
+    expect(result).toMatchObject({ release: false, degree: 2, action: 'blocked' });
+    expect(result.text).toBe('[DENIAL COUNTER: BLOCKED] Guard ultragoal-goal has denied 4 times in this session (ceiling 4, never reset); end your turn with a line `BLOCKED: <reason, at least 20 characters>`; no further attempts of the same call.');
+    const rows = journal(ctx.logDir).filter((row) => row.kind === 'denial' && row.action === 'blocked');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ result: 'blocked', degree: 2 });
+    expect(journal(ctx.logDir).filter((row) => row.kind === 'outcome' && row.ref === rows[0].id)).toMatchObject([{ result: 'blocked' }]);
+  });
+
+  it('the same session without the provider marker is released (the marker is the only difference)', () => {
+    const ctx = setup(CEILING);
+    const result = toCeiling(ctx, { guard: 'ultragoal-goal' });
+    expect(result).toMatchObject({ release: true, action: 'release', text: '' });
+  });
+
+  it('an empty marker is an ordinary process', () => {
+    const ctx = setup({ ...CEILING, OMC_PROVIDER: '' });
+    expect(toCeiling(ctx, { guard: 'ultragoal-goal' })).toMatchObject({ release: true, action: 'release' });
+  });
+
+  it('never releases the /goal guard, and before the ceiling the text is the ordinary reminder', () => {
+    const ctx = setup({ ...CEILING, OMC_PROVIDER: 'acme' });
+    const options = { guard: 'ultragoal-goal', reason: 'goal does not match' };
+    const first = deny(ctx, T0, options);
+    const second = deny(ctx, T0 + 30_000, options);
+    const third = deny(ctx, T0 + 60_000, options);
+    expect(first.text).toBe('');
+    expect(second.text).toBe('');
+    expect(third).toMatchObject({ degree: 1, release: false });
+    expect(third.text).toMatch(/^\[DENIAL COUNTER\] The same denial of guard ultragoal-goal has come 3 times/);
+    expect(third.text).not.toContain('BLOCKED');
+  });
+
+  it('gets the same BLOCKED text for another guard, with that guard name', () => {
+    const ctx = setup({ OMC_JEV_DENIAL_SESSION_MAX: '4', OMC_PROVIDER: 'acme' });
+    const result = toCeiling(ctx, { guard: 'agent-pool' });
+    expect(result.action).toBe('blocked');
+    expect(result.text).toMatch(/^\[DENIAL COUNTER: BLOCKED\] Guard agent-pool has denied 4 times in this session \(ceiling 4, never reset\)/);
+  });
+
+  it('keeps the SESSION CEILING text for an ordinary process (control)', () => {
+    const ctx = setup({ OMC_JEV_DENIAL_SESSION_MAX: '4' });
+    const result = toCeiling(ctx, { guard: 'ultragoal-goal' });
+    expect(result.action).toBe('deny-storm');
+    expect(result.text).toMatch(/^\[DENIAL COUNTER: SESSION CEILING\] Guard ultragoal-goal has denied 4 times/);
+  });
+
+  it('gets the BLOCKED text for a subagent too (its own counters, never a release)', () => {
+    const ctx = setup({ ...CEILING, OMC_PROVIDER: 'acme' });
+    const result = toCeiling(ctx, { guard: 'ultragoal-goal', agentId: 'ag-1' });
+    expect(result).toMatchObject({ release: false, action: 'blocked' });
+    expect(result.text).toMatch(/^\[DENIAL COUNTER: BLOCKED\]/);
+  });
+});
+
 describe('denial counter: state and journal', () => {
   it('keys the counts by hashes: a first denial leaves no denial text in the state file', () => {
     const ctx = setup();

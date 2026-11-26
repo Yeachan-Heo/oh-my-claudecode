@@ -29,6 +29,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { isJevShadowOptedIn, jevLastRequestId, jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from "./lib/jev-shadow.mjs";
 import { ProgressState, classifyTranscript, isAcknowledgedBlockedExit, MAX_BLOCKS_WITHOUT_PROGRESS } from "./lib/jev-progress.mjs";
 import { loadContextText } from './lib/context-text-loader.mjs';
+import { denialLogDir, keyHash, writeDenialRow } from "./lib/jev-denial-counter.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1107,6 +1108,34 @@ function getUltragoalObjective(state, omcRoot) {
 // max_reinforcements, no progress condition, no persisted progress state).
 function stopProgressEnabled() {
   return String(process.env.OMC_JEV_STOP_PROGRESS ?? "").trim() === "1";
+}
+
+// With OMC_JEV_STOP_PROGRESS=1 the Stop rows go to denials.jsonl in the Jev log directory (the writer never throws): a
+// release row for every release of the Stop and an end row when the series of blocks ends.
+const STOP_GUARD = "ultragoal-stop";
+function writeStopReleaseRow({ action, blocksWithoutProgress, totalBlocks, reasonCode }, sessionId, stateDir, maxReinforcements) {
+  return writeDenialRow({
+    kind: "release", session_id: sessionId || null, agent_id: null,
+    guard: STOP_GUARD, key: keyHash(`${STOP_GUARD}|${action}`), n: blocksWithoutProgress ?? null, sessionCount: totalBlocks || null,
+    k: MAX_BLOCKS_WITHOUT_PROGRESS + 1, maxSession: maxReinforcements || 50,
+    degree: 0, result: "passed", action, reason_code: reasonCode || "stop_release",
+    effectiveness: null, state: "ok", tool_name: null, tool_use_id: null,
+  }, denialLogDir(stateDir));
+}
+function writeStopEndRow(endType, totalBlocks, sessionId, stateDir) {
+  return writeDenialRow({
+    kind: "end", session_id: sessionId || null, agent_id: null,
+    guard: STOP_GUARD, key: keyHash(`${STOP_GUARD}|${endType}`), sessionCount: totalBlocks || 0,
+    degree: 0, result: "passed", action: endType, reason_code: "stop_release",
+    effectiveness: null, state: "ok", tool_name: null, tool_use_id: null,
+  }, denialLogDir(stateDir));
+}
+
+// A provider process (the OMC_PROVIDER marker of the provider settings, see docs/PROVIDER-WORKERS.md) that has crossed
+// the threshold of blocks without progress gets the blocked text instead of a release, and the series ends at the
+// reinforcement ceiling at the latest. Only inside the OMC_JEV_STOP_PROGRESS=1 branch.
+function isProviderProcess() {
+  return Boolean(process.env.OMC_PROVIDER);
 }
 
 // The progress state of the current block series, kept in the ultragoal state
@@ -2207,6 +2236,8 @@ async function main() {
           // not rewritten on this path.
           const lastMessage = typeof data.last_assistant_message === "string" ? data.last_assistant_message : "";
           if (isAcknowledgedBlockedExit(lastMessage)) {
+            writeStopReleaseRow({ action: "stop-acknowledged-exit", totalBlocks: progressState.totalBlocks }, sessionId, stateDir, maxReinforcements);
+            writeStopEndRow("blocked-with-reason", progressState.totalBlocks, sessionId, stateDir);
             emit({ continue: true, suppressOutput: true, systemMessage: "[ULTRAGOAL] Stop released: acknowledged blocked exit; the block counter is not spent." });
             return;
           }
@@ -2226,12 +2257,33 @@ async function main() {
             const totalBlocksAfter = progressState.totalBlocks + 1;
             ultragoal.state.stopProgress = { hash: newHash, blocks: blocksAfter, ts: Date.now(), progress: progressState.progress.state(), totalBlocks: totalBlocksAfter, parts: stateHash.parts };
             if (shouldWriteStateBack(ultragoal.path)) writeJsonFile(ultragoal.path, ultragoal.state);
+            if (isProviderProcess()) {
+              const newCountProvider = (ultragoal.state.reinforcement_count || 0) + 1;
+              if (newCountProvider > maxReinforcements) {
+                writeStopReleaseRow({ action: "stop-step-limit", totalBlocks: totalBlocksAfter, reasonCode: "timeout" }, sessionId, stateDir, maxReinforcements);
+                writeStopEndRow("step-budget", totalBlocksAfter, sessionId, stateDir);
+                emit({ continue: true, suppressOutput: true, systemMessage: "[ULTRAGOAL] Stop released: the limit of " + maxReinforcements + " ultragoal reinforcements is exhausted (block " + newCountProvider + ")." });
+                return;
+              }
+              ultragoal.state.reinforcement_count = newCountProvider; // the blocked path counts toward the ceiling
+              if (!shouldWriteStateBack(ultragoal.path)) {
+                emit(SAFE_CONTINUE);
+                return;
+              }
+              writeJsonFile(ultragoal.path, ultragoal.state);
+              emit({ decision: "block", reason: `[ULTRAGOAL: BLOCKED] ${blocksAfter} Stop blocks without progress (progress condition: work-state hash and the calls between blocks, threshold ${MAX_BLOCKS_WITHOUT_PROGRESS + 1}). End the turn with a line \`BLOCKED: <reason, at least 20 characters>\`; do not continue the loop.` });
+              return;
+            }
+            writeStopReleaseRow({ action: "stop-progress-release", blocksWithoutProgress: blocksAfter, totalBlocks: totalBlocksAfter, reasonCode: "timeout" }, sessionId, stateDir, maxReinforcements);
+            writeStopEndRow("step-budget", totalBlocksAfter, sessionId, stateDir);
             emit({ continue: true, suppressOutput: true, systemMessage: "[ULTRAGOAL] Stop released after " + blocksAfter + " Stop blocks without progress (threshold " + (MAX_BLOCKS_WITHOUT_PROGRESS + 1) + " blocks; progress condition: work-state hash and the calls between blocks)." });
             return;
           }
 
           const newCount = (ultragoal.state.reinforcement_count || 0) + 1;
           if (newCount > maxReinforcements) {
+            writeStopReleaseRow({ action: "stop-step-limit", totalBlocks: progressState.totalBlocks, reasonCode: "timeout" }, sessionId, stateDir, maxReinforcements);
+            writeStopEndRow("step-budget", progressState.totalBlocks, sessionId, stateDir);
             emit({ continue: true, suppressOutput: true, systemMessage: "[ULTRAGOAL] Stop released: the limit of " + maxReinforcements + " ultragoal reinforcements is exhausted (block " + newCount + ")." });
             return;
           }

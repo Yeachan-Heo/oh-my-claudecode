@@ -266,3 +266,110 @@ describe("persistent-mode Stop progress release", () => {
     expect(advanced.systemMessage).toBeUndefined();
   });
 });
+
+describe("persistent-mode Stop rows and the provider process", () => {
+  const journalRows = (sid: string): Record<string, unknown>[] => {
+    const file = path.join(TMP, "logs", "denials.jsonl");
+    if (!fs.existsSync(file)) return [];
+    return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>).filter((row) => row.session_id === sid);
+  };
+  const SWITCH: Record<string, string> = { OMC_JEV_STOP_PROGRESS: "1" };
+  const PROVIDER: Record<string, string> = { OMC_JEV_STOP_PROGRESS: "1", OMC_PROVIDER: "acme" };
+  const pastThreshold = { stopProgress: { hash: "", blocks: 6, ts: 0, progress: {}, totalBlocks: 6, parts: { git: "", ledger: "" } } };
+
+  it("writes a release row and an end row when the seventh block without progress releases the Stop", async () => {
+    const sid = "rows-release";
+    const root = await writeState(sid);
+    let last: Record<string, unknown> = {};
+    for (let i = 1; i <= 7; i++) last = json(runHook(SWITCH, sid, { transcript_path: writeTranscript(sid) }));
+    expect(last.continue).toBe(true);
+    expect(String(last.systemMessage ?? "")).toMatch(/Stop released after 7 Stop blocks without progress/);
+    const rows = journalRows(sid);
+    const release = rows.find((row) => row.kind === "release" && row.action === "stop-progress-release");
+    const end = rows.find((row) => row.kind === "end" && row.action === "step-budget");
+    expect(release).toMatchObject({ guard: "ultragoal-stop", reason_code: "timeout", n: 7, k: 7, maxSession: 50, result: "passed", agent_id: null });
+    expect(end).toMatchObject({ guard: "ultragoal-stop", reason_code: "stop_release", sessionCount: 7, result: "passed" });
+    expect(rows).toHaveLength(2);
+    expect((readState(root, sid).stopProgress as Record<string, unknown>).blocks).toBe(7);
+  });
+
+  it("writes the release and end rows for an acknowledged blocked exit, for an ordinary and a provider process", async () => {
+    for (const scenario of [SWITCH, PROVIDER]) {
+      const sid = "rows-ack-" + (scenario.OMC_PROVIDER ?? "plain");
+      await writeState(sid);
+      const o = json(runHook(scenario, sid, { transcript_path: writeTranscript(sid), last_assistant_message: "BLOCKED: no access to the production server and its API key" }));
+      expect(o.continue).toBe(true);
+      expect(String(o.systemMessage ?? "")).toMatch(/acknowledged blocked exit/);
+      const rows = journalRows(sid);
+      expect(rows.find((row) => row.kind === "release")).toMatchObject({ action: "stop-acknowledged-exit", guard: "ultragoal-stop", reason_code: "stop_release" });
+      expect(rows.find((row) => row.kind === "end")).toMatchObject({ action: "blocked-with-reason", guard: "ultragoal-stop" });
+      expect(rows).toHaveLength(2);
+    }
+  });
+
+  it("writes the step-limit rows when an ordinary block reaches the reinforcement ceiling", async () => {
+    const sid = "rows-ceiling";
+    await writeState(sid, { reinforcement_count: 50 });
+    const o = json(runHook(SWITCH, sid, { transcript_path: writeTranscript(sid) }));
+    expect(o.continue).toBe(true);
+    expect(String(o.systemMessage ?? "")).toMatch(/limit of 50 ultragoal reinforcements is exhausted \(block 51\)/);
+    const rows = journalRows(sid);
+    expect(rows.find((row) => row.kind === "release")).toMatchObject({ action: "stop-step-limit", reason_code: "timeout", maxSession: 50 });
+    expect(rows.find((row) => row.kind === "end")).toMatchObject({ action: "step-budget" });
+  });
+
+  it("a provider process gets the blocked text at the seventh block instead of a release, and the series is saved past the threshold", async () => {
+    const sid = "provider-series";
+    const root = await writeState(sid);
+    let last: Record<string, unknown> = {};
+    for (let i = 1; i <= 7; i++) last = json(runHook(PROVIDER, sid, { transcript_path: writeTranscript(sid) }));
+    expect(last.decision).toBe("block");
+    expect(last.continue).toBeUndefined();
+    expect(String(last.reason ?? "")).toMatch(/^\[ULTRAGOAL: BLOCKED\] 7 Stop blocks without progress/);
+    expect(String(last.reason ?? "")).toContain("BLOCKED: <reason, at least 20 characters>");
+    const state = readState(root, sid);
+    expect((state.stopProgress as Record<string, unknown>).blocks).toBe(7);
+    expect(state.reinforcement_count).toBe(7);
+    expect(journalRows(sid).some((row) => row.action === "stop-progress-release")).toBe(false);
+  });
+
+  it("the series of a provider process ends at the reinforcement ceiling: the last block counts, the next one releases with the step-limit rows", async () => {
+    const sid = "provider-ceiling";
+    const root = await writeState(sid, { reinforcement_count: 49, ...pastThreshold });
+    const blocked = json(runHook(PROVIDER, sid, { transcript_path: writeTranscript(sid) }));
+    expect(blocked.decision).toBe("block");
+    expect(String(blocked.reason ?? "")).toMatch(/^\[ULTRAGOAL: BLOCKED\] 7 Stop blocks without progress/);
+    expect(readState(root, sid).reinforcement_count).toBe(50);
+    const released = json(runHook(PROVIDER, sid, { transcript_path: writeTranscript(sid) }));
+    expect(released.continue).toBe(true);
+    expect(released.decision).toBeUndefined();
+    expect(String(released.systemMessage ?? "")).toMatch(/limit of 50 ultragoal reinforcements is exhausted \(block 51\)/);
+    const rows = journalRows(sid);
+    expect(rows.find((row) => row.kind === "release")).toMatchObject({ action: "stop-step-limit", reason_code: "timeout", sessionCount: 8 });
+    expect(rows.find((row) => row.kind === "end")).toMatchObject({ action: "step-budget" });
+    expect(readState(root, sid).reinforcement_count).toBe(50);
+  });
+
+  it("the same past-threshold state releases an ordinary process with the progress release rows (the marker is the only difference)", async () => {
+    const sid = "plain-past-threshold";
+    await writeState(sid, { reinforcement_count: 49, ...pastThreshold });
+    const o = json(runHook(SWITCH, sid, { transcript_path: writeTranscript(sid) }));
+    expect(o.continue).toBe(true);
+    expect(String(o.systemMessage ?? "")).toMatch(/Stop released after 7 Stop blocks without progress/);
+    expect(journalRows(sid).find((row) => row.kind === "release")).toMatchObject({ action: "stop-progress-release", n: 7 });
+  });
+
+  it("without OMC_JEV_STOP_PROGRESS the provider marker changes nothing: the plain upstream block, no progress state, no rows", async () => {
+    const sid = "rows-off";
+    const root = await writeState(sid);
+    for (let i = 1; i <= 8; i++) {
+      const o = json(runHook({ OMC_PROVIDER: "acme" }, sid, { transcript_path: writeTranscript(sid), last_assistant_message: "BLOCKED: no access to the production server and its API key" }));
+      expect(o.decision).toBe("block");
+      expect(String(o.reason ?? "")).toMatch(new RegExp("^\\[ULTRAGOAL #" + i + "\\/50\\]"));
+    }
+    const state = readState(root, sid);
+    expect(state.reinforcement_count).toBe(8);
+    expect("stopProgress" in state).toBe(false);
+    expect(journalRows(sid)).toEqual([]);
+  });
+});
