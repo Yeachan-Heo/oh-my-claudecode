@@ -952,3 +952,144 @@ describe('cutInTokens and worthInTokens', () => {
     for (const key of ['tokens_before', 'tokens_after_pred']) expect(some[key] - none[key], key).toBeLessThanOrEqual(20 * 1050 + 1);
   });
 });
+
+describe('the thinking of the assistant rows that build rebuilds comes off the prediction: the host counts it and no list that is installed holds it', () => {
+  // A character of thinking (its text or its signature) is 0.2575 tokens in the host's count (RATE_SIG); listTokens counts none, and build rebuilds every assistant row before the
+  // tail without its thinking. So the tokens after are the tokens before less the thinking of those rows, and a list estimate (a host with no usage to give) adds the thinking of
+  // all rows. `think`: a thinking block of 300 characters of text and 300 of signature first in every assistant message of the API form.
+  const RATE_SIG = 0.2575;
+  const PER_MESSAGE = 600;
+  const BLOCK = { type: 'thinking', thinking: 't'.repeat(300), signature: 's'.repeat(300) };
+  const withThinking = (api) => api.map((a) => (a.role === 'assistant' ? { ...a, content: [BLOCK, ...a.content] } : a));
+  const messagesIn = (api) => api.filter((a) => a.role === 'assistant').length;
+  const ENV = { ...TARGET_20, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' };
+  // A target of 80 % puts the host's count under the target of a list of 100 steps: a manual compaction, where only the scores decide (here every result is traced).
+  const MANUAL = { ...ENV, OMC_JEV_COMPACT_TARGET_PERCENT: '80' };
+  // The rows: `steps` steps of a text result of 600 characters; `open` ends inside the tool loop (the last call and its result are the tail, whose rows keep their handles and
+  // their thinking), else after an answer (every assistant row is rebuilt, the answer too). The host's count is the list as rows plus the thinking characters of every assistant
+  // message, whether or not the API form shows them. `rebuiltChars`: the thinking characters of the rows that build rebuilds.
+  async function run({ open = false, think = true, host = 'usage', env = ENV, steps = 210 } = {}) {
+    const rows = session(steps, { shot: () => false, chars: 600 }).slice(0, open ? -2 : undefined);
+    const plain = apiOf(rows);
+    const api = think ? withThinking(plain) : plain;
+    const counted = Math.round(listTokens(plain) + RATE_SIG * PER_MESSAGE * messagesIn(plain));
+    const out = await compactRun(env, rows, { tokens: host === 'usage' ? counted : null, trigger: 'manual', api });
+    return { ...out, plain, api, counted, rebuiltChars: PER_MESSAGE * (messagesIn(plain) - (open ? 1 : 0)), installed: listTokens(apiOf(out.out.messages)) };
+  }
+
+  it('the floor is lower by the thinking of the rows that are rebuilt, for the same count of the host', async () => {
+    for (const open of [false, true]) {
+      const [without, withIt] = [await run({ open, think: false }), await run({ open, think: true })];
+      expect(without.record.floor_pred, `open ${open}`).toBeGreaterThan(0);
+      expect(withIt.record.floor_pred, `open ${open}`).toBeGreaterThan(0);
+      expect(Math.abs(without.record.floor_pred - withIt.record.floor_pred - RATE_SIG * withIt.rebuiltChars), `open ${open}`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('the prediction of a plan decided by the scores alone is lower by the same thinking', async () => {
+    for (const open of [false, true]) {
+      const [without, withIt] = [await run({ open, think: false, env: MANUAL, steps: 100 }), await run({ open, think: true, env: MANUAL, steps: 100 })];
+      expect(withIt.record.cascade_pass, `open ${open}`).toBe('manual');
+      expect(without.record.traced, `open ${open}`).toBe(withIt.record.traced);
+      for (const key of ['tokens_after_pred', 'tokens_after']) expect(Math.abs(without.record[key] - withIt.record[key] - RATE_SIG * withIt.rebuiltChars), `open ${open} ${key}`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('the cascade stops at its target and the list that is installed is what it predicted, the thinking left out', async () => {
+    for (const open of [false, true]) {
+      const { record, installed } = await run({ open });
+      // The tail keeps its thinking in the host's list, which no estimate of rows holds.
+      const kept = RATE_SIG * PER_MESSAGE * (open ? 1 : 0);
+      expect(record, `open ${open}`).toMatchObject({ result: 'jev', cascade_pass: 'short_or_trace' });
+      expect(record.tokens_after_pred, `open ${open}`).toBeLessThanOrEqual(record.cascade_target_tokens);
+      expect(record.tokens_after_pred, `open ${open}`).toBeGreaterThan(record.cascade_target_tokens - 400);
+      expect(Math.abs(record.tokens_after_pred - installed - kept), `open ${open} pred`).toBeLessThanOrEqual(0.6 * record.traced + 2);
+      expect(Math.abs(record.tokens_after - installed - kept), `open ${open} after`).toBeLessThanOrEqual(0.6 * record.traced + 2);
+    }
+  });
+
+  it('a host with no usage to give: the estimate adds the thinking of every message, and the prediction takes off that of the rows that are rebuilt', async () => {
+    for (const open of [false, true]) {
+      const [without, withIt] = [await run({ open, think: false, host: 'estimate', env: MANUAL, steps: 100 }), await run({ open, think: true, host: 'estimate', env: MANUAL, steps: 100 })];
+      expect(withIt.record, `open ${open}`).toMatchObject({ result: 'jev', tokens_source: 'estimate', cascade_pass: 'manual' });
+      // What the list of the API form with the blocks of thinking counts beyond the list without them (their overhead: listTokens counts a block, not what is in it).
+      const blocks = listTokens(withIt.api) - listTokens(withIt.plain);
+      const chars = PER_MESSAGE * messagesIn(withIt.plain);
+      expect(Math.abs(withIt.record.tokens_before - without.record.tokens_before - blocks - RATE_SIG * chars), `open ${open} before`).toBeLessThanOrEqual(1);
+      // After the rebuild the thinking of the tail is all that is left of it.
+      for (const key of ['tokens_after_pred', 'tokens_after']) {
+        expect(Math.abs(withIt.record[key] - without.record[key] - blocks - RATE_SIG * (chars - withIt.rebuiltChars)), `open ${open} ${key}`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('the record says how much thinking the API form holds and how much of it sits on a row', async () => {
+    const { record, plain } = await run({ open: true });
+    expect(record).toMatchObject({ api_messages: true, sig_chars_total: PER_MESSAGE * messagesIn(plain), sig_chars_mapped: PER_MESSAGE * messagesIn(plain) });
+    // The assistant rows that build rebuilt (all but the last message of an open loop): the same number under both names.
+    expect(record).toMatchObject({ rebuilt_assistant: messagesIn(plain) - 1, rebuilt_thinking: messagesIn(plain) - 1 });
+    const between = await run({ open: false });
+    expect(between.record).toMatchObject({ rebuilt_assistant: messagesIn(between.plain), rebuilt_thinking: messagesIn(between.plain) });
+  });
+
+  it('thinking that sits on no row is counted in the total and not taken off: a row of thinking alone, redacted thinking, a message of text only', async () => {
+    const rows = session(60, { shot: () => false, chars: 600 });
+    // A row of thinking alone after step 3 (no text, no call): its API message holds the thinking block and nothing else.
+    rows.splice(7, 0, Object.freeze({ role: 'assistant', text: '', toolUses: [], handle: 'thinking-alone' }));
+    const thinkingOf = (n, m) => ({ type: 'thinking', thinking: 't'.repeat(n), signature: 's'.repeat(m) });
+    const build = () => apiOf(rows).map((a, k) => {
+      if (a.role !== 'assistant') return a;
+      if (!a.content.length) return { ...a, content: [thinkingOf(100, 50)] }; // the row of thinking alone: 150 characters, on no row
+      if (k === 1) return { ...a, content: [{ type: 'redacted_thinking', data: 'd'.repeat(70) }, ...a.content] }; // step 1: 70, on the row of its call
+      if (k === 3) return { ...a, content: [thinkingOf(10, 20), ...a.content] }; // step 2: 30, on the row of its call
+      if (a.content.every((b) => b.type === 'text')) return { ...a, content: [thinkingOf(5, 5), ...a.content] }; // the answer, of text only: 10, on the row whose text it is
+      return a;
+    });
+    const plain = apiOf(rows);
+    const counted = Math.round(listTokens(plain) + RATE_SIG * 260);
+    const go = async (api) => (await compactRun(MANUAL, rows, { tokens: counted, trigger: 'manual', api })).record;
+    const withIt = await go(build());
+    expect(withIt).toMatchObject({ result: 'jev', api_messages: true, sig_chars_total: 260, sig_chars_mapped: 110 });
+    // The prediction takes off the 110 characters on rows, not the 260 in the list.
+    const without = await go(plain);
+    expect(without).toMatchObject({ result: 'jev', api_messages: true, sig_chars_total: 0, sig_chars_mapped: 0 });
+    expect(Math.abs(without.tokens_after_pred - withIt.tokens_after_pred - RATE_SIG * 110)).toBeLessThanOrEqual(1);
+  });
+
+  it('with no thinking in the API form nothing is taken off: the prediction is the list that is installed, as before', async () => {
+    for (const open of [false, true]) {
+      const rows = session(210, { shot: () => false, chars: 600 }).slice(0, open ? -2 : undefined);
+      const counted = Math.round(listTokens(apiOf(rows)));
+      const { record, out } = await compactRun(ENV, rows, { tokens: counted, trigger: 'manual' });
+      expect(record, `open ${open}`).toMatchObject({ result: 'jev', cascade_pass: 'short_or_trace' });
+      expect(Math.abs(record.tokens_after_pred - listTokens(apiOf(out.messages))), `open ${open}`).toBeLessThanOrEqual(0.6 * record.traced + 2);
+    }
+  });
+
+  it('with no API form (the host answers rows, between turns) the thinking is unknown: nothing is added or taken off', async () => {
+    const rows = session(210, { shot: () => false, chars: 600 });
+    const counted = Math.round(listTokens(apiOf(rows)));
+    const { record, out } = await compactRun(ENV, rows, { tokens: counted, trigger: 'manual', form: false });
+    expect(record).toMatchObject({ result: 'jev', cascade_pass: 'short_or_trace' });
+    expect(Math.abs(record.tokens_after_pred - listTokens(apiOf(out.messages)))).toBeLessThanOrEqual(0.6 * record.traced + 2);
+  });
+
+  it('the fields of the thinking come with the token accounting alone, and not on the default path', async () => {
+    const rows = session(60, { shot: () => false, chars: 600 });
+    const api = withThinking(apiOf(rows));
+    const fields = ['api_messages', 'sig_chars_total', 'sig_chars_mapped', 'rebuilt_thinking'];
+    const plain = (await compactRun(ACTIVE_ENV, rows, { tokens: 40000, trigger: 'manual', api })).record;
+    expect(plain.result).toBe('jev');
+    for (const key of fields) expect(plain, key).not.toHaveProperty(key);
+    const accounted = (await compactRun({ ...ACTIVE_ENV, OMC_JEV_COMPACT_TOKEN_ACCOUNTING: '1' }, rows, { tokens: 40000, trigger: 'manual', api })).record;
+    expect(accounted).toMatchObject({ result: 'jev', api_messages: true, sig_chars_total: PER_MESSAGE * 61, sig_chars_mapped: PER_MESSAGE * 61 });
+    expect(accounted.rebuilt_thinking).toBe(accounted.rebuilt_assistant);
+    expect(accounted.rebuilt_thinking).toBeGreaterThan(0);
+  });
+
+  it('with no API form the record says so, and the host with no usage estimates the list from rows without any thinking', async () => {
+    const rows = session(210, { shot: () => false, chars: 600 });
+    const { record } = await compactRun(ENV, rows, { tokens: null, trigger: 'manual', form: false });
+    expect(record).toMatchObject({ result: 'jev', tokens_source: 'estimate', api_messages: false, sig_chars_total: 0, sig_chars_mapped: 0 });
+  });
+});

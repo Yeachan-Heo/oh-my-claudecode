@@ -236,6 +236,9 @@ export function ratesFrom(raw) {
   return rates;
 }
 const RATE_MESSAGE = -40.5; // per message, spread over its blocks
+// A character of thinking (its text and its signature) in the API form. The host's count holds the thinking of the assistant messages, and build rebuilds every assistant row
+// before keepFrom without it, so the prediction takes it off the tokens before (signatureRows); a list estimate adds it, as listTokens does not count it.
+const RATE_SIG = 0.2575;
 // Non-ASCII characters (by code point) of a text: each costs RATE_NON_ASCII tokens more than an ASCII one.
 const nonAscii = (s) => { let n = 0; for (const ch of String(s ?? '')) if (ch.codePointAt(0) > 127) n++; return n; };
 const SHORT_CHARS = 300;
@@ -2951,11 +2954,12 @@ export function worthInTokens(cut, minGain = 0) {
 }
 
 // The tokens before the compaction, the token cascade's basis: the host's usage in the main loop, else the prefix plus the estimate of the API form. `detail`
-// and `usage` are the reads the caller made (either may be missing).
-function tokensBeforeOf(e, cfg, messages, api, detail, usage) {
+// and `usage` are the reads the caller made (either may be missing). `thinking` (decide): the tokens of the thinking in the API form, which the estimate adds
+// (the host's count holds it) and the predictions take off for the rows build rebuilds.
+function tokensBeforeOf(e, cfg, messages, api, detail, usage, thinking) {
   const real = usage?.context?.tokens;
   const main = e.agentId === undefined && finitePositive(real) !== undefined;
-  return { tokens: Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates)), source: main ? 'usage' : 'estimate' };
+  return { tokens: Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates) + thinking.all), source: main ? 'usage' : 'estimate' };
 }
 
 // The record fields of one compaction with token accounting: the window and threshold, the tokens before (the host's usage in the main loop, else
@@ -2963,15 +2967,15 @@ function tokensBeforeOf(e, cfg, messages, api, detail, usage) {
 // ceiling. Read-only: the cut itself stays with allocate.
 // The host reads (`known` when the caller made them already, with `win`, the window the cascade planned with, which then stands in the record) and the settings read stay within `deadline`, the compaction's own: once it has passed the
 // estimate of the API form and no window stand in the record. `installedStageTokens`: what the text stages that installed took off. `shape` (shapeOf): the blocks
-// and messages that the keep decisions take off the list, as in the cascade.
-async function tokenAccounting($, e, cfg, messages, api, candidates, installedStageTokens, deadline, known = {}, shape = undefined) {
+// and messages that the keep decisions take off the list, as in the cascade. `thinking`: as in tokensBeforeOf; the thinking of the rebuilt rows comes off the tokens after.
+async function tokenAccounting($, e, cfg, messages, api, candidates, installedStageTokens, deadline, known = {}, shape = undefined, thinking) {
   const detail = 'detail' in known ? known.detail : await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
   const usage = 'usage' in known ? known.usage : await hostValue($, () => $.session.usage(), deadline);
   const win = known.win ?? await resolveWindow($, cfg, detail, usage, deadline);
   const real = usage?.context?.tokens;
   const main = e.agentId === undefined && finitePositive(real) !== undefined;
-  const tokensBefore = Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates));
-  let removed = installedStageTokens;
+  const tokensBefore = Math.round(main ? real : prefixTokens(detail) + listTokens(api ?? rowsAsApi(messages), cfg.rates) + thinking.all);
+  let removed = installedStageTokens + thinking.removed;
   for (const c of candidates) {
     const t = itemTokens(c, cfg.rates);
     removed += t.full - (c.keep === 'drop' ? t.drop : c.keep === 'short' ? t.short : c.keep === 'trace' ? t.trace : t.full);
@@ -3102,6 +3106,51 @@ function keptCallsIn(messages, keepFrom, api) {
   const ids = new Set();
   for (const a of api) if (a.role === 'assistant' && Array.isArray(a.content)) for (const b of a.content) if (b && b.type === 'tool_use') ids.add(b.id);
   return messages.every((m, i) => i < keepFrom || m.role !== 'assistant' || (m.toolUses || []).every((u) => ids.has(u.tool_use_id)));
+}
+
+// Thinking sizes from the API form: per assistant API message the signature and thinking text (thinking) or data (redacted_thinking), credited once to one row of `messages`: the
+// first row holding one of its tool uses, else an assistant row without tool uses whose text equals the joined text blocks (joined with a newline or with nothing). Unmapped
+// thinking counts in `total` only.
+function signatureRows(messages, api) {
+  const rowSig = new Map();
+  if (!Array.isArray(api)) return { rowSig, total: 0, mapped: 0, ok: false };
+  const rowOfUse = new Map();
+  const byText = new Map();
+  messages.forEach((m, i) => {
+    if (i === 0 || m.role !== 'assistant') return;
+    const used = m.toolUses || [];
+    for (const u of used) if (!rowOfUse.has(u.tool_use_id)) rowOfUse.set(u.tool_use_id, i);
+    if (!used.length && m.text) { if (!byText.has(m.text)) byText.set(m.text, []); byText.get(m.text).push(i); }
+  });
+  let total = 0;
+  let mapped = 0;
+  for (const a of api) {
+    if (!a || a.role !== 'assistant' || !Array.isArray(a.content)) continue;
+    let sig = 0;
+    const ids = [];
+    const texts = [];
+    for (const b of a.content) {
+      if (!b || typeof b !== 'object') continue;
+      if (b.type === 'thinking') sig += strOf(b.signature).length + strOf(b.thinking).length;
+      else if (b.type === 'redacted_thinking') sig += strOf(b.data).length;
+      else if (b.type === 'tool_use' && typeof b.id === 'string') ids.push(b.id);
+      else if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text);
+    }
+    if (!sig) continue;
+    total += sig;
+    let row;
+    for (const id of ids) { const r = rowOfUse.get(id); if (r !== undefined && (row === undefined || r < row)) row = r; }
+    if (row === undefined && texts.length) {
+      for (const t of [texts.join('\n'), texts.join('')]) {
+        const free = (byText.get(t) || []).find((r) => !rowSig.has(r));
+        if (free !== undefined) { row = free; break; }
+      }
+    }
+    if (row === undefined) continue;
+    rowSig.set(row, (rowSig.get(row) || 0) + sig);
+    mapped += sig;
+  }
+  return { rowSig, total, mapped, ok: true };
 }
 
 // Blocks a kept assistant message may carry and still keep its handle: text, client calls and signed
@@ -4365,6 +4414,14 @@ async function decide($, e, cfg, record, started) {
   const keepFrom = openLoopStart(messages, group);
   if (api && !keptCallsIn(messages, keepFrom, api)) api = undefined;
   record.kept_from = messages.length - keepFrom;
+  // The thinking of the assistant messages in the API form, in tokens: all of it (what a list estimate adds) and that of the rows before keepFrom, which build rebuilds
+  // without it (what the predictions take off). The record says what the API form holds and how much of it sits on a row, with the token cascade or the token accounting.
+  const tokenMode = cfg.targetPercent !== undefined || cfg.tokenAccounting;
+  const sigs = signatureRows(messages, api);
+  if (tokenMode) Object.assign(record, { api_messages: sigs.ok, sig_chars_total: sigs.total, sig_chars_mapped: sigs.mapped });
+  let rebuiltSig = 0;
+  for (const [row, chars] of sigs.rowSig) if (row >= 1 && row < keepFrom) rebuiltSig += chars;
+  const thinking = { all: RATE_SIG * sigs.total, removed: RATE_SIG * rebuiltSig };
   // Delivered messages no row shows are part of the context too (build carries them, a kept row gets
   // them back from the host), so they count in the characters before and in the budget as fixed text,
   // with the envelopes build adds. Their counts go into the record of every later outcome.
@@ -4411,7 +4468,7 @@ async function decide($, e, cfg, record, started) {
   if (stage.stats) record.agent_trim = stage.stats;
   const { trimmed, trimTokens, opts: agentOpts, plan: planAgents } = stage;
   // The blocks and messages that the keep decisions take off the list, which the predictions in tokens count with the costs of the candidates (shapeOf).
-  const shape = cfg.targetPercent !== undefined || cfg.tokenAccounting ? shapeOf(messages, candidates, { rows: trimmed, group, keepFrom, queued, rates: cfg.rates }) : undefined;
+  const shape = tokenMode ? shapeOf(messages, candidates, { rows: trimmed, group, keepFrom, queued, rates: cfg.rates }) : undefined;
   const movedTokens = (st) => movedTokensOf(st, cfg.rates);
   record.max_reduction = before ? Math.round((net / before) * 1000) / 1000 : 0;
   if (!before || net / before < MIN_REDUCTION) {
@@ -4440,7 +4497,7 @@ async function decide($, e, cfg, record, started) {
     known = { detail, usage };
     let win = await resolveWindow($, cfg, detail, usage, deadline);
     if (!win) return { fallback: 'no_window' };
-    tokens = tokensBeforeOf(e, cfg, messages, api, detail, usage);
+    tokens = tokensBeforeOf(e, cfg, messages, api, detail, usage, thinking);
     if (e.trigger === 'auto') {
       if (e.agentId === undefined) tokens.tokens = Math.max(tokens.tokens, win.threshold);
       else if (tokens.tokens < win.threshold) {
@@ -4466,7 +4523,7 @@ async function decide($, e, cfg, record, started) {
         agentsFloor = Math.max(0, movedTokens(planned.stats));
         record.floor_agents_tokens = Math.round(agentsFloor);
       }
-      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor + envelopeTokens, cfg.rates, shape);
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor + envelopeTokens - thinking.removed, cfg.rates, shape);
       record.floor_pred = Math.max(0, Math.round(floor));
       if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
@@ -4614,7 +4671,7 @@ async function decide($, e, cfg, record, started) {
       pasteSwaps = await movePastes($, pasted.stats.mode, pasted.jobs, messages, pasted.stats, deadline).catch(() => { pasted.stats.error = 1; return new Map(); });
       if (pasteSwaps.size) stageTokens += movedTokens(pasted.stats);
     }
-    const base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens;
+    const base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens - thinking.removed;
     let plan;
     if (manual) {
       plan = manualPlan(candidates, base, cfg.rates, shape);
@@ -4664,6 +4721,7 @@ async function decide($, e, cfg, record, started) {
     rebuilt_unchanged: stats.rebuiltUnchanged,
     kept_handle: stats.keptHandle,
     rebuilt_assistant: stats.rebuiltAssistant,
+    ...(tokenMode ? { rebuilt_thinking: stats.rebuiltAssistant } : {}), // the rows rebuilt without their thinking: the count of rebuilt_assistant
     dropped_assistant: stats.droppedAssistant,
     joined_rows: stats.joinedRows,
     queued_carried: stats.queuedCarried,
@@ -4672,7 +4730,7 @@ async function decide($, e, cfg, record, started) {
   });
   // What the installed text stages took off, with or without the cascade: a stage that moved nothing (shadow, writes that failed, or a fallback) counts for nothing.
   const installedTokens = trimTokens + agentTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0);
-  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known, shape));
+  if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known, shape, thinking));
   if (agentMoved.size) record.agent_messages.installed = true;
   if (pastesInstalled) pasted.stats.installed = true;
   if (repliesInstalled) record.replies.installed = true;
