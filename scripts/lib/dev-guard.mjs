@@ -379,7 +379,9 @@ function devExtraCommand(name, args) {
   if (name === 'unzip') {
     const { shorts, operands, values } = parseGetopt(args, 'dPOI');
     if (shorts.some((c) => 'lvtpczZ'.includes(c))) return null; // listing, testing, writing to stdout: no files are created
-    const members = shorts.includes('j') ? [] : operands.slice(1); // after the archive; -j drops the directories of the members
+    const xAt = args.indexOf('-x'); // the words from -x up to the next option are patterns to leave out, so the members are those before it (a -x before the archive does not count)
+    const before = parseGetopt(xAt < 0 ? args : args.slice(0, xAt), 'dPOI').operands;
+    const members = shorts.includes('j') ? [] : (before.length ? before : operands).slice(1); // after the archive; -j drops the directories of the members
     const dirs = values.filter(([key]) => key === 'd').map(([, value]) => value);
     for (const value of dirs) { const d = devChangedIn(value); if (d) return { what: name, path: d }; }
     return hit(archiveMemberInDev(dirs.filter((d) => d.startsWith('/')).map((d) => posix.normalize(d)), members));

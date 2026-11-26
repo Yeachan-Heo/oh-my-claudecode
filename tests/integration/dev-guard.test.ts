@@ -101,6 +101,8 @@ const BLOCKED: string[] = [
   // tar writes a member under its name with the first components stripped
   'tar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar --strip-components 1 -C / -xf /tmp/a.tar foo/dev/null', 'tar --strip=1 -C / -xf /tmp/a.tar foo/dev/null', 'gtar --strip-components=2 -C / -xf /tmp/a.tar a/b/dev/null',
   'bsdtar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar -C / --strip-components=1 -xf /tmp/a.tar ./dev/null', 'tar --strip-components=1 -C / -xf /tmp/a.tar /dev/null', 'tar --strip-components=x -C / -xf /tmp/a.tar dev/null',
+  // members before the -x list are still extracted, and so is everything when -x comes before the archive
+  'unzip a.zip dev/other -x dev/null -d /', 'unzip a.zip dev/null -x top.txt -d /', 'unzip -d / a.zip dev/other -x dev/null', 'unzip a.zip dev/null -x dev/null top.txt -d /', 'unzip -x a.zip dev/null -d /',
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
   'echo `bash <<B\nrm /dev/null\nB\n`', 'x=`bash <<B\nrm -f /dev/sda\nB\n`', 'echo `echo \\`rm /dev/null\\``',
   // a path from the pipe lands in the place of the replace string of xargs -I
@@ -194,6 +196,8 @@ const ALLOWED: string[] = [
   // a bare time is the keyword of the shell: only -p and -- are its options, so the rest is a command that does not exist
   'time -f %e rm /dev/null', 'if true; then time -f %e rm /dev/null; fi', '! time -f %e rm /dev/null', 'true && time -f %e rm /dev/null', '{ time -o /tmp/t rm /dev/null; }', 'time -p -f %e rm /dev/null',
   'time --format %e rm /dev/null', 'time -pf rm /dev/null', 'time -f%e rm /dev/null', 'time -p time -f %e rm /dev/null',
+  // the words after -x are patterns to leave out, before or after -d
+  'unzip a.zip -x dev/null -d /', 'unzip a.zip top.txt -x dev/null -d /', 'unzip a.zip -d / -x dev/null', 'unzip -d / a.zip -x dev/null', 'unzip a.zip -x dev/null top.txt -d /', 'unzip -o a.zip -x dev/null dev/other -d /',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
