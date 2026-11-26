@@ -316,7 +316,7 @@ def command_word(words):
     return None
 
 
-def session_dependent(piece, runs, directories, named, moved, assigned):
+def session_dependent(piece, runs, directories, named, moved, assigned, settled):
     """Whether the piece may be a file the guard writes that only the process of the session that runs the hook can find: the guard has
     neither its working directory nor its PATH. A path that is relative (`./prog`, `sub/prog`) where the command does not move its working
     directory (`moved`: no `-C`, `--directory` or `--chdir` option in front of the word that its own simple command runs (an option of a wrapper, `env -C DIR prog`;
@@ -326,7 +326,9 @@ def session_dependent(piece, runs, directories, named, moved, assigned):
     directory part that the command runs (`runs`) and that is the name of a file the guard writes: the shell looks it up on the PATH of
     the session, which the guard does not know, so a file that the guard finds on its own PATH does not tell which one runs; only a PATH that a
     `PATH=` word or the settings give (`assigned`) is the PATH of the hook, and then the word is settled when a directory the guard looks in has it. A parameter that nothing here gives a value (the command and the settings assign none; what the guard has in its own environment is a
-    candidate, not the value of the hook, whose session may have none or another one, `HOME` and `~` too) is the session's too: it is refused when what follows it in the word is empty or ends the path of a file the
+    candidate, not the value of the hook, whose session may have none or another one, `HOME` and `~` too) is the session's too, and so is one that only a
+    scoped assignment gives (`settled`: the names that settings.json or an assignment of its own, `A=x; cmd`, `export A=x` or `${A:=x}`, give for the whole command; `A=x cmd` and
+    `env A=x cmd` give A to `cmd` alone, and `unset A` takes it away): it is refused when what follows it in the word is empty or ends the path of a file the
     guard writes (`"$AUDIT"`, `$DIR/audit`); a word with something else after it is read as before. A piece that holds blanks is a quoted command
     (read as one), one that still holds a `$` has a parameter that is not decided here."""
     path = os.path.expanduser(os.path.expandvars(piece))
@@ -337,7 +339,7 @@ def session_dependent(piece, runs, directories, named, moved, assigned):
     scan = re.sub(r'^~[^/\\]*', '${HOME}', piece)   # (a leading ~ is the HOME of the session)
     for m in PARAMETER.finditer(scan):
         name = m.group(1) or m.group(2) or m.group(5)
-        if not assigned.get(name) and m.group(3) not in ('-', ':-', '=', ':=', '+', ':+', '?', ':?'):
+        if name not in settled and m.group(3) not in ('-', ':-', '=', ':=', '+', ':+', '?', ':?'):
             rest = os.path.expandvars(scan[m.end():])
             if not rest or any(out.endswith(key(rest)) for out in written):
                 return True
@@ -776,17 +778,27 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     found = []
     assigned = {n: [own_value(n, x) for x in v] for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
     given_path = [os.path.expanduser(os.path.expandvars(d)) for v in assigned.get('PATH', []) for variant in parameter_variants(v, assigned) for d in variant.split(os.pathsep)]   # the PATH that settings.json gives the hook processes: the guard does not have it, the shell of the hook looks a bare word up there
+    settled = set(assigned)   # the names that have a value for the whole command: the settings, the command it is quoted in, an assignment that stands alone (`A=x; cmd`) or after export, declare, typeset, readonly or local, and ${NAME:=word}; an assignment in front of a command (`A=x cmd`, `env A=x cmd`) is that command's alone, but it stays a candidate for every word
+    unset = set()
     for words in simple:
+        run = command_word(words)
         for word in words:
             name, equals, value = word.partition('=')
-            if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) and own_value(name, value) not in assigned.setdefault(name, []):
-                assigned[name].append(own_value(name, value))
+            if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name):
+                if own_value(name, value) not in assigned.setdefault(name, []):
+                    assigned[name].append(own_value(name, value))
+                if run is None or words[run] in ('export', 'declare', 'typeset', 'readonly', 'local'):
+                    settled.add(name)
+        if run is not None and words[run] == 'unset':
+            unset.update(w for w in words[run + 1:] if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', w))   # (`unset -v NAME`: the option is no name)
     for words in simple:
         for word in words:
             for m in PARAMETER.finditer(word):
                 if m.group(3) in (':=', '='):   # ${NAME:=word} and ${NAME=word} assign NAME for the words that follow: the word is a value of NAME in the whole command, as an assignment is
+                    settled.add(m.group(2))
                     if own_value(m.group(2), m.group(4)) not in assigned.setdefault(m.group(2), []):
                         assigned[m.group(2)].append(own_value(m.group(2), m.group(4)))
+    settled -= unset
     chain, moved_at = False, []   # for each simple command: whether it moves its own working directory (-C, --directory, --chdir) or a cd stands before it in its chain, or the command it is quoted in moved: the shell runs a relative path from there
     for words in simple:
         join = (words[0] if words and is_operator(words[0]) else '').strip('\n')   # the operator in front of the simple command
@@ -814,9 +826,10 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
             if any(c.isspace() for c in word) and not is_operator(word):   # (a newline is an operator: not a command to read)
                 if depth >= 2:
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
-                found += [t for t in command_programs(word, exclude, depth + 1, named, assigned, here) if t not in found]
+                here_names = {w.partition('=')[0] for w in words if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', w, re.DOTALL)}   # the quoted command gets what is set for the whole command and what stands in front of it in its own simple command (`env A=x sh -c '...'`)
+                found += [t for t in command_programs(word, exclude, depth + 1, named, {n: v for n, v in assigned.items() if n in settled or n in here_names}, here) if t not in found]
             for piece in word_pieces(word, assigned):
-                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, here, assigned):
+                if session_dependent(piece, index == run and (piece == word or '$' in word), directories, named, here, assigned, settled):
                     raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:

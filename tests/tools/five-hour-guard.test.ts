@@ -2432,13 +2432,18 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(made, `what sh makes of ${word}`).toBe(`${hooks}/${file}`);
       const script = join(hooks, file);
       writeFileSync(script, text, 'utf8');
-      for (const command of [`${assign ? `${assign}; ` : ''}python3 "${word}"`, `${assign ? `${assign} ` : ''}python3 ${word}`]) {
+      for (const command of [`${assign ? `${assign}; ` : ''}python3 "${word}"`, ...(assign ? [] : [`python3 ${word}`])]) {
         const r = start(command, script, env);
         expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
         expect(r.stderr, command).toContain(`"state_file" (${script}) and "program of another hook" (${script}) are the same file`);
         expect(readText(script), `${command}: the program is intact`).toBe(text);
       }
     }
+    // an assignment in front of the command is not seen by the words of that command (the shell expands them first): sh makes audit0 of this word, and the guard cannot know the value, so it refuses to start
+    expect(spawnSync('/bin/sh', ['-c', `X=ab true; printf %s "${hooks}/audit\${#X}"`], { encoding: 'utf8' }).stdout, 'sh does not see X').toBe(`${hooks}/audit0`);
+    const scoped = start(`X=ab python3 ${hooks}/audit\${#X}`, join(hooks, 'audit2'));
+    expect(scoped.status, 'a scoped assignment').toBe(2);
+    expect(scoped.stderr).toMatch(/not read to its end/);
     // a length that no value has names another file; a name without a value stays as written
     expect(start(`X=ab; python3 "${hooks}/audit\${#X}"`, join(hooks, 'audit3')).status, 'another length').toBe(0);
     writeFileSync(join(hooks, 'audit0'), text, 'utf8');
@@ -2967,6 +2972,50 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const [command, env] of [['python3 "${FHG_A%.py}"', settings], ['python3 "${FHG_A%$FHG_S}"', { ...settings, FHG_S: '.py' }], ['FHG_S=.py; python3 "${FHG_A%$FHG_S}"', settings], ['python3 "${FHG_A%${FHG_S:-.py}}"', settings],
       [`python3 "${hooks}/\${FHG_B#$FHG_P}"`, { ...settings, FHG_P: '/prefix/' }]] as Array<[string, Record<string, string>]>) {
       const r = start(command, env, { state_file: audit });
+      expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain('are the same file');
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+  });
+
+  it('an assignment in front of a command (NAME=x cmd, env NAME=x cmd) is that command\'s alone, and unset takes a name away: a parameter that only such an assignment or the session gives is a word the scan cannot know, so the guard refuses to start; an assignment that stands alone, after export or as ${NAME:=word}, and an assignment that a quoted command in the same simple command gets, are read as before', () => {
+    const f = fixture('foreign-assignment-scope', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    const old = join(hooks, 'audit.old');
+    writeFileSync(audit, text, { mode: 0o755 });
+    writeFileSync(old, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const path = (command: string) => spawnSync('sh', ['-c', command.replace('python3', 'printf %s')], { encoding: 'utf8' }).stdout;
+    const refused = [`FHG_S=.old true; python3 ${hooks}/audit$FHG_S`, `env FHG_S=.old true; python3 ${hooks}/audit$FHG_S`, `FHG_S=.old; unset FHG_S; python3 ${hooks}/audit$FHG_S`, `FHG_S=.old; unset -v FHG_S; python3 ${hooks}/audit$FHG_S`,
+      `FHG_S=.old python3 ${hooks}/audit$FHG_S`, `FHG_S=.old true; python3 "${hooks}/audit$FHG_S"`, `FHG_S=.old true; sh -c 'python3 ${hooks}/audit$FHG_S'`];
+    const settled = [`FHG_S=.old; python3 ${hooks}/audit$FHG_S`, `export FHG_S=.old; python3 ${hooks}/audit$FHG_S`, `env FHG_S=.old sh -c 'python3 ${hooks}/audit$FHG_S'`, `: \${FHG_S:=.old}; python3 ${hooks}/audit$FHG_S`,
+      `FHG_S=.old\npython3 ${hooks}/audit$FHG_S`, `FHG_S=.old; true; python3 ${hooks}/audit\${FHG_S}`];
+    for (const command of refused.slice(0, 5)) {
+      expect(path(command).includes('.old'), `${command}: the shell does not give the name to this command`).toBe(false);
+    }
+    for (const command of settled.slice(0, 3).concat(settled.slice(4))) {
+      expect(path(command), `${command}: the shell has the name`).toBe(old);
+    }
+    for (const command of refused) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    // the name has a value for the command: the scan reads audit.old, which is the file when it is the state file
+    for (const command of settled) {
+      const r = start(command, { state_file: old });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
       expect(r.stderr, command).toContain('are the same file');
       expect(r.stderr, command).not.toMatch(/not read to its end/);
