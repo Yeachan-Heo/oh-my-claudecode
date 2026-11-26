@@ -630,6 +630,13 @@ describe("parseFrontmatter trailing comments", () => {
     expect(parse('map: {k: "v # x"} # c').map).toBe('{k: "v # x"}');
   });
 
+  it("opens a quote after a YAML tag or anchor", () => {
+    expect(parse('description: !!str "Use # carefully"').description).toBe('!!str "Use # carefully"');
+    expect(parse("description: &d 'Use # carefully' # c").description).toBe("&d 'Use # carefully'");
+    expect(parse('map: {k: !!str "v # x"}').map).toBe('{k: !!str "v # x"}');
+    expect(parse('note: Hello !world "x # y"').note).toBe('Hello !world "x');
+  });
+
   it("opens a quote right after the colon of a quoted key", () => {
     expect(parse('metadata: {"label":"a # b"}').metadata).toBe('{"label":"a # b"}');
     expect(parse("metadata: {'label':'a # b'} # c").metadata).toBe("{'label':'a # b'}");

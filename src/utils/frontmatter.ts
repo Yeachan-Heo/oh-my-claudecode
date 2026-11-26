@@ -188,6 +188,9 @@ function foldBlockScalarRows(rows: BlockScalarRow[]): string {
   );
 }
 
+/** YAML tags and anchors (`!!str `, `!local `, `&name `) right before a scalar. */
+const NODE_PROPERTIES = /(?:[!&][^\s,[\]{}]*\s+)+$/;
+
 /**
  * Drop a trailing YAML comment from a one-line value. A `#` starts a comment only
  * at the start of the value or after whitespace, and never inside a quoted scalar,
@@ -214,9 +217,11 @@ function stripTrailingComment(value: string): string {
       // A quote opens a scalar only at the start of the value, of a flow item
       // (after `[`, `{` or `,`) or of a flow mapping value (after `:` and
       // whitespace, or right after the `:` of a quoted key, as in JSON-style
-      // `{"k":"v"}`). In `[a:", b]` the quote is part of the plain scalar `a:"`.
-      const before = value.slice(0, i);
-      const afterQuotedKey = closedAt >= 0 && /^\s*:\s*$/.test(value.slice(closedAt + 1, i));
+      // `{"k":"v"}`). A tag or anchor may come first (`!!str "a # b"`).
+      // In `[a:", b]` the quote is part of the plain scalar `a:"`.
+      const before = value.slice(0, i).replace(NODE_PROPERTIES, "");
+      const afterQuotedKey =
+        closedAt >= 0 && /^\s*:\s*$/.test(value.slice(closedAt + 1, i).replace(NODE_PROPERTIES, ""));
       if (before.trim() === "" || /[[{,]\s*$/.test(before) || /:\s+$/.test(before) || afterQuotedKey) {
         quote = char;
       }
