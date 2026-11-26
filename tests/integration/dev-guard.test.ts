@@ -160,6 +160,9 @@ const BLOCKED: string[] = [
   // ed, ex
   'ed /dev/null', 'ed -s /dev/null', "printf 'w\n' | ed /dev/null", 'ex /dev/null', 'ex -s /dev/sda', "ed -p '*' /dev/null", "ed -s /dev/null <<< 'w'", 'red /dev/null',
   // the repair recipe is refused when it is not the whole command (probe: broken, see the tests below)
+  // the words of env -S go back to the option parser of env: its own options, a double dash and assignments come first, the command last
+  "env -S '-i rm /dev/null'", "env -S '-- rm /dev/null'", "env -S '-u HOME rm /dev/null'", "env -S 'FOO=1 rm /dev/null'", "env -S '-S rm\\_/dev/null'", "env -S '-i' rm /dev/null", "env -S '-i -u HOME -- rm /dev/null' x",
+  "env --split-string='-i rm /dev/null'", "env -S '- rm /dev/null'", "env -S '-i env -i rm /dev/null'", "env -S '-i sudo -n rm /dev/null'", 'env - rm /dev/null', 'env -i - rm /dev/null',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -262,6 +265,8 @@ const ALLOWED: string[] = [
   'awk -i inplace -F /dev/ 1 file', 'fdisk -V /dev/sda', 'sfdisk --list-types /dev/sda', 'parted /dev/sda q', 'awk -i inplace --exec p.awk file', 'gawk -i inplace -l ordchr 1 file', 'awk -i inplace 1 x=/dev/null file',
   // ed and ex on an ordinary file, /dev only as a value
   'ed file', 'ed -s file', 'ed /dev/shm/x', 'echo x | ed', 'ed --version', 'ex file', 'ed -p "/dev/x" file',
+  // the same words with a command that does not touch /dev
+  "env -S '-i true'", "env -S '-i echo /dev/null'", "env -S '-- ls /dev/null'", "env -S '-u HOME true' /dev/null", 'env - ls /dev/null',
 ];
 
 describe('/dev guard: Bash commands', () => {

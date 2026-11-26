@@ -153,7 +153,7 @@ const envSplitText = (text) => text.replace(/\\(.)/gs, (pair, c) => (c === '_' ?
 
 // [name, ...args] without leading keywords, assignments and wrappers: { name, args, xargs, replace }, or null when nothing is left.
 // xargs: the command is fed by a pipe; replace: the replace string of xargs -I, -i or --replace. env -S TEXT is a command line of its own: it
-// comes back as eval with TEXT followed by the remaining arguments.
+// comes back as eval with TEXT followed by the remaining arguments, but when TEXT starts with an option its words go through env's options again.
 function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the words that are a plain unquoted time at the start of a pipeline
   let at = 0;
   let keyword = true; // still at the start of the command, where time is the keyword of the shell (only -p and -- follow it)
@@ -174,7 +174,7 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
       if (a === '--') { i++; break; }
       if (timeKeyword && a !== '-p') break;
       if (spec.assign && isAssignment(a)) continue;
-      if (!a.startsWith('-') || a === '-') break;
+      if (!a.startsWith('-') || (a === '-' && name !== 'env')) break; // for env a lone dash is -i
       if (name === 'env' && (a.startsWith('-S') || longIs(a.split('=')[0], '--split-string', 3))) { // the text to split follows, attached or as the next argument
         const eq = a.indexOf('=');
         split = a.startsWith('--') ? (eq > 0 ? a.slice(eq + 1) : values[++i]) : (a.length > 2 ? a.slice(2) : values[++i]);
@@ -192,7 +192,12 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
         if (k === a.length - 1 && !spec.opt?.includes(a[k])) i++;
       }
     }
-    if (split !== undefined) return { name: 'eval', args: [envSplitText(split), ...values.slice(i)], xargs, replace };
+    if (split !== undefined) {
+      const text = envSplitText(split);
+      const words = tokenizeBash(text).tokens.filter((t) => t.type === 'word').map(devWordText);
+      if (words[0]?.startsWith('-')) { values = ['env', ...words, ...values.slice(i)]; at = 0; continue; } // env reads the words again as its own options, then assignments, then the command
+      return { name: 'eval', args: [text, ...values.slice(i)], xargs, replace };
+    }
     if (name === 'command' && values.slice(at + 1, i).some((o) => /^-[a-z]*[vV]/.test(o))) return null; // command -v only looks the name up
     if (name === 'xargs') xargs = true;
     at = i + (spec.skip ?? 0);
