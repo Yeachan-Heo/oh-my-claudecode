@@ -2981,9 +2981,10 @@ async function main() {
       }
     }
 
-    // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands. Fail-open: any error here
-    // leaves the hook behaving as without the checks.
-    if ((toolName === 'Bash' || toolName === 'PowerShell') && process.env.OMC_SHELL_CHECKS === '1') {
+    // Opt-in shell checks (OMC_SHELL_CHECKS=1) for Bash and PowerShell commands, and for the file writers whose path field
+    // shows /dev (other writes never load the checks). Fail-open: any error here leaves the hook behaving as without the checks.
+    const devFileCall = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName) && /\/dev(?:\/|\s|$)/.test(`${(data?.tool_input ?? data?.toolInput)?.file_path ?? ''} ${(data?.tool_input ?? data?.toolInput)?.notebook_path ?? ''}`);
+    if ((toolName === 'Bash' || toolName === 'PowerShell' || devFileCall) && process.env.OMC_SHELL_CHECKS === '1') {
       try {
         const { runShellChecks } = await import('./lib/shell-checks.mjs');
         const verdict = runShellChecks(toolName, data, { logDir: join(stateDir, 'shell-checks') });
