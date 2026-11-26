@@ -1,5 +1,17 @@
 import { validateAnthropicBaseUrl } from '../utils/ssrf-guard.js';
 
+/**
+ * Loopback proxy port that ANTHROPIC_BASE_URL may point to, from
+ * OMC_ALLOW_LOOPBACK_PROXY_PORT (integer 1-65535; anything else is ignored). Set only by
+ * the provider launchers when they hand a session the address of their local proxy.
+ */
+function loopbackProxyPort(): number | undefined {
+  const raw = process.env.OMC_ALLOW_LOOPBACK_PROXY_PORT;
+  if (!raw || !/^\d+$/.test(raw)) return undefined;
+  const port = Number(raw);
+  return port >= 1 && port <= 65535 ? port : undefined;
+}
+
 export type ModelTier = 'LOW' | 'MEDIUM' | 'HIGH';
 export type ClaudeModelFamily = 'HAIKU' | 'SONNET' | 'OPUS' | 'FABLE';
 
@@ -326,6 +338,30 @@ export function isSubagentSafeModelId(modelId: string): boolean {
 }
 
 /**
+ * Check whether a model ID belongs to a configured alternative provider whose
+ * full model name carries a context suffix (for example `acme-large[1m]`).
+ *
+ * For such providers the suffix is part of the model name, not a context-window
+ * flag as with Anthropic, so the sub-agent gate must not reject the ID. Opt-in:
+ * only IDs that start with a prefix listed in OMC_PROVIDER_MODEL_PREFIXES
+ * (comma-separated, case-insensitive) qualify, and only while the process talks
+ * to a non-Claude provider other than Bedrock and Vertex AI. Without the
+ * variable this always returns false. Mirrored inline in
+ * scripts/pre-tool-enforcer.mjs.
+ */
+export function isAltProviderModelId(modelId: string): boolean {
+  const prefixes = (process.env.OMC_PROVIDER_MODEL_PREFIXES || '')
+    .split(',')
+    .map((prefix) => prefix.trim())
+    .filter(Boolean);
+  return prefixes.some((prefix) => new RegExp(
+    `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9][A-Za-z0-9._-]*(\\[\\d+[mk]\\])?$`,
+    'i',
+  ).test(modelId))
+    && isNonClaudeProvider() && !isBedrock() && !isVertexAI();
+}
+
+/**
  * Detect whether Claude Code is running on Google Vertex AI.
  *
  * Claude Code sets CLAUDE_CODE_USE_VERTEX=1 when configured for Vertex AI.
@@ -398,7 +434,7 @@ export function isNonClaudeProvider(): boolean {
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
   if (baseUrl) {
     // Validate URL for SSRF protection
-    const validation = validateAnthropicBaseUrl(baseUrl);
+    const validation = validateAnthropicBaseUrl(baseUrl, { allowLoopbackPort: loopbackProxyPort() });
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Rejecting ANTHROPIC_BASE_URL: ${validation.reason}`);
       // Treat invalid URLs as non-Claude to prevent potential SSRF
@@ -442,7 +478,7 @@ export function shouldAutoForceInherit(): boolean {
 
   const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
   if (baseUrl) {
-    const validation = validateAnthropicBaseUrl(baseUrl);
+    const validation = validateAnthropicBaseUrl(baseUrl, { allowLoopbackPort: loopbackProxyPort() });
     if (!validation.allowed) {
       console.error(`[SSRF Guard] Rejecting ANTHROPIC_BASE_URL: ${validation.reason}`);
       return true;
