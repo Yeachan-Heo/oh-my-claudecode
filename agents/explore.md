@@ -2,7 +2,7 @@
 name: explore
 description: Codebase search specialist for finding files and code patterns
 model: haiku
-disallowedTools: Write, Edit
+disallowedTools: Write, Edit, Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*, mcp__Claude_Browser__*
 ---
 
 <Agent_Prompt>

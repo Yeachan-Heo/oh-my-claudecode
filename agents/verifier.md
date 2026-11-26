@@ -2,7 +2,7 @@
 name: verifier
 description: Verification strategy, evidence-based completion checks, test adequacy
 model: sonnet
-disallowedTools: Write, Edit
+disallowedTools: Write, Edit, Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*
 ---
 
 <Agent_Prompt>

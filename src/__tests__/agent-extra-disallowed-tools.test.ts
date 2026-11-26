@@ -36,6 +36,11 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/** The extra tokens the agent's own list does not already have, appended after it. */
+function withExtras(own: readonly string[], extra: readonly string[]): string[] {
+  return [...own, ...extra.filter((token) => !own.includes(token))];
+}
+
 function frontmatterLines(content: string): string[] {
   const match = content.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/);
   return match ? match[1].split(/\r?\n/) : [];
@@ -168,7 +173,7 @@ describe('applyExtraDisallowedToolsToMarkdown', () => {
       const content = readFileSync(join(AGENTS_DIR, `${agent}.md`), 'utf-8');
       const own = extractDisallowedTools(content) ?? [];
       const out = applyExtraDisallowedToolsToMarkdown(content, DESKTOP_PATTERNS);
-      expect(extractDisallowedTools(out)).toEqual([...own, ...DESKTOP_PATTERNS]);
+      expect(extractDisallowedTools(out)).toEqual(withExtras(own, DESKTOP_PATTERNS));
       expect(out.slice(out.indexOf('\n---', 4))).toBe(content.slice(content.indexOf('\n---', 4)));
     }
   });
@@ -296,7 +301,7 @@ describe('applyExtraDisallowedToolsToMarkdown with unusual token values', () => 
     for (const agent of AGENTS) {
       const original = readFileSync(join(AGENTS_DIR, `${agent}.md`), 'utf-8');
       const out = applyExtraDisallowedToolsToMarkdown(original, tokens);
-      expect(extractDisallowedTools(out)).toEqual([...(extractDisallowedTools(original) ?? []), ...tokens]);
+      expect(extractDisallowedTools(out)).toEqual(withExtras(extractDisallowedTools(original) ?? [], tokens));
       expectFrontmatterIntact(original, out);
     }
   });
@@ -385,20 +390,21 @@ describe('getAgentDefinitions with OMC_AGENT_EXTRA_DISALLOWED_TOOLS', () => {
     }
   });
 
-  test('a custom pattern is appended to an agent without its own list', () => {
+  test('a custom pattern is appended after the own entries of an agent', () => {
     vi.stubEnv(EXTRA_DISALLOWED_TOOLS_ENV, 'mcp__custom__*');
     const defs = getAgentDefinitions({ config: {} });
-    expect(defs.executor.disallowedTools).toEqual(['mcp__custom__*']);
-    expect(defs.explore.disallowedTools).toEqual(['Write', 'Edit', 'mcp__custom__*']);
+    expect(defs.executor.disallowedTools).toEqual([...DESKTOP_PATTERNS, 'mcp__custom__*']);
+    expect(defs.explore.disallowedTools).toEqual(['Write', 'Edit', ...DESKTOP_PATTERNS, 'mcp__custom__*']);
   });
 
-  test('omc capabilities shows the effective list only when the variable is set', () => {
+  test('omc capabilities shows the effective list', () => {
     const find = (name: string) => collectCapabilitySurface().agents.find((a) => a.name === name)!;
-    expect(find('executor').disallowedTools).toEqual([]);
+    const sorted = (tools: string[]) => [...tools].sort((a, b) => a.localeCompare(b));
+    expect(find('executor').disallowedTools).toEqual(sorted(DESKTOP_PATTERNS));
 
     vi.stubEnv(EXTRA_DISALLOWED_TOOLS_ENV, 'mcp__custom__*');
-    expect(find('executor').disallowedTools).toEqual(['mcp__custom__*']);
-    expect(find('explore').disallowedTools).toEqual(['Edit', 'mcp__custom__*', 'Write']);
+    expect(find('executor').disallowedTools).toEqual(sorted([...DESKTOP_PATTERNS, 'mcp__custom__*']));
+    expect(find('explore').disallowedTools).toEqual(sorted(['Write', 'Edit', ...DESKTOP_PATTERNS, 'mcp__custom__*']));
   });
 });
 
@@ -459,7 +465,7 @@ describe('legacy agent install with OMC_AGENT_EXTRA_DISALLOWED_TOOLS', () => {
       const original = readFileSync(join(AGENTS_DIR, file), 'utf-8');
       const copy = readFileSync(join(installed, file), 'utf-8');
       expect(copy).toBe(applyExtraDisallowedToolsToMarkdown(original, DESKTOP_PATTERNS));
-      expect(extractDisallowedTools(copy)).toEqual([...(extractDisallowedTools(original) ?? []), ...DESKTOP_PATTERNS]);
+      expect(extractDisallowedTools(copy)).toEqual(withExtras(extractDisallowedTools(original) ?? [], DESKTOP_PATTERNS));
     }
   });
 

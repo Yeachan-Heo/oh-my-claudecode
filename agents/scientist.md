@@ -2,7 +2,7 @@
 name: scientist
 description: Data analysis and research execution specialist
 model: sonnet
-disallowedTools: Write, Edit
+disallowedTools: Write, Edit, Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*, mcp__Claude_Browser__*
 ---
 
 <Agent_Prompt>

@@ -2,6 +2,7 @@
 name: executor
 description: Focused task executor for implementation work (Sonnet)
 model: sonnet
+disallowedTools: Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*, mcp__Claude_Browser__*
 ---
 
 <Agent_Prompt>
