@@ -314,6 +314,8 @@ const ALLOWED: string[] = [
   'busybox ls /dev', 'busybox cat /dev/null', 'busybox echo /dev/null', 'busybox --list', 'busybox true', 'env busybox ls /dev',
   // time after a redirection of an earlier command is the keyword again after the list operator
   'true >/tmp/log && time -f %e rm /dev/null', 'true >/tmp/log; time -f %e rm /dev/null',
+  // the old style first word with O and a directory letter: the members go to the standard output wherever the directory is
+  'tar xOCf / a.tar dev/null', 'tar xCOf / a.tar dev/null',
 ];
 
 describe('/dev guard: Bash commands', () => {
