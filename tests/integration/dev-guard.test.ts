@@ -116,7 +116,7 @@ const BLOCKED: string[] = [
   'echo /dev/null | xargs --eof rm', 'echo /dev/null | xargs -e rm', 'echo /dev/null | xargs -re rm', 'echo /dev/null | xargs -rt -l rm',
   // tar writes a member under its name with the first components stripped
   'tar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar --strip-components 1 -C / -xf /tmp/a.tar foo/dev/null', 'tar --strip=1 -C / -xf /tmp/a.tar foo/dev/null', 'gtar --strip-components=2 -C / -xf /tmp/a.tar a/b/dev/null',
-  'bsdtar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar -C / --strip-components=1 -xf /tmp/a.tar ./dev/null', 'tar --strip-components=1 -C / -xf /tmp/a.tar /dev/null', 'tar --strip-components=x -C / -xf /tmp/a.tar dev/null',
+  'bsdtar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar -C / --strip-components=1 -xf /tmp/a.tar ./dev/null', 'tar --strip-components=x -C / -xf /tmp/a.tar dev/null',
   // members before the -x list are still extracted, and so is everything when -x comes before the archive
   'unzip a.zip dev/other -x dev/null -d /', 'unzip a.zip dev/null -x top.txt -d /', 'unzip -d / a.zip dev/other -x dev/null', 'unzip a.zip dev/null -x dev/null top.txt -d /', 'unzip -x a.zip dev/null -d /',
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
@@ -163,6 +163,9 @@ const BLOCKED: string[] = [
   // the words of env -S go back to the option parser of env: its own options, a double dash and assignments come first, the command last
   "env -S '-i rm /dev/null'", "env -S '-- rm /dev/null'", "env -S '-u HOME rm /dev/null'", "env -S 'FOO=1 rm /dev/null'", "env -S '-S rm\\_/dev/null'", "env -S '-i' rm /dev/null", "env -S '-i -u HOME -- rm /dev/null' x",
   "env --split-string='-i rm /dev/null'", "env -S '- rm /dev/null'", "env -S '-i env -i rm /dev/null'", "env -S '-i sudo -n rm /dev/null'", 'env - rm /dev/null', 'env -i - rm /dev/null',
+  // with the strip option a name with a leading slash loses the slash first, and then the components (bsdtar counts the slash as the first one)
+  'tar --strip-components=1 -C / -xf a.tar /foo/dev/null', 'gtar --strip-components 1 -C / -xf a.tar /foo/dev/null', 'tar --strip-components=1 -C / -xf a.tar //foo/dev/null', 'tar --strip-components=2 -C / -xf a.tar /a/b/dev/null',
+  'bsdtar --strip-components=2 -C / -xf a.tar /foo/dev/null', 'bsdtar --strip-components=1 -C / -xf a.tar /dev/null', 'tar -C / -xf a.tar /dev/null', 'tar --strip-components=1 -C /dev -xf a.tar /foo/x',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -267,6 +270,8 @@ const ALLOWED: string[] = [
   'ed file', 'ed -s file', 'ed /dev/shm/x', 'echo x | ed', 'ed --version', 'ex file', 'ed -p "/dev/x" file',
   // the same words with a command that does not touch /dev
   "env -S '-i true'", "env -S '-i echo /dev/null'", "env -S '-- ls /dev/null'", "env -S '-u HOME true' /dev/null", 'env - ls /dev/null',
+  // the same names with a strip that leaves a path outside /dev
+  'tar --strip-components=2 -C / -xf a.tar /foo/dev/null', 'tar --strip-components=1 -C / -xf a.tar /dev/null', 'gtar --strip-components=3 -C / -xf a.tar /foo/dev/null', 'bsdtar --strip-components=3 -C / -xf a.tar /foo/dev/null',
 ];
 
 describe('/dev guard: Bash commands', () => {

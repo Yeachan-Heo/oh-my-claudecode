@@ -373,7 +373,8 @@ function tarExtractDir(args, name) {
     return false;
   };
   const named = parsed.operands.filter((m) => !isExcluded(m));
-  const members = named.map((m) => (strip === 0 || m.startsWith('/') ? m : m.split('/').filter(Boolean).slice(strip).join('/'))).filter(Boolean); // a member with no component left is skipped
+  // the strip counts the components of the name without its leading slash; bsdtar counts that slash as the first one for a name with a leading slash
+  const members = named.map((m) => (strip === 0 ? m : m.split('/').filter(Boolean).slice(m.startsWith('/') && name === 'bsdtar' ? strip - 1 : strip).join('/'))).filter(Boolean); // a member with no component left is skipped
   return found ?? archiveMemberInDev(resolved, members); // a named member lands in each directory, whatever order -C and the members come in
 }
 
