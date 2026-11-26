@@ -4642,6 +4642,29 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(f.log), 'the log has the name too').toContain(kept[0]);
   });
 
+  it('a renewal whose exchange back fails keeps the file that came in under the temporary name, leaves the new pause in place, and the error and the log say so', () => {
+    const f = fixture('renewal-exchange-back-fails', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(f);   // enters the pause; the next run renews it
+    const before = readJson(f.pause).valid_until;
+    // file A takes the path right after the identity check, so the first exchange takes it out; the exchange back (the second call) does not happen
+    const driver = ['import ctypes, os, runpy, sys', 'real_lstat, real_cdll, pause, looks, calls = os.lstat, ctypes.CDLL, sys.argv[1], [], []',
+      'def swap(path, *args, **kw):', '    found = real_lstat(path, *args, **kw)',
+      '    if str(path) == pause and sys._getframe(1).f_code.co_name == "write_json" and not looks:', '        looks.append(1)',
+      '        open(pause + ".a", "w").write("foreign file A\\n")', '        os.replace(pause + ".a", pause)',
+      '    return found',
+      'class Library:', '    def __init__(self, library):', '        self.library = library',
+      '    def renameat2(self, *args):', '        calls.append(1)', '        return self.library.renameat2(*args) if len(calls) == 1 else -1',
+      'os.lstat, ctypes.CDLL = swap, lambda *args, **kw: Library(real_cdll(*args, **kw))', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    const kept = readdirSync(f.dir).filter((n) => n.endsWith('.tmp'));
+    expect(kept, 'the file that came in is kept under the temporary name').toHaveLength(1);
+    expect(readText(join(f.dir, kept[0])), 'with its content').toBe('foreign file A\n');
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*exchange back failed.*kept as .*\.tmp.*new file is in place at/);
+    expect(r.stdout, 'the message names the file that is kept').toContain(join(f.dir, kept[0]));
+    expect(readText(f.log), 'the log names it too').toContain(kept[0]);
+    expect(readJson(f.pause).valid_until, 'the new pause is at the path: the path is never empty').toBeGreaterThan(before);
+  });
+
   it('where hard links are not supported a foreign file that takes the place of the reservation after the check of its identity, right before the pause is put in place, is kept: the write fails and nothing is lost', () => {
     const driver = ['import errno, os, runpy, sys', 'target, real, looks = sys.argv[1], os.lstat, []',
       'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',

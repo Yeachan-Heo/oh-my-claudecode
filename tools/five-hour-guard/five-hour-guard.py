@@ -1108,21 +1108,24 @@ def swap_in(tmp, path, expected, mine):
     """Put the file `tmp` (identity `mine`) in place of the file at `path` that has the identity `expected`, and never destroy another file: the two
     paths are exchanged and what came out is looked at. The expected file is removed. Another file (it came in after the look) is put back by an
     exchange again, and what comes out of that is removed only when it is the new file; another one (a second arrival) stays under the temporary
-    name (KeptAside, naming it). Where the two paths cannot be exchanged nothing is replaced: OSError."""
+    name (KeptAside, naming it). When the exchange back itself fails, the new file stays at the path (it is never empty) and the file that came in
+    stays under the temporary name (KeptAside, naming both). Where the two paths cannot be exchanged nothing is replaced: OSError."""
     if not exchange(tmp, path):
         raise OSError(f'the file {path} cannot be put in place without replacing a file that was not looked at (this system or its file system cannot exchange two paths, or nothing is at the path any more): nothing is replaced')
     try:   # what was at the path is under the temporary name now: whatever fails from here on, it is not removed with the new file
         if file_identity(os.lstat(tmp)) == expected:
             os.unlink(tmp)   # the file that was looked at, replaced
             return
-        exchange(tmp, path)   # another file came in after the look: it goes back
-        ours = file_identity(os.lstat(tmp)) == mine   # what came out of that is the new file, or another file that came in meanwhile
+        back = exchange(tmp, path)   # another file came in after the look: it goes back
+        ours = back and file_identity(os.lstat(tmp)) == mine   # what came out of that is the new file, or another file that came in meanwhile
         if ours:
             os.unlink(tmp)
     except Exception as e:
         raise KeptAside(f'the file {path} changed since it was validated and is not replaced; the file under {tmp} is kept ({e!r})') from e
     if ours:
         raise OSError(f'the file {path} changed since it was validated and is not replaced')
+    if not back:   # the new file is in place and the file that came in stays under the temporary name: nothing is destroyed, the path is never empty, and the error says both
+        raise KeptAside(f'the file {path} changed since it was validated and the exchange back failed: the file that came in is kept as {tmp}, and the new file is in place at {path}')
     raise KeptAside(f'the file {path} changed since it was validated and is not replaced; the file that came in is kept as {tmp}')
 
 
