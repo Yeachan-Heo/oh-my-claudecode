@@ -1344,10 +1344,13 @@ async function main() {
 
     // Consume reviewer results on re-entry without issuing another block.
     if (data.stop_hook_active === true) {
+      const ralphSessionMatches = hasValidSessionId
+        ? ralph.state?.session_id === sessionId
+        : !ralph.state?.session_id || ralph.state.session_id === sessionId;
       if (isAuthoritativeModeActive(stateDir, "ralph", ralph, sessionId)
         && !isAwaitingConfirmation(ralph.state)
         && !isStaleState(ralph.state)
-        && isSessionMatch(ralph.state, sessionId)) {
+        && ralphSessionMatches) {
         const before = await reviewerWorkState({ directory, sessionId, omcRoot, stateDir });
         if (before.pending) {
           const beforeKey = reviewerWorkKey(before);
@@ -1383,7 +1386,10 @@ async function main() {
         "autopilot-state.json",
         sessionId,
       );
-      if (autopilotForReentry.state?.active && hasNamedWorkflowMarkers(autopilotForReentry.state) && isSessionMatch(autopilotForReentry.state, sessionId)) {
+      const autopilotSessionMatches = hasValidSessionId
+        ? autopilotForReentry.state?.session_id === sessionId
+        : !autopilotForReentry.state?.session_id || autopilotForReentry.state.session_id === sessionId;
+      if (autopilotForReentry.state?.active && hasNamedWorkflowMarkers(autopilotForReentry.state) && autopilotSessionMatches) {
         // Check if workflow has advanced to a new stage or completed
         const workflowAdvance = advanceWorkflowOnStop(autopilotForReentry.state, data, sessionId);
         if (workflowAdvance) {

@@ -407,18 +407,19 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(advancedOnce.reason).toBe(expectedStagePrompt('execution'));
     expect(readState(f).pipelineTracking.currentStageIndex).toBe(1);
 
-    // Complete stage 2 (execution)
+    // Add stage 2 completion to transcript but don't invoke yet.
+    // This creates a pending completion: the workflow is active but hasn't processed the completion.
     appendRecord(f, { message: { role: 'assistant', content: completion('execution') } });
-    const completedResult = invoke(f);
-    expect(completedResult.reason).toContain('All selected stages are complete');
     const beforeReentry = readState(f);
-    expect(beforeReentry).toMatchObject({ active: false, phase: 'complete' });
+    expect(beforeReentry).toMatchObject({ active: true, phase: 'execution', pipelineTracking: { currentStageIndex: 1 } });
 
     // Simulate stop_hook_active re-entry: workflow completion should be processed
-    // without emitting another decision:block (which would trigger safety overrides)
+    // without emitting another decision:block (which would trigger safety overrides).
+    // The re-entry logic should detect the pending completion and advance the workflow.
     const reentryResult = invoke(f, { stop_hook_active: true });
     expect(reentryResult).toEqual({ continue: true, suppressOutput: true });
-    expect(readState(f)).toEqual(beforeReentry);
+    const afterReentry = readState(f);
+    expect(afterReentry).toMatchObject({ active: false, phase: 'complete' });
   });
 
   it('allows concurrent duplicate stops to commit only one revision', async () => {

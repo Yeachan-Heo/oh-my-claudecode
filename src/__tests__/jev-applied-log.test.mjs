@@ -693,7 +693,11 @@ describe('hook scripts with OMC_JEV_APPLIED_LOG=1', () => {
         OMC_JEV_SIMPLIFIER_APPLY: '1',
         ...overrides,
       });
-      expect(output.continue).toBe(skipped);
+      if (skipped) {
+        expect(output.continue).toBe(true);
+      } else {
+        expect(output.decision).toBe('block');
+      }
       expect(readLog(context, 'applied.jsonl')).toEqual([]);
     }, 60_000);
   });
