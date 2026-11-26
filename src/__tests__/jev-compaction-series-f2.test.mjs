@@ -77,9 +77,11 @@ const call = (n) => `[compacted] Read(file-${n}.txt) - result of ${1000 + n} cha
 const SERIES = (from) => [call(from), call(from + 1), call(from + 2), call(from + 3)].join('\n');
 
 /** The same session as the F2 tests have (a task, `steps` steps of a call and its result, a last request), with `extra(i)` added to the text of step i. */
-function session(steps, extra = () => '') {
+function session(steps, extra = () => '', asks = () => undefined) {
   const m = [{ role: 'user', text: 'Task: look at the notes and report.', toolUses: [] }];
   for (let i = 1; i <= steps; i++) {
+    const owner = asks(i);
+    if (owner) m.push({ role: 'user', text: owner, toolUses: [] }, { role: 'assistant', text: `Answer to the message ${i}.`, toolUses: [] });
     m.push({ role: 'assistant', text: `Step ${i} note ${fill(`detail${i}`, 900)}${extra(i)}`, toolUses: [{ tool_use_id: `t${i}`, tool: 'Bash', input: { command: `cat notes-${i}.txt` } }] });
     m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${i}`, text: `RESULT-${i} ${'x'.repeat(RESULT_CHARS)}`, isError: false }] });
   }
@@ -138,6 +140,24 @@ describe('series of traces in the compaction run: the queue of the second round 
     expect(allText(off.out)).not.toContain('traces merged');
   });
 
+  it('a series Jev gives no rating is not in the queue: nothing merges', async () => {
+    const run = await compactRun(CASCADE(60), session(40, withSeries), { rate: () => undefined });
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, answered: 0 });
+    expect(run.record.f2.candidates.series).toBeUndefined();
+    expect(run.record.series).toBeUndefined();
+    expect(allText(run.out)).not.toContain('traces merged');
+  });
+
+  it('a row another stage changes keeps its series: the long reply stage moves the reply in the row, the series beside it is neither asked about nor merged', async () => {
+    const env = CASCADE(54, { OMC_JEV_COMPACT_LONG_REPLIES: 'active' });
+    const asks = (i) => (i % 6 === 0 ? `Owner request ${i} ${fill(`ask${i}`, 300)}` : undefined);
+    const run = await compactRun(env, session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : ''), asks), { rate: () => 0 });
+    expect(run.record.replies.moved).toBeGreaterThan(0);
+    expect(allText(run.out)).toContain('[reply moved at compaction: ');
+    expect(run.record.f2.series_question?.items ?? 0).toBe(0);
+    expect(run.record.series).toBeUndefined();
+  });
+
   it('in shadow it counts the series candidates and writes nothing', async () => {
     const shadow = await compactRun({ ...CASCADE(55), OMC_JEV_COMPACT_TRESC: 'shadow' }, session(40, withSeries));
     expect(shadow.record.f2).toMatchObject({ mode: 'shadow', candidates: { series: 2 } });
@@ -152,5 +172,9 @@ describe('series of traces in the compaction run: the queue of the second round 
     expect(run.record.floor_series_tokens).toBeGreaterThan(0);
     const none = await compactRun(CASCADE(55), session(40));
     expect(none.record.floor_series_tokens).toBeUndefined();
+    // The same traces apart (a word between each) are no series: the floor stands higher by what the series gives back.
+    const apart = await compactRun(CASCADE(55), session(40, (i) => withSeries(i).replace(/\n(?=\[compacted\])/g, '\nand\n')), { rate: () => 3 });
+    expect(apart.record.floor_series_tokens).toBeUndefined();
+    expect(Math.abs(apart.record.floor_pred - run.record.floor_pred - run.record.floor_series_tokens)).toBeLessThanOrEqual(2);
   });
 });

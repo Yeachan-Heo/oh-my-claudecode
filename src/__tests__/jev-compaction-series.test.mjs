@@ -126,11 +126,11 @@ describe('series of traces: what is a series', () => {
 });
 
 describe('series of traces: the trace of a block', () => {
-  const block = (n, mode = 'bare') => blockTrace(1200 + n, `block number ${n} `.repeat(60), `b/${String(n).repeat(32).slice(0, 32)}.txt`, mode);
+  const block = (n, mode = 'bare') => blockTrace(1200 + n, `block number ${n} `.repeat(60), `b/${sha32(`block ${n}`)}.txt`, mode);
   const header = (dir) => traceHeader(dir);
 
   it('a block moved to a file, by its trace or as an agent block, is a member of a series (an "other" trace with a file), and in a direct reply it stays and parts the series', () => {
-    const agentBlock = blockTrace(900, 'agent words', `b/${'c'.repeat(32)}.txt`, 'bare', true);
+    const agentBlock = blockTrace(900, 'agent words', `b/${sha32('agent block')}.txt`, 'bare', true);
     const text = `${call(1)}\n${block(2)}\n${agentBlock}\n${call(3)}`;
     const [run] = seriesRuns(text);
     expect(run.stats).toMatchObject({ traces: 4, calls: 2, replies: 0, others: 2, file: true });
