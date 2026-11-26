@@ -118,7 +118,7 @@ def is_entry(handler, hook):
     the exact path `hook` of the hook script, as a whole word of the command (it starts and ends at a blank, an operator of the shell or an
     end of the command: a character that is valid in a file name, such as `+`, `,`, `@`, `%`, `=`, `:` or `~`, is no boundary, so `hook.py+audit` is
     another file; a quote that opens at the start of the word closes at its end, `'hook'` and `"hook"`, so `'hook'+audit` and `audit'hook'` are other
-    words; a quote that opens in front of the path and stays open, as in `sh -c 'hook --pause-file p'`, is the text of a quoted command; the blank or operator in front of it is free, see unescaped: `foo\\ hook` is one word, `foo` and the path together, which no shell runs as the hook): the entries
+    words; a quote that opens in front of the path and stays open, as in `sh -c 'hook --pause-file p'`, is the text of a quoted command, but only as the argument of an option that ends in `c` (`-c`, `-lc`): in `printf '%s\\n' "hook is data"` the quote opens an argument with data, which is not run; the blank or operator in front of it is free, see unescaped: `foo\\ hook` is one word, `foo` and the path together, which no shell runs as the hook): the entries
     that earlier versions of `add` wrote have no marker, and their command holds the path of the hook. A path that stands in a comment of the shell (`echo ok # hook`) is
     no word that runs, so it does not count: the comments are removed first as the guard removes them (strip_comments; where it cannot place a comment, a command with `$'...'`, a
     backtick or `<<`, the text stays whole, and the path in it still counts)."""
@@ -127,4 +127,5 @@ def is_entry(handler, hook):
         return False
     path, edge = re.escape(hook), r'[^\s;&|()<>]'
     text = strip_comments(command)   # a path in a comment of the shell is never run
-    return has_marker(command) or any(m.start() == 0 or unescaped(text, m.start() - 1) for m in re.finditer(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', text))
+    quoted_command = lambda m: m.group(1) is not None or re.search(r'(?:^|[\s;&|()])-[A-Za-z]*c\s*$', text[:m.start()])   # an open quote in front of the path: the text of a command only after -c
+    return has_marker(command) or any((m.start() == 0 or unescaped(text, m.start() - 1)) and quoted_command(m) for m in re.finditer(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', text))
