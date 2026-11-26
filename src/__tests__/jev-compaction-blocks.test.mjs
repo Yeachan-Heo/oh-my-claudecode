@@ -244,6 +244,23 @@ describe('blocks of text: the verdicts carried out (OMC_JEV_COMPACT_BLOCKS=activ
     }
   });
 
+  it('an answer that is not a whole level (0.4, 0.5, 1.2 or a negative one) is no verdict and the block stays word for word, while the whole levels 0 to 3 are carried out', async () => {
+    for (const bad of [0.4, 0.5, 1.2, -0.5]) {
+      const run = await compactRun(BLOCKS, session(40, { said }), { answer: () => bad });
+      expect(allText(run.out), String(bad)).not.toContain('[block moved at compaction: ');
+      expect(allText(run.out), String(bad)).toContain(said(4));
+      expect([...run.files()].filter(([p]) => p.includes('/verdict-block-')), String(bad)).toHaveLength(0);
+      expect(run.record.blocks.no_verdict, String(bad)).toBeGreaterThan(0);
+    }
+    for (const whole of [0, 1, 2, 3]) {
+      const run = await compactRun(BLOCKS, session(40, { said }), { answer: () => whole });
+      const verdicts = [...run.files()].filter(([p]) => p.includes('/verdict-block-')).map(([, t]) => JSON.parse(t).level);
+      expect(verdicts.length, String(whole)).toBeGreaterThan(8);
+      expect(new Set(verdicts), String(whole)).toEqual(new Set([whole]));
+      expect(allText(run.out).includes('[block moved at compaction: '), String(whole)).toBe(whole < 2);
+    }
+  });
+
   it('asks about a block once: a second compaction reads the verdict files and sends no question about blocks', async () => {
     const messages = session(40, { said });
     const first = fakeDollar({ env: BLOCKS, messages, api: apiOf(messages) });

@@ -4900,10 +4900,11 @@ async function askBlockVerdicts($, cfg, items, opts) {
       }
       for (const [q, en] of requests[k].map) {
         const s = scoreOf(r.value[q]);
-        if (s === undefined) continue;
+        const scaled = s === undefined ? NaN : s * (QUESTION_CRITERIA.length - 1);
+        if (!(Math.abs(scaled - Math.round(scaled)) <= 1e-9)) continue; // a block answer is a whole level: no answer, or a fraction of one, is no verdict
         const row = levels.get(en.it) ?? { done: 0, z: en.z, max: -1, noul: 0 };
         row.done++;
-        row.max = Math.max(row.max, Math.round(s * (QUESTION_CRITERIA.length - 1)));
+        row.max = Math.max(row.max, Math.round(scaled));
         row.noul = Math.max(row.noul, s);
         levels.set(en.it, row);
       }
