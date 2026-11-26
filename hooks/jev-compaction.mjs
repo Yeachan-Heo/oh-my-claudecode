@@ -133,7 +133,8 @@
  * `f2.series_question`; `shadow` counts the candidates (`f2.candidates.series`).
  *
  * Archive of calls and results (OMC_JEV_COMPACT_ARCHIVE=off|shadow|active; off when unset or anything else; needs a state directory). With `active`, while the point itself is active and the compaction has
- * a session id, every call and result (or notification) that the cut traces, shortens or removes goes whole to <state dir>/compaction-archive/<session>/<tool_use_id>.txt: a head with the call
+ * a session id, every call and result (or notification) that the cut traces, shortens or removes goes whole to <state dir>/compaction-archive/<session>/<tool_use_id>.txt (nothing in the conversation names the file
+ * of a result removed with its call): a head with the call
  * and its input as masked JSON, then the result unchanged. The trace or the shortened result names the file (`; full call and result: <path>`) only after the file was written and read back
  * equal, and each path counts in the lengths the floor and the cascade predict. Nothing is archived that may hold a secret (a secret or private path or a secret word in the input or in the
  * result, a secret tool, a command that prints secrets, a result that masking would change), nor a result without text, an empty one, one over the host's write limit, or a text an earlier
@@ -5580,7 +5581,8 @@ const archiveOn = (cfg) => Boolean(cfg.archive) && cfg.archive !== 'off';
 // compaction that is not active, a trace is read as before the archive, so the conversation is the one built without the variable.
 const archivePathsOn = (cfg) => cfg.archive === 'active' && cfg.mode === 'active';
 const ARCHIVE_SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'Monitor']);
-// A secret named by a word without a separator ("the password is X", "PIN 1234", which maskSecrets does not mask), in English and in the languages of LOCAL_NAMES of scripts/lib/jev-mask.mjs.
+// A secret named by a word without a separator ("the password is X", "PIN 1234", which maskSecrets does not mask), in English and in Polish. The words of the other languages of LOCAL_NAMES of
+// scripts/lib/jev-mask.mjs are not covered, so a result that names a secret only in one of them is archived.
 const SECRET_WORD = /(?<![\p{L}\p{N}_])(?:has[\u0142l](?:o|a|em|u|ach|ami|om)?|has[e\u0119][\u0142l]|ha\u015ble|klucz(?:a|e|em|u|y|om|ami|ach)?|pin(?:u|em|y|\u00f3w)?|token(?:a|u|em|ie)?|sekret(?:u|em|y|\u00f3w|ami|ach)?|secrets?|passwords?|passwd|passphrase|passcode|api[ _-]?keys?|apikeys?|private[ _-]?keys?|credentials?)(?![\p{L}\p{N}_])/iu;
 // A key whose value is a secret; its value goes to the head of an archive file as *** whole, also a number, an array or an object, and so does the value of a {name|key: <such a name>, value} pair.
 const SECRET_KEY = /key(?!word|board|stroke|frame)|token|secret|passw|pass(?:[_-]?(?:phrase|wd|code)|$|[^a-z])|pwd|credential|auth(?!ors?(?:$|[^i]))|cookie|session(?:[_-]?id)?$|^sid$|^otp$|otp[_-]?(?:code|secret)|pin(?:[_-]?code)?$|has[\u0142l]o|klucz|sekret|signature|private/i;
