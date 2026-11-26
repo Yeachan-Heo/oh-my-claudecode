@@ -535,6 +535,21 @@ describe('blocks of text: the verdicts asked before they are needed', () => {
     }
   });
 
+  it('the own request to compact counts what the blocks and the series may give back only where the state directory lets them be written', async () => {
+    const m = [{ role: 'user', text: 'Task: look at the notes and report.', toolUses: [] }];
+    for (let i = 1; i <= 40; i++) {
+      m.push({ role: 'assistant', text: `Step ${i} note (ZERO) ${fill(`detail${i}`, 3000)}`, toolUses: [{ tool_use_id: `t${i}`, tool: 'Bash', input: { command: `cat notes-${i}.txt` } }] });
+      m.push({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${i}`, text: `RESULT-${i} ${'x'.repeat(3000)}`, isError: false }] });
+    }
+    m.push({ role: 'user', text: 'Good, now sum up the results.', toolUses: [] }, { role: 'assistant', text: 'Summary: done.', toolUses: [] });
+    const env = { ...OWN, OMC_JEV_COMPACT_TARGET_PERCENT: '20', OMC_JEV_COMPACT_OWN_THRESHOLD: 'active' };
+    const withDir = await turns(env, frozen(m), 1);
+    expect(withDir.compacts).toHaveLength(1);
+    for (const gone of ['HOME', 'USERPROFILE', 'OMC_JEV_LOG_DIR']) delete env[gone];
+    const without = await turns(env, frozen(m), 1);
+    expect(without.compacts).toHaveLength(0);
+  });
+
   it('the module own request to compact finds the verdicts asked first, and says what came of it in a verdicts_fill record', async () => {
     const run = await turns(OWN, session(40, { said }), 1);
     const fill = run.records().find((r) => r.event === 'verdicts_fill');

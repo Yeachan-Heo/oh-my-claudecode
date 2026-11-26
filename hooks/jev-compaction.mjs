@@ -6137,7 +6137,7 @@ async function ownThreshold($, e, next) {
     let api;
     // What the agent stage takes off counts as a cut too, as in decide (the cascade only: the stage's plan is part of the cascade's prediction).
     let stageTokens = 0;
-    const blocksCount = cfg.blocks === 'active' && cfg.verdicts !== 'off'; // the verdicts on blocks of text take text off too (the point is active here)
+    const blocksCount = cfg.blocks === 'active' && cfg.verdicts !== 'off' && Boolean(cfg.pasteDir); // the verdicts on blocks of text take text off too (the point is active here); without the state directory (blocksMode) nothing can be written
     const stageCounts = cfg.targetPercent !== undefined && (cfg.agentTrim || blocksCount);
     // With the token cascade a session that fails the characters is measured in tokens (cutInTokens): an image has no characters and costs thousands of tokens.
     const tooSmall = () => (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window)
