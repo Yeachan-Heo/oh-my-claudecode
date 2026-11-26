@@ -548,7 +548,7 @@ describe('archive: in the compaction', () => {
   });
 });
 
-describe('archive: the series of traces read the path and the counter only with the switch on', () => {
+describe('archive: the series of traces read the path and the counter only with the switch active', () => {
   const PATH = `${ARCHIVE}/${SESSION}/toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz1234567.txt`;
   const withPath = `[compacted] Bash(make) - error of 40 chars removed; full call and result: ${PATH}`;
   const merged = `[compacted] Read(a.txt) x3 - results of 450 chars removed, including 2 errors; full calls and results: ${ARCHIVE}/${SESSION}/ (a.txt, b.txt, c.txt)`;
@@ -569,32 +569,62 @@ describe('archive: the series of traces read the path and the counter only with 
     expect(seriesRuns(`${plain}\n${plain}`, false, true)[0].stats).toMatchObject({ traces: 2, calls: 2, errors: 0, file: false });
   });
 
-  it('a series of traces with archive paths is merged when the switch is on, and held as a secret when it is off (the long id is what the masker takes for one)', async () => {
-    const lines = [1, 2, 3].map((k) => `[compacted] Read(file-${k}.txt) - result of 100 chars removed; full call and result: ${ARCHIVE}/${SESSION}/toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz123456${k}.txt`);
+  /** The series merge on one row of the given lines, with the switch as given (undefined: unset) and more settings; the traces stand in a row before the tail. */
+  async function mergeLines(lines, archive, extraEnv = {}) {
     const messages = [{ role: 'user', text: 'Task.', toolUses: [], handle: 'h0' }, { role: 'user', text: 'go', toolUses: [], handle: 'h1' }, { role: 'assistant', text: 'Looking.', toolUses: [], handle: 'h2' },
       { role: 'assistant', text: lines.join('\n'), toolUses: [], handle: 'h3' }, { role: 'assistant', text: 'Done.', toolUses: [], handle: 'h4' },
       ...Array.from({ length: 10 }, (_, k) => ({ role: k % 2 ? 'assistant' : 'user', text: `tail ${k}`, toolUses: [], handle: `t${k}` }))].map((m) => Object.freeze(m));
     const api = [];
     for (const m of messages) {
-      const content = m.role === 'assistant' ? [{ type: 'text', text: m.text }] : [{ type: 'text', text: m.text }];
+      const content = [{ type: 'text', text: m.text }];
       if (m.role === 'user' && api[api.length - 1]?.role === 'user') api[api.length - 1].content.push(...content); else api.push({ role: m.role, content });
     }
-    const merge = async (archive) => {
-      const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active', ...(archive ? { OMC_JEV_COMPACT_ARCHIVE: archive } : {}) };
-      const cfg = await readConfig({ env: { get: async (name) => env[name] }, settings: { read: async () => undefined }, clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; } } });
-      const ctx = seriesContext(cfg, messages, api, messages.length);
-      const items = seriesItems(cfg, messages, ctx, SESSION);
-      const store = new Map();
-      const $ = { clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; } }, fs: { read: async (p) => { if (!store.has(p)) throw new Error('ENOENT'); return store.get(p); }, write: async (p, t) => { store.set(p, t); } } };
-      const record = {};
-      const edited = await mergeSeries($, cfg, record, messages, ctx, new Set(items.map((x) => x.key)), SESSION, Date.now() + 60000);
-      return { record, edited, items };
-    };
-    const on = await merge('active');
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active', ...extraEnv, ...(archive ? { OMC_JEV_COMPACT_ARCHIVE: archive } : {}) };
+    const cfg = await readConfig({ env: { get: async (name) => env[name] }, settings: { read: async () => undefined }, clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; } } });
+    const ctx = seriesContext(cfg, messages, api, messages.length);
+    const items = seriesItems(cfg, messages, ctx, SESSION);
+    const store = new Map();
+    const $ = { clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; } }, fs: { read: async (p) => { if (!store.has(p)) throw new Error('ENOENT'); return store.get(p); }, write: async (p, t) => { store.set(p, t); } } };
+    const record = {};
+    const edited = await mergeSeries($, cfg, record, messages, ctx, new Set(items.map((x) => x.key)), SESSION, Date.now() + 60000);
+    return { record, edited, items };
+  }
+
+  const longIds = (dir) => [1, 2, 3].map((k) => `[compacted] Read(file-${k}.txt) - result of 100 chars removed; full call and result: ${dir}/toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz123456${k}.txt`);
+
+  it('a series of traces with archive paths is merged when the switch is active, and held as a secret when it is off (the long id is what the masker takes for one)', async () => {
+    const on = await mergeLines(longIds(`${ARCHIVE}/${SESSION}`), 'active');
     expect(on.record.series).toMatchObject({ series: 1, traces: 3, secret: 0 });
     expect(on.edited.size).toBe(1);
-    const off = await merge(undefined);
+    const off = await mergeLines(longIds(`${ARCHIVE}/${SESSION}`), undefined);
     expect(off.record.series).toMatchObject({ series: 0, secret: 1 });
     expect(off.edited.size).toBe(0);
+  });
+
+  it('with the switch on shadow, or on active while the point is only shadow, a series with archive paths is held as a secret, as with the variable unset', async () => {
+    const lines = longIds(`${ARCHIVE}/${SESSION}`);
+    for (const [label, archive, extraEnv] of [['shadow', 'shadow', {}], ['shadow, spaces and case', ' SHADOW ', {}], ['off', 'off', {}], ['active, point shadow', 'active', { OMC_JEV: 'compaction' }]]) {
+      const run = await mergeLines(lines, archive, extraEnv);
+      expect(run.record.series, label).toMatchObject({ series: 0, secret: 1 });
+      expect(run.items.map((x) => x.run.stats.file), label).toEqual([false]);
+      expect(run.edited.size, label).toBe(0);
+    }
+    expect((await mergeLines(lines, 'active')).items.map((x) => x.run.stats.file)).toEqual([true]);
+  });
+
+  it('lines merged by an earlier compaction (one directory, a list of files, with a session id of 36 characters) join a series and are no secret', async () => {
+    const dir = `${ARCHIVE}/123e4567-e89b-12d3-a456-426614174000`;
+    const mergedLine = `[compacted] Read(a.txt) x3 - results of 450 chars removed, including 2 errors; full calls and results: ${dir}/ (toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz1234561.txt, toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz1234562.txt, toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz1234563.txt)`;
+    const partial = `[compacted] Read(b.txt) x2 - results of 90 chars removed; full calls and results 1 of 2: ${dir}/ (toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz1234564.txt)`;
+    const several = `[compacted] Read(c.txt) x2 - results of 90 chars removed; full calls and results: ${dir}/toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz1234565.txt, ${ARCHIVE}/other-session/toolu_01AbCdEfGhIjKlMnOpQrStUvWxYz1234566.txt`;
+    for (const lines of [[mergedLine, partial], [mergedLine, several], longIds(dir)]) {
+      const run = await mergeLines(lines, 'active');
+      expect(run.record.series).toMatchObject({ series: 1, secret: 0 });
+      expect(run.edited.size).toBe(1);
+    }
+    const counted = await mergeLines([mergedLine, partial], 'active');
+    expect(counted.record.series.traces).toBe(5);
+    const off = await mergeLines([mergedLine, partial], undefined);
+    expect(off.record.series).toMatchObject({ series: 0, secret: 1 });
   });
 });

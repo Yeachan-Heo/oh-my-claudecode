@@ -5373,7 +5373,9 @@ const seriesTok = (text, rates) => rates.RATE_TRACE * text.length + rates.RATE_N
 const seriesPath = (cfg, sessionId, name) => `${cfg.pasteDir}/${safeName(sessionId)}/${name}.txt`;
 // The paths of the module's own files stand in its traces (a reply, an agent's message, a merged series). They are no secret, and a name of 32 hexadecimal digits is what the masker
 // takes for one, so the check reads the text with them out (as the agent stage reads a trace without its path).
-const ownFilePaths = (cfg) => new RegExp(`${escapeRegExp(cfg.pasteDir)}/[A-Za-z0-9_-]{1,80}/[0-9a-f]{32}\\.txt|\\b${BLOCK_LETTER}/[0-9a-f]{32}\\.txt${archiveOn(cfg) && cfg.archiveDir ? `|${escapeRegExp(cfg.archiveDir)}/[A-Za-z0-9_-]{1,80}/[A-Za-z0-9_-]{1,80}\\.txt` : ''}`, 'g');
+// The files of the archive count only while the archive is active (see archivePathsOn): a single path, and the list of a line merged from calls of one identical call, `<dir>/ (a.txt, b.txt)`.
+const ARCHIVE_FILE = '[A-Za-z0-9_-]{1,80}\\.txt';
+const ownFilePaths = (cfg) => new RegExp(`${escapeRegExp(cfg.pasteDir)}/[A-Za-z0-9_-]{1,80}/[0-9a-f]{32}\\.txt|\\b${BLOCK_LETTER}/[0-9a-f]{32}\\.txt${archivePathsOn(cfg) && cfg.archiveDir ? `|${escapeRegExp(cfg.archiveDir)}/[A-Za-z0-9_-]{1,80}/(?:${ARCHIVE_FILE}| \\(${ARCHIVE_FILE}(?:, ${ARCHIVE_FILE})*\\))` : ''}`, 'g');
 // A row a series may stand in: text, no tool result.
 const seriesRowOk = (m) => typeof m.text === 'string' && m.text.trim() && !(m.toolResults || []).length;
 
@@ -5456,7 +5458,7 @@ export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
   for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
     const m = messages[i];
     if (!seriesRowOk(m) || ctx.fixed.has(i)) continue;
-    for (const run of seriesRuns(m.text, ctx.direct.has(i), archiveOn(cfg))) {
+    for (const run of seriesRuns(m.text, ctx.direct.has(i), archivePathsOn(cfg))) {
       const seen = byKey.get(run.text);
       const signals = { age_turns: ctx.facts.age[i], current_turn: ctx.facts.age[i] === 0, in_tail: i >= ctx.facts.tail };
       if (seen) { Object.assign(seen, signals, { row: i, repeated: true }); seen.rows.push(i); continue; }
@@ -5494,7 +5496,7 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
     for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
       const m = messages[i];
       if (!seriesRowOk(m) || ctx.fixed.has(i)) continue;
-      const runs = seriesRuns(m.text, ctx.direct.has(i), archiveOn(cfg)).filter((r) => keys.has(r.text));
+      const runs = seriesRuns(m.text, ctx.direct.has(i), archivePathsOn(cfg)).filter((r) => keys.has(r.text));
       let text = m.text;
       for (const run of [...runs].reverse()) {
         let r = done.get(run.text);
@@ -5574,6 +5576,9 @@ const ARCHIVE_PRODUCTS = ['[result shortened at compaction: ', '[notification sh
 const ARCHIVE_RESERVED = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i; // Windows device names
 const ARCHIVE_SCAN_MAX = 2000; // strings of one input walked; a larger input counts as a secret (fail closed)
 const archiveOn = (cfg) => Boolean(cfg.archive) && cfg.archive !== 'off';
+// Do the series read the path of an archive file, and a counter, in a trace? Only while the archive writes them into traces: `active` with the point active. With `shadow`, `off`, or `active` in a
+// compaction that is not active, a trace is read as before the archive, so the conversation is the one built without the variable.
+const archivePathsOn = (cfg) => cfg.archive === 'active' && cfg.mode === 'active';
 const ARCHIVE_SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'Monitor']);
 // A secret named by a word without a separator ("the password is X", "PIN 1234", which maskSecrets does not mask), in English and in the languages of LOCAL_NAMES of scripts/lib/jev-mask.mjs.
 const SECRET_WORD = /(?<![\p{L}\p{N}_])(?:has[\u0142l](?:o|a|em|u|ach|ami|om)?|has[e\u0119][\u0142l]|ha\u015ble|klucz(?:a|e|em|u|y|om|ami|ach)?|pin(?:u|em|y|\u00f3w)?|token(?:a|u|em|ie)?|sekret(?:u|em|y|\u00f3w|ami|ach)?|secrets?|passwords?|passwd|passphrase|passcode|api[ _-]?keys?|apikeys?|private[ _-]?keys?|credentials?)(?![\p{L}\p{N}_])/iu;
