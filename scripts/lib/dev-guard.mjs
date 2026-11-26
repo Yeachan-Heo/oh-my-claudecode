@@ -11,7 +11,7 @@
 // wrappers sudo, doas, env, command, builtin, exec, nice, ionice, nohup, timeout, stdbuf, setsid, time, coproc, xargs and busybox.
 // Also refused with a path under /dev: mkfs*, mke2fs, wipefs (erasing forms), fdisk, sfdisk, gdisk and parted (not their listing forms),
 // tar and bsdtar extracting with -C or --directory (not to the standard output; with -P or --absolute-names a member with a leading slash is judged by
-// its own name and no named member is refused; the --to-command text of tar is scanned like eval), unzip -d (also the members named after the archive, joined
+// its own name and no named member is refused; the texts that tar runs, as the compress program of -I and --use-compress-program, --to-command, exec= of --checkpoint-action and the volume scripts of -F, --info-script and --new-volume-script, are scanned like eval), unzip -d (also the members named after the archive, joined
 // with the directory in force at them, after --strip-components for tar, without the members that a literal --exclude of tar names and
 // without the words from unzip -x up to the next option), awk and gawk with -i inplace, ed, ex and red.
 // One exception: the atomic repair recipe for /dev/null passes when it is the whole command and /dev/null is not the character device 1:3.
@@ -20,7 +20,7 @@
 // escapes and tildes in the path, a here-document for sudo -i, sudo -s and su, coproc NAME { ...; }, flock FILE COMMAND, runuser -u USER --
 // COMMAND, a filter between a feeder and xargs, xargs -rI {}, abbreviated long options of the wrappers with a value in
 // the next word, tar --transform, --xform, bsdtar -s, --one-top-level, tar --exclude with a wildcard or naming
-// a directory and any bsdtar --exclude, the commands of tar --use-compress-program, -I and --checkpoint-action exec=, an archive extracted without naming its members into / or a
+// a directory and any bsdtar --exclude, the commands of tar --rsh-command and --rmt-command (remote archives), an archive extracted without naming its members into / or a
 // directory above /dev, wildcard or listed (-T) members, commands that are not listed (mkswap, blkdiscard,
 // losetup, cryptsetup, mdadm, ...).
 
@@ -356,6 +356,30 @@ const TAR_LONG_VALUE = {
   ]),
 };
 
+// The long options of tar that run a command text (also abbreviated, as far as the tool takes the abbreviation; the value may be in the next word): the
+// compress program (both tools), the --to-command text, the scripts at the end of a volume and the exec= action of a checkpoint (GNU tar only).
+const tarTextLong = (opt, gnu) => longIs(opt, '--use-compress-program', 4) || (gnu && (longIs(opt, '--to-command', 6) || longIs(opt, '--info-script', 6) || longIs(opt, '--new-volume-script', 7) || longIs(opt, '--checkpoint-action', 13)));
+
+// The command texts that tar and bsdtar run, wherever they run: GNU tar takes -I (the compress program) and -F (the volume script) as short options too, while
+// the -I of bsdtar names a file; an old style first word takes the value of these letters from the next words.
+function tarCommandTexts(args, name) {
+  const gnu = name !== 'bsdtar';
+  const texts = [];
+  let rest = args;
+  if (args[0] && !args[0].startsWith('-')) { // old style: tar xIf PROGRAM archive
+    let next = 1;
+    for (const c of args[0]) if ('bCfFgHIKLNTVX'.includes(c)) { if (gnu && (c === 'I' || c === 'F') && args[next] !== undefined) texts.push(args[next]); next++; }
+    rest = args.slice(next);
+  }
+  for (const [key, value] of parseGetopt(rest, gnu ? 'IF' : '', (opt) => tarTextLong(opt, gnu)).values) {
+    if (longIs(key, '--use-compress-program', 4)) texts.push(value);
+    else if (!gnu) continue;
+    else if (longIs(key, '--checkpoint-action', 13)) { if (value.startsWith('exec=')) texts.push(value.slice(5)); } // the other actions run no command
+    else if (key === 'I' || key === 'F' || longIs(key, '--to-command', 6) || longIs(key, '--info-script', 6) || longIs(key, '--new-volume-script', 7)) texts.push(value);
+  }
+  return texts;
+}
+
 // tar and bsdtar: the directories of -C / --directory (each relative one resolves against the previous), when the command extracts.
 function tarExtractDir(args, name) {
   const valueLetters = 'bCfFgHIKLNTVX';
@@ -375,7 +399,7 @@ function tarExtractDir(args, name) {
     }
     rest = args.slice(next);
   }
-  const parsed = parseGetopt(rest, valueLetters, (opt) => longIs(opt, '--directory', 5) || opt === '--cd' || longIs(opt, '--strip-components', 5) || TAR_LONG_VALUE[name === 'bsdtar' ? 'bsd' : 'gnu'].has(opt) || (name !== 'bsdtar' && longIs(opt, '--to-command', 6))); // bsdtar: --cd is --directory
+  const parsed = parseGetopt(rest, valueLetters, (opt) => longIs(opt, '--directory', 5) || opt === '--cd' || longIs(opt, '--strip-components', 5) || TAR_LONG_VALUE[name === 'bsdtar' ? 'bsd' : 'gnu'].has(opt) || tarTextLong(opt, name !== 'bsdtar')); // bsdtar: --cd is --directory
   if (parsed.shorts.includes('x') || parsed.longs.some((l) => longIs(l, '--extract', 5) || longIs(l, '--get', 4))) extract = true;
   if (parsed.shorts.includes('P') || parsed.longs.some((l) => longIs(l, '--absolute-names', 4) || longIs(l, '--absolute-paths', 4))) absolute = true; // the second name is the one of bsdtar
   if (!extract || toStdout || parsed.shorts.includes('O') || parsed.longs.some((l) => longIs(l, '--to-stdout', 6))) return null; // -O and --to-stdout write the members to the standard output, not to files
@@ -474,11 +498,7 @@ function devCommand(name, args, fed, depth) {
   const hit = (path) => (path ? { what: name, path } : null);
   const firstChanged = (list) => { for (const p of list) { const d = devChanged(p); if (d) return d; } return null; };
   if (Object.hasOwn(DEV_EVERY_OPERAND, name)) return hit(firstChanged(splitArgs(args, DEV_EVERY_OPERAND[name]).operands));
-  if (name === 'tar' || name === 'gtar') { // GNU tar runs the --to-command text through a shell for each member
-    const to = parseGetopt(args, '', (opt) => longIs(opt, '--to-command', 6)).values.find(([key]) => longIs(key, '--to-command', 6));
-    const inner = to && shellOf(to[1], depth);
-    if (inner) return inner;
-  }
+  if (name === 'tar' || name === 'gtar' || name === 'bsdtar') for (const text of tarCommandTexts(args, name)) { const inner = shellOf(text, depth); if (inner) return inner; }
   const extra = devExtraCommand(name, args);
   if (extra !== undefined) return extra;
   if (name === 'mv') {

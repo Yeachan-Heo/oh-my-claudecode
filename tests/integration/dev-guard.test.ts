@@ -196,6 +196,16 @@ const BLOCKED: string[] = [
   // GNU tar runs the --to-command text for each member
   "tar -xf a.tar --to-command='rm /dev/null'", "tar -xf a.tar --to-command 'rm /dev/null'", "tar -xf a.tar --to-c='rm /dev/null'", "tar -xf a.tar --to-c 'rm /dev/null'", "gtar -C /tmp -xf a.tar --to-command='truncate -s 0 /dev/null'",
   "tar -xOf a.tar --to-command='rm /dev/null'", "tar -xf a.tar rel/x --to-command='echo x; rm /dev/null'", "tar -xf a.tar --to-command='sh -c \"rm /dev/null\"'",
+  // the other ways in which tar runs a command text: the compress program (-I, --use-compress-program, also abbreviated), the exec action of a checkpoint
+  // and the scripts at the end of a volume (-F, --info-script, --new-volume-script, also abbreviated), in every mode and in every form of the value
+  "tar -xf a.tar -I 'rm /dev/null'", "tar -xf a.tar -I'rm /dev/null'", "tar -cf a.tar -I 'rm /dev/null' f", "tar -tf a.tar -I 'rm /dev/null'", "gtar -tf a.tar -I 'truncate -s 0 /dev/null'", "tar xIf 'rm /dev/null' a.tar",
+  "tar -tf a.tar --use-compress-program='rm /dev/null'", "tar -tf a.tar --use-compress-program 'rm /dev/null'", "tar -tf a.tar --use='rm /dev/null'", "tar -tf a.tar --use 'rm /dev/null'", "tar -tf a.tar --use-c 'rm /dev/null'",
+  "bsdtar -tf a.tar --use-compress-program 'rm /dev/null'", "bsdtar -xf a.tar --use-compress-program='rm /dev/null'", "bsdtar -tf a.tar --us 'rm /dev/null'", "bsdtar -cf a.tar --use 'rm /dev/null' f",
+  "tar -tf a.tar --checkpoint=1 --checkpoint-action='exec=rm /dev/null'", "tar -tf a.tar --checkpoint=1 --checkpoint-action 'exec=rm /dev/null'", "tar -tf a.tar --checkpoint-a 'exec=rm /dev/null'", "tar -tf a.tar --checkpoint- 'exec=rm /dev/null'",
+  "tar -xf a.tar --checkpoint=1 --checkpoint-action=echo --checkpoint-action='exec=echo x; rm /dev/null'",
+  "tar -cMf a.tar -F 'rm /dev/null' x", "tar -cMF 'rm /dev/null' -f a.tar x", "tar -cM -F'rm /dev/null' -f a.tar x", "tar -cM --info-script='rm /dev/null' -f a.tar x", "tar -cM --info-script 'rm /dev/null' -f a.tar x",
+  "tar -cM --new-volume-script='rm /dev/null' -f a.tar x", "tar -cM --new-volume-script 'rm /dev/null' -f a.tar x", "tar -cM --new-v='rm /dev/null' -f a.tar x", "tar -cM --info 'rm /dev/null' -f a.tar x", "tar -tM -F 'rm /dev/null' -f a.tar",
+  "sudo tar -xf a.tar -I 'rm /dev/null'", "nice tar -xf a.tar --checkpoint=1 --checkpoint-action='exec=rm /dev/null'", "bash -c \"tar -cM -F 'rm /dev/null' -f a.tar x\"", "tar -C /tmp -xf a.tar -I 'sh -c \"rm /dev/null\"'",
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -334,6 +344,16 @@ const ALLOWED: string[] = [
   "tar -xf a.tar --to-command='echo x'", "tar -xf a.tar --to-command 'cat /dev/null'", "tar -xf a.tar --to-command='wc -c >/dev/null'", 'tar -xf a.tar --to-stdout', 'tar -tf a.tar --to-command=cat', 'tar -xf a.tar --totals',
   // the value of --to-command in the next word is a command, not a member (also abbreviated)
   'tar -C / -xf a.tar --to-c dev/null', 'tar -C / -xf a.tar --to-command dev/null', 'tar -C / -xf a.tar --to-co=dev/null',
+  // the same options with a program that harms nothing, the checkpoint actions that run no command, and the -I of bsdtar, which names a file
+  'tar -xf a.tar -I gzip', "tar -xf a.tar -I 'gzip -9'", 'tar -xf a.tar --use-compress-program=gzip', "tar -xf a.tar --use-compress-program='gzip -9'", 'tar -cf a.tar --use-compress-program zstd f', 'tar -xf a.tar --use gzip',
+  'tar -xf a.tar --checkpoint=1 --checkpoint-action=echo=x', 'tar -xf a.tar --checkpoint=1 --checkpoint-action=dot', 'tar -xf a.tar --checkpoint=1 --checkpoint-action=sleep=1', 'tar -xf a.tar --checkpoint=1 --checkpoint-action ttyout=x',
+  'tar -xf a.tar --checkpoint=1 --checkpoint-action=totals', 'tar -xf a.tar --checkpoint=1 --checkpoint-action=bell', 'tar -xf a.tar --checkpoint=1 --checkpoint-action=exec=cat', "tar -xf a.tar --checkpoint=1 --checkpoint-action='exec=echo /dev/null'",
+  'tar -cM --info-script=true -f a.tar x', 'tar -cM -F true -f a.tar x', 'tar -cM --new-volume-script ./next.sh -f a.tar x', 'tar -cMF ./next.sh -f a.tar x',
+  'bsdtar -tf a.tar -I /dev/null', 'bsdtar -tf a.tar -I inc.txt', 'bsdtar -tf a.tar --use-compress-program gzip',
+  // the value of these options in the next word is a command text, no member (also abbreviated)
+  'tar -C / -xf a.tar --use-compress-program dev/null', 'tar -C / -xf a.tar --use dev/null', 'tar -C / -xf a.tar --info-script dev/null', 'tar -C / -xf a.tar --checkpoint-a dev/null', 'bsdtar -C / -xf a.tar --us dev/null',
+  // an echo action prints its text and runs nothing, and bsdtar knows none of the GNU options (it reads their value as a member)
+  "tar -xf a.tar --checkpoint=1 --checkpoint-action='echo=rm /dev/null'", "bsdtar -tf a.tar --to-command='rm /dev/null'", "bsdtar -xf a.tar --info-script 'rm /dev/null'",
 ];
 
 describe('/dev guard: Bash commands', () => {
