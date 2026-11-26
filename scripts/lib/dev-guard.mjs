@@ -154,7 +154,7 @@ const envSplitText = (text) => text.replace(/\\(.)/gs, (pair, c) => (c === '_' ?
 
 // [name, ...args] without leading keywords, assignments and wrappers: { name, args, xargs, replace }, or null when nothing is left.
 // xargs: the command is fed by a pipe; replace: the replace string of xargs -I, -i or --replace. env -S TEXT is a command line of its own: it
-// comes back as eval with TEXT followed by the remaining arguments, but when TEXT starts with an option its words go through env's options again.
+// comes back as eval with TEXT followed by the remaining arguments, but when TEXT starts with an option or with time (a program to env) its words go through env's options again.
 function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the words that are a plain unquoted time at the start of a pipeline
   let at = 0;
   let keyword = true; // still at the start of the command, where time is the keyword of the shell (only -p and -- follow it)
