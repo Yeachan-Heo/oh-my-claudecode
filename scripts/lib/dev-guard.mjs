@@ -661,6 +661,8 @@ function devScanTokens(tokens, heredocs, depth) {
   let timeWords = new Set(); // indexes of the words that are a plain unquoted time
   let afterPipe = false; // the current command follows a pipe, where time is no keyword
   let redirected = false; // the current command has a redirection before the word: time is no keyword after it
+  let afterOr = false; // the current command follows ||: it runs only when the one before failed
+  const dirStack = []; // the directory in force at each open parenthesis: a subshell leaves it behind
   const flush = (op) => {
     const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
     let found = null;
@@ -670,7 +672,7 @@ function devScanTokens(tokens, heredocs, depth) {
       const piped = unwrapped.replace ? unwrapped.args.map((a) => a.split(unwrapped.replace).join('/dev/\u0000')) : [...unwrapped.args, '/dev/\u0000'];
       if (!found && unwrapped.xargs && pipeDev && devCommand(unwrapped.name, piped, [], depth)) found = { what: `xargs ${unwrapped.name}`, path: pipeDev };
     }
-    if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd')) devChangeDir(unwrapped.name, unwrapped.args);
+    if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd')) { if (afterOr) devCwd = null; else devChangeDir(unwrapped.name, unwrapped.args); } // after || either directory may be in force
     pipeDev = (op === '|' || op === '|&') && unwrapped && DEV_FEEDERS.has(unwrapped.name) ? wordDev : null;
     words = [];
     fed = [];
@@ -679,12 +681,19 @@ function devScanTokens(tokens, heredocs, depth) {
     timeWords = new Set();
     redirected = false;
     afterPipe = op === '|' || op === '|&';
+    afterOr = op === '||';
     return found;
   };
   const subs = (word) => { for (const list of devSubLists(word.parts)) { const found = devScanTokens(list, heredocs, depth + 1); if (found) return found; } return null; };
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    if (t.type === 'op') { const found = flush(t.value); if (found) return found; continue; }
+    if (t.type === 'op') {
+      const found = flush(t.value);
+      if (found) return found;
+      if (t.value === '(') dirStack.push(devCwd);
+      else if (t.value === ')' && dirStack.length) devCwd = dirStack.pop();
+      continue;
+    }
     if (t.type === 'word') {
       const found = subs(t);
       if (found) return found;
@@ -693,7 +702,7 @@ function devScanTokens(tokens, heredocs, depth) {
       words.push(text);
       if (t.parts.length === 1 && t.parts[0].kind === 'lit' && DEV_OPENERS.has(text)) afterPipe = false; // a group or a condition after a pipe starts a list of its own, where time is the keyword again
       if (baseName(text) === 'find') isFind = true;
-      if (!(isFind && FIND_REFERENCE.test(words[words.length - 2] ?? ''))) wordDev ??= devLexicalIn(text); // the file after find -newer is only compared with
+      if (!(isFind && FIND_REFERENCE.test(words[words.length - 2] ?? ''))) wordDev ??= words.length > 1 && DEV_FEEDERS.has(baseName(words[0])) ? devChangedIn(text) : devLexicalIn(text); // the file after find -newer is only compared with; the arguments of a feeder are read from the directory in force
       continue;
     }
     if (t.type !== 'redir') continue;
