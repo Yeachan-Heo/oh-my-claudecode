@@ -947,6 +947,22 @@ describe('/dev guard: working directory and symbolic links', () => {
     }
   });
 
+  // -T and ln -n replace a link to a directory instead of entering it, and chmod -h leaves a link alone (measured with coreutils 9.4: ln -sf x LINK puts x into the
+  // directory, ln -sfn, ln -sfT, mv -T, install -T and cp -T --remove-destination replace the link; --no-t and --no-d are the shortest prefixes)
+  it('reads -T, ln -n and chmod -h like the tools', () => {
+    const nulllink = join(dir, 'nulllink');
+    const devlink = join(dir, 'devlink');
+    for (const command of [`ln -sfn /tmp/x ${devlink}`, `ln -sfT /tmp/x ${devlink}`, `ln -sf --no-dereference /tmp/x ${devlink}`, `ln -sf --no-d /tmp/x ${devlink}`, `ln -sf --no-target-directory /tmp/x ${devlink}`,
+      `ln -sf --no-t /tmp/x ${devlink}`, `mv -T /tmp/x ${devlink}`, `mv --no-target-directory /tmp/x ${devlink}`, `install -T /tmp/x ${devlink}`, `cp -T --remove-destination /tmp/x ${devlink}`,
+      `chmod -h 600 ${nulllink}`, `chmod --no-dereference 600 ${nulllink}`]) {
+      expect(check(command, '/tmp').decision, command).toBe('allow');
+    }
+    for (const command of [`ln -sf /tmp/x ${devlink}`, `cp -n --remove-destination /tmp/x ${devlink}`, `mv -n /tmp/x ${devlink}`, `install -c /tmp/x ${devlink}`, `ln -sf -t ${devlink} /tmp/x`,
+      `chmod 600 ${nulllink}`, `chmod -h 600 /dev/null`, `chmod -h 600 ${devlink}/null`, `ln -sfn /tmp/x ${devlink}/null`, `mv -T /tmp/x ${devlink}/null`]) {
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+    }
+  });
+
   it('reads cd like the shell: -P and -- are options, a group does not end the cd and a subshell or a pipeline does, a cd after || is unknown, an empty target stays', () => {
     expect(check('(cd /dev); rm null', '/tmp').decision).toBe('allow');
     expect(check('{ cd /dev; }; rm null', '/tmp').decision).toBe('deny');

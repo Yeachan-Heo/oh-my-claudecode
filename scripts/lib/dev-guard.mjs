@@ -189,7 +189,7 @@ const DEV_EVERY_OPERAND = {
 
 // touch, chown and chgrp change a symbolic link itself, not what it points to, with -h or --no-dereference; --dereference (chown and chgrp) turns that off
 // again, and the last of them counts (measured with coreutils 9.4: --no-d and --d are the shortest prefixes, -h may sit in a cluster before a letter with a value).
-const DEV_NO_DEREF = new Set(['touch', 'chown', 'chgrp']);
+const DEV_NO_DEREF = new Set(['touch', 'chown', 'chgrp', 'chmod']); // chmod -h leaves both the link and its target alone
 function changesLinkItself(opts, name) {
   let itself = false;
   for (const o of opts) {
@@ -372,6 +372,8 @@ function parseGetopt(args, shortValue = '', longValue = [], shortAttached = '') 
 const longIs = (name, full, min) => name.length >= min && full.startsWith(name);
 // -t DIR and --target-directory=DIR (also abbreviated: --target DIR) of mv, cp, install and ln; -t may end a cluster of short options (-sft DIR).
 const isTargetDirOption = (key) => key === 't' || longIs(key, '--target-directory', 3);
+// -T and --no-target-directory of mv, cp, install and ln: the target is a plain name even when it is a link to a directory (any prefix from --no on; one that two options share makes the tool stop with an error).
+const noTargetDir = (shorts, longs) => shorts.includes('T') || longs.some((o) => longIs(o, '--no-target-directory', 4));
 
 // Partitioners: the options with which the command only lists, dumps or verifies; without one it edits (fdisk and gdisk are interactive).
 const DEV_DISK_LISTING = {
@@ -605,11 +607,12 @@ function devCommand(name, args, fed, depth) {
   const extra = devExtraCommand(name, args);
   if (extra !== undefined) return extra;
   if (name === 'mv') {
-    const { operands, values } = parseGetopt(args, 'tS', (n) => isTargetDirOption(n) || longIs(n, '--suffix', 4));
+    const { shorts, longs, operands, values } = parseGetopt(args, 'tS', (n) => isTargetDirOption(n) || longIs(n, '--suffix', 4));
     const dirs = values.filter(([key]) => isTargetDirOption(key)).map(([, value]) => value);
     const sources = dirs.length ? operands : operands.slice(0, -1);
     const targets = dirs.length ? dirs : operands.slice(-1);
-    return hit(firstChanged(sources, false) ?? targets.map((t) => devChangedIn(t, 'dir', true)).find(Boolean)); // a source link is moved itself, a target link to a directory is entered
+    const entered = noTargetDir(shorts, longs) ? false : 'dir'; // with -T the target is replaced even when it is a link to a directory
+    return hit(firstChanged(sources, false) ?? targets.map((t) => devChangedIn(t, entered, true)).find(Boolean)); // a source link is moved itself, a target link to a directory is entered
   }
   if (name === 'cp' || name === 'install' || name === 'ln' || name === 'link' || name === 'rsync') {
     // rsync has no target directory option (-t is --times there), so no option of it takes a value here.
@@ -620,7 +623,8 @@ function devCommand(name, args, fed, depth) {
     const targets = dirs.length ? dirs : directories ? operands : operands.length >= 2 ? [operands[operands.length - 1]] : [];
     // A plain cp onto /dev/null and the other pseudo devices only writes data into them, like a redirect. Options that attach attributes or replace the target (-a, -p, --preserve, -l, -s, -b, --remove-destination) stay refused.
     const plainCopy = name === 'cp' && !shorts.some((c) => 'aplsb'.includes(c)) && !longs.some((o) => /^--(?:archive|preserve|attributes-only|remove-destination|link|symbolic-link|backup)/.test(o));
-    const follow = name === 'cp' && !longs.some((o) => longIs(o, '--remove-destination', 8)) ? true : 'dir'; // cp writes through a link to a file, the others replace it
+    const replaces = noTargetDir(shorts, longs) || (name === 'ln' && (shorts.includes('n') || longs.some((o) => longIs(o, '--no-dereference', 6)))); // -T and ln -n: a link to a directory is replaced, not entered
+    const follow = name === 'cp' && !longs.some((o) => longIs(o, '--remove-destination', 8)) ? true : replaces && name !== 'rsync' ? false : 'dir'; // cp writes through a link to a file, the others replace it
     for (const p of targets) { const d = devChangedIn(p, follow, !plainCopy); if (d && !(plainCopy && DEV_SINK.test(d))) return { what: name, path: d }; }
     return null;
   }
