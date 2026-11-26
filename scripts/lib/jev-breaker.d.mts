@@ -2,6 +2,10 @@ export interface BreakerSettings {
   breaker: boolean;
   maxRpm: number | undefined;
   dir: string;
+  /** Parent of the per-endpoint directories (also holds the openings log). */
+  base?: string;
+  /** OMC_JEV_BREAKER_TIMEOUT_LOW=1: no-response failures are counted by point priority (scope low). */
+  timeoutLow?: boolean;
   /** Pause after a breaker write in milliseconds (tests only; default 50). */
   settleMs?: number;
   /** OMC_JEV_HOOK_DEADLINE (epoch ms): the hook kills this resolver 100 ms later, so a breaker write ends before that. */
@@ -12,6 +16,10 @@ export interface OpenBreaker {
   until: number;
   reason: string;
   since: number;
+  /** "low": only low-priority points wait (OMC_JEV_BREAKER_TIMEOUT_LOW). */
+  scope?: 'low';
+  /** Start of the stretch in which every point waited. */
+  since_all?: number;
 }
 
 export interface FailureClass {
@@ -50,7 +58,10 @@ export function failureLogFields(
   error?: { status: number | null; kind: string; retry_s?: number };
   rpm?: { count: number; limit: number };
 };
-export function recordFailure(settings: BreakerSettings | undefined, failure: FailureClass | undefined, now?: number): OpenBreaker | undefined;
+export function recordFailure(settings: BreakerSettings | undefined, failure: FailureClass | undefined, now?: number, point?: string): OpenBreaker | undefined;
+export function breakerCovers(breaker: OpenBreaker | undefined, point: string | undefined): boolean;
+export function noticeWanted(breaker: OpenBreaker | undefined): boolean;
+export function openingsDirOf(settings: BreakerSettings): string;
 export function minuteKey(now?: number): string;
 export function reserveRequest(
   settings: BreakerSettings | undefined,

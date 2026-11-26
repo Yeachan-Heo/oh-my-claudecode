@@ -69,7 +69,9 @@
  * Shared breaker and request limit (OMC_JEV_BREAKER=1, OMC_JEV_MAX_RPM=<n>): the same files and rules as
  * the script side (scripts/lib/jev-breaker.mjs, see its header), under the same state directory and
  * scope. A hooks module cannot import Node, so the file work goes through $.fs; the rules are mirrors.
- * Before each request the module reads breaker.json (open: no request) and, with a limit, reserves a
+ * Before each request the module reads breaker.json (open: no request, except a breaker of scope "low",
+ * which the script side writes with OMC_JEV_BREAKER_TIMEOUT_LOW=1 for low-priority points only and which
+ * leaves this medium-priority point alone) and, with a limit, reserves a
  * slot in the UTC minute's rpm file at medium priority (a refused request takes no slot). A request
  * that fails opens the breaker by status alone (429 and 5xx; 401, 402, 403; Retry-After, for a 429
  * without one the retry time in its body), and the third request without a response within a minute
@@ -78,7 +80,9 @@
  * exceeded when several sessions reserve in the same instant; this module's own file work is done one
  * step after the other), and the per-minute files of old minutes stay (the script side removes them
  * when it writes a new minute). Without these two variables nothing of this is read or written. The
- * module's own pause, its three-failures stop and OMC_JEV_MAX_REQUESTS stay as they were.
+ * module's own pause, its three-failures stop and OMC_JEV_MAX_REQUESTS stay as they were. Not mirrored
+ * from the low scope of the script side: the module counts every request without a response as one
+ * (it writes no noresp-imp lines and no since_all), and the openings log is written by the script side only.
  *
  * Quiet: no $.ui.log; a toast only with OMC_JEV_COMPACT_TOAST=1. One JSON file per event goes to the
  * spool directory (<state dir>/compaction-spool, $.fs cannot append); the classic SessionStart hook
@@ -653,7 +657,7 @@ async function readBreakerState($, shared) {
   return failed || fresh ? { unreadable: true } : { state: undefined, corrupt: true };
 }
 
-// The open breaker {until, reason, since} (epoch ms), or undefined when it is closed, expired,
+// The open breaker {until, reason, since[, scope]} (epoch ms), or undefined when it is closed, expired,
 // unreadable, corrupt, or OMC_JEV_BREAKER is not set.
 async function readSharedBreaker($, shared, now) {
   if (!shared?.breaker) return undefined;
@@ -670,8 +674,13 @@ function breakerOf(state, now) {
   if (state.until > now + BREAKER_MAX_SECONDS * 1000 + CLOCK_SLACK_MS) return undefined;
   const since = Number.isFinite(state.since) ? state.since : now;
   if (since < 0 || since > now + CLOCK_SLACK_MS) return undefined;
-  return { until: state.until, reason: String(state.reason ?? ''), since: Math.min(since, now) };
+  return { until: state.until, reason: String(state.reason ?? ''), since: Math.min(since, now), ...(state.scope === 'low' ? { scope: state.scope } : {}) };
 }
+
+// Mirror of breakerCovers(breaker, 'compaction'): a breaker of scope "low" (OMC_JEV_BREAKER_TIMEOUT_LOW, written by the script side
+// for requests without a response of low-priority points only) holds back the low-priority points only, and `compaction` is a
+// medium-priority point; every other open breaker holds back every point.
+const holdsBack = (breaker) => Boolean(breaker) && breaker.scope !== 'low';
 
 // breaker.json.lock of jev-breaker.mjs, which creates it exclusively and removes it. $.fs has neither, so the module writes its token
 // when the lock is free, reads it back after LOCK_CONFIRM_MS (a script process that created the lock in the same moment finds the
@@ -777,8 +786,10 @@ async function openSharedBreaker($, shared, seconds, reason, now) {
           }
         }
         const current = breakerOf(onDisk.state, now);
-        if (current && current.until >= until - EXTEND_MIN_MS) return current;
-        const state = { until, reason, since: current ? Math.min(current.since, since) : since };
+        // This opening holds back every point: a breaker of scope "low" is rewritten for every point even when it ends later (mirror of openBreaker).
+        const widens = Boolean(current) && current.scope === 'low';
+        if (current && !widens && current.until >= until - EXTEND_MIN_MS) return current;
+        const state = { until: widens ? Math.max(current.until, until) : until, reason, since: current ? Math.min(current.since, since) : since };
         // The lock was taken over (stale, or a script opener in the same moment): read again.
         if (!(await holdsLock($, lockPath, token))) continue;
         await $.fs.write(path, JSON.stringify(state));
@@ -932,7 +943,7 @@ async function admitRequest($, cfg, deadline) {
 async function admitNow($, shared, deadline) {
   const now = Date.now();
   const open = await readSharedBreaker($, shared, now);
-  if (open) return { skip: { mode: 'circuit-open', breaker: open } };
+  if (holdsBack(open)) return { skip: { mode: 'circuit-open', breaker: open } };
   // Recheck deadline after I/O to avoid writing reservations after the compaction deadline has passed.
   if (Date.now() >= deadline) return { skip: { mode: 'deadline' } };
   const slot = await reserveRequest($, shared, now, deadline);
@@ -972,7 +983,7 @@ async function blockedReason($, cfg, now, agentId) {
   for (const [key, until] of session.batchRefusedUntil) if (until <= now) session.batchRefusedUntil.delete(key);
   if (session.batchRefusedUntil.size && now < (session.batchRefusedUntil.get(refusedKey(await sessionIdOf($), agentId)) ?? 0)) return 'batch_refused';
   // Bounded like admission: a stalled shared volume falls back to "not open" after SHARED_OP_MS.
-  if (cfg.shared && (await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';
+  if (cfg.shared && holdsBack(await sharedStep($, () => readSharedBreaker($, cfg.shared, now), undefined))) return 'breaker_open';
   // The capacity peek is bounded the same way and fails open. Skip the peek when RPM is not enabled.
   if (cfg.shared?.maxRpm && !(await sharedStep($, () => rpmCapacityAvailable($, cfg.shared, 'compaction', now), true))) return 'rpm';
   return undefined;

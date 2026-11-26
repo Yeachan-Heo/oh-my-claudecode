@@ -18,6 +18,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import { boundExcerpts, classifyFailure, wellFormedBody, DEFAULT_EXCERPT_CHARS, mediumThreshold, omitSecretLines, pairingOk, parseMaxRpm, pointMode, QUESTION_CRITERIA, QUESTION_INSTRUCTIONS, register, retryAfterFromBody, retryAfterMs, sharedFailureClass, tailRedacted } from '../../hooks/jev-compaction.mjs';
 import { breakerSettings, classifyFailure as sharedClassifyFailure, parseMaxRpm as sharedParseMaxRpm, readBreaker, recordFailure, reserveRequest, retryAfterFromBody as sharedRetryAfterFromBody, thresholdFor } from '../../scripts/lib/jev-breaker.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
+import { admitRequest } from '../../scripts/lib/jev-breaker.mjs';
 import { parseJevEnv, resolveExcerptChars, serializeQuestions } from '../../scripts/jev-resolve.mjs';
 import { boundExcerpts as tsBoundExcerpts, excerptCharsFor, parseJevConfig } from '../hooks/jev/config.ts';
 import { JUDGMENT_POINTS } from '../hooks/jev/points.ts';
@@ -2648,6 +2649,61 @@ describe('jev-compaction module: shared breaker and request limit (OMC_JEV_BREAK
     const after = await compactShared(c, conversation(30));
     expect(after.calls.fetch).toHaveLength(0);
     expect(after.records()[0]).toMatchObject({ reason: 'breaker_open' });
+  });
+
+  // The breaker of scope "low": the script side writes it with OMC_JEV_BREAKER_TIMEOUT_LOW=1 for requests without a response of low-priority points only.
+  const lowByScripts = (c) => {
+    const settings = breakerSettings({ OMC_JEV_BREAKER: '1', OMC_JEV_BREAKER_TIMEOUT_LOW: '1', OMC_JEV_BREAKER_DIR: c.dir }, ENDPOINT, ACTIVE_ENV.TYPESAFE_API_KEY);
+    let open;
+    for (let i = 0; i < 3; i += 1) open = recordFailure(settings, { reason: 'no-response', opens: false }, Date.now() + i * 10, 'slop-warning');
+    return open;
+  };
+  const writeBreakerFile = (c, fields) => {
+    mkdirSync(c.settings.dir, { recursive: true });
+    const now = Date.now();
+    writeFileSync(join(c.settings.dir, 'breaker.json'), JSON.stringify({ until: now + 60_000, since: now - 1000, ...fields }));
+  };
+
+  it.each([
+    ['of every point', { reason: 'http-429' }, true],
+    ['of scope low', { reason: 'no-response', scope: 'low' }, false],
+    ['of scope low with the start of the stretch of every point', { reason: 'no-response', scope: 'low', since_all: Date.now() - 500 }, false],
+    ['with a scope the library does not know', { reason: 'http-429', scope: 'medium' }, true],
+    ['with a scope that is not a string', { reason: 'http-429', scope: ['low'] }, true],
+  ])('(a) a breaker file %s: the script library and the module agree on whether the compaction point waits', async (_label, fields, waits) => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    writeBreakerFile(c, fields);
+    // the script library's admission of the point the module mirrors (the module asks as `compaction`)
+    expect(admitRequest(c.settings, 'compaction').skip?.mode === 'circuit-open').toBe(waits);
+    const run = await compactShared(c, conversation(30));
+    expect(run.calls.fetch.length === 0 && run.records()[0].reason === 'breaker_open').toBe(waits);
+    if (!waits) expect(run.records()[0]).toMatchObject({ result: 'jev' });
+  });
+
+  it('(a) a breaker of scope low that the script side opens while the compaction is under way holds back none of its later requests', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    const run = await compactShared(c, conversation(110, { chars: 600 }), {
+      respond: (body, n) => { if (n === 1) expect(lowByScripts(c)).toMatchObject({ scope: 'low' }); return okResponse(scoreByMarker(body)); },
+    });
+    expect(run.calls.fetch.length).toBeGreaterThan(1);
+    expect(run.records()[0]).toMatchObject({ result: 'jev' });
+    expect(run.records()[0]).not.toHaveProperty('held');
+    expect(admitRequest(c.settings, 'slop-warning').skip?.mode).toBe('circuit-open'); // the low-priority points do wait
+  });
+
+  it('(b) a 429 of the compaction request widens a breaker of scope low that ends later: every point waits, with the later end', async () => {
+    const c = shared({ OMC_JEV_BREAKER: '1' });
+    const lowUntil = Date.now() + 1_700_000;
+    writeBreakerFile(c, { until: lowUntil, reason: 'no-response', scope: 'low' });
+    const run = await compactShared(c, conversation(30), { respond: () => ({ ok: false, status: 429, headers: { 'retry-after': '60' }, text: '' }) });
+    expect(run.calls.fetch).toHaveLength(1);
+    const state = JSON.parse(readFileSync(join(c.settings.dir, 'breaker.json'), 'utf8'));
+    expect(state).toMatchObject({ reason: 'http-429', until: lowUntil });
+    expect(state).not.toHaveProperty('scope');
+    expect(admitRequest(c.settings, 'slop-warning').skip?.mode).toBe('circuit-open');
+    expect(admitRequest(c.settings, 'compaction').skip?.mode).toBe('circuit-open');
+    const next = await compactShared(c, conversation(30));
+    expect(next.calls.fetch).toHaveLength(0); // its own 429 holds the compaction back, as before the low scope was read
   });
 
   it('(a) a breaker file that cannot be read for a moment is read again, not taken for a closed breaker', async () => {

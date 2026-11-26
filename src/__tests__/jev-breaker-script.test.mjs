@@ -32,6 +32,7 @@ import {
   retryAfterSeconds,
   thresholdFor,
 } from '../../scripts/lib/jev-breaker.mjs';
+import { probe } from '../../scripts/jev-account-probe.mjs';
 import { resolveRequest, resolveRequestTimeoutMs } from '../../scripts/jev-resolve.mjs';
 import { JUDGMENT_POINTS } from '../hooks/jev/points.ts';
 import { resetJevResolverState, resolveJudgment } from '../hooks/jev/resolver.ts';
@@ -889,6 +890,40 @@ describe('resolveRequest with the shared breaker and limit', () => {
     }
   });
 
+  it('without OMC_JEV_BREAKER and OMC_JEV_MAX_RPM an HTTP 402 is still logged with its status, so the account probe sees it; other statuses add no field', async () => {
+    const names = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_BREAKER_DIR', 'OMC_JEV_ENDPOINT', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM'];
+    const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    const probeOf = (env) => probe(['--state-dir', env.OMC_JEV_BREAKER_DIR, '--log-dir', env.OMC_JEV_LOG_DIR], env);
+    try {
+      // the script channel
+      const script = jevEnv();
+      const first = await resolveRequest(request(), script, async () => errorResponse(402));
+      expect(first.mode).toBe('degraded');
+      expect(logRows(script)[0].error).toEqual({ status: 402, kind: 'http-402' });
+      expect(probeOf(script)).toMatchObject({ alarm: true, rule: 'A', logReadable: true });
+      await resolveRequest(request(), script, async () => okResponse());
+      expect(probeOf(script).alarm).toBe(false);
+      // another status keeps the row as it was
+      const other = jevEnv({ OMC_JEV_LOG_DIR: join(caseDir, 'log-other') });
+      await resolveRequest(request(), other, async () => errorResponse(429));
+      expect(Object.hasOwn(logRows(other)[0], 'error')).toBe(false);
+      // the TS channel
+      const ts = jevEnv({ OMC_JEV_LOG_DIR: join(caseDir, 'log-ts') });
+      for (const name of names) delete process.env[name];
+      for (const name of Object.keys(ts)) process.env[name] = ts[name];
+      resetJevResolverState();
+      await resolveJudgment({ point: 'model-routing', state: { task: 'x' }, questions: QUESTIONS, twin: () => false, fetchFn: async () => errorResponse(402) });
+      expect(logRows(ts)[0].error).toEqual({ status: 402, kind: 'http-402' });
+      expect(probeOf(ts)).toMatchObject({ alarm: true, rule: 'A', logReadable: true });
+    } finally {
+      for (const name of names) {
+        if (saved[name] === undefined) delete process.env[name];
+        else process.env[name] = saved[name];
+      }
+      resetJevResolverState();
+    }
+  });
+
   it('a module that cannot write its state never blocks a request', async () => {
     const blocked = join(caseDir, 'not-a-directory');
     writeFileSync(blocked, 'x');
@@ -1131,6 +1166,41 @@ describe('outage notice in a hook script', () => {
     expect(output.systemMessage).toBeUndefined();
     const rows = await waitForRows(env, 1);
     expect(rows.map((row) => row.mode)).toEqual(['degraded']); // the request went out (unreachable stub endpoint)
+  }, 60_000);
+
+  it('a breaker of scope low is honored in the hook: a low point is held back with the notice, an active medium point still asks Jev', async () => {
+    const stub = await startStub(() => ({ status: 200 }));
+    const env = jevEnv({ OMC_JEV: 'intent:active,slop-warning:active', OMC_JEV_BREAKER: '1', OMC_JEV_ENDPOINT: stub.endpoint, OMC_JEV_TIMEOUT_MS: '5000' });
+    const settings = settingsFor(env);
+    mkdirSync(settings.dir, { recursive: true });
+    const now = Date.now();
+    const state = { until: now + 300_000, reason: 'no-response', since: now, scope: 'low' };
+    writeFileSync(join(settings.dir, 'breaker.json'), JSON.stringify(state));
+    const shadowUrl = pathToFileURL(join(root, 'scripts', 'lib', 'jev-shadow.mjs')).href;
+    // One hook: the judgment of one point, then the hook's own JSON output (which carries the outage notice when it was armed).
+    const run = async (point, sessionId) => {
+      writeFileSync(join(caseDir, 'point-hook.mjs'), [
+        'import { recordJevShadow, setJevSessionId } from ' + JSON.stringify(shadowUrl) + ';',
+        'setJevSessionId(' + JSON.stringify(sessionId) + ');',
+        'const result = recordJevShadow({ point: ' + JSON.stringify(point) + ", state: { prompt: 'x' }, questions: { slop_advisory: { type: 'noul', criteria: { yes: 'a', no: 'b' } } }, heuristic: false });",
+        "console.log(JSON.stringify({ continue: true, waited: result?.mode ?? null }));",
+      ].join('\n'));
+      return new Promise((resolve, reject) => {
+        const child = spawn(NODE, [join(caseDir, 'point-hook.mjs')], { cwd: caseDir, env: { ...cleanParentEnv(), ...env }, windowsHide: true });
+        let out = '';
+        child.stdout.on('data', (chunk) => { out += chunk; });
+        child.stderr.resume();
+        child.on('error', reject);
+        child.on('close', () => resolve(JSON.parse(out)));
+      });
+    };
+    // Medium point: the scope-low breaker does not cover it, the active hook waits for Jev's answer and shows no notice.
+    expect(await run('intent', 'session-a')).toEqual({ continue: true, waited: 'active' });
+    expect(stub.count()).toBe(1);
+    // Low point: covered, so the hook does not wait (shadow), the resolver holds the request back, and the notice shows.
+    expect(await run('slop-warning', 'session-a')).toEqual({ continue: true, waited: null, systemMessage: outageMessage(state) });
+    expect((await waitForRows(env, 2)).some((row) => row.point === 'slop-warning' && row.mode === 'circuit-open')).toBe(true);
+    expect(stub.count()).toBe(1);
   }, 60_000);
 
   it('active mode: the request that opens the breaker shows the notice in the same hook output', async () => {

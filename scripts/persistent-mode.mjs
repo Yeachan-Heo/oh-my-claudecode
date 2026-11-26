@@ -27,6 +27,7 @@ import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
 import { isJevShadowOptedIn, jevLastRequestId, jevNoulOf, jevStateIds, recordJevApplied, recordJevShadow, setJevHookContext, setJevSessionId } from "./lib/jev-shadow.mjs";
+import { ProgressState, classifyTranscript, isAcknowledgedBlockedExit, MAX_BLOCKS_WITHOUT_PROGRESS } from "./lib/jev-progress.mjs";
 import { loadContextText } from './lib/context-text-loader.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1098,6 +1099,82 @@ function getUltragoalObjective(state, omcRoot) {
   return "";
 }
 
+// --- Ultragoal Stop progress release (opt-in via OMC_JEV_STOP_PROGRESS) ---
+
+// The ultragoal Stop block with the progress condition and the acknowledged
+// blocked exit is opt-in: without OMC_JEV_STOP_PROGRESS=1 the Stop block is
+// exactly the pre-existing behavior (the reinforcement counter up to
+// max_reinforcements, no progress condition, no persisted progress state).
+function stopProgressEnabled() {
+  return String(process.env.OMC_JEV_STOP_PROGRESS ?? "").trim() === "1";
+}
+
+// The progress state of the current block series, kept in the ultragoal state
+// (tolerant read: a broken state restarts the counter, a dependency failure
+// must not trap the session).
+function readStopProgressState(state) {
+  const p = (state?.stopProgress && typeof state.stopProgress === "object" && !Array.isArray(state.stopProgress)) ? state.stopProgress : null;
+  return {
+    progress: new ProgressState(p?.progress),
+    hash: typeof p?.hash === "string" ? p.hash : "",
+    blocks: typeof p?.blocks === "number" && Number.isFinite(p.blocks) && p.blocks >= 0 ? Math.floor(p.blocks) : 0,
+    ts: typeof p?.ts === "number" && Number.isFinite(p.ts) ? p.ts : 0,
+    totalBlocks: typeof p?.totalBlocks === "number" && Number.isFinite(p.totalBlocks) ? Math.floor(p.totalBlocks) : 0,
+    parts: (p?.parts && typeof p.parts === "object" && !Array.isArray(p.parts))
+      ? { git: typeof p.parts.git === "string" ? p.parts.git : "", ledger: typeof p.parts.ledger === "string" ? p.parts.ledger : "" }
+      : { git: "", ledger: "" },
+  };
+}
+
+// The work-state hash: git status over the paths this session saved plus
+// the ultragoal ledger checkpoint count. Guard denials are out of the hash
+// (a denial is not progress). The previous parts are kept past a git error
+// or timeout, and only a successful read replaces a part.
+function workStateHash(directory, omcRoot, sessionPaths, previous) {
+  const prev = (previous && typeof previous === "object" && !Array.isArray(previous)) ? previous : {};
+  let gitPart = typeof prev.git === "string" ? prev.git : "";
+  let ledgerPart = typeof prev.ledger === "string" ? prev.ledger : "";
+  const paths = Array.isArray(sessionPaths) ? sessionPaths.filter((s) => typeof s === "string" && s.trim()).slice(-64) : [];
+  if (paths.length) {
+    try {
+      const r = spawnSync("git", ["-C", directory, "status", "--porcelain", "--", ...paths], { timeout: 3000, encoding: "utf8", windowsHide: true });
+      if (r.status === 0 && typeof r.stdout === "string") gitPart = "git=" + r.stdout.trim().slice(0, 4000);
+    } catch { /* git missing or failing: the previous part stays */ }
+  }
+  try {
+    const ledger = readFileSync(join(omcRoot, "ultragoal", "ledger.jsonl"), "utf8");
+    ledgerPart = "ledger=" + (ledger.split("\n").filter((l) => l.trim()).length);
+  } catch { /* no ledger: the previous part stays */ }
+  return {
+    hash: createHash("sha256").update([gitPart, ledgerPart].join("\n")).digest("hex").slice(0, 16),
+    parts: { git: gitPart, ledger: ledgerPart },
+  };
+}
+
+const TRANSCRIPT_TAIL_BYTES = 2 * 1024 * 1024; // the transcript tail read for the calls between two Stop blocks
+
+// Classify the calls between two Stop blocks from the transcript tail; any
+// read failure means no data (the counter then counts without progress).
+function classifySinceBlock(transcriptPath, fromTsMs, progress) {
+  const none = { calls: 0, progress: false };
+  if (!transcriptPath || typeof transcriptPath !== "string") return none;
+  let fd = -1;
+  try {
+    const size = statSync(transcriptPath).size;
+    if (!size) return none;
+    const length = Math.min(size, TRANSCRIPT_TAIL_BYTES);
+    const buf = Buffer.alloc(length);
+    fd = openSync(transcriptPath, "r");
+    readSync(fd, buf, 0, length, size - length);
+    closeSync(fd);
+    fd = -1;
+    return classifyTranscript(buf.toString("utf8"), progress, fromTsMs);
+  } catch {
+    if (fd >= 0) { try { closeSync(fd); } catch { /* already closed */ } }
+    return none;
+  }
+}
+
 function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, cancellationContext) {
   let authenticatedAutopilot = null;
   const validateSignal = (signalPath, currentAutopilot) => {
@@ -1865,7 +1942,11 @@ async function main() {
         }
       }
 
-      emit({ continue: true, suppressOutput: true });
+      if (stopProgressEnabled()) {
+        emit({ continue: true, suppressOutput: true, systemMessage: "[OMC] Stop released: Stop already handled this turn (stop_hook_active)." });
+      } else {
+        emit({ continue: true, suppressOutput: true });
+      }
       return;
     }
     const ultragoal = readStateFileWithSession(
@@ -2114,6 +2195,70 @@ async function main() {
         ? ultragoal.state.session_id === sessionId
         : !ultragoal.state.session_id || ultragoal.state.session_id === sessionId;
       if (sessionMatches && !isUltragoalTerminalState(ultragoal.state, omcRoot)) {
+        if (stopProgressEnabled()) {
+          // Progress release (opt-in): the acknowledged blocked exit and a block
+          // series with the progress condition replace the silent reinforcement
+          // loop. With the switch off, the original block below runs unchanged.
+          const maxReinforcements = ultragoal.state.max_reinforcements || 50;
+          const progressState = readStopProgressState(ultragoal.state);
+
+          // The acknowledged blocked exit: the agent declared itself blocked
+          // in the final message, the counter is not spent and the state is
+          // not rewritten on this path.
+          const lastMessage = typeof data.last_assistant_message === "string" ? data.last_assistant_message : "";
+          if (isAcknowledgedBlockedExit(lastMessage)) {
+            emit({ continue: true, suppressOutput: true, systemMessage: "[ULTRAGOAL] Stop released: acknowledged blocked exit; the block counter is not spent." });
+            return;
+          }
+
+          // The progress condition: the call classifier between the blocks
+          // (the accumulator gains this window's saved paths before the hash
+          // reads them) plus the work-state hash over the session's saved paths.
+          const classification = classifySinceBlock(data.transcript_path || data.transcriptPath || "", progressState.ts, progressState.progress);
+          const stateHash = workStateHash(directory, omcRoot, progressState.progress.state().paths, progressState.parts);
+          const newHash = stateHash.hash;
+          const progressObserved = classification.progress || (Boolean(progressState.hash) && newHash !== progressState.hash);
+
+          // Exit conditions first: the release at the threshold is checked
+          // before the reinforcement bump.
+          if (!progressObserved && progressState.blocks + 1 > MAX_BLOCKS_WITHOUT_PROGRESS) {
+            const blocksAfter = progressState.blocks + 1;
+            const totalBlocksAfter = progressState.totalBlocks + 1;
+            ultragoal.state.stopProgress = { hash: newHash, blocks: blocksAfter, ts: Date.now(), progress: progressState.progress.state(), totalBlocks: totalBlocksAfter, parts: stateHash.parts };
+            if (shouldWriteStateBack(ultragoal.path)) writeJsonFile(ultragoal.path, ultragoal.state);
+            emit({ continue: true, suppressOutput: true, systemMessage: "[ULTRAGOAL] Stop released after " + blocksAfter + " Stop blocks without progress (threshold " + (MAX_BLOCKS_WITHOUT_PROGRESS + 1) + " blocks; progress condition: work-state hash and the calls between blocks)." });
+            return;
+          }
+
+          const newCount = (ultragoal.state.reinforcement_count || 0) + 1;
+          if (newCount > maxReinforcements) {
+            emit({ continue: true, suppressOutput: true, systemMessage: "[ULTRAGOAL] Stop released: the limit of " + maxReinforcements + " ultragoal reinforcements is exhausted (block " + newCount + ")." });
+            return;
+          }
+
+          const toolError = readLastToolError(stateDir);
+          const errorGuidance = getToolErrorRetryGuidance(toolError);
+
+          ultragoal.state.reinforcement_count = newCount;
+          ultragoal.state.last_checked_at = new Date().toISOString();
+          ultragoal.state.stopProgress = { hash: newHash, blocks: progressObserved ? 0 : progressState.blocks + 1, ts: Date.now(), progress: progressState.progress.state(), totalBlocks: progressState.totalBlocks + 1, parts: stateHash.parts };
+          if (!shouldWriteStateBack(ultragoal.path)) {
+            emit({ continue: true, suppressOutput: true });
+            return;
+          }
+          writeJsonFile(ultragoal.path, ultragoal.state);
+
+          let reason = `[ULTRAGOAL #${newCount}/${maxReinforcements}] Ultragoal mode is active. Continue the durable goal workflow, keep the matching Claude /goal active, and checkpoint .omc/ultragoal/ledger.jsonl before stopping. When all ultragoal stories are complete and the final quality gate passes, run /oh-my-claudecode:cancel to cleanly exit.`;
+          const objective = getUltragoalObjective(ultragoal.state, omcRoot);
+          if (objective) reason += `\nClaude /goal objective: ${objective}`;
+          reason += `\nWhen work is genuinely blocked by something outside your control, end the turn with a line \`BLOCKED: <reason, at least 20 characters>\` instead of continuing the loop.`;
+          if (errorGuidance) {
+            reason = errorGuidance + reason;
+          }
+
+          emit({ decision: "block", reason });
+          return;
+        }
         const newCount = (ultragoal.state.reinforcement_count || 0) + 1;
         const maxReinforcements = ultragoal.state.max_reinforcements || 50;
 
