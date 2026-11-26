@@ -4520,6 +4520,33 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readJson(f.pause).valid_until, 'a renewal of an unchanged file still renews it').toBeGreaterThanOrEqual(before);
   });
 
+  it('a pause file that is swapped for a foreign file right after the identity check of a renewal, before the file is put in place, is kept where it is: nothing at the path is destroyed, and a renewal where the system cannot exchange two paths still renews', () => {
+    const f = fixture('renewal-late-swap', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(f);   // enters the pause; the next run renews it
+    expect(readJson(f.pause).paused, 'the pause is in force').toBe(true);
+    // the swap follows the look at the path that write_json makes to compare it with the file that was validated: whatever puts the new file in place comes after it
+    const driver = ['import os, runpy, sys', 'real, pause, looks = os.lstat, sys.argv[1], []',
+      'def swap(path, *args, **kw):', '    found = real(path, *args, **kw)',
+      '    if str(path) == pause and sys._getframe(1).f_code.co_name == "write_json" and not looks:', '        looks.append(1)',
+      '        open(pause + ".foreign", "w").write("foreign file\\n")', '        os.replace(pause + ".foreign", pause)',
+      '    return found',
+      'os.lstat = swap', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*changed since it was validated and is not replaced/);
+    expect(readText(f.pause), 'the file that came in after the check is still at the path, untouched').toBe('foreign file\n');
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    // where the two paths cannot be exchanged (no such call in the C library, a file system without it) the renewal replaces the file that was looked at, as before
+    rmSync(f.pause);
+    guardOnce(f);
+    const before = readJson(f.pause).valid_until;
+    const plain = ['import ctypes, runpy, sys', 'def none(*args, **kw):', '    raise OSError("no such library")',
+      'ctypes.CDLL = none', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const again = runPyCode(plain, [GUARD, ...guardArgs(f, ['--once'])]);
+    expect(again.status, `${again.stdout}${again.stderr}`).toBe(0);
+    expect(readJson(f.pause).valid_until, 'a renewal without the exchange still renews').toBeGreaterThanOrEqual(before);
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+  });
+
   it('a pause file that is swapped for a foreign file after the last look is not removed: the path is moved aside, found to be another file and put back', () => {
     const f = fixture('unlink-swap', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');

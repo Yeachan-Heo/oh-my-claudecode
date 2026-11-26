@@ -28,7 +28,7 @@ of the same meaning wins over the file. No path is built into the code except th
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
 """
-import argparse, datetime, fnmatch, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
+import argparse, ctypes, datetime, fnmatch, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
 
 try:
     import fcntl
@@ -1113,13 +1113,25 @@ def file_identity(st):
     return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
 
 
+def exchange(first, second):
+    """Make two paths change places in one step (Linux `renameat2` with RENAME_EXCHANGE): True when done; False, with nothing changed, where
+    the system, the C library or the file system has no such call."""
+    try:
+        return ctypes.CDLL(None).renameat2(-100, os.fsencode(first), -100, os.fsencode(second), 2) == 0   # (AT_FDCWD, RENAME_EXCHANGE)
+    except Exception:
+        return False
+
+
 def write_json(path, obj, no_clobber=False, replaces=None):
     """Write atomically. no_clobber: a file that appears at the path meanwhile is kept and the write fails (a hard link is created
     instead of a rename; where links are not supported the destination is reserved exclusively first). replaces: the lstat result of the
-    file that this write renews; a file that is not that one any more when the rename is about to happen (somebody replaced the path since
-    the validation) is kept and the write fails; a file that is gone is written again."""
+    file that this write renews; a file that is not that one any more when the file is put in place (somebody replaced the path since
+    the validation) is kept and the write fails; a file that is gone is written again. Where two paths can be exchanged, the renewal puts
+    the new file in place by exchanging it with the file at the path and looks at what it got: the path is never empty (the hook reads no
+    pause file as no pause), and a file that came in after the validation is put back (exchanged again), not destroyed."""
     if A.dry_run:
         return
+    kept = False   # the file that was at the path is under the temporary name and must not be removed with it
     tmp = f'{path}.{os.getpid()}.{os.urandom(8).hex()}.tmp'   # a name that no other process can have made: nothing is removed to make room for it
     refuse_program_overwrite(path)
     # exclusive and without following links: another account that can write to the directory cannot redirect the write
@@ -1163,10 +1175,18 @@ def write_json(path, obj, no_clobber=False, replaces=None):
                     now = None
                 if now is not None and file_identity(now) != file_identity(replaces):
                     raise OSError(f'the file {path} changed since it was validated and is not replaced')
+                if now is not None and exchange(tmp, path):
+                    kept = True
+                    if file_identity(os.lstat(tmp)) == file_identity(replaces):
+                        os.unlink(tmp)   # the pause file that was looked at, replaced
+                        return
+                    kept = not exchange(tmp, path)   # another file came in after the look: it goes back, and the new file (now under the temporary name) is removed below
+                    raise OSError(f'the file {path} changed since it was validated and is not replaced' + (f'; the file that came in is kept as {tmp}' if kept else ''))
             os.replace(tmp, path)
     except BaseException:
         try:
-            os.unlink(tmp)
+            if not kept:
+                os.unlink(tmp)
         except OSError:
             pass
         raise
