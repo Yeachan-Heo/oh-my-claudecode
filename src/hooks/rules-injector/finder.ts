@@ -27,7 +27,8 @@ import type { RuleFileCandidate } from './types.js';
  * Check if a directory is a GitHub instructions directory.
  */
 function isGitHubInstructionsDir(dir: string): boolean {
-  return dir.includes('.github/instructions') || dir.endsWith('.github/instructions');
+  // path.join() uses backslashes on Windows
+  return dir.replace(/\\/g, '/').includes('.github/instructions');
 }
 
 /**
