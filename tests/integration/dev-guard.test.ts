@@ -166,6 +166,9 @@ const BLOCKED: string[] = [
   // with the strip option a name with a leading slash loses the slash first, and then the components (bsdtar counts the slash as the first one)
   'tar --strip-components=1 -C / -xf a.tar /foo/dev/null', 'gtar --strip-components 1 -C / -xf a.tar /foo/dev/null', 'tar --strip-components=1 -C / -xf a.tar //foo/dev/null', 'tar --strip-components=2 -C / -xf a.tar /a/b/dev/null',
   'bsdtar --strip-components=2 -C / -xf a.tar /foo/dev/null', 'bsdtar --strip-components=1 -C / -xf a.tar /dev/null', 'tar -C / -xf a.tar /dev/null', 'tar --strip-components=1 -C /dev -xf a.tar /foo/x',
+  // the list of -x of the zip extractor ends at the next option, and the words after that option are members again (the real tool reads none of them, but the whole archive then goes into the directory)
+  'unzip a.zip -x etc/x -d / dev/null', 'unzip a.zip -x etc/x -d / -x tmp/out -q dev/null', 'unzip a.zip -x etc/x -o dev/null -d /', 'unzip a.zip top.txt -x etc/x -d / dev/null', 'unzip a.zip dev/null -x etc/x -d /',
+  'unzip -d / a.zip -x etc/x -q dev/null', 'unzip a.zip -x etc/x -d / -- dev/null',
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -272,6 +275,8 @@ const ALLOWED: string[] = [
   "env -S '-i true'", "env -S '-i echo /dev/null'", "env -S '-- ls /dev/null'", "env -S '-u HOME true' /dev/null", 'env - ls /dev/null',
   // the same names with a strip that leaves a path outside /dev
   'tar --strip-components=2 -C / -xf a.tar /foo/dev/null', 'tar --strip-components=1 -C / -xf a.tar /dev/null', 'gtar --strip-components=3 -C / -xf a.tar /foo/dev/null', 'bsdtar --strip-components=3 -C / -xf a.tar /foo/dev/null',
+  // a list of exclusions that swallows everything up to the option, and members after it that stay outside /dev
+  'unzip a.zip -x dev/null -d /', 'unzip a.zip -x dev/null -d /tmp/out', 'unzip a.zip -x etc/x -d / tmp/out', 'unzip a.zip top.txt -x etc/x -d / tmp/out', 'unzip a.zip -x dev/null etc/x tmp/out -d /', 'unzip -x etc/x a.zip -d /',
 ];
 
 describe('/dev guard: Bash commands', () => {

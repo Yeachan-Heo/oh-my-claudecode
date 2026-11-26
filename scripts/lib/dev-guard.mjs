@@ -258,12 +258,13 @@ function parseGetopt(args, shortValue = '', longValue = [], shortAttached = '') 
   const shorts = [];
   const longs = [];
   const operands = [];
+  const operandAt = []; // the index of each operand among the arguments
   const values = [];
   const takesLong = typeof longValue === 'function' ? longValue : (name) => longValue.includes(name);
   let literal = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (literal || a === '-' || !a.startsWith('-')) { operands.push(a); continue; }
+    if (literal || a === '-' || !a.startsWith('-')) { operands.push(a); operandAt.push(i); continue; }
     if (a === '--') { literal = true; continue; }
     if (a.startsWith('--')) {
       const eq = a.indexOf('=');
@@ -282,7 +283,7 @@ function parseGetopt(args, shortValue = '', longValue = [], shortAttached = '') 
       break;
     }
   }
-  return { shorts, longs, operands, values };
+  return { shorts, longs, operands, operandAt, values };
 }
 // A long option written in full or abbreviated (GNU getopt takes any unambiguous prefix; min is the shortest unambiguous one).
 const longIs = (name, full, min) => name.length >= min && full.startsWith(name);
@@ -402,11 +403,17 @@ function devExtraCommand(name, args) {
   }
   if (name === 'tar' || name === 'gtar' || name === 'bsdtar') return hit(tarExtractDir(args, name));
   if (name === 'unzip') {
-    const { shorts, operands, values } = parseGetopt(args, 'dPOI');
+    const { shorts, operands, operandAt, values } = parseGetopt(args, 'dPOI');
     if (shorts.some((c) => 'lvtpczZ'.includes(c))) return null; // listing, testing, writing to stdout: no files are created
-    const xAt = args.indexOf('-x'); // the words from -x up to the next option are patterns to leave out, so the members are those before it (a -x before the archive does not count)
-    const before = parseGetopt(xAt < 0 ? args : args.slice(0, xAt), 'dPOI').operands;
-    const members = shorts.includes('j') ? [] : (before.length ? before : operands).slice(1); // after the archive; -j drops the directories of the members
+    // the words from -x up to the next option are patterns to leave out and what follows that option is a member again; a -x before the archive does not count
+    let skipping = false;
+    const left = new Set();
+    args.forEach((a, j) => {
+      if (a === '-x' && j > operandAt[0]) skipping = true;
+      else if (skipping && !a.startsWith('-')) left.add(j);
+      else skipping = false;
+    });
+    const members = shorts.includes('j') ? [] : operands.filter((m, k) => k > 0 && !left.has(operandAt[k])); // after the archive; -j drops the directories of the members
     const dirs = values.filter(([key]) => key === 'd').map(([, value]) => value);
     for (const value of dirs) { const d = devChangedIn(value); if (d) return { what: name, path: d }; }
     return hit(archiveMemberInDev(dirs.filter((d) => d.startsWith('/')).map((d) => posix.normalize(d)), members));
