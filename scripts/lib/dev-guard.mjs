@@ -76,6 +76,7 @@ function devNullState({ platform, devNullProbe }) {
 // The directory in force for the relative paths of the command being scanned (set by checkBashDevPath and checkDevFileTool, followed through cd, pushd and
 // popd): undefined when the hook gave none (relative paths are then not read), a path, or null after a cd that the guard cannot follow.
 let devCwd;
+const NO_DIR = Symbol('no directory yet');
 let devRealLeft = 0; // how many paths the file system may still resolve for the command being scanned; beyond that only the text counts
 
 // The path after the file system has resolved the links and the .. of the directories; the last component only when follow is true, or when follow is 'dir' and
@@ -679,6 +680,9 @@ function devScanTokens(tokens, heredocs, depth) {
   let afterPipe = false; // the current command follows a pipe, where time is no keyword
   let redirected = false; // the current command has a redirection before the word: time is no keyword after it
   let afterOr = false; // the current command follows ||: it runs only when the one before failed
+  let afterAnd = false; // the current command follows &&: it runs only when the one before succeeded
+  let afterCase = false; // the current command follows the pattern of a branch of a case
+  let chainBase = NO_DIR; // the directory before the first cd of a chain of && (NO_DIR: none yet)
   let afterPipeOp = false; // the current command follows a pipe operator (unlike afterPipe, a group or a condition does not clear it)
   const dirStack = []; // the directory in force at each open parenthesis: a subshell leaves it behind
   const flush = (op) => {
@@ -694,10 +698,14 @@ function devScanTokens(tokens, heredocs, depth) {
       devCwd = inForce;
     }
     // A cd in a pipeline or in the background runs in a subshell, so the directory stays (the last command of a pipeline too: lastpipe is off in a script).
+    // One that may not run (after ||, after && when the chain ends, in the body of then, else, elif or do, in a branch of a case) leaves the directory unknown.
     if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd') && !afterPipeOp && op !== '|' && op !== '|&' && op !== '&') {
-      if (afterOr) devCwd = null; // after || either directory may be in force
-      else devChangeDir(unwrapped.name, unwrapped.args);
+      const before = devCwd;
+      if (afterAnd && chainBase === NO_DIR) chainBase = devCwd;
+      devChangeDir(unwrapped.name, unwrapped.args);
+      if ((afterOr || afterCase || ['then', 'else', 'elif', 'do'].includes(words[0])) && devCwd !== before) devCwd = null; // it may not run: unknown unless it keeps the directory
     }
+    if (op !== '&&' && chainBase !== NO_DIR) { if (devCwd !== chainBase) devCwd = null; chainBase = NO_DIR; } // the chain of && ended: the directory is the one before it, or unknown
     pipeDev = (op === '|' || op === '|&') && unwrapped && DEV_FEEDERS.has(unwrapped.name) ? wordDev : null;
     words = [];
     fed = [];
@@ -707,6 +715,8 @@ function devScanTokens(tokens, heredocs, depth) {
     redirected = false;
     afterPipe = op === '|' || op === '|&';
     afterOr = op === '||';
+    afterAnd = op === '&&';
+    afterCase = false;
     afterPipeOp = op === '|' || op === '|&';
     return found;
   };
@@ -717,7 +727,7 @@ function devScanTokens(tokens, heredocs, depth) {
       const found = flush(t.value);
       if (found) return found;
       if (t.value === '(') dirStack.push(devCwd);
-      else if (t.value === ')' && dirStack.length) devCwd = dirStack.pop();
+      else if (t.value === ')') { if (dirStack.length) devCwd = dirStack.pop(); else afterCase = true; } // an unmatched parenthesis ends the pattern of a branch of a case
       continue;
     }
     if (t.type === 'word') {

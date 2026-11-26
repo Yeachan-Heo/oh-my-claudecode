@@ -914,7 +914,7 @@ describe('/dev guard: working directory and symbolic links', () => {
   it('reads cd like the shell: -P and -- are options, a group does not end the cd and a subshell or a pipeline does, a cd after || is unknown, an empty target stays', () => {
     expect(check('(cd /dev); rm null', '/tmp').decision).toBe('allow');
     expect(check('{ cd /dev; }; rm null', '/tmp').decision).toBe('deny');
-    expect(check('cd /dev && cd /tmp || true; rm null', '/tmp').decision).toBe('allow');
+    expect(check('cd /dev && cd /tmp || true; rm null', '/tmp').decision).toBe('deny'); // the second cd may have failed
     expect(check('cd /dev | cat; rm null', '/tmp').decision).toBe('allow'); // the cd of a pipeline runs in a subshell
     expect(check('cd ""; rm null', '/dev').decision).toBe('deny');
     expect(check('cd "" && rm null', '/tmp').decision).toBe('allow');
@@ -983,6 +983,24 @@ describe('/dev guard: spellings of round 6', () => {
   it.each([
     ['cd /tmp; cd /dev | true; rm null', '/tmp'], ['cd /tmp; true | cd /dev; rm null', '/tmp'], ['cd /tmp; cd /dev & rm null', '/tmp'], ['cd /tmp; pushd /dev | true; rm null', '/tmp'], ['cd /tmp; cd "$X" | true; rm null', '/tmp'],
     ['cd /dev | true; rm null', '/tmp'], ['true | cd /dev; rm null', '/tmp'], ['cd /dev | true; cd /tmp; rm null', '/dev'], ['cd /dev; cd /tmp; rm null', '/tmp'], ['cd "$X" | true; rm foo', '/tmp'],
+  ])('allows %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('allow');
+  });
+  // a cd that may not run leaves the directory unknown once the chain or the body ends (measured with bash 5.2: it is skipped after a failed && and a false if)
+  it.each([
+    ['cd /dev; false && cd /tmp; rm null', '/tmp'], ['cd /dev; false && cd /tmp && true; rm null', '/tmp'], ['cd /dev; true && cd /tmp; rm null', '/tmp'], ['cd /dev; if false; then cd /tmp; fi; rm null', '/tmp'],
+    ['cd /dev; if false; then :; else cd /tmp; fi; rm null', '/tmp'], ['cd /dev; if false; then :; elif true; then cd /tmp; fi; rm null', '/tmp'], ['cd /dev; for i in 1; do cd /tmp; done; rm null', '/tmp'],
+    ['cd /dev; while false; do cd /tmp; done; rm null', '/tmp'], ['cd /dev; case x in y) cd /tmp;; esac; rm null', '/tmp'], ['cd /dev; case x in x) cd /tmp;; esac; rm null', '/tmp'], ['cd /dev; false && { cd /tmp; }; rm null', '/tmp'],
+    ['cd /tmp; false && cd /dev; rm null', '/tmp'], ['cd /tmp; if false; then cd /dev; fi; rm foo', '/tmp'], ['cd /tmp && cd /dev || cd /tmp; rm null', '/tmp'], ['ls && cd /dev; rm null', '/tmp'],
+    ['cd /dev; if true; then cd /tmp; fi; rm null', '/tmp'], ['cd /dev; until false; do cd /tmp; done; rm null', '/tmp'],
+  ])('refuses %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('deny');
+  });
+
+  it.each([
+    ['cd /tmp && rm null', '/dev'], ['make && cd /tmp && rm null', '/dev'], ['true && cd /tmp; rm null', '/tmp'], ['cd /dev && cd /tmp && rm null', '/tmp'], ['ls && cd /tmp && ls && rm null', '/tmp'], ['cd /tmp; if false; then cd /tmp; fi; rm null', '/tmp'],
+    ['cd /tmp; case x in y) ls;; esac; rm null', '/tmp'], ['false && ls; rm null', '/tmp'], ['if cd /tmp; then rm null; fi', '/dev'], ['cd /tmp; for i in 1; do ls; done; rm null', '/dev'],
+    ['cd /dev; if false; then cd /tmp; fi; rm /tmp/x', '/tmp'], ['cd /dev; false && cd /tmp; ls', '/tmp'], ['cd /dev; false && cd /tmp; echo x > null', '/tmp'],
   ])('allows %j (session in %j)', (command, cwd) => {
     expect(check(command, cwd).decision).toBe('allow');
   });
