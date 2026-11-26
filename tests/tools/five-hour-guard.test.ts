@@ -3194,7 +3194,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(spawnSync('sh', ['-c', 'PATH=$FHG_DIR:$PATH audit'], { encoding: 'utf8', env: guardOnly }).stdout, 'the guard has none: it finds the other file').toBe('guard\n');
     expect(spawnSync('sh', ['-c', `PATH=${project} true; audit`], { encoding: 'utf8', env: guardOnly }).stdout, 'a PATH in front of another command is not the PATH of this one').toBe('guard\n');
     const refused: Array<[string, Record<string, string>]> = [['PATH=$FHG_DIR:$PATH audit', {}], ['PATH=$PATH:$FHG_DIR audit', {}], ['audit', { PATH: '$FHG_DIR:$PATH' }], ['PATH=${FHG_DIR}:$PATH exec audit', {}], ['true; PATH=$FHG_DIR:$PATH audit', {}],
-      [`PATH=${project} true; audit`, {}], [`PATH=${project} true | audit`, {}], [`PATH=${project} true; env audit`, {}], ['FHG_DIR=x PATH=$FHG_DIR:$PATH audit', {}], [`PATH=\${FHG_DIR:-${project}}:$PATH audit`, {}]];
+      [`PATH=${project} true; audit`, {}], [`PATH=${project} true | audit`, {}], [`PATH=${project} true; env audit`, {}], ['FHG_DIR=x PATH=$FHG_DIR:$PATH audit', {}], [`PATH=\${FHG_DIR:-${project}}:$PATH audit`, {}],
+      [`PATH=${usr}:$PATH audit`, {}], [`FHG_DIR=${project}; PATH=$FHG_DIR:$PATH audit`, {}], ['PATH=$FHG_DIR:$PATH audit', { FHG_DIR: project }]];   // (the last three: the $PATH after the directory is the PATH of the session, which the guard does not have, whatever the directory is)
     for (const [command, settingsEnv] of refused) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit }, settingsEnv);
@@ -3205,14 +3206,58 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
     }
     // a PATH whose components are all known settles which file is meant: the collision with the file of that directory
-    const settled: Array<[string, Record<string, string>, string]> = [[`PATH=${usr}:$PATH audit`, {}, known], [`FHG_DIR=${project}; PATH=\${FHG_DIR:-/nonexistent}:$PATH audit`, {}, audit], ['PATH=$FHG_DIR:$PATH audit', { FHG_DIR: project }, audit], ['audit', { PATH: `${project}:$PATH` }, audit],
-      ['FHG_DIR=' + project + '; PATH=$FHG_DIR:$PATH audit', {}, audit], [`PATH=${project}; audit`, {}, audit], [`PATH=${usr} audit`, {}, known]];
+    const settled: Array<[string, Record<string, string>, string]> = [[`PATH=${usr}:$PATH audit`, { PATH: usr }, known], [`FHG_DIR=${project}; PATH=\${FHG_DIR:-/nonexistent}:$PATH audit`, { PATH: usr }, audit], ['PATH=$FHG_DIR:$PATH audit', { FHG_DIR: project, PATH: usr }, audit], ['audit', { PATH: `${project}:$PATH` }, audit],
+      ['FHG_DIR=' + project + '; PATH=$FHG_DIR:$PATH audit', { PATH: usr }, audit], [`PATH=${project}; audit`, {}, audit], [`PATH=${usr} audit`, {}, known]];
     for (const [command, settingsEnv, file] of settled) {
       const r = start(command, { state_file: file }, settingsEnv);
       expect(r.status, `${command} with ${JSON.stringify(settingsEnv)}: ${r.stdout}${r.stderr}`).toBe(2);
       expect(r.stderr, command).toContain(`"state_file" (${file}) and "program of another hook" (${file}) are the same file`);
       expect(r.stderr, command).not.toMatch(/not read to its end/);
     }
+  });
+
+  it('a $PATH in the value that a PATH= word gives is the PATH that the session has before the assignment, not the one the guard has: where no PATH is given before it the guard cannot tell which file a bare name runs, so it refuses to start; a PATH that the settings or an earlier assignment give, and a PATH= word with no $PATH in it, settle it as before', () => {
+    const f = fixture('foreign-path-self-reference', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const project = join(f.dir, 'project-bin');   // on the PATH of the session only
+    const usr = join(f.dir, 'usr-bin');   // on the PATH of the guard only
+    mkdirSync(project);
+    mkdirSync(usr);
+    const text = '#!/bin/sh\necho session\n';
+    const audit = join(project, 'audit');
+    const known = join(usr, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    writeFileSync(known, '#!/bin/sh\necho guard\n', { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const guardOnly = { ...ENV, PATH: `${usr}:${ENV.PATH}` };
+    const start = (command: string, config: Record<string, string>, settingsEnv: Record<string, string> = {}) => {
+      writeFileSync(f.settings, JSON.stringify({ env: settingsEnv, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once'], { env: guardOnly });
+    };
+    const sessionEnv = { ...process.env, PATH: `${project}:${process.env.PATH}` };
+    const refused = ['PATH=/nonexistent/safe:$PATH audit', 'PATH=/nonexistent/safe:${PATH} audit', 'PATH=$PATH:/nonexistent/safe audit', 'env PATH=/nonexistent/safe:$PATH audit', 'PATH=/nonexistent/safe:$PATH exec audit'];
+    for (const command of refused) {
+      expect(spawnSync('sh', ['-c', command], { encoding: 'utf8', env: sessionEnv }).stdout, `${command}: the shell takes the PATH of the session`).toBe('session\n');
+      expect(spawnSync('sh', ['-c', command], { encoding: 'utf8', env: guardOnly }).stdout, `${command}: the guard has another PATH, and finds another file`).toBe('guard\n');
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a PATH that is given before the $PATH: the settings (the session has them too), or an assignment that stands alone; a PATH= word without a $PATH is the PATH
+    const settled: Array<[string, Record<string, string>]> = [['PATH=/nonexistent/safe:$PATH audit', { PATH: usr }], [`PATH=${usr}; PATH=/nonexistent/safe:$PATH audit`, {}], ['PATH=/nonexistent/safe:/nonexistent/other audit', {}], [`PATH=${usr}:/nonexistent/other audit`, {}]];
+    for (const [command, settingsEnv] of settled) {
+      const r = start(command, { state_file: known }, settingsEnv);
+      expect(r.status, `${command} with ${JSON.stringify(settingsEnv)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, command).toContain(`"state_file" (${known}) and "program of another hook" (${known}) are the same file`);
+      expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+    // no PATH is assigned at all: the word is read as before, a PATH that is only an argument is no program
+    expect(start('echo "$PATH:/nonexistent/x"', { state_file: audit }).status, 'a PATH in an argument').toBe(0);
+    expect(start('PATH=/nonexistent/safe:$PATH other', { state_file: audit }).status, 'a name that no file of the guard has').toBe(0);
   });
 
   it('a bare word anywhere in a simple command that has a command word is looked up on the PATH of the session as the program it may be (timeout 5 audit, nice -n 5 audit, stdbuf -oL audit, sudo audit): the guard cannot tell which words a wrapper runs, so it refuses to start when the word is the name of a file the guard writes and no PATH is given; an absolute path, a PATH of the command or a name that no file of the guard has settles it as before', () => {
@@ -3245,12 +3290,16 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     // a bare word that is only an argument has the same name: the false alarm that the conservative rule costs
     expect(start('echo audit', { state_file: audit }).status, 'an argument with the name of a file of the guard').toBe(2);
     // settled as before: an absolute path, a PATH of the command (the collision of an earlier test), a name that no file of the guard has
-    for (const command of [`timeout 5 ${audit}`, `PATH=${project} timeout 5 audit`, `PATH=${project}:$PATH nice -n 5 audit`]) {
+    for (const command of [`timeout 5 ${audit}`, `PATH=${project} timeout 5 audit`, `PATH=${project}:/nonexistent/other nice -n 5 audit`]) {
       const r = start(command, { state_file: audit });
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
       expect(r.stderr, command).toContain('are the same file');
       expect(r.stderr, command).not.toMatch(/not read to its end/);
     }
+    // a $PATH after the directory is the PATH of the session, which the guard does not have: not settled
+    const selfReference = start(`PATH=${project}:$PATH nice -n 5 audit`, { state_file: audit });
+    expect(selfReference.status, `${selfReference.stdout}${selfReference.stderr}`).toBe(2);
+    expect(selfReference.stderr, 'a PATH with a $PATH in it').toMatch(/not read to its end/);
     for (const command of ['timeout 5 audit', 'nice -n 5 audit', 'echo audit', 'sudo audit --flag']) {
       expect(start(command, { state_file: join(project, 'other') }).status, `${command}: no file of the guard has the name`).toBe(0);
     }
@@ -3612,8 +3661,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(data), 'the file is intact').toBe('data\n');
   });
 
-  it('a command word is looked up on the PATH that the command gives it: PATH=dir audit, env PATH=dir audit and a PATH among other assignments name the program in dir, which the guard does not replace', () => {
-    // the last form finds the program only through $PATH, which is the PATH of the guard (it is put in front of the PATH of the guard here)
+  it('a command word is looked up on the PATH that the command gives it: PATH=dir audit, env PATH=dir audit and a PATH among other assignments name the program in dir, which the guard does not replace; a $PATH in the value is the PATH of the session, not of the guard, so a PATH that has one is not read to its end', () => {
+    // the forms with a $PATH (the fourth and the last) are the PATH of the session in that place, which the guard does not have: they are refused (the last would find the program only through the PATH of the guard)
+    const withSelf = new Set([3, 5]);
     const forms: Array<(dir: string) => string> = [(dir) => `PATH=${dir} audit`, (dir) => `env PATH=${dir} audit`, (dir) => `FOO=1 PATH=${dir}:/usr/bin audit`,
       (dir) => `PATH=${dir}:$PATH audit`, (dir) => `exec env -i PATH=${dir} audit`, () => 'PATH=$PATH:/nonexistent audit'];
     for (const [k, form] of forms.entries()) {
@@ -3627,7 +3677,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
       const r = runSync(GUARD, ['--config', f.cfg, '--once'], k === forms.length - 1 ? { env: { ...ENV, PATH: `${bin}:${process.env.PATH}` } } : {});
       expect(r.status, `${form('DIR')}: ${r.stdout}${r.stderr}`).toBe(2);
-      expect(r.stderr, form('DIR')).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
+      if (withSelf.has(k)) expect(r.stderr, form('DIR')).toMatch(/not read to its end/);
+      else expect(r.stderr, form('DIR')).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
       expect(readText(audit), `${form('DIR')}: the program is intact`).toBe('#!/bin/sh\nexit 0\n');
       expect(existsSync(f.pause), `${form('DIR')}: no pause was published`).toBe(false);
     }
