@@ -86,6 +86,8 @@ const BLOCKED: string[] = [
   'ionice -tc 3 rm /dev/null', 'stdbuf -oL rm /dev/null', 'nice -n5 rm /dev/null', 'sudo -nuroot rm /dev/null', 'echo /dev/null | xargs -rn 1 rm',
   // env -S: an unquoted backslash and underscore separates arguments
   "env -S 'rm\\_/dev/null'", "env -S 'rm\\_/dev/null' x", "env --split-string='rm\\_/dev/null'", "env -S 'echo hi\\_&&\\_rm /dev/null'", "env -S 'rm\\_\"/dev/null\"'",
+  // -- ends the options of eval
+  "eval -- 'rm /dev/null'", "eval -- rm /dev/null", "eval -- 'echo x; rm /dev/null'",
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
   'echo `bash <<B\nrm /dev/null\nB\n`', 'x=`bash <<B\nrm -f /dev/sda\nB\n`', 'echo `echo \\`rm /dev/null\\``',
   // a path from the pipe lands in the place of the replace string of xargs -I
@@ -168,6 +170,7 @@ const ALLOWED: string[] = [
   "sudo -n ls /tmp", 'sudo -nu root ls /tmp', 'sudo -nH -g wheel ls /tmp', 'env -iu NAME ls /tmp', 'timeout -vk 5 3 ls /tmp', 'ionice -tc 3 ls /tmp', 'echo /dev/null | xargs -rn 1 ls',
   // env -S: a separator after the backslash and underscore, or the pair kept inside quotes (never a command)
   "env -S 'echo\\_hi'", "env -S \"echo 'rm\\_/dev/null'\"", "env -S 'echo \"rm\\_/dev/null\"'", "env -S 'echo \\x\\_y'",
+  "eval -- 'echo hi'", 'eval --', "eval -- ''",
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move

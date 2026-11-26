@@ -437,7 +437,7 @@ function devCommand(name, args, fed, depth) {
   const nests = name === 'eval' || name === 'ssh' || name === 'su' || name === 'runuser' || name === 'flock' || DEV_SHELLS.has(name);
   if (!nests) return null;
   if (depth >= DEV_MAX_DEPTH) return devMentions(tokenizeBash(args.join(' ')).tokens) ? { what: `${name} (nested too deep to inspect)`, path: '/dev' } : null; // beyond the depth limit a visible /dev path is refused, anything else passes
-  if (name === 'eval') return args.length ? shellOf(args.join(' '), depth) : null;
+  if (name === 'eval') { const text = (args[0] === '--' ? args.slice(1) : args).join(' '); return text ? shellOf(text, depth) : null; } // -- ends the options of the builtin
   if (name === 'su' || name === 'runuser' || name === 'flock') {
     const { values } = splitArgs(args, ['-c', '--command']);
     return values['-c'] !== undefined || values['--command'] !== undefined ? shellOf(values['-c'] ?? values['--command'], depth) : null;
