@@ -16,6 +16,8 @@
 //              process start, measured p50 about 110 ms and p95 about 500 ms there).
 //   heredoc    all platforms: a here-document without its closing line (bash -n only warns and exits 0) -> deny
 //   backslash  win32: a run of backslashes not directly before " -> additionalContext warning (Git Bash halves it)
+//   dev-path   all platforms: a command that deletes, moves, overwrites, truncates, re-owns or recreates a path under /dev
+//              -> deny; also the Write, Edit, MultiEdit and NotebookEdit tools aimed at such a path (dev-guard.mjs)
 // Checks (PowerShell, warnings only):
 //   ps-ssh-dollar  ssh with \$ inside "..." (in PowerShell \$ is no escape, the expansion happens locally)
 //   ps-dev-null    win32: 2>/dev/null outside quotes (write 2>$null)
@@ -30,6 +32,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { DEV_FILE_TOOLS, checkBashDevPath, checkDevFileTool } from './dev-guard.mjs';
 
 export const SHELL_CHECKS_ENV = 'OMC_SHELL_CHECKS';
 export const LENGTH_DENY_AT = 7700; // effective length from which a Bash command is denied on Windows
@@ -858,7 +861,8 @@ const delimiterLooksReal = (h) => h.quoted || /^[A-Za-z_][A-Za-z0-9_]*$/.test(h.
 
 // All checks for one Bash command. Returns { decision: 'allow' | 'deny', reason, context, checks, length, syntax }.
 // timeoutMs: limit of bash -n; the hook passes syntaxTimeoutMs(env) (OMC_SHELL_SYNTAX_TIMEOUT_MS, default 1 s).
-export function checkBashCommand(command, { platform = process.platform, env = process.env, syntax = true, bashPath, timeoutMs = SYNTAX_TIMEOUT_MS } = {}) {
+// devNullProbe: replaces the lstat probe of /dev/null that the repair recipe of the /dev guard consults.
+export function checkBashCommand(command, { platform = process.platform, env = process.env, syntax = true, bashPath, timeoutMs = SYNTAX_TIMEOUT_MS, devNullProbe } = {}) {
   const text = String(command ?? '');
   const win = platform === 'win32';
   const checks = [];
@@ -883,7 +887,10 @@ export function checkBashCommand(command, { platform = process.platform, env = p
 
   if (!denials.length) {
     const tokenized = tokenizeBash(halved);
-    if (win) {
+    const dev = checkBashDevPath(text, tokenized, { platform, devNullProbe });
+    checks.push(...dev.checks);
+    if (dev.denial) denials.push(dev.denial);
+    if (win && !denials.length) { // one denial at a time, as without the /dev guard
       const bug = findCrParserBug(halved, tokenized);
       if (bug) {
         checks.push('cr-parser');
@@ -1317,6 +1324,15 @@ const excerptForLog = (text) => maskSecrets(text).slice(0, EXCERPT_CHARS);
 // The hook entry point: checks for a Bash or PowerShell call (data = hook input), one checks.jsonl row. Returns the verdict.
 export function runShellChecks(toolName, data, { platform = process.platform, env = process.env, logDir } = {}) {
   const started = process.hrtime.bigint();
+  if (DEV_FILE_TOOLS.has(toolName)) { // the /dev guard for the file writers: a row only for a denial or a failure of the guard, so checks.jsonl keeps one row per shell command
+    const fileVerdict = checkDevFileTool(toolName, data);
+    if (fileVerdict.checks.length) {
+      let target = '';
+      try { const fileInput = data?.tool_input || data?.toolInput || {}; target = String(fileInput.file_path ?? fileInput.notebook_path ?? ''); } catch { /* the verdict already says so */ }
+      appendShellLog('checks.jsonl', { ts: new Date().toISOString(), point: 'shell-check', ...logContextOf(data || {}), tool_name: toolName, platform, decision: fileVerdict.decision, checks: fileVerdict.checks, durationMs: Math.round(Number(process.hrtime.bigint() - started) / 1e5) / 10, ...(fileVerdict.decision === 'deny' ? { reason: excerptForLog(fileVerdict.reason), command: excerptForLog(target) } : {}) }, { env, logDir });
+    }
+    return fileVerdict;
+  }
   const input = data?.tool_input || data?.toolInput || {};
   const command = typeof input.command === 'string' ? input.command : '';
   if (!command) return { decision: 'allow', reason: '', context: '', checks: [] };
