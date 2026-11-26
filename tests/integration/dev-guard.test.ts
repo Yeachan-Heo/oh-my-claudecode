@@ -1103,4 +1103,15 @@ describe('/dev guard: spellings of round 6', () => {
   ])('keeps the directory after a piped or background group: %s is %s', (command, expected) => {
     expect(check(command, '/tmp').decision).toBe(expected);
   });
+
+  // a long option of a wrapper written as a prefix takes its value in the next word (measured: env --unse, env --un, nice --a, timeout --s and --k, stdbuf --o, ionice
+  // --classd and xargs --process do), so the word after it is not the command
+  it.each([
+    ['env --unse FOO rm /dev/null', 'deny'], ['env --un FOO rm /dev/null', 'deny'], ['nice --adj 5 rm /dev/null', 'deny'], ['nice --a 5 rm /dev/null', 'deny'], ['timeout --sig KILL 5 rm /dev/null', 'deny'],
+    ['timeout --k 1 5 rm /dev/null', 'deny'], ['stdbuf --out L rm /dev/null', 'deny'], ['sudo --us root rm /dev/null', 'deny'], ['sudo --gro wheel rm /dev/null', 'deny'], ['ionice --classd 1 rm /dev/null', 'deny'],
+    ['echo /dev/null | xargs --max-a 1 rm', 'deny'], ['echo /dev/null | xargs --delim x rm', 'deny'], ['env --chd /tmp rm null', 'allow'], ['env --chd=/tmp rm null', 'allow'],
+    ['env --unse FOO echo /dev/null', 'allow'], ['nice --adj 5 ls /dev/null', 'allow'], ['sudo --us root ls /dev/null', 'allow'], ['env --ignore-environment rm /dev/null', 'deny'],
+  ])('reads a prefix of a long option of a wrapper as the option: %s is %s', (command, expected) => {
+    expect(check(command, '/dev').decision).toBe(expected);
+  });
 });

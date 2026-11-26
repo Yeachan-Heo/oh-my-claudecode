@@ -226,6 +226,10 @@ const isAssignment = (value) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
 // the blank stays in its argument, which the parser keeps in one word as well, so the quotes need no tracking).
 const envSplitText = (text) => text.replace(/\\(.)/gs, (pair, c) => (c === '_' ? ' ' : pair));
 
+// A long option of a wrapper written as a prefix takes its value in the next word too (measured: env --unse, nice --a, timeout --s, stdbuf --o and xargs --process
+// do); a prefix that two options share makes the tool stop with an error, so it does not matter how it is read.
+const wrapperTakesValue = (val, a) => val.includes(a) || (a.startsWith('--') && a.length > 2 && !a.includes('=') && val.some((v) => v.startsWith(a)));
+
 // [name, ...args] without leading keywords, assignments and wrappers: { name, args, xargs, replace }, or null when nothing is left.
 // xargs: the command is fed by a pipe; replace: the replace string of xargs -I, -i or --replace. env -S TEXT is a command line of its own: it
 // comes back as eval with TEXT followed by the remaining arguments, but when TEXT starts with an option or with time (a program to env) its words go through env's options again.
@@ -261,7 +265,7 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
       if (name === 'env') { // -C DIR, -CDIR, --chdir=DIR and every prefix of --chdir (the value of a prefix in the next word is skipped here)
         const longC = a.startsWith('--') && longIs(a.split('=')[0], '--chdir', 3);
         const shortC = !a.startsWith('--') ? /^-[^uCaS]*C/.exec(a) : null;
-        if (longC) { chdir = a.includes('=') ? a.slice(a.indexOf('=') + 1) : values[i + 1]; if (!a.includes('=') && a !== '--chdir') i++; }
+        if (longC) chdir = a.includes('=') ? a.slice(a.indexOf('=') + 1) : values[i + 1];
         else if (shortC) chdir = a.length > shortC[0].length ? a.slice(shortC[0].length) : values[i + 1];
       }
       if (name === 'xargs') {
@@ -269,7 +273,7 @@ function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the w
         const m = /^(?:-I(.+)|-i(.*)|--replace(?:=(.*))?)$/.exec(a);
         if (m) replace = m[1] ?? (m[2] || m[3] || '{}');
       }
-      if (spec.val.includes(a)) i++;
+      if (wrapperTakesValue(spec.val, a)) i++;
       else if (!a.startsWith('--')) { // a cluster of short options: the first letter with a value takes the rest of the word, or the next word when it ends the cluster
         let k = 1;
         while (k < a.length && !spec.val.includes(`-${a[k]}`) && !spec.opt?.includes(a[k])) k++;
