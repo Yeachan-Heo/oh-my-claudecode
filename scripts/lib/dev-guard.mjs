@@ -140,6 +140,20 @@ const DEV_LEADING = new Set(['then', 'do', 'else', 'elif', '{', '!', 'if', 'whil
 const baseName = (value) => String(value).replace(/\/+$/, '').split('/').pop();
 const isAssignment = (value) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
 
+// The text of env -S as the shell parser should read it: env turns an unquoted backslash and underscore into a separator of arguments.
+function envSplitText(text) {
+  let quote = '';
+  let out = '';
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k];
+    if (c === '\\' && quote !== "'" && k + 1 < text.length) { out += quote === '' && text[k + 1] === '_' ? ' ' : c + text[k + 1]; k++; continue; }
+    if (quote === c) quote = '';
+    else if (quote === '' && (c === "'" || c === '"')) quote = c;
+    out += c;
+  }
+  return out;
+}
+
 // [name, ...args] without leading keywords, assignments and wrappers: { name, args, xargs, replace }, or null when nothing is left.
 // xargs: the command is fed by a pipe; replace: the replace string of xargs -I, -i or --replace. env -S TEXT is a command line of its own: it
 // comes back as eval with TEXT followed by the remaining arguments.
@@ -177,7 +191,7 @@ function devUnwrap(values) {
         if (k === a.length - 1) i++;
       }
     }
-    if (split !== undefined) return { name: 'eval', args: [split, ...values.slice(i)], xargs, replace };
+    if (split !== undefined) return { name: 'eval', args: [envSplitText(split), ...values.slice(i)], xargs, replace };
     if (name === 'command' && values.slice(at + 1, i).some((o) => /^-[a-z]*[vV]/.test(o))) return null; // command -v only looks the name up
     if (name === 'xargs') xargs = true;
     at = i + (spec.skip ?? 0);
