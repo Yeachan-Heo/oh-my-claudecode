@@ -1800,6 +1800,30 @@ This article argues that fake popularity signals damage trust in open source.`;
       expect(result.gateApplied).toBe(false);
       expect(result.keywords).toContain('ralph');
     });
+
+    it('should not gate explicit slash invocations (ralph)', () => {
+      const result = applyRalplanGate(['ralph'], '/ralph fix this');
+      expect(result.gateApplied).toBe(false);
+      expect(result.keywords).toContain('ralph');
+    });
+
+    it('should not gate explicit slash invocations (autopilot)', () => {
+      const result = applyRalplanGate(['autopilot'], '/autopilot ship the feature');
+      expect(result.gateApplied).toBe(false);
+      expect(result.keywords).toContain('autopilot');
+    });
+
+    it('should not gate activation verb with hardware alias', () => {
+      const result = applyRalplanGate(['autopilot'], 'Please use the fullsend on this task');
+      expect(result.gateApplied).toBe(false);
+      expect(result.keywords).toContain('autopilot');
+    });
+
+    it('should not gate "use full auto" commands', () => {
+      const result = applyRalplanGate(['autopilot'], 'use full auto on this');
+      expect(result.gateApplied).toBe(false);
+      expect(result.keywords).toContain('autopilot');
+    });
   });
 
   describe('bridge pipeline regression: task-size + ralplan gate ordering', () => {

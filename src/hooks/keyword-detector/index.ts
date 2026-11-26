@@ -1374,6 +1374,14 @@ const WELL_SPECIFIED_SIGNALS: RegExp[] = [
   /\bin\s+[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx)\b/,
   // Test runner commands (explicit test target)
   /\b(?:npm\s+test|npx\s+(?:vitest|jest)|pytest|cargo\s+test|go\s+test|make\s+test)\b/i,
+  // Explicit activation verb with hardware alias (e.g., "use fullsend", "please use full auto")
+  /\b(?:please\s+)?(?:use|run|start|enable|activate)\s+(?:the\s+)?(?:full\s*auto|fullsend)\b/i,
+  // "turn <mode> on" patterns
+  /\b(?:turn|switch|enable)\s+(?:my\s+)?(?:autopilot|ralph|ralplan)\s+(?:on|up)\b/i,
+  // Specific task action verb (fix, implement, build, etc.) indicates what to do
+  /\b(?:fix|implement|build|create|refactor|debug|test|review|check|run|deploy|update|add|remove|change|modify|resolve|handle|patch|address|replace|seed|bring|ping)\b/i,
+  // Polite/modal language indicating explicit request
+  /\b(?:please|could|would|can|may|might|should|will)\s+(?:you\s+)?(?:use|run|activate)\b/i,
 ];
 
 /**
@@ -1390,6 +1398,10 @@ export function isUnderspecifiedForExecution(text: string): boolean {
   for (const prefix of GATE_BYPASS_PREFIXES) {
     if (trimmed.startsWith(prefix)) return false;
   }
+
+  // Explicit slash invocation (e.g., /ralph, /autopilot) bypasses the gate
+  // These are intentional commands, not vague requests
+  if (parseExplicitWorkflowSlashInvocation(trimmed)) return false;
 
   // If any well-specified signal is present, pass through
   if (WELL_SPECIFIED_SIGNALS.some(p => p.test(trimmed))) return false;
