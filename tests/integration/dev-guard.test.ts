@@ -102,6 +102,10 @@ const BLOCKED: string[] = [
   'echo x | xargs -rtiL rm /dev/null', 'echo /dev/null | xargs -iL rm L', 'echo x | xargs -rL 1 rm /dev/null', 'echo x | xargs -rn 1 rm /dev/null', 'echo x | xargs -rnL rm /dev/null',
   // the value of --file, --files-from and --exclude-from is not a member; the members that follow still count
   'tar -C / --extract --file a.tar dev/null', 'tar -C / -x --files-from /dev/fd/3 dev/null', 'tar -C / -x --exclude-from /dev/fd/3 dev/null', 'bsdtar -C / --extract --file a.tar dev/null',
+  // an exclusion removes a member only when its pattern has no wildcard and matches the name the way tar does
+  'tar -C / -xf a.tar dev/null --exclude=other', 'tar -C / -xf a.tar dev/null --exclude=dev/n*', 'tar -C / -xf a.tar dev/null --exclude=*', 'tar -C / -xf a.tar dev/null dev/zero --exclude=dev/null',
+  'tar -C / -xf a.tar dev/null --exclude=ev/null', 'tar -C / -xf a.tar dev/null --exclude=dev/null/', 'tar --anchored -C / -xf a.tar dev/null --exclude=null', 'bsdtar -C / -xf a.tar dev/null --exclude=dev/null',
+  'tar -C / -xf a.tar dev/null --exclude-from=x', 'tar -C / -xf a.tar dev/null --exclude-from x',
   // the options of xargs whose value is optional and attached: the next word is the command
   'echo /dev/null | xargs -rl rm', 'echo /dev/null | xargs -l rm', 'echo /dev/null | xargs -rl2 rm', 'echo /dev/null | xargs --max-lines rm', 'echo /dev/null | xargs --max-lines=2 rm',
   'echo /dev/null | xargs --eof rm', 'echo /dev/null | xargs -e rm', 'echo /dev/null | xargs -re rm', 'echo /dev/null | xargs -rt -l rm',
@@ -199,6 +203,10 @@ const ALLOWED: string[] = [
   // the value of the file options of tar is the archive or a list, not a member
   'tar -C / --extract --file /dev/fd/3 tmp/out', 'tar -C / --extract --file=/dev/fd/3 tmp/out', 'gtar -C / --extract --file /dev/fd/3 tmp/out', 'bsdtar -C / --extract --file /dev/fd/3 tmp/out',
   'tar -C / -x --files-from /dev/fd/3 tmp/out', 'tar -C / -x --exclude-from /dev/fd/3 tmp/out',
+  // a member that a literal exclusion names is not extracted
+  'tar -C / -xf a.tar dev/null --exclude=dev/null', 'tar -C / -xf a.tar dev/null --exclude dev/null', 'tar -C / -xf a.tar --exclude=dev/null dev/null', 'tar -C / -xf a.tar dev/null --exclude=null',
+  'gtar -C / -xf a.tar dev/null --exclude=dev/null', 'tar -C / -xf a.tar dev/null dev/zero --exclude=dev/null --exclude=dev/zero', 'tar --strip-components=1 -C / -xf a.tar foo/dev/null --exclude=dev/null',
+  'tar --anchored -C / -xf a.tar dev/null --exclude=dev/null',
   // the options of xargs whose value is the next word still take it
   'echo /dev/null | xargs -L 1 ls', 'echo /dev/null | xargs -rL 1 ls', 'echo /dev/null | xargs -E rm ls', 'echo /dev/null | xargs -rE rm ls', 'echo /dev/null | xargs --max-args 1 ls',
   // a member that is empty after the strip is skipped, and one that lands outside /dev stays outside
@@ -311,6 +319,8 @@ describe('/dev guard: Bash commands', () => {
       [`tar ${manyDirs.map((d) => `-C ${d}`).join(' ')} -xf a.tar ${manyMembers.join(' ')}`, 'allow'],
       [`unzip ${manyDirs.map((d) => `-d ${d}`).join(' ')} a.zip ${manyMembers.join(' ')}`, 'allow'],
       [`tar ${manyDirs.map((d) => `-C ${d}`).join(' ')} -C / -xf a.tar ${manyMembers.join(' ')} dev/null`, 'deny'],
+      [`tar -C / -xf a.tar ${manyMembers.join(' ')} ${manyMembers.map((m) => `--exclude=${m}`).join(' ')}`, 'allow'],
+      [`tar -C / -xf a.tar ${manyMembers.join(' ')} dev/null ${manyMembers.map((m) => `--exclude=${m}`).join(' ')}`, 'deny'],
     ];
     for (const [command, expected] of table) {
       const started = Date.now();

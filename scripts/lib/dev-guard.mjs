@@ -328,7 +328,7 @@ function archiveMemberInDev(dirs, members) {
 const TAR_LONG_VALUE = new Set(['--file', '--files-from', '--exclude-from', '--exclude']);
 
 // tar and bsdtar: the directories of -C / --directory (each relative one resolves against the previous), when the command extracts.
-function tarExtractDir(args) {
+function tarExtractDir(args, name) {
   const valueLetters = 'bCfFgHIKLNTVX';
   let extract = false;
   const dirs = [];
@@ -355,7 +355,17 @@ function tarExtractDir(args) {
     if (current.startsWith('/')) resolved.push(current);
   }
   const strip = Math.max(0, ...parsed.values.filter(([key]) => longIs(key, '--strip-components', 5)).slice(-1).map(([, n]) => Number(n) || 0)); // the last one counts; a bad number strips nothing
-  const members = parsed.operands.map((m) => (strip === 0 || m.startsWith('/') ? m : m.split('/').filter(Boolean).slice(strip).join('/'))).filter(Boolean); // a member with no component left is skipped
+  // a named member that a literal --exclude pattern matches is not extracted: the whole name or a tail that starts after a slash (only the whole name
+  // with --anchored); a wildcard pattern is not applied, and bsdtar reads an option after the members as one more member, so it excludes none there
+  const anchored = parsed.longs.some((l) => longIs(l, '--anchored', 4));
+  const excluded = new Set(name === 'bsdtar' ? [] : parsed.values.filter(([key, p]) => key === '--exclude' && p !== '' && !/[*?[\\]/.test(p)).map(([, p]) => p));
+  const isExcluded = (m) => {
+    if (excluded.has(m)) return true;
+    if (!anchored) for (let k = m.indexOf('/'); k >= 0; k = m.indexOf('/', k + 1)) if (excluded.has(m.slice(k + 1))) return true;
+    return false;
+  };
+  const named = parsed.operands.filter((m) => !isExcluded(m));
+  const members = named.map((m) => (strip === 0 || m.startsWith('/') ? m : m.split('/').filter(Boolean).slice(strip).join('/'))).filter(Boolean); // a member with no component left is skipped
   return found ?? archiveMemberInDev(resolved, members); // a named member lands in each directory, whatever order -C and the members come in
 }
 
@@ -381,7 +391,7 @@ function devExtraCommand(name, args) {
     if (!path || shorts.some((c) => 'lhvV'.includes(c)) || longs.some((l) => l === '--list' || l === '--help' || l === '--version')) return null;
     return partedReadsOnly(operands.slice(operands[0]?.startsWith('/') ? 1 : 0)) ? null : { what: name, path };
   }
-  if (name === 'tar' || name === 'gtar' || name === 'bsdtar') return hit(tarExtractDir(args));
+  if (name === 'tar' || name === 'gtar' || name === 'bsdtar') return hit(tarExtractDir(args, name));
   if (name === 'unzip') {
     const { shorts, operands, values } = parseGetopt(args, 'dPOI');
     if (shorts.some((c) => 'lvtpczZ'.includes(c))) return null; // listing, testing, writing to stdout: no files are created
