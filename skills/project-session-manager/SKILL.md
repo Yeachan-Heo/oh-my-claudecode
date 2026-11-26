@@ -257,13 +257,17 @@ Parse `{{ARGUMENTS}}` to determine:
 
 8. **Launch Claude Code** (unless --no-claude):
    ```bash
-   # --dangerously-skip-permissions prevents the "Do you trust this directory?" prompt
-   # and repeated tool-approval prompts from stalling the session (issue #2508).
-   tmux send-keys -t "psm_${project_alias}_pr-$pr_number" "claude --dangerously-skip-permissions" Enter
+   # Launches as plain `claude` by default (secure against prompt injection).
+   # Set PSM_SKIP_PERMISSIONS=1 to pass --dangerously-skip-permissions if needed
+   # (see issue #5149 for security implications).
+   claude_cmd="claude"
+   [[ "${PSM_SKIP_PERMISSIONS:-0}" == "1" ]] && claude_cmd="claude --dangerously-skip-permissions"
+   tmux send-keys -t "psm_${project_alias}_pr-$pr_number" "$claude_cmd" Enter
 
-   # After claude boots (PSM_CLAUDE_STARTUP_DELAY, default 5s), deliver the task.
+   # Deliver the task only once Claude shows its `>` REPL prompt. Never answer
+   # the directory-trust dialog for the user (issue #5149); if it is showing,
+   # tell the user to answer it in the session first.
    # Use -l (literal) so special characters are not misinterpreted by tmux.
-   sleep "${PSM_CLAUDE_STARTUP_DELAY:-5}"
    tmux send-keys -t "psm_${project_alias}_pr-$pr_number" -l \
      "Review PR #$pr_number: \"$pr_title\" by @$pr_author ($head_branch → $base_branch). URL: $pr_url." Enter
    ```
@@ -311,8 +315,12 @@ Parse `{{ARGUMENTS}}` to determine:
 6. **Update registry, create tmux, launch claude**:
    Same as review, but pass issue context as the initial task prompt:
    ```bash
-   tmux send-keys -t "psm_${project_alias}_issue-$issue_number" "claude --dangerously-skip-permissions" Enter
-   # After claude boots, deliver the task (see PSM_CLAUDE_STARTUP_DELAY):
+   # Launches as plain `claude` by default (secure against prompt injection).
+   # Set PSM_SKIP_PERMISSIONS=1 to pass --dangerously-skip-permissions if needed.
+   claude_cmd="claude"
+   [[ "${PSM_SKIP_PERMISSIONS:-0}" == "1" ]] && claude_cmd="claude --dangerously-skip-permissions"
+   tmux send-keys -t "psm_${project_alias}_issue-$issue_number" "$claude_cmd" Enter
+   # Once Claude shows its `>` REPL prompt (never answer the trust dialog), deliver the task:
    tmux send-keys -t "psm_${project_alias}_issue-$issue_number" -l \
      "Fix issue #$issue_number: \"$issue_title\". URL: $issue_url. Branch: $branch_name." Enter
    ```
@@ -341,7 +349,11 @@ Parse `{{ARGUMENTS}}` to determine:
 
 4. **Create session, tmux, launch claude** with feature context as initial prompt:
    ```bash
-   tmux send-keys -t "psm_${project_alias}_feat-$feature_name" "claude --dangerously-skip-permissions" Enter
+   # Launches as plain `claude` by default (secure against prompt injection).
+   # Set PSM_SKIP_PERMISSIONS=1 to pass --dangerously-skip-permissions if needed.
+   claude_cmd="claude"
+   [[ "${PSM_SKIP_PERMISSIONS:-0}" == "1" ]] && claude_cmd="claude --dangerously-skip-permissions"
+   tmux send-keys -t "psm_${project_alias}_feat-$feature_name" "$claude_cmd" Enter
    tmux send-keys -t "psm_${project_alias}_feat-$feature_name" -l \
      "Implement feature \"$feature_name\" for project $project. Branch: $branch_name." Enter
    ```
@@ -557,6 +569,24 @@ Required:
 Optional (per provider):
 - `gh` - GitHub CLI (for GitHub workflows)
 - `jira` - Jira CLI (for Jira workflows)
+
+## Security
+
+### Prompt Injection Protection (Issue #5149)
+
+PSM protects Claude sessions from prompt injection attacks when reviewing user-submitted content (PR bodies, issue titles, branch names, etc.):
+
+1. **Untrusted Data Wrapping**: PR and issue context files wrap attacker-controlled content in clearly marked untrusted-data blocks:
+   ```
+   --- UNTRUSTED DATA (source from GitHub) ---
+   [PR title, body, branch names, changed files, author]
+   --- END UNTRUSTED DATA ---
+   ```
+   This instructs Claude to treat the content as data, not instructions.
+
+2. **Delimiter Escaping**: The `psm_render_template` function neutralizes any occurrences of the closing delimiter (`--- END UNTRUSTED DATA ---`) inside substituted values, preventing attackers from prematurely closing the wrapper.
+
+3. **Permission Defaults**: By default, PSM launches Claude without `--dangerously-skip-permissions` for maximum security. This enables standard directory-trust and tool-approval prompts. Only set `PSM_SKIP_PERMISSIONS=1` if you are running PSM in a fully trusted environment and need unattended operation despite trust stalls.
 
 ## Initialization
 

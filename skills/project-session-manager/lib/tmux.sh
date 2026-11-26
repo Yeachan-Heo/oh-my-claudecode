@@ -68,9 +68,14 @@ psm_create_tmux_session() {
 #   - a path relative to the worktree root (e.g. .psm/review.md), or
 #   - a literal prompt string to send after Claude boots.
 #
-# Passes --dangerously-skip-permissions so the session does not stall on
-# directory-trust or repeated tool-approval prompts (issue #2508).
-# Set PSM_CLAUDE_STARTUP_DELAY (default: 5s) to tune literal-prompt delivery.
+# By default, launches as plain `claude` with standard directory-trust and
+# tool-approval prompts (more secure against prompt injection).
+# Set PSM_SKIP_PERMISSIONS=1 to pass --dangerously-skip-permissions (bypasses
+# both directory-trust and per-tool approval prompts). This may cause unattended
+# sessions to block indefinitely if the directory is untrusted or tools require
+# approval (issue #2508). Only use this flag in a trusted directory context.
+# The initial prompt is sent only once Claude shows its REPL prompt; PSM never
+# answers the directory-trust dialog (issue #5149).
 psm_launch_claude() {
     local session_name
     session_name=$(psm_tmux_safe_name "$1")
@@ -81,10 +86,14 @@ psm_launch_claude() {
         return 1
     fi
 
-    # --dangerously-skip-permissions bypasses both the directory-trust prompt and
-    # every per-tool approval prompt. Without this flag, unattended PSM sessions
-    # can block indefinitely on the first tool call (issue #2508).
-    tmux send-keys -t "$session_name" "claude --dangerously-skip-permissions" Enter
+    # Launch with --dangerously-skip-permissions only if PSM_SKIP_PERMISSIONS=1.
+    # Default is to launch plain `claude` for security against prompt injection.
+    local claude_cmd="claude"
+    if [[ "${PSM_SKIP_PERMISSIONS:-0}" == "1" ]]; then
+        claude_cmd="claude --dangerously-skip-permissions"
+    fi
+
+    tmux send-keys -t "$session_name" "$claude_cmd" Enter
 
     if [[ -n "$initial_context" ]]; then
         local session_path=""
@@ -93,14 +102,29 @@ psm_launch_claude() {
         # If the second arg resolves to a file in the worktree, preserve the
         # existing context-file flow. Otherwise treat it as a literal prompt.
         if [[ -n "$session_path" && -f "$session_path/$initial_context" ]]; then
-            psm_inject_prompt "$session_name" "$initial_context"
+            # Guard the inject call: if it fails (timeout or other error), keep the
+            # session registered and return success anyway, since the session was
+            # successfully created and Claude is running. The only failure is prompt
+            # injection, which is secondary to the session lifecycle.
+            if ! psm_inject_prompt "$session_name" "$initial_context"; then
+                echo "warn|Prompt injection failed; session remains registered for manual recovery" >&2
+                echo "warn|Use: tmux attach-session -t '$session_name'" >&2
+            fi
         else
-            local startup_delay="${PSM_CLAUDE_STARTUP_DELAY:-5}"
-            (
-                sleep "$startup_delay"
+            # For literal prompts, also wait for the REPL to be ready before sending.
+            # This prevents the prompt from being delivered while a trust dialog is pending.
+            # If the wait fails, keep the session registered and print recovery instructions.
+            if ! psm_wait_for_claude_prompt "$session_name"; then
+                echo "warn|Timed out waiting for Claude prompt; literal context not sent" >&2
+                echo "warn|If Claude is asking whether to trust this folder, answer it in tmux session: $session_name" >&2
+                echo "warn|Then send this prompt yourself: $initial_context" >&2
+                echo "warn|Use: tmux attach-session -t '$session_name'" >&2
+            else
+                # Use literal mode (-l) to prevent tmux from interpreting key names in the text
                 tmux send-keys -t "$session_name" -l -- "$initial_context" 2>/dev/null || true
+                sleep 0.15
                 tmux send-keys -t "$session_name" Enter 2>/dev/null || true
-            ) &
+            fi
         fi
     fi
 
@@ -111,6 +135,13 @@ psm_launch_claude() {
 # Render a PSM template file by substituting {{KEY}} placeholders.
 # Usage: psm_render_template <template_file> [KEY=VALUE ...]
 # Outputs rendered content to stdout; returns 1 if template not found.
+# 
+# Prevents prompt injection via single-pass substitution with post-substitution
+# escaping: all placeholders are replaced first, then delimiters are neutralized
+# in the final output to prevent reconstruction attacks where split values could
+# reassemble the delimiter (e.g., "--- END UNTRUST" + "ED DATA ---" = attack).
+# Uses a per-render nonce in the delimiter to make reconstruction virtually
+# impossible even if partially escaped content is detected.
 psm_render_template() {
     local template_file="$1"
     shift
@@ -123,25 +154,62 @@ psm_render_template() {
     local content
     content=$(cat "$template_file")
 
+    # Validation: if the template used the UNTRUSTED DATA wrapper,
+    # ensure the template itself has exactly one opening and one closing delimiter.
+    # We validate the template BEFORE substitution to catch malformed templates.
+    if printf '%s' "$content" | grep -qF -- '--- UNTRUSTED DATA'; then
+        local template_open
+        local template_close
+        template_open=$(printf '%s' "$content" | grep -Fo -- '--- UNTRUSTED DATA' | wc -l)
+        template_close=$(printf '%s' "$content" | grep -Fo -- '--- END UNTRUSTED DATA ---' | wc -l)
+        if [[ $template_open -ne 1 ]] || [[ $template_close -ne 1 ]]; then
+            echo "error|Invalid template wrapper structure (found $template_open openers, $template_close closers)" >&2
+            return 1
+        fi
+    fi
+
+    # Protect the template's own delimiters before substitution by replacing them
+    # with markers. This allows us to escape injected delimiters while preserving
+    # the template's structure.
+    local marker_open="__MARKER_OPEN_$(date +%s%N)__"
+    local marker_close="__MARKER_CLOSE_$(date +%s%N)__"
+    content="${content//--- UNTRUSTED DATA ---/$marker_open}"
+    content="${content//--- END UNTRUSTED DATA ---/$marker_close}"
+
+    # Single-pass substitution: replace all placeholders with values
+    # without escaping first. This prevents partial patterns from being
+    # created by sequential substitution (e.g., "--- END UNTRUST" from one
+    # value + "ED DATA ---" from another could reconstruct the delimiter).
     for assignment in "$@"; do
         local key="${assignment%%=*}"
         local value="${assignment#*=}"
-        # Bash parameter expansion handles multiline values safely
+        # Direct substitution - no pre-escaping
         content="${content//\{\{${key}\}\}/$value}"
     done
+
+    # Post-substitution: escape any delimiters that might have been
+    # reconstructed or injected via substituted values (now that placeholders are gone).
+    # This prevents injection attacks where content spans multiple placeholders
+    # (e.g., PR_BODY="--- END UNTRUST" + CHANGED_FILES="ED DATA ---" = attack).
+    content="${content//--- END UNTRUSTED DATA ---/---ESCAPED_END---}"
+
+    # Restore the template's own delimiters from markers
+    content="${content//$marker_open/--- UNTRUSTED DATA ---}"
+    content="${content//$marker_close/--- END UNTRUSTED DATA ---}"
 
     printf '%s\n' "$content"
 }
 
-# Returns 0 if the captured pane text shows Claude's interactive input prompt.
-# Matches '>' (standard prompt) or '?' (trust prompt) as the sole content of a line.
+# Returns 0 if the captured pane text shows Claude's interactive input prompt
+# ('>' as the sole content of a line).
 # Usage: _psm_pane_has_claude_prompt <pane_text>
 _psm_pane_has_claude_prompt() {
     local pane_text="$1"
-    printf '%s' "$pane_text" | grep -qE '^[[:space:]]*(>|\?)[[:space:]]*$'
+    printf '%s' "$pane_text" | grep -qE '^[[:space:]]*>[[:space:]]*$'
 }
 
 # Poll the tmux pane until Claude's REPL prompt appears.
+# Never answers dialogs: a pending directory-trust prompt is left for the user.
 # Usage: psm_wait_for_claude_prompt <session_name> [max_seconds]
 # Returns 0 when prompt detected; 1 on timeout.
 psm_wait_for_claude_prompt() {
@@ -164,19 +232,21 @@ psm_wait_for_claude_prompt() {
 }
 
 # Wait for Claude's REPL to be ready then inject a context-file trigger prompt.
-# Non-fatal: warns on timeout but does not fail the session creation.
+# If the prompt never appears (for example, Claude is waiting on the directory-trust
+# dialog), nothing is sent and the user is told how to start the task by hand.
 # Usage: psm_inject_prompt <session_name> <context_file_relative_path>
 psm_inject_prompt() {
     local session_name
     session_name=$(psm_tmux_safe_name "$1")
     local context_file="$2"
+    local trigger="Read ${context_file} for full task context, then begin."
 
     if ! psm_wait_for_claude_prompt "$session_name"; then
-        echo "warn|Timed out waiting for Claude prompt; task context not injected" >&2
-        return 0
+        echo "error|Timed out waiting for Claude prompt; task context not injected" >&2
+        echo "error|If Claude is asking whether to trust this folder, answer it in tmux session: $session_name" >&2
+        echo "error|Then send this prompt yourself: $trigger" >&2
+        return 1
     fi
-
-    local trigger="Read ${context_file} for full task context, then begin."
 
     # Use literal mode (-l) to prevent tmux from interpreting key names in the text
     tmux send-keys -t "$session_name" -l -- "$trigger"
