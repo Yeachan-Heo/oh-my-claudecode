@@ -4,6 +4,7 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { clearWorktreeCache } from '../../../lib/worktree-paths.js';
 import {
+  getBackgroundTaskPermissionFallback,
   isSafeCommand,
   isSafeRepoInspectionCommand,
   isActiveModeRunning,
@@ -602,6 +603,31 @@ describe('permission-handler', () => {
 
           expect(result.continue).toBe(true);
           expect(result.hookSpecificOutput?.decision?.behavior).not.toBe('allow');
+        } finally {
+          if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+          else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+        }
+      });
+
+      it('should honor Edit and Write allow rules in the project .claude/settings.json for background tasks', () => {
+        const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+        process.env.CLAUDE_CONFIG_DIR = path.join(testDir, 'claude-config');
+        try {
+          expect(getBackgroundTaskPermissionFallback(testDir, 'executor')).toEqual({
+            shouldFallback: true,
+            missingTools: ['Edit', 'Write'],
+          });
+
+          fs.mkdirSync(path.join(testDir, '.claude'), { recursive: true });
+          fs.writeFileSync(
+            path.join(testDir, '.claude', 'settings.json'),
+            JSON.stringify({ permissions: { allow: ['Edit', 'Write'] } }, null, 2),
+          );
+
+          expect(getBackgroundTaskPermissionFallback(testDir, 'executor')).toEqual({
+            shouldFallback: false,
+            missingTools: [],
+          });
         } finally {
           if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
           else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
