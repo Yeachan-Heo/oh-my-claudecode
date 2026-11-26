@@ -657,6 +657,15 @@ describe("parseFrontmatter trailing comments", () => {
     expect(parse('note: Hello !<a,b> "x # y"').note).toBe('Hello !<a,b> "x');
   });
 
+  it("ignores quotes inside a verbatim YAML tag", () => {
+    expect(parse("description: !<tag:example.com,2026:foo,'bar> 'Use # carefully'").description).toBe(
+      "!<tag:example.com,2026:foo,'bar> 'Use # carefully'",
+    );
+    expect(parse('map: {k: !<tag:x,"y> "v # x"} # c').map).toBe('{k: !<tag:x,"y> "v # x"}');
+    expect(parse(`note: Hello !<a,'b> "x # y"`).note).toBe(`Hello !<a,'b> "x`);
+    expect(parse("note: !<a 'b # c'").note).toBe("!<a 'b # c'");
+  });
+
   it("opens a quote right after the colon of a quoted key", () => {
     expect(parse('metadata: {"label":"a # b"}').metadata).toBe('{"label":"a # b"}');
     expect(parse("metadata: {'label':'a # b'} # c").metadata).toBe("{'label':'a # b'}");

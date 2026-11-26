@@ -216,6 +216,14 @@ function stripTrailingComment(value: string): string {
       }
       continue;
     }
+    // A verbatim tag (`!<tag:example.com,2026:a'b> `) may hold quotes, so skip it whole.
+    if (char === "!" && value[i + 1] === "<" && (i === 0 || /[\s[{,]/.test(value[i - 1]))) {
+      const tagEnd = value.indexOf(">", i + 2);
+      if (tagEnd > i + 2 && !/\s/.test(value.slice(i + 2, tagEnd))) {
+        i = tagEnd;
+        continue;
+      }
+    }
     if (char === '"' || char === "'") {
       // A quote opens a scalar only where a flow node can start:
       // - at the start of the value, after `[`, `{` or `,`, or after the `? `
