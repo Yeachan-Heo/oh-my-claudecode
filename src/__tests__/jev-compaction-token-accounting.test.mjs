@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { agentTrace, listTokens, pasteTrace, prefixTokens, ratesFrom, register, replyTrace, resolveWindow, tokenCeiling } from '../../hooks/jev-compaction.mjs';
+import { agentTrace, blockTrace, listTokens, pasteTrace, prefixTokens, ratesFrom, register, replyTrace, resolveWindow, tokenCeiling } from '../../hooks/jev-compaction.mjs';
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const SPOOL = '/home/u/.omc/state/jev/compaction-spool/';
@@ -223,7 +223,8 @@ describe('token accounting: every trace the module writes is priced at the trace
   const paste = pasteTrace(5000, `${'p'.repeat(300)}\n"quoted" [bracket] ${'q'.repeat(300)}`, '/home/u/.omc/state/jev/compaction-pastes/s/abc.txt');
   const reply = replyTrace(900, `${'r'.repeat(500)}\nsecond [line] "quote"`, '/home/u/.omc/state/jev/compaction-pastes/s/def.txt');
   const agent = agentTrace('/home/u/.omc/state/jev/compaction-pastes/s/ghi.txt', `<teammate-message teammate_id="worker-1" summary="the report">${'w'.repeat(900)}</teammate-message>`);
-  const FORMATS = [['a removed result', compacted], ['a removed notification', note], ['pasted text', paste], ['a reply', reply], ['an agent message', agent]];
+  const blockOf = blockTrace(1200, `${'b'.repeat(300)}\nsecond [line] "quote"`, '/home/u/.omc/state/jev/compaction-pastes/s/jkl.txt', 'start');
+  const FORMATS = [['a removed result', compacted], ['a removed notification', note], ['pasted text', paste], ['a reply', reply], ['an agent message', agent], ['a block', blockOf]];
 
   it.each(FORMATS)('%s: the trace alone costs RATE_TRACE a character, in a user row and in an assistant text', (_name, trace) => {
     for (const role of ['user', 'assistant']) expect(listTokens(text(role, trace)), role).toBeCloseTo(0.58 * trace.length + block, 6);
@@ -233,7 +234,7 @@ describe('token accounting: every trace the module writes is priced at the trace
   });
 
   it('a trace of a line stands apart from the words around it: the line break before it is part of the trace, the words keep their class', () => {
-    for (const [, trace] of [FORMATS[0], FORMATS[3], FORMATS[4]]) {
+    for (const [, trace] of [FORMATS[0], FORMATS[3], FORMATS[4], FORMATS[5]]) {
       const assistant = `Intro line\n${trace}\nOutro line`;
       expect(listTokens(text('assistant', assistant))).toBeCloseTo(0.58 * (1 + trace.length) + 0.315 * 'Intro line\nOutro line'.length + block, 6);
       const twice = `Intro\n${trace}\n${trace}\nOutro`;
@@ -263,9 +264,9 @@ describe('token accounting: every trace the module writes is priced at the trace
   it('lists every format of trace the module writes: a source with a new one fails here until the estimate prices it', () => {
     const source = readFileSync(join(fileURLToPath(import.meta.url), '..', '..', '..', 'hooks', 'jev-compaction.mjs'), 'utf8');
     const moved = new Set([...source.matchAll(/'\[([a-z ]+) moved at compaction/g)].map((m) => m[1]));
-    expect([...moved].sort()).toEqual(['agent message', 'pasted text', 'reply']);
+    expect([...moved].sort()).toEqual(['agent message', 'block', 'pasted text', 'reply']);
     expect(source.match(/`\[compacted\] /g)?.length).toBeGreaterThan(0);
-    for (const trace of [paste, reply, agent]) expect(trace).toMatch(/^\[(?:pasted text|reply|agent message) moved at compaction/);
+    for (const trace of [paste, reply, agent, blockOf]) expect(trace).toMatch(/^\[(?:pasted text|reply|agent message|block) moved at compaction/);
   });
 
   it('the cost of a trace when counted again is the cost the stage took off, whatever the rates', () => {

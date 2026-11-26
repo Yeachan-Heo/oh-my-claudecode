@@ -2871,7 +2871,13 @@ describe('jev-compaction module: settings fallback for the options of the stages
     ['OMC_JEV_COMPACT_OWNER_MARKERS', 'my marker', (c) => c.ownerMarkers, ['my marker'], []],
     ['OMC_JEV_COMPACT_LONG_REPLIES', 'active', (c) => c.replies, 'active', 'off'],
     ['OMC_JEV_COMPACT_HOOK_ROW_PREFIXES', 'Custom note:', (c) => c.hookRowPrefixes.includes('Custom note:'), true, false],
-    ['OMC_JEV_COMPACT_TRESC', 'active', (c) => c.series, 'active', 'off'],
+    ['OMC_JEV_COMPACT_TRESC', 'active', (c) => c.blocks, 'active', 'off'],
+    ['OMC_JEV_COMPACT_VERDICTS', 'off', (c) => c.verdicts, 'off', 'active'],
+    ['OMC_JEV_COMPACT_BLOCK_QUESTIONS', 'shared', (c) => c.blockQuestions, 'shared', 'full'],
+    ['OMC_JEV_COMPACT_WINDOW_CHARS', '9000', (c) => c.windowChars, 9000, undefined],
+    ['OMC_JEV_COMPACT_FULL_INPUT', 'active', (c) => c.fullInput, true, false],
+    ['OMC_JEV_COMPACT_JEV_STAGES', 'active', (c) => c.jevStages, true, false],
+    ['OMC_JEV_COMPACT_OWNER_LAST', 'active', (c) => c.ownerLast, true, false],
   ];
   // The keys readConfig read before those options (the other keys of its environment table).
   const READ_BEFORE = ['OMC_JEV', 'TYPESAFE_API_KEY', 'OMC_JEV_ENDPOINT', 'OMC_JEV_LOG_DIR', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_EXCERPT_CHARS_COMPACTION', 'OMC_JEV_COMPACT_AT_PERCENT', 'OMC_JEV_COMPACT_TARGET', 'OMC_JEV_COMPACT_TOAST', 'OMC_JEV_COMPACT_PRIVATE_PATHS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_BREAKER_DIR', 'OS', 'USERPROFILE', 'HOME'];

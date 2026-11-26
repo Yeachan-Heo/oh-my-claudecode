@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as module from '../../hooks/jev-compaction.mjs';
 
-const { mergeSeries, pasteTrace, readConfig, register, replyTrace, seriesContext, seriesItems, seriesRuns } = module;
+const { blockTrace, mergeSeries, pasteTrace, readConfig, register, replyTrace, seriesContext, seriesItems, seriesRuns, traceHeader } = module;
 
 const ACTIVE_ENV = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key', HOME: '/home/u' };
 const PASTES = '/home/u/.omc/state/jev/compaction-pastes/';
@@ -122,6 +122,36 @@ describe('series of traces: what is a series', () => {
     const text = `${call(1)}\n${call(2)}\n${reply(3)}\n${call(4)}\n${agent(5)}\n${call(6)}\n${call(7)}\n${call(8)}`;
     expect(seriesRuns(text, true).map((r) => r.stats.traces)).toEqual([2, 3]);
     expect(seriesRuns(text, false).map((r) => r.stats.traces)).toEqual([8]);
+  });
+});
+
+describe('series of traces: the trace of a block', () => {
+  const block = (n, mode = 'bare') => blockTrace(1200 + n, `block number ${n} `.repeat(60), `b/${String(n).repeat(32).slice(0, 32)}.txt`, mode);
+  const header = (dir) => traceHeader(dir);
+
+  it('a block moved to a file, by its trace or as an agent block, is a member of a series (an "other" trace with a file), and in a direct reply it stays and parts the series', () => {
+    const agentBlock = blockTrace(900, 'agent words', `b/${'c'.repeat(32)}.txt`, 'bare', true);
+    const text = `${call(1)}\n${block(2)}\n${agentBlock}\n${call(3)}`;
+    const [run] = seriesRuns(text);
+    expect(run.stats).toMatchObject({ traces: 4, calls: 2, replies: 0, others: 2, file: true });
+    expect(seriesRuns(`${call(1)}\n${call(2)}\n${block(3)}\n${call(4)}\n${call(5)}\n${call(6)}`, true).map((r) => r.stats.traces)).toEqual([2, 3]);
+  });
+
+  it('the file of a series that holds a block trace opens with the header that says which directory the letter stands for, and the letter paths are no secret', async () => {
+    const cfg = await configOf({ OMC_JEV_COMPACT_TRESC: 'active' });
+    const text = `Findings.\n${call(1)}\n${block(2, 'start')}\n${call(3)}`;
+    const messages = conversation([text]);
+    const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
+    const fake = fakeDollar();
+    const record = {};
+    const items = seriesItems(cfg, messages, ctx, SESSION);
+    expect(items).toHaveLength(1);
+    const edited = await mergeSeries(fake.$, cfg, record, messages, ctx, new Set(items.map((x) => x.key)), SESSION, FAR);
+    expect(record.series).toMatchObject({ series: 1, traces: 3, secret: 0, written: 1 });
+    const body = `${call(1)}\n${block(2, 'start')}\n${call(3)}`;
+    const file = `${header(`${PASTES}${SESSION}`.replace(/\/$/, ''))}\n${body}\n`;
+    expect([...fake.files().values()]).toEqual([file]);
+    expect(edited.get(rowOf(0))).toMatch(/^Findings\.\n\[compacted\] traces merged: 2 calls, 0 replies, 1 others; list in /);
   });
 });
 
@@ -386,14 +416,14 @@ describe('series of traces: merging', () => {
 
 describe('series of traces: the switch', () => {
   it('is off when unset, shadow or active by its value in any case, and any other value is off', async () => {
-    expect((await configOf({})).series).toBe('off');
-    expect((await configOf({ OMC_JEV_COMPACT_TRESC: 'shadow' })).series).toBe('shadow');
-    expect((await configOf({ OMC_JEV_COMPACT_TRESC: ' Active ' })).series).toBe('active');
-    expect((await configOf({ OMC_JEV_COMPACT_TRESC: '1' })).series).toBe('off');
-    expect((await configOf({ OMC_JEV_COMPACT_TRESC: 'on' })).series).toBe('off');
+    expect((await configOf({})).blocks).toBe('off');
+    expect((await configOf({ OMC_JEV_COMPACT_TRESC: 'shadow' })).blocks).toBe('shadow');
+    expect((await configOf({ OMC_JEV_COMPACT_TRESC: ' Active ' })).blocks).toBe('active');
+    expect((await configOf({ OMC_JEV_COMPACT_TRESC: '1' })).blocks).toBe('off');
+    expect((await configOf({ OMC_JEV_COMPACT_TRESC: 'on' })).blocks).toBe('off');
   });
 
-  it('a compaction leaves neighbouring traces as they are whatever the switch says (nothing asks for a merge yet)', async () => {
+  it('a compaction without the token cascade leaves neighbouring traces as they are whatever the switch says (series merge only in the second round of F2)', async () => {
     const SERIES = `${call(1)}\n${call(2)}\n${call(3)}`;
     const rows = [user('Task: look at the notes and report.')];
     for (let k = 0; k < 8; k++) rows.push({ role: 'assistant', text: `Step ${k}.`, toolUses: [{ tool_use_id: `t${k}`, tool: 'Bash', input: { command: `cat n-${k}.txt` } }] }, { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${k}`, text: `RESULT-${k} ${'x'.repeat(5000)}`, isError: false }] });
