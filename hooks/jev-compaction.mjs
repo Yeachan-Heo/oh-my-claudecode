@@ -5925,7 +5925,7 @@ export function mergeTraceEntries(entries) {
 // result row a break per kept result, then its text; a traced notification as a trace that never merges (it parts its neighbours), a kept or cut one as text; a removed call or
 // notification leaves nothing (unless a delivered message is carried in its place); every other row is text. A trace carries the API message of its row (`group` of groupsOf), so traces of two
 // messages never merge.
-function archTraceEntries(rows, candidates, keepFrom, group, queued = new Map()) {
+export function archTraceEntries(rows, candidates, keepFrom, group, queued = new Map()) {
   const byId = new Map();
   const notes = new Map();
   for (const c of candidates) { if (c.note) notes.set(c.resIdx, c); else byId.set(c.id, c); }

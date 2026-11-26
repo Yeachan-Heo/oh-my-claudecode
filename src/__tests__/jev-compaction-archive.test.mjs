@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as module from '../../hooks/jev-compaction.mjs';
 
-const { archiveContentOf, archiveHeaderOf, archiveModeOf, archivePathOf, archivePlan, archiveResults, archiveSegment, archiveSkip, mergeSeries, mergeTraceEntries, readConfig, register, seriesContext, seriesItems, seriesRuns } = module;
+const { archTraceEntries, archiveContentOf, archiveHeaderOf, archiveModeOf, archivePathOf, archivePlan, archiveResults, archiveSegment, archiveSkip, mergeSeries, mergeTraceEntries, readConfig, register, seriesContext, seriesItems, seriesRuns } = module;
 
 const STATE = '/users/u/.omc/state/jev';
 const ARCHIVE = `${STATE}/compaction-archive`;
@@ -26,7 +26,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const cand = (id, text, { tool = 'Bash', input = { command: `cat ${id}.txt` }, isError = false, keep = 'trace', extra = {} } = {}) => ({ id, use: { tool, input }, res: { text, isError }, textOnly: true, secret: false, keep, ...extra });
 
 /** A fake `$` for archiveResults: files in a map, with sizes in the list; delays, failures and hangs by path. */
-function unitHost({ delay = 0, failWrite = () => false, corrupt = () => false, hang = () => false, initial = [] } = {}) {
+function unitHost({ delay = 0, failWrite = () => false, corrupt = () => false, hang = () => false, initial = [], strictList = false } = {}) {
   const files = new Map(initial);
   const stats = { writes: [], reads: [], active: 0, peak: 0 };
   const track = async (fn) => {
@@ -37,7 +37,11 @@ function unitHost({ delay = 0, failWrite = () => false, corrupt = () => false, h
   const $ = {
     clock: { after: (ms, fn) => { const t = setTimeout(fn, ms >= 1000 ? 300 : ms); return { cancel: () => clearTimeout(t) }; } },
     fs: {
-      list: async (dir) => [...files.entries()].filter(([p]) => p.startsWith(`${dir}/`)).map(([p, t]) => ({ name: p.slice(dir.length + 1), kind: 'file', size: Buffer.byteLength(t) })),
+      list: async (dir) => {
+        const listed = [...files.entries()].filter(([p]) => p.startsWith(`${dir}/`)).map(([p, t]) => ({ name: p.slice(dir.length + 1), kind: 'file', size: Buffer.byteLength(t) }));
+        if (strictList && !listed.length) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        return listed;
+      },
       read: async (p) => {
         stats.reads.push(p);
         if (hang(p, 'read')) return new Promise(() => {});
@@ -223,6 +227,36 @@ describe('archive: writing the files', () => {
     expect(none.files.size).toBe(0);
   });
 
+  it('the marker is written for an empty batch only when the session directory exists already, and for a batch with something to archive', async () => {
+    const stay = [cand('t1', 'one', { keep: 'full' })];
+    const none = unitHost({ strictList: true });
+    const a = await run(none, stay, { marker: true });
+    expect(a.marker).toBe(false);
+    expect(none.stats.writes).toEqual([]);
+    const live = unitHost({ strictList: true, initial: [[`${ARCHIVE}/${SESSION}/t0.txt`, 'an earlier file']] });
+    const b = await run(live, stay, { marker: true });
+    expect(b.marker).toBe(true);
+    expect(live.files.has(`${ARCHIVE}/${SESSION}/.compaction`)).toBe(true);
+    const some = unitHost({ strictList: true });
+    expect((await run(some, [cand('t1', 'one')], { marker: true })).marker).toBe(true);
+    expect(some.files.has(`${ARCHIVE}/${SESSION}/.compaction`)).toBe(true);
+  });
+
+  it('a file that holds the same text is reused by its size in bytes, also when the text is not ASCII', async () => {
+    const c = cand('t1', 'caf\u00e9 \u00fc\u00f1\u00ee \u4e2d\u6587 \ud83d\ude00 '.repeat(20));
+    const content = archiveContentOf(c);
+    expect(Buffer.byteLength(content)).toBeGreaterThan(content.length);
+    const path = `${ARCHIVE}/${SESSION}/t1.txt`;
+    const host = unitHost({ initial: [[path, content]] });
+    const out = await run(host, [c]);
+    expect(out).toMatchObject({ written: 0, reused: 1, rewritten: 0 });
+    expect(out.byId.get('t1').path).toBe(path);
+    expect(host.stats.writes).toEqual([]);
+    const other = unitHost({ initial: [[path, content.replace('caf\u00e9', 'cafe')]] });
+    expect(await run(other, [c])).toMatchObject({ written: 1, reused: 0 });
+    expect(other.files.get(path)).toBe(content);
+  });
+
   it('a file that holds the same text is reused and not written again; a file of the same size with other text, or of another size, is written again', async () => {
     const c = cand('t1', 'result one');
     const path = `${ARCHIVE}/${SESSION}/t1.txt`;
@@ -373,6 +407,29 @@ describe('archive: merging neighbouring traces of one identical call', () => {
   });
 });
 
+describe('archive: the entries of the merge, from the rows', () => {
+  const read = (id) => ({ id, use: { tool: 'Read', input: { file_path: '/work/a.txt' } }, summary: '/work/a.txt', trace: `[compacted] Read(/work/a.txt) - result of 100 chars removed`, res: { text: 'x'.repeat(100), isError: false }, resultChars: 100, textOnly: true, keep: 'trace' });
+  const note = (keep) => ({ id: 'notification-1', note: true, resIdx: 1, keep, use: { tool: 'notification', input: {} }, res: { text: 'a task ended' }, textOnly: true });
+  const rows = [{ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'r1' }] }, { role: 'user', text: 'a task ended', toolUses: [] }, { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'r3' }] }];
+  const kinds = (entries) => entries.map((e) => e.kind);
+
+  it('a removed notification leaves nothing, unless a delivered message is carried in its place, which parts the traces on both sides (one API message assumed here)', () => {
+    const list = [read('r1'), note('drop'), read('r3')];
+    const none = archTraceEntries(rows, list, 3, [0, -1, 0]);
+    expect(kinds(none)).toEqual(['trace', 'trace']);
+    expect(mergeTraceEntries(none).some((e) => e.merged)).toBe(true);
+    const carried = archTraceEntries(rows, list, 3, [0, -1, 0], new Map([[1, ['a message typed meanwhile']]]));
+    expect(kinds(carried)).toEqual(['trace', 'text', 'trace']);
+    expect(carried[1].text).toBe('a task ended');
+    expect(mergeTraceEntries(carried).some((e) => e.merged)).toBe(false);
+    // A notification that stays whole is text, and a traced one is a trace that never merges.
+    expect(kinds(archTraceEntries(rows, [read('r1'), note('full'), read('r3')], 3, [0, -1, 0]))).toEqual(['trace', 'text', 'trace']);
+    const traced = archTraceEntries(rows, [read('r1'), { ...note('trace'), trace: '[compacted] notification (a task ended) - 12 chars removed', summary: 'a task ended' }, read('r3')], 3, [0, -1, 0]);
+    expect(kinds(traced)).toEqual(['trace', 'trace', 'trace']);
+    expect(mergeTraceEntries(traced).some((e) => e.merged)).toBe(false);
+  });
+});
+
 describe('archive: in the compaction', () => {
   /** One compaction through register(on); Jev scores every result 0, so every result is cut. `fsFail` makes the write of a path throw, `corrupt` makes one read back wrong. */
   async function compactRun(env, messages, { tokens = 30000, score = 0, fsFail = () => false, corrupt = () => false, preset = [] } = {}) {
@@ -483,9 +540,14 @@ describe('archive: in the compaction', () => {
   });
 
   it('shadow in a compaction that is not active counts the same, and active without the point active behaves as shadow', async () => {
+    const shadowInShadow = await compactRun({ ...CASCADE, OMC_JEV: 'compaction', OMC_JEV_COMPACT_ARCHIVE: 'shadow' }, shape());
+    expect(shadowInShadow.record).toMatchObject({ mode: 'shadow', archive_mode: 'shadow', archive_planned: 12 });
+    expect(shadowInShadow.archived().size).toBe(0);
     const asShadowPoint = await compactRun({ ...CASCADE, OMC_JEV: 'compaction', OMC_JEV_COMPACT_ARCHIVE: 'active' }, shape());
     expect(asShadowPoint.record).toMatchObject({ mode: 'shadow', archive_mode: 'shadow', archive_planned: 12 });
     expect(asShadowPoint.archived().size).toBe(0);
+    const archiveFields = (r) => Object.fromEntries(Object.entries(r).filter(([k]) => k.startsWith('archive_') || k.startsWith('merged_')));
+    expect(archiveFields(asShadowPoint.record)).toEqual(archiveFields(shadowInShadow.record));
   });
 
   it('with the switch off or unset the record has none of its fields, no file is written and the result is the same', async () => {
@@ -545,6 +607,59 @@ describe('archive: in the compaction', () => {
     const run = await compactRun({ ...CASCADE, OMC_JEV_COMPACT_ARCHIVE: 'active' }, messages);
     expect(run.record).toMatchObject({ archive_written: 2, merged_traces: 0 });
     expect(traceLinesOf(run.out)).toHaveLength(2);
+  });
+
+  const readOf = (id, text) => ({ tool_use_id: id, tool: 'Read', input: { file_path: '/work/a.txt' }, text });
+  const resultsOf = (...ids) => row('', { toolResults: ids.map((id) => ({ tool_use_id: id, text: id.startsWith('k') ? 'ok' : `Content of ${id}. `.repeat(400), isError: false })) });
+
+  it('identical calls in two API messages that carry no text of their own never merge, and the number of messages stays the one without the switch', async () => {
+    const w = talk(30);
+    const messages = [w[0], assistant('', [readOf('r1')]), resultsOf('r1'), assistant('', [readOf('r2')]), resultsOf('r2'), ...w.slice(1)];
+    const off = await compactRun(CASCADE, messages);
+    const run = await compactRun({ ...CASCADE, OMC_JEV_COMPACT_ARCHIVE: 'active' }, messages);
+    expect(run.record).toMatchObject({ result: 'jev', archive_written: 2, merged_traces: 0, merged_items: 0 });
+    expect(traceLinesOf(run.out)).toHaveLength(2);
+    expect(run.out.messages).toHaveLength(off.out.messages.length);
+  });
+
+  it('a call that is kept between two identical traces of one API message parts them, and so does a result that is kept', async () => {
+    const w = talk(30);
+    const keptCall = assistant('', [{ tool_use_id: 'k1', tool: 'Bash', input: { command: 'echo kept' } }, readOf('r1')]);
+    const parted = [w[0], keptCall, resultsOf('r1'), assistant('', [readOf('r3')]), resultsOf('k1', 'r3'), ...w.slice(1)];
+    const a = await compactRun({ ...CASCADE, OMC_JEV_COMPACT_ARCHIVE: 'active' }, parted);
+    expect(a.record).toMatchObject({ result: 'jev', archive_written: 2, merged_traces: 0 });
+    expect(traceLinesOf(a.out)).toHaveLength(2);
+    const keptResult = [w[0], assistant('', [{ tool_use_id: 'k1', tool: 'Bash', input: { command: 'echo kept' } }]), assistant('', [readOf('r1')]), resultsOf('k1'), assistant('', [readOf('r3')]), resultsOf('r1', 'r3'), ...w.slice(1)];
+    const b = await compactRun({ ...CASCADE, OMC_JEV_COMPACT_ARCHIVE: 'active' }, keptResult);
+    expect(b.record).toMatchObject({ result: 'jev', archive_written: 2, merged_traces: 0 });
+    expect(traceLinesOf(b.out)).toHaveLength(2);
+    // The same two traces with nothing kept between them are one line.
+    const joined = [w[0], assistant('', [readOf('r1')]), assistant('', [readOf('r3')]), resultsOf('r1', 'r3'), ...w.slice(1)];
+    const c = await compactRun({ ...CASCADE, OMC_JEV_COMPACT_ARCHIVE: 'active' }, joined);
+    expect(c.record).toMatchObject({ result: 'jev', archive_written: 2, merged_traces: 1, merged_items: 2 });
+    expect(traceLinesOf(c.out)).toHaveLength(1);
+  });
+
+  it('without the cascade the length of the path counts in the cost of a trace, so a result the switch off keeps whole can become a trace', async () => {
+    const w = talk(30);
+    const pairId = (i, tool, input, text) => [assistant(`Step ${i}.`, [{ tool_use_id: `toolu_${String(i).padStart(2, '0')}`, tool, input }]), row('', { toolResults: [{ tool_use_id: `toolu_${String(i).padStart(2, '0')}`, text, isError: false }] })];
+    const results = (i) => (i === 3 ? `${body(i)} the password is hunter2` : i === 5 ? 'short' : i === 7 ? `${body(i)}\r\nwith CRLF\r\n` : i === 9 ? 'm'.repeat(160) : body(i));
+    const same = { file_path: '/work/a.txt' };
+    const reads = assistant('Reading.', [{ tool_use_id: 'toolu_r1', tool: 'Read', input: same }, { tool_use_id: 'toolu_r2', tool: 'Read', input: same }]);
+    const readRes = row('', { toolResults: ['toolu_r1', 'toolu_r2'].map((id, k) => ({ tool_use_id: id, text: `Content ${k}. `.repeat(500), isError: false })) });
+    const messages = [w[0], ...Array.from({ length: 10 }, (_, i) => pairId(i + 1, 'Bash', { command: `cat notes-${i + 1}.txt` }, results(i + 1))).flat(), reads, readRes, ...w.slice(1)];
+    const wholeIn = (out) => (out.out.messages || []).flatMap((m) => (m.toolResults || []).map((r) => r.tool_use_id));
+    const dir = { OMC_JEV_LOG_DIR: `/users/u/${'d'.repeat(60)}` };
+    const off = await compactRun(dir, messages);
+    const on = await compactRun({ ...dir, OMC_JEV_COMPACT_ARCHIVE: 'active' }, messages);
+    expect(off.record.result).toBe('jev');
+    expect(on.record.result).toBe('jev');
+    expect(wholeIn(off)).toContain('toolu_07');
+    expect(wholeIn(on)).not.toContain('toolu_07');
+    expect(traceLinesOf(on.out).some((l) => l.startsWith('[compacted] Bash(cat notes-7.txt) - '))).toBe(true);
+    expect(on.record.chars_after).toBeLessThan(off.record.chars_after);
+    const shadow = await compactRun({ ...dir, OMC_JEV_COMPACT_ARCHIVE: 'shadow' }, messages);
+    expect(shadow.out.messages).toEqual(off.out.messages);
   });
 });
 
