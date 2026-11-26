@@ -4630,8 +4630,10 @@ export function blockTrace(chars, text, file, mode = 'bare', agent = false) {
   return `${BLOCK_TRACE_PREFIX}${chars} chars in ${file}${start}${end}]`;
 }
 /** The header of the traces, once per compaction in the first row of the result: the directory the letter of a trace stands for. */
-export const traceHeader = (dir) => `${TRACE_HEADER_PREFIX}${BLOCK_LETTER}/ = ${dir}]`;
-const isHeaderRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.startsWith(TRACE_HEADER_PREFIX);
+const TRACE_HEADER_OPEN = `${TRACE_HEADER_PREFIX}${BLOCK_LETTER}/ = `;
+export const traceHeader = (dir) => `${TRACE_HEADER_OPEN}${dir}]`;
+// Only the whole generated header is one: a message of the user that opens with the same words and goes on is the user's.
+const isHeaderRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.startsWith(TRACE_HEADER_OPEN) && m.text.endsWith(']') && !m.text.includes('\n');
 const blockFileOf = (hash) => `${BLOCK_LETTER}/${hash}.txt`;
 // The tokens of a block by the class of its author and the characters past ASCII (the rates of the module).
 const blockTokens = (rates, author, text) => ({ w: rates.RATE_OWN, a: rates.RATE_ATXT }[author] ?? rates.RATE_NOTE) * text.length + rates.RATE_NON_ASCII * nonAscii(text);

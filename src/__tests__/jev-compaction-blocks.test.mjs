@@ -381,6 +381,34 @@ describe('blocks of text: a row that opens with a moved block', () => {
   });
 });
 
+describe('blocks of text: the header of the trace files', () => {
+  const HEADER_OPEN = '[compaction trace files: ';
+  const header = traceHeader(`${PASTES}sess-blocks`);
+
+  it('a message of the user that opens with the words of the header and goes on is kept whole in the middle of the session', async () => {
+    const asks = (i) => (i === 6 ? `${HEADER_OPEN}my note: MIDWORDS (THREE) ${fill('wish', 600)}` : undefined);
+    const run = await compactRun(BLOCKS, session(40, { said, asks }));
+    expect(allText(run.out)).toContain(`${HEADER_OPEN}my note: MIDWORDS (THREE) wish`);
+    expect(run.out.messages[0].text).toBe(header);
+    expect(allText(run.out).split(header).length).toBe(2);
+  });
+
+  it('a newest message of the user that opens with the words of the header and goes on is kept whole', async () => {
+    const tailed = session(40, { said }).map((m, i, all) => (i === all.length - 2 ? { ...m, text: `${HEADER_OPEN}b/ = /my/dir] and then TAILWORDS` } : m));
+    const run = await compactRun(BLOCKS, tailed);
+    expect(allText(run.out)).toContain(`${HEADER_OPEN}b/ = /my/dir] and then TAILWORDS`);
+    expect(run.out.messages[0].text).toBe(header);
+  });
+
+  it('the header of an earlier compaction, the whole generated row, is replaced by the new one', async () => {
+    const earlier = [{ role: 'user', text: traceHeader('/earlier/dir'), toolUses: [] }, ...session(40, { said })];
+    const run = await compactRun(BLOCKS, earlier);
+    expect(run.out.messages[0].text).toBe(header);
+    expect(allText(run.out)).not.toContain('/earlier/dir');
+    expect(allText(run.out).split(HEADER_OPEN).length).toBe(2);
+  });
+});
+
 describe('blocks of text: the stages that decide by fixed lengths (OMC_JEV_COMPACT_JEV_STAGES)', () => {
   const replies = { OMC_JEV_COMPACT_LONG_REPLIES: 'active', OMC_JEV_COMPACT_PASTES: 'active' };
   const longReply = (i) => `Step ${i} (ZERO) ${fill(`reply${i}`, 6000)}`;
