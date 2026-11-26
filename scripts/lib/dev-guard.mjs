@@ -149,21 +149,25 @@ const envSplitText = (text) => text.replace(/\\(.)/gs, (pair, c) => (c === '_' ?
 // [name, ...args] without leading keywords, assignments and wrappers: { name, args, xargs, replace }, or null when nothing is left.
 // xargs: the command is fed by a pipe; replace: the replace string of xargs -I, -i or --replace. env -S TEXT is a command line of its own: it
 // comes back as eval with TEXT followed by the remaining arguments.
-function devUnwrap(values) {
+function devUnwrap(values, keywords = new Set()) { // keywords: indexes of the words that are a plain unquoted time at the start of a pipeline
   let at = 0;
+  let keyword = true; // still at the start of the command, where time is the keyword of the shell (only -p and -- follow it)
   let xargs = false;
   let replace;
   for (;;) {
-    while (at < values.length && (isAssignment(values[at]) || DEV_LEADING.has(values[at]) || values[at] === 'function')) at += values[at] === 'function' ? 2 : 1; // function NAME { ...
+    while (at < values.length && (isAssignment(values[at]) || DEV_LEADING.has(values[at]) || values[at] === 'function')) { if (isAssignment(values[at])) keyword = false; at += values[at] === 'function' ? 2 : 1; } // function NAME { ...
     if (at >= values.length) return null;
     const name = baseName(values[at]);
     const spec = Object.hasOwn(DEV_WRAPPERS, name) ? DEV_WRAPPERS[name] : null;
     if (!spec) return { name, args: values.slice(at + 1), xargs, replace };
+    const timeKeyword = keyword && name === 'time' && keywords.has(at);
+    if (!timeKeyword) keyword = false;
     let i = at + 1;
     let split;
     for (; i < values.length; i++) {
       const a = values[i];
       if (a === '--') { i++; break; }
+      if (timeKeyword && a !== '-p') break;
       if (spec.assign && isAssignment(a)) continue;
       if (!a.startsWith('-') || a === '-') break;
       if (name === 'env' && (a.startsWith('-S') || longIs(a.split('=')[0], '--split-string', 3))) { // the text to split follows, attached or as the next argument
@@ -500,8 +504,10 @@ function devScanTokens(tokens, heredocs, depth) {
   let pipeDev = null; // a /dev path among the words of the command before the last pipe
   let wordDev = null; // a /dev path among the words of the current command
   let isFind = false; // the current command has find among its words
+  let timeWords = new Set(); // indexes of the words that are a plain unquoted time
+  let afterPipe = false; // the current command follows a pipe, where time is no keyword
   const flush = (op) => {
-    const unwrapped = words.length ? devUnwrap(words) : null;
+    const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
     let found = null;
     if (unwrapped) {
       found = devCommand(unwrapped.name, unwrapped.args, fed, depth);
@@ -514,6 +520,8 @@ function devScanTokens(tokens, heredocs, depth) {
     fed = [];
     wordDev = null;
     isFind = false;
+    timeWords = new Set();
+    afterPipe = op === '|' || op === '|&';
     return found;
   };
   const subs = (word) => { for (const list of devSubLists(word.parts)) { const found = devScanTokens(list, heredocs, depth + 1); if (found) return found; } return null; };
@@ -524,6 +532,7 @@ function devScanTokens(tokens, heredocs, depth) {
       const found = subs(t);
       if (found) return found;
       const text = devWordText(t);
+      if (!afterPipe && text === 'time' && t.parts.length === 1 && t.parts[0].kind === 'lit' && t.parts[0].text === 'time') timeWords.add(words.length);
       words.push(text);
       if (baseName(text) === 'find') isFind = true;
       if (!(isFind && FIND_REFERENCE.test(words[words.length - 2] ?? ''))) wordDev ??= devChangedIn(text); // the file after find -newer is only compared with

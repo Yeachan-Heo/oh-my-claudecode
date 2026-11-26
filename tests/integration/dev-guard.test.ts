@@ -78,9 +78,12 @@ const BLOCKED: string[] = [
   'rm "/de\\\nv/null"', 'rm /de\\\nv/null', 'rm /de"\\\n"v/null', 'rm "/dev/nu\\\nll"', 'echo x > "/de\\\nv/sda"',
   // devices that may carry a write to something real: the input of a terminal session, terminals and serial ports
   'echo x > /dev/stdin', 'echo x > /dev/pts/3', 'echo x > /dev/ttyUSB0', 'echo x > /dev/tty1', 'echo x | tee /dev/stdin', 'dd if=x of=/dev/pts/0', 'rm /dev/zero', 'mv x /dev/zero',
-  // the options of time that take a value, in both spellings, and the ones that do not
-  "/usr/bin/time -f '%e' rm /dev/null", 'time -f%e rm /dev/null', "time --format '%e' rm /dev/null", 'time --format=%e rm /dev/null', 'time -o /tmp/t rm /dev/null', 'time -o/tmp/t rm /dev/null',
-  'time --output /tmp/t rm /dev/null', 'time --output=/tmp/t rm /dev/null', 'time -p -a -v rm /dev/null', 'time --portability --append --verbose rm /dev/null',
+  // the options of the external time utility that take a value, in both spellings, and the ones that do not (a bare time is the keyword of the shell, see below)
+  "/usr/bin/time -f '%e' rm /dev/null", 'command time -f%e rm /dev/null', "command time --format '%e' rm /dev/null", 'command time --format=%e rm /dev/null', 'command time -o /tmp/t rm /dev/null', 'command time -o/tmp/t rm /dev/null',
+  'command time --output /tmp/t rm /dev/null', 'command time --output=/tmp/t rm /dev/null', 'command time -p -a -v rm /dev/null', 'command time --portability --append --verbose rm /dev/null',
+  // time is the keyword of the shell only as a plain word at the start of a pipeline, and then it runs the command after -p; anywhere else it is the external utility
+  'time -p rm /dev/null', 'time -p -- rm /dev/null', 'time -- rm /dev/null', 'time time -p rm /dev/null', 'command time -f %e rm /dev/null', 'env time -f %e rm /dev/null', 'sudo time -f %e rm /dev/null', 'nice time -f %e rm /dev/null',
+  'ZM=1 time -f %e rm /dev/null', "'time' -f %e rm /dev/null", '\\time -f %e rm /dev/null', '"time" -f %e rm /dev/null', 'true | time -f %e rm /dev/null', 'find . -exec time -f %e rm /dev/null ;',
   // a cluster of short options that ends in an option with a value
   'sudo -nu root rm /dev/null', 'sudo -Eu root rm /dev/null', 'sudo -nH -g wheel rm /dev/null', 'doas -nu root rm /dev/null', 'env -iu NAME rm /dev/null', 'timeout -vk 5 3 rm /dev/null',
   'ionice -tc 3 rm /dev/null', 'stdbuf -oL rm /dev/null', 'nice -n5 rm /dev/null', 'sudo -nuroot rm /dev/null', 'echo /dev/null | xargs -rn 1 rm',
@@ -188,6 +191,9 @@ const ALLOWED: string[] = [
   'echo /dev/null | xargs -L 1 ls', 'echo /dev/null | xargs -rL 1 ls', 'echo /dev/null | xargs -E rm ls', 'echo /dev/null | xargs -rE rm ls', 'echo /dev/null | xargs --max-args 1 ls',
   // a member that is empty after the strip is skipped, and one that lands outside /dev stays outside
   'tar --strip-components=1 -C / -xf /tmp/a.tar dev/null', 'tar --strip-components 2 -C / -xf /tmp/a.tar dev/null', 'tar --strip-components=1 -C / -xf /tmp/a.tar foo/etc/x', 'tar --strip-components=1 -C /tmp -xf /tmp/a.tar foo/dev/null',
+  // a bare time is the keyword of the shell: only -p and -- are its options, so the rest is a command that does not exist
+  'time -f %e rm /dev/null', 'if true; then time -f %e rm /dev/null; fi', '! time -f %e rm /dev/null', 'true && time -f %e rm /dev/null', '{ time -o /tmp/t rm /dev/null; }', 'time -p -f %e rm /dev/null',
+  'time --format %e rm /dev/null', 'time -pf rm /dev/null', 'time -f%e rm /dev/null', 'time -p time -f %e rm /dev/null',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
