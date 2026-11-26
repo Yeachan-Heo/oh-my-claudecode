@@ -781,8 +781,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     found = []
     assigned = {n: [own_value(n, x) for x in v] for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
     given_path = [os.path.expanduser(os.path.expandvars(d)) for v in assigned.get('PATH', []) for variant in parameter_variants(v, assigned) for d in variant.split(os.pathsep)]   # the PATH that settings.json gives the hook processes: the guard does not have it, the shell of the hook looks a bare word up there
-    settled = set(assigned)   # the names that have a value for the whole command: the settings, the command it is quoted in, an assignment that stands alone (`A=x; cmd`) or after export, declare, typeset, readonly or local, and ${NAME:=word}; an assignment in front of a command (`A=x cmd`, `env A=x cmd`) is that command's alone, but it stays a candidate for every word
-    unset = set()
+    settled = set(assigned)   # the names that have a value at the place that is looked at (settled_at below): the settings and the command it is quoted in, then what an assignment that stands alone (`A=x; cmd`) or after export, declare, typeset, readonly or local, and ${NAME:=word}, give from there on; an assignment in front of a command (`A=x cmd`, `env A=x cmd`) is that command's alone, but it stays a candidate for every word
     for words in simple:
         run = command_word(words)
         for word in words:
@@ -790,18 +789,26 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
             if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name):
                 if own_value(name, value) not in assigned.setdefault(name, []):
                     assigned[name].append(own_value(name, value))
-                if run is None or words[run] in ('export', 'declare', 'typeset', 'readonly', 'local'):
-                    settled.add(name)
-        if run is not None and words[run] == 'unset':
-            unset.update(w for w in words[run + 1:] if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', w))   # (`unset -v NAME`: the option is no name)
     for words in simple:
         for word in words:
             for m in PARAMETER.finditer(word):
                 if m.group(3) in (':=', '='):   # ${NAME:=word} and ${NAME=word} assign NAME for the words that follow: the word is a value of NAME in the whole command, as an assignment is
-                    settled.add(m.group(2))
                     if own_value(m.group(2), m.group(4)) not in assigned.setdefault(m.group(2), []):
                         assigned[m.group(2)].append(own_value(m.group(2), m.group(4)))
-    settled -= unset
+    settled_at = []   # for each simple command, for each word and once more after the last: the names that have a value for the whole command at that place, in the order of the words (the settings, an assignment that stands alone or after export, declare, typeset, readonly or local, and ${NAME:=word} count from the word after theirs on, `unset NAME` takes the name away from the next command on): `"$A"; A=/x` runs the A of the session, `A=/x; "$A"` does not. Only the order of the words is read: an assignment in a subshell, a pipe, after `||` or in a branch counts like one that runs
+    for words in simple:
+        run = command_word(words)
+        row = []
+        for word in words:
+            row.append(frozenset(settled))
+            name, equals, _value = word.partition('=')
+            if equals and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name) and (run is None or words[run] in ('export', 'declare', 'typeset', 'readonly', 'local')):
+                settled.add(name)
+            settled.update(m.group(2) for m in PARAMETER.finditer(word) if m.group(3) in (':=', '='))
+        if run is not None and words[run] == 'unset':
+            settled.difference_update(w for w in words[run + 1:] if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', w))   # (`unset -v NAME`: the option is no name)
+        row.append(frozenset(settled))
+        settled_at.append(row)
     chain, moved_at = False, []   # for each simple command: whether it moves its own working directory (-C, --directory, --chdir) or a cd stands before it in its chain, or the command it is quoted in moved: the shell runs a relative path from there
     for words in simple:
         join = (words[0] if words and is_operator(words[0]) else '').strip('\n')   # the operator in front of the simple command
@@ -818,9 +825,9 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                 directory = os.path.expanduser(os.path.expandvars(piece))
                 if directory and len(directory) <= MAX_PATH_CHARS and '\0' not in directory and os.path.isdir(directory) and directory not in named:
                     named.append(directory)
-    for words, here in zip(simple, moved_at):
+    for k, (words, here) in enumerate(zip(simple, moved_at)):
         run = command_word(words)
-        path_values = (assigned.get('PATH', []) if 'PATH' in settled else []) + [own_value('PATH', w[5:]) for w in words if w.startswith('PATH=')]   # the PATH of this simple command: the one that holds for the whole command, and its own PATH= words (a PATH= in front of another command is not its PATH)
+        path_values = (assigned.get('PATH', []) if 'PATH' in settled_at[k][0] else []) + [own_value('PATH', w[5:]) for w in words if w.startswith('PATH=')]   # the PATH of this simple command: the one that holds for the whole command, and its own PATH= words (a PATH= in front of another command is not its PATH)
         path_dirs = os.environ.get('PATH', os.defpath).split(os.pathsep) + [os.path.expanduser(os.path.expandvars(d)) for w in words if w.startswith('PATH=') for piece in word_pieces(w, assigned) if piece.startswith('PATH=') for d in piece[5:].split(os.pathsep)] + given_path   # a PATH= word is filled in with the values of its parameters first, then split
         directories = [''] + path_dirs + [os.path.normpath(os.path.join(n, d)) for d in path_dirs if d and not os.path.isabs(d) for n in named] + named   # a PATH=dir word adds its directories for every word of the simple command; a relative PATH entry is also looked up from each directory that the command names (`cd /dir; PATH=bin prog`)
         for index, word in enumerate(words):
@@ -831,9 +838,9 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
                 if depth >= 2:
                     raise ScanIncomplete('quoted commands nested too deeply to scan')
                 here_names = {w.partition('=')[0] for w in words if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', w, re.DOTALL)}   # the quoted command gets what is set for the whole command and what stands in front of it in its own simple command (`env A=x sh -c '...'`)
-                found += [t for t in command_programs(word, exclude, depth + 1, named, {n: v for n, v in assigned.items() if n in settled or n in here_names}, here) if t not in found]
+                found += [t for t in command_programs(word, exclude, depth + 1, named, {n: v for n, v in assigned.items() if n in settled_at[k][index] or n in here_names}, here) if t not in found]
             for piece in word_pieces(word, assigned):
-                if session_dependent(piece, run is not None and not is_operator(word) and (piece == word or '$' in word), directories, named, here, settled, path_values):
+                if session_dependent(piece, run is not None and not is_operator(word) and (piece == word or '$' in word), directories, named, here, settled_at[k][index], path_values):
                     raise ScanIncomplete('command runs a file that only the session of the hook can find, and it may be a file the guard writes (a path relative to its working directory, or a program that is not on the PATH of the guard)')
                 for path in word_files(piece, directories, named):
                     if path not in found:

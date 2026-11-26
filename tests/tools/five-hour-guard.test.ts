@@ -1890,12 +1890,22 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
       return runSync(GUARD, ['--config', f.cfg, '--once']);
     };
-    for (const command of [`DIR=${hooks}; python3 "$DIR/audit"`, `DIR=${hooks}; python3 \${DIR}/audit`, `python3 "$DIR/audit"; DIR=${hooks}`, `A=/x B=${hooks}; python3 "$B/$FILE"; FILE=audit`, `DIR=${hooks}; cd "$DIR" && PATH=$DIR audit`, `DIR=${hooks}; sh -c 'python3 $DIR/audit'`]) {
+    for (const command of [`DIR=${hooks}; python3 "$DIR/audit"`, `DIR=${hooks}; python3 \${DIR}/audit`, `A=/x B=${hooks}; FILE=audit; python3 "$B/$FILE"`, `DIR=${hooks}; cd "$DIR" && PATH=$DIR audit`, `DIR=${hooks}; sh -c 'python3 $DIR/audit'`]) {
       writeFileSync(f.settings, settings(command), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: script });
         expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
         expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+        expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
+      }
+    }
+    // a name that is used before the assignment is the session's: the later value is not what the command runs, so the guard refuses to start (the assignments of the first list, after their use)
+    for (const command of [`python3 "$DIR/audit"; DIR=${hooks}`, `A=/x B=${hooks}; python3 "$B/$FILE"; FILE=audit`]) {
+      writeFileSync(f.settings, settings(command), 'utf8');
+      for (const key of ['log_file', 'state_file', 'pause_file']) {
+        const r = start({ [key]: script });
+        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
       }
     }
@@ -3026,6 +3036,42 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(r.status, `${command}: ${r.stdout}${r.stderr}`).toBe(2);
       expect(r.stderr, command).toContain('are the same file');
       expect(r.stderr, command).not.toMatch(/not read to its end/);
+    }
+  });
+
+  it('a standalone assignment, an export or a default-assigning expansion gives its name a value only to the commands and words after it: a name that is used before it is the one the session has, so the guard refuses to start; an assignment before the use settles it, as unset takes it away from the next command on', () => {
+    const f = fixture('foreign-assignment-order', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, config: Record<string, string>) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...config }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    const later = '/nonexistent/later';
+    const ran = (command: string) => spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { ...process.env, FHG_AUDIT: audit } }).stdout.includes('ran');
+    const used = [`"$FHG_AUDIT"; FHG_AUDIT=${later}`, `"$FHG_AUDIT"; export FHG_AUDIT=${later}`, `"$FHG_AUDIT"; : "\${FHG_AUDIT:=${later}}"`, `"$FHG_AUDIT"\nFHG_AUDIT=${later}`];
+    const unsetBefore = `FHG_AUDIT=${later}; unset FHG_AUDIT; "$FHG_AUDIT"`;   // the shell runs nothing here (the name is gone); the scan does not know what the session would have, so it refuses
+    const set = [`FHG_AUDIT=${later}; "$FHG_AUDIT"`, `export FHG_AUDIT=${later}; "$FHG_AUDIT"`, `unset FHG_AUDIT; FHG_AUDIT=${later}; "$FHG_AUDIT"`, `FHG_AUDIT=${later}; "$FHG_AUDIT"; unset FHG_AUDIT`];
+    // what the shell does: the first command runs the file of the session, the others the name that was set before the use (which is no file)
+    for (const command of used) expect(ran(command), `${JSON.stringify(command)}: the session's file runs`).toBe(true);
+    for (const command of set) expect(ran(command), `${JSON.stringify(command)}: the name was set before the use`).toBe(false);
+    for (const command of [...used, unsetBefore]) {
+      for (const key of ['state_file', 'pause_file', 'log_file']) {
+        const r = start(command, { [key]: audit });
+        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expect(r.stderr).not.toMatch(/Traceback/);
+        expect(readText(audit), `${JSON.stringify(command)} as ${key}: the file is intact`).toBe(text);
+      }
+    }
+    for (const command of set) {
+      const r = start(command, { state_file: audit });
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
     }
   });
 
