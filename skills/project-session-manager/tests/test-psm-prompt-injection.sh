@@ -543,6 +543,82 @@ else
     fail "no attacker-controlled delimiters outside wrapper" "wrapper not found"
 fi
 
+# ── Trust dialog handling (issue #5149 thread c) ──────────────────────────────
+
+echo ""
+echo "=== Trust dialog handling (security fix) ==="
+
+# 51. _psm_pane_has_claude_prompt detects '>' prompt
+if _psm_pane_has_claude_prompt ">"; then
+    pass "_psm_pane_has_claude_prompt detects >"
+else
+    fail "_psm_pane_has_claude_prompt detects >" "should return 0 for prompt"
+fi
+
+# 52. _psm_pane_has_claude_prompt detects '?' trust prompt
+if _psm_pane_has_claude_prompt "?"; then
+    pass "_psm_pane_has_claude_prompt detects trust prompt"
+else
+    fail "_psm_pane_has_claude_prompt detects trust prompt" "should return 0 for trust prompt"
+fi
+
+# 53. Code inspection: psm_wait_for_claude_prompt does NOT send T
+# (Verify by checking function does not contain 'send-keys.*T')
+if grep -q "tmux send-keys.*'T'" "${PSM_LIB_DIR}/tmux.sh"; then
+    fail "psm_wait_for_claude_prompt no longer auto-sends T" "SECURITY: auto-send T still in code"
+else
+    pass "psm_wait_for_claude_prompt no longer auto-sends T"
+fi
+
+# 54. Code inspection: _psm_wait_for_trust_dialog_to_clear exists
+if grep -q "_psm_wait_for_trust_dialog_to_clear()" "${PSM_LIB_DIR}/tmux.sh"; then
+    pass "_psm_wait_for_trust_dialog_to_clear function exists"
+else
+    fail "_psm_wait_for_trust_dialog_to_clear function exists" "function not found"
+fi
+
+# 55. Code inspection: _psm_wait_for_trust_dialog_to_clear has polling loop
+if sed -n '225,250p' "${PSM_LIB_DIR}/tmux.sh" | grep -q 'while'; then
+    pass "_psm_wait_for_trust_dialog_to_clear has polling loop"
+else
+    fail "_psm_wait_for_trust_dialog_to_clear has polling loop" "while loop not found"
+fi
+
+# 56. Code inspection: psm_inject_prompt checks for trust dialog with grep
+if sed -n '254,290p' "${PSM_LIB_DIR}/tmux.sh" | grep -q 'pane_content.*grep'; then
+    pass "psm_inject_prompt checks pane content with grep"
+else
+    fail "psm_inject_prompt checks pane content with grep" "grep check not found"
+fi
+
+# 57. Code inspection: psm_inject_prompt prints informational messages
+if grep -q "info|Directory trust dialog" "${PSM_LIB_DIR}/tmux.sh"; then
+    pass "psm_inject_prompt prints trust dialog message"
+else
+    fail "psm_inject_prompt prints trust dialog message" "message text not found"
+fi
+
+# 58. Code inspection: psm_inject_prompt returns error on timeout
+if grep -A 50 "^psm_inject_prompt()" "${PSM_LIB_DIR}/tmux.sh" | grep -q "return 1"; then
+    pass "psm_inject_prompt returns error code on timeout"
+else
+    fail "psm_inject_prompt returns error code on timeout" "error return not found"
+fi
+
+# 59. Code inspection: psm_inject_prompt provides fallback instructions
+if grep -q "To manually approve trust" "${PSM_LIB_DIR}/tmux.sh"; then
+    pass "psm_inject_prompt provides fallback instructions"
+else
+    fail "psm_inject_prompt provides fallback instructions" "fallback instructions not found"
+fi
+
+# 60. Code inspection: PSM_SKIP_PERMISSIONS opt-in is still supported
+if grep -q "PSM_SKIP_PERMISSIONS" "${PSM_LIB_DIR}/tmux.sh"; then
+    pass "PSM_SKIP_PERMISSIONS opt-in flag is supported"
+else
+    fail "PSM_SKIP_PERMISSIONS opt-in flag is supported" "flag not found"
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 
 echo ""
