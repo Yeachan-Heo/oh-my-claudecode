@@ -10,7 +10,8 @@
 // eval with literal arguments, a script given to a shell as here-document or here-string, ssh with a remote command, and the
 // wrappers sudo, doas, env, command, builtin, exec, nice, ionice, nohup, timeout, stdbuf, setsid, time, coproc, xargs and busybox.
 // Also refused with a path under /dev: mkfs*, mke2fs, wipefs (erasing forms), fdisk, sfdisk, gdisk and parted (not their listing forms),
-// tar and bsdtar extracting with -C or --directory (not to the standard output), unzip -d (also the members named after the archive, joined
+// tar and bsdtar extracting with -C or --directory (not to the standard output; with -P or --absolute-names a member with a leading slash is judged by
+// its own name and no named member is refused; the --to-command text of tar is scanned like eval), unzip -d (also the members named after the archive, joined
 // with the directory in force at them, after --strip-components for tar, without the members that a literal --exclude of tar names and
 // without the words from unzip -x up to the next option), awk and gawk with -i inplace, ed, ex and red.
 // One exception: the atomic repair recipe for /dev/null passes when it is the whole command and /dev/null is not the character device 1:3.
@@ -18,8 +19,8 @@
 // file, interpreters (python -c ...), unknown wrappers, symbolic links to /dev, a script piped into a shell, wildcards, braces, ANSI-C
 // escapes and tildes in the path, a here-document for sudo -i, sudo -s and su, coproc NAME { ...; }, flock FILE COMMAND, runuser -u USER --
 // COMMAND, a filter between a feeder and xargs, xargs -rI {}, abbreviated long options of the wrappers with a value in
-// the next word, tar --transform, --xform, bsdtar -s, --one-top-level, -P and --absolute-names, tar --exclude with a wildcard or naming
-// a directory and any bsdtar --exclude, the command text of tar --to-command, an archive extracted without naming its members into / or a
+// the next word, tar --transform, --xform, bsdtar -s, --one-top-level, tar --exclude with a wildcard or naming
+// a directory and any bsdtar --exclude, the commands of tar --use-compress-program, -I and --checkpoint-action exec=, an archive extracted without naming its members into / or a
 // directory above /dev, wildcard or listed (-T) members, commands that are not listed (mkswap, blkdiscard,
 // losetup, cryptsetup, mdadm, ...).
 
