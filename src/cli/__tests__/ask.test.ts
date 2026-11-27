@@ -1225,6 +1225,79 @@ describe('run-provider-advisor script contract', () => {
     }
   });
 
+  it('treats a muse timeout/hang (SIGKILL/ETIMEDOUT) as a failure (#5176)', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-muse-timeout-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['muse', '--prompt', 'reply please'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath, SPAWN_CAPTURE_MODE: 'timeout' },
+      );
+
+      // A killed/timed-out muse run must fail, not hang or record success.
+      expect(result.status).toBe(1);
+      const stderr = `${result.stderr ?? ''}`;
+      expect(stderr).toContain('timed out');
+      expect(stderr).toContain('[ask-muse]');
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('spawns muse with a hard-kill timeout bound (SIGKILL) so a hung muse cannot block forever (#5176)', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-muse-killcfg-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['muse', '--prompt', 'reply please'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath },
+      );
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string; args: string[]; options: { timeout: number | null; killSignal: string | null };
+      }>;
+      const providerRun = calls.find((c) => c.command === 'muse' && !c.args.includes('--version'));
+      expect(providerRun).toBeDefined();
+      // The kill must be SIGKILL (terminal): a catchable SIGTERM would let a
+      // signal-trapping muse hang past the timeout and block spawnSync.
+      expect(providerRun!.options.killSignal).toBe('SIGKILL');
+      expect(providerRun!.options.timeout).toBe(300000);
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores an invalid OMC_MUSE_TIMEOUT_MS override and falls back to the default bound', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-muse-badtimeout-'));
+    try {
+      const capturePath = join(wd, 'spawn-sync-calls.json');
+      const preludePath = writeSpawnSyncCapturePreludeNative(wd);
+      const result = runAdvisorScriptWithPrelude(
+        preludePath,
+        ['muse', '--prompt', 'reply please'],
+        wd,
+        { SPAWN_CAPTURE_PATH: capturePath, OMC_MUSE_TIMEOUT_MS: '-5' },
+      );
+      expect(result.status).toBe(0);
+      expect(`${result.stderr ?? ''}`).toContain('Ignoring invalid OMC_MUSE_TIMEOUT_MS');
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string; args: string[]; options: { timeout: number | null };
+      }>;
+      const providerRun = calls.find((c) => c.command === 'muse' && !c.args.includes('--version'));
+      expect(providerRun!.options.timeout).toBe(300000);
+    } finally {
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
   it('pipes multiline claude prompts over stdin so the prompt is never a raw argv value (#3221)', () => {
     const wd = mkdtempSync(join(tmpdir(), 'omc-ask-claude-multiline-stdin-'));
     const multilinePrompt = 'line one\nline two\nline three';

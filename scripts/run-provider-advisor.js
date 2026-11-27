@@ -35,22 +35,26 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 // whole `omc ask` / `/ccg` flow forever. Generous so it never trips a real answer.
 // The kill MUST be SIGKILL: spawnSync does not return until the child exits, so a
 // catchable SIGTERM would let a signal-trapping agy hang past the timeout.
-const ANTIGRAVITY_TIMEOUT_DEFAULT_MS = 300000;
-const ANTIGRAVITY_TIMEOUT_KILL_SIGNAL = 'SIGKILL';
-const ANTIGRAVITY_TIMEOUT_MS = (() => {
-  const raw = process.env.OMC_ANTIGRAVITY_TIMEOUT_MS;
+const TIMEOUT_DEFAULT_MS = 300000;
+const TIMEOUT_KILL_SIGNAL = 'SIGKILL';
+
+function parseTimeoutMs(envVarName, defaultMs) {
+  const raw = process.env[envVarName];
   if (raw === undefined || raw === '') {
-    return ANTIGRAVITY_TIMEOUT_DEFAULT_MS;
+    return defaultMs;
   }
   const parsed = Number(raw);
   // Require a finite, integer, >=1000ms value; clamp to <=1h. Otherwise warn and
   // fall back to the default so a bad override can't disable or distort the bound.
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1000) {
-    console.error(`[ask-antigravity] Ignoring invalid OMC_ANTIGRAVITY_TIMEOUT_MS="${raw}" (need an integer >= 1000); using ${ANTIGRAVITY_TIMEOUT_DEFAULT_MS}ms.`);
-    return ANTIGRAVITY_TIMEOUT_DEFAULT_MS;
+    console.error(`[ask-${envVarName}] Ignoring invalid ${envVarName}="${raw}" (need an integer >= 1000); using ${defaultMs}ms.`);
+    return defaultMs;
   }
   return Math.min(parsed, 3600000);
-})();
+}
+
+const ANTIGRAVITY_TIMEOUT_MS = parseTimeoutMs('OMC_ANTIGRAVITY_TIMEOUT_MS', TIMEOUT_DEFAULT_MS);
+const MUSE_TIMEOUT_MS = parseTimeoutMs('OMC_MUSE_TIMEOUT_MS', TIMEOUT_DEFAULT_MS);
 
 /**
  * Build CLI args for a given provider.
@@ -355,7 +359,9 @@ async function main() {
       // Bound antigravity so an upstream non-TTY hang (#76) fails cleanly instead of
       // blocking forever; agy's own --print-timeout does not work. SIGKILL (not a
       // catchable SIGTERM) guarantees spawnSync returns even if agy traps signals.
-      ...(provider === 'antigravity' ? { timeout: ANTIGRAVITY_TIMEOUT_MS, killSignal: ANTIGRAVITY_TIMEOUT_KILL_SIGNAL } : {}),
+      // Muse `exec` can also hang indefinitely; apply the same timeout bound.
+      ...(provider === 'antigravity' ? { timeout: ANTIGRAVITY_TIMEOUT_MS, killSignal: TIMEOUT_KILL_SIGNAL } : {}),
+      ...(provider === 'muse' ? { timeout: MUSE_TIMEOUT_MS, killSignal: TIMEOUT_KILL_SIGNAL } : {}),
       ...(pipePromptViaStdin ? { input: prompt } : { stdio: ['ignore', 'pipe', 'pipe'] }),
     });
   } finally {
@@ -377,7 +383,7 @@ async function main() {
   // under pipe capture; this surfaces the regression/refusal cases instead of
   // masking them.) No silent success, no infinite wait — see #76 for why neither
   // a PTY wrapper nor agy's --print-timeout is a usable workaround.
-  if (provider === 'antigravity' && (run.error?.code === 'ETIMEDOUT' || run.signal === ANTIGRAVITY_TIMEOUT_KILL_SIGNAL)) {
+  if (provider === 'antigravity' && (run.error?.code === 'ETIMEDOUT' || run.signal === TIMEOUT_KILL_SIGNAL)) {
     console.error(`[ask-antigravity] agy timed out after ${ANTIGRAVITY_TIMEOUT_MS}ms with no completed response (see antigravity-cli#76).`);
     console.error('[ask-antigravity] agy headless print mode can hang on non-TTY; verify interactively with: agy -p "<prompt>"');
     exitCode = exitCode === 0 ? 1 : exitCode;
@@ -386,6 +392,14 @@ async function main() {
     console.error('[ask-antigravity] Treating as failure (see google-antigravity/antigravity-cli#76).');
     console.error('[ask-antigravity] Re-run, or verify interactively with: agy -p "<prompt>"');
     exitCode = 1;
+  }
+
+  // Muse `exec` can hang indefinitely if the backend is stalled. The timeout above
+  // turns a hang into a killed/non-zero run; here we ensure the failure is logged
+  // and the artifact is written even after timeout.
+  if (provider === 'muse' && (run.error?.code === 'ETIMEDOUT' || run.signal === TIMEOUT_KILL_SIGNAL)) {
+    console.error(`[ask-muse] muse timed out after ${MUSE_TIMEOUT_MS}ms with no completed response.`);
+    exitCode = exitCode === 0 ? 1 : exitCode;
   }
 
   const artifactPath = await writeArtifact({
