@@ -1146,4 +1146,14 @@ describe('/dev guard: spellings of round 6', () => {
     expect(check(command, cwd).decision).toBe(expected);
   });
 
+  // a newline after &&, ||, a pipe operator or the pattern of a case ends no command (measured with bash 5.2: false &&, then cd B on the next line, keeps the directory);
+  // time is a keyword and its cd moves the shell
+  it.each([
+    ['false &&\ncd /tmp; rm null', '/dev', 'deny'], ['true ||\ncd /tmp; rm null', '/dev', 'deny'], ['true |\ncd /tmp; rm null', '/dev', 'deny'], ['true |&\n\ncd /tmp; rm null', '/dev', 'deny'],
+    ['false && # why\ncd /tmp; rm null', '/dev', 'deny'], ['false ||\n\ntrue &&\ncd /tmp; rm null', '/dev', 'deny'], ['case x in y)\ncd /tmp;; esac; rm null', '/dev', 'deny'], ['false &&\n{ true; cd /tmp; }; rm null', '/dev', 'deny'],
+    ['echo /dev/null |\nxargs rm', '/tmp', 'deny'], ['ls /dev |&\n\nxargs rm', '/tmp', 'deny'],
+    ['true |\ncd /dev; rm null', '/tmp', 'allow'], ['cd /tmp\nrm null', '/dev', 'allow'], ['true;\ncd /tmp; rm null', '/dev', 'allow'], ['time cd /tmp; rm null', '/dev', 'allow'], ['time -p cd /tmp; rm null', '/dev', 'allow'],
+  ])('keeps the operator before a command across newlines: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
 });

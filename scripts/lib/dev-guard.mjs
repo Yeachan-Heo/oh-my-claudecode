@@ -732,6 +732,7 @@ function devScanTokens(tokens, heredocs, depth) {
   const dirStack = []; // the directory in force at each open parenthesis: a subshell leaves it behind
   const groupDirs = []; // the same at each open group or compound command ({, if, while, until, for, case): one that is piped or put in the background runs in a subshell, one after && or || may not run
   const flush = (op) => {
+    if (op === '\n' && !words.length && !fed.length && !redirected) return null; // after an operator or a case pattern a newline ends no command
     const mayNotRun = afterOr || afterCase || ['then', 'else', 'elif', 'do'].includes(words[0]);
     let opened = false; // the command opens a group or a compound command, whose first command is no member of a pipeline itself
     for (const w of words) {
