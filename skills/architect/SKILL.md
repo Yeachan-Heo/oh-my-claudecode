@@ -1,6 +1,6 @@
 ---
 name: architect
-description: "Settle types and module shape before cross-boundary code — sketch two shapes, pick by ownership and caller load, record the decision with rejected alternatives and an accepted-deviations register. For a large or contested design, arena decides instead."
+description: "Settle types and module shape before cross-boundary code: sketch two shapes, pick by ownership and caller load, record rejected alternatives. For a large or contested design, arena decides instead."
 aliases: []
 metadata:
   credits:

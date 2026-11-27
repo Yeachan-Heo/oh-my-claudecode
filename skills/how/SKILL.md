@@ -1,6 +1,6 @@
 ---
 name: how
-description: Walk through how a subsystem works — one read-only explainer pass, presented as a layered walkthrough a senior engineer could onboard from. Use for "how does X work", onboarding on unfamiliar code, or before changing a subsystem you cannot yet explain.
+description: "Walk through how a subsystem works — one read-only explainer pass, presented as a layered walkthrough a senior engineer could onboard from. For \"how does X work\" or onboarding on unfamiliar code."
 aliases: []
 metadata:
   credits:
