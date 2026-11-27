@@ -1111,7 +1111,8 @@ function stopProgressEnabled() {
 }
 
 // With OMC_JEV_STOP_PROGRESS=1 the Stop rows go to denials.jsonl in the Jev log directory (the writer never throws): a
-// release row for every release of the Stop and an end row when the series of blocks ends.
+// release row and an end row for the ultragoal release at the progress threshold, at the reinforcement ceiling and on the
+// acknowledged blocked exit. The other releases of the Stop write no row.
 const STOP_GUARD = "ultragoal-stop";
 function writeStopReleaseRow({ action, blocksWithoutProgress, totalBlocks, reasonCode }, sessionId, stateDir, maxReinforcements) {
   return writeDenialRow({
