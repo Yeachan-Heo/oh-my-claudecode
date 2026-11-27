@@ -100,6 +100,30 @@ describe('cleanupTransientState — session-scoped hud-stdin-cache', () => {
     expect(existsSync(other)).toBe(true);
   });
 
+  it('removes the HUD call count checkpoint of the ending session only, with its temp files', () => {
+    const ending = join(tmpRoot, '.omc', 'state', 'sessions', 'session-ending');
+    const other = join(tmpRoot, '.omc', 'state', 'sessions', 'session-other');
+    const uuid = '123e4567-e89b-12d3-a456-426614174000';
+    // Fresh files: the age based sweep of other temp files does not apply
+    const files = [
+      'hud-call-counts.json',
+      `.hud-call-counts.json.tmp.${uuid}`,
+      `hud-call-counts.json.rollback.${uuid}`,
+    ];
+    for (const dir of [ending, other]) {
+      mkdirSync(dir, { recursive: true });
+      for (const file of files) writeFileSync(join(dir, file), '{}');
+    }
+
+    cleanupTransientState(tmpRoot, 'session-ending');
+
+    for (const file of files) {
+      expect(existsSync(join(ending, file))).toBe(false);
+      expect(existsSync(join(other, file))).toBe(true);
+    }
+    expect(existsSync(ending)).toBe(false);
+  });
+
   it('preserves cancel-signal/stop-breaker in other session dirs', () => {
     // Transient markers can still be live cancellation state for another
     // session; SessionEnd must not erase them across ownership boundaries.
