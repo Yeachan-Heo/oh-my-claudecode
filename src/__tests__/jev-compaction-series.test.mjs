@@ -1,7 +1,7 @@
 /* global setTimeout, clearTimeout */
 /**
  * Tests for the series of traces in hooks/jev-compaction.mjs (OMC_JEV_COMPACT_BLOCKS=off|shadow|active, off when unset): two or more neighbouring traces of the module in one row
- * are a series, and a series that is asked for merges into one line that names a file with the traces word for word. No network; files are a map in memory.
+ * are a series, and a series that is asked for merges into one line that names a file with the traces, masked. No network; files are a map in memory.
  */
 
 import { createHash } from 'node:crypto';
@@ -186,7 +186,7 @@ describe('series of traces: the rows a series may stand in', () => {
     expect(held.size).toBe(0);
   });
 
-  it('a series in the last row that holds a secret value is held and stays whole, the series beside it in that row is merged', async () => {
+  it('a series in the last row that holds a secret value is merged like the one beside it, and its file holds the value masked', async () => {
     const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const CLEAR = `${call(6)}\n${call(7)}`;
     const SECRET = `${call(8)}\n[compacted] Bash(export API_TOKEN=abc123def456) - result of 20 chars removed`;
@@ -195,11 +195,11 @@ describe('series of traces: the rows a series may stand in', () => {
     const fake = fakeDollar();
     const record = {};
     const edited = await mergeSeries(fake.$, cfg, record, messages, ctx, new Set([CLEAR, SECRET]), SESSION, FAR);
-    const path = `${PASTES}${SESSION}/${sha32(`${CLEAR}\n`)}.txt`;
-    expect(edited.get(2)).toBe(`[compacted] traces merged: 2 calls, 0 replies, 0 others; list in ${path}\nthen\n${SECRET}`);
-    expect([...fake.files().keys()]).toEqual([path]);
+    expect(edited.get(2)).not.toContain('abc123def456');
+    expect(edited.get(2).match(/\[compacted\] traces merged: 2 calls/g)).toHaveLength(2);
     expect([...fake.files().values()].join('')).not.toContain('abc123def456');
-    expect(record.series).toMatchObject({ series: 1, secret: 1, written: 1 });
+    expect([...fake.files().values()].join('')).toContain(`${call(8)}\n[compacted] Bash(export API_TOKEN=*** - result of 20 chars removed\n`);
+    expect(record.series).toMatchObject({ series: 2, secret: 0, written: 2 });
   });
 
   it('without the API form nothing is known, and a user message with an image that matches no row stops it too', async () => {
@@ -299,7 +299,7 @@ describe('series of traces: merging', () => {
     return { cfg, messages, edited, record, fake };
   }
 
-  it('active: each asked-for series is one line with the counts and its file, the file holds the traces word for word, the rest of the row stays', async () => {
+  it('active: each asked-for series is one line with the counts and its file, the file holds the traces word for word when the mask finds nothing, the rest of the row stays', async () => {
     const { edited, record, fake } = await run();
     const fileA = `${SERIES_A}\n`;
     const fileB = `${SERIES_B}\n`;
@@ -310,7 +310,7 @@ describe('series of traces: merging', () => {
     expect(fake.files().get(pathA)).toBe(fileA);
     expect(fake.files().get(pathB)).toBe(fileB);
     expect(fake.files().size).toBe(2);
-    expect(record.series).toMatchObject({ mode: 'active', series: 2, traces: 5, files: 2, written: 2, reused: 0, write_failed: 0, secret: 0, unchecked: 0, timed_out: 0, installed: false });
+    expect(record.series).toMatchObject({ mode: 'active', series: 2, traces: 5, files: 2, written: 2, reused: 0, write_failed: 0, secret: 0, timed_out: 0, installed: false });
     expect(record.series.tokens_before).toBeGreaterThan(record.series.tokens_after);
   });
 
@@ -359,40 +359,78 @@ describe('series of traces: merging', () => {
     expect(record.series.mode).toBe('shadow');
   });
 
-  it('a series that names a secret path is held: it stays, no file', async () => {
+  /** The one file a run wrote. */
+  const onlyFile = (fake) => { const files = [...fake.files()]; expect(files).toHaveLength(1); return files[0]; };
+
+  it('a line that names a secret path is replaced whole in the file, and the series merges; the file is named after what it holds', async () => {
     const secret = `[compacted] Read(/home/u/.ssh/id_rsa) - result of 1700 chars removed\n${call(2)}`;
-    const { edited, record, fake } = await run({ texts: [secret, SERIES_B] });
-    expect(edited.get(rowOf(1))).toBeDefined();
-    expect(edited.get(rowOf(0))).toBeUndefined();
-    expect(record.series).toMatchObject({ series: 1, secret: 1 });
-    expect(fake.files().size).toBe(1);
+    const { record, fake } = await run({ texts: [secret] });
+    const [path, file] = onlyFile(fake);
+    expect(file).toBe(`[line omitted: secret path]\n${call(2)}\n`);
+    expect(path).toBe(`${PASTES}${SESSION}/${sha32(file)}.txt`);
+    expect(record.series).toMatchObject({ series: 1, secret: 0, written: 1 });
   });
 
-  it('the paths of the module\'s own files in a series are no secret, though their name is 32 hexadecimal digits; the same name anywhere else is held', async () => {
-    const own = `${PASTES}${SESSION}/a87affd3def94e9fbfe945090b906d08.txt`;
-    const ours = `[compacted] traces merged: 2 calls, 0 replies, 0 others; list in ${own}\n${call(1)}`;
-    const first = await run({ texts: [ours] });
+  it('a value named in words only is masked in the file ("the password is ...")', async () => {
+    const prose = `[compacted] Bash(echo "the password is Zaq12wsx9" > note.txt) - result of 20 chars removed\n${call(2)}`;
+    const { record, fake } = await run({ texts: [prose] });
+    const [, file] = onlyFile(fake);
+    expect(file).toBe(`[compacted] Bash(echo "the password is ***" > note.txt) - result of 20 chars removed\n${call(2)}\n`);
+    expect(record.series).toMatchObject({ series: 1, secret: 0 });
+  });
+
+  it('a line where a value still follows a secret word after the mask is replaced whole', async () => {
+    const residual = `${call(1)}\n[compacted] Bash(echo secret key value Qw7e8R9t0y) - result of 20 chars removed\n${call(3)}`;
+    const { record, fake } = await run({ texts: [residual] });
+    const [, file] = onlyFile(fake);
+    expect(file).toBe(`${call(1)}\n*** [line with a possible secret replaced]\n${call(3)}\n`);
+    expect(record.series).toMatchObject({ series: 1, secret: 0 });
+  });
+
+  it('the paths of the module\'s own files stay in the file of a series though their name is 32 hexadecimal digits; the same name anywhere else is masked', async () => {
+    const name = 'a87affd3def94e9fbfe945090b906d08';
+    const session = '123e4567-e89b-12d3-a456-426614174000';
+    const own = [`${PASTES}${session}/${name}.txt`, `b/${name}.txt`];
+    const ours = `[compacted] traces merged: 2 calls, 0 replies, 0 others; list in ${own[0]}\n[compacted] Bash(echo the password is in ${own[1]}) - result of 5 chars removed\n${call(1)}`;
+    const first = await run({ texts: [ours], sessionId: session });
+    const [, kept] = onlyFile(first.fake);
+    expect(kept).toContain(`list in ${own[0]}\n`);
+    expect(kept).not.toContain('\u{e000}');
     expect(first.record.series).toMatchObject({ series: 1, secret: 0, written: 1 });
-    const elsewhere = `[compacted] Read(/srv/data/a87affd3def94e9fbfe945090b906d08.txt) - result of 1700 chars removed\n${call(1)}`;
+    const elsewhere = `[compacted] Read(/srv/data/${name}.txt) - result of 1700 chars removed\n${call(1)}`;
     const second = await run({ texts: [elsewhere] });
-    expect(second.record.series).toMatchObject({ series: 0, secret: 1 });
+    expect(onlyFile(second.fake)[1]).toBe(`[compacted] Read(/srv/data/***.txt) - result of 1700 chars removed\n${call(1)}\n`);
   });
 
-  it('a series that holds a secret value is held', async () => {
+  it('a series that names a private path of the list stays whole: no file; the module\'s own files are no private path', async () => {
+    const env = { OMC_JEV_COMPACT_BLOCKS: 'active', OMC_JEV_COMPACT_PRIVATE_PATHS: '/home/u' };
+    const named = `[compacted] Read(/home/u/diary.md) - result of 1700 chars removed\n${call(2)}`;
+    const held = await run({ env, texts: [named, SERIES_B] });
+    expect(held.edited.get(rowOf(0))).toBeUndefined();
+    expect(held.edited.get(rowOf(1))).toBeDefined();
+    expect([...held.fake.files().values()].join('')).not.toContain('diary');
+    expect(held.record.series).toMatchObject({ series: 1, secret: 1 });
+    const own = `[compacted] traces merged: 2 calls, 0 replies, 0 others; list in ${PASTES}${SESSION}/a87affd3def94e9fbfe945090b906d08.txt\n${call(1)}`;
+    const free = await run({ env, texts: [own] });
+    expect(free.record.series).toMatchObject({ series: 1, secret: 0, written: 1 });
+  });
+
+  it('a token shape is masked in the file', async () => {
     const withToken = `${call(1)}\n[compacted] Bash(curl -H "Authorization: Bearer sk-ant-api03-AbCdEf0123456789AbCdEf0123456789AbCdEf0123456789") - result of 300 chars removed`;
-    const { edited, record } = await run({ texts: [withToken] });
-    expect(edited.size).toBe(0);
-    expect(record.series).toMatchObject({ series: 0, secret: 1 });
+    const { record, fake } = await run({ texts: [withToken] });
+    expect(onlyFile(fake)[1]).not.toContain('AbCdEf0123456789');
+    expect(record.series).toMatchObject({ series: 1, secret: 0 });
   });
 
-  it('a series longer than the check can read stays whole (unchecked), and so does one beyond the budget of the scan', async () => {
+  it('a long series is masked and merged; one the mask cannot read at once stays whole and is counted', async () => {
     const long = Array.from({ length: 160 }, (_, k) => call(100000 + k, ` ${'x'.repeat(200)}`)).join('\n');
     const first = await run({ texts: [long] });
-    expect(first.record.series).toMatchObject({ series: 0, unchecked: 1 });
-    const mid = Array.from({ length: 80 }, (_, k) => call(k, ` ${'y'.repeat(280)}`)).join('\n'); // about 27 000 characters, four of them fit the budget of 120 000 and the fifth does not
-    const texts = [1, 2, 3, 4, 5].map((n) => mid.replaceAll('file-', `f${n}-`));
-    const second = await run({ texts });
-    expect(second.record.series).toMatchObject({ series: 4, unchecked: 1 });
+    expect(first.record.series).toMatchObject({ series: 1, secret: 0, written: 1 });
+    const unreadable = `${call(1, ` ${'z '.repeat(105000)}`)}\n${call(2)}`;
+    const second = await run({ texts: [unreadable, SERIES_B] });
+    expect(second.edited.get(rowOf(0))).toBeUndefined();
+    expect(second.edited.get(rowOf(1))).toBeDefined();
+    expect(second.record.series).toMatchObject({ series: 1, secret: 1 });
   });
 
   it('a write that fails leaves the series as it is and is counted', async () => {
@@ -407,7 +445,7 @@ describe('series of traces: merging', () => {
     expect(record.series).toMatchObject({ series: 0, write_failed: 1 });
   });
 
-  it('a deadline that has passed starts no write and no scan: the series stay and are counted as timed out', async () => {
+  it('a deadline that has passed starts no write: the series stay and are counted as timed out', async () => {
     const { edited, record, fake } = await run({ deadline: Date.now() - 1 });
     expect(edited.size).toBe(0);
     expect(fake.files().size).toBe(0);
