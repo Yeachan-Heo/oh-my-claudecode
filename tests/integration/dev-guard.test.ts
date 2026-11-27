@@ -1158,4 +1158,19 @@ describe('/dev guard: spellings of round 6', () => {
   ])('keeps the operator before a command across newlines: %s (session in %s) is %s', (command, cwd, expected) => {
     expect(check(command, cwd).decision).toBe(expected);
   });
+
+  // in a protected directory under /dev a newline after then, else or do ends no command either (measured with bash 5.2: if false, then cd B on the next line,
+  // keeps the directory); a cd on such a line that ends in a protected directory still counts as run, and nothing changes elsewhere
+  it.each([
+    ['if false; then\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['if true; then :; else\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['for i in; do\ncd /tmp\ndone; rm null', '/dev', 'deny'],
+    ['if false; then # why\n\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['if false\nthen\n{ true; cd /tmp; }\nfi; rm null', '/dev', 'deny'], ['cd /dev\nif false; then\ncd /tmp\nfi\nrm null', '/tmp', 'deny'],
+    ['if x; then\ncd /dev\necho x > sda\nfi', '/tmp', 'deny'], ['while x; do\ncd /dev\ndone; echo x > sda', '/tmp', 'deny'], ['if x; then\ncd disk\nfi; echo x > sda', '/dev', 'deny'],
+    ['if x; then\n{ cd /dev; }\nfi; echo x > sda', '/tmp', 'deny'], ['if x; then\nif y; then\ncd /dev\nfi\nfi; tee sda', '/tmp', 'deny'],
+    ['if false; then\ncd /dev/shm\nfi; rm null', '/dev', 'deny'], ['cd /dev\nif x; then\n:\nfi; cd /tmp; true || cd /dev; echo x > log', '/tmp', 'allow'],
+    ['if x; then\ncd build\nrm cache\nfi', '/tmp', 'allow'],
+    ['echo then\ncd /dev; rm null', '/tmp', 'deny'], ['echo do\ncd /tmp; rm null', '/dev', 'allow'], ['if true; then >/tmp/log\ncd /tmp; rm null; fi', '/dev', 'allow'],
+    ['if x; then\ncd /tmp\nfi; rm null\ncd /tmp\nrm null', '/tmp', 'allow'],
+  ])('keeps the body open across the newline after then, else and do: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
 });

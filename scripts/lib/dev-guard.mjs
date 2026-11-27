@@ -732,20 +732,24 @@ function devScanTokens(tokens, heredocs, depth) {
   let afterPipeOp = false; // the current command follows a pipe operator (unlike afterPipe, a group or a condition does not clear it)
   const dirStack = []; // the directory in force at each open parenthesis: a subshell leaves it behind
   const groupDirs = []; // the same at each open group or compound command ({, if, while, until, for, case): one that is piped or put in the background runs in a subshell, one after && or || may not run
+  let bodyLine = false; // such a newline is part of the current command: a cd of it that ends in a protected /dev directory still counts as run
   const flush = (op) => {
-    if (op === '\n' && !words.length && !redirected) return null; // after an operator or a case pattern a newline ends no command
+    // in a protected /dev directory a newline after then, else or do ends no command either, so that a cd away that may not run is read as such
+    const bodyOpens = ['then', 'else', 'do'].includes(words[words.length - 1]) && words.every((w) => DEV_LEADING.has(w)) && Boolean(devChangedIn(devCwd));
+    if (op === '\n' && !redirected && (!words.length || bodyOpens)) { bodyLine ||= bodyOpens; return null; } // after an operator or a case pattern a newline ends no command
     const mayNotRun = afterOr || afterCase || ['then', 'else', 'elif', 'do'].includes(words[0]);
     let opened = false; // the command opens a group or a compound command, whose first command is no member of a pipeline itself
     for (const w of words) {
       if (DEV_GROUP_OPEN.has(w)) {
-        groupDirs.push({ dir: devCwd, piped: !opened && afterPipeOp, maybe: !opened && (afterAnd || mayNotRun) });
+        groupDirs.push({ dir: devCwd, piped: !opened && afterPipeOp, maybe: !opened && (afterAnd || mayNotRun), bodyLine });
         opened = true;
       } else if (!DEV_LEADING.has(w)) break;
     }
     if (DEV_GROUP_CLOSE.has(words[0]) && groupDirs.length) {
-      const { dir, piped, maybe } = groupDirs.pop();
+      const group = groupDirs.pop();
+      const { dir, piped, maybe } = group;
       if (piped || op === '|' || op === '|&' || op === '&') devCwd = dir; // a subshell leaves the directory as it was
-      else if (maybe && devCwd !== dir) devCwd = null; // the group may not have run
+      else if (maybe && devCwd !== dir && !(group.bodyLine && devChangedIn(devCwd))) devCwd = null; // the group may not have run
     }
     const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
     let found = null;
@@ -764,7 +768,7 @@ function devScanTokens(tokens, heredocs, depth) {
       const before = devCwd;
       if (afterAnd && chainBase === NO_DIR) chainBase = devCwd;
       devChangeDir(unwrapped.name, unwrapped.args);
-      if (mayNotRun && devCwd !== before) devCwd = null; // it may not run: unknown unless it keeps the directory
+      if (mayNotRun && devCwd !== before && !(bodyLine && devChangedIn(devCwd))) devCwd = null; // it may not run: unknown unless it keeps the directory
     }
     if (op !== '&&' && chainBase !== NO_DIR) { if (devCwd !== chainBase) devCwd = null; chainBase = NO_DIR; } // the chain of && ended: the directory is the one before it, or unknown
     pipeDev = (op === '|' || op === '|&') && unwrapped && DEV_FEEDERS.has(unwrapped.name) ? wordDev : null;
@@ -774,6 +778,7 @@ function devScanTokens(tokens, heredocs, depth) {
     isFind = false;
     timeWords = new Set();
     redirected = false;
+    bodyLine = false;
     afterPipe = op === '|' || op === '|&';
     afterOr = op === '||';
     afterAnd = op === '&&';
