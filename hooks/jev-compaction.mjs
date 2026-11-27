@@ -5541,15 +5541,17 @@ export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) 
   return { tail: Math.min(keepFrom, messages.length), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
 }
 
-// The statistics of a series name its tools to Jev. A name that a mask changes, alone or at the start of its trace, and one too long for a tool name are counted under one
-// neutral name, so no name carries what a mask hides; long MCP names and server ids that the shared mask takes for secrets are counted there too.
+// The statistics of a series name its tools to Jev. A name that a mask changes, alone or at the start of a trace, and one too long for a tool name are counted under one
+// neutral name. An MCP name is read as its server and the rest (read whole, a long name of plain words looks like a token); a server id that the shared mask takes for
+// a secret is counted there too.
 const STAT_NAME_MAX = 200;
 const STAT_NAME_HIDDEN = 'masked_tool';
+const MCP_NAME = /^mcp__(.*?)__(.*)$/s;
 function statTools(tools) {
-  const plain = (text) => maskSecrets(text) === text && cleanForJevLong(text) === text;
+  const plain = (text) => [text, `[compacted] ${text}(`].every((s) => maskSecrets(s) === s && cleanForJevLong(s) === s);
   const out = {};
   for (const [name, count] of Object.entries(tools)) {
-    const key = name.length <= STAT_NAME_MAX && plain(name) && plain(`[compacted] ${name}(`) ? name : STAT_NAME_HIDDEN;
+    const key = name.length <= STAT_NAME_MAX && (MCP_NAME.exec(name)?.slice(1) ?? [name]).every(plain) ? name : STAT_NAME_HIDDEN;
     out[key] = (out[key] || 0) + count;
   }
   return out;

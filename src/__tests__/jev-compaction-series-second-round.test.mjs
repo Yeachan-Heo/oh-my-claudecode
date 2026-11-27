@@ -233,8 +233,8 @@ describe('series of traces in the compaction run: the queue of the second round'
     const series = names.map((name) => `[compacted] ${name}(x) - result of 20 chars removed`).join('\n');
     const run = await compactRun(CASCADE(60), session(40, (i) => (i === 5 ? `\n\n${series}` : '')), { rate: () => 0 });
     expect(run.record.f2.series_question).toMatchObject({ items: 1, secret: 0, answered: 1 });
-    // A name the shared mask takes for a token (the long MCP name with digits and the server id here) is counted under a neutral name.
-    expect(run.asked[0].item.series.tools).toEqual({ [names[0]]: 1, masked_tool: 2, [names[2]]: 1, [names[4]]: 1 });
+    // An MCP name is read part by part; the server id here is a part the shared mask takes for a token, so that name is counted under a neutral name.
+    expect(run.asked[0].item.series.tools).toEqual({ [names[0]]: 1, [names[1]]: 1, [names[2]]: 1, masked_tool: 1, [names[4]]: 1 });
   });
 
   it('a deadline that has passed when a series is checked keeps it whole and counts it timed out in the question of the second round', async () => {
