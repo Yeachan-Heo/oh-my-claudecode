@@ -5418,22 +5418,22 @@ function seriesFileMask(text) {
 const withOwnPaths = (masked, kept) => masked?.replace(/\u{e000}(\d+)\u{e000}/gu, (mark, n) => kept[n] ?? mark);
 // The file of a series keeps a path of the module's own files as it was only when every file it names can be read, so a name the shared mask hides leaves in it only as the
 // name of a file that is there. Any other text of that shape is masked like the text around it; so is a path whose read fails or comes too late.
-async function ownFilesThere($, gate, cfg, sessionId, path) {
+function namedFiles(cfg, sessionId, path) {
   const list = /^(.*\/) \((.*)\)$/.exec(path); // the list of a merged line, `<dir>/ (a.txt, b.txt)`
-  const files = list ? list[2].split(', ').map((name) => `${list[1]}${name}`) : [path.startsWith(`${BLOCK_LETTER}/`) ? `${blockDir(cfg, sessionId)}${path.slice(BLOCK_LETTER.length)}` : path];
-  for (const file of files) {
-    const read = await fsCall($, gate, () => $.fs.read(file));
-    if (typeof read.value !== 'string') return false;
-  }
-  return true;
+  if (list) return list[2].split(', ').map((name) => `${list[1]}${name}`);
+  return [path.startsWith(`${BLOCK_LETTER}/`) ? `${blockDir(cfg, sessionId)}${path.slice(BLOCK_LETTER.length)}` : path];
 }
-// The text of the file of a series as it is written (`there`: what is known of the paths so far); undefined when the mask cannot clear it.
+// The text of the file of a series as it is written; undefined when the mask cannot clear it. `there` maps each file read so far to whether it could be read; the files
+// not read yet are read ARCHIVE_PARALLEL at a time.
 async function seriesFileBody($, gate, cfg, sessionId, series, there) {
   const own = ownFilePaths(cfg);
   const text = series.replace(/\u{e000}/gu, '\u{fffd}');
-  for (const [path] of text.matchAll(own)) if (!there.has(path)) there.set(path, await ownFilesThere($, gate, cfg, sessionId, path));
+  const files = [...new Set(Array.from(text.matchAll(own), ([path]) => namedFiles(cfg, sessionId, path)).flat())].filter((file) => !there.has(file));
+  for (let at = 0; at < files.length; at += ARCHIVE_PARALLEL) {
+    await Promise.all(files.slice(at, at + ARCHIVE_PARALLEL).map(async (file) => there.set(file, typeof (await fsCall($, gate, () => $.fs.read(file))).value === 'string')));
+  }
   const kept = [];
-  const marked = `${text.trim()}\n`.replace(own, (path) => (there.get(path) ? `\u{e000}${kept.push(path) - 1}\u{e000}` : path));
+  const marked = `${text.trim()}\n`.replace(own, (path) => (namedFiles(cfg, sessionId, path).every((file) => there.get(file)) ? `\u{e000}${kept.push(path) - 1}\u{e000}` : path));
   return withOwnPaths(seriesFileMask(maskSecrets(marked)), kept);
 }
 // What may leave of one series, as text to Jev or as a file. A series that names a private path of the user's list stays whole. The names of its tools go to Jev in the
@@ -5600,7 +5600,7 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
   try {
     const gate = { deadline, stalled: false };
     const done = new Map(); // text of a series -> {path} or {}: the same series in several rows gets one file
-    const there = new Map(); // path of an own file named in a series -> whether it can be read
+    const there = new Map(); // own file named in a series -> whether it can be read
     const paths = new Set();
     for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
       const m = messages[i];

@@ -38,7 +38,7 @@ function apiOf(messages) {
  * A whole compaction of forty steps; `series` stands in the text of step 3 and a control series of plain traces in the text of step 7. Jev rates every series 0, so
  * both come down. `there`: files of the module that exist before; `broken`: reads that fail; `hung`: reads that never come back. `steps`: the command and result of a step.
  */
-async function compact(series, { env = {}, there = [], broken = [], hung = [], steps = () => undefined } = {}) {
+async function compact(series, { env = {}, there = [], broken = [], hung = [], steps = () => undefined, onRead = async () => {} } = {}) {
   const rows = [{ role: 'user', text: 'Task: look at the notes and report.', toolUses: [] }];
   for (let i = 1; i <= 40; i++) {
     const extra = i === 3 ? `\n\n${series}` : i === 7 ? `\n\n${calls(71)}` : '';
@@ -58,6 +58,7 @@ async function compact(series, { env = {}, there = [], broken = [], hung = [], s
     clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; }, sleep: async () => { throw new Error('no sleep'); } },
     fs: {
       read: async (p) => {
+        await onRead(p);
         if (hung.includes(p)) return new Promise(() => {});
         if (broken.includes(p)) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
         if (!store.has(p)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
@@ -312,6 +313,21 @@ describe('what leaves with a series: the paths of the module\'s own files', () =
       expect(run.written).toContain(call(36));
       expect(run.written).not.toContain(HEX32);
     }
+  });
+
+  it('reads the own files a series names a few at a time, each once', async () => {
+    const files = Array.from({ length: 30 }, (_, k) => `${ARCHIVE}${UUID}/call-${k}.txt`);
+    const flight = { now: 0, most: 0, reads: [] };
+    const run = await compact([...files, files[0]].map(ownLine).join('\n'), { there: files, onRead: async (p) => {
+      if (!files.includes(p)) return;
+      flight.reads.push(p);
+      flight.most = Math.max(flight.most, ++flight.now);
+      await new Promise((r) => setTimeout(r, 5));
+      flight.now--;
+    } });
+    expect(flight.most).toBe(8);
+    expect(flight.reads.sort()).toEqual([...files].sort());
+    for (const file of files) expect(run.written).toContain(file);
   });
 
   it('a read that does not come back in time leaves no file with the path: the series stays whole and is counted timed out', async () => {
