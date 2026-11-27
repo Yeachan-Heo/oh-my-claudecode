@@ -210,7 +210,7 @@ export function removeCodeBlocks(text: string): string {
 const PASTED_MAGIC_KEYWORD_HEADER_PATTERN =
   /^\s*\[MAGIC KEYWORDS?(?: DETECTED)?:.*$/i;
 const ROLE_BOUNDARY_PATTERN =
-  /^<\s*\/?\s*(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
+  /^<\s*(?:\/\s*)?(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
 const SKILL_TRANSCRIPT_LINE_PATTERN =
   /^\s*Skill:\s+oh-my-(?:claudecode|codex):/i;
 const USER_REQUEST_LINE_PATTERN = /^\s*User request(?:\s*\([^)]*\))?:\s*$/i;
@@ -366,10 +366,15 @@ const PATH_SEGMENT_CHARS =
  * outcome for every path input — no detector/bundle divergence. Bare slash-commands
  * like `/ralph` lack an internal slash so they are not stripped here (and are
  * detected pre-sanitization via parseExplicitWorkflowSlashInvocation anyway).
+ *
+ * The ideographic space U+3000 is both whitespace and a segment character, so a
+ * U+3000 that follows another start character is not accepted as the start
+ * character itself: that start never wins, and trying it on every character of a
+ * long run of them would scan the rest of the run again each time.
  */
 /* eslint-disable no-misleading-character-class -- Same script ranges as NON_LATIN_SCRIPT_PATTERN: intentional range set, not grapheme clusters */
 const FILE_PATH_PATTERN = new RegExp(
-  '(^|[\\s"\'`(])(?:\\/)?(?:' +
+  '(^|(?!(?<=[\\s"\'`(])\\u3000)[\\s"\'`(])(?:\\/)?(?:' +
     PATH_SEGMENT_CHARS +
     '+\\/)+(?:' +
     PATH_SEGMENT_CHARS +
@@ -377,6 +382,16 @@ const FILE_PATH_PATTERN = new RegExp(
   'gm',
 );
 /* eslint-enable no-misleading-character-class */
+
+/**
+ * Replacer for the line-anchored patterns that open with `\s*`. Such a pattern
+ * rescans one run of blank lines from every line start, which takes quadratic or
+ * cubic time on long runs. The block quote and table patterns make everything after
+ * that whitespace optional: a line start that leads to no match consumes the run
+ * once and gets it back unchanged. The text they remove is the same as before.
+ */
+const keepUnlessMatched = (run: string, matched: string | undefined): string =>
+  matched === undefined ? run : '';
 
 /**
 * Sanitize text for keyword detection by removing structural noise.
@@ -389,13 +404,13 @@ export function sanitizeForKeywordDetection(text: string): string {
   // Keep optional closing-tag attributes on one line and stop at adjacent tags.
   result = result.replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1(?:[ \t][^<>\r\n]*)?>/g, '');
   // Remove self-closing XML tags
-  result = result.replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, '');
+  result = result.replace(/<\w[\w-]*(?:\s[^>]*)?\/>/g, '');
   // Remove URLs
   result = result.replace(/https?:\/\/\S+/g, '');
   // Remove block quotes and markdown table rows - they are typically reference content
-  result = result.replace(/^\s*>\s.*$/gm, '');
-  result = result.replace(/^\s*\|(?:[^|\n]*\|){2,}\s*$/gm, '');
-  result = result.replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|){1,}\s*$/gm, '');
+  result = result.replace(/^\s*(>\s.*$)?/gm, keepUnlessMatched);
+  result = result.replace(/^\s*(\|(?:[^|\n]*\|){2,}\s*$)?/gm, keepUnlessMatched);
+  result = result.replace(/^\s*((?:\|\s*)?:?-{3,}:?\s*\|(?:\s*:?-{3,}:?\s*\|)*\s*$)?/gm, keepUnlessMatched);
   // Remove file paths — requires leading / or ./ or multi-segment dir/file.ext.
   // Unicode-aware segments (FILE_PATH_PATTERN) so CJK file names are stripped too.
   result = result.replace(FILE_PATH_PATTERN, '$1');
@@ -433,7 +448,9 @@ const REFERENCE_META_PATTERNS: RegExp[] = [
   /(?:เปรียบเทียบ|ต่างกัน|ความต่าง|เอกสาร|บทความ|ไกด์|คู่มือ|เกี่ยวกับ|เหมือน)/u,
 ];
 const REFERENCE_EXPLANATION_PATTERNS: RegExp[] = [
-  /(?:^|\n)\s*(?:결론|특징|예시|요약|장점|단점|설명)\s*[:：]/u,
+  // Korean section labels (conclusion, features, example, summary, pros, cons, explanation). Only the
+  // whitespace of the label's own line is skipped: every earlier line break is its own start position.
+  /(?:^|\n)[^\S\n]*(?:\uACB0\uB860|\uD2B9\uC9D5|\uC608\uC2DC|\uC694\uC57D|\uC7A5\uC810|\uB2E8\uC810|\uC124\uBA85)\s*[:\uFF1A]/u,
   /\b(?:summary|conclusion|key\s+points?|example|examples|pros|cons|overview)\s*:/i,
   /[^\n]{1,80}=\s*["“]/,
   /[→⇒]/,
@@ -903,7 +920,7 @@ const AUTOPILOT_MARKDOWN_MARKS = /[*_`#>]+/g;
 const AUTOPILOT_LIST_PREFIX = /^[\s\-+]*(?:\d+[.)]\s+)?/;
 const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
 // A heading line that is only the label ("## Documentation") also marks what follows as reference text.
-const AUTOPILOT_REFERENCE_HEADING = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:?[ \t]*$/i;
+const AUTOPILOT_REFERENCE_HEADING = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*(?::[ \t]*)?$/i;
 const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
 const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/iu;
 // A line with any non-ASCII letter (Hangul, kana, Han, Thai, Cyrillic, Arabic, Polish diacritics, ...) is not
@@ -971,7 +988,7 @@ function hasExplicitAutopilotInvocationContext(
   // "autopilot fix the parser (why it fails)" activates because the keyword is outside the parens.
   // "Please do the following (use autopilot to replace ? with ! in the template)" activates because
   // the parenthesized clause is not a true question (? is an example character, not sentence-final).
-  const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
+  const sentenceText = text.slice(lineStart, lineEnd).trimEnd();
   if (sentenceText.endsWith(')')) {
     const parenStart = sentenceText.lastIndexOf('(');
     if (parenStart >= 0) {
@@ -1054,7 +1071,7 @@ function findActionableAutopilotAliasMatch(
     }
     const afterAlias = text.slice(match.index + keyword.length, match.index + keyword.length + 60);
     const ownLine = /^[ \t]*$/.test(linePrefix)
-      && !AUTOPILOT_REFERENCE_HEADING.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))
+      && !AUTOPILOT_REFERENCE_HEADING.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').trimEnd())
       && (AUTOPILOT_COMMAND_AFTER.test(afterAlias) || AUTOPILOT_COLON_VERB.test(afterAlias));
     const from = ownLine ? lineStart : Math.max(0, match.index - AUTOPILOT_CONTEXT_WINDOW);
     const to = ownLine ? lineEnd : match.index + keyword.length + AUTOPILOT_CONTEXT_WINDOW;
@@ -1358,7 +1375,7 @@ const WELL_SPECIFIED_SIGNALS: RegExp[] = [
   // Bare issue/PR number (#123, #42)
   /(?:^|\s)#\d+\b/,
   // Has numbered steps or bullet list (structured request)
-  /(?:^|\n)\s*(?:\d+[.)]\s|-\s+\S|\*\s+\S)/m,
+  /^[^\S\r\n\u2028\u2029]*(?:\d+[.)]\s|-\s+\S|\*\s+\S)/m,
   // Has acceptance criteria or test spec keywords
   /\b(?:acceptance\s+criteria|test\s+(?:spec|plan|case)|should\s+(?:return|throw|render|display|create|delete|update))\b/i,
   // Has specific error or issue reference

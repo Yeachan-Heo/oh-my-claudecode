@@ -33,7 +33,7 @@ export interface TeamFollowupContext {
  * Matches: "team", "team please", "team으로 해줘", "/team", "run team", etc.
  */
 const SHORT_TEAM_PATTERNS: RegExp[] = [
-  /^\s*\/?\s*team\s*$/i,
+  /^\s*(?:\/\s*)?team\s*$/i,
   /^\s*team\s+please\s*$/i,
   /^\s*run\s+team\s*$/i,
   /^\s*start\s+team\s*$/i,
@@ -47,7 +47,7 @@ const SHORT_TEAM_PATTERNS: RegExp[] = [
  * Matches: "ralph", "ralph please", "/ralph", "run ralph", etc.
  */
 const SHORT_RALPH_PATTERNS: RegExp[] = [
-  /^\s*\/?\s*ralph\s*$/i,
+  /^\s*(?:\/\s*)?ralph\s*$/i,
   /^\s*ralph\s+please\s*$/i,
   /^\s*run\s+ralph\s*$/i,
   /^\s*start\s+ralph\s*$/i,
