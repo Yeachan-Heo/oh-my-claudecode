@@ -497,6 +497,39 @@ describe('series of traces: merging', () => {
     expect(record.series.series).toBe(0);
   });
 
+  const STATE = '/home/u/.omc/state/jev/';
+  const ID = '0f1e2d3c-4b5a-4968-8776-655443322110';
+  const NAME = 'a1b2c3d4'.repeat(4);
+  const read = (path) => `[compacted] Read(${path}) - result of 20 chars removed`;
+
+  it('the paths of the own files stay in the file as they were: a session named by a UUID, an archive file of a tool use id, a block file by its letter', async () => {
+    const paths = [`${PASTES}${ID}/${NAME}.txt`, `${STATE}compaction-archive/${ID}/toolu_01AbCdEfGhJkLmNpQrStUvWx.txt`, `b/${NAME}.txt`];
+    const series = paths.map(read).join('\n');
+    const { fake } = await run({ texts: [series] });
+    expect([...fake.files().values()]).toEqual([`${series}\n`]);
+  });
+
+  it.each([
+    ['the session directory of the pastes', (token) => `${PASTES}${token}/${NAME}.txt`],
+    ['the session directory of the archive', (token) => `${STATE}compaction-archive/${token}/call-1.txt`],
+    ['the name of an archive file', (token) => `${STATE}compaction-archive/${ID}/${token}.txt`],
+  ])('a secret as %s under an own directory is masked like any text', async (_, path) => {
+    const token = `ghp_${'abcdefghijklmnopqrstuvwxyz0123'}`;
+    const { record, fake } = await run({ texts: [`${read(path(token))}\n${call(2)}`] });
+    expect(record.series).toMatchObject({ series: 1 });
+    const [file] = [...fake.files().values()];
+    expect(file).toContain(call(2));
+    expect(file).not.toContain(token);
+  });
+
+  it('the character of the marks in the text of the conversation names no own path', async () => {
+    const path = `${PASTES}${ID}/${NAME}.txt`;
+    const { fake } = await run({ texts: [`[compacted] Bash(echo \u{e000}0\u{e000}) - result of 20 chars removed\n${read(path)}`] });
+    const [file] = [...fake.files().values()];
+    expect(file).toContain('Bash(echo �0�)');
+    expect(file.split(path)).toHaveLength(2);
+  });
+
   it('without a state directory, a session or the API form nothing merges and the reason is in the record', async () => {
     const cfg = await configOf({ OMC_JEV_COMPACT_BLOCKS: 'active' });
     const messages = conversation([SERIES_B]);

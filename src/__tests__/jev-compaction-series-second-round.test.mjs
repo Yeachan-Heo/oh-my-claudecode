@@ -5,7 +5,7 @@
  * traces join a series. The calls of Jev are a fake `$.http.fetch`; no network.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { register } from '../../hooks/jev-compaction.mjs';
 
@@ -197,6 +197,60 @@ describe('series of traces in the compaction run: the queue of the second round'
     const shadow = await compactRun({ ...CASCADE(60), OMC_JEV_COMPACT_BLOCKS: 'shadow' }, session(40, (i) => (i === 5 ? `\n\n${HELD}` : '')));
     expect(shadow.record.f2).toMatchObject({ mode: 'shadow', candidates: { series: 1 } });
     expect(allText(shadow.out)).toContain(HELD);
+  });
+
+  // Forms the mask of a series cuts apart and the shared mask of the other stages reads: neither the question nor the file holds the value.
+  it.each([
+    ['a value behind an escaped quote', 'Bash(curl {"cmd":"export DB_PASSWORD=\\"Zq8Tr4Lm2Xp\\""})'],
+    ['a secret name after a secret name', 'Bash(curl secret: x-api-key: Zq8Tr4Lm2Xp)'],
+    ['a value with a bracket behind an escaped quote', 'Bash(curl {"cmd":"API_KEY=\\"ab(cd)Zq8Tr4Lm2Xp\\""})'],
+  ])('the question and the file of a series hold no value of %s', async (_, literal) => {
+    const form = `[compacted] ${literal} - result of 20 chars removed\n${call(12)}\n${call(13)}`;
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 5 ? `\n\n${form}` : '')), { rate: () => 0 });
+    expect(run.record.series).toMatchObject({ series: 1, secret: 0 });
+    expect(run.asked).toHaveLength(1);
+    expect(run.asked[0].item.text).toContain('file-12.txt');
+    expect(JSON.stringify(run.asked)).not.toContain('Zq8Tr4Lm2Xp');
+    const files = [...run.files().values()].join('');
+    expect(files).toContain(call(13));
+    expect(files).not.toContain('Zq8Tr4Lm2Xp');
+  });
+
+  it.each([
+    ['a token', `ghp_${'abcdefghijklmnopqrstuvwxyz0123'}`],
+    ['an assignment', 'password=Zaq12wsx9'],
+    ['a token as the tool part of an MCP name', `mcp__server__ghp_${'abcdefghijklmnopqrstuvwxyz0123'}`],
+  ])('a series with a tool name that holds a secret (%s) is not sent to Jev and stays', async (_, name) => {
+    const held = `[compacted] ${name}(x) - result of 20 chars removed\n${call(12)}\n${call(13)}`;
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : i === 5 ? `\n\n${held}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 1, answered: 1 });
+    expect(JSON.stringify(run.asked)).not.toContain(name.replace('mcp__server__', ''));
+    expect(allText(run.out)).toContain(held);
+  });
+
+  it('real tool names hold no series back, long MCP names with digits and server ids among them', async () => {
+    const names = ['Read', 'mcp__plugin_context7_context7__resolve-library-id', 'mcp__plugin_oh-my-claudecode_t__ast_grep_search', 'mcp__9f0e1c2a-1111-4222-8333-944455566677__list_events', 'mcp__claude_ai_Google_Calendar__get_token'];
+    const series = names.map((name) => `[compacted] ${name}(x) - result of 20 chars removed`).join('\n');
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 5 ? `\n\n${series}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 1, secret: 0, answered: 1 });
+    expect(Object.keys(run.asked[0].item.series.tools)).toEqual(names);
+  });
+
+  it('a deadline that has passed when a series is checked keeps it whole and counts it timed out in the question of the second round', async () => {
+    const now = Date.now.bind(Date);
+    // The clock is past every deadline inside the check of a series and as usual everywhere else.
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => {
+      const limit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 40;
+      const inCheck = new Error().stack.includes('checkSeries');
+      Error.stackTraceLimit = limit;
+      return inCheck ? now() + 3_600_000 : now();
+    });
+    let run;
+    try { run = await compactRun(CASCADE(60), session(40, withSeries), { rate: () => 0 }); } finally { clock.mockRestore(); }
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, timed_out: 2, secret: 0 });
+    expect(run.asked).toEqual([]);
+    expect(allText(run.out)).toContain(call(11));
   });
 
   it('a series is checked once for the floor, the question and the file, so three long series fit the amount one compaction checks', async () => {

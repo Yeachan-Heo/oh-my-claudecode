@@ -125,13 +125,14 @@
  * blocks last in that queue. The checks of the blocks for a secret have their own budget, BLOCK_SCAN_BUDGET_CHARS. The record gets `f2`; see "second round" below.
  *
  * Series of traces (the same switch, OMC_JEV_COMPACT_BLOCKS). Two or more traces of the module on neighbouring lines of one row (a removed call, a moved reply, a moved agent
- * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round every series of the rows before the tail
+ * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round every series of the rows before the open tool loop
  * (the rows the blocks left, less the rows another stage changes) that passes the checks below is rated by Jev with the question of the round, its
  * text masked, and stands in the queue with the results and the blocks; a series that comes down merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces
- * go to a file in the pastes directory (with the header of the block files when a block trace is among them), masked, written and read back like the other files. The checks: the
- * mask comes first (scripts/lib/jev-series-mask.mjs; the paths of the module's own files are kept), and a series that names a private path (OMC_JEV_COMPACT_PRIVATE_PATHS) or keeps a
- * line the mask cannot clear stays whole; then the check for a secret of the other stages reads both masked texts, and a hit, a text beyond what it reads or no time left keeps the
- * series whole too (not sent, not written, not counted). The series count in the floor like the blocks. In a direct reply the trace of a reply, of a block or of an agent's message is never merged. The record gets `series` (the merge) and
+ * go to a file in the pastes directory (with the header of the block files when a block trace is among them), masked, written and read back like the other files. The checks: a series
+ * that names a private path (OMC_JEV_COMPACT_PRIVATE_PATHS) stays whole, and the check for a secret of the other stages reads the names of its tools; then the mask of a series
+ * (scripts/lib/jev-series-mask.mjs; the paths of the module's own files are kept in the file), and a series that keeps a line the mask cannot clear stays whole; then the same
+ * check reads both masked texts, and a hit, a text beyond what it reads or no time left keeps the series whole too (not sent, not written, not counted). What leaves has the shared
+ * mask of the other stages under the mask of a series. The series count in the floor like the blocks. In a direct reply the trace of a reply, of a block or of an agent's message is never merged. The record gets `series` (the merge) and
  * `f2.series_question`; `shadow` counts the candidates (`f2.candidates.series`).
  *
  * Archive of calls and results (OMC_JEV_COMPACT_ARCHIVE=off|shadow|active; off when unset or anything else; needs a state directory). With `active`, while the point itself is active and the compaction has
@@ -5317,7 +5318,7 @@ async function askTie($, cfg, group, ctx) {
   const fieldsOf = ({ x }) => (x.kind === 'result'
     ? { kind: 'tool_result', tool: x.c.note ? NOTE_LABEL : x.c.use.tool, input: x.c.note ? '' : clip(oneLine(maskSecrets(sentInputJson(x.c.use.input, cfg.privatePaths).slice(0, STATE_INPUT_CHARS * 4 + MASK_SLACK_CHARS))), STATE_INPUT_CHARS), result: maskedHeadTail(x.c.res.text || '', STATE_HEAD_CHARS, STATE_TAIL_CHARS, cfg.privatePaths), chars: x.c.resultChars, ...(x.c.res.isError ? { error: true } : {}) }
     : x.kind === 'series'
-      ? { row: x.item.row, kind: 'trace_series', author: 'module', text: cleanForJevLong(x.item.body), length: x.item.chars, age_turns: x.item.age_turns, current_turn: x.item.current_turn, in_tail: x.item.in_tail, has_file: true, repeated: x.item.repeated, agent_session: x.item.agent_session, series: x.item.f2 }
+      ? { row: x.item.row, kind: 'trace_series', author: 'module', text: seriesQuestion(x.item.body), length: x.item.chars, age_turns: x.item.age_turns, current_turn: x.item.current_turn, in_tail: x.item.in_tail, has_file: true, repeated: x.item.repeated, agent_session: x.item.agent_session, series: x.item.f2 }
       : { ...blockFields(x.item, { text: x.item.body, nr: 1, z: 1 }) });
   const windowBytes = windowBytesOf(cfg);
   const header = blockHeader(ctx.user, windowBytes, { f2: { goal_tokens: Math.round(ctx.goal), to_remove_tokens: Math.round(ctx.restNeed), ...(ctx.rateOnly ? {} : { tie_group: true }) } });
@@ -5379,23 +5380,48 @@ const seriesPath = (cfg, sessionId, name) => `${cfg.pasteDir}/${safeName(session
 // The paths of the module's own files stand in its traces (a reply, an agent's message, a merged series). They are no secret, and a name of 32 hexadecimal digits is what the mask
 // takes for one, so the file of a series is masked with them out and holds them as they were. They are no private path either.
 // The files of the archive count whatever its switch says, as a conversation can still name them after it went off: a single path, and the list of a line merged from calls of one
-// identical call, `<dir>/ (a.txt, b.txt)`.
+// identical call, `<dir>/ (a.txt, b.txt)`. A path whose names the mask would change (the ids a host makes aside) is no path of the module: it is masked like any text.
+const HOST_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}|[0-9a-f]{16}(?=\.txt|\/)|toolu_(?:bdrk_|vrtx_)?[A-Za-z0-9]{20,32}/g;
+function plainOwnPath(cfg, path) {
+  const dir = [cfg.pasteDir, cfg.archiveDir].find((d) => d && path.startsWith(`${d}/`));
+  const names = (dir ? path.slice(dir.length + 1) : path).replace(HOST_ID, 'id');
+  return maskSecrets(names) === names && cleanForJevLong(names) === names;
+}
 const ARCHIVE_FILE = '[A-Za-z0-9_-]{1,80}\\.txt';
 const ownFilePaths = (cfg) => new RegExp(`${escapeRegExp(cfg.pasteDir)}/[A-Za-z0-9_-]{1,80}/[0-9a-f]{32}\\.txt|\\b${BLOCK_LETTER}/[0-9a-f]{32}\\.txt${cfg.archiveDir ? `|${escapeRegExp(cfg.archiveDir)}/[A-Za-z0-9_-]{1,80}/(?:${ARCHIVE_FILE}| \\(${ARCHIVE_FILE}(?:, ${ARCHIVE_FILE})*\\))` : ''}`, 'g');
-// What may leave of one series, as text to Jev or as a file. First the mask (scripts/lib/jev-series-mask.mjs): a series that names a private path of the user's list, or keeps
-// a line the mask cannot clear, stays whole. Then secretCheck, the check of the other stages, reads both masked texts, the one of the file and the one of the question (the paths of
-// the module's own files out of both): a hit, a text beyond what the check reads or no time left keeps the series whole. Returns {held: 'secret' | 'unchecked' | 'timed_out'}
-// or {held: '', masked, kept}, the text of the file with its own paths as marks and the paths.
+// The text of a series in the question to Jev: the shared mask of the other stages first (it reads forms the mask of a series cuts apart, as a value behind an escaped quote),
+// then the mask of a series.
+const seriesQuestion = (text) => cleanForJevLong(maskSecrets(text));
+// The text of the file of a series: the mask of a series, then a line that keeps a possible secret is replaced; undefined when the mask cannot clear the text.
+function seriesFileMask(text) {
+  let masked = archiveMaskedLong(text);
+  if (masked !== undefined) masked = maskResidualLines(masked);
+  return masked === undefined || RESIDUAL_SECRET.test(masked) ? undefined : masked;
+}
+// What may leave of one series, as text to Jev or as a file. A series that names a private path of the user's list stays whole. The names of its tools go to Jev as they are, so
+// secretCheck, the check of the other stages, reads each of them. Then the mask of a series (a series that keeps a line it cannot clear stays whole), and secretCheck reads both
+// masked texts, the one of the file and the one of the question (the paths of the module's own files out of both): a hit, a text beyond what the check reads or no time left keeps
+// the series whole. What leaves a series that passed has the shared mask under the mask of a series (seriesQuestion for the question). Returns
+// {held: 'secret' | 'unchecked' | 'timed_out'} or {held: '', masked, kept}, the text of the file with its own paths as marks and the paths.
 function checkSeries(cfg, series, own, budget) {
   if (namesPrivatePath(series.replace(own, 'file.txt'), cfg.privatePaths)) return { held: 'secret' };
+  const tools = new Set(Array.from(series.matchAll(/^\[compacted\] ([^\s(]+)/gm), (m) => m[1]));
+  for (const part of [...tools].flatMap((name) => name.replace(HOST_ID, 'id').split('__'))) {
+    const held = secretCheck(part, cfg.privatePaths, budget);
+    if (held) return { held };
+  }
+  // A mark stands for the n-th own path while the file is masked; the character of the marks is taken out of the text first, so the text of the conversation cannot name a path.
+  const text = series.replace(/\u{e000}/gu, '\u{fffd}');
   const kept = [];
-  let masked = archiveMaskedLong(`${series.trim()}\n`.replace(own, (path) => `\u{e000}${kept.push(path) - 1}\u{e000}`));
-  if (masked !== undefined) masked = maskResidualLines(masked);
-  if (masked === undefined || RESIDUAL_SECRET.test(masked)) return { held: 'secret' };
-  const file = masked.replace(/\u{e000}\d+\u{e000}/gu, 'file.txt').trim();
-  const question = cleanForJevLong(series.replace(own, 'file.txt')).trim();
+  const marked = `${text.trim()}\n`.replace(own, (path) => (plainOwnPath(cfg, path) ? `\u{e000}${kept.push(path) - 1}\u{e000}` : path));
+  const first = seriesFileMask(marked);
+  if (first === undefined) return { held: 'secret' };
+  const file = first.replace(/\u{e000}\d+\u{e000}/gu, 'file.txt').trim();
+  const question = cleanForJevLong(text.replace(own, (path) => (plainOwnPath(cfg, path) ? 'file.txt' : path))).trim();
   const held = secretCheck(file, cfg.privatePaths, budget) || (question === file ? '' : secretCheck(question, cfg.privatePaths, budget));
-  return held ? { held } : { held, masked, kept };
+  if (held) return { held };
+  const masked = seriesFileMask(maskSecrets(marked));
+  return masked === undefined ? { held: 'secret' } : { held: '', masked, kept };
 }
 // One checker serves the floor, the question and the file of a compaction, so a series gets one answer in all three and is checked once, within one budget of the scan.
 function seriesChecker(cfg, deadline) {
