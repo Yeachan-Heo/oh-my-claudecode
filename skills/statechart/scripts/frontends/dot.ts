@@ -35,7 +35,12 @@ export const parseState = (label: string, parsed = new Map<string, [string, Valu
 
 export type Lines = string | Iterable<string>;
 
-export const linesOf = (input: Lines) => (typeof input === "string" ? input.split("\n") : input);
+// TLC writes \r\n line ends on native Windows, and a stray \r hid broken
+// rules behind labels that never matched. Split on both line ends.
+export const splitLines = (text: string) =>
+  (text.endsWith("\r") ? text.slice(0, -1) : text).split(/\r?\n/);
+
+export const linesOf = (input: Lines) => (typeof input === "string" ? splitLines(input) : input);
 
 export function parseDot(input: Lines): Graph {
   const states = new Map<string, State>();

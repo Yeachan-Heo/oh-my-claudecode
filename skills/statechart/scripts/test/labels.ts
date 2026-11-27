@@ -1,5 +1,5 @@
 import { inspect } from "node:util";
-import { mermaid as chartText } from "../backends/mermaid.ts";
+import { drawnEdges, mermaid as chartText } from "../backends/mermaid.ts";
 import { checkView } from "../frontends/view.ts";
 import type { Chart, ChartState, State, Step, View } from "../ir.ts";
 import { walk } from "../passes/reach.ts";
@@ -398,6 +398,7 @@ function expected(chart: Chart): Want {
     const region = chart.regions[i];
     const wrap = multi ? `r${i}` : null;
     if (wrap) nodes.set(wrap, { text: region.name, parent: "all", group: true });
+    const drawn = drawnEdges(region);
     const tree = (prefix: string[], parent: string | null, below: ChartState[]) => {
       const heads = new Map<string, ChartState[]>();
       for (const s of below) {
@@ -413,19 +414,23 @@ function expected(chart: Chart): Want {
           else leaf = s;
         const node = id(region.name, path);
         nodes.set(node, { text: head, parent, group: inner.length > 0 });
-        if (inner.length) tree(path, node, inner);
-        else if (leaf?.group !== undefined) used.add(chart.colors[String(leaf.group)]);
+        if (inner.length) {
+          tree(path, node, inner);
+          const key = JSON.stringify(path);
+          for (const e of drawn)
+            if (e.start && JSON.stringify(e.from) === key)
+              edges.push([`${node}_start`, id(region.name, e.to), e.label ?? ""]);
+        } else if (leaf?.group !== undefined) used.add(chart.colors[String(leaf.group)]);
       }
     };
     tree([], wrap, region.states);
-    for (const s of region.states)
-      if (s.start) edges.push([`${wrap ?? "root"}_start`, id(region.name, s.path), ""]);
-    for (const s of region.steps)
-      edges.push([
-        id(region.name, s.from),
-        id(region.name, s.to),
-        s.label + (s.when ? ` [${s.when}]` : ""),
-      ]);
+    for (const e of drawn)
+      if (!e.start || !e.from.length)
+        edges.push([
+          e.start ? `${wrap ?? "root"}_start` : id(region.name, e.from),
+          id(region.name, e.to),
+          e.label ?? "",
+        ]);
   }
   let legend = 0;
   for (const [text, cls] of Object.entries(chart.colors))
