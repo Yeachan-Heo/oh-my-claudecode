@@ -699,7 +699,7 @@ describe('archive: the series of traces read the path and the counter only with 
     const ctx = seriesContext(cfg, messages, api, messages.length);
     const items = seriesItems(cfg, messages, ctx, SESSION);
     const store = new Map();
-    const $ = { clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; } }, fs: { read: async (p) => { if (!store.has(p)) throw new Error('ENOENT'); return store.get(p); }, write: async (p, t) => { store.set(p, t); } } };
+    const $ = { clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; } }, fs: { read: async (p) => { if (store.has(p)) return store.get(p); if (p.startsWith(`${ARCHIVE}/`)) return 'archived'; throw new Error('ENOENT'); }, write: async (p, t) => { store.set(p, t); } } }; // the archive files the traces name are there
     const record = {};
     const edited = await mergeSeries($, cfg, record, messages, ctx, new Set(items.map((x) => x.key)), SESSION, Date.now() + 60000);
     return { record, edited, items, files: [...store.values()].join('') };

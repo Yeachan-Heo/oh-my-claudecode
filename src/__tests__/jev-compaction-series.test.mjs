@@ -28,13 +28,17 @@ async function configOf(env) {
   return readConfig({ env: { get: async (name) => ({ ...ACTIVE_ENV, ...env })[name] }, settings: { read: async () => undefined }, clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; } } });
 }
 
-/** A fake `$` with files in a map: `failWrite` makes a write throw, `wrong` makes a read give back other text. */
-function fakeDollar({ failWrite = false, wrong = false } = {}) {
+/** A fake `$` with files in a map: `failWrite` makes a write throw, `wrong` makes a read give back other text, `there` names own files written earlier. */
+function fakeDollar({ failWrite = false, wrong = false, there = [] } = {}) {
   const store = new Map();
   const $ = {
     clock: { after: (ms, fn) => { const t = setTimeout(fn, ms); return { cancel: () => clearTimeout(t) }; } },
     fs: {
-      read: async (p) => { if (!store.has(p)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return wrong ? `${store.get(p)}!` : store.get(p); },
+      read: async (p) => {
+        if (store.has(p)) return wrong ? `${store.get(p)}!` : store.get(p);
+        if (there.includes(p)) return 'written earlier';
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
       write: async (p, text) => { if (failWrite) throw new Error('disk full'); store.set(p, text); },
     },
   };
@@ -142,7 +146,7 @@ describe('series of traces: the trace of a block', () => {
     const text = `Findings.\n${call(1)}\n${block(2, 'start')}\n${call(3)}`;
     const messages = conversation([text]);
     const ctx = seriesContext(cfg, messages, apiOf(messages), messages.length);
-    const fake = fakeDollar();
+    const fake = fakeDollar({ there: [`${PASTES}${SESSION}/${sha32('block 2')}.txt`] });
     const record = {};
     const items = seriesItems(cfg, messages, ctx, SESSION);
     expect(items).toHaveLength(1);
@@ -359,6 +363,17 @@ describe('series of traces: merging', () => {
     expect(record.series.mode).toBe('shadow');
   });
 
+  it('a merge that only counts reads no file the series names', async () => {
+    const own = `${PASTES}${SESSION}/${sha32('block 2')}.txt`;
+    const fake = fakeDollar({ there: [own] });
+    const reads = [];
+    const read = fake.$.fs.read;
+    fake.$.fs.read = async (p) => { reads.push(p); return read(p); };
+    const { record } = await run({ env: { OMC_JEV_COMPACT_BLOCKS: 'shadow' }, texts: [`[compacted] Read(${own}) - result of 20 chars removed\n${call(1)}`], fake });
+    expect(record.series).toMatchObject({ mode: 'shadow', series: 1, secret: 0, timed_out: 0 });
+    expect(reads).toEqual([]);
+  });
+
   /** The one file a run wrote. */
   const onlyFile = (fake) => { const files = [...fake.files()]; expect(files).toHaveLength(1); return files[0]; };
 
@@ -398,7 +413,7 @@ describe('series of traces: merging', () => {
     const session = '123e4567-e89b-12d3-a456-426614174000';
     const own = [`${PASTES}${session}/${name}.txt`, `b/${name}.txt`];
     const ours = `[compacted] traces merged: 2 calls, 0 replies, 0 others; list in ${own[0]}\n[compacted] Bash(echo the password is in ${own[1]}) - result of 5 chars removed\n${call(1)}`;
-    const first = await run({ texts: [ours], sessionId: session });
+    const first = await run({ texts: [ours], sessionId: session, fake: fakeDollar({ there: own.map((p) => p.replace(/^b\//, `${PASTES}${session}/`)) }) });
     const [, kept] = onlyFile(first.fake);
     expect(kept).toContain(`list in ${own[0]}\n`);
     expect(kept).not.toContain('\u{e000}');
@@ -505,7 +520,7 @@ describe('series of traces: merging', () => {
   it('the paths of the own files stay in the file as they were: a session named by a UUID, an archive file of a tool use id, a block file by its letter', async () => {
     const paths = [`${PASTES}${ID}/${NAME}.txt`, `${STATE}compaction-archive/${ID}/toolu_01AbCdEfGhJkLmNpQrStUvWx.txt`, `b/${NAME}.txt`];
     const series = paths.map(read).join('\n');
-    const { fake } = await run({ texts: [series] });
+    const { fake } = await run({ texts: [series], fake: fakeDollar({ there: [paths[0], paths[1], `${PASTES}${SESSION}/${NAME}.txt`] }) });
     expect([...fake.files().values()]).toEqual([`${series}\n`]);
   });
 
@@ -524,7 +539,7 @@ describe('series of traces: merging', () => {
 
   it('the character of the marks in the text of the conversation names no own path', async () => {
     const path = `${PASTES}${ID}/${NAME}.txt`;
-    const { fake } = await run({ texts: [`[compacted] Bash(echo \u{e000}0\u{e000}) - result of 20 chars removed\n${read(path)}`] });
+    const { fake } = await run({ texts: [`[compacted] Bash(echo \u{e000}0\u{e000}) - result of 20 chars removed\n${read(path)}`], fake: fakeDollar({ there: [path] }) });
     const [file] = [...fake.files().values()];
     expect(file).toContain('Bash(echo \ufffd0\ufffd)');
     expect(file.split(path)).toHaveLength(2);

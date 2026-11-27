@@ -129,8 +129,9 @@
  * (the rows the blocks left, less the rows another stage changes) that passes the checks below is rated by Jev with the question of the round, its
  * text masked, and stands in the queue with the results and the blocks; a series that comes down merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces
  * go to a file in the pastes directory (with the header of the block files when a block trace is among them), masked, written and read back like the other files. The checks: a series
- * that names a private path (OMC_JEV_COMPACT_PRIVATE_PATHS) stays whole, and the check for a secret of the other stages reads the names of its tools; then the mask of a series
- * (scripts/lib/jev-series-mask.mjs; the paths of the module's own files are kept in the file), and a series that keeps a line the mask cannot clear stays whole; then the same
+ * that names a private path (OMC_JEV_COMPACT_PRIVATE_PATHS) stays whole, and the check for a secret of the other stages reads the names of its tools (a name a mask changes is
+ * counted as `masked_tool` in what Jev is told); then the mask of a series (scripts/lib/jev-series-mask.mjs; the file keeps the paths of the module's own files whose files can be
+ * read), and a series that keeps a line the mask cannot clear stays whole; then the same
  * check reads both masked texts, and a hit, a text beyond what it reads or no time left keeps the series whole too (not sent, not written, not counted). What leaves has the shared
  * mask of the other stages under the mask of a series. The series count in the floor like the blocks. In a direct reply the trace of a reply, of a block or of an agent's message is never merged. The record gets `series` (the merge) and
  * `f2.series_question`; `shadow` counts the candidates (`f2.candidates.series`).
@@ -5394,8 +5395,10 @@ const seriesPath = (cfg, sessionId, name) => `${cfg.pasteDir}/${safeName(session
 // The paths of the module's own files stand in its traces (a reply, an agent's message, a merged series). They are no secret, and a name of 32 hexadecimal digits is what the mask
 // takes for one, so the file of a series is masked with them out and holds them as they were. They are no private path either.
 // The files of the archive count whatever its switch says, as a conversation can still name them after it went off: a single path, and the list of a line merged from calls of one
-// identical call, `<dir>/ (a.txt, b.txt)`. A path whose names the mask would change (the ids a host makes aside) is no path of the module: it is masked like any text.
-const HOST_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}|[0-9a-f]{16}(?=\.txt|\/)|toolu_(?:bdrk_|vrtx_)?[A-Za-z0-9]{20,32}/g;
+// identical call, `<dir>/ (a.txt, b.txt)`. To the checks a path whose names the mask would change (the ids a host makes aside) is no path of the module: it is masked
+// like any text; a file that is written keeps the paths whose files are there (seriesFileBody).
+// An id a host makes counts only where a name begins, so behind a token prefix the mask reads it with the rest of the name; hexadecimal digits and a UUID also only where it ends.
+const HOST_ID = /(?<![A-Za-z0-9_-])(?:(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}|[0-9a-f]{16}(?=\.txt|\/))(?![A-Za-z0-9_-])|toolu_(?:bdrk_|vrtx_)?[A-Za-z0-9]{20,32})/g;
 function plainOwnPath(cfg, path) {
   const dir = [cfg.pasteDir, cfg.archiveDir].find((d) => d && path.startsWith(`${d}/`));
   const names = (dir ? path.slice(dir.length + 1) : path).replace(HOST_ID, 'id');
@@ -5412,16 +5415,37 @@ function seriesFileMask(text) {
   if (masked !== undefined) masked = maskResidualLines(masked);
   return masked === undefined || RESIDUAL_SECRET.test(masked) ? undefined : masked;
 }
-// What may leave of one series, as text to Jev or as a file. A series that names a private path of the user's list stays whole. The names of its tools go to Jev as they are, so
-// secretCheck, the check of the other stages, reads each of them. Then the mask of a series (a series that keeps a line it cannot clear stays whole), and secretCheck reads both
-// masked texts, the one of the file and the one of the question (the paths of the module's own files out of both): a hit, a text beyond what the check reads or no time left keeps
+const withOwnPaths = (masked, kept) => masked?.replace(/\u{e000}(\d+)\u{e000}/gu, (mark, n) => kept[n] ?? mark);
+// The file of a series keeps a path of the module's own files as it was only when every file it names can be read, so a name the shared mask hides leaves in it only as the
+// name of a file that is there. Any other text of that shape is masked like the text around it; so is a path whose read fails or comes too late.
+async function ownFilesThere($, gate, cfg, sessionId, path) {
+  const list = /^(.*\/) \((.*)\)$/.exec(path); // the list of a merged line, `<dir>/ (a.txt, b.txt)`
+  const files = list ? list[2].split(', ').map((name) => `${list[1]}${name}`) : [path.startsWith(`${BLOCK_LETTER}/`) ? `${blockDir(cfg, sessionId)}${path.slice(BLOCK_LETTER.length)}` : path];
+  for (const file of files) {
+    const read = await fsCall($, gate, () => $.fs.read(file));
+    if (typeof read.value !== 'string') return false;
+  }
+  return true;
+}
+// The text of the file of a series as it is written (`there`: what is known of the paths so far); undefined when the mask cannot clear it.
+async function seriesFileBody($, gate, cfg, sessionId, series, there) {
+  const own = ownFilePaths(cfg);
+  const text = series.replace(/\u{e000}/gu, '\u{fffd}');
+  for (const [path] of text.matchAll(own)) if (!there.has(path)) there.set(path, await ownFilesThere($, gate, cfg, sessionId, path));
+  const kept = [];
+  const marked = `${text.trim()}\n`.replace(own, (path) => (there.get(path) ? `\u{e000}${kept.push(path) - 1}\u{e000}` : path));
+  return withOwnPaths(seriesFileMask(maskSecrets(marked)), kept);
+}
+// What may leave of one series, as text to Jev or as a file. A series that names a private path of the user's list stays whole. The names of its tools go to Jev in the
+// statistics (statTools), so secretCheck, the check of the other stages, reads each of them (the parts of an MCP name one by one). Then the mask of a series (a series
+// that keeps a line it cannot clear stays whole), and secretCheck reads both masked texts, the one of the file and the one of the question (the paths of the module's own files out of both): a hit, a text beyond what the check reads or no time left keeps
 // the series whole. What leaves a series that passed has the shared mask under the mask of a series (seriesQuestion for the question). Returns
 // {held: 'secret' | 'unchecked' | 'timed_out'} or {held: '', masked, kept}, the text of the file with its own paths as marks and the paths.
 function checkSeries(cfg, series, own, budget) {
   if (namesPrivatePath(series.replace(own, 'file.txt'), cfg.privatePaths)) return { held: 'secret' };
   const tools = new Set(Array.from(series.matchAll(/^\[compacted\] ([^\s(]+)/gm), (m) => m[1]));
-  for (const part of [...tools].flatMap((name) => name.replace(HOST_ID, 'id').split('__'))) {
-    const held = secretCheck(part, cfg.privatePaths, budget);
+  for (const part of [...tools].flatMap((name) => (name.startsWith('mcp__') ? name.split('__') : [name]))) {
+    const held = secretCheck(part.replace(HOST_ID, 'id'), cfg.privatePaths, budget);
     if (held) return { held };
   }
   // A mark stands for the n-th own path while the file is masked; the character of the marks is taken out of the text first, so the text of the conversation cannot name a path.
@@ -5517,6 +5541,20 @@ export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) 
   return { tail: Math.min(keepFrom, messages.length), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
 }
 
+// The statistics of a series name its tools to Jev. A name that a mask changes, alone or at the start of its trace, and one too long for a tool name are counted under one
+// neutral name, so no name carries what a mask hides; long MCP names and server ids that the shared mask takes for secrets are counted there too.
+const STAT_NAME_MAX = 200;
+const STAT_NAME_HIDDEN = 'masked_tool';
+function statTools(tools) {
+  const plain = (text) => maskSecrets(text) === text && cleanForJevLong(text) === text;
+  const out = {};
+  for (const [name, count] of Object.entries(tools)) {
+    const key = name.length <= STAT_NAME_MAX && plain(name) && plain(`[compacted] ${name}(`) ? name : STAT_NAME_HIDDEN;
+    out[key] = (out[key] || 0) + count;
+  }
+  return out;
+}
+
 /**
  * The series for Jev and for the second round of the cascade: one item per text of a series (the same series in several rows is one item with its rows), with what merging it
  * gains in tokens (the traces at RATE_TRACE less the one line that replaces them, its path planned at the length of a file's). {kind, key, body, row (the last row), rows, chars, run,
@@ -5537,7 +5575,7 @@ export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
       const { traces, calls, replies, others, tools, errors, file } = run.stats;
       byKey.set(run.text, {
         kind: 'series', key: run.text, body: run.text, row: i, rows: [i], chars: run.text.length, run, gain, repeated: false, ...signals, agent_session: agent,
-        f2: { kind: 'trace_series', traces, calls, replies, others, tools, errors, has_file: file, tokens: Math.round(seriesTok(run.text, cfg.rates)), gain_tokens: Math.round(gain) },
+        f2: { kind: 'trace_series', traces, calls, replies, others, tools: statTools(tools), errors, has_file: file, tokens: Math.round(seriesTok(run.text, cfg.rates)), gain_tokens: Math.round(gain) },
       });
     }
   }
@@ -5546,7 +5584,8 @@ export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
 
 /**
  * Merges the series whose keys are in `keys` (the texts of the series): one line `[compacted] traces merged: N calls, M replies, K others; list in <file>` in place of the
- * traces, and the file holds them, masked (archiveMaskedLong, then maskResidualLines). Same files as the stages that move text: the state directory and `savePaste`. A series
+ * traces, and the file holds them, masked (archiveMaskedLong, then maskResidualLines; the paths of the module's own files whose files can be read stay as they were).
+ * Same files as the stages that move text: the state directory and `savePaste`. A series
  * stays whole when its file cannot be written and read back in time, or when `check` holds it (seriesChecker: `secret`, `unchecked`, `timed_out`). `record.series` holds the
  * counts. Returns the new text of each changed row by its row index (none unless active). Never rejects. `ctx` is seriesContext's.
  */
@@ -5561,6 +5600,7 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
   try {
     const gate = { deadline, stalled: false };
     const done = new Map(); // text of a series -> {path} or {}: the same series in several rows gets one file
+    const there = new Map(); // path of an own file named in a series -> whether it can be read
     const paths = new Set();
     for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
       const m = messages[i];
@@ -5572,9 +5612,10 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
         if (!r) {
           const { held, masked, kept } = check(run.text);
           r = {};
-          if (held) stats[held]++;
+          // A shadow merge writes no file and reads none.
+          const body = held ? undefined : mode === 'active' ? await seriesFileBody($, gate, cfg, sessionId, run.text, there) : withOwnPaths(masked, kept);
+          if (body === undefined) stats[held || 'secret']++;
           else {
-            const body = masked.replace(/\u{e000}(\d+)\u{e000}/gu, (mark, n) => kept[n] ?? mark);
             // The block traces in it name their files by letter: the file carries the header that says which directory the letter stands for.
             const file = run.text.includes(BLOCK_TRACE_PREFIX) || run.text.includes(`${AGENT_TRACE_PREFIX}${BLOCK_LETTER}/`) ? `${traceHeader(blockDir(cfg, sessionId))}\n${body}` : body;
             const path = seriesPath(cfg, sessionId, (await sha256Hex(file)).slice(0, 32));
