@@ -4,7 +4,7 @@
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import { chmodSync, closeSync, constants as fsConstants, copyFileSync, existsSync, openSync, truncateSync, linkSync, lstatSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, closeSync, constants as fsConstants, copyFileSync, existsSync, openSync, truncateSync, linkSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, SETTINGS_TOOL, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
@@ -6280,6 +6280,28 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard pause_command', { timeout: 90000 
     const r = guardOnce(g);
     expect(r.stdout).toMatch(/WARNING \(pause-command\): cannot run pause_command .*: the pause goes on without it/);
     expect(readJson(g.pause).paused).toBe(true);
+  });
+
+  it('where no lock is available pause_command ends when the pause is found to be that of another running process, and that pause is left alone', async () => {
+    const noLocks = ['import runpy, sys', 'sys.modules["fcntl"] = None', 'sys.modules["msvcrt"] = None', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = nearLimit('pause-command-other-owner');
+    const p = pauseProgram(f, 'wait');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    const g = spawnPyCode(noLocks, [GUARD, ...guardArgs(f)]);
+    const other = JSON.stringify(pauseDoc({ pid: process.pid, valid_until: now() + 3600 }));   // the process of this test: alive, with a current heartbeat
+    try {
+      await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+      writeFileSync(`${f.pause}.other`, other, 'utf8');
+      renameSync(`${f.pause}.other`, f.pause);
+      await waitFor(() => /ERROR: tick failed.*belongs to the running process/.test(g.out), 20000, 'the renewal that is refused');
+      expect(readText(p.report), 'its input is open while the stored pause lasts').not.toMatch(/end of input/);
+      setUsage(f, 10);
+      await waitFor(() => /end of input/.test(readText(p.report)), 20000, 'the end of the command');
+      await waitFor(() => /the state is left as it is and the pause is left alone[\s\S]*pause_command ended \(status 0\)/.test(g.out), 20000, 'the lines in the log');
+      expect(g.exited, 'the guard goes on').toBe(false);
+      expect(readText(f.pause), 'the pause of the other process').toBe(other);
+    } finally { await stopGuard(g); }
+    expect(readText(f.pause), 'also after the stop').toBe(other);
   });
 
   it('a pause_command that is not a list of an executable file and arguments, or that names a file the guard writes, stops the start; the pause file may be named', () => {
