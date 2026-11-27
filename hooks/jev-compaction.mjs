@@ -6224,12 +6224,67 @@ async function archiveStep($, cfg, record, mode, candidates, rows, keepFrom, gro
 // The kinds of attachments are told by the first line the host renders each with, so their table follows the version of the host.
 const API_FORM_MAX = 4096; // the number of messages the host's API form keeps (a cut form shows less than the conversation)
 const GOAL_COMMAND = /^\s*<command-name>\s*\/goal\b/i;
-// The advisor's reminder in its three forms (the instructions, the sentence of an announcement, the removal), at the start of a text or after an empty line.
-const ADVISOR_NOTE = new RegExp(String.raw`(?:^\s*|\n\n)<system-reminder>\n(?:# Advisor Tool\n[\s\S]*?`
-  + String.raw`|The advisor tool is available; the advisor instructions announced earlier apply\.`
-  + String.raw`|The advisor tool is no longer available; disregard the earlier advisor instructions\.)\n</system-reminder>(?=\n\n|\s*$)`, 'g');
-const advisorNotes = (text) => (typeof text === 'string' && text.includes('<system-reminder>\n') ? (text.match(ADVISOR_NOTE) || []).length : 0);
-const REMINDER_BLOCK = /<system-reminder>\n[\s\S]*?\n<\/system-reminder>/g;
+const REMINDER_OPEN = '<system-reminder>\n';
+const REMINDER_CLOSE = '\n</system-reminder>';
+// The reminders of a text, each from an opener to the first closing line after it, and the text without them. One pass: after an opener without a closing line no
+// later opener has one either, so the scan stops there (a lazy regular expression reads to the end from every one of them, which is quadratic).
+export function splitReminders(text) {
+  const reminders = [];
+  const rest = [];
+  let at = 0;
+  for (let from = text.indexOf(REMINDER_OPEN); from >= 0; from = text.indexOf(REMINDER_OPEN, at)) {
+    const close = text.indexOf(REMINDER_CLOSE, from + REMINDER_OPEN.length);
+    if (close < 0) break;
+    rest.push(text.slice(at, from));
+    at = close + REMINDER_CLOSE.length;
+    reminders.push(text.slice(from, at));
+  }
+  rest.push(text.slice(at));
+  return { reminders, rest: rest.join('') };
+}
+// The advisor's reminder in its three forms: the instructions (under this heading), the sentence of an announcement and the sentence of the removal.
+const ADVISOR_HEADING = '# Advisor Tool\n';
+const ADVISOR_SENTENCES = [
+  'The advisor tool is available; the advisor instructions announced earlier apply.',
+  'The advisor tool is no longer available; disregard the earlier advisor instructions.',
+];
+// How many reminders of the advisor a text holds: each opens the text (after blank space) or follows an empty line, and an empty line or blank space to the end
+// follows its closing line. One pass: the openers are read in order, and the closing line that ends the instructions is searched only forward.
+export function advisorNotes(text) {
+  if (typeof text !== 'string' || !text.includes(REMINDER_OPEN)) return 0;
+  const blankFrom = text.trimEnd().length;
+  const ends = (close) => text.startsWith(REMINDER_CLOSE, close) && (close + REMINDER_CLOSE.length >= blankFrom || text.startsWith('\n\n', close + REMINDER_CLOSE.length));
+  let closing = -1; // the closing line found last that ends the instructions
+  let none = false; // no such line stands further on
+  // Where the reminder whose body starts at `body` ends; -1 when there is none.
+  const endOf = (body) => {
+    if (!text.startsWith(ADVISOR_HEADING, body)) {
+      const sentence = ADVISOR_SENTENCES.find((s) => text.startsWith(s, body));
+      return sentence && ends(body + sentence.length) ? body + sentence.length + REMINDER_CLOSE.length : -1;
+    }
+    const first = body + ADVISOR_HEADING.length;
+    if (!none && closing < first) {
+      closing = text.indexOf(REMINDER_CLOSE, first);
+      while (closing >= 0 && !ends(closing)) closing = text.indexOf(REMINDER_CLOSE, closing + 1);
+      none = closing < 0;
+    }
+    return none ? -1 : closing + REMINDER_CLOSE.length;
+  };
+  let count = 0;
+  let at = 0; // where the next reminder may start
+  const take = (opener) => {
+    const end = endOf(opener + REMINDER_OPEN.length);
+    if (end < 0) return false;
+    count++;
+    at = end;
+    return true;
+  };
+  const head = text.length - text.trimStart().length;
+  if (text.startsWith(REMINDER_OPEN, head)) take(head);
+  const opener = `\n\n${REMINDER_OPEN}`;
+  for (let p = text.indexOf(opener, at); p >= 0; p = text.indexOf(opener, at)) if (!take(p + 2)) at = p + 1;
+  return count;
+}
 // One rendered attachment of the host (a reminder) and its kind, by the first line the host renders it with. The third value says what the host does when the list
 // after the boundary lacks the attachment: true, it announces it again; 'list', it is a list the host keeps as a set of entries (a delta that comes back leaves the
 // rest of the list to be announced again); 'always', one is added after every compaction whatever was taken off (SessionStart hooks); false, it is never announced
@@ -6293,14 +6348,15 @@ function attachmentPieces(text, known = [], rest = true) {
   if (typeof text !== 'string' || !text.trim()) return [];
   const left = [...known];
   const out = [];
-  for (const m of text.match(REMINDER_BLOCK) || []) {
+  const { reminders, rest: outside } = splitReminders(text);
+  for (const m of reminders) {
     const at = left.indexOf(m);
     if (at >= 0) { left.splice(at, 1); continue; }
     const kind = attachmentKind(m);
     if (kind === 'delivery') continue;
     out.push(kind === 'invoked_skills' ? { kind, chars: m.length, names: skillNames(m) } : { kind, chars: m.length });
   }
-  const around = rest ? text.replace(REMINDER_BLOCK, '') : '';
+  const around = rest ? outside : '';
   if (around.trim()) {
     const sk = SKILL_TEXT.exec(around);
     out.push(sk ? { kind: 'skill_text', chars: around.length, names: [sk[1].trim().replace(/\/+$/, '').split('/').pop()] } : { kind: 'meta', chars: around.length });
@@ -6430,7 +6486,8 @@ function carrierRows(messages, api, keepFrom) {
           const r = rowOfResult.get(b.tool_use_id);
           if (r === undefined) continue;
           const own = messages[r].toolResults.find((x) => x.tool_use_id === b.tool_use_id)?.text || '';
-          for (const t of blockTexts(b)) for (const p of attachmentPieces(t, own.match(REMINDER_BLOCK) || [], false)) piece(p, covered);
+          const shown = splitReminders(own).reminders;
+          for (const t of blockTexts(b)) for (const p of attachmentPieces(t, shown, false)) piece(p, covered);
           continue;
         }
         if (b.type !== 'text' || typeof b.text !== 'string') continue;

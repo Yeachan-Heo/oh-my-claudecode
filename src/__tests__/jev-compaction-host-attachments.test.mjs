@@ -1,3 +1,4 @@
+/* global performance */
 /**
  * Tests of OMC_JEV_COMPACT_HOST_ATTACHMENTS of hooks/jev-compaction.mjs: the user rows of text lose their handle, so the attachments the host keeps in their groups
  * (instructions, lists, the text of used skills, hook contexts) do not come back, and the advisor's reminder is rebuilt with its row. The only fake of the Jev side is
@@ -320,5 +321,19 @@ describe('HOST_ATTACHMENTS with the other switches', () => {
     const header = config.rates.RATE_TRACE * traceHeader(PASTES).length;
     expect(Math.abs(withThinking.tokens_after + header - withThinking.tokens_after_pred)).toBeLessThanOrEqual(2);
     expect(listTokens(thinking, config.rates)).toBeGreaterThan(listTokens(plain, config.rates));
+  });
+});
+
+describe('HOST_ATTACHMENTS: linear time', () => {
+  // Every text of the API form is read for attachments, so an opener that no line closes may not cost the length of the text again.
+  it.each([
+    ['reminders', '<system-reminder>\n', 60_000],
+    ['reminders of the advisor', '\n\n<system-reminder>\n# Advisor Tool\n', 30_000],
+  ])('a block full of openers of %s without a closing line is read in linear time', async (_, opener, count) => {
+    const junk = `Note.${opener.repeat(count)}`;
+    const t0 = performance.now();
+    const r = await run(HA, { extras: { 2: [junk] } });
+    expect(performance.now() - t0).toBeLessThan(5000);
+    expect(compactRecord(r)).toMatchObject({ result: 'jev', advisor_blocks: 0, attachments_dropped: 1, attachments_kinds: { meta: 1 } });
   });
 });

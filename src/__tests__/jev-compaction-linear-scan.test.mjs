@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  agentBlocks, cutHostBlocks, isNotification, noteSummary, otherFrame, preludeLength, withoutPasteMarks, withoutTags, withoutTrailingClosers,
+  advisorNotes, agentBlocks, cutHostBlocks, isNotification, noteSummary, otherFrame, preludeLength, splitReminders, withoutPasteMarks, withoutTags, withoutTrailingClosers,
 } from '../../hooks/jev-compaction.mjs';
 
 const HOST_BLOCK = /<(system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b[^>]*>[\s\S]*?<\/\1>/g;
@@ -16,6 +16,8 @@ const TRAILING_CLOSERS = /(?:\s*<\/system-reminder[^>]*>)+\s*$/;
 const PASTE_MARKS = /\[pasted text moved at compaction: \d+ chars, full text in (?:(?!; start: ")[^\n])*; start: "(?:[^"\\\n]|\\[^\n])*"; end: "(?:[^"\\\n]|\\[^\n])*"\]/g;
 const OTHER_FRAME = /^(?:.+ sent an? (?:new )?(?:message|report)|(?:A message|Messages) arrived .+|Activity (?:was observed )?in the bound conversation) while you were working(?:,.*)?:$/;
 const oneLine = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
+const REMINDER_BLOCK = /<system-reminder>\n[\s\S]*?\n<\/system-reminder>/g;
+const ADVISOR_NOTE = /(?:^\s*|\n\n)<system-reminder>\n(?:# Advisor Tool\n[\s\S]*?|The advisor tool is available; the advisor instructions announced earlier apply\.|The advisor tool is no longer available; disregard the earlier advisor instructions\.)\n<\/system-reminder>(?=\n\n|\s*$)/g;
 const NOTES = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>'];
 function noteSummaryByRegExp(text) {
   const tag = /<summary>([\s\S]*?)<\/summary>/.exec(text);
@@ -33,6 +35,8 @@ const PIECES = {
   tags: ['<', '>', 'a', ' ', '\n', '<a>', '</a>', '<<', '>>', 'x y', '\u00a0', '<b c="d">'],
   note: ['<summary>', '</summary>', '[SYSTEM NOTIFICATION - NOT USER INPUT]', '<task-notification>', '\n', ' ', 'x', '<', '>', '<b>', '</b>', 'line', '  ', '\u00a0', '<summary></summary>', '<summary> </summary>'],
   paste: ['[pasted text moved at compaction: ', '[pasted text moved at compaction: 5 chars; start: "a]b"; end: "c"]', '[pasted text moved at compaction: 5 chars, full text in /p; start: "a]b\\"c"; end: "d]"]', '[pasted text moved at compaction: 5 chars, full text in /p; start: "a"; end: "b"]', '5 chars, full text in ', '/p', '; start: "', '; end: "', '\\', '\\"', 'a]b', ']', '[', '[Keep it.]', '\n', '\r', '\u2028', 'x', ' ', '"', '[pasted text moved at compaction:'],
+  reminder: ['<system-reminder>\n', '\n</system-reminder>', '<system-reminder>', '</system-reminder>', '\n', 'x', ' ', '<', '>', '\n\n', '<system-reminder id="a">\n'],
+  advisor: ['<system-reminder>\n', '\n</system-reminder>', '# Advisor Tool\n', 'The advisor tool is available; the advisor instructions announced earlier apply.', 'The advisor tool is no longer available; disregard the earlier advisor instructions.', '\n\n', '\n', ' ', '\u00a0', '\u2028', 'x', 'The advisor tool is ', '# Advisor Tool', '\n\n<system-reminder>\n# Advisor Tool\n', '\n</system-reminder>\n\n'],
   frame: [' sent a message', ' sent an new report', ' sent a new message', ' sent an report', ' while you were working', ',', ':', 'A message arrived ', 'Messages arrived ', 'Activity ', 'was observed ', 'in the bound conversation', 'Activity in the bound conversation', 'Activity was observed in the bound conversation', 'x', ' ', '\r', '\u2028', '\u2029', '\n', 'sent a message', ' sent a', 'message', 'report', ' sent  a message', ':\n', ',:'],
 };
 const CASES = [
@@ -43,6 +47,8 @@ const CASES = [
   ['noteSummary', 'note', 12, (s) => [noteSummaryByRegExp(s), noteSummary(s)]],
   ['withoutPasteMarks', 'paste', 10, (s) => [s.replace(PASTE_MARKS, ''), withoutPasteMarks(s)]],
   ['otherFrame', 'frame', 9, (s) => [OTHER_FRAME.test(s.split('\n', 1)[0]), otherFrame(s)]],
+  ['splitReminders', 'reminder', 12, (s) => [JSON.stringify({ reminders: s.match(REMINDER_BLOCK) || [], rest: s.replace(REMINDER_BLOCK, '') }), JSON.stringify(splitReminders(s))]],
+  ['advisorNotes', 'advisor', 12, (s) => [(s.match(ADVISOR_NOTE) || []).length, advisorNotes(s)]],
 ];
 
 describe('the one-pass scans give what the regular expressions they replace give', () => {
@@ -107,6 +113,11 @@ const SHAPES = {
   pasteWhole: rep('[pasted text moved at compaction: 5 chars, full text in /p; start: "a]"; end: "b]"] [x] '),
   sent: rep('x sent a message while you were working,') + 'y',
   plain: 'lorem ipsum dolor sit amet '.repeat(40000), // about a megabyte, no tag
+  reminderOpen: rep('<system-reminder>\n'),
+  reminderClosed: rep('<system-reminder>\na\n</system-reminder>\n'),
+  advisorOpen: rep('\n\n<system-reminder>\n# Advisor Tool\n'),
+  advisorEndsInText: rep('\n\n<system-reminder>\n# Advisor Tool\n\n</system-reminder>x'),
+  advisorBlank: `\n\n<system-reminder>\n# Advisor Tool\n${rep('\n</system-reminder> ')}x`,
 };
 const SCANS = [
   ['cutHostBlocks', cutHostBlocks, ['open', 'openNoGt', 'closersNoGt', 'closed', 'mixed', 'taskOpen', 'teammateOpen', 'lt', 'plain']],
@@ -118,6 +129,8 @@ const SCANS = [
   ['otherFrame', otherFrame, ['sent', 'plain']],
   ['agentBlocks', agentBlocks, ['teammateOpen', 'teammateQuote', 'teammateClosed', 'teammateStray', 'lt', 'plain']],
   ['isNotification', (text) => isNotification({ role: 'user', text, toolUses: [] }), ['open', 'openNoGt', 'closersNoGt', 'mixed', 'taskOpen', 'summaryOpen', 'teammateOpen', 'plain']],
+  ['splitReminders', splitReminders, ['reminderOpen', 'reminderClosed', 'open', 'plain']],
+  ['advisorNotes', advisorNotes, ['advisorOpen', 'advisorEndsInText', 'advisorBlank', 'reminderOpen', 'reminderClosed', 'plain']],
 ];
 
 describe('a text of tens of thousands of tags without partners is read in a fraction of a second', () => {
@@ -141,5 +154,8 @@ describe('a text of tens of thousands of tags without partners is read in a frac
     expect(agentBlocks(SHAPES.teammateStray)).toMatchObject({ blocks: [], loose: true }); // a closing tag without its opener
     expect(isNotification({ role: 'user', text: SHAPES.open, toolUses: [] })).toBe(false);
     expect(isNotification({ role: 'user', text: `${SHAPES.openNoGt}\nwords of the user`, toolUses: [] })).toBe(false);
+    expect(splitReminders(SHAPES.reminderOpen)).toEqual({ reminders: [], rest: SHAPES.reminderOpen });
+    expect(splitReminders(SHAPES.reminderClosed).reminders).toHaveLength(N);
+    expect([advisorNotes(SHAPES.advisorOpen), advisorNotes(SHAPES.advisorEndsInText), advisorNotes(SHAPES.advisorBlank)]).toEqual([0, 0, 0]);
   });
 });
