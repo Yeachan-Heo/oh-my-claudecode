@@ -117,6 +117,27 @@ describe('keyword detector time on long whitespace runs', () => {
   }, 30000);
 });
 
+// Trailing whitespace of a whole line is trimmed before the autopilot context checks.
+// The first two answers change if such a line keeps the whitespace at its end; the third
+// shows that a line which is not a reference heading still leaves the command active.
+const TRAILING_WHITESPACE: Array<[string, string, boolean]> = [
+  ['a parenthesized question followed by spaces', 'one question (should i use autopilot here)   \nthanks', false],
+  ['a reference heading followed by a carriage return', '## Documentation\r\nautopilot fix the parser', false],
+  ['an ordinary heading followed by a carriage return', '## Parser\r\nautopilot fix the parser', true],
+];
+
+describe('keyword detector trims the end of a line', () => {
+  // The answers are listed as exported detector, plugin hook, standalone template hook.
+  it.each(TRAILING_WHITESPACE)('in every copy for %s', (_label, prompt, activates) => {
+    const answers = [
+      detectKeywordsWithType(prompt).some((match) => match.type === 'autopilot'),
+      ...HOOKS.map(({ path }) => runHook(path, prompt).stdout.includes('[MAGIC KEYWORD: AUTOPILOT]')),
+    ];
+
+    expect(answers).toEqual([activates, activates, activates]);
+  }, 60000);
+});
+
 // Differential check: the rewritten patterns must give the same result as the earlier,
 // slow ones. The earlier patterns are kept here as the reference.
 /* eslint-disable no-misleading-character-class -- The detector's script ranges: an intentional range set, not grapheme clusters */
