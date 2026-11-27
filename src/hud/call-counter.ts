@@ -10,7 +10,17 @@
  */
 
 import { createHash } from "crypto";
-import { closeSync, fstatSync, openSync, readFileSync, readSync } from "fs";
+import {
+  closeSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  unlinkSync,
+} from "fs";
+import { basename, dirname, join } from "path";
 import { atomicWriteFileSync } from "../lib/atomic-write.js";
 
 export interface CallCounts {
@@ -41,6 +51,9 @@ const MAX_LINE_BYTES = 16 * 1024 * 1024;
 const ANCHOR_BYTES = 256;
 // Bounds memory and checkpoint size; later calls are no longer de-duplicated.
 const MAX_SEEN_CALLS = 100_000;
+// A younger temp file may belong to a write that is still in progress.
+const STALE_TEMP_AGE_MS = 60 * 1000;
+const UUID_PATTERN = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const TOOL_USE_MARKER = Buffer.from('"tool_use"');
 const AGENT_TOOL_NAMES = new Set(["Task", "proxy_Task", "Agent", "proxy_Agent"]);
 const SKILL_TOOL_NAMES = new Set(["Skill", "proxy_Skill"]);
@@ -114,6 +127,37 @@ function readCheckpoint(statePath: string): Checkpoint | null {
     return valid ? saved : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Remove what interrupted writes of the checkpoint left next to it: the
+ * temporary file and the rollback copy that atomicWriteFileSync creates.
+ */
+function removeStaleTempFiles(statePath: string): void {
+  const dir = dirname(statePath);
+  const name = basename(statePath);
+  const prefixes = [`.${name}.tmp.`, `${name}.rollback.`];
+  try {
+    for (const entry of readdirSync(dir)) {
+      const ours = prefixes.some(
+        (prefix) =>
+          entry.startsWith(prefix) && UUID_PATTERN.test(entry.slice(prefix.length)),
+      );
+      if (!ours) continue;
+      try {
+        const path = join(dir, entry);
+        // The writer creates regular files only; a link is never followed
+        const stats = lstatSync(path);
+        if (stats.isFile() && Date.now() - stats.mtimeMs > STALE_TEMP_AGE_MS) {
+          unlinkSync(path);
+        }
+      } catch {
+        // Another run removed it first
+      }
+    }
+  } catch {
+    // No state directory yet
   }
 }
 
@@ -219,6 +263,7 @@ export function countTranscriptCalls(
         ...counts,
         seen: [...seen],
       };
+      removeStaleTempFiles(statePath);
       try {
         atomicWriteFileSync(statePath, JSON.stringify(checkpoint));
       } catch {

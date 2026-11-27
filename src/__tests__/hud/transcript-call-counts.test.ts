@@ -7,6 +7,8 @@ import { spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
+  lutimesSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -14,7 +16,9 @@ import {
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -493,6 +497,73 @@ describe("countTranscriptCalls", () => {
     expect(countTranscriptCalls(path, state)).toEqual(counts(5));
     expect(countTranscriptCalls(path, state)).toEqual(counts(5));
   });
+
+  const UUID = "123e4567-e89b-12d3-a456-426614174000";
+  const TEMP_NAMES = [`.counts.json.tmp.${UUID}`, `counts.json.rollback.${UUID}`];
+  const twoMinutesAgo = () => new Date(Date.now() - 2 * 60 * 1000);
+
+  /** A state directory that holds the given files, last written at `time` */
+  function leftBehind(names: string[], time: Date) {
+    const files = setup(calls("a", 2));
+    const stateDir = join(files.dir, "state");
+    mkdirSync(stateDir);
+    for (const name of names) {
+      writeFileSync(join(stateDir, name), "left behind");
+      utimesSync(join(stateDir, name), time, time);
+    }
+    return { ...files, stateDir };
+  }
+
+  it("removes what an interrupted write left, before it saves", () => {
+    const { path, state, stateDir } = leftBehind(TEMP_NAMES, twoMinutesAgo());
+
+    expect(countTranscriptCalls(path, state)).toEqual(counts(2));
+
+    expect(readdirSync(stateDir)).toEqual(["counts.json"]);
+  });
+
+  it("keeps a temp file that a running write may still own", () => {
+    const halfMinuteAgo = new Date(Date.now() - 30 * 1000);
+    const { path, state, stateDir } = leftBehind(TEMP_NAMES, halfMinuteAgo);
+
+    countTranscriptCalls(path, state);
+
+    expect(readdirSync(stateDir).sort()).toEqual([...TEMP_NAMES, "counts.json"].sort());
+  });
+
+  it("keeps old files that are not temp files of this checkpoint", () => {
+    const others = [
+      `.hud-state.json.tmp.${UUID}`,
+      `hud-state.json.rollback.${UUID}`,
+      `counts.json.tmp.${UUID}`,
+      `.counts.json.rollback.${UUID}`,
+      ".counts.json.tmp.notes",
+      `.counts.json.tmp.${UUID}.keep`,
+    ];
+    const { path, state, stateDir } = leftBehind(others, twoMinutesAgo());
+
+    countTranscriptCalls(path, state);
+
+    expect(readdirSync(stateDir).sort()).toEqual([...others, "counts.json"].sort());
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "leaves a link with a temp file name and its target alone",
+    () => {
+      const { dir, path, state, stateDir } = leftBehind([], twoMinutesAgo());
+      const target = join(dir, "target");
+      writeFileSync(target, "keep me");
+      const link = join(stateDir, TEMP_NAMES[0]);
+      symlinkSync(target, link);
+      utimesSync(target, twoMinutesAgo(), twoMinutesAgo());
+      lutimesSync(link, twoMinutesAgo(), twoMinutesAgo());
+
+      expect(countTranscriptCalls(path, state)).toEqual(counts(2));
+
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(readFileSync(target, "utf8")).toBe("keep me");
+    },
+  );
 
   it("gives processes that share a checkpoint the same counts", async () => {
     const content = calls("a", 60, "Task");
