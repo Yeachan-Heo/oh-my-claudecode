@@ -203,6 +203,17 @@ describe('HOST_ATTACHMENTS: the user rows of text lose their handle and the old 
     expect(record.attachments_kinds).toEqual({ deferred_tools: 2, host_reminder: 2 });
   });
 
+  it('of what comes back with a kept row the host announces only what is still missing', async () => {
+    const listed = reminder(`The following skills are available for use with the Skill tool:\n\n- a: ${para('desc', 3000)}`);
+    const added = reminder(`New skills discovered in /x/skills:\n\n- b: ${para('desc', 500)}`);
+    const session = reminder(`SessionStart:compact hook additional context: ${para('note', 800)}`);
+    const messages = withRows([assistantRow('First answer.'), ownerRow('Look at [Image #1] please'), assistantRow('Seen.'), ownerRow('Plain row'), assistantRow('Third answer.')], 30);
+    const record = compactRecord(await run(HA, { messages, extras: { 2: [added, INSTR, session], 4: [listed, INSTR, session] } }));
+    expect(record).toMatchObject({ rebuilt_user: 3, attachments_dropped: 3, attachments_back: 3 });
+    // The list: the entries that did not come back. The instructions: nothing, as one came back. The session hook: again, whatever came back.
+    expect(record.attachments_resent_tokens).toBe(Math.round(0.43 * (listed.length - added.length + session.length)));
+  });
+
   it('a skill loaded as a meta text is counted with the last segment of its directory', async () => {
     const record = compactRecord(await run(HA, { extras: { 0: ['Base directory for this skill: /x/skills/review-notes/\n\n# Review notes', 'A hook continues the turn.'] } }));
     expect(record).toMatchObject({ attachments_kinds: { skill_text: 1, meta: 1 }, attachments_skills: ['review-notes'] });
