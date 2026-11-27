@@ -672,7 +672,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
   }, SLOW);
 
   // --- --no-advisor: the advisor tool is switched off per session through the --settings file ---
-  it('(K1) a start with --no-advisor: the settings file has CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 next to the role variables, the row says advisor: disabled', async () => {
+  it('a start with --no-advisor: the settings file has CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 next to the role variables, the row says advisor: disabled', async () => {
     const r = await start({ args: ['--no-advisor'] });
     assert.equal(r.result.code, 0, `exit ${r.result.code}: ${r.result.stderr.slice(0, 200)}`);
     const file = valueOf(r.argv, '--settings');
@@ -682,14 +682,14 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     assert.ok(settings.env.OMC_SESSION_ROLE === 'worker' && settings.env.OMC_SESSION_NAME === 'Test track 1' && settings.env.OMC_SESSION_COORDINATOR === 'd7ec31aa', js(settings));
     assert.equal(r.row.advisor, 'disabled', js(r.row));
   }, SLOW);
-  it('(K2) a start without the flag: the settings file has exactly the three role keys, the row has no advisor field', async () => {
+  it('a start without the flag: the settings file has exactly the three role keys, the row has no advisor field', async () => {
     const r = await start();
     assert.equal(r.result.code, 0, `exit ${r.result.code}`);
     const settings = JSON.parse(readFileSync(valueOf(r.argv, '--settings'), 'utf8'));
     assert.equal(js(Object.keys(settings.env).sort()), js(['OMC_SESSION_COORDINATOR', 'OMC_SESSION_NAME', 'OMC_SESSION_ROLE']));
     assert.ok(!('advisor' in r.row), js(r.row));
   }, SLOW);
-  it('(K3) a resume with --no-advisor: argv has --settings <file> right before the prompt, the file has only that variable, the row is a resume with advisor: disabled', async () => {
+  it('a resume with --no-advisor: argv has --settings <file> right before the prompt, the file has only that variable, the row is a resume with advisor: disabled', async () => {
     resetStarter();
     const logs = join(logsRoot, `s${++counter}`);
     mkdirSync(logs, { recursive: true });
@@ -703,7 +703,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     const row = rowsOf(logs, 'sessions.jsonl').at(-1);
     assert.ok(row.mode === 'resume' && row.result === 'resume' && row.advisor === 'disabled', js(row));
   }, SLOW);
-  it('(K4) a resume without the flag: argv without --settings, the row without the advisor field', async () => {
+  it('a resume without the flag: argv without --settings, the row without the advisor field', async () => {
     resetStarter();
     const logs = join(logsRoot, `s${++counter}`);
     mkdirSync(logs, { recursive: true });
@@ -713,7 +713,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     const row = rowsOf(logs, 'sessions.jsonl').at(-1);
     assert.ok(row.mode === 'resume' && row.result === 'resume' && !('advisor' in row), js(row));
   }, SLOW);
-  it('(K5) --dry-run with --no-advisor (a start and a resume): the switch-off is visible in the output and in the row, no settings file is created', async () => {
+  it('--dry-run with --no-advisor (a start and a resume): the switch-off is visible in the output and in the row, no settings file is created', async () => {
     const r = await start({ args: ['--dry-run', '--no-advisor'] });
     assert.equal(r.result.code, 0, `exit ${r.result.code}: ${r.result.stderr.slice(0, 200)}`);
     assert.match(r.result.stdout, /CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1/);
@@ -728,7 +728,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     assert.ok(resumedRow.result === 'dry-run' && resumedRow.advisor === 'disabled', js(resumedRow));
     assert.ok(!existsSync(join(logs, 'session-settings')), 'the dry run of a resume created the settings directory');
   }, SLOW);
-  it('(K6) a settings file that cannot be written: a start and a resume with --no-advisor give advisor: settings-error, one warning line and no --settings; without the flag the row has no advisor field', async () => {
+  it('a settings file that cannot be written: a start and a resume with --no-advisor give advisor: settings-error, one warning line and no --settings; without the flag the row has no advisor field', async () => {
     // a file in place of the settings directory makes the mkdir of the settings writer throw
     const broken = () => {
       const dir = join(logsRoot, `s${++counter}`);
@@ -759,7 +759,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     assert.equal(plain.code, 0, `no flag: exit ${plain.code}: ${plain.stderr.slice(0, 300)}`);
     assert.ok(!('advisor' in rowsOf(plainLogs, 'sessions.jsonl').at(-1)), js(rowsOf(plainLogs, 'sessions.jsonl').at(-1)));
   }, SLOW);
-  it('(K7) the row never holds the text of the brief, with and without --no-advisor', async () => {
+  it('the row never holds the text of the brief, with and without --no-advisor', async () => {
     for (const args of [[], ['--no-advisor']]) {
       const r = await start({ brief: 'SECRET-BRIEF-TEXT to be checked', args });
       assert.ok(!js(r.row).includes('SECRET-BRIEF-TEXT'), js(r.row));
@@ -767,7 +767,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
   }, SLOW);
 
   // --- the provider field of the rows: OMC_JEV_SESSION_PROVIDER=1 ---
-  it('(H1) without OMC_JEV_SESSION_PROVIDER no row has a provider field, also when OMC_PROVIDER is set (a start, a dry run, a resume)', async () => {
+  it('without OMC_JEV_SESSION_PROVIDER no row has a provider field, also when OMC_PROVIDER is set (a start, a dry run, a resume)', async () => {
     const env = { OMC_PROVIDER: 'acme' };
     const regular = await start({ env });
     assert.ok(regular.result.code === 0 && !('provider' in regular.row), js(regular.row));
@@ -779,7 +779,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     assert.equal(resumed.code, 0, resumed.stderr.slice(0, 200));
     assert.ok(!('provider' in rowsOf(logs, 'sessions.jsonl').at(-1)), js(rowsOf(logs, 'sessions.jsonl').at(-1)));
   }, SLOW);
-  it('(H2) with OMC_JEV_SESSION_PROVIDER=1 the row names the profile of OMC_PROVIDER, `claude` without it or when it is blank; a start, a dry run and a resume', async () => {
+  it('with OMC_JEV_SESSION_PROVIDER=1 the row names the profile of OMC_PROVIDER, `claude` without it or when it is blank; a start, a dry run and a resume', async () => {
     const on = { OMC_JEV_SESSION_PROVIDER: '1' };
     const named = await start({ env: { ...on, OMC_PROVIDER: ' acme ' } });
     assert.ok(named.result.code === 0 && named.row.provider === 'acme' && named.row.session_id === 'ab12cd34', js(named.row));
@@ -820,7 +820,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     assert.ok(plainResume.result === 'pool-refused' && !('advisor' in plainResume) && !('provider' in plainResume), js(plainResume));
   }, SLOW);
 
-  it('(H3) only the exact value 1 switches the provider field on', async () => {
+  it('only the exact value 1 switches the provider field on', async () => {
     for (const value of ['true', '0', '']) {
       const r = await start({ env: { OMC_JEV_SESSION_PROVIDER: value, OMC_PROVIDER: 'acme' } });
       assert.ok(r.result.code === 0 && !('provider' in r.row), `${value}: ${js(r.row)}`);
