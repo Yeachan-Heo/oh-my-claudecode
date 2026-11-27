@@ -301,7 +301,8 @@ pause begins, once the pause file is published (also after a restart that finds 
 and to hold whatever it holds. The pipe is closed when the pause is over, when the guard stops, and by the system when the guard
 dies in any way, so a program that ends at the end of its input never outlives the guard's pause. A program that is still running
 5 seconds after that is terminated, and killed 5 seconds later; only the process the guard started is signalled, so a program that
-starts others ends them itself. A program that ends while the pause lasts is started again at the next check
+starts others ends them itself. It is ended also when the state file cannot be written at the end of a pause: the pause file is then
+not renewed and the sessions are released when it lapses. A program that ends while the pause lasts is started again at the next check
 (`WARNING (pause-command-ended)`), and one that cannot be started is `WARNING (pause-command)`: neither stops the pause. Its output
 goes to the output of the guard. No word of the list may be a file the guard writes (the pause file may be named, to be read).
 `--dry-run` and `--test-pause` do not run it. A configuration with a `pause_command` that is not such a list stops the guard at start

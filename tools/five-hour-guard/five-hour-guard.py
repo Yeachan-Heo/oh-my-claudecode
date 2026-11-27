@@ -1635,8 +1635,9 @@ def enter_pause(state, pct, reset_ts):
 
 
 def leave_pause(state, why):
-    """Leave the pause in this order: the state is written first, the pause file removed after. When the write fails nothing has
-    changed (the pause stays in force, in memory, on disk and as a file) and the next tick tries again; when the removal fails
+    """Leave the pause in this order: the state is written first, the pause file removed after. When the write fails the pause stays
+    as it is (in memory, on disk and as a file) and the next tick tries again; pause_command is ended all the same, since the failed
+    tick does not renew the pause file and the sessions are released when it lapses. When the removal fails
     the state is already unpaused and the removal is retried by the next tick (and by the next start, as a leftover). Where no lock names the
     owner, a pause file of a live process that is not this one is its pause (see live_owner): the state is not written then and the file is
     left alone, since a state of "not paused" under a live pause would have the next start remove that pause as a leftover. The locks are looked at
@@ -1651,7 +1652,11 @@ def leave_pause(state, why):
         log(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: the state is left as it is and the pause is left alone')
         end_pause_command()
         return
-    write_json(STATE, {**{k: v for k, v in state.items() if k != 'unlink_pending'}, 'paused': False, 'since': None, 'resume_at': None})
+    try:
+        write_json(STATE, {**{k: v for k, v in state.items() if k != 'unlink_pending'}, 'paused': False, 'since': None, 'resume_at': None})
+    except Exception:
+        end_pause_command()
+        raise
     state.update(paused=False, since=None, resume_at=None)
     removed = unpublish()   # the waiting calls first, then pause_command, which may take a moment to end
     end_pause_command()

@@ -6145,6 +6145,39 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard pause_command', { timeout: 90000 
     expect(g.out).not.toMatch(/ERROR|WARNING \(pause-command/);
   });
 
+  it.each([
+    ['an early resume', 0],
+    ['the resume time', 7200],
+  ])('pause_command ends with the pause also when the state cannot be written at %s, and the error is still reported', async (name, ahead) => {
+    // argv: flag file, seconds; while the flag file is there the state cannot be written and the clock of the guard is that far ahead
+    const driver = ['import os, runpy, sys, time', 'real_open, real_time, flag, ahead = os.open, time.time, sys.argv[1], int(sys.argv[2])',
+      'def broken(path, *a, **k):', '    if "state.json." in str(path) and str(path).endswith(".tmp") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real_open(path, *a, **k)',
+      'os.open = broken', 'time.time = lambda: real_time() + (ahead if os.path.exists(flag) else 0)', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = nearLimit(`pause-command-unwritable-${ahead}`);
+    const p = pauseProgram(f, 'wait');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    const flag = join(f.dir, 'break-state');
+    const g = spawnPyCode(driver, [flag, String(ahead), GUARD, ...guardArgs(f)]);
+    try {
+      await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+      writeFileSync(flag, '');
+      if (!ahead) setUsage(f, 10);
+      await waitFor(() => /end of input/.test(readText(p.report)), 20000, `the end of the command at ${name}`);
+      await waitFor(() => /pause_command ended \(status 0\)[\s\S]*ERROR: tick failed.*Read-only file system/.test(g.out), 20000, 'the error of the failed write');
+      await sleep(600); // a few more tries to leave the pause
+      expect(starts(p.report), 'not run again while the end of the pause is tried again').toBe(1);
+      expect(existsSync(f.pause), 'the pause file is not removed before the state is written').toBe(true);
+      expect(readJson(f.state).paused).toBe(true);
+      expect(g.out).not.toMatch(/RESUMED/);
+      unlinkSync(flag);
+      if (ahead) {
+        await waitFor(() => starts(p.report) === 2, 20000, 'a pause that goes on runs it again');
+        setUsage(f, 10);
+      }
+      await waitFor(() => !existsSync(f.pause), 20000, 'the pause ends once the state can be written');
+    } finally { await stopGuard(g); }
+  });
+
   it('pause_command ends with a guard that is stopped, and with one that is killed, and does not keep the locks of the guard', async () => {
     for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
       const f = nearLimit(`pause-command-${signal}`);
