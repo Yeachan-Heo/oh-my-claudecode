@@ -30,7 +30,7 @@
 // The ceiling covers the launches in flight: a launch takes a reservation under the pool lock before the Jev query and gives it back when it is
 // over, so two launchers that counted the sessions at the same time do not both start.
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -332,13 +332,17 @@ async function launch(argv, env, held) {
   if (trust.verdict === 'untrusted') { console.error(`jev-session: directory ${cwd} (source: ${cwdSource}) is not trusted by Claude Code (no trust in ${trust.configFile} for it, its parent directories or its repository); a background session would not start. Pass --cwd <a trusted project directory> or run \`claude\` once in this directory and accept the trust. Nothing was started.`); return 2; }
 
   const loggedName = privatePathMask(process.env)?.(args.name) ?? args.name; // the rows and the settings file name; the session gets args.name
+  // The handoff gate (lib/jev-handoff.mjs) finds the rows of its handoff file by `brief`. Where a listed private path hides that value, the row also
+  // holds a digest of the full path, which the gate compares instead.
+  const briefHidden = (privatePathMask(process.env)?.(briefPath) ?? briefPath) !== briefPath;
+  const briefDigest = briefHidden ? { brief_sha256: createHash('sha256').update(briefPath).digest('hex') } : {};
 
   // The session pool gate before any Jev query: at the ceiling the start is refused with the count in the message and in the log row; a counter
   // read error never refuses and shows in the final row as pool {sessions: null, error}.
   const gate = poolGate(env, logDir, held);
   if (gate.refuse) {
     const maskedRefusal = maskJevState({ brief: briefPath, cwd }); // the same mask as the regular row
-    writeRow(logDir, { role: args.role, name: loggedName, ...advisorField, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
+    writeRow(logDir, { role: args.role, name: loggedName, ...advisorField, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, ...briefDigest, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
     console.error(refusalMessage(gate));
     return 2;
   }
@@ -379,7 +383,7 @@ async function launch(argv, env, held) {
 
   // The log row keeps paths only through the state mask, never the text of the brief.
   const masked = maskJevState({ brief: briefPath, cwd });
-  const row = { mode, ...advisorField, role: args.role, name: loggedName, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: masked.brief, cwd: masked.cwd, cwd_source: cwdSource, result: decision.degraded ? 'degraded' : mode === 'off' ? 'off' : 'decided', ...(decision.reason ? { reason: decision.reason } : {}), ...(decision.marker ? { marker: decision.marker } : {}), ...(decision.refused ? { refused: decision.refused } : {}), ...(decision.capped ? { capped: decision.capped } : {}), ...(decision.model ? { model: { to: decision.model, source: decision.source.model } } : {}), ...(decision.effort ? { effort: { to: decision.effort, source: decision.source.effort, ...(decision.score !== undefined ? { score: decision.score, confidence: decision.confidence } : {}) } } : {}), ...(gate.pool ? { pool: gate.pool } : {}), started_with: { model: passModel ?? null, effort: passEffort ?? null }, queryMs };
+  const row = { mode, ...advisorField, role: args.role, name: loggedName, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: masked.brief, ...briefDigest, cwd: masked.cwd, cwd_source: cwdSource, result: decision.degraded ? 'degraded' : mode === 'off' ? 'off' : 'decided', ...(decision.reason ? { reason: decision.reason } : {}), ...(decision.marker ? { marker: decision.marker } : {}), ...(decision.refused ? { refused: decision.refused } : {}), ...(decision.capped ? { capped: decision.capped } : {}), ...(decision.model ? { model: { to: decision.model, source: decision.source.model } } : {}), ...(decision.effort ? { effort: { to: decision.effort, source: decision.source.effort, ...(decision.score !== undefined ? { score: decision.score, confidence: decision.confidence } : {}) } } : {}), ...(gate.pool ? { pool: gate.pool } : {}), started_with: { model: passModel ?? null, effort: passEffort ?? null }, queryMs };
 
   if (args.dryRun) { // a dry run writes no settings file; it prints the one it would write
     writeRow(logDir, { ...row, result: 'dry-run' }, env);

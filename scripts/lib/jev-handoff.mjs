@@ -167,7 +167,10 @@ function launcherOutcome({ state, logDir }) {
   const since = Number(state?.launcher_attempt_ts) || 0;
   const path = state?.handoff_path ? resolve(String(state.handoff_path)) : '';
   if (!since || !path || !logDir) return 'pending';
-  const sameBrief = (brief) => typeof brief === 'string' && (resolve(brief) === path || brief === maskSecrets(path));
+  // A row names the brief as the launcher logged it: the path, the path through the secret mask, or, where a listed private path hides it,
+  // brief_sha256, the digest of the full path.
+  const digest = hashContent(path);
+  const sameBrief = (row) => row?.brief_sha256 === digest || (typeof row?.brief === 'string' && (resolve(row.brief) === path || row.brief === maskSecrets(path)));
   let failed = false;
   try {
     for (const file of jevLogFiles(logDir, 'sessions', since)) {
@@ -178,7 +181,7 @@ function launcherOutcome({ state, logDir }) {
         try { row = JSON.parse(rows[i]); } catch { continue; }
         const at = Date.parse(row?.ts);
         if (Number.isFinite(at) && at < since) break; // the rows are in time order: older rows belong to earlier calls
-        if (!sameBrief(row?.brief) || row.result === 'dry-run') continue;
+        if (!sameBrief(row) || row.result === 'dry-run') continue;
         if (row.starter_exit === 0) return 'started';
         failed = true;
       }
