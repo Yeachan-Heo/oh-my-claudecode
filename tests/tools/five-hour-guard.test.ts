@@ -5982,6 +5982,21 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard beside a hook command that is not
     });
   });
 
+  it('beside such a command the log is looked at before every line: one that becomes something else right after a line is not appended to', () => {
+    // two lines within the second for which a look is otherwise kept (the clock of that is stopped), the log replaced between them
+    const driver = ['import os, runpy, sys, time', 'time.monotonic = lambda: 1000.0', 'guard, log, text = sys.argv[1], sys.argv[2], sys.argv[3]', 'sys.argv = [guard] + sys.argv[4:]',
+      'g = runpy.run_path(guard, run_name="guard_functions")', 'g["log"]("first line")', 'print("appended:", "first line" in open(log).read(), flush=True)',
+      'with open(log + ".new", "w") as f: f.write(text)', 'os.replace(log + ".new", log)', 'g["log"]("second line")', 'g["log"]("third line")'].join('\n');
+    const f = nearLimit('unread-log-between-lines', 50);
+    writeConfig(f);
+    writeBeside(f, 'echo "$(date)"');
+    const r = runPyCode(driver, [GUARD, f.log, PROGRAM_TEXT, ...guardArgs(f)]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout, 'the log of the guard was written').toMatch(/appended: True/);
+    expect(readText(f.log), 'the file that took its place is kept').toBe(PROGRAM_TEXT);
+    expect(r.stdout.match(/nothing is appended to it/g), 'a look that refuses is still kept: one notice').toHaveLength(1);
+  });
+
   it('beside such a command a state file that becomes something else under a running guard is not written: the pause is refused with an error that names the command', async () => {
     const f = nearLimit('unread-state-turns-foreign', 50);
     writeConfig(f);

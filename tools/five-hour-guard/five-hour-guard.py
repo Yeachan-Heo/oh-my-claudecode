@@ -1078,7 +1078,9 @@ def log_is_program():
     """Whether log_file is a hook, interpreter or launcher that a registered entry names, or a program that a command of another hook runs
     (settings.json can be rewritten after the start): nothing is appended to a program. settings.json is read once per tick (safe_tick
     forgets the look) and at most once a second outside a tick, not for every line; a scan that finds a program no earlier scan found
-    forgets the look too (registered_runtime_files). The notice goes to stdout only, never through log()."""
+    forgets the look too (registered_runtime_files). While a command is not read to its end, a look that lets the line through is not
+    kept: it rests on what the log holds at that moment, so the next line looks again. The notice goes to stdout only, never through
+    log()."""
     now = time.monotonic()
     if LOG_LOOK[0] is None or now - LOG_LOOK[0] >= LOG_LOOK_S:
         try:
@@ -1088,7 +1090,8 @@ def log_is_program():
             blocked = True
         except Exception:
             blocked = False   # a look that fails never costs the log
-        LOG_LOOK[:] = [now, blocked]
+        unread = any(label == UNSCANNED for label, _ in LAST_SCAN[0])
+        LOG_LOOK[:] = [None if unread and not blocked else now, blocked]
         if blocked:
             print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard; while a command there is not read to its end, a log file that holds other text than the lines of this guard counts as such a program)', flush=True)
     return LOG_LOOK[1]

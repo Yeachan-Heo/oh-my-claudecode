@@ -364,7 +364,7 @@ A command with a command substitution (a dollar sign and a parenthesis, or a bac
 The guard still pauses and renews its pause. What such a command names is not known, so while one is in `settings.json` the guard
 writes a file of its own (the state file, the pause file, the log) only where that destroys nothing of somebody else: where nothing
 is at the path, where an empty file is, or where the file holds what the guard writes there (a pause document, a stored state,
-or in the log a first line that starts with the time the way the guard logs it). Anything else, a symbolic link too, is left as it is: a state or pause file that holds something
+or in the log a first line that starts with the time the way the guard logs it; the log is looked at before every line then). Anything else, a symbolic link too, is left as it is: a state or pause file that holds something
 else stops the guard at start (exit status 2, "... is not read to its end"), and after the start every write to it is refused with
 an `ERROR` that names the command; a log file with other text is not appended to (the notice goes to stdout). The guard says which
 command it could not read in `WARNING (hook-unread)`, at start and then at most once per `--warn-every` seconds; a command read once
