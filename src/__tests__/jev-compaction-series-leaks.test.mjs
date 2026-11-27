@@ -211,6 +211,7 @@ describe('what leaves with a series: where an id of the shape a host makes is se
     ['behind a token prefix in a part of an MCP name', `mcp__server__sk-${UUID}`],
     ['a tool use id behind other characters', `x_${VRTX}`],
     ['with more hexadecimal digits after it', HEX40],
+    ['a tool use id with far more characters than a host id', join('toolu_', ALNUM.slice(0, 35), ALNUM.slice(0, 35))],
     ['a UUID with more characters after it', `${UUID}-tail`],
     ['cut by two underscores out of a name that is no MCP name', join('Zq8Tr4Lm2XpB9KwD', '__', TAIL)],
   ])('a series with a tool name that holds one elsewhere stays whole: %s', async (_, name) => {

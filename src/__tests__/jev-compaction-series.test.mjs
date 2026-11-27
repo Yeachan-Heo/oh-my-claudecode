@@ -374,6 +374,16 @@ describe('series of traces: merging', () => {
     expect(reads).toEqual([]);
   });
 
+  it('a series whose text the mask cannot clear once a path of a missing file is masked with it stays whole and is counted in secret', async () => {
+    // One line that is short while each path stands as a mark and longer than the mask reads at once with the paths as written.
+    const paths = Array.from({ length: 2000 }, (_, k) => `${PASTES}${'ab-'.repeat(26)}/${sha32(`gone ${k}`)}.txt`);
+    const long = `[compacted] Bash(cat ${paths.join(' ')}) - result of 5 chars removed\n${call(1)}`;
+    const { edited, record, fake } = await run({ texts: [long] });
+    expect(record.series).toMatchObject({ series: 0, secret: 1, write_failed: 0, timed_out: 0 });
+    expect(edited.size).toBe(0);
+    expect(fake.files().size).toBe(0);
+  });
+
   /** The one file a run wrote. */
   const onlyFile = (fake) => { const files = [...fake.files()]; expect(files).toHaveLength(1); return files[0]; };
 
