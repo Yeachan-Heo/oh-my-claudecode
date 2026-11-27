@@ -9,7 +9,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
@@ -890,6 +890,59 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
       await run(['--resume', 'pth000001', '--prompt', 'p', '--cwd', project, ...flags], launcherEnv({ logs, extra }));
       const row = rowsOf(logs, 'sessions.jsonl').at(-1);
       assert.ok(row.mode === 'resume' && row.result === result && row.cwd === '[private path]', js(row));
+    }
+  }, SLOW);
+
+  it('with OMC_JEV_COMPACT_PRIVATE_PATHS the row and the settings file name hide a listed path in the session name, and the session gets the name as it is', async () => {
+    const name = 'Track /VOL/Acme-Ledger//x';
+    const r = await start({ args: ['--name', name], env: { OMC_JEV_COMPACT_PRIVATE_PATHS: '/vol/acme-ledger' } });
+    assert.equal(r.result.code, 0, r.result.stderr.slice(0, 300));
+    assert.equal(r.row.name, 'Track [private path]', js(r.row));
+    const file = valueOf(r.argv, '--settings');
+    assert.match(basename(file), /^track-private-path-\d+-[0-9a-f]{8}\.json$/);
+    assert.equal(valueOf(r.argv, '--name'), name);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).env.OMC_SESSION_NAME, name);
+  }, SLOW);
+
+  it('with OMC_JEV_COMPACT_PRIVATE_PATHS a refused start, a dry run and every kind of resume hide a listed path in the session name', async () => {
+    const sessionsFile = join(tmp, 'sessions-private-name');
+    writeFileSync(sessionsFile, '25\n');
+    const listed = { OMC_JEV_COMPACT_PRIVATE_PATHS: '/vol/acme-ledger' };
+    const full = poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, ...listed });
+    const named = ['--name', 'Track /vol/acme-ledger/x'];
+    const refused = await start({ env: full, args: named });
+    assert.ok(refused.row.result === 'pool-refused' && refused.row.name === 'Track [private path]', js(refused.row));
+    const dry = await start({ env: listed, args: [...named, '--dry-run'] });
+    assert.ok(dry.row.result === 'dry-run' && dry.row.name === 'Track [private path]', js(dry.row));
+    // The command a dry run prints is the one a start would run: the name as it is, the settings file name without the path.
+    assert.match(dry.result.stdout, /--name "Track \/vol\/acme-ledger\/x" --settings \S+track-private-path-/);
+    const logs = join(logsRoot, `s${++counter}`);
+    mkdirSync(logs, { recursive: true });
+    const resume = ['--resume', 'pth000002', '--prompt', 'p', '--cwd', project, ...named, '--no-advisor'];
+    for (const [extra, flags, result] of [[listed, [], 'resume'], [listed, ['--dry-run'], 'dry-run'], [full, [], 'pool-refused']]) {
+      const done = await run([...resume, ...flags], launcherEnv({ logs, extra }));
+      const row = rowsOf(logs, 'sessions.jsonl').at(-1);
+      assert.ok(row.mode === 'resume' && row.result === result && row.name === 'Track [private path]', js(row));
+      if (result === 'dry-run') assert.match(done.stdout, /--settings \S+track-private-path-/);
+    }
+    const files = readdirSync(join(logs, 'session-settings')); // only the resume that ran wrote a file
+    assert.equal(files.length, 1, js(files));
+    assert.match(files[0], /^track-private-path-\d+-[0-9a-f]{8}\.json$/);
+  }, SLOW);
+
+  it('without an entry of OMC_JEV_COMPACT_PRIVATE_PATHS that matches it, the session name stays in the rows and in the settings file name', async () => {
+    const name = 'Track /vol/acme-ledger/x';
+    const slug = /^track-vol-acme-ledger-x-\d+-[0-9a-f]{8}\.json$/;
+    for (const value of [undefined, 'ab, /,C:\\', '/vol/acme,/vol/zeta-books']) {
+      const env = value === undefined ? {} : { OMC_JEV_COMPACT_PRIVATE_PATHS: value };
+      const r = await start({ args: ['--name', name], env });
+      assert.equal(r.row.name, name, `${value}: ${js(r.row)}`);
+      assert.match(basename(valueOf(r.argv, '--settings')), slug);
+      const logs = join(logsRoot, `s${++counter}`);
+      mkdirSync(logs, { recursive: true });
+      await run(['--resume', 'pth000003', '--prompt', 'p', '--cwd', project, '--name', name, '--no-advisor'], launcherEnv({ logs, extra: env }));
+      assert.equal(rowsOf(logs, 'sessions.jsonl').at(-1).name, name, String(value));
+      assert.match(basename(valueOf(readArgv(), '--settings')), slug);
     }
   }, SLOW);
 });
