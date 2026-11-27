@@ -220,6 +220,7 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'teach', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in how+why composition with a landing check (idea credit: pstack).' }),
   entry({ name: 'bro', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in plain-language restatement keeping every fact (idea credit: pstack).' }),
   entry({ name: 'sharpen', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in task aiming: consumer, done-check, non-goals (idea credit: pstack).' }),
+  entry({ name: 'reframe', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in expert vocabulary for what the user is building: disambiguate, 8-12 terms, neighboring fields, rewrite (idea credit: pstack).' }),
   entry({ name: 'in-your-own-words', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in goal playback before work starts (idea credit: pstack).' }),
   entry({ name: 'recall', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in artifact-first context recovery (idea credit: pstack); complements native session state.' }),
   entry({ name: 'ketchup', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in session catch-up summary (idea credit: pstack).' }),

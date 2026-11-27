@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-|- [Skills (84 Total)](#skills-84-total)
+|- [Skills (85 Total)](#skills-85-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -980,7 +980,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (84 Total)
+## Skills (85 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -1051,6 +1051,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `ralplan`                 | Consensus planning entrypoint                                                   | `/oh-my-claudecode:ralplan`                 |
 | `reflect`                  | Three-reviewer transcript audit proposing concrete skill edits                 | `/oh-my-claudecode:reflect`                 |
 | `recall`                  | Reconstruct working context from artifacts in trust order                      | `/oh-my-claudecode:recall`                  |
+| `reframe`                 | Teach the expert words for what the user is building, then rewrite the description with them | `/oh-my-claudecode:reframe`                 |
 | `release`                 | Automated release workflow                                                      | `/oh-my-claudecode:release`                 |
 | `refit`                   | Cross-session retrospective; instrument evidence to user-approved environment fixes | `/oh-my-claudecode:refit` |
 | `remember`                | Save and retrieve durable session memory                                        | `/oh-my-claudecode:remember`                |
@@ -1144,6 +1145,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:ralph <task>`                         | Persistence loop until task completion (`--critic=architect \| critic \| codex`)             |
 | `/oh-my-claudecode:ralplan <description>`                | Iterative planning with consensus structured deliberation                                     |
 | `/oh-my-claudecode:recall`                               | Reconstruct working context from artifacts in trust order                                     |
+| `/oh-my-claudecode:reframe <description>`                | Teach the expert words for what the user is building, then rewrite the description with them  |
 | `/oh-my-claudecode:sharpen <brief>`                      | Aim a task at its real objective: consumer, expert lens, done-check, non-goals                |
 | `/oh-my-claudecode:show-me-your-work`                    | Start (or read) the append-only decision trail                                                |
 | `/oh-my-claudecode:release`                              | Automated release workflow                                                                    |
