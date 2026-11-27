@@ -52,7 +52,7 @@ export const DELIVERY_ALERT_PERCENT = 95;
 // this alarm, and so does more minutes than this of holding back (the union of the openings' time).
 export const TIMEOUTS_ALERT_OPENINGS = 20;
 export const TIMEOUTS_ALERT_MINUTES = 60;
-// Blind alarm (OMC_JEV_GUARD_BLIND_ALARM=1): fewer decisions in the window than this are too few to say the guard cannot see the agents.
+// Blind alarm (OMC_JEV_GUARD_BLIND_ALARM=1): fewer decisions in the window than this are too few for the alarm.
 const BLIND_MIN_DECISIONS = 10;
 const DAY_MS = 24 * 3600 * 1000;
 const STALE_RESULT_MS = 2 * DAY_MS; // a daily result older than this is not shown
@@ -78,7 +78,8 @@ export function isGuardEnabled(env = process.env, permissionMode) {
 //   OMC_JEV_GUARD_USE_MARKER=1      leave out the decisions of calls with a `use` marker (applied.jsonl, source "marker")
 //   OMC_JEV_GUARD_TIMEOUTS_ALARM=1  count the breaker's openings caused by missing responses and alarm when there are many
 //   OMC_JEV_GUARD_BLIND_ALARM=1     count the decisions with no agent meta.json found (`noMeta`) and alarm when of 10 or more decisions
-//                                   more than half have none: the guard cannot see the agents, so its share says nothing
+//                                   more than half have none (the guard cannot see the agents, so its share says nothing) or none can
+//                                   be evaluated
 // OMC_JEV_GUARD_PROJECT_DIRS lists more Claude Code project directories to read (see projectDirs); without it only the configuration
 // directory's `projects` is read.
 const switchOn = (env, name) => String(env?.[name] ?? '').trim() === '1';
@@ -272,12 +273,20 @@ function deliveryPart(result) {
   const percent = typeof result.deliveredPercent === 'number' ? result.deliveredPercent : null;
   // Use full-precision percent if available (production), otherwise fall back to rounded percent (tests/legacy)
   const thresholdPercent = typeof result.deliveredPercentFull === 'number' ? result.deliveredPercentFull : percent;
-  // The guard cannot see the agents when, of enough decisions, more than half have no agent meta.json. The field exists only with
-  // OMC_JEV_GUARD_BLIND_ALARM=1; without it the share is NaN and the comparison is false.
+  // The blind alarm fires when, of enough decisions, more than half have no agent meta.json (the guard cannot see the agents) or
+  // none can be evaluated. The `noMeta` field exists only with OMC_JEV_GUARD_BLIND_ALARM=1; without it there is no blind alarm.
   const decided = Number(result.decisions) || 0;
-  const blind = decided >= BLIND_MIN_DECISIONS && Number(result.noMeta) / decided > 0.5;
+  const enough = typeof result.noMeta === 'number' && decided >= BLIND_MIN_DECISIONS;
+  const unseen = enough && result.noMeta / decided > 0.5;
+  const blind = unseen || (enough && !(result.withAgent > 0));
   if (!(interrupted > 0 || blind || (thresholdPercent !== null && thresholdPercent < DELIVERY_ALERT_PERCENT))) return null;
-  if (blind) return `Jev delivery guard: of ${decided} decisions in the last ${result.windowHours} h the guard cannot see the agents (${result.withAgent ?? 0} evaluated, ${result.noMeta} without meta.json); check the Claude Code project directories (OMC_JEV_GUARD_PROJECT_DIRS) and OMC_JEV_LOG_DIR. PreToolUse:Agent hooks interrupted: ${interrupted} (hooks of other commands: ${Number(result.interruptedOtherHooks) || 0}).`;
+  if (blind) {
+    // With at most half of the meta.json files missing and nothing evaluated, the rest are calls the share leaves out.
+    const what = unseen ? 'the guard cannot see the agents' : 'the guard can evaluate none of them';
+    const rest = unseen ? '' : `, ${decided - result.noMeta} named or \`use\` marker calls`;
+    const advice = unseen ? '; check the Claude Code project directories (OMC_JEV_GUARD_PROJECT_DIRS) and OMC_JEV_LOG_DIR' : '';
+    return `Jev delivery guard: of ${decided} decisions in the last ${result.windowHours} h ${what} (${result.withAgent ?? 0} evaluated, ${result.noMeta} without meta.json${rest})${advice}. PreToolUse:Agent hooks interrupted: ${interrupted} (hooks of other commands: ${Number(result.interruptedOtherHooks) || 0}).`;
+  }
   // With the `use` marker left out of the count the share no longer holds it against the hook.
   const markerLeftOut = typeof result.markerDecisions === 'number';
   const alone = markerLeftOut ? 'forceInherit' : 'a `use` marker or forceInherit';

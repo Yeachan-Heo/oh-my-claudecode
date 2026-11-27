@@ -273,8 +273,51 @@ describe('OMC_JEV_GUARD_BLIND_ALARM', () => {
     expect(deliveryMessage(resultOf({ noMeta: 0, withAgent: 12, delivered: 12, deliveredPercent: 100 }))).toBeNull();
   });
 
-  it('does not take a day of marker or named calls for a blind guard (no meta.json is what counts)', () => {
-    expect(deliveryMessage(resultOf({ noMeta: 0, withAgent: 0, markerDecisions: 12 }))).toBeNull();
+  const interruptions = 'PreToolUse:Agent hooks interrupted: 0 (hooks of other commands: 0).';
+  const noneEvaluated = (count, noMeta) => `Jev delivery guard: of ${count} decisions in the last 24 h the guard can evaluate none of them (0 evaluated, ${noMeta} without meta.json, ${count - noMeta} named or \`use\` marker calls). ${interruptions}`;
+  // `count` decisions, none of which can be evaluated: the first `missing` have no meta.json, the others are named agents
+  const namedDay = (count, missing) => {
+    decisions(count, 0);
+    for (let i = missing; i < count; i++) meta(`b${i}`, { model: 'opus', name: `worker-${i}` });
+  };
+  const dailyMessage = async (env) => {
+    const result = await computeDelivery({ logDir, configDir, now: NOW, env: { OMC_JEV_GUARD_EFFORT: '1', ...env } });
+    return { result, message: deliveryMessage(result) };
+  };
+
+  it('alarms when of 10 decisions none can be evaluated, although no more than half have no meta.json', async () => {
+    namedDay(10, 5);
+    const { result, message } = await dailyMessage({ OMC_JEV_GUARD_BLIND_ALARM: '1' });
+    expect(result).toMatchObject({ decisions: 10, withAgent: 0, noMeta: 5, namedAgents: 5 });
+    expect(message).toBe(noneEvaluated(10, 5));
+  });
+
+  it('does not alarm below 10 decisions when none can be evaluated', async () => {
+    namedDay(9, 4);
+    const { result, message } = await dailyMessage({ OMC_JEV_GUARD_BLIND_ALARM: '1' });
+    expect(result).toMatchObject({ decisions: 9, withAgent: 0, noMeta: 4 });
+    expect(message).toBeNull();
+  });
+
+  it('does not alarm without the switch when none of the decisions can be evaluated', async () => {
+    namedDay(10, 0);
+    const { result, message } = await dailyMessage({});
+    expect(result).toMatchObject({ decisions: 10, withAgent: 0, namedAgents: 10 });
+    expect('noMeta' in result).toBe(false);
+    expect(message).toBeNull();
+  });
+
+  it('alarms for a day of named calls only, or of `use` marker calls only, although the guard finds their meta.json files', async () => {
+    namedDay(10, 0);
+    expect((await dailyMessage({ OMC_JEV_GUARD_BLIND_ALARM: '1' })).message).toBe(noneEvaluated(10, 0));
+    writeFileSync(join(logDir, 'applied.jsonl'), Array.from({ length: 10 }, (_, i) => applied(`b${i}`, 'marker')).join('\n') + '\n');
+    const marked = await dailyMessage({ OMC_JEV_GUARD_BLIND_ALARM: '1', OMC_JEV_GUARD_USE_MARKER: '1' });
+    expect(marked.result).toMatchObject({ decisions: 10, withAgent: 0, noMeta: 0, markerDecisions: 10 });
+    expect(marked.message).toBe(noneEvaluated(10, 0));
+  });
+
+  it('keeps the wording about the project directories when more than half have no meta.json and none is evaluated', () => {
+    expect(deliveryMessage(resultOf({ noMeta: 12 }))).toBe(`Jev delivery guard: of 12 decisions in the last 24 h the guard cannot see the agents (0 evaluated, 12 without meta.json); check the Claude Code project directories (OMC_JEV_GUARD_PROJECT_DIRS) and OMC_JEV_LOG_DIR. ${interruptions}`);
   });
 
   it('keeps the delivery message for an interrupted hook and adds the blind alarm to it', () => {
