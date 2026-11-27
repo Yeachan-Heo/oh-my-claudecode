@@ -526,7 +526,7 @@ describe('series of traces: merging', () => {
     const path = `${PASTES}${ID}/${NAME}.txt`;
     const { fake } = await run({ texts: [`[compacted] Bash(echo \u{e000}0\u{e000}) - result of 20 chars removed\n${read(path)}`] });
     const [file] = [...fake.files().values()];
-    expect(file).toContain('Bash(echo �0�)');
+    expect(file).toContain('Bash(echo \ufffd0\ufffd)');
     expect(file.split(path)).toHaveLength(2);
   });
 
