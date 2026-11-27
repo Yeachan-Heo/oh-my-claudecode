@@ -3,11 +3,13 @@
  * that the parser reads for its other data.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -17,6 +19,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 import { parseTranscript } from "../../hud/transcript.js";
 import { countCall, countTranscriptCalls } from "../../hud/call-counter.js";
@@ -51,6 +54,14 @@ function calls(prefix: string, count: number, name = "Read"): string {
   let lines = "";
   for (let i = 0; i < count; i++) lines += call(`${prefix}_${i}`, name);
   return lines;
+}
+
+/** A local API request record that carries a copy of a call */
+function requestCopy(id: string, name = "Read"): string {
+  return JSON.stringify({
+    type: "api-request-blob",
+    message: { content: [{ type: "tool_use", id, name, input: {} }] },
+  }) + "\n";
 }
 
 /** Lines without calls, about `bytes` long in total */
@@ -125,10 +136,7 @@ describe("parseTranscript call counts", () => {
   it("counts a repeated record once, in small and in large transcripts", async () => {
     const dir = tempDir();
     const repeated = call("same_task", "Task") + call("same_skill", "Skill", { skill: "demo" });
-    const copy = JSON.stringify({
-      type: "api-request-blob",
-      message: { content: [{ type: "tool_use", id: "same_task", name: "Task", input: {} }] },
-    }) + "\n";
+    const copy = requestCopy("same_task", "Task");
 
     const small = join(dir, "small.jsonl");
     writeFileSync(small, repeated + copy + repeated);
@@ -137,6 +145,25 @@ describe("parseTranscript call counts", () => {
     const large = join(dir, "large.jsonl");
     writeFileSync(large, repeated + filler(5 * MB) + copy + repeated);
     expect(await parseTranscript(large)).toMatchObject(counts(2, 1, 1));
+  });
+
+  it("counts a repeat of a call that an earlier render counted only once", async () => {
+    const dir = tempDir();
+    const path = join(dir, "large.jsonl");
+    const options = { callCountStatePath: join(dir, "state.json") };
+    writeFileSync(path, HEAD + filler(5 * MB) + TAIL);
+    expect(await parseTranscript(path, options)).toMatchObject(counts(9, 3, 2));
+
+    // A call from before the tail window, one from inside it, and a copy
+    appendFileSync(
+      path,
+      call("head_task", "Task") +
+        call("tail_agent", "Agent") +
+        requestCopy("head_skill", "Skill") +
+        call("new"),
+    );
+
+    expect(await parseTranscript(path, options)).toMatchObject(counts(10, 3, 2));
   });
 
   it("applies the same rules to a large transcript as to a small one", async () => {
@@ -173,20 +200,52 @@ describe("parseTranscript call counts", () => {
     expect(await parseTranscript(path, options)).toMatchObject(counts(3, 1, 1));
     expect(await parseTranscript(path, options)).toMatchObject(counts(9, 3, 2));
   });
-
-  it("gives parallel runs the same counts", async () => {
-    const dir = tempDir();
-    const path = join(dir, "large.jsonl");
-    const options = { callCountStatePath: join(dir, "state.json") };
-    writeFileSync(path, HEAD + filler(5 * MB) + TAIL);
-
-    const results = await Promise.all(
-      Array.from({ length: 4 }, () => parseTranscript(path, options)),
-    );
-
-    for (const result of results) expect(result).toMatchObject(counts(9, 3, 2));
-  });
 });
+
+/**
+ * Wait for the other workers, then count with a small budget until the backlog
+ * is read, a few times over, all on the same checkpoint.
+ */
+const WORKER = `
+import { existsSync, writeFileSync } from "node:fs";
+const [moduleUrl, path, state, budget, dir, id, workers] = process.argv.slice(2);
+const { countTranscriptCalls } = await import(moduleUrl);
+const pause = () => new Promise((done) => setTimeout(done, 2));
+writeFileSync(dir + "/ready-" + id, "");
+const deadline = Date.now() + 15000;
+for (let other = 0; other < Number(workers); other++) {
+  while (!existsSync(dir + "/ready-" + other)) {
+    if (Date.now() > deadline) throw new Error("worker " + other + " did not start");
+    await pause();
+  }
+}
+const results = [];
+for (let run = 0; run < 200 && results.length < 20; run++) {
+  const result = countTranscriptCalls(path, state, Number(budget));
+  if (result) results.push(result);
+  await pause();
+}
+process.stdout.write(JSON.stringify(results));
+`;
+
+function runWorker(args: string[]): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--import", "tsx", ...args], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 25_000,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolve(JSON.parse(stdout));
+      else reject(new Error(`worker exited ${code}: ${stderr}`));
+    });
+  });
+}
 
 describe("countTranscriptCalls", () => {
   function setup(content: string) {
@@ -301,6 +360,18 @@ describe("countTranscriptCalls", () => {
 
     expect(statSync(path).ino).toBe(inode);
     expect(countTranscriptCalls(path, state)).toEqual(counts(1));
+  });
+
+  it("counts a call that an earlier run counted only once", () => {
+    const { path, state } = setup(calls("a", 3, "Task"));
+    expect(countTranscriptCalls(path, state)).toEqual(counts(3, 3));
+
+    appendFileSync(path, call("a_0", "Task") + requestCopy("a_1", "Task") + call("b"));
+    expect(countTranscriptCalls(path, state)).toEqual(counts(4, 3));
+
+    // The checkpoint that a resumed run saves still knows the earlier calls
+    appendFileSync(path, call("a_2", "Task") + call("b"));
+    expect(countTranscriptCalls(path, state)).toEqual(counts(4, 3));
   });
 
   it("counts an unterminated last line now and only once later", () => {
@@ -422,6 +493,34 @@ describe("countTranscriptCalls", () => {
     expect(countTranscriptCalls(path, state)).toEqual(counts(5));
     expect(countTranscriptCalls(path, state)).toEqual(counts(5));
   });
+
+  it("gives processes that share a checkpoint the same counts", async () => {
+    const content = calls("a", 60, "Task");
+    const { dir, path, state, offset } = setup(content);
+    countTranscriptCalls(path, state);
+    // Repeats of counted calls, new calls and their repeats
+    appendFileSync(
+      path,
+      calls("a", 20, "Task") + calls("b", 60) + calls("b", 20) + call("c", "Skill"),
+    );
+    const worker = join(dir, "worker.mjs");
+    writeFileSync(worker, WORKER);
+    const moduleUrl = pathToFileURL(join(process.cwd(), "src/hud/call-counter.ts")).href;
+    const budget = String(Math.ceil(content.length / 8));
+    const workers = 4;
+
+    const results = await Promise.all(
+      Array.from({ length: workers }, (_, id) =>
+        runWorker([worker, moduleUrl, path, state, budget, dir, String(id), String(workers)]),
+      ),
+    );
+
+    for (const result of results) {
+      expect(result).toEqual(Array.from({ length: 20 }, () => counts(121, 60, 1)));
+    }
+    expect(offset()).toBe(statSync(path).size);
+    expect(readdirSync(join(dir, "state"))).toEqual(["counts.json"]);
+  }, 30_000);
 
   it("returns null for a missing transcript", () => {
     const { dir, state } = setup("");
