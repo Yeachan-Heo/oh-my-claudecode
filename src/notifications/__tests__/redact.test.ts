@@ -194,6 +194,7 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
     ['ghp_', `tok ${fake('ghp_', 36)} end`, fake('ghp_', 36)],
     ['github_pat_', `tok ${fake('github_pat_', 30)} end`, fake('github_pat_', 30)],
     ['AKIA', `tok AKIA${fake('', 16).toUpperCase()} end`, fake('', 16).toUpperCase()],
+    ['ASIA', `tok ASIA${fake('', 16).toUpperCase()} end`, fake('', 16).toUpperCase()],
   ];
 
   // JWT: three base64url segments (first one starts with eyJ), at least 8 characters per segment after eyJ.
@@ -242,6 +243,7 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
       for (const text of CLEAN) expect(redactTokens(text)).toBe(text);
       // regex rules are not affected by the switch
       expect(redactTokens('token=xoxa-2-abc123def456')).toBe('token=xoxa-****');
+      expect(redactTokens('id ASIAIOSFODNN7EXAMPLE in ASIAPACIFIC')).toBe('id ASIA**** in ASIAPACIFIC');
     });
   });
 
@@ -453,7 +455,7 @@ describe('redactTokens key-shape masking (OMC_REDACT_KEY_SHAPES=1)', () => {
             .replace(/\b(gho_)[A-Za-z0-9]+/g, '$1****')
             .replace(/\b(ghs_)[A-Za-z0-9]+/g, '$1****')
             .replace(/\b(github_pat_)[A-Za-z0-9_]+/g, '$1****')
-            .replace(/\b(AKIA)[A-Z0-9]{16}\b/g, '$1****');
+            .replace(/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, '$1****');
         // pieces without a name phrase, a key prefix of the scan or eyJ: the scan finds nothing in any combination
         const pieces = ['xoxb-', 'xoxp-', 'xoxa-', 'xapp-', '/bot', '/bot123456:', '123456789:', 'ghp_', 'gho_', 'ghs_', 'github_pat_', 'AKIA',
           'ABCDEFGHIJKLMNOP', 'Bearer ', 'bearer\t', 'Bot ', 'robot ', 'abc', 'x', '12345678', ':', '-', '_', ' ', '\n', '"', "'", '*', '****',

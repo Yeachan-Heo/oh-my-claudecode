@@ -56,6 +56,9 @@ const PREFIX_KEYS = [
   ['glpat-', 'glpat-abcdefghijklmnop', '_', (k) => k.replace(/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/, '$1***')],
   ['xoxb-', 'xoxb-abcdefghijklm', '-', (k) => k.replace(/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/, '$1***')],
   ['AKIA', 'AKIAIOSFODNN7EXAMPLE', '-', (k) => k.replace(/\bAKIA[0-9A-Z]{16}\b/, 'AKIA***')],
+  ['ASIA', 'ASIAIOSFODNN7EXAMPLE', '-', (k) => k.replace(/\bASIA[0-9A-Z]{16}\b/, 'ASIA***')],
+  ['gsk_', 'gsk_abcdefghijklmnopqrstuvwx', '_', (k) => k.replace(/\b(gsk_|xai-)[A-Za-z0-9]{20}[A-Za-z0-9_-]*/, '$1***')],
+  ['xai-', 'xai-abcdefghijklmnopqrstuvwx', '-', (k) => k.replace(/\b(gsk_|xai-)[A-Za-z0-9]{20}[A-Za-z0-9_-]*/, '$1***')],
   ['JWT', 'eyJabcdefgh.abcdefgh.abcdefgh', '_', (k) => k.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/, 'eyJ***')],
   ['bearer', 'bearer abcdefghijklm', '-', (k) => k.replace(/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/i, '$1***')],
   ['long mixed string', 'abcdefghijklmnopqrstuvwxyz012345', '_', (k) => k.replace(/(^|[^A-Za-z0-9+_-])(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])[A-Za-z0-9+_-]{32,}={0,2}/, '$1***')],
@@ -1192,6 +1195,26 @@ describe.each([
       [String.raw`{\\\"hasło\\\":\\\"hunter2zz\\\"}`, String.raw`{\\\"hasło\\\":\\\"***\\\"}`],
     ];
     for (const [text, masked] of cases) expect({ text, out: mask(text) }).toEqual({ text, out: masked });
+  });
+
+  it('masks Groq and xAI keys and temporary AWS key ids, and keeps names that only start like them', () => {
+    const twenty = 'AbCdEfGhIj0123456789';
+    const cases = [
+      [`key gsk_${twenty} end`, 'key gsk_*** end'],
+      [`key xai-${twenty} end`, 'key xai-*** end'],
+      [`xai-${twenty}-tail_9, gsk_${twenty}_x.`, 'xai-***, gsk_***.'],
+      ['id ASIAIOSFODNN7EXAMPLE end', 'id ASIA*** end'],
+    ];
+    for (const [text, masked] of cases) expect({ text, out: mask(text) }).toEqual({ text, out: masked });
+    const kept = [
+      'gsk_renderer_new_for_surface (GskRenderer *renderer)',
+      'gsk_render_node_get_node_type',
+      'pip install xai-sdk-python xai-compatible-provider-config',
+      `short gsk_${twenty.slice(1)} and xai-${twenty.slice(1)}`,
+      `inside a word: xgsk_${twenty}`,
+      'ASIAPACIFIC, and ASIAIOSFODNN7EXAMPLE1 is longer than a key',
+    ];
+    for (const text of kept) expect({ text, out: mask(text) }).toEqual({ text, out: text });
   });
 });
 

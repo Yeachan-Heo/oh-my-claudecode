@@ -27,8 +27,8 @@ const TOKEN_RULES: ReadonlyArray<readonly [pattern: RegExp, replacement: string]
   [/\b(gho_)[A-Za-z0-9]+/g, '$1****'],
   [/\b(ghs_)[A-Za-z0-9]+/g, '$1****'],
   [/\b(github_pat_)[A-Za-z0-9_]+/g, '$1****'],
-  // AWS access key IDs: AKIA...
-  [/\b(AKIA)[A-Z0-9]{16}\b/g, '$1****'],
+  // AWS access key IDs: AKIA... and the temporary ASIA...
+  [/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, '$1****'],
 ];
 
 const MASK = '****';

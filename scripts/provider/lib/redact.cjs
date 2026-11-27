@@ -10,6 +10,10 @@ const SECRET_PATTERNS = [
   [/\b(sk-(?:ant-|proj-)?)[A-Za-z0-9_-]{12,}/g, '$1[REDACTED]'],
   [/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/g, '$1[REDACTED]'],
   [/\b(AIza)[0-9A-Za-z_-]{30,}/g, '$1[REDACTED]'],
+  // `gsk_` also starts the functions of GTK's GSK library and `xai-` ordinary package names: a key has 20 letters and digits.
+  [/\b(gsk_|xai-)[A-Za-z0-9]{20}[A-Za-z0-9_-]*/g, '$1[REDACTED]'],
+  // AWS access key ids, permanent (AKIA) and temporary (ASIA).
+  [/\b(AKIA|ASIA)[0-9A-Z]{16}\b/g, '$1[REDACTED]'],
   [/((?:[?&;_]|^)token=)[^&\s"']{4,}/gi, '$1[REDACTED]'],
   [/("(?:api_key|authorization|x-api-key|token|access_token|bearer)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"'],
   // Provider keys have the form <hex>.<chars>. The whole key is masked, so no

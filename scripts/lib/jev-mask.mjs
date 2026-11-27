@@ -42,7 +42,9 @@ export function maskSecrets(text, { keepGitHashes = false } = {}) {
     [/\b(sk-(?:ant-|proj-)?)[A-Za-z0-9_-]{12,}/g],
     [/\b(gh[pousr]_|github_pat_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/g],
     [/\b((?:sk|rk|pk)_(?:live|test)_|hf_|npm_)[A-Za-z0-9]{16,}/g],
-    [/\bAKIA[0-9A-Z]{16}\b/g, 4],
+    // `gsk_` also starts the functions of GTK's GSK library and `xai-` ordinary package names: a key has 20 letters and digits.
+    [/\b(gsk_|xai-)[A-Za-z0-9]{20}[A-Za-z0-9_-]*/g],
+    [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, 4], // ASIA: temporary AWS keys
     // A JWT, or else the rest of the run kept unchanged; the run class has no dot, so a match with a dot is the JWT.
     [/\beyJ(?:[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]*)/g, (m) => m[0].includes('.') ? 3 : Infinity],
     // A whole word containing a keyword: the lookahead finds the keyword once, then the word is read to its end.
