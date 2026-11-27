@@ -1242,6 +1242,10 @@ describe('run-provider-advisor script contract', () => {
       const stderr = `${result.stderr ?? ''}`;
       expect(stderr).toContain('timed out');
       expect(stderr).toContain('[ask-muse]');
+      // The failure is still recorded as an artifact so callers can recover.
+      const artifactPath = `${result.stdout ?? ''}`.trim();
+      expect(artifactPath).toContain(join('.omc', 'artifacts', 'ask', 'muse-'));
+      expect(existsSync(artifactPath)).toBe(true);
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
