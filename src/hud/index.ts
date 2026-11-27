@@ -50,6 +50,7 @@ import { compareVersions } from "../features/auto-update.js";
 import { resolveOmcUpdateState } from "./elements/update-hint.js";
 import { OMC_HUD_UNBUILT_VERSION_ENV } from "../lib/env-vars.js";
 import {
+  resolveSessionStatePaths,
   resolveToWorktreeRoot,
   resolveTranscriptPath,
   withWorktreePathRenderScope,
@@ -71,6 +72,26 @@ function extractSessionIdFromPath(transcriptPath: string): string | null {
   if (!transcriptPath) return null;
   const match = transcriptPath.match(/([0-9a-f-]{36})(?:\.jsonl)?$/i);
   return match ? match[1] : null;
+}
+
+/**
+ * Checkpoint of the transcript call counts, session scoped when the session is
+ * known. Without a usable path the counts are rebuilt on every render.
+ */
+function getCallCountStatePath(
+  cwd: string,
+  sessionId: string | null,
+): string | undefined {
+  try {
+    return resolveSessionStatePaths(
+      "hud-call-counts",
+      sessionId ?? undefined,
+      cwd,
+      { fileName: "hud-call-counts.json" },
+    ).effectiveWrite;
+  } catch {
+    return undefined;
+  }
 }
 
 // The two sources round reset times differently (e.g. 17:59:59.924Z vs 18:00:00Z).
@@ -348,14 +369,15 @@ async function mainImpl(watchMode = false, skipInit = false): Promise<void> {
       cwd,
     );
 
-    // Parse transcript for agents and todos
-    const transcriptData = await parseTranscript(resolvedTranscriptPath, {
-      staleTaskThresholdMinutes: config.staleTaskThresholdMinutes,
-    });
-
     const currentSessionId = extractSessionIdFromPath(
       resolvedTranscriptPath ?? stdin.transcript_path ?? "",
     );
+
+    // Parse transcript for agents and todos
+    const transcriptData = await parseTranscript(resolvedTranscriptPath, {
+      staleTaskThresholdMinutes: config.staleTaskThresholdMinutes,
+      callCountStatePath: getCallCountStatePath(cwd, currentSessionId),
+    });
 
     // Initialize HUD state (cleanup stale/orphaned tasks)
     // Must happen after cwd resolution so cleanup targets the correct project directory

@@ -6,6 +6,7 @@
  *
  * Performance optimizations:
  * - Tail-based parsing: reads only the last ~500KB of large transcripts
+ *   (call counts cover the whole file, see call-counter.ts)
  * - Bounded agent map: caps at 50 agents during parsing
  * - Early termination: stops when enough running agents found
  */
@@ -28,6 +29,12 @@ import type {
   LastRequestTokenUsage,
 } from "./types.js";
 import { classifyAgentSpawn, parseIncomingAgentWrapper } from "./agent-kind.js";
+import {
+  countCall,
+  countTranscriptCalls,
+  isAgentTool,
+  isSkillTool,
+} from "./call-counter.js";
 
 // Performance constants
 // 4MB tail window: enough to catch the full tool_use → tool_result → task-notification
@@ -112,9 +119,12 @@ const TRANSCRIPT_CACHE_MAX_SIZE = 20;
  * Extracts running agents and latest todo list.
  *
  * For large files (>500KB), only parses the tail portion for performance.
+ * The tool, agent and skill call counts cover the whole file.
  */
 export interface ParseTranscriptOptions {
   staleTaskThresholdMinutes?: number;
+  /** File that carries the call counts of a large transcript between runs */
+  callCountStatePath?: string;
 }
 
 export async function parseTranscript(
@@ -161,6 +171,8 @@ export async function parseTranscript(
   };
   let sessionTotalsReliable = false;
   const observedSessionIds = new Set<string>();
+  const seenCalls = new Set<string>();
+  let callCountsPending = false;
 
   try {
     const stat = statSync(transcriptPath);
@@ -177,6 +189,7 @@ export async function parseTranscript(
             agentMap,
             latestTodos,
             result,
+            seenCalls,
             MAX_AGENT_MAP_SIZE,
             backgroundAgentMap,
             sessionTokenTotals,
@@ -186,6 +199,14 @@ export async function parseTranscript(
           // Skip malformed lines
         }
       }
+      // The counts so far cover the tail only. Replace them with the counts of
+      // the whole file once those are complete.
+      const fileCounts = countTranscriptCalls(
+        transcriptPath,
+        options?.callCountStatePath,
+      );
+      if (fileCounts) Object.assign(result, fileCounts);
+      else callCountsPending = true;
       // Token totals from a tail-read are partial (we only saw the last MAX_TAIL_BYTES).
       // Still surface them when token data was found so the HUD shows something useful.
       sessionTotalsReliable = sessionTokenTotals.seenUsage;
@@ -206,6 +227,7 @@ export async function parseTranscript(
             agentMap,
             latestTodos,
             result,
+            seenCalls,
             MAX_AGENT_MAP_SIZE,
             backgroundAgentMap,
             sessionTokenTotals,
@@ -239,7 +261,8 @@ export async function parseTranscript(
 
   const pendingPermissions = Array.from(pendingPermissionMap.values()).map(clonePendingPermission);
   const finalized = finalizeTranscriptResult(result, options, pendingPermissions);
-  if (cacheKey) {
+  // An unchanged file must be parsed again while its counts are still pending.
+  if (cacheKey && !callCountsPending) {
     if (transcriptCache.size >= TRANSCRIPT_CACHE_MAX_SIZE) {
       transcriptCache.clear();
     }
@@ -475,6 +498,7 @@ function processEntry(
   agentMap: Map<string, ActiveAgent>,
   latestTodos: TodoItem[],
   result: TranscriptData,
+  seenCalls: Set<string>,
   maxAgentMapSize: number = 50,
   backgroundAgentMap?: BackgroundAgentMap,
   sessionTokenTotals?: {
@@ -581,15 +605,9 @@ function processEntry(
     }
     // Track tool_use for Task (agents) and TodoWrite
     if (block.type === "tool_use" && block.id && block.name) {
-      result.toolCallCount++;
+      countCall(result, seenCalls, block.id, block.name);
       result.lastToolName = block.name;
-      if (
-        block.name === "Task" ||
-        block.name === "proxy_Task" ||
-        block.name === "Agent" ||
-        block.name === "proxy_Agent"
-      ) {
-        result.agentCallCount++;
+      if (isAgentTool(block.name)) {
         const input = block.input as TaskInput | undefined;
         // Named Task/Agent spawns are teammates on the native agent team;
         // unnamed spawns are anonymous subagents (issue #3666).
@@ -671,8 +689,7 @@ function processEntry(
             if (typeof input.activeForm === "string" && input.activeForm) item.activeForm = input.activeForm;
           }
         }
-      } else if (block.name === "Skill" || block.name === "proxy_Skill") {
-        result.skillCallCount++;
+      } else if (isSkillTool(block.name)) {
         // Track last activated skill
         const input = block.input as SkillInput | undefined;
         if (input?.skill) {

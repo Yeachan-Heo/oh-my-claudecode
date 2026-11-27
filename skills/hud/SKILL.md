@@ -211,6 +211,10 @@ You can manually edit the config file. Each option can be set individually - any
 }
 ```
 
+### Call counts
+
+The call-count badge covers the whole session transcript. Tool, agent and skill calls are counted once per `tool_use` id, also when the transcript repeats a record. For a transcript over 4 MB the HUD keeps the counts and the position reached in `.omc/state/sessions/<session>/hud-call-counts.json` and reads only what was appended since. A backlog over 64 MB is spread over several renders, which show the counts of the last 4 MB until it is read. Lines over 16 MB are not counted.
+
 ### callCountsFormat
 
 Controls the call-count badge icon style:

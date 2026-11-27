@@ -192,6 +192,11 @@ describe('HUD watch mode initialization', () => {
       resolveToWorktreeRoot: vi.fn((cwd?: string) => cwd ?? '/tmp/worktree'),
       resolveTranscriptPath: vi.fn((transcriptPath?: string) => transcriptPath),
       getOmcRoot: vi.fn(() => '/tmp/worktree/.omc'),
+      resolveSessionStatePaths: vi.fn(
+        (_name: string, sessionId: string | undefined, root: string, options: { fileName: string }) => ({
+          effectiveWrite: `${root}/.omc/state/${sessionId ? `sessions/${sessionId}/` : ''}${options.fileName}`,
+        }),
+      ),
       withWorktreePathRenderScope: vi.fn((callback: () => unknown) => callback()),
     }));
 
@@ -283,6 +288,20 @@ describe('HUD watch mode initialization', () => {
       { enabled: true },
       '123e4567-e89b-12d3-a456-426614174000',
     );
+  });
+
+  it('gives the transcript parser a per-session checkpoint for the call counts', async () => {
+    const stdin = makeStdin();
+    stdin.transcript_path = '/tmp/worktree/transcripts/123e4567-e89b-12d3-a456-426614174000.jsonl';
+    const hud = await importHudModule({ stdin });
+    const { parseTranscript } = await import('../../hud/transcript.js');
+
+    await hud.main(true, false);
+
+    expect(parseTranscript).toHaveBeenCalledWith(stdin.transcript_path, expect.objectContaining({
+      callCountStatePath:
+        '/tmp/worktree/.omc/state/sessions/123e4567-e89b-12d3-a456-426614174000/hud-call-counts.json',
+    }));
   });
 
   it('merges stdin generic rate limits over usage API data when available', async () => {
