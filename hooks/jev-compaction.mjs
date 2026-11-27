@@ -150,6 +150,12 @@
  * `archive_timed_out`, `archive_ms`, `archive_marker`; `archive_planned` in shadow) and `merged_traces`, `merged_items`. A marker file in the session directory is touched by every compaction
  * that archives; scripts/lib/jev-compaction-state.mjs removes session directories whose newest file is older than OMC_JEV_ARCHIVE_DAYS days.
  *
+ * Usage of Jev's requests (OMC_JEV_COMPACT_JEV_USAGE=1 or active, off by default; without it no record gains a field and no record is added). The record of a
+ * compaction gets `jev_usage`, one entry per request sent to Jev: `model` (as the answer names it, masked and cut to JEV_MODEL_MAX_CHARS characters),
+ * `input_tokens`, `output_tokens` and `cost_usd` (always null; a missing value is null, never 0). The scoring requests come first, parallel to `jev_ms` and without
+ * `purpose`; the others carry `purpose` (pastes, blocks, second_round). `cost_basis` is `reported` when an answer carries a cost, else `unknown`. The pass before the
+ * module's own request puts both fields into its `verdicts_fill` record, and a pass in the background that asked something writes such a record of its own.
+ *
  * Secrets in the paste, reply, agent and block stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
  * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added. The check is bounded (maskSecrets
@@ -796,6 +802,7 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_FULL_INPUT: await $.env.get('OMC_JEV_COMPACT_FULL_INPUT'),
     OMC_JEV_COMPACT_OWNER_LAST: await $.env.get('OMC_JEV_COMPACT_OWNER_LAST'),
     OMC_JEV_COMPACT_ARCHIVE: await $.env.get('OMC_JEV_COMPACT_ARCHIVE'),
+    OMC_JEV_COMPACT_JEV_USAGE: await $.env.get('OMC_JEV_COMPACT_JEV_USAGE'),
     OMC_JEV_COMPACT_JEV_STAGES: await $.env.get('OMC_JEV_COMPACT_JEV_STAGES'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
@@ -916,6 +923,8 @@ export async function readConfig($) {
     // Archive of calls and results (off unless OMC_JEV_COMPACT_ARCHIVE says shadow or active): the files of the cut results go to <state dir>/compaction-archive.
     archive: archiveModeOf(env.OMC_JEV_COMPACT_ARCHIVE),
     archiveDir: stateDir ? `${stateDir}/compaction-archive` : undefined,
+    // Usage and model of every request of Jev in the records (off unless 1 or active).
+    jevUsage: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_JEV_USAGE ?? '').trim()),
   };
 }
 
@@ -3555,7 +3564,41 @@ async function askJev($, cfg, state, questions) {
     invalid.invalid = true;
     throw invalid;
   }
-  return body.answers;
+  return cfg.jevUsage ? withJevMeta(body.answers, { usage: sanitizeJevUsage(body.usage), raw: body.usage, model: usageModel(body.model) }) : body.answers;
+}
+
+// Usage of Jev's requests (OMC_JEV_COMPACT_JEV_USAGE). The usage and the model of an answer ride along with the answers as a non-enumerable property: spread,
+// Object.keys and JSON.stringify do not see it, so no reader of the answers changes and no question name collides with it.
+const JEV_META_KEY = '__jevMeta';
+function withJevMeta(answers, meta) {
+  Object.defineProperty(answers, JEV_META_KEY, { value: meta, enumerable: false, configurable: true });
+  return answers;
+}
+const jevMetaOf = (answers) => answers?.[JEV_META_KEY];
+// The model name is text of the server and goes into the record: masked, on one line, and cut. The mask reads a bounded start of it.
+const JEV_MODEL_MAX_CHARS = 100;
+const JEV_MODEL_SCAN_CHARS = 600;
+const usageModel = (model) => (typeof model === 'string' ? clip(oneLine(maskSecrets(model.slice(0, JEV_MODEL_SCAN_CHARS))), JEV_MODEL_MAX_CHARS) : null);
+// Only finite token counts of zero or more; anything else is no data.
+function sanitizeJevUsage(usage) {
+  const isCount = (n) => Number.isFinite(n) && n >= 0;
+  return isCount(usage?.input_tokens) && isCount(usage?.output_tokens) ? { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens } : undefined;
+}
+// 'reported' only when the answer itself carries a cost; otherwise 'unknown' (no cost is derived from a price list).
+const costBasisOf = (usage) => (['total_cost_usd', 'cost_usd', 'cost'].some((k) => Number.isFinite(usage?.[k])) ? 'reported' : 'unknown');
+// One entry per request: the model and the tokens of its answer. No data is null, never 0; the cost is null.
+function jevUsageOf(answers) {
+  const meta = jevMetaOf(answers);
+  return { model: meta?.model ?? null, input_tokens: meta?.usage?.input_tokens ?? null, output_tokens: meta?.usage?.output_tokens ?? null, cost_usd: null };
+}
+// The requests other than the scoring of results (the question about a pasted tag, the questions about blocks, the tie of the second round) add their entry, with its
+// `purpose`, to the record being written (cfg.usageRecord). A request that failed counts too.
+function noteJevUsage(cfg, purpose, r) {
+  const record = cfg.usageRecord;
+  if (!record) return;
+  (record.jev_usage ??= []).push({ ...jevUsageOf(r.value), purpose });
+  if (costBasisOf(jevMetaOf(r.value)?.raw) === 'reported') record.cost_basis = 'reported';
+  else record.cost_basis ??= 'unknown';
 }
 
 // Score 0-1 from an answer on the four levels (0-3), else undefined.
@@ -3840,6 +3883,7 @@ async function askPaste($, cfg, text, deadline) {
   if (t0 >= deadline) { session.requests--; return { held: true }; }
   const timeoutMs = Math.min(REQUEST_MS, deadline - t0);
   const r = await withDeadline($, askJev($, cfg, { fragment: { text, chars: text.length } }, PASTE_QUESTIONS), timeoutMs);
+  noteJevUsage(cfg, 'pastes', r);
   const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
   if (Date.now() < deadline) await withDeadline($, recording, deadline - Date.now());
   if (!r.value) { noteFailures([classifyFailure(r)], Date.now()); return {}; }
@@ -4919,6 +4963,7 @@ async function askBlockVerdicts($, cfg, items, opts) {
         const timeoutMs = Math.min(opts.requestMs, opts.deadline - t0);
         if (timeoutMs < 500) { session.requests--; results[k] = { skipped: true }; continue; }
         const r = await withDeadline($, askJev($, cfg, requests[k].state, requests[k].questions), timeoutMs);
+        noteJevUsage(cfg, 'blocks', r);
         // Shared failure bookkeeping may finish later, but cannot extend the deadline.
         const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
         if (Date.now() < opts.deadline) await withDeadline($, recording, opts.deadline - Date.now());
@@ -5130,8 +5175,9 @@ async function fillBlockVerdicts($, cfg, messages, ctx) {
       if (win) limit = ruleTargetOf(win, cfg);
     }
     const extra = blockSignals(cfg.rates, prefix + listTokens(api, cfg.rates), plan.items, prefix, limit);
-    const stats = await ensureBlockVerdicts($, cfg, plan, { ...ctx, user, extra });
-    return { rows: plan.stats.rows, blocks: plan.stats.blocks, ...stats };
+    const used = {}; // the usage of the requests of this pass (OMC_JEV_COMPACT_JEV_USAGE)
+    const stats = await ensureBlockVerdicts($, cfg.jevUsage ? { ...cfg, usageRecord: used } : cfg, plan, { ...ctx, user, extra });
+    return { rows: plan.stats.rows, blocks: plan.stats.blocks, ...stats, ...used };
   } catch (error) { return { skipped: 'error', error: clip(oneLine(String(error?.message ?? error)), 200) }; }
 }
 
@@ -5165,7 +5211,9 @@ async function backgroundBlockVerdicts($, cfg) {
     if (cfg.mode !== 'active' || cfg.blocks === 'off' || cfg.verdicts === 'off' || session.compacting > 0 || session.hostCannot || (await blockedReason($, cfg, Date.now(), undefined))) return;
     const read = await withDeadline($, Promise.resolve().then(() => $.session.messages()), HOST_MS);
     if (!Array.isArray(read.value) || session.compacting > 0) return;
-    await fillBlockVerdicts($, cfg, read.value, { minAge: 1, low: true, deadline: Date.now() + BLOCK_BACKGROUND_MS, requestMs: BLOCK_BACKGROUND_REQUEST_MS, cancel: () => session.compacting > 0 || state.stop });
+    const fill = await fillBlockVerdicts($, cfg, read.value, { minAge: 1, low: true, deadline: Date.now() + BLOCK_BACKGROUND_MS, requestMs: BLOCK_BACKGROUND_REQUEST_MS, cancel: () => session.compacting > 0 || state.stop });
+    // With the usage switch, a pass in the background that asked something leaves a record of what it used; without it the pass writes none.
+    if (fill.jev_usage) await writeRecord($, cfg, { ts: isoNow(), point: POINT, event: 'verdicts_fill', session_id: (await sessionIdOf($)) ?? null, agent_id: null, background: true, ...fill });
   } catch { /* the pass in the background never breaks a turn */ } finally {
     state.busy = false;
     done();
@@ -5371,6 +5419,7 @@ async function askTie($, cfg, group, ctx) {
         questions[n.name] = { type: 'score', instructions: `${F2_QUESTION} The item is \`items.${n.name}\`.`, criteria: BLOCK_LEVELS.map((what) => ({ what })) };
       }
       const r = await withDeadline($, askJev($, cfg, { ...header, items, block_rules: BLOCK_RULES }, questions), timeoutMs);
+      noteJevUsage(cfg, 'second_round', r);
       const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
       if (Date.now() < ctx.deadline) await withDeadline($, recording, ctx.deadline - Date.now());
       if (!r.value) { failures.push(classifyFailure(r)); continue; }
@@ -6097,6 +6146,7 @@ async function archiveStep($, cfg, record, mode, candidates, rows, keepFrom, gro
 }
 
 async function decide($, e, cfg, record, started) {
+  if (cfg.jevUsage) cfg = { ...cfg, usageRecord: record }; // every request of this decision adds to its record
   const messages = Array.isArray(e.messages) ? e.messages : [];
   let before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
@@ -6353,6 +6403,11 @@ async function decide($, e, cfg, record, started) {
   }
   const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);
   record.jev_ms = results.map((r) => r.ms);
+  if (cfg.jevUsage) {
+    // The scoring entries first, parallel to jev_ms, then those of the other requests in the order in which they ended.
+    record.jev_usage = [...results.map((r) => jevUsageOf(r.value)), ...(record.jev_usage ?? [])];
+    record.cost_basis = results.some((r) => costBasisOf(jevMetaOf(r.value)?.raw) === 'reported') ? 'reported' : (record.cost_basis ?? 'unknown');
+  }
   let answered = 0;
   const failures = [];
   for (const r of results) {
