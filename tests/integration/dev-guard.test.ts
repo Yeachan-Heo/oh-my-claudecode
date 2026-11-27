@@ -1142,6 +1142,7 @@ describe('/dev guard: spellings of round 6', () => {
     ['if false; then { true; cd /tmp; }; fi; rm null', '/dev', 'deny'], ['case x in y) { true; cd /tmp; };; esac; rm null', '/dev', 'deny'], ['false && while true; do true; cd /tmp; break; done; rm null', '/dev', 'deny'],
     ['false && if true; then true; cd /tmp; fi; rm null', '/dev', 'deny'], ['true && { cd /dev; rm null; }', '/tmp', 'deny'], ['true && { true; cd /dev; rm null; }', '/tmp', 'deny'],
     ['true && { ls; }; rm null', '/tmp', 'allow'], ['cd /tmp && { rm null; }', '/dev', 'allow'], ['false || { true; }; rm null', '/tmp', 'allow'], ['{ true; cd /tmp; }; rm null', '/dev', 'allow'],
+    ['true && { { true; cd /tmp; }; rm null; }', '/dev', 'allow'],
   ])('reads the directory after a group that may not run as unknown: %s (session in %s) is %s', (command, cwd, expected) => {
     expect(check(command, cwd).decision).toBe(expected);
   });
@@ -1153,6 +1154,7 @@ describe('/dev guard: spellings of round 6', () => {
     ['false && # why\ncd /tmp; rm null', '/dev', 'deny'], ['false ||\n\ntrue &&\ncd /tmp; rm null', '/dev', 'deny'], ['case x in y)\ncd /tmp;; esac; rm null', '/dev', 'deny'], ['false &&\n{ true; cd /tmp; }; rm null', '/dev', 'deny'],
     ['echo /dev/null |\nxargs rm', '/tmp', 'deny'], ['ls /dev |&\n\nxargs rm', '/tmp', 'deny'],
     ['true |\ncd /dev; rm null', '/tmp', 'allow'], ['cd /tmp\nrm null', '/dev', 'allow'], ['true;\ncd /tmp; rm null', '/dev', 'allow'], ['time cd /tmp; rm null', '/dev', 'allow'], ['time -p cd /tmp; rm null', '/dev', 'allow'],
+    ['(false) && cd /tmp; rm null', '/dev', 'deny'], ["<<< 'rm /dev/null'\nbash", '/tmp', 'allow'], ['>out.txt\ntime -f x rm /dev/null', '/tmp', 'allow'],
   ])('keeps the operator before a command across newlines: %s (session in %s) is %s', (command, cwd, expected) => {
     expect(check(command, cwd).decision).toBe(expected);
   });
