@@ -6226,6 +6226,27 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard pause_command', { timeout: 90000 
     expect(g.out).not.toMatch(/ERROR/);
   });
 
+  it('the first start of pause_command in a pause is logged; a start again in the same pause is a warning that --warn-every limits', async () => {
+    const f = nearLimit('pause-command-started');
+    const p = pauseProgram(f, 'quit');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    const g = startGuard(f);
+    const first = () => g.out.match(/ pause_command started \(pid \d+\)/g)?.length ?? 0;
+    const again = () => g.out.match(/WARNING \(pause-command-started\): pause_command started again \(pid \d+\)/g)?.length ?? 0;
+    try {
+      await waitFor(() => starts(p.report) >= 4, 30000, 'the command run again and again');
+      setUsage(f, 10);
+      await waitFor(() => /RESUMED/.test(g.out), 20000, 'the end of the first pause');
+      expect(first(), g.out).toBe(1);
+      expect(again(), g.out).toBe(1);
+      const before = starts(p.report);
+      setUsage(f, 98);
+      await waitFor(() => starts(p.report) >= before + 3, 30000, 'the command of the second pause run again');
+    } finally { await stopGuard(g); }
+    expect(first(), 'the first start of the second pause is logged').toBe(2);
+    expect(again(), 'the limit holds across pauses, as for any warning').toBe(1);
+  });
+
   it('a pause_command that goes on after the end of its input is terminated, and one that ignores that is killed', async () => {
     for (const [mode, line] of [['outlive', /pause_command ended \(status 0\)/], ['deaf', /pause_command ended \(status -9\)/]] as const) {
       const f = nearLimit(`pause-command-${mode}`);

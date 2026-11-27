@@ -1577,12 +1577,14 @@ def unpublish(strict=False):
 
 PAUSE_PROCESS = [None]   # the pause_command (subprocess.Popen) of the pause in force
 PAUSE_COMMAND_GRACE_S = 5   # the time pause_command has to end after its standard input is closed, and again after it is terminated
+PAUSE_COMMAND_LOGGED = [None]   # `since` of the pause for which a start of pause_command was logged
 
 
-def run_pause_command():
-    """Keep pause_command running while a pause lasts: it is started when the pause begins, and again at a later tick when it has ended.
-    Its standard input is a pipe that only the guard holds, so it reads the end of it when the pause is over and also when the guard dies
-    in any way. A command that cannot be run is a warning: the pause goes on."""
+def run_pause_command(since):
+    """Keep pause_command running while the pause that began at `since` lasts: it is started when the pause begins, and again at a later
+    tick when it has ended. Its standard input is a pipe that only the guard holds, so it reads the end of it when the pause is over and
+    also when the guard dies in any way. The first start of a pause is logged; a later one in the same pause is a warning, so a command
+    that ends at once does not write a line at every tick. A command that cannot be run is a warning: the pause goes on."""
     process = PAUSE_PROCESS[0]
     if not PAUSE_COMMAND or A.dry_run or (process is not None and process.poll() is None):
         return
@@ -1595,7 +1597,11 @@ def run_pause_command():
         PAUSE_PROCESS[0] = None
         warn_data('pause-command', f'cannot run pause_command ({e!r}): the pause goes on without it')
         return
-    log(f'pause_command started (pid {PAUSE_PROCESS[0].pid})')
+    if PAUSE_COMMAND_LOGGED[0] == since:
+        warn_data('pause-command-started', f'pause_command started again (pid {PAUSE_PROCESS[0].pid})')
+    else:
+        PAUSE_COMMAND_LOGGED[0] = since
+        log(f'pause_command started (pid {PAUSE_PROCESS[0].pid})')
 
 
 def end_pause_command():
@@ -1634,7 +1640,7 @@ def enter_pause(state, pct, reset_ts):
         return
     write_json(STATE, state)   # the durable state first: a pause file with no stored pause behind it would be removed as a leftover after a crash
     publish(state, pct)
-    run_pause_command()
+    run_pause_command(state['since'])
 
 
 def leave_pause(state, why):
@@ -1714,7 +1720,7 @@ def tick(state):
             return
     write_json(STATE, state)   # also here: a first write that failed has not stored the pause yet
     publish(state, pct)
-    run_pause_command()
+    run_pause_command(state['since'])
 
 
 def safe_tick(state):

@@ -303,8 +303,9 @@ dies in any way, so a program that ends at the end of its input never outlives t
 5 seconds after that is terminated, and killed 5 seconds later; only the process the guard started is signalled, so a program that
 starts others ends them itself. It is ended also when the state file cannot be written at the end of a pause: the pause file is then
 not renewed and the sessions are released when it lapses. A program that ends while the pause lasts is started again at the next check
-(`WARNING (pause-command-ended)`), and one that cannot be started is `WARNING (pause-command)`: neither stops the pause. Its output
-goes to the output of the guard. No word of the list may be a file the guard writes (the pause file may be named, to be read).
+(`WARNING (pause-command-ended)`), and one that cannot be started is `WARNING (pause-command)`: neither stops the pause. The first
+start in a pause is logged as `pause_command started`; a later start in the same pause is `WARNING (pause-command-started)`, limited by
+`--warn-every` like the other warnings. Its output goes to the output of the guard. No word of the list may be a file the guard writes (the pause file may be named, to be read).
 `--dry-run` and `--test-pause` do not run it. A configuration with a `pause_command` that is not such a list stops the guard at start
 (exit status 2).
 
