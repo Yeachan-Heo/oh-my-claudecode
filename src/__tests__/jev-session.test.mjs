@@ -7,6 +7,7 @@
  * from Jev's answer, the effort cap, the `use` marker, no fable; (D) the role goes through the --settings file with an env block; (J) resume.
  */
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -17,7 +18,7 @@ import assert from 'node:assert/strict';
 import { clearTimeout, setTimeout } from 'node:timers';
 import { Buffer } from 'node:buffer';
 import { afterAll, beforeAll, describe, it } from 'vitest';
-import { successorUseLine } from '../../scripts/lib/jev-handoff.mjs';
+import { LAUNCHER_IN_FLIGHT_MS, launcherGate, successorUseLine } from '../../scripts/lib/jev-handoff.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SCRIPT = join(ROOT, 'scripts', 'jev-session.mjs');
@@ -943,6 +944,53 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
       await run(['--resume', 'pth000003', '--prompt', 'p', '--cwd', project, '--name', name, '--no-advisor'], launcherEnv({ logs, extra: env }));
       assert.equal(rowsOf(logs, 'sessions.jsonl').at(-1).name, name, String(value));
       assert.match(basename(valueOf(readArgv(), '--settings')), slug);
+    }
+  }, SLOW);
+
+  // The handoff mode learns from the journal whether the launcher started the successor of the registered handoff file.
+  const gateOf = (logDir, since, later) => launcherGate({ state: { handoff_path: briefFile, launcher_attempts: 1, launcher_attempt_ts: since }, logDir, now: since + later, env: {} });
+
+  it('a brief under a listed path: the row holds a digest in place of the path and the handoff gate reads the start from it', async () => {
+    const listed = { OMC_JEV_COMPACT_PRIVATE_PATHS: tmp };
+    const since = Date.now();
+    const r = await start({ env: listed });
+    assert.equal(r.result.code, 0, r.result.stderr.slice(0, 300));
+    assert.equal(r.row.brief, '[private path]', js(r.row));
+    assert.equal(r.row.brief_sha256, createHash('sha256').update(briefFile).digest('hex'), js(r.row));
+    assert.ok(!js(r.row).includes(tmp), js(r.row));
+    assert.deepEqual(gateOf(r.logs, since, LAUNCHER_IN_FLIGHT_MS + 1), { allow: false, status: 'started' });
+    // Another brief under the same listed path is written as the same marker and does not count for this handoff.
+    const other = join(tmp, 'other-brief.md');
+    writeFileSync(other, 'Another task.');
+    const logs = join(logsRoot, `s${++counter}`);
+    mkdirSync(logs, { recursive: true });
+    const otherSince = Date.now();
+    const done = await run(['--role', 'worker', '--brief', other, '--name', 'other track'], launcherEnv({ logs, extra: listed }));
+    assert.equal(done.code, 0, done.stderr.slice(0, 300));
+    assert.equal(rowsOf(logs, 'sessions.jsonl').at(-1).brief, '[private path]');
+    assert.deepEqual(gateOf(logs, otherSince, 1000), { allow: false, status: 'in-flight' });
+  }, SLOW);
+
+  it('a brief under a listed path and a refused start: the handoff gate reads the failure and lets the call be repeated', async () => {
+    const sessionsFile = join(tmp, 'sessions-private-brief');
+    writeFileSync(sessionsFile, '25\n');
+    const since = Date.now();
+    const refused = await start({ env: poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, OMC_JEV_COMPACT_PRIVATE_PATHS: tmp }) });
+    assert.ok(refused.row.result === 'pool-refused' && refused.row.brief === '[private path]' && !js(refused.row).includes(tmp), js(refused.row));
+    assert.deepEqual(gateOf(refused.logs, since, 1000), { allow: true, status: 'retry' });
+  }, SLOW);
+
+  it('a row has no brief digest unless a listed path changes the brief, and the handoff gate reads such a row as before', async () => {
+    const sessionsFile = join(tmp, 'sessions-plain-brief');
+    writeFileSync(sessionsFile, '25\n');
+    for (const value of [undefined, '/vol/acme-ledger', project]) { // the last one hides the working directory only
+      const listed = value === undefined ? {} : { OMC_JEV_COMPACT_PRIVATE_PATHS: value };
+      const since = Date.now();
+      const r = await start({ env: listed });
+      assert.ok(r.row.brief === briefFile && !('brief_sha256' in r.row), `${value}: ${js(r.row)}`);
+      assert.deepEqual(gateOf(r.logs, since, 1000), { allow: false, status: 'started' });
+      const refused = await start({ env: poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, ...listed }) });
+      assert.ok(refused.row.result === 'pool-refused' && !('brief_sha256' in refused.row), `${value}: ${js(refused.row)}`);
     }
   }, SLOW);
 });
