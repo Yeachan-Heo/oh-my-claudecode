@@ -8,7 +8,7 @@ import { chmodSync, closeSync, constants as fsConstants, copyFileSync, existsSyn
 import { join, relative } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, SETTINGS_TOOL, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
-  readJson, readText, runPyCode, runSync, sleep, spawnPy, spawnPyCode, startHook, waitFor, writeCache, writePause, type Fixture, type Proc,
+  readJson, readText, runPyCode, runSync, shellQuote, sleep, spawnPy, spawnPyCode, startHook, waitFor, writeCache, writePause, type Fixture, type Proc,
 } from './five-hour-guard-support.js';
 
 afterAll(cleanup);
@@ -6008,5 +6008,79 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard beside a hook command that is not
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
     expect(r.stderr).toMatch(/"state_file" .* and "registered hook log" .* are the same file/);
     expect(existsSync(f.state)).toBe(false);
+  });
+});
+
+describe.skipIf(!HAS_PYTHON3)('five-hour guard and an entry of an installation that moved', { timeout: 90000 }, () => {
+  const movedForms: Array<[string, (f: Fixture, hook: string) => string]> = [
+    ['with the checks of the hook and the interpreter, without the marker', (f, hook) => generatedCommand(f.pause, hook, PYBIN, f.hookLog).replace(' # five-hour-guard-entry', '')],
+    ['the older form without those checks', (f, hook) => `[ -f ${shellQuote(f.pause)} ] && [ -f ${shellQuote(hook)} ] || exit 0; exec ${shellQuote(PYBIN)} -I ${shellQuote(hook)} --pause-file ${shellQuote(f.pause)} --log ${shellQuote(f.hookLog)}`],
+    ['the older form without a hook log', (f, hook) => `[ -f ${shellQuote(f.pause)} ] && [ -f ${shellQuote(hook)} ] || exit 0; exec ${shellQuote(PYBIN)} -I ${shellQuote(hook)} --pause-file ${shellQuote(f.pause)}`],
+  ];
+  const installElsewhere = (f: Fixture) => {
+    const dir = join(f.dir, 'old install');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    return { dir, hook };
+  };
+  const onlyEntry = (f: Fixture, command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+
+  it('an entry that add wrote for this pause file with the scripts in another directory is the entry of this guard: it starts and pauses, asks to replace the entry, and says so when its hook is gone', () => {
+    movedForms.forEach(([name, build], i) => {
+      const f = nearLimit(`moved-entry-${i}`);
+      const old = installElsewhere(f);
+      writeConfig(f, { hook_log_file: f.hookLog });
+      onlyEntry(f, build(f, old.hook));
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(0);
+      expect(readJson(f.pause).paused, name).toBe(true);
+      expect(r.stdout, name).toMatch(/is not the entry this guard generates/);
+      expect(r.stdout, name).not.toMatch(/NOT registered/);
+      expect(r.stdout, name).not.toMatch(/is missing or cannot be/);
+      rmSync(old.dir, { recursive: true });
+      unlinkSync(f.pause);
+      unlinkSync(f.state);
+      const gone = guardOnce(f);
+      expect(gone.stdout, name).toMatch(/WARNING \(start\): the hook entry in .*: its hook .*old install\/five-hour-guard-hook\.py is missing or cannot be read, so the entry lets every call through during a pause/);
+    });
+  });
+
+  it('a command that only resembles such an entry is another tool\'s: with one more word or another file name it names the pause file as a foreign hook does', () => {
+    const variants: Array<[string, (f: Fixture, hook: string) => string]> = [
+      ['one more command', (f, hook) => `${movedForms[0][1](f, hook)} ; true`],
+      ['one more word', (f, hook) => `${movedForms[1][1](f, hook)} --poll 1`],
+      ['another file name', (f, hook) => movedForms[0][1](f, `${hook}.old`)],
+    ];
+    variants.forEach(([name, build], i) => {
+      const f = nearLimit(`moved-lookalike-${i}`);
+      const old = installElsewhere(f);
+      writeConfig(f, { hook_log_file: f.hookLog });
+      onlyEntry(f, build(f, old.hook));
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, name).toMatch(/"pause_file" .* and "program of another hook" .* are the same file/);
+    });
+  });
+
+  it('the wiring check names a hook or an interpreter of the entry that is not there, and not one given by a relative path or with a variable', () => {
+    const f = nearLimit('entry-files-missing');
+    writeConfig(f);
+    const gone = join(f.dir, 'gone', 'five-hour-guard-hook.py');
+    onlyEntry(f, generatedCommand(f.pause, gone, PYBIN));
+    const noHook = guardOnce(f);
+    expect(noHook.stdout).toMatch(/its hook .*gone\/five-hour-guard-hook\.py is missing or cannot be read/);
+    expect(noHook.stdout).not.toMatch(/its interpreter/);
+    const plain = join(f.dir, 'not-executable');
+    writeFileSync(plain, PROGRAM_TEXT, 'utf8');
+    onlyEntry(f, generatedCommand(f.pause, HOOK, plain));
+    const noPython = guardOnce(f);
+    expect(noPython.stdout).toMatch(/its interpreter .*not-executable is missing or cannot be run/);
+    expect(noPython.stdout).not.toMatch(/its hook/);
+    for (const [hook, python] of [['hooks/five-hour-guard-hook.py', 'python3'], ['/nonexistent/$TOOLS/five-hour-guard-hook.py', '/nonexistent/${PY}/python3']]) {
+      onlyEntry(f, generatedCommand(f.pause, hook, python));
+      const unknown = guardOnce(f);
+      expect(unknown.stdout, hook).not.toMatch(/is missing or cannot be/);
+    }
   });
 });

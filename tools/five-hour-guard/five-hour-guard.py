@@ -281,7 +281,7 @@ def command_hooks(groups):
     for g in groups if isinstance(groups, list) else []:
         if not isinstance(g, dict) or not isinstance(g.get('hooks', []), list):
             continue   # not a group of Claude Code: skipped here, so that the entries after it are still seen
-        found += [(g, h) for h in g.get('hooks', []) if ENTRY.is_entry(h, BUNDLED_HOOK)]
+        found += [(g, h) for h in g.get('hooks', []) if ENTRY.is_entry(h, BUNDLED_HOOK, PAUSE_FILE)]
     return found
 
 
@@ -1413,7 +1413,7 @@ def check_wiring(where):
     if ours and not any(m in (None, '', '*') for m in matchers):
         log(f'WARNING ({where}): the hook entry in {SETTINGS} has the matcher {matchers[0]!r}, which does not cover every tool: calls of other tools would go on during a pause. Run five-hour-guard-settings.py add again')
     for handler in handlers:
-        for problem in ENTRY.handler_problems(handler):
+        for problem in ENTRY.handler_problems(handler) + ENTRY.file_problems(handler['command']):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
     runtime = configured_files()
     registered = registered_runtime_files()
