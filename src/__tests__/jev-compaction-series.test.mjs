@@ -428,15 +428,50 @@ describe('series of traces: merging', () => {
     expect(record.series).toMatchObject({ series: 1, secret: 0 });
   });
 
-  it('a long series is masked and merged; one the mask cannot read at once stays whole and is counted', async () => {
-    const long = Array.from({ length: 160 }, (_, k) => call(100000 + k, ` ${'x'.repeat(200)}`)).join('\n');
-    const first = await run({ texts: [long] });
-    expect(first.record.series).toMatchObject({ series: 1, secret: 0, written: 1 });
+  it('a long series is masked and merged; one beyond what the check reads, or that the mask cannot read at once, stays whole and is counted', async () => {
+    const calls = (n) => Array.from({ length: n }, (_, k) => call(100000 + k, ` ${'x'.repeat(200)}`)).join('\n');
+    const first = await run({ texts: [calls(100)] });
+    expect(first.record.series).toMatchObject({ series: 1, secret: 0, unchecked: 0, written: 1 });
+    const beyond = await run({ texts: [calls(160), SERIES_B] });
+    expect(beyond.edited.get(rowOf(0))).toBeUndefined();
+    expect(beyond.edited.get(rowOf(1))).toBeDefined();
+    expect(beyond.record.series).toMatchObject({ series: 1, secret: 0, unchecked: 1 });
     const unreadable = `${call(1, ` ${'z '.repeat(105000)}`)}\n${call(2)}`;
     const second = await run({ texts: [unreadable, SERIES_B] });
     expect(second.edited.get(rowOf(0))).toBeUndefined();
     expect(second.edited.get(rowOf(1))).toBeDefined();
     expect(second.record.series).toMatchObject({ series: 1, secret: 1 });
+  });
+
+  // Literals the mask lets through and the check of the other stages finds.
+  it.each([
+    ['a German word for a secret', 'Bash(echo "kennwort: Zq8Tr4Lm2Xp" > a.txt)'],
+    ['a Spanish word for a secret', 'Bash(echo "contraseña: Zq8Tr4Lm2Xp")'],
+    ['escaped JSON, found in the text of the question only', 'Bash(echo {\\"password\\": \\"Zq8Tr4Lm2Xp\\"})'],
+    ['unicode escapes in JSON', 'Bash(echo {\\u0022password\\u0022: \\u0022Zq8Tr4Lm2Xp\\u0022})'],
+    ['a .ssh directory with a suffix', 'Read(/home/u/.ssh_backup/Zq8Tr4Lm2Xp)'],
+  ])('a series the check of the other stages holds stays whole and the one beside it merges: %s', async (_, held) => {
+    const { edited, record, fake } = await run({ texts: [`[compacted] ${held} - result of 20 chars removed\n${call(2)}`, SERIES_B] });
+    expect(edited.get(rowOf(0))).toBeUndefined();
+    expect(edited.get(rowOf(1))).toBeDefined();
+    expect([...fake.files().values()]).toEqual([`${SERIES_B}\n`]);
+    expect(record.series).toMatchObject({ series: 1, secret: 1, unchecked: 0, timed_out: 0 });
+  });
+
+  const long = (base) => Array.from({ length: 100 }, (_, k) => call(base + k, ` ${'x'.repeat(200)}`)).join('\n');
+
+  it('the check reads a limited amount of text in one compaction: the series beyond it stay whole and are counted unchecked', async () => {
+    const { edited, record, fake } = await run({ texts: [1, 2, 3, 4, 5, 6].map((n) => long(n * 100000)) });
+    expect([...edited.keys()]).toEqual([0, 1, 2, 3].map(rowOf));
+    expect(fake.files().size).toBe(4);
+    expect(record.series).toMatchObject({ series: 4, secret: 0, unchecked: 2, timed_out: 0 });
+  });
+
+  it('no check begins after the deadline: the series stay whole and are counted timed out', async () => {
+    const { edited, record, fake } = await run({ deadline: Date.now() - 1 });
+    expect(edited.size).toBe(0);
+    expect(fake.files().size).toBe(0);
+    expect(record.series).toMatchObject({ series: 0, secret: 0, timed_out: 2, write_failed: 0 });
   });
 
   it('a write that fails leaves the series as it is and is counted', async () => {

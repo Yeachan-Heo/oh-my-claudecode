@@ -175,6 +175,38 @@ describe('series of traces in the compaction run: the queue of the second round'
     expect(only.record.floor_series_tokens).toBeUndefined();
   });
 
+  // Literals the mask lets through and the check of the other stages finds: the floor, the question and the file give one answer.
+  it.each([
+    ['a German word for a secret', 'Bash(echo "kennwort: Zq8Tr4Lm2Xp" > a.txt)'],
+    ['escaped JSON, found in the text of the question only', 'Bash(echo {\\"password\\": \\"Zq8Tr4Lm2Xp\\"})'],
+    ['a .ssh directory with a suffix', 'Read(/home/u/.ssh_backup/Zq8Tr4Lm2Xp)'],
+  ])('a series the check holds is not sent to Jev, not written and not counted in the floor: %s', async (_, literal) => {
+    const HELD = `[compacted] ${literal} - result of 20 chars removed\n${call(12)}\n${call(13)}\n${call(14)}`;
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : i === 5 ? `\n\n${HELD}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 1, unchecked: 0, answered: 1 });
+    expect(JSON.stringify(run.asked)).not.toContain('Zq8Tr4Lm2Xp');
+    expect([...run.files().values()].join('')).not.toContain('Zq8Tr4Lm2Xp');
+    expect(run.record.series).toMatchObject({ series: 1, secret: 0 });
+    expect(allText(run.out)).toContain(HELD);
+    const alone = await compactRun(CASCADE(60), session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : '')), { rate: () => 0 });
+    expect(alone.record.floor_series_tokens).toBeGreaterThan(0);
+    expect(run.record.floor_series_tokens).toBe(alone.record.floor_series_tokens);
+    const only = await compactRun(CASCADE(60), session(40, (i) => (i === 5 ? `\n\n${HELD}` : '')), { rate: () => 0 });
+    expect(only.record.floor_series_tokens).toBeUndefined();
+    expect(only.asked).toHaveLength(0);
+    const shadow = await compactRun({ ...CASCADE(60), OMC_JEV_COMPACT_BLOCKS: 'shadow' }, session(40, (i) => (i === 5 ? `\n\n${HELD}` : '')));
+    expect(shadow.record.f2).toMatchObject({ mode: 'shadow', candidates: { series: 1 } });
+    expect(allText(shadow.out)).toContain(HELD);
+  });
+
+  it('a series is checked once for the floor, the question and the file, so three long series fit the amount one compaction checks', async () => {
+    const long = (base) => Array.from({ length: 100 }, (_, k) => call(base + k)).map((line) => `${line} ${'x'.repeat(200)}`).join('\n');
+    const run = await compactRun(CASCADE(60), session(40, (i) => ([3, 5, 7].includes(i) ? `\n\n${long(i * 100000)}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 3, secret: 0, unchecked: 0, answered: 3 });
+    expect(run.record.series.unchecked).toBe(0);
+    expect(run.record.series.series).toBeGreaterThan(0);
+  });
+
   it('asks nothing about series when the prediction is already at the goal, and without the switch there is no series at all', async () => {
     const calm = await compactRun(CASCADE(80), session(40, withSeries));
     expect(calm.record.f2.reason).toBe('below_goal');

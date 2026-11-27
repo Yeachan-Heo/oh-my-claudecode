@@ -126,11 +126,12 @@
  *
  * Series of traces (the same switch, OMC_JEV_COMPACT_BLOCKS). Two or more traces of the module on neighbouring lines of one row (a removed call, a moved reply, a moved agent
  * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round every series of the rows before the tail
- * (the rows the blocks left, less the rows another stage changes) that names no private path (OMC_JEV_COMPACT_PRIVATE_PATHS) is rated by Jev with the question of the round, its
+ * (the rows the blocks left, less the rows another stage changes) that passes the checks below is rated by Jev with the question of the round, its
  * text masked, and stands in the queue with the results and the blocks; a series that comes down merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces
- * go to a file in the pastes directory (with the header of the block files when a block trace is among them), masked, written and read back like the other files; a series with a
- * line the mask cannot clear stays whole (scripts/lib/jev-series-mask.mjs; the paths of the module's own files are kept). The series
- * count in the floor like the blocks. In a direct reply the trace of a reply, of a block or of an agent's message is never merged. The record gets `series` (the merge) and
+ * go to a file in the pastes directory (with the header of the block files when a block trace is among them), masked, written and read back like the other files. The checks: the
+ * mask comes first (scripts/lib/jev-series-mask.mjs; the paths of the module's own files are kept), and a series that names a private path (OMC_JEV_COMPACT_PRIVATE_PATHS) or keeps a
+ * line the mask cannot clear stays whole; then the check for a secret of the other stages reads both masked texts, and a hit, a text beyond what it reads or no time left keeps the
+ * series whole too (not sent, not written, not counted). The series count in the floor like the blocks. In a direct reply the trace of a reply, of a block or of an agent's message is never merged. The record gets `series` (the merge) and
  * `f2.series_question`; `shadow` counts the candidates (`f2.candidates.series`).
  *
  * Archive of calls and results (OMC_JEV_COMPACT_ARCHIVE=off|shadow|active; off when unset or anything else; needs a state directory). With `active`, while the point itself is active and the compaction has
@@ -5381,8 +5382,30 @@ const seriesPath = (cfg, sessionId, name) => `${cfg.pasteDir}/${safeName(session
 // identical call, `<dir>/ (a.txt, b.txt)`.
 const ARCHIVE_FILE = '[A-Za-z0-9_-]{1,80}\\.txt';
 const ownFilePaths = (cfg) => new RegExp(`${escapeRegExp(cfg.pasteDir)}/[A-Za-z0-9_-]{1,80}/[0-9a-f]{32}\\.txt|\\b${BLOCK_LETTER}/[0-9a-f]{32}\\.txt${cfg.archiveDir ? `|${escapeRegExp(cfg.archiveDir)}/[A-Za-z0-9_-]{1,80}/(?:${ARCHIVE_FILE}| \\(${ARCHIVE_FILE}(?:, ${ARCHIVE_FILE})*\\))` : ''}`, 'g');
-// A series that names a private path of the user's list stays whole: it is not sent, written or counted. Secrets are masked, not held (scripts/lib/jev-series-mask.mjs).
-const seriesHeld = (cfg, text, own) => namesPrivatePath(text.replace(own, 'file.txt'), cfg.privatePaths);
+// What may leave of one series, as text to Jev or as a file. First the mask (scripts/lib/jev-series-mask.mjs): a series that names a private path of the user's list, or keeps
+// a line the mask cannot clear, stays whole. Then secretCheck, the check of the other stages, reads both masked texts, the one of the file and the one of the question (the paths of
+// the module's own files out of both): a hit, a text beyond what the check reads or no time left keeps the series whole. Returns {held: 'secret' | 'unchecked' | 'timed_out'}
+// or {held: '', masked, kept}, the text of the file with its own paths as marks and the paths.
+function checkSeries(cfg, series, own, budget) {
+  if (namesPrivatePath(series.replace(own, 'file.txt'), cfg.privatePaths)) return { held: 'secret' };
+  const kept = [];
+  let masked = archiveMaskedLong(`${series.trim()}\n`.replace(own, (path) => `\u{e000}${kept.push(path) - 1}\u{e000}`));
+  if (masked !== undefined) masked = maskResidualLines(masked);
+  if (masked === undefined || RESIDUAL_SECRET.test(masked)) return { held: 'secret' };
+  const file = masked.replace(/\u{e000}\d+\u{e000}/gu, 'file.txt').trim();
+  const question = cleanForJevLong(series.replace(own, 'file.txt')).trim();
+  const held = secretCheck(file, cfg.privatePaths, budget) || (question === file ? '' : secretCheck(question, cfg.privatePaths, budget));
+  return held ? { held } : { held, masked, kept };
+}
+// One checker serves the floor, the question and the file of a compaction, so a series gets one answer in all three and is checked once, within one budget of the scan.
+function seriesChecker(cfg, deadline) {
+  const budget = { left: SCAN_BUDGET_CHARS, deadline };
+  const done = new Map();
+  return (series) => {
+    if (!done.has(series)) done.set(series, checkSeries(cfg, series, ownFilePaths(cfg), budget));
+    return done.get(series);
+  };
+}
 // A row a series may stand in: text, no tool result.
 const seriesRowOk = (m) => typeof m.text === 'string' && m.text.trim() && !(m.toolResults || []).length;
 
@@ -5484,12 +5507,12 @@ export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
 /**
  * Merges the series whose keys are in `keys` (the texts of the series): one line `[compacted] traces merged: N calls, M replies, K others; list in <file>` in place of the
  * traces, and the file holds them, masked (archiveMaskedLong, then maskResidualLines). Same files as the stages that move text: the state directory and `savePaste`. A series
- * stays whole when its file cannot be written and read back in time, when it names a private path or when the mask cannot clear it (both `secret`). `record.series` holds the
+ * stays whole when its file cannot be written and read back in time, or when `check` holds it (seriesChecker: `secret`, `unchecked`, `timed_out`). `record.series` holds the
  * counts. Returns the new text of each changed row by its row index (none unless active). Never rejects. `ctx` is seriesContext's.
  */
-export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId, deadline) {
+export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId, deadline, check = seriesChecker(cfg, deadline)) {
   const mode = cfg.blocks === 'active' && cfg.mode === 'active' ? 'active' : 'shadow';
-  const stats = { mode, series: 0, traces: 0, tokens_before: 0, tokens_after: 0, files: 0, written: 0, reused: 0, write_failed: 0, secret: 0, timed_out: 0, ...(mode === 'active' ? { installed: false } : {}) };
+  const stats = { mode, series: 0, traces: 0, tokens_before: 0, tokens_after: 0, files: 0, written: 0, reused: 0, write_failed: 0, secret: 0, unchecked: 0, timed_out: 0, ...(mode === 'active' ? { installed: false } : {}) };
   record.series = stats;
   const edited = new Map();
   if (ctx.reason) { stats.reason = ctx.reason; return edited; }
@@ -5497,7 +5520,6 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
   if (!sessionId) { stats.reason = 'no_session'; return edited; }
   try {
     const gate = { deadline, stalled: false };
-    const own = ownFilePaths(cfg);
     const done = new Map(); // text of a series -> {path} or {}: the same series in several rows gets one file
     const paths = new Set();
     for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
@@ -5508,16 +5530,13 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
       for (const run of [...runs].reverse()) {
         let r = done.get(run.text);
         if (!r) {
-          const lines = `${run.text.trim()}\n`;
-          const kept = [];
-          let masked = seriesHeld(cfg, lines, own) ? undefined : archiveMaskedLong(lines.replace(own, (path) => `\u{e000}${kept.push(path) - 1}\u{e000}`));
-          if (masked !== undefined) masked = maskResidualLines(masked);
+          const { held, masked, kept } = check(run.text);
           r = {};
-          if (masked === undefined || RESIDUAL_SECRET.test(masked)) stats.secret++;
+          if (held) stats[held]++;
           else {
-            masked = masked.replace(/\u{e000}(\d+)\u{e000}/gu, (mark, n) => kept[n] ?? mark);
+            const body = masked.replace(/\u{e000}(\d+)\u{e000}/gu, (mark, n) => kept[n] ?? mark);
             // The block traces in it name their files by letter: the file carries the header that says which directory the letter stands for.
-            const file = lines.includes(BLOCK_TRACE_PREFIX) || lines.includes(`${AGENT_TRACE_PREFIX}${BLOCK_LETTER}/`) ? `${traceHeader(blockDir(cfg, sessionId))}\n${masked}` : masked;
+            const file = run.text.includes(BLOCK_TRACE_PREFIX) || run.text.includes(`${AGENT_TRACE_PREFIX}${BLOCK_LETTER}/`) ? `${traceHeader(blockDir(cfg, sessionId))}\n${body}` : body;
             const path = seriesPath(cfg, sessionId, (await sha256Hex(file)).slice(0, 32));
             const saved = mode === 'active' ? await savePaste($, gate, path, file) : 'planned';
             if (saved === 'written' || saved === 'reused' || saved === 'planned') { if (saved !== 'planned') stats[saved]++; r = { path }; }
@@ -5542,24 +5561,24 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
 }
 
 // The series of one compaction (or pass): seriesContext on `messages` (the rows as they came), the items on `rows` (the rows as the stages before leave them). `potential` is what merging
-// them all gives back (every series once, as the floor counts it); a series that names a private path is no part of it.
-function planSeries(cfg, messages, rows, api, queued, keepFrom, sessionId, agent = false) {
+// them all gives back (every series once, as the floor counts it); a series that `check` holds is no part of it. Nothing is checked before the floor asks.
+function planSeries(cfg, messages, rows, api, queued, keepFrom, sessionId, agent = false, deadline = undefined) {
   const ctx = seriesContext(cfg, messages, api, keepFrom, queued);
   const items = seriesItems(cfg, rows, ctx, sessionId, agent);
-  const own = ownFilePaths(cfg);
-  return { ctx, items, potential: items.reduce((sum, it) => (seriesHeld(cfg, it.body, own) ? sum : sum + it.gain), 0) };
+  const check = seriesChecker(cfg, deadline);
+  return { ctx, items, check, potential: () => items.reduce((sum, it) => (it.gain > 0 && !check(it.body).held ? sum + it.gain : sum), 0) };
 }
 
-// The series as entries of the second round: one per series that gains something, with its gain and the tokens it holds; a series that names a private path (it would stay whole)
+// The series as entries of the second round: one per series that gains something, with its gain and the tokens it holds; a series that `check` holds (it would stay whole)
 // is not asked about and is no entry. The ratings come from Jev (askTie with `rateOnly`, which sends the text masked); an entry without one is left out of the queue.
-// {entries, stats: {items, secret}}.
-function seriesEntries(cfg, items) {
-  const stats = { items: items.length, secret: 0 };
-  const own = ownFilePaths(cfg);
+// {entries, stats: {items, secret, unchecked, timed_out}}.
+function seriesEntries(cfg, items, check) {
+  const stats = { items: items.length, secret: 0, unchecked: 0, timed_out: 0 };
   const entries = [];
   for (const it of items) {
     if (it.gain <= 0) continue;
-    if (seriesHeld(cfg, it.body, own)) { stats.secret++; continue; }
+    const { held } = check(it.body);
+    if (held) { stats[held]++; continue; }
     entries.push({ id: `s:${contentHash(it.key)}`, kind: 'series', gain: it.gain, tokens: seriesTok(it.body, cfg.rates), item: it });
   }
   return { entries, stats };
@@ -6084,10 +6103,13 @@ async function decide($, e, cfg, record, started) {
   const blocksPotential = blockPlan && blocksMode === 'active' && blockOn ? blockPlan.potential : 0;
   // The series of traces count in the floor like the blocks: what merging them gives back (the same switch, the same gate).
   let seriesPlan;
+  let seriesPotential = 0;
   if (blocksMode !== 'off') {
-    try { seriesPlan = planSeries(cfg, messages, trimmed, api, queued, keepFrom, record.session_id, e.agentId !== undefined); } catch { seriesPlan = undefined; }
+    try {
+      seriesPlan = planSeries(cfg, messages, trimmed, api, queued, keepFrom, record.session_id, e.agentId !== undefined, deadline);
+      if (blocksMode === 'active' && blockOn) seriesPotential = seriesPlan.potential();
+    } catch { seriesPlan = undefined; }
   }
-  const seriesPotential = seriesPlan && blocksMode === 'active' && blockOn ? seriesPlan.potential : 0;
   // The blocks and messages that the keep decisions take off the list, which the predictions in tokens count with the costs of the candidates (shapeOf).
   const shapeFrom = (rows) => (tokenMode ? shapeOf(messages, candidates, { rows, group, keepFrom, queued, rates: cfg.rates }) : undefined);
   let shape = shapeFrom(trimmed);
@@ -6351,10 +6373,10 @@ async function decide($, e, cfg, record, started) {
         // The series of traces on the rows the blocks left (their traces may stand beside the old ones now): Jev rates them with the question of the round, then they stand in the queue
         // with the results and the blocks. The rows another stage changes stay out (blockHold), as for the blocks.
         const seriesCtx = seriesPlan?.ctx && !seriesPlan.ctx.reason ? seriesContext(cfg, messages, api, keepFrom, queued) : undefined;
-        let seriesRated = { entries: [], stats: { items: 0, secret: 0 } };
+        let seriesRated = { entries: [], stats: { items: 0, secret: 0, unchecked: 0, timed_out: 0 } };
         if (seriesCtx && !seriesCtx.reason) {
           for (const r of blockHold) seriesCtx.fixed.add(r);
-          seriesRated = seriesEntries(cfg, seriesItems(cfg, currentRows(), seriesCtx, record.session_id, e.agentId !== undefined));
+          seriesRated = seriesEntries(cfg, seriesItems(cfg, currentRows(), seriesCtx, record.session_id, e.agentId !== undefined), seriesPlan.check);
           if (seriesRated.entries.length) await askTie($, cfg, seriesRated.entries, { user: blockUser, goal: target, restNeed: first.predicted - target, deadline, rateOnly: true });
         }
         const seriesAnswered = seriesRated.entries.filter((x) => typeof x.score === 'number');
@@ -6380,7 +6402,7 @@ async function decide($, e, cfg, record, started) {
         // The series that came down are merged on the rows as they stand now (after the blocks were carried out again): one line and a file, the tokens come off the base.
         if (seriesKeys.size) {
           const headerBefore = headerTokens();
-          seriesEdits = await mergeSeries($, cfg, record, currentRows(), seriesCtx, seriesKeys, record.session_id, deadline);
+          seriesEdits = await mergeSeries($, cfg, record, currentRows(), seriesCtx, seriesKeys, record.session_id, deadline, seriesPlan.check);
           if (seriesEdits.size) {
             seriesSaved = record.series.tokens_before - record.series.tokens_after;
             base += headerTokens() - headerBefore - seriesSaved;
@@ -6646,7 +6668,7 @@ async function ownThreshold($, e, next) {
           // What the blocks may give back (every one at level 0), as the floor of decide counts it.
           if (blocksCount && sessionId) {
             stageTokens += planBlocks(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
-            stageTokens += planSeries(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
+            stageTokens += planSeries(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, false, Date.now() + TOTAL_MS).potential();
           }
         } catch { stageTokens = 0; }
       }
