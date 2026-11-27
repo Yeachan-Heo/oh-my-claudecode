@@ -298,6 +298,18 @@ describe("persistent-mode Stop rows and the provider process", () => {
     for (const row of rows) expect((await validateRow())(row), JSON.stringify(row)).toEqual({ ok: true, errors: [] });
   });
 
+  it("the release rows count the blocks without progress apart from the blocks of the series and carry the configured ceiling", async () => {
+    const afterProgress = { stopProgress: { ...pastThreshold.stopProgress, totalBlocks: 20 }, max_reinforcements: 12 };
+    await writeState("rows-counts", afterProgress);
+    runHook(SWITCH, "rows-counts", { transcript_path: writeTranscript("rows-counts") });
+    const rows = journalRows("rows-counts");
+    expect(rows.find((row) => row.kind === "release")).toMatchObject({ action: "stop-progress-release", n: 7, k: 7, sessionCount: 21, maxSession: 12 });
+    expect(rows.find((row) => row.kind === "end")).toMatchObject({ action: "step-budget", sessionCount: 21 });
+    await writeState("rows-own-ceiling", { reinforcement_count: 12, max_reinforcements: 12 });
+    runHook(SWITCH, "rows-own-ceiling", { transcript_path: writeTranscript("rows-own-ceiling") });
+    expect(journalRows("rows-own-ceiling").find((row) => row.kind === "release")).toMatchObject({ action: "stop-step-limit", n: null, maxSession: 12 });
+  });
+
   it("writes the release and end rows for an acknowledged blocked exit, for an ordinary and a provider process", async () => {
     for (const scenario of [SWITCH, PROVIDER]) {
       const sid = "rows-ack-" + (scenario.OMC_PROVIDER ?? "plain");
