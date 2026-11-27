@@ -1,6 +1,6 @@
 ---
 name: reframe
-description: "Teach the expert words for what the user is building: borrow the terms their field and neighboring fields use for the same problem, then rewrite their description with them. For \"name this\", \"what is this called\", or a description that keeps missing the real concept."
+description: "Teach the expert words for what the user is building, borrowing the terms neighboring fields use for the same problem, then rewrite their description with them. For \"name this\" or a description that keeps missing the real concept."
 aliases: []
 metadata:
   credits:
