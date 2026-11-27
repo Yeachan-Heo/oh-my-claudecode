@@ -255,7 +255,7 @@ async function launch(argv, env, held) {
     const gate = poolGate(env, logDir, held);
     if (gate.refuse) {
       const maskedRefusal = maskJevState({ cwd });
-      writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...advisorField, ...(maskedRefusal.cwd ? { cwd: maskedRefusal.cwd } : {}), cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
+      writeRow(logDir, { mode: 'resume', resume: args.resume, name, ...advisorField, ...providerField(env), ...(maskedRefusal.cwd ? { cwd: maskedRefusal.cwd } : {}), cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
       console.error(refusalMessage(gate));
       return 2;
     }
@@ -309,7 +309,7 @@ async function launch(argv, env, held) {
   const gate = poolGate(env, logDir, held);
   if (gate.refuse) {
     const maskedRefusal = maskJevState({ brief: briefPath, cwd }); // the same mask as the regular row
-    writeRow(logDir, { role: args.role, name: args.name, ...advisorField, ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
+    writeRow(logDir, { role: args.role, name: args.name, ...advisorField, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
     console.error(refusalMessage(gate));
     return 2;
   }
