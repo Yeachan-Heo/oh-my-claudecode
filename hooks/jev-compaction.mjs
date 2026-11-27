@@ -182,8 +182,8 @@
  * cannot be rebuilt, or the API form does not show the start of a long conversation, the compaction goes to the summary (advisor_image, advisor_command,
  * advisor_no_row, advisor_in_tail, advisor_form_cut). The predictions take off the attachments that go less what the host announces again. The record gets
  * `rebuilt_user`, `advisor_blocks`, `attachments_dropped`, `attachments_dropped_tokens`, `attachments_kinds`, `attachments_kinds_tokens`, `attachments_skills`
- * (names of used skills), `attachments_back`, `attachments_back_tokens`, `attachments_back_from_results_tokens` and `attachments_resent_tokens`; see
- * "host attachments" below.
+ * (names of used skills: masked and cut; a name or skill directory that names a secret or private path is left out), `attachments_back`,
+ * `attachments_back_tokens`, `attachments_back_from_results_tokens` and `attachments_resent_tokens`; see "host attachments" below.
  *
  * Secrets in the paste, reply, agent and block stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
@@ -6359,7 +6359,7 @@ function attachmentPieces(text, known = [], rest = true) {
   const around = rest ? outside : '';
   if (around.trim()) {
     const sk = SKILL_TEXT.exec(around);
-    out.push(sk ? { kind: 'skill_text', chars: around.length, names: [sk[1].trim().replace(/\/+$/, '').split('/').pop()] } : { kind: 'meta', chars: around.length });
+    out.push(sk ? { kind: 'skill_text', chars: around.length, names: [sk[1].trim()], directory: true } : { kind: 'meta', chars: around.length });
   }
   return out;
 }
@@ -6409,7 +6409,7 @@ function carrierRows(messages, api, keepFrom) {
   };
   const out = {
     rows: new Set(), text: new Set(), blocks: 0, blocked: undefined,
-    dropped: { n: 0, chars: 0, uncovered: 0, kinds: {}, charsByKind: {}, max: new Map(), skills: new Set() },
+    dropped: { n: 0, chars: 0, uncovered: 0, kinds: {}, charsByKind: {}, max: new Map(), skills: new Map() }, // skills: name or directory -> is a directory
     back: { n: 0, chars: 0, kinds: new Set(), byKind: new Map() }, coveredBack: 0,
   };
   const block = (reason) => { if (!out.blocked) out.blocked = reason; };
@@ -6466,7 +6466,7 @@ function carrierRows(messages, api, keepFrom) {
         out.dropped.kinds[p.kind] = (out.dropped.kinds[p.kind] || 0) + 1;
         out.dropped.charsByKind[p.kind] = (out.dropped.charsByKind[p.kind] || 0) + p.chars;
         out.dropped.max.set(p.kind, Math.max(out.dropped.max.get(p.kind) || 0, p.chars));
-        for (const name of p.names || []) out.dropped.skills.add(name);
+        for (const name of p.names || []) out.dropped.skills.set(name, p.directory === true);
       } else {
         out.back.n++;
         out.back.chars += p.chars;
@@ -6552,15 +6552,32 @@ function carrierRows(messages, api, keepFrom) {
   }
   return out;
 }
+// The names of used skills for the record. Each is text of the conversation (a heading of the used skills, or the directory a skill was loaded from), so it goes in
+// only when the whole of it names no secret path and no private path of the user's list; a directory gives its last part. The name then goes through both masks, the
+// shared one under the mask of a series (they read a bounded start of it), is put on one line and cut.
+const SKILL_NAMES_MAX = 50;
+const SKILL_NAME_MAX_CHARS = 80;
+const SKILL_NAME_SCAN_CHARS = 600;
+function recordedSkillNames(skills, privatePaths) {
+  const out = new Set();
+  for (const [text, directory] of skills) {
+    if (out.size >= SKILL_NAMES_MAX) break;
+    if (namesSecretPath(text, privatePaths)) continue;
+    const name = directory ? text.split(/[\\/]+/).filter(Boolean).pop() ?? '' : text;
+    const shown = clip(oneLine(cleanForJevLong(maskSecrets(name.slice(0, SKILL_NAME_SCAN_CHARS)))), SKILL_NAME_MAX_CHARS);
+    if (shown) out.add(shown);
+  }
+  return [...out];
+}
 // The record fields of the attachments the rebuilt rows take off (tokens at RATE_ATT per character) and of those that come back with rows that keep their handle.
-function hostAttachmentRecord(a, rates) {
+function hostAttachmentRecord(a, rates, privatePaths) {
   if (!a) return { attachments_dropped: null };
   const tok = (chars) => Math.round(rates.RATE_ATT * chars);
   return {
     advisor_blocks: a.blocks,
     attachments_dropped: a.dropped.n, attachments_dropped_tokens: tok(a.dropped.chars), attachments_kinds: a.dropped.kinds,
     attachments_kinds_tokens: Object.fromEntries(Object.entries(a.dropped.charsByKind).map(([k, c]) => [k, tok(c)])),
-    attachments_skills: [...a.dropped.skills].slice(0, 50),
+    attachments_skills: recordedSkillNames(a.dropped.skills, privatePaths),
     attachments_back: a.back.n, attachments_back_tokens: tok(a.back.chars), attachments_back_from_results_tokens: tok(a.coveredBack),
     attachments_resent_tokens: tok(a.resent),
   };
@@ -6730,7 +6747,7 @@ async function decide($, e, cfg, record, started) {
   // loss hands the compaction to the summary.
   const hostAtt = cfg.hostAttachments ? carrierRows(messages, api, keepFrom) : null;
   if (cfg.hostAttachments) {
-    Object.assign(record, hostAttachmentRecord(hostAtt, cfg.rates));
+    Object.assign(record, hostAttachmentRecord(hostAtt, cfg.rates, cfg.privatePaths));
     if (hostAtt?.blocked) return { fallback: hostAtt.blocked };
   }
   const dropRows = hostAtt ? new Set([...hostAtt.text, ...hostAtt.rows]) : undefined;

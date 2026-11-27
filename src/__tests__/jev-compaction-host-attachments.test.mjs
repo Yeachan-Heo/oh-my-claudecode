@@ -324,6 +324,50 @@ describe('HOST_ATTACHMENTS with the other switches', () => {
   });
 });
 
+describe('HOST_ATTACHMENTS: the names of used skills in the record', () => {
+  const used = (...names) => reminder(`The following skills were invoked EARLIER in this session:\n\n${names.map((name) => `### Skill: ${name}\nbody`).join('\n\n')}`);
+  const loaded = (directory) => `Base directory for this skill: ${directory}\n\nDo the steps.`;
+  const namesOf = async (texts, env = HA) => compactRecord(await run(env, { extras: { 2: texts } })).attachments_skills;
+
+  it('masks a key in a name and cuts a long name', async () => {
+    const key = ['gsk_', 'a1B2c3D4', 'e5F6g7H8', 'i9J0k1L2'].join('');
+    const temporary = ['ASIA', 'QWER5TYU', 'IOP7ASDF'].join(''); // only the mask of a series knows this prefix
+    const names = await namesOf([used(`deploy ${key}`, `sync ${temporary}`, 'n'.repeat(5000)), loaded(`/x/skills/run-${key}`)]);
+    expect(names).toHaveLength(4);
+    expect(JSON.stringify(names)).not.toContain(key.slice(4));
+    expect(JSON.stringify(names)).not.toContain(temporary.slice(4));
+    expect(names).toContain('n'.repeat(80));
+    expect(names.some((name) => name.startsWith('deploy '))).toBe(true);
+    for (const name of names) expect(name.length).toBeLessThanOrEqual(80);
+  });
+
+  it('leaves out a name or a skill directory that names a private path of the list or a secret path', async () => {
+    const env = { ...HA, OMC_JEV_COMPACT_PRIVATE_PATHS: '/x/clients,vault-notes' };
+    const texts = [
+      used('demo', 'read vault-notes', 'open /home/u/.ssh/id_rsa'),
+      loaded('/x/clients/acme/skills/billing'),
+      loaded('C:\\x\\clients\\skills\\drive'),
+      loaded('/x/Clients/skills/audit'),
+      loaded('/x/skills/pdf'),
+    ];
+    expect(await namesOf(texts, env)).toEqual(['demo', 'pdf']);
+    expect(await namesOf(texts)).toEqual(['demo', 'read vault-notes', 'billing', 'drive', 'audit', 'pdf']);
+  });
+
+  it('records the last part of a skill directory written with either slash, and at most 50 names', async () => {
+    expect(await namesOf([loaded('C:\\Users\\someone\\.claude\\skills\\sheet\\'), loaded('/x/skills/slides//')])).toEqual(['sheet', 'slides']);
+    const many = Array.from({ length: 60 }, (_, k) => `skill-${k}`);
+    expect(await namesOf([used(...many)])).toEqual(many.slice(0, 50));
+  });
+
+  it('reads a skill directory that is a long run of slashes in linear time', async () => {
+    const t0 = performance.now();
+    const names = await namesOf([loaded(`${'/'.repeat(100_000)}tail`)]);
+    expect(performance.now() - t0).toBeLessThan(2500);
+    expect(names).toEqual(['tail']);
+  });
+});
+
 describe('HOST_ATTACHMENTS: linear time', () => {
   // Every text of the API form is read for attachments, so an opener that no line closes may not cost the length of the text again.
   it.each([
