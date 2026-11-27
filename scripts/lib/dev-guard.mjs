@@ -730,18 +730,20 @@ function devScanTokens(tokens, heredocs, depth) {
   let chainBase = NO_DIR; // the directory before the first cd of a chain of && (NO_DIR: none yet)
   let afterPipeOp = false; // the current command follows a pipe operator (unlike afterPipe, a group or a condition does not clear it)
   const dirStack = []; // the directory in force at each open parenthesis: a subshell leaves it behind
-  const groupDirs = []; // the same at each open group or compound command ({, if, while, until, for, case): one that is piped or put in the background runs in a subshell
+  const groupDirs = []; // the same at each open group or compound command ({, if, while, until, for, case): one that is piped or put in the background runs in a subshell, one after && or || may not run
   const flush = (op) => {
+    const mayNotRun = afterOr || afterCase || ['then', 'else', 'elif', 'do'].includes(words[0]);
     let opened = false; // the command opens a group or a compound command, whose first command is no member of a pipeline itself
     for (const w of words) {
       if (DEV_GROUP_OPEN.has(w)) {
-        groupDirs.push({ dir: devCwd, piped: !opened && afterPipeOp });
+        groupDirs.push({ dir: devCwd, piped: !opened && afterPipeOp, maybe: !opened && (afterAnd || mayNotRun) });
         opened = true;
       } else if (!DEV_LEADING.has(w)) break;
     }
     if (DEV_GROUP_CLOSE.has(words[0]) && groupDirs.length) {
-      const { dir, piped } = groupDirs.pop();
+      const { dir, piped, maybe } = groupDirs.pop();
       if (piped || op === '|' || op === '|&' || op === '&') devCwd = dir; // a subshell leaves the directory as it was
+      else if (maybe && devCwd !== dir) devCwd = null; // the group may not have run
     }
     const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
     let found = null;
@@ -760,7 +762,7 @@ function devScanTokens(tokens, heredocs, depth) {
       const before = devCwd;
       if (afterAnd && chainBase === NO_DIR) chainBase = devCwd;
       devChangeDir(unwrapped.name, unwrapped.args);
-      if ((afterOr || afterCase || ['then', 'else', 'elif', 'do'].includes(words[0])) && devCwd !== before) devCwd = null; // it may not run: unknown unless it keeps the directory
+      if (mayNotRun && devCwd !== before) devCwd = null; // it may not run: unknown unless it keeps the directory
     }
     if (op !== '&&' && chainBase !== NO_DIR) { if (devCwd !== chainBase) devCwd = null; chainBase = NO_DIR; } // the chain of && ended: the directory is the one before it, or unknown
     pipeDev = (op === '|' || op === '|&') && unwrapped && DEV_FEEDERS.has(unwrapped.name) ? wordDev : null;

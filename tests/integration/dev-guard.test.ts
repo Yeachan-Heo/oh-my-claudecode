@@ -1136,4 +1136,14 @@ describe('/dev guard: spellings of round 6', () => {
     expect(check(command, cwd).decision).toBe(expected);
   });
 
+  // a group or a compound command after && or ||, in the body of a condition or loop or in a branch of a case may not run
+  it.each([
+    ['false && { true; cd /tmp; }; rm null', '/dev', 'deny'], ['true || { true; cd /tmp; }; rm null', '/dev', 'deny'], ['false && x && { true; cd /tmp; }; rm null', '/dev', 'deny'],
+    ['if false; then { true; cd /tmp; }; fi; rm null', '/dev', 'deny'], ['case x in y) { true; cd /tmp; };; esac; rm null', '/dev', 'deny'], ['false && while true; do true; cd /tmp; break; done; rm null', '/dev', 'deny'],
+    ['false && if true; then true; cd /tmp; fi; rm null', '/dev', 'deny'], ['true && { cd /dev; rm null; }', '/tmp', 'deny'], ['true && { true; cd /dev; rm null; }', '/tmp', 'deny'],
+    ['true && { ls; }; rm null', '/tmp', 'allow'], ['cd /tmp && { rm null; }', '/dev', 'allow'], ['false || { true; }; rm null', '/tmp', 'allow'], ['{ true; cd /tmp; }; rm null', '/dev', 'allow'],
+  ])('reads the directory after a group that may not run as unknown: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
+
 });
