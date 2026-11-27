@@ -828,23 +828,23 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
   }, SLOW);
 
   // OMC_JEV_COMPACT_PRIVATE_PATHS: invented paths only. The brief names listed paths in several spellings and two things that are not listed.
-  const privateList = () => ['~/vault-notes', '/srv/Acme-Ledger/', ' x:\\Acme\\Plans ', '/opt/zeta.books', 'kappa-box', 'ab', '/', project, briefFile].join(',');
+  const privateList = () => ['~/vault-notes', '/vol/Acme-Ledger/', ' x:\\Acme\\Plans ', '/depot/zeta.books', 'kappa-box', 'ab', '/', project, briefFile].join(',');
   const privateBrief = () => [
     'Read ~/vault-notes/q3.txt and ' + join(home, 'vault-notes', 'a.md') + ' first.',
-    'Then /SRV/ACME-LEDGER//2026/sum.csv, X:/acme\\plans\\draft.docx; also "/opt/zeta.books" and `/srv/acme-ledger`.',
-    'Keep /srv/acme-ledgers/open.csv, /opt/zetaXbooks and /srv/acme-ledger.old/y as they are; ab stays.',
+    'Then /VOL/ACME-LEDGER//2026/sum.csv, X:/acme\\plans\\draft.docx; also "/depot/zeta.books" and `/vol/acme-ledger`.',
+    'Keep /vol/acme-ledgers/open.csv, /depot/zetaXbooks and /vol/acme-ledger.old/y as they are; ab stays.',
     'A bare entry like kappa-box/a.txt counts at the start of a path, not as docs/kappa-box here.',
   ].join('\n');
   const wholeBrief = { OMC_JEV_EXCERPT_CHARS: '4000' }; // the query keeps the whole brief of these tests
 
   it('with OMC_JEV_COMPACT_PRIVATE_PATHS a listed path goes neither to the routing query nor to sessions.jsonl, in any slash or letter-case spelling', async () => {
-    const r = await start({ brief: privateBrief(), args: ['--name', 'Track /srv/acme-ledger/x'], env: { ...wholeBrief, OMC_JEV_COMPACT_PRIVATE_PATHS: privateList() } });
+    const r = await start({ brief: privateBrief(), args: ['--name', 'Track /vol/acme-ledger/x'], env: { ...wholeBrief, OMC_JEV_COMPACT_PRIVATE_PATHS: privateList() } });
     assert.equal(r.result.code, 0, r.result.stderr.slice(0, 300));
     const { state } = r.queries[0].body;
     assert.equal(state.task, [
       'Read [private path] and [private path] first.',
       'Then [private path], [private path]; also "[private path]" and `[private path]`.',
-      'Keep /srv/acme-ledgers/open.csv, /opt/zetaXbooks and /srv/acme-ledger.old/y as they are; ab stays.',
+      'Keep /vol/acme-ledgers/open.csv, /depot/zetaXbooks and /vol/acme-ledger.old/y as they are; ab stays.',
       'A bare entry like [private path] counts at the start of a path, not as docs/kappa-box here.',
     ].join('\n'));
     assert.equal(state.description, 'Track [private path]');
@@ -870,7 +870,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
   }, SLOW);
 
   it('a listed path is hidden before the secret mask can change a part of it', async () => {
-    const listed = '/srv/acme-token=abcdef123456789/ledger';
+    const listed = '/vol/acme-token=abcdef123456789/ledger';
     const r = await start({ brief: `Sum up ${listed}/may.csv today.`, env: { OMC_JEV_COMPACT_PRIVATE_PATHS: listed } });
     assert.equal(r.queries[0].body.state.task, 'Sum up [private path] today.');
   }, SLOW);
