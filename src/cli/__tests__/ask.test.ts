@@ -1213,7 +1213,7 @@ describe('run-provider-advisor script contract', () => {
         { SPAWN_CAPTURE_PATH: capturePath, OMC_ANTIGRAVITY_TIMEOUT_MS: '-5' },
       );
       expect(result.status).toBe(0);
-      expect(`${result.stderr ?? ''}`).toContain('Ignoring invalid OMC_ANTIGRAVITY_TIMEOUT_MS');
+      expect(`${result.stderr ?? ''}`).toContain('[ask-antigravity] Ignoring invalid OMC_ANTIGRAVITY_TIMEOUT_MS');
 
       const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
         command: string; args: string[]; options: { timeout: number | null };
@@ -1286,7 +1286,7 @@ describe('run-provider-advisor script contract', () => {
         { SPAWN_CAPTURE_PATH: capturePath, OMC_MUSE_TIMEOUT_MS: '-5' },
       );
       expect(result.status).toBe(0);
-      expect(`${result.stderr ?? ''}`).toContain('Ignoring invalid OMC_MUSE_TIMEOUT_MS');
+      expect(`${result.stderr ?? ''}`).toContain('[ask-muse] Ignoring invalid OMC_MUSE_TIMEOUT_MS');
 
       const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
         command: string; args: string[]; options: { timeout: number | null };

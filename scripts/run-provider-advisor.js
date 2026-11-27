@@ -38,7 +38,7 @@ const SHOULD_USE_WINDOWS_SHELL = process.platform === 'win32';
 const TIMEOUT_DEFAULT_MS = 300000;
 const TIMEOUT_KILL_SIGNAL = 'SIGKILL';
 
-function parseTimeoutMs(envVarName, defaultMs) {
+function parseTimeoutMs(provider, envVarName, defaultMs) {
   const raw = process.env[envVarName];
   if (raw === undefined || raw === '') {
     return defaultMs;
@@ -47,14 +47,14 @@ function parseTimeoutMs(envVarName, defaultMs) {
   // Require a finite, integer, >=1000ms value; clamp to <=1h. Otherwise warn and
   // fall back to the default so a bad override can't disable or distort the bound.
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1000) {
-    console.error(`[ask-${envVarName}] Ignoring invalid ${envVarName}="${raw}" (need an integer >= 1000); using ${defaultMs}ms.`);
+    console.error(`[ask-${provider}] Ignoring invalid ${envVarName}="${raw}" (need an integer >= 1000); using ${defaultMs}ms.`);
     return defaultMs;
   }
   return Math.min(parsed, 3600000);
 }
 
-const ANTIGRAVITY_TIMEOUT_MS = parseTimeoutMs('OMC_ANTIGRAVITY_TIMEOUT_MS', TIMEOUT_DEFAULT_MS);
-const MUSE_TIMEOUT_MS = parseTimeoutMs('OMC_MUSE_TIMEOUT_MS', TIMEOUT_DEFAULT_MS);
+const ANTIGRAVITY_TIMEOUT_MS = parseTimeoutMs('antigravity', 'OMC_ANTIGRAVITY_TIMEOUT_MS', TIMEOUT_DEFAULT_MS);
+const MUSE_TIMEOUT_MS = parseTimeoutMs('muse', 'OMC_MUSE_TIMEOUT_MS', TIMEOUT_DEFAULT_MS);
 
 /**
  * Build CLI args for a given provider.
