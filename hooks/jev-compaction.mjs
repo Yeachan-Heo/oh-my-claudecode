@@ -1400,13 +1400,12 @@ function inputSummary(tool, input) {
 const namesSecretPath = (value, privatePaths) => SECRET_PATH.test(value) || namesPrivatePath(value, privatePaths);
 
 // A character of a path written as an escape: a JSON `\uXXXX` (behind any run of backslashes, as each further JSON string doubles it) or the `%XX` bytes of one
-// UTF-8 character in a URL. Each escape is of a bounded length, the text is decoded once (a double encoding stays as it is) and every run is read from its start
-// only, so the scan stays linear.
-const PATH_ESCAPE = /(?<!\\)\\+u([0-9a-fA-F]{4})|%(?:[0-7][0-9a-fA-F]|[cdCD][0-9a-fA-F]%[89abAB][0-9a-fA-F]|[eE][0-9a-fA-F](?:%[89abAB][0-9a-fA-F]){2}|[fF][0-7](?:%[89abAB][0-9a-fA-F]){3})/g;
-function pathEscape(all, code) {
-  if (code !== undefined) return String.fromCharCode(parseInt(code, 16));
-  try { return decodeURIComponent(all); } catch { return all; } // bytes that are no character stay as written
-}
+// UTF-8 character in a URL. Only well-formed UTF-8 is matched, so no decoding throws (a thrown error costs far more than the scan); other bytes stay as written.
+// Each escape is of a bounded length, the text is decoded once (a double encoding stays as it is) and every run is read from its start only, so the scan stays linear.
+// A text longer than PATH_DECODE_MAX characters is not decoded: when it holds an escape it counts as naming a private path.
+const PATH_ESCAPE = /(?<!\\)\\+u([0-9a-fA-F]{4})|%(?:[0-7][0-9a-fA-F]|(?:[cC][2-9a-fA-F]|[dD][0-9a-fA-F])%[89abAB][0-9a-fA-F]|(?:[eE]0%[abAB]|[eE][dD]%[89]|[eE][1-9a-cA-CefEF]%[89abAB])[0-9a-fA-F]%[89abAB][0-9a-fA-F]|(?:[fF]0%[9abAB]|[fF]4%8|[fF][1-3]%[89abAB])[0-9a-fA-F](?:%[89abAB][0-9a-fA-F]){2})/g;
+const PATH_DECODE_MAX = 4194304;
+const pathEscape = (all, code) => (code !== undefined ? String.fromCharCode(parseInt(code, 16)) : decodeURIComponent(all));
 
 function namesPrivatePath(value, privatePaths) {
   if (!privatePaths.length) return false;
@@ -1417,6 +1416,7 @@ function namesPrivatePath(value, privatePaths) {
   if (names(text)) return true;
   // The text as written first, then with its escapes read: a path may hold what looks like an escape (`C:\data\ubeef`).
   if (!text.includes('%') && !text.includes('\\u')) return false;
+  if (text.length > PATH_DECODE_MAX) return true;
   const decoded = text.replace(PATH_ESCAPE, pathEscape);
   return decoded !== text && names(decoded);
 }

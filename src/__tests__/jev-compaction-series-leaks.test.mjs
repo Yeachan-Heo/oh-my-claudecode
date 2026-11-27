@@ -223,7 +223,7 @@ describe('what leaves with a series: where an id of the shape a host makes is se
 });
 
 // --- private paths written with escapes -----------------------------------------------------------------------------------------------
-const PRIVATE = { OMC_JEV_COMPACT_PRIVATE_PATHS: '/srv/quarterly-ledger,C:\\Users\\u\\Ledger,/srv/caf\u00e9-books,C:\\data\\ubeef' };
+const PRIVATE = { OMC_JEV_COMPACT_PRIVATE_PATHS: '/srv/quarterly-ledger,C:\\Users\\u\\Ledger,/srv/caf\u00e9-books,C:\\data\\ubeef,/srv/ledger-\u20ac,/srv/ledger-\ud55c,/srv/ledger-\ud7ff,/srv/ledger-\u0905,/srv/ledger-\u{1f4d2},/srv/ledger-\u{e0041},/srv/ledger-\u{10fffd}' };
 const MARK = 'figures-of-q3';
 const ENCODED = [
   ['a URL with %2F', `curl file:///srv%2Fquarterly-ledger%2F${MARK}.csv`],
@@ -236,6 +236,8 @@ const ENCODED = [
   ['a letter beyond ASCII as UTF-8 bytes in a URL', `open %2Fsrv%2Fcaf%C3%A9-books%2F${MARK}.jpg`],
   ['bytes that are no character beside the path', `open %FF%C0%AF%2Fsrv%2Fquarterly-ledger%2F${MARK}.csv`],
   ['a listed path that holds what looks like an escape', `type C:\\data\\ubeef\\${MARK}.txt`],
+  // one character for each shape of a UTF-8 sequence of three and of four bytes
+  ...['\u20ac', '\ud55c', '\ud7ff', '\u0905', '\u{1f4d2}', '\u{e0041}', '\u{10fffd}'].map((ch) => [`U+${ch.codePointAt(0).toString(16)} as UTF-8 bytes in a URL`, `open %2Fsrv%2Fledger-${encodeURIComponent(ch)}%2F${MARK}.jpg`]),
 ];
 
 describe('what leaves with a series: a private path of the list written with escapes', () => {

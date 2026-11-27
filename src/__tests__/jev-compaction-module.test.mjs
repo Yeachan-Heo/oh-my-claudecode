@@ -531,6 +531,45 @@ describe('jev-compaction module: active compaction', () => {
     expect(run.records()[0].mentioned).toBe(1);
   });
 
+  it('reads the escapes of a long text in linear time in a private-path check', () => {
+    const pp = ['/home/u/secret-notes'];
+    // Each shape holds `\u` or `%`, so the escapes are read. A scan that starts over at each backslash takes many times the bound here; a linear one a small
+    // part of it, so the bound holds on a loaded machine.
+    const n = 200_000;
+    for (const s of [`${'\\'.repeat(n)}u`, '\\u'.repeat(n / 2), '%'.repeat(n), '%E2%82'.repeat(n / 6), '%C0%AF'.repeat(n / 6)]) {
+      const t0 = performance.now();
+      expect(omitSecretLines(s, pp)).toBe(s);
+      expect(performance.now() - t0).toBeLessThan(5000);
+    }
+  });
+
+  it('decodes only escapes that are characters, so no decoding throws', () => {
+    // Every pair of a leading and a second byte with continuation bytes after them, and the bytes that start no character.
+    const hex = (b) => `%${b.toString(16).padStart(2, '0')}`;
+    const parts = [];
+    for (let lead = 0x80; lead <= 0xff; lead++) for (let next = 0x70; next <= 0xcf; next++) parts.push(`${hex(lead)}${hex(next)}%80%80`, `${hex(lead).toUpperCase()}${hex(next).toUpperCase()}%BF%BF`);
+    const spy = vi.spyOn(globalThis, 'decodeURIComponent');
+    try {
+      const text = parts.join(' ');
+      expect(omitSecretLines(text, ['/home/u/secret-notes'])).toBe(text);
+      expect(spy.mock.calls.length).toBeGreaterThan(0);
+      expect(spy.mock.results.filter((r) => r.type === 'throw')).toEqual([]);
+    } finally { spy.mockRestore(); }
+  });
+
+  it('reads the escapes of a text up to a bound: a longer one that holds some counts as naming a private path', () => {
+    const pp = ['/home/u/secret-notes'];
+    const bound = 4 * 1024 * 1024;
+    const at = (escape, length) => `${escape}${'x'.repeat(length - escape.length)}`;
+    for (const escape of ['%20', '\\u0020']) {
+      expect(omitSecretLines(at(escape, bound), pp)).toBe(at(escape, bound));
+      expect(omitSecretLines(at(escape, bound + 1), pp)).toBe('[line omitted: secret path]');
+      expect(omitSecretLines(`${at(escape, bound + 1)}\nplain line`, pp)).toBe('[line omitted: secret path]\nplain line');
+      expect(omitSecretLines(at(escape, bound + 1), [])).toBe(at(escape, bound + 1));
+    }
+    expect(omitSecretLines(at('', bound + 1), pp)).toBe(at('', bound + 1));
+  });
+
   it('checks the keys of an MCP input, counts only strings and keys toward the walk limit, fails closed beyond it or below depth 8, and sends a named-field tool\'s input with a key naming a secret path omitted', async () => {
     let deep9 = 'leaf';
     for (let k = 0; k < 9; k++) deep9 = { a: deep9 };
