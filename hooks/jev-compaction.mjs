@@ -150,6 +150,17 @@
  * `archive_timed_out`, `archive_ms`, `archive_marker`; `archive_planned` in shadow) and `merged_traces`, `merged_items`. A marker file in the session directory is touched by every compaction
  * that archives; scripts/lib/jev-compaction-state.mjs removes session directories whose newest file is older than OMC_JEV_ARCHIVE_DAYS days.
  *
+ * Owner tail (OMC_JEV_COMPACT_OWNER_TAIL=active, off by default; without it the three options below do nothing). The newest message of the user and the text of
+ * every assistant row after it stay word for word in any compaction: no stage moves a block, a pasted tag, a long reply, an agent message or a series out of them,
+ * and Jev is not asked about their blocks; calls and results after the message are compacted as usual. When the fixed prefix with the protected text is over the
+ * threshold less FLOOR_MARGIN of the window (token cascade; also when the floor or the final prediction with it is over that bound), the next boundary is tried
+ * (OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION=fallback, the default: the newest message of another session after the user's; `on` counts such messages like the
+ * user's, `off` ignores them), and past the last one nothing is protected (OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW unset), or with `keep` the last boundary stays while
+ * it is under the threshold and the gates that hand the compaction to the summary are off. Subagents have no owner tail unless
+ * OMC_JEV_COMPACT_OWNER_TAIL_AGENTS=active. A protected text that came out changed leaves the conversation as it was: a skip that opens with OWNER_TAIL_SKIP, no
+ * summary. The record gets `owner_tail` (from_idx, rows, tokens, violations, goal_yielded, overflow, boundary, protected_rows), `owner_tail_applied`,
+ * `owner_tail_tier` and `owner_tail_violations`; see "owner tail" below.
+ *
  * The tail by the open tool loop (OMC_JEV_COMPACT_TAIL_BY_LOOP=active, off by default; without it "the last KEEP_LAST rows" below stand as written). The tail that
  * the cut and the stages leave alone is then the open tool loop alone, whose rows keep their handles, and nothing at a turn boundary: the results, notifications,
  * agent messages, pasted tags and blocks of the last KEEP_LAST rows are treated like older ones, with the same checks for secrets and private paths (a long reply
@@ -159,7 +170,8 @@
  * Usage of Jev's requests (OMC_JEV_COMPACT_JEV_USAGE=1 or active, off by default; without it no record gains a field and no record is added). The record of a
  * compaction gets `jev_usage`, one entry per request sent to Jev: `model` (as the answer names it, masked and cut to JEV_MODEL_MAX_CHARS characters),
  * `input_tokens`, `output_tokens` and `cost_usd` (always null; a missing value is null, never 0). The scoring requests come first, parallel to `jev_ms` and without
- * `purpose`; the others carry `purpose` (pastes, blocks, second_round). `cost_basis` is `reported` when an answer carries a cost, else `unknown`. The pass before the
+ * `purpose`; the others carry `purpose` (pastes, blocks, second_round). When the owner tail makes the compaction decide again, the entries of the decisions that
+ * were given up follow with `abandoned: true`. `cost_basis` is `reported` when an answer carries a cost, else `unknown`. The pass before the
  * module's own request puts both fields into its `verdicts_fill` record, and a pass in the background that asked something writes such a record of its own.
  *
  * Secrets in the paste, reply, agent and block stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
@@ -813,6 +825,10 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_ARCHIVE: await $.env.get('OMC_JEV_COMPACT_ARCHIVE'),
     OMC_JEV_COMPACT_JEV_USAGE: await $.env.get('OMC_JEV_COMPACT_JEV_USAGE'),
     OMC_JEV_COMPACT_TAIL_BY_LOOP: await $.env.get('OMC_JEV_COMPACT_TAIL_BY_LOOP'),
+    OMC_JEV_COMPACT_OWNER_TAIL: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL'),
+    OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION'),
+    OMC_JEV_COMPACT_OWNER_TAIL_AGENTS: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL_AGENTS'),
+    OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW'),
     OMC_JEV_COMPACT_JEV_STAGES: await $.env.get('OMC_JEV_COMPACT_JEV_STAGES'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
@@ -937,6 +953,11 @@ export async function readConfig($) {
     jevUsage: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_JEV_USAGE ?? '').trim()),
     // The tail kept whole is the open tool loop alone, not also the last KEEP_LAST rows (off unless active).
     tailByLoop: String(env.OMC_JEV_COMPACT_TAIL_BY_LOOP ?? '').trim() === 'active',
+    // Owner tail (off unless active): the newest message of the user and the text of the answers after it stay word for word. The three options act only with it.
+    ownerTail: String(env.OMC_JEV_COMPACT_OWNER_TAIL ?? '').trim() === 'active',
+    ownerTailCrossSession: crossSessionMode(env.OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION),
+    ownerTailAgents: String(env.OMC_JEV_COMPACT_OWNER_TAIL_AGENTS ?? '').trim() === 'active',
+    ownerTailOverflow: String(env.OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW ?? '').trim() === 'keep' ? 'keep' : 'revert',
   };
 }
 
@@ -3853,7 +3874,7 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new
   const found = [];
   // The first and the newest user message stay as they are.
   for (const row of users.slice(1, -1)) {
-    if (row >= before || images.rows.has(row)) continue;
+    if (row >= before || images.rows.has(row) || cfg.ownerProtected?.has(row)) continue;
     const text = messages[row].text;
     const tags = pasteTags(text);
     stats.tags += tags.length;
@@ -4138,7 +4159,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   const budget = { left: SCAN_BUDGET_CHARS, deadline };
   for (let row = 0; row < limit; row++) {
     const m = messages[row];
-    if (m.role !== 'assistant' || !m.text) continue;
+    if (m.role !== 'assistant' || !m.text || cfg.ownerProtected?.has(row)) continue;
     stats.assistant_rows++;
     if (skip.has(row)) { stats.skipped_blocks++; continue; }
     if (direct.has(row)) { stats.direct_replies++; continue; }
@@ -4762,6 +4783,7 @@ function blockRows(cfg, rows, ctx) {
   for (let i = 0; i < Math.min(ctx.limit, rows.length); i++) {
     const m = rows[i];
     if (m.trimDrop === true || typeof m.text !== 'string' || !m.text.trim() || (m.toolResults || []).length) continue;
+    if (ctx.protect?.has(i)) continue; // no verdict touches a protected row of the owner tail
     let author;
     let list;
     if (m.role === 'assistant') {
@@ -4810,7 +4832,7 @@ function planBlocks(cfg, messages, trimmed, api, queued, keepFrom, sessionId, ag
   const images = nonTextUserRows(messages, api);
   const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
-  const found = blockRows(cfg, trimmed, { limit: tailEnd(cfg, keepFrom, messages.length), skipUser: images.rows, userUnmatched: images.unmatched, skipAssistant: nonTextAssistantRows(messages, api), queued, users, delivered, agent });
+  const found = blockRows(cfg, trimmed, { limit: tailEnd(cfg, keepFrom, messages.length), skipUser: images.rows, userUnmatched: images.unmatched, skipAssistant: nonTextAssistantRows(messages, api), queued, users, delivered, agent, protect: cfg.ownerProtected });
   const potential = found.items.reduce((sum, it) => (it.chars <= cfg.pasteMaxChars && !namesSecretPath(it.body, cfg.privatePaths) ? sum + blockGain(cfg, it) * it.count : sum), 0);
   return { ...found, messages: trimmed, sessionId, verdicts: new Map(), potential };
 }
@@ -5173,17 +5195,20 @@ async function fillBlockVerdicts($, cfg, messages, ctx) {
     if (!keptCallsIn(messages, keepFrom, api)) return { skipped: 'tail_calls' };
     const delivered = queuedOf(messages, api);
     const queued = delivered ? delivered.rows : new Map();
+    // With the owner tail the reads of the host come first, as in decide, so that Jev is not asked about the blocks of a protected row.
+    const early = cfg.ownerTail && cfg.targetPercent !== undefined ? await ownerTailReads($, cfg, ctx.deadline) : undefined;
+    cfg = ownerProtectedCfg(cfg, messages, early);
     const stage = agentStageOf($, cfg, undefined, messages, api, queued, keepFrom, sessionId, ctx.deadline);
     const plan = planBlocks(cfg, messages, stage.trimmed, api, queued, keepFrom, sessionId);
     if (!plan.items.length) return { items: 0 };
     const user = userTask(messages, undefined, queued, cfg.privatePaths, cfg.notUserPrefixes, ownerLimitsOf(cfg));
     let prefix = 0;
     let limit = null;
-    const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }), ctx.deadline);
+    const detail = early ? early.detail : await hostValue($, () => $.session.usage({ breakdown: 'summary' }), ctx.deadline);
     prefix = prefixTokens(detail);
     if (cfg.targetPercent !== undefined) {
-      const usage = await hostValue($, () => $.session.usage(), ctx.deadline);
-      const win = await resolveWindow($, cfg, detail, usage, ctx.deadline);
+      const usage = early ? early.usage : await hostValue($, () => $.session.usage(), ctx.deadline);
+      const win = early ? early.win : await resolveWindow($, cfg, detail, usage, ctx.deadline);
       if (win) limit = ruleTargetOf(win, cfg);
     }
     const extra = blockSignals(cfg.rates, prefix + listTokens(api, cfg.rates), plan.items, prefix, limit);
@@ -5596,6 +5621,7 @@ export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) 
   if (images.unmatched) return { reason: 'image_unmatched' };
   const fixed = new Set([...nonTextAssistantRows(messages, api), ...images.rows]);
   for (const [row] of queued) if (messages[row]?.role === 'user') fixed.add(row);
+  for (const row of cfg.ownerProtected ?? []) fixed.add(row); // a protected row of the owner tail is no place for a series
   const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
@@ -6157,6 +6183,110 @@ async function archiveStep($, cfg, record, mode, candidates, rows, keepFrom, gro
   Object.assign(record, { merged_traces: merged.filter((e) => e.merged).length, merged_items: merged.reduce((n, e) => n + (e.merged ? e.ids.length : 0), 0) });
 }
 
+// --- owner tail (OMC_JEV_COMPACT_OWNER_TAIL=active) ----------------------------------------------------------------------------------------------
+// The newest message of the user and the text of the answers after it (the text of the assistant rows, not their calls) stay word for word in any compaction, also at
+// a turn boundary and for a plugin's request. What else comes after it (calls and results of tools, reports of agents, messages of other sessions, notifications) is
+// compacted like the rest, and the open tool loop keeps its handles as ever. The protected rows (cfg.ownerProtected) are left out of the stages of pasted text,
+// long replies, blocks and series; the agent stage leaves a row of the user and one that opens with a block of another session by its own rules. After the build
+// ownerTailViolations checks that every protected text is still there: one that came out changed leaves the conversation as it was (a skip, so the host's summary
+// does not run either).
+// The user's message is a user row without results that holds words of the user's own (userWords) and that no hook or the host put in (isMeta, hookRowPrefixes). A
+// message of another session is a row that opens with CROSS_SESSION_PREFIX: OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION `on` counts it like a message of the user (the
+// boundary is the newest of both kinds), `off` ignores it, `fallback` (the default) takes the user's row as the first boundary and the newest message of another
+// session after it as the next one, tried when the protected text is too large.
+const CROSS_SESSION_PREFIX = '<cross-session-message';
+export const OWNER_TAIL_SKIP = 'jev-compaction-owner-tail:'; // opens the text of this skip; ownThreshold tells it from OWN_SKIP_PREFIX
+const crossSessionMode = (raw) => {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return v === 'on' || v === 'off' ? v : 'fallback';
+};
+const isCrossSessionRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trimStart().startsWith(CROSS_SESSION_PREFIX);
+// While the blocks act, a row that is only a moved block or the header of the trace files holds no words of the user (as in ownerRows).
+const isOwnerWords = (m, cfg) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.isMeta !== true
+  && !cfg.hookRowPrefixes.some((p) => m.text.trimStart().startsWith(p)) && userWords(m, notUserOf(cfg.blockTraces)).length > 0;
+export const isOwnerTailRow = (m, cfg) => isOwnerWords(m, cfg) || (cfg.ownerTailCrossSession === 'on' && isCrossSessionRow(m));
+
+/** The boundaries a compaction tries, the one with the most protected text first: the newest row of the user (with `on`, of the user or another session), then with `fallback` the newest message of another session after it. */
+export function ownerTailTiers(messages, cfg) {
+  const tiers = [];
+  const owner = messages.findLastIndex((m) => isOwnerTailRow(m, cfg));
+  if (owner >= 0) tiers.push(owner);
+  if (cfg.ownerTailCrossSession === 'fallback') {
+    const cross = messages.findLastIndex(isCrossSessionRow);
+    if (cross > owner) tiers.push(cross);
+  }
+  return tiers;
+}
+
+/** What is protected from the boundary row `from`: that row and every assistant row with text after it. */
+export function ownerTailProtected(messages, from) {
+  const rows = [from];
+  for (let i = from + 1; i < messages.length; i++) if (messages[i].role === 'assistant' && typeof messages[i].text === 'string' && messages[i].text.trim()) rows.push(i);
+  return { rows, user: messages[from].text, texts: rows.slice(1).map((i) => messages[i].text) };
+}
+
+/**
+ * The check of the built list before anything goes to the host: the protected message opens the text of a user row, and every protected text of the assistant stands in
+ * the text of the assistant rows, in order (build joins the rows of one message with a newline and may put the traces of its calls after its text). One name per
+ * protected element that is gone: `owner_text`, `assistant_text`.
+ */
+export function ownerTailViolations(built, prot) {
+  const bad = [];
+  if (!built.some((m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.startsWith(prot.user))) bad.push('owner_text');
+  const joined = built.filter((m) => m.role === 'assistant' && typeof m.text === 'string' && m.text).map((m) => m.text).join('\n');
+  let at = 0;
+  for (const text of prot.texts) {
+    const found = joined.indexOf(text, at);
+    if (found < 0) bad.push('assistant_text');
+    else at = found + text.length;
+  }
+  return bad;
+}
+
+// The reads of the host and the window, made before the stages are planned: the bound of the protected text needs them, and they are used again instead of new ones.
+async function ownerTailReads($, cfg, deadline) {
+  const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
+  const usage = await hostValue($, () => $.session.usage(), deadline);
+  return { detail, usage, win: await resolveWindow($, cfg, detail, usage, deadline) };
+}
+
+// The boundary of one compaction: the first of the tiers (from cfg.ownerTailDemote on) whose protected text with the fixed prefix stays under `bound`, the threshold of
+// the host less FLOOR_MARGIN of the window (without a window the first tier is taken). None fitting is an overflow: no protection, or with `keep` the last tier while it
+// stays under the threshold (`kept`: the gates that hand a floor over the bound to the host's summary are then off, as the summary would take the text too). In the main
+// loop a boundary at the first row protects nothing (the whole conversation would be protected); in a subagent, with the option, the prompt of its parent counts.
+// Returns {tail (for the record), kept} and, with protection, {prot, rows (the protected rows), fixed (the prefix with the protected text), tier}.
+function ownerTailPlan(cfg, messages, main, win, prefix) {
+  const tiers = main || cfg.ownerTailAgents ? ownerTailTiers(messages, cfg) : [];
+  const usable = tiers.filter((from) => from > 0 || !main);
+  const tokensOf = (prot) => Math.round(listTokens(rowsAsApi(prot.rows.map((i) => ({ role: messages[i].role, text: messages[i].text }))), cfg.rates));
+  const prots = usable.map((from) => ownerTailProtected(messages, from));
+  const sizes = prots.map(tokensOf);
+  const bound = win ? win.threshold - FLOOR_MARGIN * win.window : Infinity;
+  let pick;
+  for (let i = cfg.ownerTailDemote ?? 0; i < usable.length && pick === undefined; i++) if (prefix + sizes[i] <= bound) pick = i;
+  const overflow = usable.length > 0 && pick === undefined;
+  let kept = false;
+  if (overflow && cfg.ownerTailOverflow === 'keep' && win && prefix + sizes[usable.length - 1] <= win.threshold) { pick = usable.length - 1; kept = true; }
+  const shown = pick !== undefined ? usable[pick] : tiers[0];
+  const shownProt = pick !== undefined ? prots[pick] : shown === undefined ? undefined : ownerTailProtected(messages, shown);
+  const tail = {
+    from_idx: shown ?? null, rows: shown === undefined ? 0 : messages.length - shown, tokens: shownProt === undefined ? 0 : pick !== undefined ? sizes[pick] : tokensOf(shownProt),
+    violations: 0, goal_yielded: false, overflow, boundary: pick === undefined ? 'old' : isOwnerWords(messages[shown], cfg) ? 'owner' : 'cross_session',
+    protected_rows: shownProt === undefined ? 0 : shownProt.rows.length,
+  };
+  if (pick === undefined) return { tail, kept };
+  return { tail, kept, prot: prots[pick], rows: new Set(prots[pick].rows), fixed: prefix + sizes[pick], tier: pick };
+}
+
+// The protected rows of the main loop for a plan made outside decide (the pass that fills the verdicts, the estimate of the own threshold), taken as decide takes
+// them, so that no block of a protected row is asked about and no stage counts one. `early` is what ownerTailReads returned (none without the token cascade).
+function ownerProtectedCfg(cfg, messages, early) {
+  if (!cfg.ownerTail || !Array.isArray(messages)) return cfg;
+  const plan = ownerTailPlan(cfg, messages, true, early?.win, early ? prefixTokens(early.detail) : 0);
+  return plan.rows ? { ...cfg, ownerProtected: plan.rows } : cfg;
+}
+// --- end of the owner tail ----------------------------------------------------------------------------------------------------------------------
+
 async function decide($, e, cfg, record, started) {
   if (cfg.jevUsage) cfg = { ...cfg, usageRecord: record }; // every request of this decision adds to its record
   const messages = Array.isArray(e.messages) ? e.messages : [];
@@ -6226,6 +6356,23 @@ async function decide($, e, cfg, record, started) {
   const net = removable - envelopes;
   // The envelopes are text the installed rows hold and the host's count does not: the predictions start from the count plus them.
   const envelopeTokens = cfg.rates.RATE_NOTE * envelopes;
+  // Owner tail: the protected rows are known before the stages are planned, so with the token cascade the host reads and the window come first.
+  let ownerPlan;
+  let early;
+  if (cfg.ownerTail) {
+    if (cfg.targetPercent !== undefined) early = await ownerTailReads($, cfg, deadline);
+    let win = early?.win;
+    if (win && e.trigger === 'auto' && e.agentId !== undefined) { // a subagent's window follows its estimate, as in the cascade below
+      const estimate = tokensBeforeOf(e, cfg, messages, api, early.detail, early.usage, thinking).tokens;
+      if (estimate < win.threshold) win = { window: Math.min(win.window, Math.round(estimate) + HOST_BUFFER), threshold: Math.max(1, Math.round(estimate)) };
+    }
+    ownerPlan = ownerTailPlan(cfg, messages, e.agentId === undefined, win, early ? prefixTokens(early.detail) : 0);
+    Object.assign(record, { owner_tail: ownerPlan.tail, owner_tail_applied: Boolean(ownerPlan.prot) });
+    if (ownerPlan.prot) {
+      record.owner_tail_tier = ownerPlan.tier;
+      cfg = { ...cfg, ownerProtected: ownerPlan.rows };
+    }
+  }
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target is the rule's target, a share of the window).
   // Verdicts of Jev on blocks of text (OMC_JEV_COMPACT_BLOCKS): off without the API form, a state directory or a session; `shadow` also while the point itself is not active. They ask
@@ -6283,10 +6430,10 @@ async function decide($, e, cfg, record, started) {
   let known;
   if (cfg.targetPercent !== undefined) {
     // The host reads are made once, within the compaction's deadline, and the token accounting below uses them again.
-    const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
-    const usage = await hostValue($, () => $.session.usage(), deadline);
+    const detail = early ? early.detail : await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
+    const usage = early ? early.usage : await hostValue($, () => $.session.usage(), deadline);
     known = { detail, usage };
-    let win = await resolveWindow($, cfg, detail, usage, deadline);
+    let win = early ? early.win : await resolveWindow($, cfg, detail, usage, deadline);
     if (!win) return { fallback: 'no_window' };
     tokens = tokensBeforeOf(e, cfg, messages, api, detail, usage, thinking);
     if (e.trigger === 'auto') {
@@ -6299,8 +6446,10 @@ async function decide($, e, cfg, record, started) {
     Object.assign(record, { window: win.window, threshold: win.threshold, window_source: win.source });
     known.win = win; // the window that governs the cut: the token accounting records it as it is
     // The rule's target: the usual target before the owner's limit (`raw`), then the limit from the configured window ceiling (absent by default).
-    const raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
+    let raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
     ruleTarget = ruleTargetOf(win, cfg);
+    // Owner tail: nothing can come below the prefix with the protected text, so a goal under it goes up to it.
+    if (ownerPlan?.fixed > ruleTarget) { ruleTarget = ownerPlan.fixed; raw = Math.max(raw, ownerPlan.fixed); ownerPlan.tail.goal_yielded = true; }
     manual = tokens.tokens <= raw;
     if (!manual) {
       // With the stage active the floor counts what it plans to save (a plan, no write), so a session full of agents' reports is not handed to the
@@ -6321,7 +6470,7 @@ async function decide($, e, cfg, record, started) {
       }
       const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor - blocksFloor + envelopeTokens - thinking.removed, cfg.rates, shape);
       record.floor_pred = Math.max(0, Math.round(floor));
-      if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
+      if (!ownerPlan?.kept && floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
   }
   const blocked = await blockedReason($, cfg, Date.now(), e.agentId);
@@ -6576,8 +6725,9 @@ async function decide($, e, cfg, record, started) {
     // keeps the numbers). The module's own requests and other mods' plugin compactions are not handled here.
     // The files were planned to spare the host's summary (the floor counted them): when the writes fell short and the plan still ends above the bound the
     // floor is held to, the summary runs.
-    if ((agentsFloor > 0 || blocksFloor > 0) && plan.predicted > record.threshold - FLOOR_MARGIN * record.window) { record.floor_after_agents = plan.predicted; return { fallback: 'text_above_threshold' }; }
-    if (cfg.handoff && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && (e.trigger === 'manual' || e.trigger === 'auto')) return { fallback: 'cut_below_host_min' };
+    if ((agentsFloor > 0 || blocksFloor > 0) && !ownerPlan?.kept && plan.predicted > record.threshold - FLOOR_MARGIN * record.window) { record.floor_after_agents = plan.predicted; return { fallback: 'text_above_threshold' }; }
+    // With protected text the small cut is made: the host's summary would take that text.
+    if (cfg.handoff && !ownerPlan?.prot && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && (e.trigger === 'manual' || e.trigger === 'auto')) return { fallback: 'cut_below_host_min' };
     // The module's own request (`$.session.compact()` of ownThreshold, trigger `plugin`) that would stay under HOST_MIN_CUT is rejected, not handed over:
     // the host's summary is what it replaces, and nothing forces a compaction yet. compact() answers it with a skip. A `plugin` compaction asked by
     // another mod is not ours to veto.
@@ -6611,6 +6761,15 @@ async function decide($, e, cfg, record, started) {
     }
   }
   if (header !== undefined) built.unshift({ role: 'user', text: header, toolUses: [], toolResults: [] });
+  // Owner tail: a protected text that is gone, whatever stage made it, leaves the conversation as it was; the record names the element, not its text.
+  if (ownerPlan?.prot) {
+    const bad = ownerTailViolations(built, ownerPlan.prot);
+    ownerPlan.tail.violations = bad.length;
+    if (bad.length) {
+      record.owner_tail_violations = bad.slice(0, 10);
+      return { fallback: 'owner_tail_changed', skip: true, skipText: `${OWNER_TAIL_SKIP} a protected text came out changed, nothing replaced`, tokensBefore: tokens?.tokens };
+    }
+  }
   const after = built.reduce((s, m) => s + messageChars(m), stats.queuedKeptChars);
   const hist = [0, 0, 0, 0];
   for (const c of asked) if (c.answered) hist[Math.min(3, Math.round(c.score * 3))]++;
@@ -6676,11 +6835,31 @@ async function compact($, e, next) {
       ...(cfg.shared?.unavailable ? { shared_unavailable: true } : {}),
     };
     let decision;
+    const initial = { ...record }; // the record a repeated decision starts from
+    const abandoned = []; // the usage of the requests of the decisions that were repeated
+    let reported = false;
     try {
       decision = await decide($, e, cfg, record, started);
+      // Owner tail: the floor or the plan with the protected text (nothing of it can be lowered) is over the bound of the host. The compaction is decided again with the
+      // next boundary, down to the overflow (no protection, or with `keep` the text kept and the gates off), instead of going to the host's summary, which takes the text too.
+      for (let again = 0; again < 3 && (decision.fallback === 'floor_above_threshold' || decision.fallback === 'text_above_threshold') && record.owner_tail_applied === true && !record.owner_tail.overflow; again++) {
+        const demote = record.owner_tail_tier + 1;
+        if (record.jev_usage) {
+          abandoned.push(...record.jev_usage.map((entry) => ({ ...entry, abandoned: true })));
+          reported ||= record.cost_basis === 'reported';
+        }
+        for (const key of Object.keys(record)) delete record[key];
+        Object.assign(record, initial);
+        decision = await decide($, e, { ...cfg, ownerTailDemote: demote }, record, started);
+      }
     } catch (error) {
       decision = { fallback: 'exception' };
       record.error = clip(oneLine(maskSecrets(String(error?.message ?? error))), 200);
+    }
+    // Every request sent keeps its entry: those of the repeated decisions follow, marked `abandoned`.
+    if (abandoned.length) {
+      record.jev_usage = [...(record.jev_usage ?? []), ...abandoned];
+      record.cost_basis = reported ? 'reported' : (record.cost_basis ?? 'unknown');
     }
     record.duration_ms = Date.now() - started;
     if (decision.fallback) Object.assign(record, { result: 'fallback', reason: decision.fallback });
@@ -6693,7 +6872,7 @@ async function compact($, e, next) {
       // armed here on purpose and skipBase records the tokens of this request, so the next one waits for OWN_MIN_GAIN of the window of growth from them
       // instead of paying for Jev's scores again after MIN_TURNS_BETWEEN turns.
       if (e.agentId === undefined) { session.growthArmed = true; session.growthBase = undefined; session.skipBase = decision.tokensBefore; }
-      return { skip: `${OWN_SKIP_PREFIX} cut under ${Math.round(HOST_MIN_CUT * 100)} % of the tokens, nothing replaced` };
+      return { skip: decision.skipText ?? `${OWN_SKIP_PREFIX} cut under ${Math.round(HOST_MIN_CUT * 100)} % of the tokens, nothing replaced` };
     }
     if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
@@ -6812,14 +6991,16 @@ async function ownThreshold($, e, next) {
         try {
           let sessionId;
           try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
-          const stage = agentStageOf($, cfg, undefined, messages, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, Date.now() + TOTAL_MS);
+          // Owner tail: the protected rows give nothing back.
+          const planCfg = ownerProtectedCfg(cfg, messages, cfg.ownerTail && cfg.targetPercent !== undefined ? await ownerTailReads($, cfg, Date.now() + TOTAL_MS) : undefined);
+          const stage = agentStageOf($, planCfg, undefined, messages, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, Date.now() + TOTAL_MS);
           // The checks go to the compaction that follows (takeAgentChecks); one that does not follow leaves them to the next preflight, which replaces them.
           if (stage.opts && sessionId) session.agentChecked = { id: sessionId, paths: JSON.stringify(cfg.privatePaths), checked: stage.opts.checked };
           stageTokens = await agentStageTokens(cfg, cfg.jevStages && blocksCount ? { ...stage, opts: undefined } : stage);
           // What the blocks may give back (every one at level 0), as the floor of decide counts it.
           if (blocksCount && sessionId) {
-            stageTokens += planBlocks(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
-            stageTokens += planSeries(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, false, Date.now() + TOTAL_MS).potential();
+            stageTokens += planBlocks(planCfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
+            stageTokens += planSeries(planCfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, false, Date.now() + TOTAL_MS).potential();
           }
         } catch { stageTokens = 0; }
       }
@@ -6832,7 +7013,7 @@ async function ownThreshold($, e, next) {
     try {
       session.ownCompactInFlight = true;
       const done = await $.session.compact();
-      if (done && typeof done.skip === 'string') { reason = cfg.ownSkip && done.skip.startsWith(OWN_SKIP_PREFIX) ? 'cut_below_host_min' : 'host_skipped'; detailText = done.skip; }
+      if (done && typeof done.skip === 'string') { reason = cfg.ownSkip && done.skip.startsWith(OWN_SKIP_PREFIX) ? 'cut_below_host_min' : done.skip.startsWith(OWNER_TAIL_SKIP) ? 'owner_tail_changed' : 'host_skipped'; detailText = done.skip; }
     } catch (error) {
       detailText = String(error?.message ?? error);
       reason = /headless|sdk|-p\b/i.test(detailText) ? 'host_cannot_compact' : /turn|in flight|running/i.test(detailText) ? 'host_turn_running' : 'host_error';
