@@ -34,6 +34,7 @@ import {
   resolveJevTimeoutMs,
   rotateJevLog,
 } from "../jev-resolve.mjs";
+import { privatePathMask } from "./jev-private-paths.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
 const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
@@ -689,7 +690,8 @@ export async function setJevHookContext(data) {
     delete context.request_id;
     if (context.cwd === undefined) {
       try {
-        context.cwd = process.cwd();
+        const cwd = process.cwd();
+        context.cwd = privatePathMask(process.env)?.(cwd) ?? cwd; // hidden as the input's own cwd is
       } catch {
         // No working directory: the field is left out.
       }
