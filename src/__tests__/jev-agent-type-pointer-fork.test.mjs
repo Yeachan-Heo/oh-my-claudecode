@@ -799,6 +799,56 @@ describe('pointer expansion (OMC_JEV_POINTER_EXPAND, OMC_JEV_POINTER_EXPAND_DIRS
       expect(task).toBe(padded + label(realpathSync(file)) + 'CWD-MARKER');
     });
 
+    it('a directory above the home directory is not a root, also through a link, while a neighbour of the home directory is', async () => {
+      const context = makeContext();
+      const homes = join(context.root, 'homes');
+      const user = join(homes, 'user');
+      for (const dir of [user, join(homes, 'other'), join(homes, 'us')]) mkdirSync(dir, { recursive: true });
+      symlinkSync(homes, join(context.root, 'homes-link'));
+      const file = join(homes, 'other', 'notes.md');
+      writeFileSync(file, 'ABOVE-MARKER', 'utf8');
+      const prompt = TASK + ' Details in ' + file;
+      const withHome = CWD(context, { HOME: user, USERPROFILE: user });
+      for (const cwd of [homes, context.root, join(context.root, 'homes-link')]) {
+        const { task, row } = await taskSentFor(context, prompt, withHome, { cwd });
+        expect(task, cwd).toBe(prompt);
+        expect(row?.pointer_unexpanded, cwd).toBe('working-dir-too-broad');
+      }
+      const neighbour = await taskSentFor(context, prompt, withHome, { cwd: join(homes, 'other') });
+      expect(neighbour.task).toBe(prompt + label(realpathSync(file)) + 'ABOVE-MARKER');
+      const samePrefix = join(homes, 'us', 'notes.md');
+      writeFileSync(samePrefix, 'PREFIX-MARKER', 'utf8');
+      const prefixPrompt = TASK + ' Details in ' + samePrefix;
+      const prefix = await taskSentFor(context, prefixPrompt, withHome, { cwd: join(homes, 'us') });
+      expect(prefix.task).toBe(prefixPrompt + label(realpathSync(samePrefix)) + 'PREFIX-MARKER');
+    });
+
+    it('a directory above a home directory that does not exist is not a root either', async () => {
+      const context = makeContext();
+      const file = cwdFile(context, 'notes.md', 'GHOST-MARKER');
+      const prompt = TASK + ' Details in ' + file;
+      const ghost = join(context.cwd, 'missing', 'home');
+      const { task, row } = await taskSentFor(context, prompt, CWD(context, { HOME: ghost, USERPROFILE: ghost }));
+      expect(task).toBe(prompt);
+      expect(row?.pointer_unexpanded).toBe('working-dir-too-broad');
+    });
+
+    it('with an empty home directory the working directory is not a root, and the listed directories still work', async () => {
+      const context = makeContext();
+      const file = cwdFile(context, 'notes.md', 'NO-HOME-MARKER');
+      const prompt = TASK + ' Details in ' + file;
+      const noHome = { HOME: '', USERPROFILE: '' };
+      for (const cwd of [context.cwd, context.root]) {
+        const { task, row } = await taskSentFor(context, prompt, CWD(context, noHome), { cwd });
+        expect(task, cwd).toBe(prompt);
+        expect(row?.pointer_unexpanded, cwd).toBe('outside-allowed-dirs');
+      }
+      const brief = briefFixture(context);
+      const listedPrompt = TASK + ' Details in ' + brief;
+      const listed = await taskSentFor(context, listedPrompt, CWD(context, { ...noHome, OMC_JEV_POINTER_EXPAND_DIRS: join(context.root, 'briefs') }));
+      expect(listed.row?.pointer_expanded).toBe(true);
+    });
+
     it('with the working directory switch on, a file outside the working directory keeps the usual reason, also under a broad one', async () => {
       const context = makeContext();
       mkdirSync(join(context.root, 'elsewhere'));

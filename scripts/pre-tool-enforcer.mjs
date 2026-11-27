@@ -1178,7 +1178,8 @@ function recordJevForkSkipRow(data, toolInput, stateDir) {
 // are not changed. Only files
 // under the directories listed in OMC_JEV_POINTER_EXPAND_DIRS (separated by the platform path delimiter, empty by
 // default, so nothing is read) are expanded; with OMC_JEV_POINTER_EXPAND_CWD=1 the working directory of the session is an
-// allowed root as well, unless it is the filesystem root or the home directory (the reason is then working-dir-too-broad).
+// allowed root as well, unless it is the filesystem root, the home directory or a directory above it (the reason is then
+// working-dir-too-broad) or no home directory is known.
 // A file whose canonical path looks secret
 // (scripts/lib/jev-pointer-secret-path.mjs: SSH keys, env files, credential and token files, key stores), a
 // settings*.json file, and any file under a directory listed in OMC_JEV_POINTER_EXPAND_SECRET_DIRS is never
@@ -1208,19 +1209,21 @@ function pointerExpandRoots(env = process.env) {
   return pointerDirList(env.OMC_JEV_POINTER_EXPAND_DIRS);
 }
 // The working directory of the session as an extra root (OMC_JEV_POINTER_EXPAND_CWD=1). Returns { root } for a usable
-// directory, { broad } (its real path) for the filesystem root or the home directory, which never become a root, and
-// {} when the switch is off or the directory cannot be resolved.
+// directory, { broad } (its real path) for the filesystem root, the home directory or a directory above it, which never
+// become a root, and {} when the switch is off, the home directory is unknown or the directory cannot be resolved.
 function pointerCwdRoot(directory, env = process.env) {
   if (String(env.OMC_JEV_POINTER_EXPAND_CWD ?? '').trim() !== '1') return {};
   try {
     const real = realpathSync(directory || process.cwd());
-    let home = null;
+    let home = homedir();
+    if (!home) return {}; // nothing tells whether the working directory holds the home directory
+    home = resolve(home);
     try {
-      home = realpathSync(homedir());
+      home = realpathSync(home);
     } catch {
-      // No usable home directory: only the filesystem root is too broad.
+      // A home directory that cannot be resolved is compared as written.
     }
-    return real === parse(real).root || real === home ? { broad: real } : { root: real };
+    return real === parse(real).root || isPathInDirectory(home, real) ? { broad: real } : { root: real };
   } catch {
     return {};
   }
