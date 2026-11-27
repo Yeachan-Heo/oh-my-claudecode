@@ -446,7 +446,7 @@ describe('series of traces: merging', () => {
   // Literals the mask lets through and the check of the other stages finds.
   it.each([
     ['a German word for a secret', 'Bash(echo "kennwort: Zq8Tr4Lm2Xp" > a.txt)'],
-    ['a Spanish word for a secret', 'Bash(echo "contraseña: Zq8Tr4Lm2Xp")'],
+    ['a Spanish word for a secret', 'Bash(echo "contrase\u00f1a: Zq8Tr4Lm2Xp")'],
     ['escaped JSON, found in the text of the question only', 'Bash(echo {\\"password\\": \\"Zq8Tr4Lm2Xp\\"})'],
     ['unicode escapes in JSON', 'Bash(echo {\\u0022password\\u0022: \\u0022Zq8Tr4Lm2Xp\\u0022})'],
     ['a .ssh directory with a suffix', 'Read(/home/u/.ssh_backup/Zq8Tr4Lm2Xp)'],
