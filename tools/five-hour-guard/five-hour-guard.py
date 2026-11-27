@@ -73,7 +73,7 @@ ap.add_argument('--max-age', type=finite_float, default=180, help='data older th
 ap.add_argument('--margin', type=finite_float, default=150, help=f'resume this many seconds after the reset time (0 to {MAX_MARGIN_S})')
 ap.add_argument('--interval', type=finite_float, default=30, help=f'seconds between ticks (at least {MIN_INTERVAL_S:g})')
 ap.add_argument('--heartbeat', type=finite_float, default=None, help=f'pause file validity after each tick; the hook lets sessions go when it lapses (guard dead); from twice --interval plus {HEARTBEAT_SLACK_S} s to {MAX_HEARTBEAT_S} (default {DEFAULT_HEARTBEAT_S}, or twice --interval plus {HEARTBEAT_SLACK_S} s when that is more)')
-ap.add_argument('--warn-every', type=finite_float, default=600, help='at most one WARNING about the usage data (missing, stale, no percentage, implausible reset time) per this many seconds and kind')
+ap.add_argument('--warn-every', type=finite_float, default=600, help='at most one WARNING about the usage data (missing, stale, no percentage, implausible reset time) or a hook command that is not read to its end per this many seconds and kind')
 ap.add_argument('--test-pause', type=finite_float, default=0, metavar='SECONDS', help=f'install check: hold sessions for this many seconds (up to {MAX_TEST_PAUSE_S}), then release; touches no state')
 ap.add_argument('--test-only', default='', metavar='PREFIXES', help='with --test-pause: comma separated session id prefixes; only those sessions are held')
 ap.add_argument('--once', action='store_true', help='run a single tick and exit without cleaning a pause started by it (tests)')
@@ -211,7 +211,7 @@ def same_file(a, b):
 HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}
 ENTRY_LOG = 'registered hook log'   # the value of --log in a hook entry that carries the marker: the hook appends a line to it for every call it holds
 ENTRY_FILE = 'file named by the hook entry'   # a word of the command of the hook entry in settings.json that the entry the guard generates does not have (another hook, interpreter or log path)
-UNSCANNED = 'command that cannot be read to its end'   # the entry for a command of another hook that a limit of command_programs cut short: the guard writes nothing while it is there
+UNSCANNED = 'command that cannot be read to its end'   # the entry for a command that command_programs cannot read to its end: while it is there, the guard writes a file only where that destroys nothing of somebody else (holds_own_output)
 OTHER_PROGRAM = 'program of another hook'   # a file that a command of any other hook (or the status line) in settings.json runs
 PROGRAM_LABELS = HOOK_PROGRAMS | {OTHER_PROGRAM, 'guard script', 'settings tool script', 'entry module'}
 READ_ONLY_LABELS = {'configuration file', 'usage_cache', 'usage_cache lock', 'settings_file'}   # files the guard only reads (many hooks name them): a command of another hook that names one is no collision
@@ -240,7 +240,7 @@ def may_be_one_file(la, pa, lb, pb):
 
 def collisions(files):
     """[(label a, path a, label b, path b)]: pairs of files that are one file and may not be."""
-    named = [(label, path) for label, path in files if path]
+    named = [(label, path) for label, path in files if path and label != UNSCANNED]   # (an unread command is a message, not a path)
     return [(la, pa, lb, pb) for i, (la, pa) in enumerate(named) for lb, pb in named[i + 1:]
             if not may_be_one_file(la, pa, lb, pb) and same_file(pa, pb)]
 
@@ -299,8 +299,8 @@ CHDIR_WORDS = frozenset({'-C', '--directory', '--chdir'})   # options of a wrapp
 
 
 class ScanIncomplete(Exception):
-    """A command that command_programs cannot read to its end (a limit was reached): what it names may be a file of the guard, so the
-    guard writes nothing while it stands in settings.json (see UNSCANNED)."""
+    """A command that command_programs cannot read to its end (a limit was reached, or a construct whose result it cannot know): what it names
+    may be a file of the guard (see UNSCANNED)."""
 
 
 def command_word(words):
@@ -932,8 +932,13 @@ def registered_runtime_files():
             try:   # one handler that cannot be read must not hide the ones after it
                 marked = ENTRY.has_marker(handler['command'])   # the roles of three words are read in the entry that `add` writes, not in a command found by its exact path
                 hooks, interpreters, logs = entry_roles(handler['command']) if marked else ([], [], [])
-                found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated) + [t for t in logs if os.path.isabs(t)], values=env)]   # the log is a file of its own below, so no other word of the entry may be it
-                if marked:
+                try:
+                    words = command_programs(handler['command'], list(generated) + [t for t in logs if os.path.isabs(t)], values=env)   # the log is a file of its own below, so no other word of the entry may be it
+                except ScanIncomplete as e:
+                    words = []
+                    found.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
+                found += [(ENTRY_FILE, t) for t in words]
+                if marked:   # also where the command is not read to its end: its hook, interpreter and log stay protected
                     found += [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters] + [(ENTRY_LOG, t) for t in logs if os.path.isabs(t)]
             except ScanIncomplete as e:
                 found.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
@@ -982,9 +987,6 @@ def own_files():
     return [('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
             ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('entry module', os.path.join(HERE, 'five_hour_guard_entry.py'))]
 
-for _label, _text in registered_runtime_files():
-    if _label == UNSCANNED:
-        fail(f'{_text}... in {SETTINGS or default_settings()} is not read to its end, so the guard cannot tell whether it names a file of the guard: shorten the command or remove the hook')
 check_distinct([*configured_files(), *registered_runtime_files(),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
@@ -1067,7 +1069,7 @@ def log_is_program():
             blocked = False   # a look that fails never costs the log
         LOG_LOOK[:] = [now, blocked]
         if blocked:
-            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard; a command there that is not read to its end blocks the log too)', flush=True)
+            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard; while a command there is not read to its end, a log file that holds other text than the lines of this guard counts as such a program)', flush=True)
     return LOG_LOOK[1]
 
 
@@ -1086,16 +1088,48 @@ def fix_hint(label):
     return 'check the configured paths' if label == OTHER_PROGRAM else 'run five-hour-guard-settings.py add again'
 
 
+OWN_LOG_LINE = re.compile(rb'\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ')   # how every line that log() writes starts
+
+
+def holds_own_output(path):
+    """Whether a write to the pause file, the state file or the log at `path` destroys nothing of somebody else: nothing is there, or a regular
+    file (not a link) that is empty or holds what this guard writes there: a pause document, a stored state, log lines. A file that cannot be
+    looked at counts as somebody else's."""
+    try:
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode):
+            return False
+        if st.st_size == 0:
+            return True
+        if path == PAUSE_FILE:
+            return is_guard_pause(path)
+        with os.fdopen(os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)), 'rb') as f:
+            if path == LOG:
+                return OWN_LOG_LINE.match(f.read(20)) is not None
+            doc = load_json(f)
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return (path == STATE and isinstance(doc, dict) and type(doc.get('paused')) is bool
+            and all(doc.get(k) is None or type(doc.get(k)) in (int, float) for k in ('since', 'resume_at')))
+
+
 def refuse_program_overwrite(*paths):
     """A hook, interpreter or launcher that a registered entry names, or a program that another hook entry runs, is never replaced by a
     write of the guard: settings.json can be rewritten at any moment, so this is looked at at every write (the entry into a pause, each
-    renewal and the end of a pause). One look at settings.json serves all the paths of one write."""
+    renewal and the end of a pause). One look at settings.json serves all the paths of one write. A command that is not read to its end does
+    not stop a pause: what it names is not known, so while one is there a path is written only where that destroys nothing of somebody else
+    (holds_own_output)."""
     scanned = registered_runtime_files()
-    for label, text in scanned:
-        if label == UNSCANNED:   # what the command names is not known, so a file of the guard may be among it
-            raise OSError(f'{text}... in {SETTINGS or default_settings()} is not read to its end, so the guard cannot tell whether it names {paths[0] if paths else "a file of the guard"}: nothing is written (shorten the command or remove the hook)')
     if not SCANNED[0]:   # a session that loaded settings.json before it was damaged still runs its hooks, and none of them is known
         raise OSError(f'{SETTINGS or default_settings()} cannot be read and no earlier read of it succeeded, so the guard cannot tell whether a hook of it runs {paths[0] if paths else "a file of the guard"}: nothing is written until it can be read')
+    unread = next((text for label, text in scanned if label == UNSCANNED), None)
+    if unread is not None:   # what the command names is not known, so a file of the guard that holds something else may be among it
+        for path in paths:
+            if not holds_own_output(path):
+                raise OSError(f'{unread}... in {SETTINGS or default_settings()} is not read to its end and {path} holds something else than what this guard writes there, so the guard cannot tell whether '
+                              f'it names {path}: nothing is written (shorten the command, remove the hook or give the guard files of its own)')
     programs = [(label, program) for label, program in scanned if label in PROTECTED_LABELS]
     for path in paths:
         for label, program in programs:
@@ -1282,6 +1316,15 @@ def warn_data(kind, text):
         return
     WARNED[kind] = now
     log(f'WARNING ({kind}): {text}')
+
+
+def warn_unread():
+    """A command of settings.json that the scan cannot read to its end does not stop the guard (see refuse_program_overwrite), but it is said,
+    at most once per --warn-every seconds."""
+    unread = [text for label, text in registered_runtime_files() if label == UNSCANNED]
+    if unread:
+        warn_data('hook-unread', f'{len(unread)} command(s) in {SETTINGS or default_settings()} are not read to their end, so the guard cannot tell whether they name a file of the guard: '
+                  f'it writes its pause file, state file and log only where nothing, an empty file or its own earlier output is. First: {unread[0]}...')
 
 
 CACHE_READ_TRIES = 5     # OMC refreshes the cache by truncating it in place and writing it again: a read in between sees an empty or half-written document
@@ -1495,7 +1538,7 @@ def enter_pause(state, pct, reset_ts):
         check_pause_path()   # before anything is stored: a pause that cannot be published must not be remembered
         for label, path, out_label in program_collisions():
             raise OSError(f'the {label} {path} is the {out_label} of this guard: a pause would replace the program, so none is stored ({fix_hint(label)})')
-        refuse_program_overwrite(*[x for x in (STATE, PAUSE_FILE) if x])   # also a command that is not read to its end: no pause is remembered that cannot be written
+        refuse_program_overwrite(*[x for x in (STATE, PAUSE_FILE) if x])   # also, beside a command that is not read to its end, a file that holds something else: no pause is remembered that cannot be written
     state.update(paused=True, since=time.time(), resume_at=reset_ts + A.margin)
     log(f'THRESHOLD: 5h {pct} %, reset {ts(reset_ts)}; pause until {ts(state["resume_at"])}')
     hook_check('pause start')
@@ -1586,6 +1629,7 @@ def safe_tick(state):
             log('ERROR: a lock file of this guard was removed or replaced and another guard holds the new one: stopping, the pause file is left alone')
             STOP = True
             return False
+        warn_unread()
         tick(state)
         return True
     except Exception as e:
@@ -1742,6 +1786,11 @@ def main():
     signal.signal(signal.SIGINT, on_signal)
     if A.test_pause:
         return test_pause()
+    unread = [text for label, text in registered_runtime_files() if label == UNSCANNED]
+    for label, path in (('state_file', STATE), ('pause_file', PAUSE_FILE)) if unread else ():
+        if not holds_own_output(path):   # no pause could ever be written: say it now, not at the threshold
+            fail(f'{unread[0]}... in {SETTINGS or default_settings()} is not read to its end, and "{label}" ({path}) holds something else than what this guard writes there, so that command may run it: '
+                 'give the guard files of its own, or shorten the command or remove the hook')
     if os.path.lexists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):   # lexists: a dangling link is somebody's path too
         # the start would remove it as a leftover: never remove a file that is not a pause of this guard (a mistyped path)
         fail(f'the file {PAUSE_FILE} exists and is not a pause file of this guard: it is left untouched; check "pause_file", or remove the file yourself')
