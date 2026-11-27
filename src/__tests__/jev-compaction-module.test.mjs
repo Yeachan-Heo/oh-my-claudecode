@@ -2920,6 +2920,7 @@ describe('jev-compaction module: settings fallback for the options of the stages
     ['OMC_JEV_COMPACT_ARCHIVE', 'active', (c) => c.archive, 'active', 'off'],
     ['OMC_JEV_COMPACT_JEV_USAGE', '1', (c) => c.jevUsage, true, false],
     ['OMC_JEV_COMPACT_TAIL_BY_LOOP', 'active', (c) => c.tailByLoop, true, false],
+    ['OMC_JEV_COMPACT_HOST_ATTACHMENTS', '1', (c) => c.hostAttachments, true, false],
     ['OMC_JEV_COMPACT_OWNER_TAIL', 'active', (c) => c.ownerTail, true, false],
     ['OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION', 'on', (c) => c.ownerTailCrossSession, 'on', 'fallback'],
     ['OMC_JEV_COMPACT_OWNER_TAIL_AGENTS', 'active', (c) => c.ownerTailAgents, true, false],

@@ -174,6 +174,17 @@
  * were given up follow with `abandoned: true`. `cost_basis` is `reported` when an answer carries a cost, else `unknown`. The pass before the
  * module's own request puts both fields into its `verdicts_fill` record, and a pass in the background that asked something writes such a record of its own.
  *
+ * Host attachments (OMC_JEV_COMPACT_HOST_ATTACHMENTS=1 or true, off by default; without it the user rows of text keep their handles and no record gains a field).
+ * The host keeps what is no row (instructions, lists of skills, agents and tools, hook contexts, the text of used skills) in the group of the row before it, and a
+ * row that keeps its handle comes back with its group. With the switch on each user row of text before the open tool loop is built from its text, with the messages
+ * delivered after it in their envelopes, and the host announces again what it finds missing. A row keeps its handle in a turn with an image, a document or a /goal
+ * record, without text or with [Image #N], or in a turn the API form does not place; without the API form nothing is taken off. When the row of an advisor reminder
+ * cannot be rebuilt, or the API form does not show the start of a long conversation, the compaction goes to the summary (advisor_image, advisor_command,
+ * advisor_no_row, advisor_in_tail, advisor_form_cut). The predictions take off the attachments that go less what the host announces again. The record gets
+ * `rebuilt_user`, `advisor_blocks`, `attachments_dropped`, `attachments_dropped_tokens`, `attachments_kinds`, `attachments_kinds_tokens`, `attachments_skills`
+ * (names of used skills), `attachments_back`, `attachments_back_tokens`, `attachments_back_from_results_tokens` and `attachments_resent_tokens`; see
+ * "host attachments" below.
+ *
  * Secrets in the paste, reply, agent and block stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
  * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added. The check is bounded (maskSecrets
@@ -825,6 +836,7 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_ARCHIVE: await $.env.get('OMC_JEV_COMPACT_ARCHIVE'),
     OMC_JEV_COMPACT_JEV_USAGE: await $.env.get('OMC_JEV_COMPACT_JEV_USAGE'),
     OMC_JEV_COMPACT_TAIL_BY_LOOP: await $.env.get('OMC_JEV_COMPACT_TAIL_BY_LOOP'),
+    OMC_JEV_COMPACT_HOST_ATTACHMENTS: await $.env.get('OMC_JEV_COMPACT_HOST_ATTACHMENTS'),
     OMC_JEV_COMPACT_OWNER_TAIL: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL'),
     OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION'),
     OMC_JEV_COMPACT_OWNER_TAIL_AGENTS: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL_AGENTS'),
@@ -953,6 +965,8 @@ export async function readConfig($) {
     jevUsage: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_JEV_USAGE ?? '').trim()),
     // The tail kept whole is the open tool loop alone, not also the last KEEP_LAST rows (off unless active).
     tailByLoop: String(env.OMC_JEV_COMPACT_TAIL_BY_LOOP ?? '').trim() === 'active',
+    // Host attachments (off unless 1 or true): the user rows of text lose their handle, so the host's old attachments in their groups do not come back.
+    hostAttachments: ['1', 'true'].includes(String(env.OMC_JEV_COMPACT_HOST_ATTACHMENTS ?? '').trim().toLowerCase()),
     // Owner tail (off unless active): the newest message of the user and the text of the answers after it stay word for word. The three options act only with it.
     ownerTail: String(env.OMC_JEV_COMPACT_OWNER_TAIL ?? '').trim() === 'active',
     ownerTailCrossSession: crossSessionMode(env.OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION),
@@ -3409,7 +3423,7 @@ function serverBlocks(messages, api, keepFrom) {
 // the one message of its group (groupsOf), placed at the group's first row with content, so the result
 // rows that follow pair with it and the host gives it a new message.id; from keepFrom on
 // (openLoopStart) the rows keep their handles.
-function build(messages, candidates, keepFrom, group, stats, queued = new Map()) {
+function build(messages, candidates, keepFrom, group, stats, queued = new Map(), drop = new Set()) {
   const byId = new Map();
   const notes = new Map();
   for (const c of candidates) { if (c.note) notes.set(c.resIdx, c); else byId.set(c.id, c); }
@@ -3421,6 +3435,7 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
   stats.joinedRows = 0;
   stats.queuedCarried = 0;
   stats.queuedKeptChars = 0;
+  stats.rebuiltUser = 0;
   const merged = new Map();
   for (const [i, m] of messages.entries()) {
     if (m.trimDrop === true) continue; // agent trim: a row left without a block
@@ -3478,6 +3493,14 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
       stats.queuedCarried += own.length;
       if (!results.length && !text) continue;
       out.push({ role: 'user', text, toolUses: [], toolResults: results });
+      continue;
+    }
+    // A user row of text in `drop` (host attachments) is built from its text with the messages delivered after it, so the host does not bring back its group.
+    if (m.role === 'user' && drop.has(i)) {
+      const { own, text } = carriedText(m, queued.get(i));
+      stats.queuedCarried += own.length;
+      stats.rebuiltUser++;
+      if (text.trim()) out.push({ role: 'user', text, toolUses: [], toolResults: [] });
       continue;
     }
     // A row kept as it is gets the messages delivered after it back from the host.
@@ -3731,13 +3754,18 @@ function noteFailures(failures, now) {
 // or one with a result that may change (a candidate); a row kept by its handle gets its blocks back as they were.
 // A notification row is rebuilt only when its keep decision replaces it, so its envelopes are not in the sum: they are set on the candidate, measured on the
 // replacement row build writes (`envelope`: a trace or a short copy, text outside the envelopes; `envelopeDrop`: no text), and charged by that decision
-// (itemTokens, allocate).
-function envelopeChars(messages, queued, candidates) {
+// (itemTokens, allocate). A user row of text in `rebuild` (host attachments) is rebuilt too, so its envelopes are in the sum.
+function envelopeChars(messages, queued, candidates, rebuild) {
   const changing = new Set(candidates.map((c) => c.resIdx));
   const noteRows = new Map(candidates.filter((c) => c.note).map((c) => [c.resIdx, c]));
   let envelopes = 0;
   for (const [i, blocks] of queued) {
     const m = messages[i];
+    if (rebuild?.has(i) && m.role === 'user' && !(m.toolResults || []).length) {
+      const c = carriedText(m, blocks);
+      envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
+      continue;
+    }
     if (!((m.toolResults || []).length || noteRows.has(i)) || !((m.toolResults || []).every(textOnlyResult) || changing.has(i))) continue;
     const note = noteRows.get(i);
     if (note) {
@@ -6183,6 +6211,305 @@ async function archiveStep($, cfg, record, mode, candidates, rows, keepFrom, gro
   Object.assign(record, { merged_traces: merged.filter((e) => e.merged).length, merged_items: merged.reduce((n, e) => n + (e.merged ? e.ids.length : 0), 0) });
 }
 
+// --- host attachments (OMC_JEV_COMPACT_HOST_ATTACHMENTS=1 or true) -------------------------------------------------------------------------------
+// The host keeps every entry that is no row (an attachment, a local command's record, an isMeta message, a system entry) in the group of the row before it, and a row
+// that keeps its handle comes back with its whole group. So with the switch on a user row of text before keepFrom is built from its text (build, `drop`), with the
+// messages delivered after it in their envelopes, and its group (instructions, lists of skills and agents, deltas of tools, memory files, the old text of used
+// skills, hook contexts) does not come back; the host announces again what it finds missing in the list after the boundary. A row keeps its handle for a technical
+// reason only: it stands from keepFrom on (the open loop), its turn holds an image, a document or a /goal record (which renders to nothing and which the host does
+// not rebuild), it has no text or holds [Image #N], or the API form does not place its turn.
+// The advisor: the host takes the advisor's model from the last advisor_tool attachment of the list before its first request after a compaction, so the row that
+// carries the advisor's reminder (the last user row of its turn) is rebuilt too and the host announces the advisor again from the setting; a carrier that cannot be
+// rebuilt without a loss hands the compaction to the host's summary (advisor_image, advisor_command, advisor_no_row, advisor_in_tail, advisor_form_cut).
+// The kinds of attachments are told by the first line the host renders each with, so their table follows the version of the host.
+const API_FORM_MAX = 4096; // the number of messages the host's API form keeps (a cut form shows less than the conversation)
+const GOAL_COMMAND = /^\s*<command-name>\s*\/goal\b/i;
+// The advisor's reminder in its three forms (the instructions, the sentence of an announcement, the removal), at the start of a text or after an empty line.
+const ADVISOR_NOTE = new RegExp(String.raw`(?:^\s*|\n\n)<system-reminder>\n(?:# Advisor Tool\n[\s\S]*?`
+  + String.raw`|The advisor tool is available; the advisor instructions announced earlier apply\.`
+  + String.raw`|The advisor tool is no longer available; disregard the earlier advisor instructions\.)\n</system-reminder>(?=\n\n|\s*$)`, 'g');
+const advisorNotes = (text) => (typeof text === 'string' && text.includes('<system-reminder>\n') ? (text.match(ADVISOR_NOTE) || []).length : 0);
+const REMINDER_BLOCK = /<system-reminder>\n[\s\S]*?\n<\/system-reminder>/g;
+// One rendered attachment of the host (a reminder) and its kind, by the first line the host renders it with. The third value says what the host does when the list
+// after the boundary lacks the attachment: true, it announces it again; 'list', it is a list the host keeps as a set of entries (a delta that comes back leaves the
+// rest of the list to be announced again); 'always', one is added after every compaction whatever was taken off (SessionStart hooks); false, it is never announced
+// again (used skills and a restored file come back only in the pack of the host's own compaction; hook contexts, task states and file notes come from events).
+const HOST_ATTACHMENTS = [
+  ['instructions', /^Codebase and user instructions are shown below/, true],
+  ['instructions_reread', /^Instruction files were re-read /, false],
+  ['session_context', /^(?:As you answer the user's questions, you can use the following context|The session context was re-read )/, true],
+  ['skill_listing', /^(?:The following skills are available for use with|New skills discovered in )/, 'list'],
+  ['agent_listing', /^(?:Available agent types for the Agent tool|New agent types are now available for the Agent tool|The following agent types are no longer available)/, 'list'],
+  ['deferred_tools', /^(?:The following tools just became available|The following deferred tools are now available)/, 'list'],
+  ['deferred_tools', /^(?:Definitions of the following tools were loaded earlier|The following (?:deferred )?tools are no longer available)/, 'list'],
+  ['mcp_instructions', /^(?:# MCP Server Instructions\b|The following MCP servers have disconnected)/, 'list'],
+  ['environment', /^# Environment\n/, true],
+  ['environment_update', /^# Environment update\b/, false],
+  ['model', /^You are powered by the model named /, true],
+  ['language', /^# Language\n/, true],
+  ['date', /^Today's date is /, true],
+  ['date_change', /^The date has changed\./, false],
+  ['advisor_tool', /^(?:# Advisor Tool\n|The advisor tool is (?:available|no longer available))/, true],
+  ['auto_mode', /^While (?:bypass permissions|auto) mode is active/, true],
+  ['remote_session_change', /^From here on, do not add attribution lines/, true],
+  ['invoked_skills', /^The following skills were invoked EARLIER/, false],
+  ['file', /^(?:Called the Read tool with the following input|Result of calling the Read tool)/, false],
+  ['compact_file_reference', /^Note: [^\n]+ was read before the last conversation was summarized/, false],
+  ['hook_session_start', /^SessionStart(?::[^\n]*)? hook (?:additional context|success): /, 'always'],
+  ['hook_context', /^[A-Za-z][\w.]*(?::[^\n]*)? hook (?:additional context|success|blocking error from command|stopped continuation)\b/, false],
+  ['task_status', /^(?:Background (?:agent|shell|monitor) |Task )/, false],
+  ['edited_file', /^Note: [^\n]+ changed on disk since you last read it/, false],
+  ['nested_memory', /^Contents of [^\n]+:\n/, false],
+  ['image_paths', /^The \d+ attached images?, in display order, are also saved at /, false],
+  ['host_reminder', /^(?:The user hasn't heard from you in a while|The task tools haven't been used recently|The user included the keyword "ultrathink")/, false],
+  ['host_reminder', /^(?:The user's message contains \/|## Exited Auto Mode|<total_tokens>|<tools-used-before-summary>)/, false],
+];
+const RESENT = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === true).map(([kind]) => kind));
+const LIST_KINDS = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === 'list').map(([kind]) => kind));
+const ALWAYS_RESENT = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === 'always').map(([kind]) => kind));
+const SKILL_TEXT = /^Base directory for this skill: ([^\n]+)/m;
+const skillNames = (t) => [...t.matchAll(/^### Skill: ([^\n]+)/gm)].map((x) => x[1].trim());
+// The host shows a user text that opens with <system-reminder ...> in the API form with that first "<" as "&lt;": a block is compared with the rows after this is undone.
+const unescapedOpener = (text) => (typeof text === 'string' ? text.replace(/^(\s*)&lt;(system-reminder\b)/, '$1<$2') : text);
+// A text made only of envelopes of this module (carriedText: <system-reminder id="jev-N">).
+function isOwnEnvelopes(text) {
+  const found = envelopesOf(text);
+  let at = 0;
+  for (const e of found) {
+    if (text.slice(at, e.from).trim() || !e.text.startsWith('<system-reminder id="jev-')) return false;
+    at = e.to;
+  }
+  return found.length > 0 && !text.slice(at).trim();
+}
+// The kind of one reminder; a message delivered while a turn ran (deliveryOf) is no attachment (queuedOf carries it).
+function attachmentKind(text) {
+  const body = text.replace(/^\s*<system-reminder>\n/, '');
+  for (const [kind, re] of HOST_ATTACHMENTS) if (re.test(body)) return kind;
+  return deliveryOf(text) || deliveryOf(body) ? 'delivery' : 'other';
+}
+// The attachments in a text the rows do not show: each reminder, and with `rest` the text around them as one piece of kind `meta` (an isMeta message: the text of a
+// skill, the continuation of a hook). `known`: the reminders a row's own text holds (the text of a result), taken off once each.
+function attachmentPieces(text, known = [], rest = true) {
+  if (typeof text !== 'string' || !text.trim()) return [];
+  const left = [...known];
+  const out = [];
+  for (const m of text.match(REMINDER_BLOCK) || []) {
+    const at = left.indexOf(m);
+    if (at >= 0) { left.splice(at, 1); continue; }
+    const kind = attachmentKind(m);
+    if (kind === 'delivery') continue;
+    out.push(kind === 'invoked_skills' ? { kind, chars: m.length, names: skillNames(m) } : { kind, chars: m.length });
+  }
+  const around = rest ? text.replace(REMINDER_BLOCK, '') : '';
+  if (around.trim()) {
+    const sk = SKILL_TEXT.exec(around);
+    out.push(sk ? { kind: 'skill_text', chars: around.length, names: [sk[1].trim().replace(/\/+$/, '').split('/').pop()] } : { kind: 'meta', chars: around.length });
+  }
+  return out;
+}
+// The texts of a block an attachment's reminder may stand in: a text block, the content of a tool_result (a string, or its text blocks).
+function blockTexts(b) {
+  if (b.type === 'text') return [b.text];
+  if (b.type !== 'tool_result') return [];
+  if (typeof b.content === 'string') return [b.content];
+  return Array.isArray(b.content) ? b.content.filter((x) => x && x.type === 'text').map((x) => x.text) : [];
+}
+const contentBlocks = (a) => (typeof a.content === 'string' ? [{ type: 'text', text: a.content }] : a.content.filter((b) => b && typeof b === 'object'));
+// A user row of text the host can rebuild from its text alone (a row of the open loop, a row with an image, a /goal record cannot be).
+const textRebuildable = (m, i, keepFrom, imageRows) => m.role === 'user' && !(m.toolResults || []).length && i < keepFrom
+  && Boolean(rowText(m.text)) && !/\[Image #\d+\]/.test(m.text) && !GOAL_COMMAND.test(m.text) && !imageRows.has(i);
+const resultRebuilt = (m) => m.role === 'user' && (m.toolResults || []).length > 0 && m.toolResults.every(textOnlyResult);
+// The API form read turn by turn (the messages between two assistant messages) against the rows. Returns {rows (the rows that carry an advisor reminder), text (the
+// user rows of text that are rebuilt without their handle: the rows of a turn that holds no image and no /goal record, advisor or not), blocks (advisor reminders
+// found), blocked (a reason the compaction goes to the summary), dropped, back, coveredBack, resent (the characters of what goes, what comes back and what the host
+// announces again)}; null without the API form.
+function carrierRows(messages, api, keepFrom) {
+  if (!Array.isArray(api) || !api.length) return null;
+  const imageRows = nonTextUserRows(messages, api).rows;
+  const rowOfResult = new Map();
+  const rowOfUse = new Map();
+  const textRows = new Map(); // rowText -> {rows: user rows with that text, ascending, at: the next one to take}
+  const asstRows = new Map();
+  const add = (list, t, i) => { const e = list.get(t); if (e) e.rows.push(i); else list.set(t, { rows: [i], at: 0 }); };
+  messages.forEach((m, i) => {
+    if (m.role === 'user') {
+      for (const r of m.toolResults || []) if (!rowOfResult.has(r.tool_use_id)) rowOfResult.set(r.tool_use_id, i);
+      const t = rowText(m.text);
+      if (t) add(textRows, t, i);
+    } else if (m.role === 'assistant') {
+      for (const u of m.toolUses || []) if (!rowOfUse.has(u.tool_use_id)) rowOfUse.set(u.tool_use_id, i);
+      const t = rowText(m.text);
+      if (t) add(asstRows, t, i);
+    }
+  });
+  let cursor = 0;
+  // The first row of `list` at or after the cursor and `lo`, before `hi`; rows are taken in order, so two rows with the same text are two turns.
+  const next = (list, text, lo = 0, hi = Infinity) => {
+    const e = list.get(text);
+    if (!e) return undefined;
+    const from = Math.max(cursor, lo);
+    while (e.at < e.rows.length && e.rows[e.at] < from) e.at++;
+    return e.at < e.rows.length && e.rows[e.at] < hi ? e.rows[e.at++] : undefined;
+  };
+  const out = {
+    rows: new Set(), text: new Set(), blocks: 0, blocked: undefined,
+    dropped: { n: 0, chars: 0, uncovered: 0, kinds: {}, charsByKind: {}, max: new Map(), skills: new Set() },
+    back: { n: 0, chars: 0, kinds: new Set(), byKind: new Map() }, coveredBack: 0,
+  };
+  const block = (reason) => { if (!out.blocked) out.blocked = reason; };
+  let seenAssistant = false;
+  let headShown = false;
+  let before; // the last row of the assistant message before the turn (undefined: none, or not placed)
+  let stretch = [];
+  const flush = (nextFirst) => {
+    const st = stretch;
+    stretch = [];
+    const first = !seenAssistant;
+    const msgs = st.map((a) => [a, contentBlocks(a)]);
+    const blocks = [];
+    const textAt = new Map(); // block -> the row its text shows
+    const anchors = [];
+    const lo0 = first ? 0 : before === undefined ? 0 : before + 1;
+    const hi0 = nextFirst === undefined ? Infinity : nextFirst;
+    for (const [, bs] of msgs) {
+      for (const b of bs) {
+        blocks.push(b);
+        if (b.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) anchors.push(rowOfResult.get(b.tool_use_id));
+        else if (b.type === 'text' && typeof b.text === 'string') {
+          const r = next(textRows, rowText(b.text), lo0, hi0) ?? next(textRows, rowText(unescapedOpener(b.text)), lo0, hi0);
+          if (r !== undefined) { anchors.push(r); textAt.set(b, r); }
+        }
+      }
+    }
+    if (anchors.length) cursor = Math.max(cursor, Math.max(...anchors) + 1);
+    if (first && anchors.includes(0)) headShown = true;
+    const image = blocks.some((b) => b.type !== 'text' && b.type !== 'tool_result');
+    const goal = blocks.some((b) => b.type === 'text' && typeof b.text === 'string' && GOAL_COMMAND.test(b.text));
+    // The user rows of the turn stand between the rows of the assistant messages around it.
+    let lo = first ? 0 : before === undefined ? undefined : before + 1;
+    let hi = nextFirst;
+    if (anchors.length) {
+      const top = Math.max(...anchors);
+      if (lo === undefined) { lo = top; while (lo > 0 && messages[lo - 1].role === 'user') lo--; }
+      if (hi === undefined) { hi = top + 1; while (hi < messages.length && messages[hi].role === 'user') hi++; }
+    }
+    const known = lo !== undefined && hi !== undefined;
+    let carrier;
+    if (known) for (let k = Math.min(hi, messages.length) - 1; k >= lo; k--) if (messages[k].role === 'user') { carrier = k; break; }
+    // The rows of text of the turn lose their handle unless a technical reason keeps it (an image or a /goal record in the turn).
+    if (known && !goal && !image) for (let k = lo; k < Math.min(hi, messages.length); k++) if (textRebuildable(messages[k], k, keepFrom, imageRows)) out.text.add(k);
+    const rebuilt = (k) => k !== undefined && (out.text.has(k) || resultRebuilt(messages[k]));
+    // Every attachment of the turn stands in the carrier's group (no user row: the assistant row before the turn, rebuilt before keepFrom), also one the host folded
+    // into the content of a result: it goes when the carrier is rebuilt and comes back with it otherwise.
+    const goes = carrier !== undefined ? rebuilt(carrier) : known && !first && before !== undefined && before < keepFrom;
+    const piece = (p, covered) => {
+      if (goes) {
+        out.dropped.n++;
+        out.dropped.chars += p.chars;
+        if (!covered) out.dropped.uncovered += p.chars;
+        out.dropped.kinds[p.kind] = (out.dropped.kinds[p.kind] || 0) + 1;
+        out.dropped.charsByKind[p.kind] = (out.dropped.charsByKind[p.kind] || 0) + p.chars;
+        out.dropped.max.set(p.kind, Math.max(out.dropped.max.get(p.kind) || 0, p.chars));
+        for (const name of p.names || []) out.dropped.skills.add(name);
+      } else {
+        out.back.n++;
+        out.back.chars += p.chars;
+        out.back.kinds.add(p.kind);
+        out.back.byKind.set(p.kind, (out.back.byKind.get(p.kind) || 0) + p.chars);
+        if (covered) out.coveredBack += p.chars;
+      }
+    };
+    for (const [a, bs] of msgs) {
+      let msgRow;
+      for (const b of bs) if (b.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) msgRow = Math.max(msgRow ?? -1, rowOfResult.get(b.tool_use_id));
+      // A user message with results: its hidden text goes with its row in the count of `messages` (a rebuilt result row), so it is `covered`.
+      const covered = a.role === 'user' && msgRow !== undefined && resultRebuilt(messages[msgRow]);
+      for (const b of bs) {
+        if (textAt.has(b)) continue;
+        if (b.type === 'tool_result') {
+          const r = rowOfResult.get(b.tool_use_id);
+          if (r === undefined) continue;
+          const own = messages[r].toolResults.find((x) => x.tool_use_id === b.tool_use_id)?.text || '';
+          for (const t of blockTexts(b)) for (const p of attachmentPieces(t, own.match(REMINDER_BLOCK) || [], false)) piece(p, covered);
+          continue;
+        }
+        if (b.type !== 'text' || typeof b.text !== 'string') continue;
+        const t = unescapedOpener(b.text);
+        if (isOwnEnvelopes(t)) continue;
+        if (deliveryOf(t)) continue; // a delivered message is carried by queuedOf
+        if (textRows.has(rowText(t)) || textRows.has(rowText(b.text))) continue; // a row's text the host shows in another turn
+        for (const p of attachmentPieces(t)) piece(p, covered);
+      }
+    }
+    // The advisor's reminder in the turn.
+    let found = 0;
+    for (const b of blocks) for (const t of blockTexts(b)) found += advisorNotes(t);
+    if (!found) return;
+    out.blocks += found;
+    if (image) block('advisor_image');
+    if (goal) block('advisor_command');
+    if (!known) { block('advisor_no_row'); return; }
+    if (carrier === undefined) {
+      // No user row: the attachment stands behind the assistant message before the turn, which is rebuilt before keepFrom.
+      if (first) block('advisor_no_row');
+      else if (before >= keepFrom) block('advisor_in_tail');
+      return;
+    }
+    const m = messages[carrier];
+    if ((m.toolResults || []).length) { if (!m.toolResults.every(textOnlyResult)) block('advisor_image'); return; } // a result row of text is rebuilt anyway, the tail's too
+    if (carrier >= keepFrom) { block('advisor_in_tail'); return; }
+    const text = typeof m.text === 'string' ? m.text : '';
+    if (!rowText(text) || /\[Image #\d+\]/.test(text)) { block('advisor_image'); return; }
+    if (GOAL_COMMAND.test(text)) { block('advisor_command'); return; }
+    out.rows.add(carrier);
+  };
+  for (const a of api) {
+    if (!a || typeof a !== 'object' || !(Array.isArray(a.content) || typeof a.content === 'string')) continue;
+    if (a.role !== 'assistant') { stretch.push(a); continue; }
+    let lo;
+    let hi;
+    for (const b of contentBlocks(a)) if (b.type === 'tool_use' && rowOfUse.has(b.id)) { const r = rowOfUse.get(b.id); lo = Math.min(lo ?? r, r); hi = Math.max(hi ?? r, r); }
+    if (lo === undefined) {
+      for (const b of contentBlocks(a)) {
+        if (b.type !== 'text' || typeof b.text !== 'string') continue;
+        const r = next(asstRows, rowText(b.text));
+        if (r !== undefined) { lo = hi = r; break; }
+      }
+    }
+    if (!seenAssistant && lo === 0) headShown = true;
+    flush(lo);
+    before = hi;
+    seenAssistant = true;
+    if (hi !== undefined) cursor = Math.max(cursor, hi + 1);
+  }
+  flush(messages.length);
+  // An API form the host cut (it keeps the last API_FORM_MAX messages) shows less than the conversation: told by a head the form does not show.
+  if (!headShown && (api.length >= API_FORM_MAX / 2 || messages.length > API_FORM_MAX)) block('advisor_form_cut');
+  // The host announces again a kind of RESENT none of whose attachments come back: about as long as the longest one taken off; of a list the entries the pieces that
+  // come back do not hold; of ALWAYS_RESENT the longest taken off whatever comes back.
+  out.resent = 0;
+  for (const [k, n] of out.dropped.max) {
+    if (ALWAYS_RESENT.has(k)) out.resent += n;
+    else if (LIST_KINDS.has(k)) out.resent += Math.max(0, n - (out.back.byKind.get(k) || 0));
+    else if (RESENT.has(k) && !out.back.kinds.has(k)) out.resent += n;
+  }
+  return out;
+}
+// The record fields of the attachments the rebuilt rows take off (tokens at RATE_ATT per character) and of those that come back with rows that keep their handle.
+function hostAttachmentRecord(a, rates) {
+  if (!a) return { attachments_dropped: null };
+  const tok = (chars) => Math.round(rates.RATE_ATT * chars);
+  return {
+    advisor_blocks: a.blocks,
+    attachments_dropped: a.dropped.n, attachments_dropped_tokens: tok(a.dropped.chars), attachments_kinds: a.dropped.kinds,
+    attachments_kinds_tokens: Object.fromEntries(Object.entries(a.dropped.charsByKind).map(([k, c]) => [k, tok(c)])),
+    attachments_skills: [...a.dropped.skills].slice(0, 50),
+    attachments_back: a.back.n, attachments_back_tokens: tok(a.back.chars), attachments_back_from_results_tokens: tok(a.coveredBack),
+    attachments_resent_tokens: tok(a.resent),
+  };
+}
+// --- end of the host attachments ----------------------------------------------------------------------------------------------------------------
+
 // --- owner tail (OMC_JEV_COMPACT_OWNER_TAIL=active) ----------------------------------------------------------------------------------------------
 // The newest message of the user and the text of the answers after it (the text of the assistant rows, not their calls) stay word for word in any compaction, also at
 // a turn boundary and for a plugin's request. What else comes after it (calls and results of tools, reports of agents, messages of other sessions, notifications) is
@@ -6342,6 +6669,16 @@ async function decide($, e, cfg, record, started) {
   // The host restores a delivery after a row that keeps its handle, but a result row that is rebuilt carries it as
   // text, which would split the kept message: the summary runs instead.
   if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
+  // Host attachments: the user rows of text that are rebuilt without their handle, the carriers of the advisor among them; a carrier that cannot be rebuilt without a
+  // loss hands the compaction to the summary.
+  const hostAtt = cfg.hostAttachments ? carrierRows(messages, api, keepFrom) : null;
+  if (cfg.hostAttachments) {
+    Object.assign(record, hostAttachmentRecord(hostAtt, cfg.rates));
+    if (hostAtt?.blocked) return { fallback: hostAtt.blocked };
+  }
+  const dropRows = hostAtt ? new Set([...hostAtt.text, ...hostAtt.rows]) : undefined;
+  // The attachments of the rebuilt rows go (those of result rows are not counted: the host's count holds them either way); the host announces again what then lacks.
+  const attachTokens = hostAtt ? cfg.rates.RATE_ATT * (hostAtt.dropped.uncovered - hostAtt.resent - hostAtt.coveredBack) : 0;
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   // With the tail by the open loop every row is looked at; the filter below leaves the loop out.
   const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, { blockTraces: cfg.blockTraces, tailFrom: cfg.tailByLoop ? messages.length : undefined }).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
@@ -6350,7 +6687,7 @@ async function decide($, e, cfg, record, started) {
   const archMode = archiveModeIn(cfg, record);
   if (archMode === 'active') for (const c of candidates) { const path = archivePlannedPath(cfg, record.session_id, c); if (path) { c.archivePath = path; archiveCosts(c); } }
   if (cfg.notifications) record.notifications = candidates.filter((c) => c.note).length;
-  const envelopes = envelopeChars(messages, queued, candidates);
+  const envelopes = envelopeChars(messages, queued, candidates, dropRows);
   const removable = removableChars(candidates);
   // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
   const net = removable - envelopes;
@@ -6468,7 +6805,7 @@ async function decide($, e, cfg, record, started) {
         if (blocksPotential) record.floor_blocks_tokens = Math.round(blocksPotential);
         if (seriesPotential) record.floor_series_tokens = Math.round(seriesPotential);
       }
-      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor - blocksFloor + envelopeTokens - thinking.removed, cfg.rates, shape);
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor - blocksFloor - attachTokens + envelopeTokens - thinking.removed, cfg.rates, shape);
       record.floor_pred = Math.max(0, Math.round(floor));
       if (!ownerPlan?.kept && floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
@@ -6662,7 +6999,7 @@ async function decide($, e, cfg, record, started) {
     const blockHold = new Set([...agentMoved.keys(), ...(replyEdits ? replyEdits.keys() : []), ...messages.flatMap((m, i) => (pasteSwaps?.has(m) ? [i] : []))]);
     await moveBlockRows(blockHold);
     stageTokens += blockSaved;
-    let base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens - thinking.removed + headerTokens();
+    let base = tokens.tokens - trimTokens - agentTokens - stageTokens - attachTokens + envelopeTokens - thinking.removed + headerTokens();
     let plan;
     if (blocksMode === 'active' && blockOn) {
       // The second round (OMC_JEV_COMPACT_BLOCKS=active): the first pass (or the scores alone, for a manual compaction) comes first, and a prediction still above the target goes to the
@@ -6751,12 +7088,12 @@ async function decide($, e, cfg, record, started) {
   const header = headerOf();
   if (header !== undefined) rows = rows.map((m) => (isHeaderRow(m) ? { ...m, trimDrop: true } : m));
   if (archMode !== 'off') await archiveStep($, cfg, record, archMode, candidates, rows, keepFrom, group, queued, started);
-  let built = build(rows, candidates, keepFrom, group, stats, queued);
+  let built = build(rows, candidates, keepFrom, group, stats, queued, dropRows);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   if (cfg.replies !== 'off' && e.agentId === undefined) {
     const edited = replyEdits ?? (await moveReplies($, cfg, record, messages, api, keepFrom, deadline, queued));
     if (edited.size) {
-      built = build(rows.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
+      built = build(rows.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued, dropRows);
       repliesInstalled = true;
     }
   }
@@ -6787,11 +7124,13 @@ async function decide($, e, cfg, record, started) {
     dropped_assistant: stats.droppedAssistant,
     joined_rows: stats.joinedRows,
     queued_carried: stats.queuedCarried,
+    ...(cfg.hostAttachments ? { rebuilt_user: stats.rebuiltUser } : {}),
     score_hist: hist,
     unanswered: asked.length - answered,
   });
   // What the installed text stages took off, with or without the cascade: a stage that moved nothing (shadow, writes that failed, or a fallback) counts for nothing.
-  const installedTokens = trimTokens + agentTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0) + blockSaved + seriesSaved;
+  const installedTokens = trimTokens + agentTokens + attachTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0)
+    + (pastesInstalled ? movedTokens(pasted.stats) : 0) + blockSaved + seriesSaved;
   if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known, shape, thinking));
   if (agentMoved.size) record.agent_messages.installed = true;
   if (pastesInstalled) pasted.stats.installed = true;
