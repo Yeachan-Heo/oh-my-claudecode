@@ -1,3 +1,4 @@
+export function cleanHostText(value: unknown, max?: number): string;
 export function cleanTextBlock(value: unknown): string;
 export function escapeIdentifier(value: unknown, max?: number): string;
 export function cleanTextBlockKeeping(value: unknown, identifiers: unknown): string;
