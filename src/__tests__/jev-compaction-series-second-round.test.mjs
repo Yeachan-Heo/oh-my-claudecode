@@ -171,6 +171,8 @@ describe('series of traces in the compaction run: the queue of the second round'
     expect(JSON.stringify(run.asked)).not.toContain('diary');
     expect(allText(run.out)).toContain('/srv/diary/may.md');
     expect(run.record.series).toMatchObject({ series: 1, secret: 0 });
+    const only = await compactRun(env, session(40, (i) => (i === 5 ? `\n\n[compacted] Read(/srv/diary/may.md) - result of 1700 chars removed\n${call(12)}\n${call(13)}\n${call(14)}` : '')), { rate: () => 0 });
+    expect(only.record.floor_series_tokens).toBeUndefined();
   });
 
   it('asks nothing about series when the prediction is already at the goal, and without the switch there is no series at all', async () => {

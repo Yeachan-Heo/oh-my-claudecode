@@ -379,6 +379,12 @@ describe('series of traces: merging', () => {
     expect(record.series).toMatchObject({ series: 1, secret: 0 });
   });
 
+  it('a long word with no digit after a secret word and a link word is masked in the file', async () => {
+    const words = `[compacted] Bash(echo the password is correcthorsebattery now) - result of 20 chars removed\n${call(2)}`;
+    const { fake } = await run({ texts: [words] });
+    expect(onlyFile(fake)[1]).toBe(`[compacted] Bash(echo the password is *** now) - result of 20 chars removed\n${call(2)}\n`);
+  });
+
   it('a line where a value still follows a secret word after the mask is replaced whole', async () => {
     const residual = `${call(1)}\n[compacted] Bash(echo secret key value Qw7e8R9t0y) - result of 20 chars removed\n${call(3)}`;
     const { record, fake } = await run({ texts: [residual] });
