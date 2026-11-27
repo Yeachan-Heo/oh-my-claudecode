@@ -253,8 +253,7 @@ function createTriggerRepository(): { root: string; sha: string } {
   }));
   writeFileSync(join(root, 'docs', 'CLAUDE.md'), `<!-- OMC:VERSION:${VERSION} -->\n`);
   writeFileSync(join(root, 'CHANGELOG.md'), `# oh-my-claudecode v${VERSION}: fixture\n`);
-  const prevVersion = VERSION.split('.').map((p, i) => i === 2 ? String(Number(p) - 1) : p).join('.');
-  const releaseBodyFixture = `# oh-my-claudecode v${VERSION}\n\nRelease notes for ${PACKAGE_NAME}@${VERSION}.\n\n## Changes\n\n[Compare](https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v${prevVersion}...v${VERSION})\n`;
+  const releaseBodyFixture = `# oh-my-claudecode v${VERSION}\n\nnpm install -g ${PACKAGE_NAME}@${VERSION}\n\n[Compare](https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.15.3...v${VERSION})\n`;
   writeFileSync(join(root, '.github', 'release-body.md'), releaseBodyFixture);
   execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.name', 'Release Test'], { cwd: root, stdio: 'ignore' });
@@ -337,40 +336,31 @@ describe('release-boundary.mjs', () => {
     execFileSync('git', ['tag', TAG], { cwd: root, stdio: 'ignore' });
     expect(() => assertTrigger({ tag: TAG, sha, cwd: root })).toThrow('must be annotated');
 
-    // Test: Release body heading must contain the version
-    execFileSync('git', ['tag', '-d', TAG], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-a', TAG, '-m', TAG], { cwd: root, stdio: 'ignore' });
-    writeFileSync(join(root, '.github', 'release-body.md'), '# Release notes v4.15.3\n');
-    execFileSync('git', ['add', '.github/release-body.md'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['commit', '--amend', '--no-edit'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-d', TAG], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-a', TAG, '-m', TAG], { cwd: root, stdio: 'ignore' });
-    expect(() => assertTrigger({ tag: TAG, sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), cwd: root })).toThrow('heading does not contain version');
-
-    // Test: Release body must contain package@version
-    const prevVersion = VERSION.split('.').map((p, i) => i === 2 ? String(Number(p) - 1) : p).join('.');
-    writeFileSync(join(root, '.github', 'release-body.md'), `# oh-my-claudecode v${VERSION}\nRelease notes with no package line\n[Compare](https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v${prevVersion}...v${VERSION})\n`);
-    execFileSync('git', ['add', '.github/release-body.md'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['commit', '--amend', '--no-edit'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-d', TAG], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-a', TAG, '-m', TAG], { cwd: root, stdio: 'ignore' });
-    expect(() => assertTrigger({ tag: TAG, sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), cwd: root })).toThrow('does not contain');
-
-    // Test: Release body compare link must end with correct version
-    writeFileSync(join(root, '.github', 'release-body.md'), `# oh-my-claudecode v${VERSION}\nRelease for ${PACKAGE_NAME}@${VERSION}\n[Compare](https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v4.15.2...v4.15.3)\n`);
-    execFileSync('git', ['add', '.github/release-body.md'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['commit', '--amend', '--no-edit'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-d', TAG], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-a', TAG, '-m', TAG], { cwd: root, stdio: 'ignore' });
-    expect(() => assertTrigger({ tag: TAG, sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), cwd: root })).toThrow('compare link does not end with');
-
-    // Test: Valid release body passes with correct heading, package line, and compare link
-    writeFileSync(join(root, '.github', 'release-body.md'), `# oh-my-claudecode v${VERSION}\nRelease for ${PACKAGE_NAME}@${VERSION}\n[Compare](https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v${prevVersion}...v${VERSION})\n`);
-    execFileSync('git', ['add', '.github/release-body.md'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['commit', '--amend', '--no-edit'], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-d', TAG], { cwd: root, stdio: 'ignore' });
-    execFileSync('git', ['tag', '-a', TAG, '-m', TAG], { cwd: root, stdio: 'ignore' });
-    expect(assertTrigger({ tag: TAG, sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), cwd: root })).toEqual({ version: VERSION, sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() });
+    // The committed release body must describe this version (#5173).
+    const prevVersion = '4.15.3';
+    const compare = (range: string) => `[Compare](https://github.com/Yeachan-Heo/oh-my-claudecode/compare/${range})`;
+    const goodBody = `# oh-my-claudecode v${VERSION}\n\n\`\`\`bash\nnpm install -g ${PACKAGE_NAME}@${VERSION}\n\`\`\`\n\n${compare(`v${prevVersion}...v${VERSION}`)}\n`;
+    const triggerWithBody = (body: string) => {
+      execFileSync('git', ['tag', '-d', TAG], { cwd: root, stdio: 'ignore' });
+      writeFileSync(join(root, '.github', 'release-body.md'), body);
+      execFileSync('git', ['add', '.github/release-body.md'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['commit', '--amend', '--no-edit'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['tag', '-a', TAG, '-m', TAG], { cwd: root, stdio: 'ignore' });
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+      return () => assertTrigger({ tag: TAG, sha: head, cwd: root });
+    };
+    const stalePrevious = `# oh-my-claudecode v${prevVersion}\n\nnpm install -g ${PACKAGE_NAME}@${prevVersion}\n\n${compare(`v4.15.2...v${prevVersion}`)}\n`;
+    expect(triggerWithBody(stalePrevious)).toThrow('first heading must name v4.15.4');
+    expect(triggerWithBody('Release notes without a heading\n')).toThrow('first heading must name v4.15.4 (found: no heading)');
+    expect(triggerWithBody(goodBody.replace(`# oh-my-claudecode v${VERSION}`, `# oh-my-claudecode v${VERSION}0`))).toThrow('first heading must name');
+    expect(triggerWithBody(goodBody.replace(`# oh-my-claudecode v${VERSION}`, `# oh-my-claudecode v${VERSION}-rc.1`))).toThrow('first heading must name');
+    expect(triggerWithBody(goodBody.replace(`${PACKAGE_NAME}@${VERSION}`, `${PACKAGE_NAME}@${prevVersion}`))).toThrow(`install line for ${PACKAGE_NAME}@${VERSION}`);
+    expect(triggerWithBody(goodBody.replace(`${PACKAGE_NAME}@${VERSION}`, `${PACKAGE_NAME}@${VERSION}0`))).toThrow('install line for');
+    expect(triggerWithBody(goodBody.replace(`v${prevVersion}...v${VERSION}`, `v4.15.2...v${prevVersion}`))).toThrow(`compare link must end with ...v${VERSION} (found: v4.15.2...v${prevVersion})`);
+    expect(triggerWithBody(`${goodBody}\n${compare(`v4.15.2...v${prevVersion}`)}\n`)).toThrow('compare link must end with');
+    const passing = triggerWithBody(goodBody);
+    expect(passing()).toEqual({ version: VERSION, sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() });
+    expect(triggerWithBody(goodBody.replace(`\n\n${compare(`v${prevVersion}...v${VERSION}`)}\n`, '\n'))()).toEqual({ version: VERSION, sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() });
   });
 
   it('stages a safe npm archive with only a staged gitHead injection and rejects traversal', () => {

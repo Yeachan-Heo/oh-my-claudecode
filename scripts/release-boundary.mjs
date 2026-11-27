@@ -650,31 +650,23 @@ export function assertTrigger({ tag, sha, cwd = process.cwd() }) {
   if (committedReleaseBody !== releaseBody) {
     fail(`${releaseBodyPath} must match the contents committed at HEAD`);
   }
-  
-  // Guard: Release body must have a first heading containing the version
-  const headingMatch = committedReleaseBody.match(/^#\s+(.+?)(?:\n|$)/);
-  if (!headingMatch) {
-    fail(`${releaseBodyPath} must start with a markdown heading (# ...)`);
+
+  // The committed body is published verbatim as the GitHub Release, so it must
+  // describe this version, not a previous one (#5173). Versions match as whole
+  // tokens so 5.8.1 is not satisfied by 5.8.10 or 5.8.1-rc.1.
+  const versionToken = (prefix) => new RegExp(`(?<![\\w.-])${escapeRegExp(`${prefix}${version}`)}(?![\\w.-])`);
+  const releaseBodyHeading = committedReleaseBody.match(/^# +(.+)$/m)?.[1];
+  if (!releaseBodyHeading || !versionToken('v').test(releaseBodyHeading)) {
+    fail(`${releaseBodyPath} first heading must name v${version} (found: ${releaseBodyHeading ?? 'no heading'})`);
   }
-  if (!headingMatch[1].includes(`v${version}`)) {
-    fail(`${releaseBodyPath} heading does not contain version v${version} (found: ${headingMatch[1]})`);
+  if (!versionToken(`${PACKAGE_NAME}@`).test(committedReleaseBody)) {
+    fail(`${releaseBodyPath} must contain the install line for ${PACKAGE_NAME}@${version}`);
   }
-  
-  // Guard: Release body must contain package name with version
-  const packageLine = `${PACKAGE_NAME}@${version}`;
-  if (!committedReleaseBody.includes(packageLine)) {
-    fail(`${releaseBodyPath} does not contain '${packageLine}'`);
-  }
-  
-  // Guard: Release body must have compare link ending with correct version
-  const compareLinkMatch = committedReleaseBody.match(/\/compare\/([^\s)]+)/);
-  if (compareLinkMatch) {
-    const compareLink = compareLinkMatch[1];
-    if (!compareLink.endsWith(`...v${version}`)) {
-      fail(`${releaseBodyPath} compare link does not end with ...v${version} (found: ${compareLink})`);
+  for (const [, compareRange] of committedReleaseBody.matchAll(/\/compare\/([^\s)]+)/g)) {
+    if (!compareRange.endsWith(`...v${version}`)) {
+      fail(`${releaseBodyPath} compare link must end with ...v${version} (found: ${compareRange})`);
     }
   }
-  
   return { version, sha: expectedSha };
 }
 
