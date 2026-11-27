@@ -1122,4 +1122,18 @@ describe('/dev guard: spellings of round 6', () => {
   ])('reads the signal options of env as attached only: %s is %s', (command, expected) => {
     expect(check(command, '/dev').decision).toBe(expected);
   });
+
+  // the first command of a group or a condition after a pipe runs in the subshell of that part of the pipeline, and the whole group leaves the directory behind
+  // (measured with bash 5.2: true | { cd B; pwd; } prints B, true | { cd B; }; pwd and true | { true; cd B; }; pwd print the directory it started in)
+  it.each([
+    ['true | { cd /dev; rm null; }', '/tmp', 'deny'], ['true |& { cd /dev; rm null; }', '/tmp', 'deny'], ['true && true | { cd /dev; rm null; }', '/tmp', 'deny'], ['true | { { cd /dev; rm null; }; }', '/tmp', 'deny'],
+    ['true | { { cd /dev; }; rm null; }', '/tmp', 'deny'], ['true | if cd /dev; then rm null; fi', '/tmp', 'deny'], ['true | while cd /dev; do rm null; break; done', '/tmp', 'deny'], ['true |\n{ cd /dev; rm null; }', '/tmp', 'deny'],
+    ['true | { true; cd /tmp; }; rm null', '/dev', 'deny'], ['true | { cd /tmp; }; rm null', '/dev', 'deny'], ['true | { { true; cd /tmp; }; }; rm null', '/dev', 'deny'], ['true | if true; then true; cd /tmp; fi; rm null', '/dev', 'deny'],
+    ['true | while true; do true; cd /tmp; break; done; rm null', '/dev', 'deny'], ['true | for i in 1; do true; cd /tmp; done; rm null', '/dev', 'deny'], ['true | case x in x) true; cd /tmp;; esac; rm null', '/dev', 'deny'],
+    ['true | { cd /tmp; rm null; }', '/dev', 'allow'], ['true | { cd /dev; }; rm null', '/tmp', 'allow'], ['true | { true; cd /dev; }; rm null', '/tmp', 'allow'], ['true | { cd /dev; } && rm null', '/tmp', 'allow'],
+    ['true | { cd /dev | cat; rm null; }', '/tmp', 'allow'],
+  ])('reads a group after a pipe as a subshell of its own: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
+
 });

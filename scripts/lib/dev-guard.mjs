@@ -732,8 +732,17 @@ function devScanTokens(tokens, heredocs, depth) {
   const dirStack = []; // the directory in force at each open parenthesis: a subshell leaves it behind
   const groupDirs = []; // the same at each open group or compound command ({, if, while, until, for, case): one that is piped or put in the background runs in a subshell
   const flush = (op) => {
-    for (const w of words) { if (DEV_GROUP_OPEN.has(w)) groupDirs.push(devCwd); else if (!DEV_LEADING.has(w)) break; }
-    if (DEV_GROUP_CLOSE.has(words[0]) && groupDirs.length) { const outer = groupDirs.pop(); if (op === '|' || op === '|&' || op === '&') devCwd = outer; }
+    let opened = false; // the command opens a group or a compound command, whose first command is no member of a pipeline itself
+    for (const w of words) {
+      if (DEV_GROUP_OPEN.has(w)) {
+        groupDirs.push({ dir: devCwd, piped: !opened && afterPipeOp });
+        opened = true;
+      } else if (!DEV_LEADING.has(w)) break;
+    }
+    if (DEV_GROUP_CLOSE.has(words[0]) && groupDirs.length) {
+      const { dir, piped } = groupDirs.pop();
+      if (piped || op === '|' || op === '|&' || op === '&') devCwd = dir; // a subshell leaves the directory as it was
+    }
     const unwrapped = words.length ? devUnwrap(words, timeWords) : null;
     let found = null;
     if (unwrapped) {
@@ -747,7 +756,7 @@ function devScanTokens(tokens, heredocs, depth) {
     }
     // A cd in a pipeline or in the background runs in a subshell, so the directory stays (the last command of a pipeline too: lastpipe is off in a script).
     // One that may not run (after ||, after && when the chain ends, in the body of then, else, elif or do, in a branch of a case) leaves the directory unknown.
-    if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd') && !afterPipeOp && op !== '|' && op !== '|&' && op !== '&') {
+    if (unwrapped && (unwrapped.name === 'cd' || unwrapped.name === 'pushd' || unwrapped.name === 'popd') && (opened || !afterPipeOp) && op !== '|' && op !== '|&' && op !== '&') {
       const before = devCwd;
       if (afterAnd && chainBase === NO_DIR) chainBase = devCwd;
       devChangeDir(unwrapped.name, unwrapped.args);
