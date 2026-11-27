@@ -21,7 +21,8 @@
 // whatever --mode says. When claude refuses the flags of a start, the start is repeated once without them (row: fallback true). Source of the mode: --mode,
 // OMC_JEV_SESSION_MODE, the entry `session-routing[:shadow|:active|:off]` of OMC_JEV (the point is named-only: `all` never enables it);
 // `off` starts without any query. Jev failing (no key, error, timeout, no usable answer) never stops the start: the session starts with the default
-// model and the log row says `degraded`. The text sent to Jev and the paths of the log row are masked here, by maskJevState below (the resolver does not mask them).
+// model and the log row says `degraded`. The text sent to Jev and the paths of the log row are masked here, by maskJevState below (secrets, and the paths
+// of OMC_JEV_COMPACT_PRIVATE_PATHS when it is set); the same private paths are hidden in the working directory of the log context.
 // The log: <Jev log directory>/sessions.jsonl, one row per start (the directory of the other Jev logs: OMC_JEV_LOG_DIR, else state/jev under the state
 // root of the working directory); the query itself is in shadow.jsonl (point session-routing).
 // The session pool (OMC_JEV_POOL=1, OMC_JEV_POOL_MAX_SESSIONS, scripts/lib/jev-pool.mjs): at the ceiling the start is refused; off by default.
@@ -44,9 +45,33 @@ const ROLES = ['coordinator', 'worker'];
 const BRIEF_MAX_BYTES = 400_000;
 const MODES = ['shadow', 'active', 'off'];
 
-// The text sent to Jev (the start of the brief, the name) and the paths of the log row pass through the secret mask of
-// the Jev log (lib/jev-mask.mjs): every string field of the object is masked, other values stay as they are.
-const maskJevState = (state) => Object.fromEntries(Object.entries(state).map(([key, value]) => [key, typeof value === 'string' ? maskSecrets(value) : value]));
+// The user's own private paths (OMC_JEV_COMPACT_PRIVATE_PATHS, comma separated; a leading ~ also as the expanded home path), as the compaction module
+// treats them for its own text. A match is replaced with the marker; the pattern is linear (no run of slashes is entered in its middle). Without an
+// entry there is no function.
+const PRIVATE_PATH_MARKER = "[private path]";
+function privatePathMask(env) {
+  const sources = [];
+  const escape = (seg) => seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const entry of String(env.OMC_JEV_COMPACT_PRIVATE_PATHS ?? "").split(",").slice(0, 200)) {
+    const trimmed = entry.trim().replace(/[\\/]+$/, ""); // a trailing separator is not part of the name
+    if (trimmed.length < 3) continue; // "/", ".", "C:" would mask the whole text
+    const forms = [trimmed];
+    if (/^~(?:[\\/]|$)/.test(trimmed)) forms.push(homedir() + trimmed.slice(1)); // ~/x also as the expanded path
+    for (const form of forms) sources.push(form.split(/[\\/]+/).map(escape).join("[\\\\/]{1,8}")); // both slashes
+  }
+  if (sources.length === 0) return undefined;
+  // The path, a sub-path to the end of the token (the file name under the directory), never the middle of a longer name.
+  const re = new RegExp(`(?<![\\\\/])(?:${sources.join("|")})(?:[\\\\/][^\\s"'\x60;|&<>(),]*)?(?![\\p{L}\\p{N}_.-])`, "giu");
+  return (text) => text.replace(re, PRIVATE_PATH_MARKER);
+}
+
+// The text sent to Jev (the start of the brief, the name) and the paths of the log row pass through the private path mask and then the secret mask of
+// the Jev log (lib/jev-mask.mjs): every string field of the object is masked, other values stay as they are. The private paths go first, so that
+// the secret mask cannot change a path before it is read.
+const maskJevState = (state) => {
+  const hidePath = privatePathMask(process.env) ?? ((text) => text);
+  return Object.fromEntries(Object.entries(state).map(([key, value]) => [key, typeof value === 'string' ? maskSecrets(hidePath(value)) : value]));
+};
 
 function parseArgs(argv) {
   const out = { dryRun: false, noAdvisor: false };
@@ -326,7 +351,7 @@ async function launch(argv, env, held) {
     const previous = process.env.OMC_JEV;
     process.env.OMC_JEV = `${POINT}:active`;
     try {
-      await setJevHookContext({ session_id: env.CLAUDE_CODE_SESSION_ID, cwd, agent_type: 'jev-session' });
+      await setJevHookContext({ session_id: env.CLAUDE_CODE_SESSION_ID, cwd: privatePathMask(process.env)?.(cwd) ?? cwd, agent_type: 'jev-session' }); // the directory goes to the rows of shadow.jsonl
       decision = decideSession({ brief, name: args.name, role: args.role, env });
     } catch (error) { decision = { degraded: true, asked: false, source: {}, reason: `error: ${String(error?.message || error).slice(0, 120)}` }; }
     finally { if (previous === undefined) delete process.env.OMC_JEV; else process.env.OMC_JEV = previous; }

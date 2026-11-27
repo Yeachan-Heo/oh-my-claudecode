@@ -826,4 +826,68 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
       assert.ok(r.result.code === 0 && !('provider' in r.row), `${value}: ${js(r.row)}`);
     }
   }, SLOW);
+
+  // OMC_JEV_COMPACT_PRIVATE_PATHS: invented paths only. The brief names listed paths in several spellings and two things that are not listed.
+  const privateList = () => ['~/vault-notes', '/srv/Acme-Ledger/', ' x:\\Acme\\Plans ', '/opt/zeta.books', 'ab', '/', project, briefFile].join(',');
+  const privateBrief = () => [
+    'Read ~/vault-notes/q3.txt and ' + join(home, 'vault-notes', 'a.md') + ' first.',
+    'Then /SRV/ACME-LEDGER//2026/sum.csv, X:/acme\\plans\\draft.docx; also "/opt/zeta.books" and `/srv/acme-ledger`.',
+    'Keep /srv/acme-ledgers/open.csv, /opt/zetaXbooks and /srv/acme-ledger.old/y as they are; ab stays.',
+  ].join('\n');
+  const wholeBrief = { OMC_JEV_EXCERPT_CHARS: '4000' }; // the query keeps the whole brief of these tests
+
+  it('with OMC_JEV_COMPACT_PRIVATE_PATHS a listed path goes neither to the routing query nor to sessions.jsonl, in any slash or letter-case spelling', async () => {
+    const r = await start({ brief: privateBrief(), args: ['--name', 'Track /srv/acme-ledger/x'], env: { ...wholeBrief, OMC_JEV_COMPACT_PRIVATE_PATHS: privateList() } });
+    assert.equal(r.result.code, 0, r.result.stderr.slice(0, 300));
+    const { state } = r.queries[0].body;
+    assert.equal(state.task, [
+      'Read [private path] and [private path] first.',
+      'Then [private path], [private path]; also "[private path]" and `[private path]`.',
+      'Keep /srv/acme-ledgers/open.csv, /opt/zetaXbooks and /srv/acme-ledger.old/y as they are; ab stays.',
+    ].join('\n'));
+    assert.equal(state.description, 'Track [private path]');
+    assert.ok(r.row.result === 'decided' && r.row.brief === '[private path]' && r.row.cwd === '[private path]', js(r.row));
+    // The start itself works with the real paths.
+    assert.equal(readFileSync(`${argvFile}.cwd`, 'utf8'), realpathSync(project));
+    assert.ok(r.argv.at(-1).includes(briefFile), js(r.argv));
+  }, SLOW);
+
+  it('without a usable entry in OMC_JEV_COMPACT_PRIVATE_PATHS the query, the row and the log context keep the paths', async () => {
+    for (const value of [undefined, '', 'ab, /,C:\\']) {
+      const r = await start({ brief: privateBrief(), env: { ...wholeBrief, OMC_JEV_LOG_CONTEXT: '1', ...(value === undefined ? {} : { OMC_JEV_COMPACT_PRIVATE_PATHS: value }) } });
+      assert.equal(r.queries[0].body.state.task, privateBrief(), String(value));
+      assert.ok(r.row.brief === briefFile && r.row.cwd === project, `${value}: ${js(r.row)}`);
+      assert.equal(r.shadow[0].cwd, project, `${value}: ${js(r.shadow[0])}`);
+    }
+  }, SLOW);
+
+  it('with OMC_JEV_COMPACT_PRIVATE_PATHS the working directory of the log context is hidden in shadow.jsonl', async () => {
+    const r = await start({ env: { OMC_JEV_LOG_CONTEXT: '1', OMC_JEV_COMPACT_PRIVATE_PATHS: project } });
+    assert.ok(r.shadow.length === 1 && r.shadow[0].cwd === '[private path]', js(r.shadow));
+    assert.ok(!js(r.shadow).includes(project) && r.row.cwd === '[private path]', js(r.row));
+  }, SLOW);
+
+  it('a listed path is hidden before the secret mask can change a part of it', async () => {
+    const listed = '/srv/acme-token=abcdef123456789/ledger';
+    const r = await start({ brief: `Sum up ${listed}/may.csv today.`, env: { OMC_JEV_COMPACT_PRIVATE_PATHS: listed } });
+    assert.equal(r.queries[0].body.state.task, 'Sum up [private path] today.');
+  }, SLOW);
+
+  it('with OMC_JEV_COMPACT_PRIVATE_PATHS the rows of a refused start, a dry run and every kind of resume hide the paths', async () => {
+    const sessionsFile = join(tmp, 'sessions-private');
+    writeFileSync(sessionsFile, '25\n');
+    const listed = { OMC_JEV_COMPACT_PRIVATE_PATHS: `${project},${briefFile}` };
+    const full = poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, ...listed });
+    const refused = await start({ env: full });
+    assert.ok(refused.row.result === 'pool-refused' && refused.row.brief === '[private path]' && refused.row.cwd === '[private path]', js(refused.row));
+    const dry = await start({ env: listed, args: ['--dry-run'] });
+    assert.ok(dry.row.result === 'dry-run' && dry.row.brief === '[private path]' && dry.row.cwd === '[private path]', js(dry.row));
+    const logs = join(logsRoot, `s${++counter}`);
+    mkdirSync(logs, { recursive: true });
+    for (const [extra, flags, result] of [[listed, [], 'resume'], [listed, ['--dry-run'], 'dry-run'], [full, [], 'pool-refused']]) {
+      await run(['--resume', 'pth000001', '--prompt', 'p', '--cwd', project, ...flags], launcherEnv({ logs, extra }));
+      const row = rowsOf(logs, 'sessions.jsonl').at(-1);
+      assert.ok(row.mode === 'resume' && row.result === result && row.cwd === '[private path]', js(row));
+    }
+  }, SLOW);
 });
