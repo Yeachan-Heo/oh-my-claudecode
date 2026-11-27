@@ -24,6 +24,7 @@ import {
 import { ProgressState, classifyTranscript } from '../../scripts/lib/jev-progress.mjs';
 import { refusalText, reserveAgent } from '../../scripts/lib/jev-pool.mjs';
 import { findBashForSyntax } from '../../scripts/lib/shell-checks.mjs';
+import { validateRow } from '../../tools/diagnostics/denial_log_summary.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CLEANUPS = [];
@@ -331,6 +332,7 @@ describe('denial counter: provider process at the session ceiling', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ result: 'blocked', degree: 2 });
     expect(journal(ctx.logDir).filter((row) => row.kind === 'outcome' && row.ref === rows[0].id)).toMatchObject([{ result: 'blocked' }]);
+    for (const row of journal(ctx.logDir)) expect(validateRow(row), JSON.stringify(row)).toEqual({ ok: true, errors: [] });
   });
 
   it('the same session without the provider marker is released (the marker is the only difference)', () => {

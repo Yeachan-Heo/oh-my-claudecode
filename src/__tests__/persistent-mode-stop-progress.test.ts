@@ -4,6 +4,7 @@ import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { pathToFileURL } from "url";
 // @ts-expect-error the hook helper module has no type declarations
 import { resolveOmcStateRoot } from "../../scripts/lib/state-root.mjs";
 
@@ -273,6 +274,9 @@ describe("persistent-mode Stop rows and the provider process", () => {
     if (!fs.existsSync(file)) return [];
     return fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>).filter((row) => row.session_id === sid);
   };
+  // The schema validator of the journal reader tool: the rows the hook writes have to pass it.
+  const validateRow = async (): Promise<(row: Record<string, unknown>) => { ok: boolean; errors: string[] }> =>
+    (await import(pathToFileURL(path.join(WORKTREE, "tools", "diagnostics", "denial_log_summary.mjs")).href)).validateRow;
   const SWITCH: Record<string, string> = { OMC_JEV_STOP_PROGRESS: "1" };
   const PROVIDER: Record<string, string> = { OMC_JEV_STOP_PROGRESS: "1", OMC_PROVIDER: "acme" };
   const pastThreshold = { stopProgress: { hash: "", blocks: 6, ts: 0, progress: {}, totalBlocks: 6, parts: { git: "", ledger: "" } } };
@@ -291,6 +295,7 @@ describe("persistent-mode Stop rows and the provider process", () => {
     expect(end).toMatchObject({ guard: "ultragoal-stop", reason_code: "stop_release", sessionCount: 7, result: "passed" });
     expect(rows).toHaveLength(2);
     expect((readState(root, sid).stopProgress as Record<string, unknown>).blocks).toBe(7);
+    for (const row of rows) expect((await validateRow())(row), JSON.stringify(row)).toEqual({ ok: true, errors: [] });
   });
 
   it("writes the release and end rows for an acknowledged blocked exit, for an ordinary and a provider process", async () => {
@@ -304,6 +309,7 @@ describe("persistent-mode Stop rows and the provider process", () => {
       expect(rows.find((row) => row.kind === "release")).toMatchObject({ action: "stop-acknowledged-exit", guard: "ultragoal-stop", reason_code: "stop_release" });
       expect(rows.find((row) => row.kind === "end")).toMatchObject({ action: "blocked-with-reason", guard: "ultragoal-stop" });
       expect(rows).toHaveLength(2);
+      for (const row of rows) expect((await validateRow())(row), JSON.stringify(row)).toEqual({ ok: true, errors: [] });
     }
   });
 
@@ -316,6 +322,7 @@ describe("persistent-mode Stop rows and the provider process", () => {
     const rows = journalRows(sid);
     expect(rows.find((row) => row.kind === "release")).toMatchObject({ action: "stop-step-limit", reason_code: "timeout", maxSession: 50 });
     expect(rows.find((row) => row.kind === "end")).toMatchObject({ action: "step-budget" });
+    for (const row of rows) expect((await validateRow())(row), JSON.stringify(row)).toEqual({ ok: true, errors: [] });
   });
 
   it("a provider process gets the blocked text at the seventh block instead of a release, and the series is saved past the threshold", async () => {
