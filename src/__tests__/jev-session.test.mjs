@@ -10,7 +10,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
@@ -951,7 +951,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
   const gateOf = (logDir, since, later) => launcherGate({ state: { handoff_path: briefFile, launcher_attempts: 1, launcher_attempt_ts: since }, logDir, now: since + later, env: {} });
 
   it('a brief under a listed path: the row holds a digest in place of the path and the handoff gate reads the start from it', async () => {
-    const listed = { OMC_JEV_COMPACT_PRIVATE_PATHS: tmp };
+    const listed = { OMC_JEV_COMPACT_PRIVATE_PATHS: tmp, OMC_JEV_HANDOFF: '1' };
     const since = Date.now();
     const r = await start({ env: listed });
     assert.equal(r.result.code, 0, r.result.stderr.slice(0, 300));
@@ -975,16 +975,37 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     const sessionsFile = join(tmp, 'sessions-private-brief');
     writeFileSync(sessionsFile, '25\n');
     const since = Date.now();
-    const refused = await start({ env: poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, OMC_JEV_COMPACT_PRIVATE_PATHS: tmp }) });
+    const refused = await start({ env: poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, OMC_JEV_COMPACT_PRIVATE_PATHS: tmp, OMC_JEV_HANDOFF: '1' }) });
     assert.ok(refused.row.result === 'pool-refused' && refused.row.brief === '[private path]' && !js(refused.row).includes(tmp), js(refused.row));
     assert.deepEqual(gateOf(refused.logs, since, 1000), { allow: true, status: 'retry' });
+  }, SLOW);
+
+  it('a relative --brief under a listed path: the digest is that of the full path and the handoff gate reads the start from it', async () => {
+    const since = Date.now();
+    // The later --brief wins; the launcher of this test runs in the project directory, one level below the directory of the brief.
+    const r = await start({ args: ['--brief', relative(project, briefFile)], env: { OMC_JEV_COMPACT_PRIVATE_PATHS: tmp, OMC_JEV_HANDOFF: '1' } });
+    assert.equal(r.result.code, 0, r.result.stderr.slice(0, 300));
+    assert.equal(r.row.brief_sha256, createHash('sha256').update(briefFile).digest('hex'), js(r.row));
+    assert.deepEqual(gateOf(r.logs, since, LAUNCHER_IN_FLIGHT_MS + 1), { allow: false, status: 'started' });
+  }, SLOW);
+
+  it('without OMC_JEV_HANDOFF=1 a hidden brief gets no digest, neither in the row of a start nor in that of a refused one', async () => {
+    const sessionsFile = join(tmp, 'sessions-no-handoff');
+    writeFileSync(sessionsFile, '25\n');
+    for (const value of [undefined, '', '0', 'true']) {
+      const env = { OMC_JEV_COMPACT_PRIVATE_PATHS: tmp, ...(value === undefined ? {} : { OMC_JEV_HANDOFF: value }) };
+      const r = await start({ env });
+      assert.ok(r.row.brief === '[private path]' && !('brief_sha256' in r.row), `${value}: ${js(r.row)}`);
+      const refused = await start({ env: poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, ...env }) });
+      assert.ok(refused.row.result === 'pool-refused' && refused.row.brief === '[private path]' && !('brief_sha256' in refused.row), `${value}: ${js(refused.row)}`);
+    }
   }, SLOW);
 
   it('a row has no brief digest unless a listed path changes the brief, and the handoff gate reads such a row as before', async () => {
     const sessionsFile = join(tmp, 'sessions-plain-brief');
     writeFileSync(sessionsFile, '25\n');
     for (const value of [undefined, '/vol/acme-ledger', project]) { // the last one hides the working directory only
-      const listed = value === undefined ? {} : { OMC_JEV_COMPACT_PRIVATE_PATHS: value };
+      const listed = { OMC_JEV_HANDOFF: '1', ...(value === undefined ? {} : { OMC_JEV_COMPACT_PRIVATE_PATHS: value }) };
       const since = Date.now();
       const r = await start({ env: listed });
       assert.ok(r.row.brief === briefFile && !('brief_sha256' in r.row), `${value}: ${js(r.row)}`);
