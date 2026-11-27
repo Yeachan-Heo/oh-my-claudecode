@@ -46,13 +46,16 @@ own lane.
 ## Method
 
 1. State the question and what would count as an answer.
-2. Fan out source gathering to a read-only subagent when the history is long
-   (`oh-my-claudecode:explore`); keep synthesis in the lead.
+2. Read the record yourself, in authority order: the commits and PR
+   discussions that introduced the target and each later change, then the
+   linked records and incident sources when that trail is thin. A search
+   that finds nothing is still a finding.
 3. Reconcile: where sources conflict, the more authoritative source wins, and
    the conflict itself is reported.
 4. Write the answer with three labeled tiers — **evidence** (cited),
    **inference** (your reasoning from evidence, marked), **guess** (marked).
-   End with the one action the answer most supports, or "no action".
+   End with the one action the answer most supports, or "no action", and say
+   what the record does not answer.
 
 ## Rules
 

@@ -48,5 +48,5 @@ trust:
   are for.
 - A thread with no artifact behind it is reported as "mentioned but not
   persisted", never reconstructed from vibes.
-- Human rulings encountered in the trails keep their original wording
-  (`why` skill epistemics).
+- Human rulings encountered in the trails keep their original wording, attributed
+  to their source (the `why` skill's evidence tiers).

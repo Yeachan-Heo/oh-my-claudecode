@@ -31,6 +31,52 @@ follows one standard so readers can navigate any of them the same way.
 5. **No filler.** No restating the obvious, no throat-clearing, no AI tells
    (`ai-slop-cleaner` territory; this skill composes with it).
 
+## Cut every word that does no work
+
+- If the sentence survives without a word, the word goes. "In order to" is
+  "to".
+- Use the short, everyday word: "use", not "utilize".
+- Write the real symbol, file, flag, or command name, not a synonym or a
+  description of it.
+- Don't invent jargon. Use the words a developer would say out loud; say
+  what a named pattern means the first time.
+- When a rule makes a sentence worse, fix the sentence another way or leave
+  it alone.
+
+## Pick the mode first (Diátaxis)
+
+One document, one mode. Don't mix modes; split and link instead.
+
+- **Tutorial: learning by doing.** Say what the learner will build. Every
+  step produces a visible result, and you say what they should see.
+  Explanation gets one clause and a link.
+- **How-to: steps to a goal.** Solve the reader's problem. Assume
+  competence. Action only. Allow forks. Name the guide by the task.
+- **Reference: facts for lookup.** Only describe. Be dry, complete, and
+  sure. Mirror the structure of the thing described.
+- **Explanation: understanding and why.** One bounded topic. Give context:
+  design decisions, history, constraints, alternatives. Opinion is allowed
+  here and nowhere else.
+
+## Write sentences to the reader
+
+- Talk to the reader as "you", in the present tense. Say who does what;
+  passive only when the actor is unknown or beside the point.
+- Write instructions as commands. Put the condition before the instruction
+  and the common case first.
+- Vary sentence lengths: split the sentence that carries two thoughts, keep
+  the long one that carries one. Have a view in explanation; keep reference
+  dry.
+- Keep "only" and "not" next to the word they change. Break up long noun
+  strings. Make every "it", "they", and "this" point at one obvious thing.
+- Keep "the" and "a". Give each word one meaning, and pick one word per
+  action.
+- Use periods, not semicolons or em dashes. No slashes and no "(s)".
+- Never "simply", "easy", or "quickly" in a procedure. Skip idioms and
+  metaphors.
+- Headings carry the point, in sentence case. One h1 per page, no skipped
+  levels.
+
 ## Per surface
 
 - **Commit message**: subject says what changed in one line ≤72 chars; body
