@@ -975,8 +975,8 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     const sessionsFile = join(tmp, 'sessions-private-brief');
     writeFileSync(sessionsFile, '25\n');
     const since = Date.now();
-    const refused = await start({ env: poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, OMC_JEV_COMPACT_PRIVATE_PATHS: tmp, OMC_JEV_HANDOFF: '1' }) });
-    assert.ok(refused.row.result === 'pool-refused' && refused.row.brief === '[private path]' && !js(refused.row).includes(tmp), js(refused.row));
+    const refused = await start({ env: poolEnv({ FAKE_SESSIONS_FILE: sessionsFile, OMC_JEV_COMPACT_PRIVATE_PATHS: tmp, OMC_JEV_HANDOFF: ' 1 ' }) }); // trimmed, as the hook reads the switch
+    assert.ok(refused.row.result === 'pool-refused' && refused.row.brief === '[private path]' && 'brief_sha256' in refused.row && !js(refused.row).includes(tmp), js(refused.row));
     assert.deepEqual(gateOf(refused.logs, since, 1000), { allow: true, status: 'retry' });
   }, SLOW);
 
