@@ -22,7 +22,8 @@
 // OMC_JEV_SESSION_MODE, the entry `session-routing[:shadow|:active|:off]` of OMC_JEV (the point is named-only: `all` never enables it);
 // `off` starts without any query. Jev failing (no key, error, timeout, no usable answer) never stops the start: the session starts with the default
 // model and the log row says `degraded`. The text sent to Jev and the paths of the log row are masked here, by maskJevState below (secrets, and the paths
-// of OMC_JEV_COMPACT_PRIVATE_PATHS when it is set); the same private paths are hidden in the working directory of the log context.
+// of OMC_JEV_COMPACT_PRIVATE_PATHS when it is set); the same private paths are hidden in the working directory of the log context, in the session name of
+// the log rows and in the name of the settings file. The session itself gets its name as it is.
 // The log: <Jev log directory>/sessions.jsonl, one row per start (the directory of the other Jev logs: OMC_JEV_LOG_DIR, else state/jev under the state
 // root of the working directory); the query itself is in shadow.jsonl (point session-routing).
 // The session pool (OMC_JEV_POOL=1, OMC_JEV_POOL_MAX_SESSIONS, scripts/lib/jev-pool.mjs): at the ceiling the start is refused; off by default.
@@ -270,7 +271,8 @@ async function launch(argv, env, held) {
       if (value !== undefined) { console.error(`jev-session: --resume: ${flag} makes no sense at a resume (the role and the Jev decision stay from the original start of the session)\n${usageResume}`); return 2; }
     }
     if (!args.prompt) { console.error(`jev-session: --resume needs --prompt (the text of the resume turn)\n${usageResume}`); return 2; }
-    const name = args.name || `resume-${String(args.resume).slice(0, 8)}`;
+    const askedName = args.name || `resume-${String(args.resume).slice(0, 8)}`;
+    const name = privatePathMask(process.env)?.(askedName) ?? askedName; // the rows and the settings file name only: a resume passes no --name
     const { dir: cwd, source: cwdSource } = resolveStartDir({ cwdArg: args.cwd, env });
     if (!existsSync(cwd)) { console.error(`jev-session: directory ${cwd} does not exist`); return 2; }
     const trust = checkTrust(cwd, env);
@@ -329,12 +331,14 @@ async function launch(argv, env, held) {
   const trust = checkTrust(cwd, env);
   if (trust.verdict === 'untrusted') { console.error(`jev-session: directory ${cwd} (source: ${cwdSource}) is not trusted by Claude Code (no trust in ${trust.configFile} for it, its parent directories or its repository); a background session would not start. Pass --cwd <a trusted project directory> or run \`claude\` once in this directory and accept the trust. Nothing was started.`); return 2; }
 
+  const loggedName = privatePathMask(process.env)?.(args.name) ?? args.name; // the rows and the settings file name; the session gets args.name
+
   // The session pool gate before any Jev query: at the ceiling the start is refused with the count in the message and in the log row; a counter
   // read error never refuses and shows in the final row as pool {sessions: null, error}.
   const gate = poolGate(env, logDir, held);
   if (gate.refuse) {
     const maskedRefusal = maskJevState({ brief: briefPath, cwd }); // the same mask as the regular row
-    writeRow(logDir, { role: args.role, name: args.name, ...advisorField, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
+    writeRow(logDir, { role: args.role, name: loggedName, ...advisorField, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: maskedRefusal.brief, cwd: maskedRefusal.cwd, cwd_source: cwdSource, result: 'pool-refused', pool: gate.pool }, env);
     console.error(refusalMessage(gate));
     return 2;
   }
@@ -363,7 +367,7 @@ async function launch(argv, env, held) {
   const jevPasses = mode === 'active' && !decision.degraded;
   const passModel = decision.model && (decision.source?.model === 'marker' || (jevPasses && decision.source?.model === 'jev')) ? decision.model : undefined;
   const passEffort = decision.effort && (decision.source?.effort === 'marker' || (jevPasses && decision.source?.effort === 'jev')) ? decision.effort : undefined;
-  const settingsFile = settingsPathFor({ logDir, name: args.name });
+  const settingsFile = settingsPathFor({ logDir, name: loggedName });
   const buildArgs = (withFlags, withSettings) => {
     const a = ['--bg', '--name', args.name];
     if (withFlags && passModel) a.push('--model', passModel);
@@ -375,7 +379,7 @@ async function launch(argv, env, held) {
 
   // The log row keeps paths only through the state mask, never the text of the brief.
   const masked = maskJevState({ brief: briefPath, cwd });
-  const row = { mode, ...advisorField, role: args.role, name: args.name, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: masked.brief, cwd: masked.cwd, cwd_source: cwdSource, result: decision.degraded ? 'degraded' : mode === 'off' ? 'off' : 'decided', ...(decision.reason ? { reason: decision.reason } : {}), ...(decision.marker ? { marker: decision.marker } : {}), ...(decision.refused ? { refused: decision.refused } : {}), ...(decision.capped ? { capped: decision.capped } : {}), ...(decision.model ? { model: { to: decision.model, source: decision.source.model } } : {}), ...(decision.effort ? { effort: { to: decision.effort, source: decision.source.effort, ...(decision.score !== undefined ? { score: decision.score, confidence: decision.confidence } : {}) } } : {}), ...(gate.pool ? { pool: gate.pool } : {}), started_with: { model: passModel ?? null, effort: passEffort ?? null }, queryMs };
+  const row = { mode, ...advisorField, role: args.role, name: loggedName, ...providerField(env), ...(args.coordinator ? { coordinator: args.coordinator } : {}), brief: masked.brief, cwd: masked.cwd, cwd_source: cwdSource, result: decision.degraded ? 'degraded' : mode === 'off' ? 'off' : 'decided', ...(decision.reason ? { reason: decision.reason } : {}), ...(decision.marker ? { marker: decision.marker } : {}), ...(decision.refused ? { refused: decision.refused } : {}), ...(decision.capped ? { capped: decision.capped } : {}), ...(decision.model ? { model: { to: decision.model, source: decision.source.model } } : {}), ...(decision.effort ? { effort: { to: decision.effort, source: decision.source.effort, ...(decision.score !== undefined ? { score: decision.score, confidence: decision.confidence } : {}) } } : {}), ...(gate.pool ? { pool: gate.pool } : {}), started_with: { model: passModel ?? null, effort: passEffort ?? null }, queryMs };
 
   if (args.dryRun) { // a dry run writes no settings file; it prints the one it would write
     writeRow(logDir, { ...row, result: 'dry-run' }, env);
