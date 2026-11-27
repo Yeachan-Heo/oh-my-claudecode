@@ -150,6 +150,12 @@
  * `archive_timed_out`, `archive_ms`, `archive_marker`; `archive_planned` in shadow) and `merged_traces`, `merged_items`. A marker file in the session directory is touched by every compaction
  * that archives; scripts/lib/jev-compaction-state.mjs removes session directories whose newest file is older than OMC_JEV_ARCHIVE_DAYS days.
  *
+ * The tail by the open tool loop (OMC_JEV_COMPACT_TAIL_BY_LOOP=active, off by default; without it "the last KEEP_LAST rows" below stand as written). The tail that
+ * the cut and the stages leave alone is then the open tool loop alone, whose rows keep their handles, and nothing at a turn boundary: the results, notifications,
+ * agent messages, pasted tags and blocks of the last KEEP_LAST rows are treated like older ones, with the same checks for secrets and private paths (a long reply
+ * stays before the last user messages and turns as before; the series of traces stop at the open loop with the switch or without it). A conversation of three
+ * messages or more is compacted. The first and the newest user message stay as they are in the paste stage.
+ *
  * Usage of Jev's requests (OMC_JEV_COMPACT_JEV_USAGE=1 or active, off by default; without it no record gains a field and no record is added). The record of a
  * compaction gets `jev_usage`, one entry per request sent to Jev: `model` (as the answer names it, masked and cut to JEV_MODEL_MAX_CHARS characters),
  * `input_tokens`, `output_tokens` and `cost_usd` (always null; a missing value is null, never 0). The scoring requests come first, parallel to `jev_ms` and without
@@ -226,6 +232,9 @@ import { RESIDUAL_SECRET, archiveMaskedLong, cleanForJevLong, maskResidualLines 
 const POINT = 'compaction';
 // The last messages stay whole: the work in flight.
 const KEEP_LAST = 6;
+// The first row of the tail the stages leave alone, at most keepFrom (the first row that keeps its handle). With OMC_JEV_COMPACT_TAIL_BY_LOOP=active the tail is
+// the open tool loop alone, and nothing at a turn boundary; else it is also the last KEEP_LAST rows.
+const tailEnd = (cfg, keepFrom, length) => (cfg.tailByLoop ? keepFrom : Math.min(keepFrom, Math.max(1, length - KEEP_LAST)));
 // Cap on the host call for the API form of the conversation: a call that never settles must not hold
 // the compaction.
 const HOST_MS = 2000;
@@ -803,6 +812,7 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_OWNER_LAST: await $.env.get('OMC_JEV_COMPACT_OWNER_LAST'),
     OMC_JEV_COMPACT_ARCHIVE: await $.env.get('OMC_JEV_COMPACT_ARCHIVE'),
     OMC_JEV_COMPACT_JEV_USAGE: await $.env.get('OMC_JEV_COMPACT_JEV_USAGE'),
+    OMC_JEV_COMPACT_TAIL_BY_LOOP: await $.env.get('OMC_JEV_COMPACT_TAIL_BY_LOOP'),
     OMC_JEV_COMPACT_JEV_STAGES: await $.env.get('OMC_JEV_COMPACT_JEV_STAGES'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
@@ -925,6 +935,8 @@ export async function readConfig($) {
     archiveDir: stateDir ? `${stateDir}/compaction-archive` : undefined,
     // Usage and model of every request of Jev in the records (off unless 1 or active).
     jevUsage: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_JEV_USAGE ?? '').trim()),
+    // The tail kept whole is the open tool loop alone, not also the last KEEP_LAST rows (off unless active).
+    tailByLoop: String(env.OMC_JEV_COMPACT_TAIL_BY_LOOP ?? '').trim() === 'active',
   };
 }
 
@@ -2477,13 +2489,13 @@ export function noteSummary(text) {
   return clip(line, TRACE_INPUT_CHARS);
 }
 
-// Candidates: tool results outside the first message and the last KEEP_LAST messages whose call is
-// in an earlier assistant message.
-function findCandidates(messages, privatePaths, notifications = false, blockTraces = false) {
+// Candidates: tool results outside the first message and before `tailFrom` (unset: before the last KEEP_LAST messages) whose call is
+// in an earlier assistant message. The options stand in one object, so that a parameter added after it cannot take their place.
+function findCandidates(messages, privatePaths, notifications = false, { blockTraces = false, tailFrom } = {}) {
   const outputs = backgroundOutputFiles(messages, privatePaths);
   const uses = new Map();
   messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) uses.set(u.tool_use_id, { i, u }); });
-  const tailStart = Math.max(1, messages.length - KEEP_LAST);
+  const tailStart = tailFrom ?? Math.max(1, messages.length - KEEP_LAST);
   const out = [];
   for (let i = 1; i < tailStart; i++) {
     const m = messages[i];
@@ -3836,7 +3848,7 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new
   const images = nonTextUserRows(messages, api);
   if (images.unmatched) { stats.reason = 'image_unmatched'; return []; }
   const users = ownerRows(messages, cfg.hookRowPrefixes, cfg.blockTraces);
-  const before = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
+  const before = tailEnd(cfg, keepFrom, messages.length);
   const limit = cfg.pasteMaxChars;
   const found = [];
   // The first and the newest user message stay as they are.
@@ -4115,7 +4127,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   const turns = [];
   messages.forEach((m, i) => { if (m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trim()) turns.push(i); });
   const limit = Math.min(
-    Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)),
+    tailEnd(cfg, keepFrom, messages.length),
     userRows.length >= REPLY_KEEP_OWNERS ? userRows[userRows.length - REPLY_KEEP_OWNERS] : 0,
     turns.length >= REPLY_KEEP_TURNS ? turns[turns.length - REPLY_KEEP_TURNS] : 0,
   );
@@ -4189,7 +4201,7 @@ function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionI
   let trim;
   let stats;
   const skip = cfg.agentTrim && agentId === undefined && api ? nonTextUserRows(messages, api) : undefined;
-  const from = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
+  const from = tailEnd(cfg, keepFrom, messages.length);
   if (skip && !skip.unmatched) {
     try {
       trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates, deadline, blockTraces: cfg.blockTraces });
@@ -4798,7 +4810,7 @@ function planBlocks(cfg, messages, trimmed, api, queued, keepFrom, sessionId, ag
   const images = nonTextUserRows(messages, api);
   const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
-  const found = blockRows(cfg, trimmed, { limit: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skipUser: images.rows, userUnmatched: images.unmatched, skipAssistant: nonTextAssistantRows(messages, api), queued, users, delivered, agent });
+  const found = blockRows(cfg, trimmed, { limit: tailEnd(cfg, keepFrom, messages.length), skipUser: images.rows, userUnmatched: images.unmatched, skipAssistant: nonTextAssistantRows(messages, api), queued, users, delivered, agent });
   const potential = found.items.reduce((sum, it) => (it.chars <= cfg.pasteMaxChars && !namesSecretPath(it.body, cfg.privatePaths) ? sum + blockGain(cfg, it) * it.count : sum), 0);
   return { ...found, messages: trimmed, sessionId, verdicts: new Map(), potential };
 }
@@ -6151,7 +6163,7 @@ async function decide($, e, cfg, record, started) {
   let before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
   const deadline = started + TOTAL_MS;
-  if (messages.length <= KEEP_LAST + 1) return { fallback: 'too_few_messages' };
+  if (messages.length <= (cfg.tailByLoop ? 2 : KEEP_LAST + 1)) return { fallback: 'too_few_messages' };
   // The rows of one API message are rebuilt together (groupsOf); only the last message of an open tool
   // loop keeps its handles, and then the API form has to hold every call of it: without it a call whose
   // result came back quickly starts a group of its own, and that message would be split.
@@ -6201,7 +6213,8 @@ async function decide($, e, cfg, record, started) {
   // text, which would split the kept message: the summary runs instead.
   if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
-  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
+  // With the tail by the open loop every row is looked at; the filter below leaves the loop out.
+  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, { blockTraces: cfg.blockTraces, tailFrom: cfg.tailByLoop ? messages.length : undefined }).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
   record.candidates = candidates.length;
   // Archive: the planned path goes into every trace and cut before the floor and the cascade count their lengths (active only).
   const archMode = archiveModeIn(cfg, record);
@@ -6749,7 +6762,7 @@ async function ownThreshold($, e, next) {
     session.lastAttempt = session.turnCount;
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
-    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces);
+    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, { blockTraces: cfg.blockTraces, tailFrom: cfg.tailByLoop ? openLoopStart(messages, groupsOf(messages, undefined)) : undefined });
     // The blocks and messages that the cuts take off the list count with the costs of the candidates, as in decide (shapeOf), from the API form once it is read.
     const shapeIn = (apiForm, rows) => {
       const group = groupsOf(messages, apiForm);
