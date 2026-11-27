@@ -259,6 +259,7 @@ async function launch(argv, env, held) {
   if (args.error) { console.error(`jev-session: ${args.error}\n${usage}`); return 2; }
 
   const logDir = await resolveJevLogDir(env);
+  const hidePrivate = privatePathMask(process.env) ?? ((text) => text); // built once for the whole launch
   const refusalMessage = (gate) => `jev-session: refused: the session pool is full (${gate.sessions}/${gate.limit}). No session was started; a slot frees up when a running session ends. Do not delegate further: do the work yourself with the tools you have.`;
 
   // Resume of a background session (--resume): the same path as a regular start (start dir and trust, the pool gate, the starter, a row
@@ -272,7 +273,7 @@ async function launch(argv, env, held) {
     }
     if (!args.prompt) { console.error(`jev-session: --resume needs --prompt (the text of the resume turn)\n${usageResume}`); return 2; }
     const askedName = args.name || `resume-${String(args.resume).slice(0, 8)}`;
-    const name = privatePathMask(process.env)?.(askedName) ?? askedName; // the rows and the settings file name only: a resume passes no --name
+    const name = hidePrivate(askedName); // the rows and the settings file name only: a resume passes no --name
     const { dir: cwd, source: cwdSource } = resolveStartDir({ cwdArg: args.cwd, env });
     if (!existsSync(cwd)) { console.error(`jev-session: directory ${cwd} does not exist`); return 2; }
     const trust = checkTrust(cwd, env);
@@ -331,11 +332,11 @@ async function launch(argv, env, held) {
   const trust = checkTrust(cwd, env);
   if (trust.verdict === 'untrusted') { console.error(`jev-session: directory ${cwd} (source: ${cwdSource}) is not trusted by Claude Code (no trust in ${trust.configFile} for it, its parent directories or its repository); a background session would not start. Pass --cwd <a trusted project directory> or run \`claude\` once in this directory and accept the trust. Nothing was started.`); return 2; }
 
-  const loggedName = privatePathMask(process.env)?.(args.name) ?? args.name; // the rows and the settings file name; the session gets args.name
+  const loggedName = hidePrivate(args.name); // the rows and the settings file name; the session gets args.name
   // The handoff gate (lib/jev-handoff.mjs) finds the rows of its handoff file by `brief`. Where a listed private path hides that value, the row also
   // holds a digest of the full path, which the gate compares instead. The digest confirms a guessed path, so it is written only with
   // OMC_JEV_HANDOFF=1 in the environment of the launcher, the one mode that reads it.
-  const briefHidden = (privatePathMask(process.env)?.(briefPath) ?? briefPath) !== briefPath;
+  const briefHidden = hidePrivate(briefPath) !== briefPath;
   const briefDigest = briefHidden && String(env.OMC_JEV_HANDOFF ?? '').trim() === '1' ? { brief_sha256: createHash('sha256').update(briefPath).digest('hex') } : {};
 
   // The session pool gate before any Jev query: at the ceiling the start is refused with the count in the message and in the log row; a counter
@@ -360,7 +361,7 @@ async function launch(argv, env, held) {
     const previous = process.env.OMC_JEV;
     process.env.OMC_JEV = `${POINT}:active`;
     try {
-      await setJevHookContext({ session_id: env.CLAUDE_CODE_SESSION_ID, cwd: privatePathMask(process.env)?.(cwd) ?? cwd, agent_type: 'jev-session' }); // the directory goes to the rows of shadow.jsonl
+      await setJevHookContext({ session_id: env.CLAUDE_CODE_SESSION_ID, cwd: hidePrivate(cwd), agent_type: 'jev-session' }); // the directory goes to the rows of shadow.jsonl
       decision = decideSession({ brief, name: args.name, role: args.role, env });
     } catch (error) { decision = { degraded: true, asked: false, source: {}, reason: `error: ${String(error?.message || error).slice(0, 120)}` }; }
     finally { if (previous === undefined) delete process.env.OMC_JEV; else process.env.OMC_JEV = previous; }
