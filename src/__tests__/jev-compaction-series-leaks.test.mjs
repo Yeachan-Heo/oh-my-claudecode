@@ -161,6 +161,11 @@ const PREFIXED = [['a gsk_ key', GSK, SHORT], ['an xai- key', XAI, SHORT], ['a t
   [`${name} as a tool name`, named(token), body],
   [`${name} as the name of an archive file`, archived(token), body],
   [`${name} as the session directory of a paste path`, pasted(token), body],
+  [`${name} as the tool part of an MCP name`, named(`mcp__srv__${token}`), body],
+  [`${name} as the server part of an MCP name`, named(`mcp__${token}__list`), body],
+  [`${name} followed by an underscore in a file name`, bash(`cat ./${token}_notes.txt`), body],
+  [`${name} behind an underscore in a file name`, bash(`cat ./old_${token}.txt`), body],
+  ...['\\t', '\\n', '\\r', '\\u0009', '\\x09', '%20'].map((escape) => [`${name} behind the escape ${escape}`, bash(`echo {"v":"a${escape}${token}"}`), body]),
 ]);
 
 describe('what leaves with a series: no request body and no written file holds the value', () => {
