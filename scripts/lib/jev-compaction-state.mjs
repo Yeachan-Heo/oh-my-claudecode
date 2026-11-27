@@ -20,7 +20,10 @@
  *    session explains it. When the record says the built-in summary ran (fallback, shadow) or there is
  *    no record (`module_missing`), the registry goes to the model as additional context (at most
  *    REGISTRY_CHARS characters); after a Jev compaction the messages stayed verbatim, so it is left
- *    out. MISSING_TO_NOTIFY `module_missing` within a day give one systemMessage.
+ *    out. MISSING_TO_NOTIFY `module_missing` within a day give one systemMessage. With
+ *    OMC_JEV_COMPACT_REGISTRY_BY_WINDOW=1 the limits of that text (characters, changed files, git
+ *    lines, tasks) are multiplied by window / REFERENCE_WINDOW, `window` being that of the claimed
+ *    record (see registryBudgets), and a task list is written with up to TASKS_RECORD_CAP entries.
  *
  * 4. Pasted-text retention. With OMC_JEV_COMPACT_PASTES the module writes the pasted text it moves out of the conversation to
  *    <state dir>/compaction-pastes/<session>/<hash>.txt (see its header). SessionStart (any source but `compact`) first touches
@@ -77,6 +80,15 @@ const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 const GIT_CHANGE = /\bgit(?:\.exe)?(?:\s+(?:-C\s+(?:"[^"]*"|'[^']*'|\S+)|-c\s+\S+|--[a-z-]+(?:=\S+)?))*\s+(commit|push|pull|fetch|merge|rebase|reset|checkout|switch|restore|add|rm|mv|stash|tag|cherry-pick|revert|apply|am|worktree|clone|init|branch\s+(?:-[dDmMcC]\b|--delete|--move|[^-\s]))/;
 const MODULE_FILE = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), 'hooks', 'jev-compaction.mjs');
 
+// The context window, in tokens, at which the registry limits above apply as they are.
+const REFERENCE_WINDOW = 400_000;
+const REFERENCE_BUDGETS = { chars: REGISTRY_CHARS, files: MAX_FILES, git: MAX_GIT, tasks: MAX_TASKS };
+// With the switch on, a task list is written with up to this many entries; the limit of the text applies when the file is read.
+const TASKS_RECORD_CAP = 100;
+// A window outside this range, in tokens, does not scale the limits.
+const REGISTRY_WINDOW_MIN = 10_000;
+const REGISTRY_WINDOW_MAX = 10_000_000;
+
 export const MISSING_MESSAGE =
   '[OMC] The Jev compaction module (hooks/jev-compaction.mjs) left no record for 3 compactions in the last day, so they used the built-in summary. ' +
   'Mods need Claude Code v2.1.287 or later and are off with disableAllHooks or --safe-mode; `claude plugin validate` on the plugin directory lists the loaded hooks module.';
@@ -85,6 +97,25 @@ export const MISSING_MESSAGE =
 export function compactionEnabled(env = process.env) {
   try { return parseJevEnv(POINT, env) !== 'off'; } catch { return false; }
 }
+
+/** OMC_JEV_COMPACT_REGISTRY_BY_WINDOW: on only for exactly `1` (surrounding spaces ignored). */
+export function registryByWindowOn(env = process.env) {
+  return String(env.OMC_JEV_COMPACT_REGISTRY_BY_WINDOW ?? '').trim() === '1';
+}
+
+/**
+ * The registry limits for one context window: the values at REFERENCE_WINDOW multiplied by window / REFERENCE_WINDOW, each count at least 1.
+ * A window that is not an integer from REGISTRY_WINDOW_MIN to REGISTRY_WINDOW_MAX gives the values at REFERENCE_WINDOW.
+ */
+export function registryBudgets(window) {
+  const scalable = Number.isInteger(window) && window >= REGISTRY_WINDOW_MIN && window <= REGISTRY_WINDOW_MAX;
+  const factor = scalable ? window / REFERENCE_WINDOW : 1;
+  const scale = (n) => Math.max(1, Math.round(n * factor));
+  return { chars: Math.round(REGISTRY_CHARS * factor), files: scale(MAX_FILES), git: scale(MAX_GIT), tasks: scale(MAX_TASKS) };
+}
+
+// How many entries of a task list are written per event.
+const taskRecordCap = (env) => (registryByWindowOn(env) ? TASKS_RECORD_CAP : MAX_TASKS);
 
 /** Directory of the registry and the module's spool. */
 export function stateDirOf(env = process.env) {
@@ -178,9 +209,9 @@ export function recordCompactionState(kind, data, env = process.env) {
       } else if (SHELL_TOOLS.has(tool) && typeof input.command === 'string' && GIT_CHANGE.test(input.command)) {
         events.push({ t: 'git', v: oneLine(maskSecrets(input.command, { keepGitHashes: true }), 200) });
       } else if (tool === 'TodoWrite' && Array.isArray(input.todos)) {
-        events.push({ t: 'tasks', v: input.todos.filter((x) => x && x.status !== 'completed').slice(0, MAX_TASKS).map((x) => ({ text: oneLine(x.content ?? x.activeForm, 150), status: String(x.status ?? '') })) });
+        events.push({ t: 'tasks', v: input.todos.filter((x) => x && x.status !== 'completed').slice(0, taskRecordCap(env)).map((x) => ({ text: oneLine(x.content ?? x.activeForm, 150), status: String(x.status ?? '') })) });
       } else if (/(^|__)update_plan$/.test(tool) && Array.isArray(input.items)) {
-        events.push({ t: 'tasks', v: input.items.filter((x) => x && x.status !== 'completed').slice(0, MAX_TASKS).map((x) => ({ text: oneLine(x.content, 150), status: String(x.status ?? '') })) });
+        events.push({ t: 'tasks', v: input.items.filter((x) => x && x.status !== 'completed').slice(0, taskRecordCap(env)).map((x) => ({ text: oneLine(x.content, 150), status: String(x.status ?? '') })) });
       } else if (tool === 'TaskCreate' && (input.subject || input.description)) {
         events.push({ t: 'task+', id: taskIdOf(data.tool_response) ?? null, text: oneLine(input.subject || input.description, 150) });
       } else if (tool === 'TaskUpdate' && input.taskId !== undefined) {
@@ -193,18 +224,18 @@ export function recordCompactionState(kind, data, env = process.env) {
   } catch { /* the registry never breaks a hook */ }
 }
 
-/** The registry folded from its event file: {files, git, tasks, error}, or undefined without a file. */
-export function foldRegistry(sessionId, agentId, env = process.env) {
+/** The registry folded from its event file: {files, git, tasks, error}, its lists within `budgets`, or undefined without a file. */
+export function foldRegistry(sessionId, agentId, env = process.env, budgets = REFERENCE_BUDGETS) {
   let text;
   try { text = readFileSync(registryPath(sessionId, agentId, env), 'utf8'); } catch { return undefined; }
   const reg = { files: [], git: [], tasks: [], error: null };
   for (const line of text.split('\n').slice(-MAX_REGISTRY_LINES)) {
     let ev;
     try { ev = JSON.parse(line); } catch { continue; }
-    if (ev.t === 'file') reg.files = reg.files.filter((p) => p !== ev.v).concat(ev.v).slice(-MAX_FILES);
-    else if (ev.t === 'git') reg.git = reg.git.concat(ev.v).slice(-MAX_GIT);
-    else if (ev.t === 'tasks' && Array.isArray(ev.v)) reg.tasks = ev.v;
-    else if (ev.t === 'task+') reg.tasks = reg.tasks.filter((x) => !ev.id || x.id !== ev.id).concat({ ...(ev.id ? { id: ev.id } : {}), text: ev.text, status: 'pending' }).slice(-MAX_TASKS);
+    if (ev.t === 'file') reg.files = reg.files.filter((p) => p !== ev.v).concat(ev.v).slice(-budgets.files);
+    else if (ev.t === 'git') reg.git = reg.git.concat(ev.v).slice(-budgets.git);
+    else if (ev.t === 'tasks' && Array.isArray(ev.v)) reg.tasks = ev.v.slice(0, budgets.tasks); // the first tasks of a list stay
+    else if (ev.t === 'task+') reg.tasks = reg.tasks.filter((x) => !ev.id || x.id !== ev.id).concat({ ...(ev.id ? { id: ev.id } : {}), text: ev.text, status: 'pending' }).slice(-budgets.tasks);
     else if (ev.t === 'task~') {
       if (ev.status === 'completed' || ev.status === 'deleted') reg.tasks = reg.tasks.filter((x) => x.id !== ev.id);
       else reg.tasks = reg.tasks.map((x) => (x.id === ev.id ? { ...x, ...(ev.status ? { status: ev.status } : {}), ...(ev.text ? { text: ev.text } : {}) } : x));
@@ -216,9 +247,9 @@ export function foldRegistry(sessionId, agentId, env = process.env) {
 
 const STATUS_LABEL = { in_progress: 'in progress', pending: 'pending' };
 
-/** The registry as text for the model, at most REGISTRY_CHARS characters; '' when there is nothing to say. */
-export function renderRegistry(sessionId, agentId, env = process.env, writers) {
-  const reg = foldRegistry(sessionId, agentId, env);
+/** The registry as text for the model, at most `budgets.chars` characters (REGISTRY_CHARS by default); '' when there is nothing to say. */
+export function renderRegistry(sessionId, agentId, env = process.env, writers, budgets = REFERENCE_BUDGETS) {
+  const reg = foldRegistry(sessionId, agentId, env, budgets);
   if (!reg) return '';
   const lines = [];
   if (reg.tasks.length) lines.push('Open tasks: ' + reg.tasks.map((x) => `[${STATUS_LABEL[x.status] || x.status || '?'}] ${x.text}`).join('; '));
@@ -233,11 +264,11 @@ export function renderRegistry(sessionId, agentId, env = process.env, writers) {
   for (;;) { // drop the oldest changed files first until the text fits
     const fileLine = files.length ? [`Changed files (newest last): ${files.join('; ')}`] : [];
     text = [head, ...lines, ...fileLine].join('\n');
-    if (text.length <= REGISTRY_CHARS || !files.length) break;
+    if (text.length <= budgets.chars || !files.length) break;
     files.shift();
   }
-  if (writers) return writers.fitLines(text, REGISTRY_CHARS);
-  return text.length > REGISTRY_CHARS ? text.slice(0, REGISTRY_CHARS - 1) + '…' : text;
+  if (writers) return writers.fitLines(text, budgets.chars);
+  return text.length > budgets.chars ? text.slice(0, budgets.chars - 1) + '\u2026' : text;
 }
 
 function appendRows(logDir, rows, env = process.env) {
@@ -488,7 +519,8 @@ export function afterSessionStart(data, { logDir, writers } = {}, env = process.
         if (noteMissing(stateDir, now)) out.systemMessage = MISSING_MESSAGE;
       }
       if (!claimed || claimed.record.result !== 'jev') {
-        const text = renderRegistry(sessionId, agent, env, writers);
+        const budgets = registryByWindowOn(env) && claimed ? registryBudgets(claimed.record.window) : undefined;
+        const text = renderRegistry(sessionId, agent, env, writers, budgets);
         if (text) out.context = text;
       }
     }

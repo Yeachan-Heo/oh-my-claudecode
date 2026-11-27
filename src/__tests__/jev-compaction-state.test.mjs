@@ -15,7 +15,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { archiveSegment } from '../../hooks/jev-compaction.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
-import { afterSessionStart, archiveDays, foldRegistry, MISSING_MESSAGE, pastesDays, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry, sweepArchive, sweepPastes } from '../../scripts/lib/jev-compaction-state.mjs';
+import {
+  afterSessionStart, archiveDays, foldRegistry, MISSING_MESSAGE, pastesDays, recordCompactionState, REGISTRY_CHARS, registryBudgets, registryByWindowOn, registryPath, renderRegistry, sweepArchive,
+  sweepPastes,
+} from '../../scripts/lib/jev-compaction-state.mjs';
 import * as writers from '../../scripts/lib/context-text-sanitize.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -592,5 +595,175 @@ describe('jev-compaction-state: hook entry points', () => {
     expect(context).toContain('lint failed');
     const rows = logRows(join(cwd, '.omc', 'state', 'jev', 'compaction.jsonl'));
     expect(rows).toEqual([expect.objectContaining({ result: 'fallback', reason: 'timeout', session_id: sid })]);
+  });
+});
+
+describe('jev-compaction-state: registry limits by window (OMC_JEV_COMPACT_REGISTRY_BY_WINDOW)', () => {
+  const SWITCH = 'OMC_JEV_COMPACT_REGISTRY_BY_WINDOW';
+  const section = (text, label, separator) => {
+    const line = String(text ?? '').split('\n').find((l) => l.startsWith(label));
+    return line === undefined ? [] : line.slice(label.length).split(separator);
+  };
+  const filesOf = (text) => section(text, 'Changed files (newest last): ', '; ');
+  const tasksOf = (text) => section(text, 'Open tasks: ', '; ');
+  const gitOf = (text) => section(text, 'Recent git changes: ', ' | ');
+  const pad = (i) => String(i).padStart(3, '0');
+  const todos = (count) => Array.from({ length: count }, (_, i) => ({ content: `task ${pad(i + 1)}`, status: 'pending' }));
+  const eventsOf = (env, sid) => readFileSync(registryPath(sid, undefined, env), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+
+  // A registry written through the hook entry point (60 files, 20 git lines, 60 tasks), then a SessionStart after the built-in
+  // summary whose module record names `window`; `record: false` leaves no module record.
+  function scenario(extraEnv, window, { pathPadding = 0, record = true } = {}) {
+    const { env: base, sid, spool } = setup();
+    const env = { ...base, ...extraEnv };
+    for (let i = 1; i <= 60; i++) post(env, sid, 'Write', { file_path: `/p/${'x'.repeat(pathPadding)}file-${pad(i)}.ts` });
+    for (let i = 1; i <= 20; i++) post(env, sid, 'Bash', { command: `git commit -m "change ${pad(i)}"` });
+    post(env, sid, 'TodoWrite', { todos: todos(60) });
+    if (record) spoolRecord(spool, sid, { result: 'fallback', reason: 'jev_error', ...(window !== undefined ? { window } : {}) });
+    const out = afterSessionStart({ session_id: sid, source: 'compact' }, {}, env);
+    return { out, env, sid };
+  }
+
+  it('is on only for exactly 1, surrounding spaces ignored', () => {
+    expect(registryByWindowOn({})).toBe(false);
+    for (const value of ['1', ' 1 ', '1\n']) expect(registryByWindowOn({ [SWITCH]: value }), JSON.stringify(value)).toBe(true);
+    for (const value of ['', '0', '2', 'true', 'yes', 'on', 'active', '01', '1.0', 'off']) expect(registryByWindowOn({ [SWITCH]: value }), JSON.stringify(value)).toBe(false);
+  });
+
+  it('scales the limits with the window and keeps them for a window that is not an integer from 10000 to 10000000', () => {
+    const reference = { chars: 1500, files: 20, git: 5, tasks: 15 };
+    expect(registryBudgets(400_000)).toEqual(reference);
+    expect(registryBudgets(1_000_000)).toEqual({ chars: 3750, files: 50, git: 13, tasks: 38 });
+    expect(registryBudgets(200_000)).toEqual({ chars: 750, files: 10, git: 3, tasks: 8 });
+    expect(registryBudgets(10_000)).toEqual({ chars: 38, files: 1, git: 1, tasks: 1 });
+    expect(registryBudgets(10_000_000)).toEqual({ chars: 37500, files: 500, git: 125, tasks: 375 });
+    for (const window of [undefined, null, 0, -400_000, NaN, Infinity, 400_000.5, 9999, 10_000_001, '1000000', {}]) {
+      expect(registryBudgets(window), `window ${String(window)}`).toEqual(reference);
+    }
+  });
+
+  it('unset or with any other value: 20 files, 5 git lines, 15 tasks written and shown, 1500 characters, whatever the window', () => {
+    const base = scenario({}, 1_000_000);
+    expect(base.out.context.length).toBeLessThanOrEqual(REGISTRY_CHARS);
+    expect([filesOf(base.out.context).length, gitOf(base.out.context).length, tasksOf(base.out.context).length]).toEqual([20, 5, 15]);
+    const written = eventsOf(base.env, base.sid);
+    expect(written.find((e) => e.t === 'tasks').v).toHaveLength(15);
+    for (const value of ['', '0', 'off', 'true', 'active', 'on', '2', '01']) {
+      const other = scenario({ [SWITCH]: value }, 1_000_000);
+      expect(other.out, JSON.stringify(value)).toEqual(base.out);
+      expect(eventsOf(other.env, other.sid), JSON.stringify(value)).toEqual(written);
+    }
+  });
+
+  it('with the switch on and a window of 1000000: the newest 50 files and 13 git lines, the first 38 tasks, 3750 characters', () => {
+    const { out } = scenario({ [SWITCH]: '1' }, 1_000_000);
+    expect(filesOf(out.context)).toHaveLength(50);
+    expect(filesOf(out.context)[0]).toBe('/p/file-011.ts');
+    expect(filesOf(out.context).at(-1)).toBe('/p/file-060.ts');
+    expect(gitOf(out.context)).toHaveLength(13);
+    expect(gitOf(out.context).at(-1)).toBe('git commit -m "change 020"');
+    expect(tasksOf(out.context)).toHaveLength(38);
+    expect(tasksOf(out.context)[0]).toBe('[pending] task 001');
+    expect(tasksOf(out.context).at(-1)).toBe('[pending] task 038');
+    // Long paths: the character limit drops the oldest files first.
+    const long = scenario({ [SWITCH]: '1' }, 1_000_000, { pathPadding: 70 }).out.context;
+    expect(long.length).toBeLessThanOrEqual(3750);
+    expect(long.length).toBeGreaterThan(REGISTRY_CHARS);
+    expect(filesOf(long).length).toBeLessThan(50);
+    expect(filesOf(long).at(-1)).toMatch(/file-060\.ts$/);
+  });
+
+  it('with the switch on and a window of 200000: the newest 10 files and 3 git lines, the first 8 tasks, 750 characters', () => {
+    const { out } = scenario({ [SWITCH]: '1' }, 200_000);
+    expect(filesOf(out.context)).toHaveLength(10);
+    expect(filesOf(out.context)[0]).toBe('/p/file-051.ts');
+    expect(gitOf(out.context)).toHaveLength(3);
+    expect(tasksOf(out.context)).toHaveLength(8);
+    expect(tasksOf(out.context).at(-1)).toBe('[pending] task 008');
+    expect(out.context.length).toBeLessThanOrEqual(750);
+    expect(scenario({ [SWITCH]: '1' }, 200_000, { pathPadding: 70 }).out.context.length).toBeLessThanOrEqual(750);
+  });
+
+  it('with the switch on, a window of 400000, no usable window or no record: the same text as with the switch off', () => {
+    const off = scenario({}, 400_000).out;
+    for (const window of [400_000, undefined, null, 0, 'abc', '1000000', 9999]) {
+      expect(scenario({ [SWITCH]: '1' }, window).out, `window ${String(window)}`).toEqual(off);
+    }
+    expect(scenario({ [SWITCH]: '1' }, undefined, { record: false }).out).toEqual(scenario({}, undefined, { record: false }).out);
+  });
+
+  it('takes the window of the record it claims: a subagent compaction gets the limits of the subagent', () => {
+    const { env: base, sid, spool } = setup();
+    const env = { ...base, [SWITCH]: '1' };
+    for (let i = 1; i <= 60; i++) post(env, sid, 'Write', { file_path: `/sub/file-${pad(i)}.ts` }, { agent_id: 'abc123' });
+    spoolRecord(spool, sid, { result: 'fallback', window: 1_000_000 });
+    spoolRecord(spool, sid, { result: 'fallback', window: 200_000, agent_id: 'abc123' }, 1000);
+    const out = afterSessionStart({ session_id: sid, source: 'compact', transcript_path: `/t/${sid}/subagents/agent-abc123.jsonl` }, {}, env);
+    expect(filesOf(out.context)).toHaveLength(10);
+  });
+
+  it('applies the scaled character limit with the cleaning writers and without them', () => {
+    const { env, sid } = setup();
+    const on = { ...env, [SWITCH]: '1' };
+    post(on, sid, 'TodoWrite', { todos: Array.from({ length: 20 }, (_, i) => ({ content: `${pad(i)}`.repeat(50), status: 'pending' })) });
+    post(on, sid, 'Bash', { command: 'git push' });
+    const budgets = registryBudgets(1_600_000);
+    const fitted = renderRegistry(sid, undefined, on, writers, budgets);
+    expect(fitted.length).toBeGreaterThan(REGISTRY_CHARS);
+    expect(fitted).toContain('git push');
+    expect(renderRegistry(sid, undefined, on, undefined, budgets)).toBe(fitted);
+    for (const text of [renderRegistry(sid, undefined, on, writers, registryBudgets(200_000)), renderRegistry(sid, undefined, on, undefined, registryBudgets(200_000))]) {
+      expect(text.length).toBeLessThanOrEqual(750);
+      expect(text.endsWith('\u2026')).toBe(true);
+    }
+  });
+
+  it('writes a task list of up to 100 entries while the switch is on, for TodoWrite and a plan tool, and 15 while it is off', () => {
+    for (const [extraEnv, count] of [[{ [SWITCH]: '1' }, 100], [{}, 15], [{ [SWITCH]: 'off' }, 15]]) {
+      const { env: base, sid } = setup();
+      const env = { ...base, ...extraEnv };
+      post(env, sid, 'TodoWrite', { todos: todos(120) });
+      post(env, sid, 'mcp__x__update_plan', { items: todos(120) });
+      expect(eventsOf(env, sid).map((e) => e.v.length), JSON.stringify(extraEnv)).toEqual([count, count]);
+    }
+  });
+
+  it('cuts the tasks when read: the first ones of a list, the newest of added ones', () => {
+    const budgets = registryBudgets(200_000);
+    const listed = setup();
+    post({ ...listed.env, [SWITCH]: '1' }, listed.sid, 'TodoWrite', { todos: todos(30) });
+    expect(foldRegistry(listed.sid, undefined, listed.env, budgets).tasks.map((t) => t.text)).toEqual(todos(8).map((t) => t.content));
+    const added = setup();
+    for (let i = 1; i <= 50; i++) post(added.env, added.sid, 'TaskCreate', { subject: `added ${pad(i)}` }, { tool_response: { task: { id: String(i) } } });
+    expect(foldRegistry(added.sid, undefined, added.env, budgets).tasks.map((t) => t.text)).toEqual(Array.from({ length: 8 }, (_, i) => `added ${pad(i + 43)}`));
+    expect(foldRegistry(added.sid, undefined, added.env).tasks).toHaveLength(15);
+    expect(foldRegistry(added.sid, undefined, added.env, registryBudgets(1_000_000)).tasks).toHaveLength(38);
+  });
+
+  it('shows at most 15 tasks of a list written with the switch on once the switch is off', () => {
+    const { env, sid, spool } = setup();
+    post({ ...env, [SWITCH]: '1' }, sid, 'TodoWrite', { todos: todos(120) });
+    for (const value of [undefined, 'off']) {
+      const off = { ...env, [SWITCH]: value };
+      expect(tasksOf(renderRegistry(sid, undefined, off)), String(value)).toHaveLength(15);
+      spoolRecord(spool, sid, { result: 'fallback', window: 1_000_000 });
+      expect(tasksOf(afterSessionStart({ session_id: sid, source: 'compact' }, {}, off).context), String(value)).toHaveLength(15);
+    }
+  });
+
+  it('reaches the hooks through their environment: PostToolUse writes the longer list, SessionStart shows it', () => {
+    const home = join(tmp, 'by-window-home');
+    const cwd = join(tmp, 'by-window-project');
+    mkdirSync(home, { recursive: true });
+    mkdirSync(cwd, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd });
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(OMC_|TYPESAFE_|CLAUDE|ANTHROPIC_|CODEX|DISABLE_OMC)/i.test(k)));
+    const env = { ...clean, HOME: home, USERPROFILE: home, OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'k', [SWITCH]: '1' };
+    const run = (script, input) => execFileSync(NODE, [join(root, 'scripts', script)], { env, encoding: 'utf8', input: JSON.stringify(input), timeout: 30000 });
+    const sid = 'sess-window';
+    run('post-tool-verifier.mjs', { session_id: sid, cwd, tool_name: 'TodoWrite', tool_input: { todos: todos(30) }, tool_response: { success: true } });
+    spoolRecord(join(home, '.omc', 'state', 'jev', 'compaction-spool'), sid, { result: 'fallback', reason: 'timeout', window: 1_000_000 });
+    const out = JSON.parse(run('session-start.mjs', { session_id: sid, cwd, source: 'compact', hook_event_name: 'SessionStart' }).trim().split('\n').pop());
+    expect(out.hookSpecificOutput.additionalContext).toContain('[pending] task 030');
   });
 });
