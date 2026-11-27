@@ -270,6 +270,38 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('reads a block-list extends as one list of base skills', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(skillsRoot, 'verify'), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, 'verify', 'SKILL.md'),
+      '---\nname: verify\n---\n\n# Verify\n\nCheck the result.\n',
+    );
+    writePlaybook(
+      root,
+      'block-list.md',
+      '---\nextends:\n  - tdd\n  - verify\nwhen: A block list names both bases.\n---\n\n**After** "Write the failing test first." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('missing an "extends:"');
+    expect(r.stderr).not.toContain('does not appear in any extended skill');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects an empty block-list extends', () => {
+    const { root, skillsRoot } = buildProject();
+    writePlaybook(
+      root,
+      'empty-block-list.md',
+      '---\nextends:\nwhen: An empty list names nothing.\n---\n\nBody.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('missing an "extends:" field');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('rejects a symlinked playbook instead of skipping it', { skip: process.platform === 'win32' }, () => {
     const { root, skillsRoot } = buildProject();
     writePlaybook(root, 'real.md', '---\nextends: tdd\nwhen: Real playbook.\n---\n\nBody.\n');

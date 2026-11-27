@@ -89,9 +89,23 @@ function parseFrontmatter(source) {
   const match = source.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
   if (!match) return {};
   const fields = {};
+  let currentKey;
   for (const line of match[1].split(/\r?\n/)) {
+    // A block-list item continues the most recent key: `extends:` followed by
+    // `- tdd` lines is one list, the way a YAML block sequence reads.
+    const item = line.match(/^ +- +(.*)$/);
+    if (currentKey && item && !line.match(/^[A-Za-z][\w-]*:/)) {
+      if (!Array.isArray(fields[currentKey])) fields[currentKey] = [];
+      fields[currentKey].push(item[1].trim());
+      continue;
+    }
     const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (kv) fields[kv[1]] = kv[2];
+    if (kv) {
+      currentKey = kv[1];
+      fields[kv[1]] = kv[2];
+    } else if (line.trim() && currentKey && !Array.isArray(fields[currentKey])) {
+      currentKey = undefined;
+    }
   }
   return fields;
 }
@@ -236,8 +250,10 @@ async function main() {
       const fields = parseFrontmatter(playbookSource);
       const extendsValue = fields.extends;
       // One error per problem: record both missing required fields before
-      // deciding whether anchor validation can run at all.
-      const missingExtends = !extendsValue;
+      // deciding whether anchor validation can run at all. A block-list
+      // extends reads as an array of items, which is present.
+      const missingExtends =
+        !extendsValue || (Array.isArray(extendsValue) && extendsValue.length === 0);
       if (missingExtends) {
         problems.push(
           `${fileLabel}: frontmatter is missing an "extends:" field`,
@@ -261,33 +277,41 @@ async function main() {
       // Check for explicitly quoted values: if quoted, unquote and split by comma
       // only (do not reinterpret brackets within the quoted content, and do not
       // apply yamlScalar again since the value is already decoded).
-      const trimmedValue = extendsValue.trim();
+      // A block list (`extends:` followed by `- tdd` lines) already parsed to
+      // an array of items; read each item as a scalar and skip the scalar
+      // paths.
       let baseNames = [];
-      const isQuoted =
-        trimmedValue.length > 1 &&
-        ((trimmedValue.startsWith('"') && trimmedValue.endsWith('"')) ||
-          (trimmedValue.startsWith("'") && trimmedValue.endsWith("'")));
-      if (isQuoted) {
-        // Explicitly quoted value: unquote, split by comma, and trim each item
-        // (do not apply yamlScalar again, since it would double-unquote)
-        const unquoted = trimmedValue.slice(1, -1);
-        baseNames = unquoted
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-      } else if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
-        // Bracket-enclosed list (not quoted): strip brackets, split by comma, then unquote each
-        baseNames = trimmedValue
-          .slice(1, -1)
-          .split(",")
-          .map(yamlScalar)
-          .filter(Boolean);
+      if (Array.isArray(extendsValue)) {
+        baseNames = extendsValue.map(yamlScalar).filter(Boolean);
       } else {
-        // Plain value or comma-separated: split by comma and unquote each
-        baseNames = extendsValue
-          .split(",")
-          .map(yamlScalar)
-          .filter(Boolean);
+        const trimmedValue = extendsValue.trim();
+        const isQuoted =
+          trimmedValue.length > 1 &&
+          ((trimmedValue.startsWith('"') && trimmedValue.endsWith('"')) ||
+            (trimmedValue.startsWith("'") && trimmedValue.endsWith("'")));
+        if (isQuoted) {
+          // Explicitly quoted value: unquote, split by comma, and trim each
+          // item (do not apply yamlScalar again, it would double-unquote)
+          const unquoted = trimmedValue.slice(1, -1);
+          baseNames = unquoted
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        } else if (trimmedValue.startsWith("[") && trimmedValue.endsWith("]")) {
+          // Bracket-enclosed list (not quoted): strip brackets, split by
+          // comma, then unquote each
+          baseNames = trimmedValue
+            .slice(1, -1)
+            .split(",")
+            .map(yamlScalar)
+            .filter(Boolean);
+        } else {
+          // Plain value or comma-separated: split by comma and unquote each
+          baseNames = extendsValue
+            .split(",")
+            .map(yamlScalar)
+            .filter(Boolean);
+        }
       }
       if (baseNames.length === 0) {
         problems.push(
