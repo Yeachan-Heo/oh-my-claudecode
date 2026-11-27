@@ -6084,3 +6084,162 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard and an entry of an installation t
     }
   });
 });
+
+// a program for pause_command (argv: mode, report file): it reports its start and the end of its input. "quit" ends at once with status 3,
+// "outlive" goes on after the end of its input until it is terminated, "deaf" also ignores that and has to be killed, "linger" goes on for a
+// few seconds after the end of its input and then ends by itself
+const PAUSE_PROGRAM = [
+  'import os, signal, sys, time',
+  'mode, report = sys.argv[1], sys.argv[2]',
+  'def note(text):',
+  "    with open(report, 'a') as f:",
+  "        f.write(text + '\\n')",
+  'def terminated(*args):',
+  "    note('terminated')",
+  '    sys.exit(0)',
+  "if mode == 'deaf':",
+  '    signal.signal(signal.SIGTERM, signal.SIG_IGN)',
+  "elif mode == 'outlive':",
+  '    signal.signal(signal.SIGTERM, terminated)',
+  "note('start %d' % os.getpid())",
+  "if mode == 'quit':",
+  '    sys.exit(3)',
+  'sys.stdin.read()',
+  "note('end of input')",
+  "if mode in ('outlive', 'deaf'):",
+  '    time.sleep(40)',
+  "elif mode == 'linger':",
+  '    time.sleep(6)',
+  "note('left')",
+].join('\n');
+describe.skipIf(!HAS_PYTHON3)('five-hour guard pause_command', { timeout: 90000 }, () => {
+  const pauseProgram = (f: Fixture, mode: string) => {
+    const program = join(f.dir, 'pause-program.py');
+    writeFileSync(program, PAUSE_PROGRAM, 'utf8');
+    const report = join(f.dir, `report-${mode}.txt`);
+    return { report, command: [PYBIN, '-I', program, mode, report] };
+  };
+  const starts = (report: string) => readText(report).match(/^start /gm)?.length ?? 0;
+
+  it('pause_command runs for as long as a pause lasts, once, and reads the end of its input when the pause is over', async () => {
+    const f = nearLimit('pause-command', 50);
+    const p = pauseProgram(f, 'wait');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, pause_command: [...p.command, f.pause] }), 'utf8');
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      await sleep(600);
+      expect(starts(p.report), 'not run while there is no pause').toBe(0);
+      setUsage(f, 98);
+      await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+      const first = readJson(f.pause).valid_until;
+      await waitFor(() => readJson(f.pause).valid_until > first + 0.5, 20000, 'a few renewals');
+      expect(starts(p.report), 'one process for the whole pause').toBe(1);
+      expect(readText(p.report), 'its input is open while the pause lasts').not.toMatch(/end of input/);
+      setUsage(f, 10);
+      await waitFor(() => /left/.test(readText(p.report)), 20000, 'the end of the command');
+      await waitFor(() => /pause_command ended \(status 0\)/.test(readText(f.log)), 20000, 'the line in the log');
+      expect(existsSync(f.pause)).toBe(false);
+    } finally { await stopGuard(g); }
+    expect(g.out).toMatch(/pause_command started \(pid \d+\)/);
+    expect(g.out).not.toMatch(/ERROR|WARNING \(pause-command/);
+  });
+
+  it('pause_command ends with a guard that is stopped, and with one that is killed, and does not keep the locks of the guard', async () => {
+    for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+      const f = nearLimit(`pause-command-${signal}`);
+      const p = pauseProgram(f, signal === 'SIGKILL' ? 'linger' : 'wait');
+      writeConfig(f, { pause_command: p.command, settings_file: '' });
+      const g = startGuard(f);
+      try {
+        await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+        g.child.kill(signal);
+        await waitFor(() => /end of input/.test(readText(p.report)), 20000, `the end of the input after ${signal}`);
+        if (signal === 'SIGKILL') {
+          expect(readText(p.report), 'the command is still running').not.toMatch(/left/);
+          const next = runSync(GUARD, guardArgs(f, ['--once']));
+          expect(next.status, `a new guard starts while the old command still runs: ${next.stdout}${next.stderr}`).toBe(0);
+        }
+      } finally { await stopGuard(g); }
+      await waitFor(() => /left/.test(readText(p.report)), 20000, 'the command ends by itself');
+    }
+  });
+
+  it('a pause_command that ends while the pause lasts is run again at the next check, with a warning, and the pause goes on', async () => {
+    const f = nearLimit('pause-command-quits');
+    const p = pauseProgram(f, 'quit');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    const g = startGuard(f);
+    try {
+      await waitFor(() => starts(p.report) >= 3, 30000, 'the command run again');
+      expect(readJson(f.pause).paused).toBe(true);
+    } finally { await stopGuard(g); }
+    expect(g.out).toMatch(/WARNING \(pause-command-ended\): pause_command ended with status 3 while the pause lasts: it is run again/);
+    expect(g.out).not.toMatch(/ERROR/);
+  });
+
+  it('a pause_command that goes on after the end of its input is terminated, and one that ignores that is killed', async () => {
+    for (const [mode, line] of [['outlive', /pause_command ended \(status 0\)/], ['deaf', /pause_command ended \(status -9\)/]] as const) {
+      const f = nearLimit(`pause-command-${mode}`);
+      const p = pauseProgram(f, mode);
+      writeConfig(f, { pause_command: p.command, settings_file: '' });
+      const g = startGuard(f);
+      try {
+        await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+        setUsage(f, 10);
+        await waitFor(() => line.test(g.out), 40000, `${mode}: the end of the command`);
+        expect(existsSync(f.pause), 'the waiting calls were released').toBe(false);
+      } finally { await stopGuard(g); }
+      expect(/terminated/.test(readText(p.report)), mode).toBe(mode === 'outlive');
+    }
+  });
+
+  it('pause_command is not run by --dry-run or --test-pause; --once runs it and ends it with the process; a program that cannot be run is a warning and the pause goes on', () => {
+    const f = nearLimit('pause-command-modes');
+    const p = pauseProgram(f, 'wait');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    expect(runSync(GUARD, guardArgs(f, ['--dry-run'])).status).toBe(0);
+    expect(runSync(GUARD, guardArgs(f, ['--test-pause', '0.3'])).status).toBe(0);
+    expect(starts(p.report)).toBe(0);
+    const once = guardOnce(f);
+    expect(once.stdout).toMatch(/pause_command started[\s\S]*pause_command ended/);
+    const g = nearLimit('pause-command-broken');
+    const broken = join(g.dir, 'broken');
+    writeFileSync(broken, '#!/nonexistent-interpreter\n', 'utf8');
+    chmodSync(broken, 0o755);
+    writeConfig(g, { pause_command: [broken], settings_file: '' });
+    const r = guardOnce(g);
+    expect(r.stdout).toMatch(/WARNING \(pause-command\): cannot run pause_command .*: the pause goes on without it/);
+    expect(readJson(g.pause).paused).toBe(true);
+  });
+
+  it('a pause_command that is not a list of an executable file and arguments, or that names a file the guard writes, stops the start; the pause file may be named', () => {
+    const f = nearLimit('pause-command-config', 50);
+    const plain = join(f.dir, 'not-executable');
+    writeFileSync(plain, PROGRAM_TEXT, 'utf8');
+    const bad: Array<[unknown, RegExp]> = [
+      ['/bin/true', /"pause_command" must be a list of strings/],
+      [['/bin/true', 3], /"pause_command" must be a list of strings/],
+      [['/bin/true', ''], /"pause_command" must be a list of strings/],
+      [{}, /"pause_command" must be a list of strings/],
+      [['true'], /is not the absolute path of an executable file/],
+      [[plain], /is not the absolute path of an executable file/],
+      [[join(f.dir, 'nothing-here')], /is not the absolute path of an executable file/],
+      [[PYBIN, f.state], /"pause_command" names .*state\.json, which is the state_file of this guard/],
+      [[PYBIN, f.log], /"pause_command" names .*guard\.log, which is the log_file of this guard/],
+      [[PYBIN, `${f.pause}.lock`], /which is the lock of the pause file of this guard/],
+    ];
+    for (const [value, message] of bad) {
+      writeConfig(f, { pause_command: value, settings_file: '' });
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${JSON.stringify(value)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(value)).toMatch(message);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+    for (const value of [[], null, [PYBIN, '-c', 'pass', f.pause]]) {
+      writeConfig(f, { pause_command: value, settings_file: '' });
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${JSON.stringify(value)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+});

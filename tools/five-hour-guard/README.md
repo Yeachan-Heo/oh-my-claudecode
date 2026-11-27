@@ -164,6 +164,7 @@ older than `--max-age` (`cache-stale`), has no `fiveHourPercent` (`cache-no-perc
    | `hook_log_file` | none (the hook does not log) | hook log, an absolute path (the guard refuses a relative one at the start, as `add` does); used by the settings tool |
    | `settings_file` | none | `settings.json` the guard checks for the hook entry, with a loud warning in its log when it is missing |
    | `exclude` | `[]` | session id prefixes whose tool calls are never held |
+   | `pause_command` | none | a program (absolute path) and its arguments, run for as long as a pause lasts (see "Other work during a pause") |
 
    The configuration file comes from `--config <file>` or the `OMC_FIVE_HOUR_GUARD_CONFIG` variable. A command line option
    of the same meaning wins over the file. No path is built into the scripts except the default of `usage_cache`.
@@ -248,7 +249,7 @@ python3 -I ~/.claude/five-hour-guard/five-hour-guard.py --config ~/.claude/five-
 | `--margin <seconds>` | 150 | resume this long after the reset time; 0 to 1800 |
 | `--interval <seconds>` | 30 | seconds between checks; at least 0.1 |
 | `--heartbeat <seconds>` | 300, or twice `--interval` plus 1 s when that is more | validity of the pause file after each check, which is how long a dead guard keeps sessions waiting; from twice `--interval` plus 1 s (one missed check must not release the sessions, and a failed check takes time before the retry) up to 1800, so `--interval` is at most 899.5 (a longer interval is refused, as no heartbeat can cover it); the next check is scheduled from the start of the previous one |
-| `--warn-every <seconds>` | 600 | at most one `WARNING` about the usage data or a hook command that is not read to its end per this many seconds and kind; 0 for every check, up to 86400 |
+| `--warn-every <seconds>` | 600 | at most one `WARNING` about the usage data, a hook command that is not read to its end or `pause_command` per this many seconds and kind; 0 for every check, up to 86400 |
 | `--test-pause <seconds>` | off | hold sessions for a while, then release; up to 1800 |
 | `--test-only <prefixes>` | all | with `--test-pause`: only sessions with these id prefixes |
 | `--once` | off | one check, then exit without cleaning up a pause that check started (tests) |
@@ -277,6 +278,27 @@ answer during a pause, for example the one in which you stop the guard. Without 
 that would release it. Prefixes are matched against the `session_id` that Claude Code puts in the hook event. A change
 of `exclude` in the file takes effect when the guard is restarted (a call that is already held is released as soon as it reads the new pause document that excludes it). Sessions routed to another provider are never held
 (see the table above).
+
+## Other work during a pause
+
+The hook holds the tool calls of the sessions that load it. Work that spends the same window outside those sessions (a pool of
+background workers, a scheduled job) goes on unless you stop it yourself. `pause_command` is the way to do that, off unless
+you set it:
+
+```json
+"pause_command": ["/opt/tools/hold-workers", "--pool", "nightly"]
+```
+
+The list is the program (an absolute path of an executable file) and its arguments; no shell reads it. The guard starts it when a
+pause begins, once the pause file is published (also after a restart that finds a stored pause), with a pipe as its standard input, and expects it to keep running
+and to hold whatever it holds. The pipe is closed when the pause is over, when the guard stops, and by the system when the guard
+dies in any way, so a program that ends at the end of its input never outlives the guard's pause. A program that is still running
+5 seconds after that is terminated, and killed 5 seconds later; only the process the guard started is signalled, so a program that
+starts others ends them itself. A program that ends while the pause lasts is started again at the next check
+(`WARNING (pause-command-ended)`), and one that cannot be started is `WARNING (pause-command)`: neither stops the pause. Its output
+goes to the output of the guard. No word of the list may be a file the guard writes (the pause file may be named, to be read).
+`--dry-run` and `--test-pause` do not run it. A configuration with a `pause_command` that is not such a list stops the guard at start
+(exit status 2).
 
 ## Order of events when a pause ends
 

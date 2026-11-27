@@ -27,6 +27,7 @@ of the same meaning wins over the file. No path is built into the code except th
   settings_file  optional  settings.json checked for the hook entry (loud warning when it is missing)
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
+  pause_command  optional  list: absolute path of a program and its arguments, run for as long as a pause lasts (see README.md)
 """
 import argparse, ctypes, datetime, fnmatch, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
 
@@ -73,7 +74,7 @@ ap.add_argument('--max-age', type=finite_float, default=180, help='data older th
 ap.add_argument('--margin', type=finite_float, default=150, help=f'resume this many seconds after the reset time (0 to {MAX_MARGIN_S})')
 ap.add_argument('--interval', type=finite_float, default=30, help=f'seconds between ticks (at least {MIN_INTERVAL_S:g})')
 ap.add_argument('--heartbeat', type=finite_float, default=None, help=f'pause file validity after each tick; the hook lets sessions go when it lapses (guard dead); from twice --interval plus {HEARTBEAT_SLACK_S} s to {MAX_HEARTBEAT_S} (default {DEFAULT_HEARTBEAT_S}, or twice --interval plus {HEARTBEAT_SLACK_S} s when that is more)')
-ap.add_argument('--warn-every', type=finite_float, default=600, help='at most one WARNING about the usage data (missing, stale, no percentage, implausible reset time) or a hook command that is not read to its end per this many seconds and kind')
+ap.add_argument('--warn-every', type=finite_float, default=600, help='at most one WARNING about the usage data (missing, stale, no percentage, implausible reset time), a hook command that is not read to its end or pause_command per this many seconds and kind')
 ap.add_argument('--test-pause', type=finite_float, default=0, metavar='SECONDS', help=f'install check: hold sessions for this many seconds (up to {MAX_TEST_PAUSE_S}), then release; touches no state')
 ap.add_argument('--test-only', default='', metavar='PREFIXES', help='with --test-pause: comma separated session id prefixes; only those sessions are held')
 ap.add_argument('--once', action='store_true', help='run a single tick and exit without cleaning a pause started by it (tests)')
@@ -1013,6 +1014,26 @@ def parse_exclude():
 
 
 EXCLUDE = parse_exclude()
+
+
+def parse_pause_command():
+    """The `pause_command` of the configuration: [] when it is not set, else the program (an absolute path of an executable file) and its
+    arguments. No word of it may be a file the guard writes, except the pause file, which the command may read."""
+    raw = CFG.get('pause_command')
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list) or not all(isinstance(x, str) and x and '\0' not in x for x in raw):
+        fail('"pause_command" must be a list of strings: the absolute path of a program, then its arguments')
+    if not (os.path.isabs(raw[0]) and os.path.isfile(raw[0]) and os.access(raw[0], os.X_OK)):
+        fail(f'the program of "pause_command" ({raw[0]}) is not the absolute path of an executable file')
+    for word in raw:
+        for label, path in written_files():
+            if label != 'pause_file' and same_file(word, path):
+                fail(f'"pause_command" names {word}, which is the {label} of this guard: a write of the guard would replace or change it')
+    return raw
+
+
+PAUSE_COMMAND = parse_pause_command()
 ONLY = [x for x in A.test_only.split(',') if x]
 
 
@@ -1533,6 +1554,52 @@ def unpublish(strict=False):
     return True
 
 
+PAUSE_PROCESS = [None]   # the pause_command (subprocess.Popen) of the pause in force
+PAUSE_COMMAND_GRACE_S = 5   # the time pause_command has to end after its standard input is closed, and again after it is terminated
+
+
+def run_pause_command():
+    """Keep pause_command running while a pause lasts: it is started when the pause begins, and again at a later tick when it has ended.
+    Its standard input is a pipe that only the guard holds, so it reads the end of it when the pause is over and also when the guard dies
+    in any way. A command that cannot be run is a warning: the pause goes on."""
+    process = PAUSE_PROCESS[0]
+    if not PAUSE_COMMAND or A.dry_run or (process is not None and process.poll() is None):
+        return
+    if process is not None:
+        warn_data('pause-command-ended', f'pause_command ended with status {process.returncode} while the pause lasts: it is run again')
+    import subprocess   # imported here and in end_pause_command: only a guard with a pause_command needs it
+    try:
+        PAUSE_PROCESS[0] = subprocess.Popen(PAUSE_COMMAND, stdin=subprocess.PIPE)
+    except (OSError, ValueError) as e:
+        PAUSE_PROCESS[0] = None
+        warn_data('pause-command', f'cannot run pause_command ({e!r}): the pause goes on without it')
+        return
+    log(f'pause_command started (pid {PAUSE_PROCESS[0].pid})')
+
+
+def end_pause_command():
+    """End the pause_command of a pause that is over: its standard input is closed; when it goes on, it is terminated, then killed (only this
+    child of the guard, never another process)."""
+    process, PAUSE_PROCESS[0] = PAUSE_PROCESS[0], None
+    if process is None:
+        return
+    import subprocess
+    try:
+        process.stdin.close()
+    except OSError:
+        pass
+    for push in (None, process.terminate, process.kill):
+        if push:
+            push()
+        try:
+            process.wait(timeout=PAUSE_COMMAND_GRACE_S)
+        except subprocess.TimeoutExpired:
+            continue
+        log(f'pause_command ended (status {process.returncode})')
+        return
+    log(f'ERROR: pause_command (pid {process.pid}) did not end')
+
+
 def enter_pause(state, pct, reset_ts):
     if not A.dry_run:
         check_pause_path()   # before anything is stored: a pause that cannot be published must not be remembered
@@ -1546,6 +1613,7 @@ def enter_pause(state, pct, reset_ts):
         return
     write_json(STATE, state)   # the durable state first: a pause file with no stored pause behind it would be removed as a leftover after a crash
     publish(state, pct)
+    run_pause_command()
 
 
 def leave_pause(state, why):
@@ -1563,10 +1631,13 @@ def leave_pause(state, why):
         state.update(paused=False, since=None, resume_at=None)   # this guard has no pause to keep any more
         state.pop('unlink_pending', None)
         log(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: the state is left as it is and the pause is left alone')
+        end_pause_command()
         return
     write_json(STATE, {**{k: v for k, v in state.items() if k != 'unlink_pending'}, 'paused': False, 'since': None, 'resume_at': None})
     state.update(paused=False, since=None, resume_at=None)
-    if not unpublish():
+    removed = unpublish()   # the waiting calls first, then pause_command, which may take a moment to end
+    end_pause_command()
+    if not removed:
         state['unlink_pending'] = True
         raise OSError(f'the pause file {PAUSE_FILE} could not be removed: the removal is tried again at the next tick')
     state.pop('unlink_pending', None)
@@ -1617,6 +1688,7 @@ def tick(state):
             return
     write_json(STATE, state)   # also here: a first write that failed has not stored the pause yet
     publish(state, pct)
+    run_pause_command()
 
 
 def safe_tick(state):
@@ -1846,6 +1918,7 @@ def main():
                 # the unpaused state could not be written, or the first removal failed: the sessions are still released (a restart
                 # reads a stored pause and keeps it only while it lasts)
                 log('RESUMED (guard stopping, state not saved): pause file removed' if state.get('paused') else 'RESUMED (guard stopping, second try): pause file removed')
+        end_pause_command()   # also on an exit that leaves the pause file (--once, a lost lock): the command of this guard ends with it
     return 1 if LOCK_LOST[0] else 0
 
 
