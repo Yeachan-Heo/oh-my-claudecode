@@ -1165,7 +1165,7 @@ describe('/dev guard: spellings of round 6', () => {
     ['if false; then\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['if true; then :; else\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['for i in; do\ncd /tmp\ndone; rm null', '/dev', 'deny'],
     ['if false; then # why\n\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['if false\nthen\n{ true; cd /tmp; }\nfi; rm null', '/dev', 'deny'], ['cd /dev\nif false; then\ncd /tmp\nfi\nrm null', '/tmp', 'deny'],
     ['if x; then\ncd /dev\necho x > sda\nfi', '/tmp', 'deny'], ['while x; do\ncd /dev\ndone; echo x > sda', '/tmp', 'deny'], ['if x; then\ncd disk\nfi; echo x > sda', '/dev', 'deny'],
-    ['if x; then\n{ cd /dev; }\nfi; echo x > sda', '/tmp', 'deny'], ['if x; then\nif y; then\ncd /dev\nfi\nfi; tee sda', '/tmp', 'deny'],
+    ['if x; then\n{ cd disk; }\nfi; echo x > sda', '/dev', 'deny'], ['if x; then\nif y; then\ncd disk\nfi\nfi; tee sda', '/dev', 'deny'],
     ['if false; then\ncd /dev/shm\nfi; rm null', '/dev', 'deny'], ['cd /dev\nif x; then\n:\nfi; cd /tmp; true || cd /dev; echo x > log', '/tmp', 'allow'],
     ['if x; then\ncd build\nrm cache\nfi', '/tmp', 'allow'],
     ['echo then\ncd /dev; rm null', '/tmp', 'deny'], ['echo do\ncd /tmp; rm null', '/dev', 'allow'], ['if true; then >/tmp/log\ncd /tmp; rm null; fi', '/dev', 'allow'],
