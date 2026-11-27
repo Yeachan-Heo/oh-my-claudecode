@@ -1398,12 +1398,26 @@ function inputSummary(tool, input) {
 
 const namesSecretPath = (value, privatePaths) => SECRET_PATH.test(value) || namesPrivatePath(value, privatePaths);
 
+// A character of a path written as an escape: a JSON `\uXXXX` (behind any run of backslashes, as each further JSON string doubles it) or the `%XX` bytes of one
+// UTF-8 character in a URL. Each escape is of a bounded length, the text is decoded once (a double encoding stays as it is) and every run is read from its start
+// only, so the scan stays linear.
+const PATH_ESCAPE = /(?<!\\)\\+u([0-9a-fA-F]{4})|%(?:[0-7][0-9a-fA-F]|[cdCD][0-9a-fA-F]%[89abAB][0-9a-fA-F]|[eE][0-9a-fA-F](?:%[89abAB][0-9a-fA-F]){2}|[fF][0-7](?:%[89abAB][0-9a-fA-F]){3})/g;
+function pathEscape(all, code) {
+  if (code !== undefined) return String.fromCharCode(parseInt(code, 16));
+  try { return decodeURIComponent(all); } catch { return all; } // bytes that are no character stay as written
+}
+
 function namesPrivatePath(value, privatePaths) {
   if (!privatePaths.length) return false;
   // Every run of slashes and backslashes as one slash: a Windows path, its JSON form (C:\\Users\\x), an escaped
   // slash (\/home\/u) and a doubled slash all compare equal to the private path (linear, unlike slash()).
-  const v = String(value).replace(/[\\/]+/g, '/').toLowerCase();
-  return privatePaths.some((p) => v.includes(p));
+  const text = String(value);
+  const names = (s) => { const v = s.replace(/[\\/]+/g, '/').toLowerCase(); return privatePaths.some((p) => v.includes(p)); };
+  if (names(text)) return true;
+  // The text as written first, then with its escapes read: a path may hold what looks like an escape (`C:\data\ubeef`).
+  if (!text.includes('%') && !text.includes('\\u')) return false;
+  const decoded = text.replace(PATH_ESCAPE, pathEscape);
+  return decoded !== text && names(decoded);
 }
 
 // The text with every line that names a secret or private path replaced by SECRET_LINE (exported for tests). Private
