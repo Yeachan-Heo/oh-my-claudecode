@@ -472,6 +472,9 @@ describe('series of traces: merging', () => {
     expect(edited.size).toBe(0);
     expect(fake.files().size).toBe(0);
     expect(record.series).toMatchObject({ series: 0, secret: 0, timed_out: 2, write_failed: 0 });
+    // With nothing to write, only the check can run out of time.
+    const planned = await run({ env: { OMC_JEV_COMPACT_BLOCKS: 'shadow' }, deadline: Date.now() - 1 });
+    expect(planned.record.series).toMatchObject({ mode: 'shadow', series: 0, timed_out: 2 });
   });
 
   it('a write that fails leaves the series as it is and is counted', async () => {
