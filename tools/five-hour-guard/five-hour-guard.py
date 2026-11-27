@@ -1162,6 +1162,21 @@ def file_identity(st):
     return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
 
 
+REPLACE_TRIES = 5   # Windows refuses to replace or rename a file that another process holds open, as the hook does for the moment it reads the pause file
+REPLACE_RETRY_S = 0.05
+
+
+def while_held_open(step):
+    """Run a rename or a replace, again a few times while it is refused with PermissionError (Windows: the file is open in another process)."""
+    for attempt in range(REPLACE_TRIES):
+        try:
+            return step()
+        except PermissionError:
+            if attempt == REPLACE_TRIES - 1:
+                raise
+            time.sleep(REPLACE_RETRY_S)
+
+
 def take_away(path, identity, what):
     """Remove the file at `path` only while it has `identity`: the path is moved aside in one step, to a name that is new every time (a rename must not
     replace a file that was kept under one), and what was moved is compared with `identity`. A file that took the place in the instant between the
@@ -1169,7 +1184,7 @@ def take_away(path, identity, what):
     kept under its new name and the log says so, `what` being what it is not). True when the file was removed, False when it was another one;
     FileNotFoundError when there was none."""
     gone = f'{path}.{os.getpid()}.{os.urandom(6).hex()}.gone'
-    os.rename(path, gone)
+    while_held_open(lambda: os.rename(path, gone))
     if file_identity(os.lstat(gone)) == identity:
         os.unlink(gone)
         return True
@@ -1201,15 +1216,18 @@ def swap_in(tmp, path, expected, mine):
     exchange again, and what comes out of that is removed only when it is the new file; another one (a second arrival) stays under the temporary
     name (KeptAside, naming it). When the exchange back itself fails, the new file stays at the path (it is never empty) and the file that came in
     stays under the temporary name (KeptAside, naming both). Where the two paths cannot be exchanged the file is looked at once more and replaced by a plain replace, when it
-    still has the identity `expected`, and not replaced (OSError) when it has not."""
+    still has the identity `expected`, and not replaced (OSError) when it has not; a replace that Windows refuses while the file is open
+    in another process is tried again, each time after a new look."""
     if not exchange(tmp, path):   # this system or its file system cannot exchange two paths (macOS, Windows), or nothing is at the path any more: a plain replace, after one more look at the file that is expected
-        try:
-            unchanged = file_identity(os.lstat(path)) == expected
-        except FileNotFoundError:
-            unchanged = False
-        if not unchanged:
-            raise OSError(f'the file {path} cannot be put in place: it changed since it was validated, or is gone, and is not replaced')
-        os.replace(tmp, path)   # atomic for one file; a file that comes in between the look and this call is replaced, a window of microseconds that exists only where there is no exchange
+        def replace_expected():
+            try:
+                unchanged = file_identity(os.lstat(path)) == expected
+            except FileNotFoundError:
+                unchanged = False
+            if not unchanged:
+                raise OSError(f'the file {path} cannot be put in place: it changed since it was validated, or is gone, and is not replaced')
+            os.replace(tmp, path)   # atomic for one file; a file that comes in between the look and this call is replaced, a window of microseconds that exists only where there is no exchange
+        while_held_open(replace_expected)
         return
     try:   # what was at the path is under the temporary name now: whatever fails from here on, it is not removed with the new file
         if file_identity(os.lstat(tmp)) == expected:

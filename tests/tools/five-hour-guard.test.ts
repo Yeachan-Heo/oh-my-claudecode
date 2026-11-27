@@ -6243,3 +6243,51 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard pause_command', { timeout: 90000 
     }
   });
 });
+
+// the guard runs where two paths cannot be exchanged (macOS, Windows), and the first `count` renames or replaces of the pause file are refused as
+// Windows refuses them while another process holds the file open (argv: pause file, replace or rename, count, "arrival" to put a foreign file there)
+const HELD_OPEN_DRIVER = [
+  'import ctypes, os, runpy, sys',
+  'def none(*args, **kw):',
+  '    raise OSError("no library")',
+  'ctypes.CDLL = none',
+  'pause, what, left, arrival = sys.argv[1], sys.argv[2], [int(sys.argv[3])], sys.argv[4]',
+  'real = getattr(os, what)',
+  'def step(source, target, *args, **kw):',
+  "    if str(target if what == 'replace' else source) == pause and left[0] > 0:",
+  '        left[0] -= 1',
+  "        if arrival == 'arrival':",
+  "            open(pause + '.a', 'w').write('foreign file\\n')",
+  "            os.rename(pause + '.a', pause)",
+  "        raise PermissionError(13, 'the file is open in another process')",
+  '    return real(source, target, *args, **kw)',
+  'setattr(os, what, step)',
+  'sys.argv = sys.argv[5:]',
+  "runpy.run_path(sys.argv[0], run_name='__main__')",
+].join('\n');
+
+describe.skipIf(!HAS_PYTHON3)('five-hour guard where a replace or a rename is refused', { timeout: 90000 }, () => {
+  it('a replace or a rename of the pause file that is refused while another process holds it open is tried again, a file that came in meanwhile is kept, and a refusal that stays is an error', () => {
+    const run = (f: Fixture, what: string, count: number, arrival = '') => runPyCode(HELD_OPEN_DRIVER, [f.pause, what, String(count), arrival, GUARD, ...guardArgs(f, ['--once'])]);
+    const f = nearLimit('held-open-renewal');
+    guardOnce(f);
+    let before = readJson(f.pause).valid_until;
+    const brief = run(f, 'replace', 3);
+    expect(brief.stdout, `${brief.stdout}${brief.stderr}`).not.toMatch(/ERROR/);
+    expect(readJson(f.pause).valid_until, 'renewed after the refusals').toBeGreaterThan(before);
+    before = readJson(f.pause).valid_until;
+    const lasting = run(f, 'replace', 1000);
+    expect(lasting.stdout).toMatch(/ERROR: tick failed.*PermissionError/);
+    expect(readJson(f.pause).valid_until, 'the pause that was there stays').toBe(before);
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    setUsage(f, 10);
+    const end = run(f, 'rename', 3);
+    expect(end.stdout, `${end.stdout}${end.stderr}`).not.toMatch(/ERROR|cannot remove/);
+    expect(existsSync(f.pause), 'removed after the refusals').toBe(false);
+    const g = nearLimit('held-open-arrival');
+    guardOnce(g);
+    const late = run(g, 'replace', 1, 'arrival');
+    expect(late.stdout).toMatch(/ERROR: tick failed.*cannot be put in place/);
+    expect(readText(g.pause), 'the file that came in between two tries is kept').toBe('foreign file\n');
+  });
+});
