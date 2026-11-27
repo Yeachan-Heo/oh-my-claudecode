@@ -102,6 +102,12 @@ This is the default of `usage_cache`. Fields used:
 | `data.fiveHourResetsAt` | end of the window, an ISO 8601 string |
 | `error`, `rateLimited`, `lastSuccessAt` | a refresh that failed or was rate limited rewrites the entry with a fresh `timestamp` but keeps the old `data`; the age of the data is then counted from `lastSuccessAt` (milliseconds), and from `timestamp` otherwise |
 
+While the usage API answers with a rate limit, OMC waits longer before each next try, up to 5 minutes, and the data keeps its age
+since the last successful fetch: it grows older than `--max-age` (180 s), and the guard does not act on it (`cache-stale`) until a
+fetch succeeds. A larger `--max-age` keeps the guard acting on older data through such a stretch, at the price of acting on a
+percentage that old. The API can also answer without the five-hour window for a while; the cache then has no
+`fiveHourPercent` and the guard holds nothing until it returns (`cache-no-percent`).
+
 Who keeps the file fresh: only two parts of OMC write it. The OMC status line (HUD) refreshes it while it renders, at
 most once per `usageApiPollIntervalMs` (90 s by default), and only when it is set up as the Claude Code `statusLine` and
 does not hide rate limits (`elements.rateLimits` is not `false`; the `opencode` preset hides them). The `omc wait`
