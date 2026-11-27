@@ -333,9 +333,10 @@ async function launch(argv, env, held) {
 
   const loggedName = privatePathMask(process.env)?.(args.name) ?? args.name; // the rows and the settings file name; the session gets args.name
   // The handoff gate (lib/jev-handoff.mjs) finds the rows of its handoff file by `brief`. Where a listed private path hides that value, the row also
-  // holds a digest of the full path, which the gate compares instead.
+  // holds a digest of the full path, which the gate compares instead. The digest confirms a guessed path, so it is written only with
+  // OMC_JEV_HANDOFF=1 in the environment of the launcher, the one mode that reads it.
   const briefHidden = (privatePathMask(process.env)?.(briefPath) ?? briefPath) !== briefPath;
-  const briefDigest = briefHidden ? { brief_sha256: createHash('sha256').update(briefPath).digest('hex') } : {};
+  const briefDigest = briefHidden && String(env.OMC_JEV_HANDOFF ?? '').trim() === '1' ? { brief_sha256: createHash('sha256').update(briefPath).digest('hex') } : {};
 
   // The session pool gate before any Jev query: at the ceiling the start is refused with the count in the message and in the log row; a counter
   // read error never refuses and shows in the final row as pool {sessions: null, error}.
