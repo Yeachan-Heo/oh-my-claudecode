@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import * as mod from '../../hooks/jev-compaction.mjs';
-import { ACTIVE_ENV, CASCADE, PASTES, apiOf, assistantRow, compactOnce, compactRecord, conversation, fakeDollar, frozen, hostUsage, okResponse, outcomeOf, ownerRow, para, withRows } from './jev-compaction-tail-harness.mjs';
+import { ACTIVE_ENV, CASCADE, PASTES, apiOf, assistantRow, compactOnce, compactRecord, conversation, fakeDollar, frozen, hostUsage, load, okResponse, outcomeOf, ownerRow, para, withRows } from './jev-compaction-tail-harness.mjs';
 
 const { listTokens, readConfig, traceHeader } = mod;
 const SWITCH = { OMC_JEV_COMPACT_HOST_ATTACHMENTS: '1' };
@@ -475,6 +475,39 @@ describe('HOST_ATTACHMENTS: the names of used skills in the record', () => {
     const names = await namesOf([loaded(`${'/'.repeat(100_000)}tail`)]);
     expect(performance.now() - t0).toBeLessThan(2500);
     expect(names).toEqual(['tail']);
+  });
+});
+
+describe('HOST_ATTACHMENTS: the estimate of the own threshold', () => {
+  // Whether the end of a turn asks the host for a compaction.
+  const asks = async (env, messages, extras, usage) => {
+    const fake = fakeDollar({ env, messages, api: apiWith(messages, extras), usage });
+    await load()['turn.complete'](fake.$, Object.freeze({ isAborted: false }), async () => ({}));
+    return fake.calls.compact;
+  };
+
+  it('counts the attachments that go in the floor it checks before it asks', async () => {
+    // The results alone cut less than the 30 % of the tokens that the skip of the own request asks for.
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60', OMC_JEV_COMPACT_TARGET_PERCENT: '80', OMC_JEV_COMPACT_OWN_THRESHOLD: '1' };
+    const usage = () => ({ context: { tokens: 165000, window: 200000 } });
+    const messages = withRows([], 30, { chars: 3300 });
+    const context = reminder(`UserPromptSubmit hook additional context: ${para('note', 40_000)}`);
+    expect(await asks(env, messages, { 0: [context] }, usage)).toBe(0);
+    expect(await asks({ ...env, ...SWITCH }, messages, { 0: [context] }, usage)).toBe(1);
+    // Attachments that come back with the newest message of the user give nothing.
+    expect(await asks({ ...env, ...SWITCH }, messages, { [messages.length - 2]: [context] }, usage)).toBe(0);
+  });
+
+  it('counts the envelopes of the rows of text it rebuilds, as the compaction does', async () => {
+    // Many short rows of text, each with a delivered message: rebuilt, each carries it in an envelope, and the results then cut too little.
+    const env = { ...ACTIVE_ENV, OMC_JEV_COMPACT_AT_PERCENT: '60' };
+    const usage = () => ({ context: { tokens: 9000, window: 10000 } });
+    const messages = withRows(Array.from({ length: 100 }, (_, k) => [assistantRow(para(`a${k}`, 600)), ownerRow(`Step ${k}.`)]).flat(), 10, { chars: 5200 });
+    const extras = Object.fromEntries(Array.from({ length: 100 }, (_, k) => [2 * k + 2, [FRAME(`Status ${k}.`)]]));
+    expect(await asks(env, messages, extras, usage)).toBe(1);
+    expect(await asks({ ...env, ...SWITCH }, messages, extras, usage)).toBe(0);
+    const compaction = compactRecord(await compactOnce(messages, { env: { ...env, ...SWITCH }, api: apiWith(messages, extras), usage }));
+    expect(compaction).toMatchObject({ result: 'fallback', reason: 'too_few_results' });
   });
 });
 

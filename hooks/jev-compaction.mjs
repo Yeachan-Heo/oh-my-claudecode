@@ -6605,6 +6605,10 @@ function hostAttachmentRecord(a, rates, privatePaths) {
     attachments_resent_tokens: tok(a.resent),
   };
 }
+// The user rows of text that build writes without their handle, and the tokens the prediction takes off for them: what goes, less what the host announces again (the
+// attachments of result rows are not counted: the host's count holds them either way).
+const rowsWithoutHandle = (a) => (a ? new Set([...a.text, ...a.rows]) : undefined);
+const attachmentTokens = (a, rates) => (a ? rates.RATE_ATT * (a.dropped.uncovered - a.resent - a.coveredBack) : 0);
 // --- end of the host attachments ----------------------------------------------------------------------------------------------------------------
 
 // --- owner tail (OMC_JEV_COMPACT_OWNER_TAIL=active) ----------------------------------------------------------------------------------------------
@@ -6774,9 +6778,8 @@ async function decide($, e, cfg, record, started) {
     Object.assign(record, hostAttachmentRecord(hostAtt, cfg.rates, cfg.privatePaths));
     if (hostAtt?.blocked) return { fallback: hostAtt.blocked };
   }
-  const dropRows = hostAtt ? new Set([...hostAtt.text, ...hostAtt.rows]) : undefined;
-  // The attachments of the rebuilt rows go (those of result rows are not counted: the host's count holds them either way); the host announces again what then lacks.
-  const attachTokens = hostAtt ? cfg.rates.RATE_ATT * (hostAtt.dropped.uncovered - hostAtt.resent - hostAtt.coveredBack) : 0;
+  const dropRows = rowsWithoutHandle(hostAtt);
+  const attachTokens = attachmentTokens(hostAtt, cfg.rates);
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   // With the tail by the open loop every row is looked at; the filter below leaves the loop out.
   const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, { blockTraces: cfg.blockTraces, tailFrom: cfg.tailByLoop ? messages.length : undefined }).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
@@ -7408,9 +7411,15 @@ async function ownThreshold($, e, next) {
     if (!('value' in apiRead)) return result;
     api = apiFormOf(apiRead.value);
     const delivered = queuedOf(messages, api);
+    // Host attachments, as decide counts them: the envelopes of the rows of text it rebuilds, and in the floor below the attachments that go with them.
+    let hostAtt = null;
+    if (cfg.hostAttachments) {
+      const keepFrom = openLoopStart(messages, groupsOf(messages, api));
+      if (api && keptCallsIn(messages, keepFrom, api)) hostAtt = carrierRows(messages, api, keepFrom, newestOwnerRow(messages, cfg));
+    }
     if (delivered) {
       for (const blocks of delivered.rows.values()) before += rawChars(blocks);
-      envelopes = envelopeChars(messages, delivered.rows, candidates);
+      envelopes = envelopeChars(messages, delivered.rows, candidates, rowsWithoutHandle(hostAtt));
       removable = removableChars(candidates) - envelopes;
     }
     if (cfg.targetPercent !== undefined) shape = shapeIn(api, delivered ? delivered.rows : new Map());
@@ -7419,7 +7428,7 @@ async function ownThreshold($, e, next) {
     // results only, so with a stage on that takes text off as well (agent trim, long replies, pasted text) it is no proof: decide holds the request to the same
     // bound with the text of those stages in its plan, and answers it with a skip. Held after the API read, with the deliveries in the shape.
     const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active' || blocksCount;
-    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates, shape) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
+    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens - attachmentTokens(hostAtt, cfg.rates), cfg.rates, shape) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     // Only a session that the results alone do not carry needs the stage's scans: the compaction it asks for makes them otherwise.
     if (stageCounts && api && tooSmall()) {
       // The rows that keep their handles, as decide finds them; without the API form that holds their calls there is no stage.
