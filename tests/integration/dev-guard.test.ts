@@ -5,9 +5,9 @@
  * /dev stay allowed. No case is ever executed: every command is a string handed to checkBashCommand or to the hook
  * as tool input, and the state of /dev/null is always a stub or a fake lstat, so no test changes the real /dev.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -74,8 +74,51 @@ const BLOCKED: string[] = [
   'sudo --user root rm /dev/null', 'sudo --chdir /tmp rm /dev/null', 'env --unset X rm /dev/null', 'env --chdir /tmp rm /dev/null', "env -S 'rm -f /dev/null'", 'env --split-string="rm /dev/null"', "env -S'rm /dev/null'",
   "env -S 'rm -f' /dev/null", "env -i -S 'sh -c \"rm /dev/null\"'", 'stdbuf --output L rm /dev/null', 'ionice --class 3 rm /dev/null', 'echo /dev/null | xargs --max-args 1 rm', `${'sudo '.repeat(11)}rm /dev/null`,
   'sudo --group wheel --user root env --unset X nice --adjustment 3 rm /dev/null', 'coproc rm /dev/null',
+  // a backslash and a newline inside or outside double quotes are removed by the shell, in the middle of the path as well
+  'rm "/de\\\nv/null"', 'rm /de\\\nv/null', 'rm /de"\\\n"v/null', 'rm "/dev/nu\\\nll"', 'echo x > "/de\\\nv/sda"',
   // devices that may carry a write to something real: the input of a terminal session, terminals and serial ports
   'echo x > /dev/stdin', 'echo x > /dev/pts/3', 'echo x > /dev/ttyUSB0', 'echo x > /dev/tty1', 'echo x | tee /dev/stdin', 'dd if=x of=/dev/pts/0', 'rm /dev/zero', 'mv x /dev/zero',
+  // the options of the external time utility that take a value, in both spellings, and the ones that do not (a bare time is the keyword of the shell, see below)
+  "/usr/bin/time -f '%e' rm /dev/null", 'command time -f%e rm /dev/null', "command time --format '%e' rm /dev/null", 'command time --format=%e rm /dev/null', 'command time -o /tmp/t rm /dev/null', 'command time -o/tmp/t rm /dev/null',
+  'command time --output /tmp/t rm /dev/null', 'command time --output=/tmp/t rm /dev/null', 'command time -p -a -v rm /dev/null', 'command time --portability --append --verbose rm /dev/null',
+  // time is the keyword of the shell only as a plain word at the start of a pipeline, and then it runs the command after -p; anywhere else it is the external utility
+  'time -p rm /dev/null', 'time -p -- rm /dev/null', 'time -- rm /dev/null', 'time time -p rm /dev/null', 'command time -f %e rm /dev/null', 'env time -f %e rm /dev/null', 'sudo time -f %e rm /dev/null', 'nice time -f %e rm /dev/null',
+  'ZM=1 time -f %e rm /dev/null', "'time' -f %e rm /dev/null", '\\time -f %e rm /dev/null', '"time" -f %e rm /dev/null', 'true | time -f %e rm /dev/null', 'find . -exec time -f %e rm /dev/null ;',
+  // a cluster of short options that ends in an option with a value
+  'sudo -nu root rm /dev/null', 'sudo -Eu root rm /dev/null', 'sudo -nH -g wheel rm /dev/null', 'doas -nu root rm /dev/null', 'env -iu NAME rm /dev/null', 'timeout -vk 5 3 rm /dev/null',
+  'ionice -tc 3 rm /dev/null', 'stdbuf -oL rm /dev/null', 'nice -n5 rm /dev/null', 'sudo -nuroot rm /dev/null', 'echo /dev/null | xargs -rn 1 rm',
+  // env -S: an unquoted backslash and underscore separates arguments
+  "env -S 'rm\\_/dev/null'", "env -S 'rm\\_/dev/null' x", "env --split-string='rm\\_/dev/null'", "env -S 'echo hi\\_&&\\_rm /dev/null'", "env -S 'rm\\_\"/dev/null\"'",
+  // -- ends the options of eval
+  "eval -- 'rm /dev/null'", "eval -- rm /dev/null", "eval -- 'echo x; rm /dev/null'",
+  // a member of an archive that lands under /dev when the extraction directory is /
+  'tar -C / -xf /tmp/a.tar dev/null', 'gtar -C / -xf /tmp/a.tar dev/null', 'bsdtar -C / -xf /tmp/a.tar dev/null', 'tar xf /tmp/a.tar -C / dev/null', 'tar -xf /tmp/a.tar -C / ./dev/null',
+  'tar --directory=/ -xf /tmp/a.tar dev/null', 'tar -C / --extract --file=/tmp/a.tar dev/null', 'tar -C / -xf /tmp/a.tar dev', 'tar -C /tmp -xf /tmp/a.tar ../dev/null', 'tar -C / -C tmp -xf /tmp/a.tar ../dev/null',
+  'unzip -o /tmp/a.zip dev/null -d /', 'unzip /tmp/a.zip dev/null -d /', 'unzip -d / /tmp/a.zip dev/null', 'unzip -d/ /tmp/a.zip dev/null', 'unzip -o /tmp/a.zip x ../dev/null -d /tmp',
+  // the options of xargs whose value is the next word still take it, so the command comes after it
+  'echo /dev/null | xargs -L 1 rm', 'echo /dev/null | xargs -rL 1 rm', 'echo /dev/null | xargs -E x rm', 'echo /dev/null | xargs -rE x rm',
+  // a letter with an optional attached value ends a cluster of xargs options: the rest of the word is its value and the next word is the command
+  'echo x | xargs -iL rm /dev/null', 'echo x | xargs -rilL rm /dev/null', 'echo x | xargs -ilx rm /dev/null', 'echo x | xargs -eL rm /dev/null', 'echo x | xargs -lL rm /dev/null',
+  'echo x | xargs -rtiL rm /dev/null', 'echo /dev/null | xargs -iL rm L', 'echo x | xargs -rL 1 rm /dev/null', 'echo x | xargs -rn 1 rm /dev/null', 'echo x | xargs -rnL rm /dev/null',
+  // the value of --file, --files-from and --exclude-from is not a member; the members that follow still count
+  'tar -C / --extract --file a.tar dev/null', 'tar -C / -x --files-from /dev/fd/3 dev/null', 'tar -C / -x --exclude-from /dev/fd/3 dev/null', 'bsdtar -C / --extract --file a.tar dev/null',
+  // an exclusion removes a member only when its pattern has no wildcard and matches the name the way tar does
+  'tar -C / -xf a.tar dev/null --exclude=other', 'tar -C / -xf a.tar dev/null --exclude=dev/n*', 'tar -C / -xf a.tar dev/null --exclude=*', 'tar -C / -xf a.tar dev/null dev/zero --exclude=dev/null',
+  'tar -C / -xf a.tar dev/null --exclude=ev/null', 'tar -C / -xf a.tar dev/null --exclude=dev/null/', 'tar --anchored -C / -xf a.tar dev/null --exclude=null', 'bsdtar -C / -xf a.tar dev/null --exclude=dev/null',
+  'tar -C / -xf a.tar dev/null --exclude-from=x', 'tar -C / -xf a.tar dev/null --exclude-from x',
+  "tar -C / -xf a.tar 'dev/n*' --exclude='dev/n*'", "tar -C / -xf a.tar 'dev/n?ll' --exclude='dev/n?ll'", "tar -C / -xf a.tar 'dev/[n]ull' --exclude='dev/[n]ull'",
+  // a plain time at the start of a command is the keyword also in a group or a condition after a pipe, and the external utility everywhere else
+  'echo x | time -f %e rm /dev/null', 'echo x | sudo { time -f %e rm /dev/null; }', 'echo x | env { time -f %e rm /dev/null; }', 'echo x | { time -p rm /dev/null; }',
+  'echo x | { command time -f %e rm /dev/null; }', 'echo x | time -p { time -f %e rm /dev/null; }', 'echo x | { sudo time -f %e rm /dev/null; }', 'echo x | { A=1 time -f %e rm /dev/null; }',
+  "echo x | '{' time -f %e rm /dev/null", 'echo x | "if" time -f %e rm /dev/null',
+  // the options of xargs whose value is optional and attached: the next word is the command
+  'echo /dev/null | xargs -rl rm', 'echo /dev/null | xargs -l rm', 'echo /dev/null | xargs -rl2 rm', 'echo /dev/null | xargs --max-lines rm', 'echo /dev/null | xargs --max-lines=2 rm',
+  'echo /dev/null | xargs --eof rm', 'echo /dev/null | xargs -e rm', 'echo /dev/null | xargs -re rm', 'echo /dev/null | xargs -rt -l rm',
+  // tar writes a member under its name with the first components stripped
+  'tar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar --strip-components 1 -C / -xf /tmp/a.tar foo/dev/null', 'tar --strip=1 -C / -xf /tmp/a.tar foo/dev/null', 'gtar --strip-components=2 -C / -xf /tmp/a.tar a/b/dev/null',
+  'bsdtar --strip-components=1 -C / -xf /tmp/a.tar foo/dev/null', 'tar -C / --strip-components=1 -xf /tmp/a.tar ./dev/null', 'tar --strip-components=x -C / -xf /tmp/a.tar dev/null',
+  // members before the -x list are still extracted, and so is everything when -x comes before the archive
+  'unzip a.zip dev/other -x dev/null -d /', 'unzip a.zip dev/null -x top.txt -d /', 'unzip -d / a.zip dev/other -x dev/null', 'unzip a.zip dev/null -x dev/null top.txt -d /', 'unzip -x a.zip dev/null -d /',
   // a here-document handed to a shell inside backticks, whose offsets are those of the text between the backticks
   'echo `bash <<B\nrm /dev/null\nB\n`', 'x=`bash <<B\nrm -f /dev/sda\nB\n`', 'echo `echo \\`rm /dev/null\\``',
   // a path from the pipe lands in the place of the replace string of xargs -I
@@ -117,6 +160,62 @@ const BLOCKED: string[] = [
   // ed, ex
   'ed /dev/null', 'ed -s /dev/null', "printf 'w\n' | ed /dev/null", 'ex /dev/null', 'ex -s /dev/sda', "ed -p '*' /dev/null", "ed -s /dev/null <<< 'w'", 'red /dev/null',
   // the repair recipe is refused when it is not the whole command (probe: broken, see the tests below)
+  // the words of env -S go back to the option parser of env: its own options, a double dash and assignments come first, the command last
+  "env -S '-i rm /dev/null'", "env -S '-- rm /dev/null'", "env -S '-u HOME rm /dev/null'", "env -S 'FOO=1 rm /dev/null'", "env -S '-S rm\\_/dev/null'", "env -S '-i' rm /dev/null", "env -S '-i -u HOME -- rm /dev/null' x",
+  "env --split-string='-i rm /dev/null'", "env -S '- rm /dev/null'", "env -S '-i env -i rm /dev/null'", "env -S '-i sudo -n rm /dev/null'", 'env - rm /dev/null', 'env -i - rm /dev/null',
+  // with the strip option a name with a leading slash loses the slash first, and then the components (bsdtar counts the slash as the first one)
+  'tar --strip-components=1 -C / -xf a.tar /foo/dev/null', 'gtar --strip-components 1 -C / -xf a.tar /foo/dev/null', 'tar --strip-components=1 -C / -xf a.tar //foo/dev/null', 'tar --strip-components=2 -C / -xf a.tar /a/b/dev/null',
+  'bsdtar --strip-components=2 -C / -xf a.tar /foo/dev/null', 'bsdtar --strip-components=1 -C / -xf a.tar /dev/null', 'tar -C / -xf a.tar /dev/null', 'tar --strip-components=1 -C /dev -xf a.tar /foo/x',
+  // the list of -x of the zip extractor ends at the next option, and the words after that option are members again (the real tool reads none of them, but the whole archive then goes into the directory)
+  'unzip a.zip -x etc/x -d / dev/null', 'unzip a.zip -x etc/x -d / -x tmp/out -q dev/null', 'unzip a.zip -x etc/x -o dev/null -d /', 'unzip a.zip top.txt -x etc/x -d / dev/null', 'unzip a.zip dev/null -x etc/x -d /',
+  'unzip -d / a.zip -x etc/x -q dev/null', 'unzip a.zip -x etc/x -d / -- dev/null',
+  // after a redirection time is no keyword: the shell runs the external utility, whose options take a value
+  '>/tmp/log time -f %e rm /dev/null', '>/tmp/log time -p rm /dev/null', '2>/tmp/log time -f %e rm /dev/null', '</tmp/in time -p rm /dev/null', 'FOO=1 >/tmp/log time -p rm /dev/null', '{ >/tmp/log time -f %e rm /dev/null; }',
+  'true && >/tmp/log time -f %e rm /dev/null', '>/tmp/log time -- rm /dev/null', 'time -p >/tmp/log rm /dev/null', '! >/tmp/log time -p rm /dev/null', 'if >/tmp/log time -f %e rm /dev/null; then true; fi',
+  // only the extraction to the standard output is free; the command pipe of the archive extractor and the other cases keep their members
+  'tar --to-command=cat -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null --totals', 'tar -C / --to-command cat -xf a.tar dev/null',
+  // -C applies from its place on: the members after it go into its directory, the ones before the first -C stay where the command runs
+  'tar -xf a.tar tmp/out -C / dev/null', 'tar -C / -xf a.tar dev/null tmp/out', 'tar -C /tmp -xf a.tar x -C / dev/null', 'tar -C /tmp -xf a.tar x -C .. dev/null', 'tar xCf / a.tar dev/null', 'tar -xf a.tar -C / dev/null',
+  'tar -xf a.tar x -C /dev y', 'tar -xC / -f a.tar dev/null', 'tar -C /tmp -xf a.tar dev/null -C / x dev/zero', 'tar -x -C / -f a.tar x dev/null', 'bsdtar -C / -xf a.tar tmp/out dev/null',
+  // the value of an option that the tool takes with a next word is not a member, and the members that follow still count; the sets differ per tool
+  'tar -C / -xf a.tar --label x dev/null', 'tar -C / -xf a.tar --transform s,a,b, dev/null', 'tar -C / -xf a.tar --label=x dev/null', 'tar -C / -xf a.tar --label dev/null dev/null',
+  'tar -C / -xf a.tar --uid dev/null tmp/out', 'bsdtar -C / -xf a.tar --label dev/null tmp/out', 'bsdtar -C / -xf a.tar --uid 0 dev/null', 'gtar -C / -xf a.tar --owner root dev/null',
+  'tar -C / -xf a.tar --backup dev/null', 'tar -C / -xf a.tar --one-top-level dev/null',
+  // env -S inside a cluster of short options reads its text as options of env again, like the separate form
+  "env -iS 'rm /dev/null'", "env -iS'rm /dev/null'", "env -vS 'rm /dev/null'", "env -iS '-i rm /dev/null'", "env -iS '-u HOME rm /dev/null'", "env -iuS rm /dev/null",
+  // busybox runs the applet named by its first argument
+  'busybox rm /dev/null', 'busybox env -i rm /dev/null', 'env busybox rm /dev/null', "busybox sh -c 'rm /dev/null'", 'busybox sed -i s/a/b/ /dev/null', 'sudo busybox rm /dev/null',
+  // ... and the external utility again when the redirection belongs to its own command or it follows a pipe
+  'true >/tmp/log && >/tmp/log time -f %e rm /dev/null', 'true >/tmp/log | time -f %e rm /dev/null',
+  // -P and --absolute-names keep the leading slash: without a named member every member of the archive lands under its own name
+  'tar -xPf a.tar', 'tar -xPf a.tar -C /tmp', 'tar -C /tmp -xPf a.tar', 'tar xPf a.tar', 'tar -xf a.tar -P', 'tar --absolute-names -xf a.tar', 'tar -x --absolute-n -f a.tar', 'tar -x --ab -f a.tar',
+  'gtar -xf a.tar --absolute-names', 'bsdtar -xPf a.tar', 'bsdtar -xf a.tar --absolute-paths', 'bsdtar -x --ab -f a.tar', 'tar --extract --absolute-names --file a.tar', 'tar -xPf a.tar --exclude=foo',
+  'tar -xPf a.tar --strip-components=0', 'sudo tar -xPf a.tar', "bash -c 'tar -xPf a.tar'", 'nice tar --absolute-names -xf a.tar',
+  // ... and a named member with a leading slash is judged by its own name, whatever -C and the wrappers say
+  'tar -xPf a.tar /dev/zz-x', 'tar -xPf a.tar -C /tmp /dev/zz-x', 'tar -C /tmp -xPf a.tar /dev/null', 'tar --absolute-names -xf a.tar rel/x /dev/zz-x', 'bsdtar -xPf a.tar -C /tmp /dev/zz-x',
+  // GNU tar runs the --to-command text for each member
+  "tar -xf a.tar --to-command='rm /dev/null'", "tar -xf a.tar --to-command 'rm /dev/null'", "tar -xf a.tar --to-c='rm /dev/null'", "tar -xf a.tar --to-c 'rm /dev/null'", "gtar -C /tmp -xf a.tar --to-command='truncate -s 0 /dev/null'",
+  "tar -xf a.tar rel/x --to-command='echo x; rm /dev/null'", "tar -xf a.tar --to-command='sh -c \"rm /dev/null\"'",
+  // the other ways in which tar runs a command text: the compress program (-I, --use-compress-program, also abbreviated), the exec action of a checkpoint
+  // and the scripts at the end of a volume (-F, --info-script, --new-volume-script, also abbreviated), in every mode and in every form of the value
+  "tar -xf a.tar -I 'rm /dev/null'", "tar -xf a.tar -I'rm /dev/null'", "tar -cf a.tar -I 'rm /dev/null' f", "tar -tf a.tar -I 'rm /dev/null'", "gtar -tf a.tar -I 'truncate -s 0 /dev/null'", "tar xIf 'rm /dev/null' a.tar",
+  "tar -tf a.tar --use-compress-program='rm /dev/null'", "tar -tf a.tar --use-compress-program 'rm /dev/null'", "tar -tf a.tar --use='rm /dev/null'", "tar -tf a.tar --use 'rm /dev/null'", "tar -tf a.tar --use-c 'rm /dev/null'",
+  "bsdtar -tf a.tar --use-compress-program 'rm /dev/null'", "bsdtar -xf a.tar --use-compress-program='rm /dev/null'", "bsdtar -tf a.tar --us 'rm /dev/null'", "bsdtar -cf a.tar --use 'rm /dev/null' f",
+  "tar -tf a.tar --checkpoint=1 --checkpoint-action='exec=rm /dev/null'", "tar -tf a.tar --checkpoint=1 --checkpoint-action 'exec=rm /dev/null'", "tar -tf a.tar --checkpoint-a 'exec=rm /dev/null'", "tar -tf a.tar --checkpoint- 'exec=rm /dev/null'",
+  "tar -xf a.tar --checkpoint=1 --checkpoint-action=echo --checkpoint-action='exec=echo x; rm /dev/null'",
+  "tar -cMf a.tar -F 'rm /dev/null' x", "tar -cMF 'rm /dev/null' -f a.tar x", "tar -cM -F'rm /dev/null' -f a.tar x", "tar -cM --info-script='rm /dev/null' -f a.tar x", "tar -cM --info-script 'rm /dev/null' -f a.tar x",
+  "tar -cM --new-volume-script='rm /dev/null' -f a.tar x", "tar -cM --new-volume-script 'rm /dev/null' -f a.tar x", "tar -cM --new-v='rm /dev/null' -f a.tar x", "tar -cM --info 'rm /dev/null' -f a.tar x", "tar -tM -F 'rm /dev/null' -f a.tar",
+  "sudo tar -xf a.tar -I 'rm /dev/null'", "nice tar -xf a.tar --checkpoint=1 --checkpoint-action='exec=rm /dev/null'", "bash -c \"tar -cM -F 'rm /dev/null' -f a.tar x\"", "tar -C /tmp -xf a.tar -I 'sh -c \"rm /dev/null\"'",
+  // env -S text that starts with time: env runs time as a program (its -f takes a value), not as the keyword of the shell
+  "env -S 'time -f %e rm /dev/null'", "env -S 'time -p rm /dev/null'", "env -S'time -f %e rm /dev/null'", "env --split-string='time -f %e rm /dev/null'", "env -S 'time -o out.tmp rm /dev/null'",
+  "env -S '\"time\" -f %e rm /dev/null'", "env -i -S 'time -f %e rm /dev/null'", "sudo env -S 'time -f %e rm /dev/null'", "env -S 'time -f %e rm /dev/null' extra", "env -S 'nice time -f %e rm /dev/null'",
+  // unzip: after the archive every word is a pattern for a member, even one that looks like an option (only -x with its list and -d with its directory stay options)
+  'unzip -o a.zip -P dev/null -d /', 'unzip a.zip -o dev/null -d /', 'unzip a.zip -q dev/null -d /', 'unzip a.zip -j dev/null -d /', 'unzip a.zip -n dev/null -d /', 'unzip a.zip -l dev/null -d /', 'unzip a.zip -v dev/null -d /',
+  'unzip a.zip -t dev/null -d /', 'unzip a.zip -p dev/null -d /', 'unzip a.zip -c dev/null -d /', 'unzip a.zip -z dev/null -d /', 'unzip a.zip -Z dev/null -d /', 'unzip a.zip -- dev/null -d /', 'unzip a.zip -P secret dev/null -d /',
+  'unzip a.zip -i dev/null -d /', 'unzip a.zip -O cp437 dev/null -d /', 'unzip a.zip -d / -o dev/null', 'unzip a.zip dev/null -d / -o', 'unzip a.zip -d/ dev/null', 'unzip a.zip -x etc/x -o -d / dev/null',
+  'unzip a.zip -x etc/x -P dev/null -d /', 'sudo unzip -o a.zip -P dev/null -d /',
+  // --to-command runs for the members of an extraction to files, in every spelling of the extraction
+  "tar --get -f a.tar --to-command='rm /dev/null'", "tar xf a.tar --to-command='rm /dev/null'", "tar --extract -f a.tar --to-command 'rm /dev/null'", "tar -xf a.tar rel/x --to-command='rm /dev/null'", "tar -xvf a.tar --to-c='rm /dev/null'",
 ];
 
 // Commands the guard must let through. Text only, never executed.
@@ -150,8 +249,38 @@ const ALLOWED: string[] = [
   'echo /dev/null | xargs -i cp {} ./e', 'echo /dev/null | xargs --replace=@ cp @ ./e', 'echo /dev/null | xargs -I @ cp @ ./e',
   // a here-document of cat inside backticks, and a top-level one whose offset happens to match the one inside the backticks
   'echo `cat <<B\nrm /dev/null\nB\n`', "cats <<'A'\nrm -f /dev/null\nA\necho `bash <<B`", 'echo `ls /tmp`',
+  // the same pair stays text in single quotes and in $'...', and an escaped backslash before the newline is not a continuation
+  "rm '/de\\\nv/null'", "rm $'/de\\\nv/null'", 'rm "/tmp/x\\\\\nv/null"',
   // writes to pseudo devices that discard or ignore them
   'echo x > /dev/zero', 'echo x > /dev/full', 'echo x > /dev/urandom', 'echo x > /dev/random', 'echo x > /dev/stderr', 'echo x | tee /dev/zero', 'dd if=x of=/dev/zero', 'echo x >> /dev/full',
+  "time -f '%e' ls /tmp", 'time --output /tmp/t ls /tmp', 'time -p ls /tmp',
+  "sudo -n ls /tmp", 'sudo -nu root ls /tmp', 'sudo -nH -g wheel ls /tmp', 'env -iu NAME ls /tmp', 'timeout -vk 5 3 ls /tmp', 'ionice -tc 3 ls /tmp', 'echo /dev/null | xargs -rn 1 ls',
+  // env -S: a separator after the backslash and underscore, or the pair kept inside quotes (never a command)
+  "env -S 'echo\\_hi'", "env -S \"echo 'rm\\_/dev/null'\"", "env -S 'echo \"rm\\_/dev/null\"'", "env -S 'echo \\x\\_y'",
+  "eval -- 'echo hi'", 'eval --', "eval -- ''",
+  // members that stay outside /dev, a member without an extraction directory, and -j, which drops the directories of the members
+  'tar -C /tmp -xf /tmp/a.tar dev/null', 'tar -xf /tmp/a.tar dev/null', 'tar -C / -xf /tmp/a.tar etc/x', 'tar -tf /tmp/a.tar dev/null', 'tar -C / -tf /tmp/a.tar dev/null',
+  'unzip -o /tmp/a.zip dev/null -d /tmp', 'unzip /tmp/a.zip dev/null', 'unzip -j /tmp/a.zip dev/null -d /', 'unzip -l /tmp/a.zip dev/null -d /', 'unzip -o /tmp/a.zip etc/x -d /',
+  // the value of the file options of tar is the archive or a list, not a member
+  'tar -C / --extract --file /dev/fd/3 tmp/out', 'tar -C / --extract --file=/dev/fd/3 tmp/out', 'gtar -C / --extract --file /dev/fd/3 tmp/out', 'bsdtar -C / --extract --file /dev/fd/3 tmp/out',
+  'tar -C / -x --files-from /dev/fd/3 tmp/out', 'tar -C / -x --exclude-from /dev/fd/3 tmp/out',
+  // a member that a literal exclusion names is not extracted
+  'tar -C / -xf a.tar dev/null --exclude=dev/null', 'tar -C / -xf a.tar dev/null --exclude dev/null', 'tar -C / -xf a.tar --exclude=dev/null dev/null', 'tar -C / -xf a.tar dev/null --exclude=null',
+  'gtar -C / -xf a.tar dev/null --exclude=dev/null', 'tar -C / -xf a.tar dev/null dev/zero --exclude=dev/null --exclude=dev/zero', 'tar --strip-components=1 -C / -xf a.tar foo/dev/null --exclude=dev/null',
+  'tar --anchored -C / -xf a.tar dev/null --exclude=dev/null',
+  // the keyword time opens its own context in a group or a condition after a pipe
+  'echo x | { time -f %e rm /dev/null; }', 'echo x | { true; time -f %e rm /dev/null; }', 'echo x | if time -f %e rm /dev/null; then true; fi', 'echo x | while time -f %e rm /dev/null; do break; done',
+  'echo x | until time -f %e rm /dev/null; do break; done', 'echo x | { ! time -f %e rm /dev/null; }', 'echo x | ( time -f %e rm /dev/null )', 'echo x | for i in 1; do time -f %e rm /dev/null; done',
+  'echo x | case x in x) time -f %e rm /dev/null;; esac',
+  // the options of xargs whose value is the next word still take it
+  'echo /dev/null | xargs -L 1 ls', 'echo /dev/null | xargs -rL 1 ls', 'echo /dev/null | xargs -E rm ls', 'echo /dev/null | xargs -rE rm ls', 'echo /dev/null | xargs --max-args 1 ls',
+  // a member that is empty after the strip is skipped, and one that lands outside /dev stays outside
+  'tar --strip-components=1 -C / -xf /tmp/a.tar dev/null', 'tar --strip-components 2 -C / -xf /tmp/a.tar dev/null', 'tar --strip-components=1 -C / -xf /tmp/a.tar foo/etc/x', 'tar --strip-components=1 -C /tmp -xf /tmp/a.tar foo/dev/null',
+  // a bare time is the keyword of the shell: only -p and -- are its options, so the rest is a command that does not exist
+  'time -f %e rm /dev/null', 'if true; then time -f %e rm /dev/null; fi', '! time -f %e rm /dev/null', 'true && time -f %e rm /dev/null', '{ time -o /tmp/t rm /dev/null; }', 'time -p -f %e rm /dev/null',
+  'time --format %e rm /dev/null', 'time -pf rm /dev/null', 'time -f%e rm /dev/null', 'time -p time -f %e rm /dev/null',
+  // the words after -x are patterns to leave out, before or after -d
+  'unzip a.zip -x dev/null -d /', 'unzip a.zip top.txt -x dev/null -d /', 'unzip a.zip -d / -x dev/null', 'unzip -d / a.zip -x dev/null', 'unzip a.zip -x dev/null top.txt -d /', 'unzip -o a.zip -x dev/null dev/other -d /',
   // the same wrappers in front of a harmless command
   'sudo --user root ls', "env -S 'ls -l' x", `${'sudo '.repeat(11)}ls`, "env --split-string='echo hi'", 'coproc ls', 'stdbuf --output L cat /dev/urandom', "env -S 'echo x > /dev/null'",
   // tmpfs scratch under /dev/shm, also as the target directory of a copy or move
@@ -189,6 +318,59 @@ const ALLOWED: string[] = [
   'awk -i inplace -F /dev/ 1 file', 'fdisk -V /dev/sda', 'sfdisk --list-types /dev/sda', 'parted /dev/sda q', 'awk -i inplace --exec p.awk file', 'gawk -i inplace -l ordchr 1 file', 'awk -i inplace 1 x=/dev/null file',
   // ed and ex on an ordinary file, /dev only as a value
   'ed file', 'ed -s file', 'ed /dev/shm/x', 'echo x | ed', 'ed --version', 'ex file', 'ed -p "/dev/x" file',
+  // the same words with a command that does not touch /dev
+  "env -S '-i true'", "env -S '-i echo /dev/null'", "env -S '-- ls /dev/null'", "env -S '-u HOME true' /dev/null", 'env - ls /dev/null',
+  // the same names with a strip that leaves a path outside /dev
+  'tar --strip-components=2 -C / -xf a.tar /foo/dev/null', 'tar --strip-components=1 -C / -xf a.tar /dev/null', 'gtar --strip-components=3 -C / -xf a.tar /foo/dev/null', 'bsdtar --strip-components=3 -C / -xf a.tar /foo/dev/null',
+  // a list of exclusions that swallows everything up to the option, and members after it that stay outside /dev
+  'unzip a.zip -x dev/null -d /', 'unzip a.zip -x dev/null -d /tmp/out', 'unzip a.zip -x etc/x -d / tmp/out', 'unzip a.zip top.txt -x etc/x -d / tmp/out', 'unzip a.zip -x dev/null etc/x tmp/out -d /', 'unzip -x etc/x a.zip -d /',
+  // a redirection after the keyword time does not change it
+  'time -f %e >/tmp/log rm /dev/null', 'time -f %e 2>/tmp/log rm /dev/null', '{ time -f %e rm /dev/null; } >/tmp/log',
+  // extraction to the standard output creates no file
+  'tar -O -C / -xf /tmp/a.tar dev/null', 'tar --to-stdout -C / -xf a.tar dev/null', 'tar --to-s -C / -xf a.tar dev/null', 'tar -xOf a.tar dev/null', 'tar -C / -xOf a.tar dev/null', 'tar xOf a.tar dev/null', 'tar -xf a.tar -O',
+  'tar -O -C /dev -xf a.tar x', 'tar -C /dev --to-stdout -xf a.tar x', 'bsdtar -O -C / -xf a.tar dev/null', 'bsdtar --to-stdout -C / -xf a.tar dev/null', 'gtar -O -C / -xf a.tar dev/null', 'tar -C / -xf a.tar dev/null -O',
+  // members before the -C that leads to /dev stay in the current directory; the directory after the last member is not applied to anything
+  'tar -xf a.tar dev/null -C / tmp/out', 'tar -xf a.tar dev/null -C /', 'tar -C / -xf a.tar tmp/out -C /tmp dev/null', 'tar -xf a.tar dev/null dev/zero -C / tmp/out tmp/x', 'tar -C /tmp -xf a.tar x -C / tmp/out',
+  'tar -x -f a.tar dev/null -C /', 'tar -xf a.tar dev/null --directory=/ tmp/out',
+  // an option of the archive extractor with a value in the next word: the value is no member
+  'tar -C / -xf a.tar --label dev/null tmp/out', 'tar -C / -xf a.tar --label=dev/null tmp/out', 'tar -C / -xf a.tar --transform dev/null tmp/out', 'tar -C / -xf a.tar --blocking-factor dev/null tmp/out',
+  'tar -C / -xf a.tar --use-compress-program dev/null tmp/out', 'tar -C / -xf a.tar --newer dev/null tmp/out', 'tar -C / -xf a.tar --owner dev/null tmp/out', 'tar -C / -xf a.tar --mode dev/null tmp/out',
+  'tar -C / -xf a.tar --format dev/null tmp/out', 'gtar -C / -xf a.tar --to-command dev/null tmp/out', 'bsdtar -C / -xf a.tar --uid dev/null tmp/out', 'bsdtar -C / -xf a.tar --options dev/null tmp/out',
+  'bsdtar -C / -xf a.tar --newer-than dev/null tmp/out', 'tar -C / -xf a.tar --suffix dev/null tmp/out',
+  // env -S inside a cluster: a letter that takes a value before the S keeps the S as its value; the text still goes through the checks
+  "env -iS 'true'", "env -iS 'echo /dev/null'", "env -iu S true", "env -iuS true", "env -uS echo x", "env -iC /tmp true",
+  // busybox with an applet that only reads, and without an applet
+  'busybox ls /dev', 'busybox cat /dev/null', 'busybox echo /dev/null', 'busybox --list', 'busybox true', 'env busybox ls /dev',
+  // time after a redirection of an earlier command is the keyword again after the list operator
+  'true >/tmp/log && time -f %e rm /dev/null', 'true >/tmp/log; time -f %e rm /dev/null',
+  // the old style first word with O and a directory letter: the members go to the standard output wherever the directory is
+  'tar xOCf / a.tar dev/null', 'tar xCOf / a.tar dev/null',
+  // a letter that takes a value before the S: the text after the cluster is the program name, not text to split
+  "env -uS 'rm /dev/null'",
+  // -P and --absolute-names change nothing when the command only creates or lists, or when the strip option makes every name relative again, or a member has a slash and is no device path
+  'tar -cPf a.tar /etc/x', 'tar -tPf a.tar', 'tar --absolute-names -cf a.tar /dev/null', 'tar -xPf a.tar --strip-components=1', 'tar -xPf a.tar --strip-components=2', 'tar -xPf a.tar -C /tmp rel/x',
+  'tar -xPf a.tar /tmp/x', 'tar -xPf a.tar -C /dev/shm rel/x', 'bsdtar -tf a.tar --absolute-paths', 'tar -xPOf a.tar', 'tar -xPf a.tar -O',
+  // a --to-command text that harms nothing, and the other options of the same family
+  "tar -xf a.tar --to-command='echo x'", "tar -xf a.tar --to-command 'cat /dev/null'", "tar -xf a.tar --to-command='wc -c >/dev/null'", 'tar -xf a.tar --to-stdout', 'tar -tf a.tar --to-command=cat', 'tar -xf a.tar --totals',
+  // the value of --to-command in the next word is a command, not a member (also abbreviated)
+  'tar -C / -xf a.tar --to-c dev/null', 'tar -C / -xf a.tar --to-command dev/null', 'tar -C / -xf a.tar --to-co=dev/null',
+  // the same options with a program that harms nothing, the checkpoint actions that run no command, and the -I of bsdtar, which names a file
+  'tar -xf a.tar -I gzip', "tar -xf a.tar -I 'gzip -9'", 'tar -xf a.tar --use-compress-program=gzip', "tar -xf a.tar --use-compress-program='gzip -9'", 'tar -cf a.tar --use-compress-program zstd f', 'tar -xf a.tar --use gzip',
+  'tar -xf a.tar --checkpoint=1 --checkpoint-action=echo=x', 'tar -xf a.tar --checkpoint=1 --checkpoint-action=dot', 'tar -xf a.tar --checkpoint=1 --checkpoint-action=sleep=1', 'tar -xf a.tar --checkpoint=1 --checkpoint-action ttyout=x',
+  'tar -xf a.tar --checkpoint=1 --checkpoint-action=totals', 'tar -xf a.tar --checkpoint=1 --checkpoint-action=bell', 'tar -xf a.tar --checkpoint=1 --checkpoint-action=exec=cat', "tar -xf a.tar --checkpoint=1 --checkpoint-action='exec=echo /dev/null'",
+  'tar -cM --info-script=true -f a.tar x', 'tar -cM -F true -f a.tar x', 'tar -cM --new-volume-script ./next.sh -f a.tar x', 'tar -cMF ./next.sh -f a.tar x',
+  'bsdtar -tf a.tar -I /dev/null', 'bsdtar -tf a.tar -I inc.txt', 'bsdtar -tf a.tar --use-compress-program gzip',
+  // the value of these options in the next word is a command text, no member (also abbreviated)
+  'tar -C / -xf a.tar --use-compress-program dev/null', 'tar -C / -xf a.tar --use dev/null', 'tar -C / -xf a.tar --info-script dev/null', 'tar -C / -xf a.tar --checkpoint-a dev/null', 'bsdtar -C / -xf a.tar --us dev/null',
+  // an echo action prints its text and runs nothing, and bsdtar knows none of the GNU options (it reads their value as a member)
+  "tar -xf a.tar --checkpoint=1 --checkpoint-action='echo=rm /dev/null'", "bsdtar -tf a.tar --to-command='rm /dev/null'", "bsdtar -xf a.tar --info-script 'rm /dev/null'",
+  // ... and a time program that wraps something harmless
+  "env -S 'time -f %e true'", "env -S 'time -f %e echo /dev/null'", "env -S 'time -p true'",
+  // ... and the options before the archive still count: -j drops the directories, -l lists, and a password before the archive is no member
+  'unzip -j a.zip dev/null -d /', 'unzip -l a.zip dev/null -d /', 'unzip -P dev/null a.zip -d /', 'unzip a.zip -o rel/x -d /tmp/out', 'unzip -o a.zip -P secret -d /tmp/out', 'unzip a.zip -d /tmp/out -o dev/null',
+  // ... and never otherwise: not when listing, creating, comparing, appending, deleting, or when the members go to the standard output
+  "tar -tf a.tar --to-command='rm /dev/null'", "tar -cf a.tar --to-command='rm /dev/null' f", "tar -xOf a.tar --to-command='rm /dev/null'", "tar -xf a.tar --to-stdout --to-command='rm /dev/null'", "tar -xf a.tar --to-command='rm /dev/null' -O",
+  "tar xOf a.tar --to-command='rm /dev/null'", "tar -df a.tar --to-command='rm /dev/null'", "tar -rf a.tar --to-command='rm /dev/null' f", "tar --delete -f a.tar --to-command='rm /dev/null' f", "tar -tf a.tar --to-command 'rm /dev/null'",
 ];
 
 describe('/dev guard: Bash commands', () => {
@@ -238,6 +420,9 @@ describe('/dev guard: Bash commands', () => {
     const recipe = 'mknod -m 666 /dev/null.new c 1 3 && mv -f /dev/null.new /dev/null';
     // 12 000 here-documents (about 230 000 characters) took several seconds when each redirection searched the list of here-documents
     const manyHeredocs = Array.from({ length: 12000 }, (_, i) => `cat <<E${i}\nx\nE${i}`).join('\n');
+    // 10 000 extraction directories and 10 000 members, all different, took more than a minute when every member was tried against every directory
+    const manyDirs = Array.from({ length: 10000 }, (_, i) => `/tmp/d${i}`);
+    const manyMembers = Array.from({ length: 10000 }, (_, i) => `m/x${i}`);
     const table: Array<[string, 'allow' | 'deny']> = [
       ['echo' + ' '.repeat(200000) + 'x', 'allow'],
       ['echo' + '\t'.repeat(200000) + 'x', 'allow'],
@@ -249,6 +434,11 @@ describe('/dev guard: Bash commands', () => {
       [manyHeredocs, 'allow'],
       [`${manyHeredocs}\nbash <<'Z'\nrm /dev/null\nZ`, 'deny'],
       [`${'nice '.repeat(10000)}ls /tmp`, 'allow'],
+      [`tar ${manyDirs.map((d) => `-C ${d}`).join(' ')} -xf a.tar ${manyMembers.join(' ')}`, 'allow'],
+      [`unzip ${manyDirs.map((d) => `-d ${d}`).join(' ')} a.zip ${manyMembers.join(' ')}`, 'allow'],
+      [`tar ${manyDirs.map((d) => `-C ${d}`).join(' ')} -C / -xf a.tar ${manyMembers.join(' ')} dev/null`, 'deny'],
+      [`tar -C / -xf a.tar ${manyMembers.join(' ')} ${manyMembers.map((m) => `--exclude=${m}`).join(' ')}`, 'allow'],
+      [`tar -C / -xf a.tar ${manyMembers.join(' ')} dev/null ${manyMembers.map((m) => `--exclude=${m}`).join(' ')}`, 'deny'],
     ];
     for (const [command, expected] of table) {
       const started = Date.now();
@@ -473,7 +663,7 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
     rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   });
 
-  function hook(toolName: string, toolInput: Record<string, unknown>, extraEnv: Record<string, string> = { OMC_SHELL_CHECKS: '1' }) {
+  function hook(toolName: string, toolInput: Record<string, unknown>, extraEnv: Record<string, string> = { OMC_SHELL_CHECKS: '1' }, inputCwd?: string) {
     const env = {
       PATH: process.env.PATH,
       SystemRoot: process.env.SystemRoot,
@@ -490,7 +680,7 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
     };
     const sid = `dev-guard-${process.pid}-${++counter}`;
     const result = spawnSync(process.execPath, [join(ROOT, 'scripts', 'pre-tool-enforcer.mjs')], {
-      input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, tool_use_id: `toolu_${sid}`, cwd, session_id: sid, permission_mode: 'bypassPermissions' }),
+      input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, tool_use_id: `toolu_${sid}`, cwd: inputCwd ?? cwd, session_id: sid, permission_mode: 'bypassPermissions' }),
       cwd,
       env,
       encoding: 'utf8',
@@ -511,6 +701,17 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
     const rows = logRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ decision: 'deny', checks: ['dev-path'], tool_name: 'Bash' });
+  });
+
+  it('reads the directory of the session from the cwd field of the hook input', () => {
+    const inDev = hook('Bash', { command: 'rm null' }, { OMC_SHELL_CHECKS: '1' }, '/dev');
+    expect(inDev.code, inDev.stderr).toBe(0);
+    expect(inDev.denied, inDev.stdout).toBe(true);
+    expect(inDev.reason).toMatch(/Blocked: `rm` would change \/dev\/null/);
+    expect(hook('Bash', { command: 'rm null' }, { OMC_SHELL_CHECKS: '1' }, '/tmp').denied).toBe(false);
+    expect(hook('Bash', { command: 'cd /dev && rm null' }).denied).toBe(true);
+    expect(hook('Write', { file_path: 'null' }, { OMC_SHELL_CHECKS: '1' }, '/dev').denied).toBe(true);
+    expect(hook('Bash', { command: 'rm null' }, {}, '/dev').denied).toBe(false); // without OMC_SHELL_CHECKS=1 nothing is read
   });
 
   it('denies sed -i, perl -i, bash -c, sudo and a pipeline into xargs', () => {
@@ -591,5 +792,385 @@ describe('/dev guard in the pre-tool-enforcer hook', () => {
 
   it('does not cover PowerShell', () => {
     expect(hook('PowerShell', { command: 'rm /dev/null' }).denied).toBe(false);
+  });
+});
+
+// The working directory of the session, cd in the command and symbolic links to /dev. Text only: nothing is ever run, the links below are only looked at.
+describe('/dev guard: working directory and symbolic links', () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'dev-guard-links-'));
+    mkdirSync(join(dir, 'plain'));
+    symlinkSync('/dev', join(dir, 'devlink'));
+    symlinkSync('/dev/null', join(dir, 'nulllink'));
+    symlinkSync(join(dir, 'plain'), join(dir, 'plainlink'));
+  });
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const DEVICES = ['null', 'zero', 'full', 'random', 'urandom', 'tty'];
+  // the operations that replace or change a file, with <P> for the path
+  const OPERATIONS = [
+    'rm <P>', 'mv <P> /tmp/x', 'mv /tmp/x <P>', 'cp --remove-destination /tmp/x <P>', 'ln -sf /tmp/x <P>', 'install /tmp/x <P>',
+    'sed -i s/a/b/ <P>', "perl -i -pe 's/a/b/' <P>", 'truncate -s 0 <P>',
+  ];
+  const each = (spell: (device: string) => string, wrap: (command: string) => string = (c) => c) =>
+    OPERATIONS.flatMap((op) => DEVICES.map((d) => wrap(op.split('<P>').join(spell(d)))));
+  const check = (command: string, cwd?: string) => shell.checkBashCommand(command, { platform: 'linux', syntax: false, env: {}, devNullProbe: probeOf('healthy'), cwd });
+
+  it('refuses the operations on a bare name or a ./ name when the session is in /dev', () => {
+    for (const command of [...each((d) => d), ...each((d) => `./${d}`)]) expect(check(command, '/dev').decision, command).toBe('deny');
+  });
+
+  it('refuses them after cd /dev in the same command, with or without a directory of the session', () => {
+    for (const command of [...each((d) => d, (c) => `cd /dev && ${c}`), ...each((d) => `./${d}`, (c) => `cd /dev && ${c}`)]) {
+      expect(check(command).decision, command).toBe('deny');
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+    }
+  });
+
+  it('refuses them through a symbolic link to /dev, also after .. behind the link', () => {
+    const link = join(dir, 'devlink');
+    for (const command of [...each((d) => `${link}/${d}`), ...each((d) => `${link}/..${link}/${d}`)]) expect(check(command, '/tmp').decision, command).toBe('deny');
+    expect(check('rm null', link).decision).toBe('deny');
+    expect(check(`cd ${link} && rm null`, '/tmp').decision).toBe('deny');
+    expect(check('cd devlink && rm null', dir).decision).toBe('deny');
+    expect(check('rm devlink/null', dir).decision).toBe('deny');
+    expect(check('rm ./devlink/null', dir).decision).toBe('deny');
+  });
+
+  it.each([
+    ['cd /dev; rm null', '/tmp'], ['cd /dev/ && rm null', '/tmp'], ['cd //dev && rm null', '/tmp'], ['cd -P /dev && rm null', '/tmp'], ['cd -- /dev && rm null', '/tmp'],
+    ['cd /tmp && cd /dev && rm null', '/tmp'], ['cd / && cd dev && rm null', '/tmp'], ['cd /dev/.. && rm dev/null', '/tmp'], ['cd /dev && cd .. && rm dev/null', '/tmp'],
+    ['cd .. && rm dev/null', '/dev'], ['rm ../dev/null', '/dev'], ['cd /dev/pts && rm 0', '/tmp'], ['cd /dev && find . -delete', '/tmp'],
+    ["bash -c 'cd /dev && rm null'", '/tmp'], ['(cd /dev && rm null)', '/tmp'], ['{ cd /dev; rm null; }', '/tmp'], ['cd /dev && bash -c "rm null"', '/tmp'], ['cd /dev || true; rm null', '/tmp'],
+    ['cd /dev && echo x | tee sda', '/tmp'], ['cd /dev && echo x > sda', '/tmp'], ['cd /dev && dd of=sda if=x', '/tmp'], ['echo x > sda', '/dev'], ['chmod 600 null', '/dev'], ['touch null', '/dev'],
+    ['cd /dev && chmod 600 null', undefined],
+    // a subshell leaves its cd behind, a cd after || may not have run, and a path that a feeder hands to xargs is read from the directory in force
+    ['cd /dev && (cd /tmp; true); rm null', '/tmp'], ['cd /dev || cd /tmp; rm null', '/tmp'], ['(cd /tmp); rm null', '/dev'], ['cd /dev && echo null | xargs rm', '/tmp'], ['echo null | xargs rm', '/dev'],
+    // an extraction without -C or -d goes to the directory of the session, a relative -C or -d is read from it
+    ['tar -xf a.tar', '/dev'], ['unzip a.zip', '/dev'], ['tar -xf a.tar -C sub', '/dev'], ['unzip a.zip -d sub', '/dev'], ['tar -C . -xf a.tar', '/dev'], ['tar -xf a.tar dev/null', '/'], ['unzip a.zip dev/null', '/'],
+    ['cd /dev && tar -xf a.tar', '/tmp'], ['cd /dev && unzip a.zip', '/tmp'], ['cd /dev && tar -xf a.tar', undefined], ['cd /dev && unzip a.zip dev/null', undefined],
+  ])('refuses %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('deny');
+  });
+
+  it('refuses a replacing operation on a relative path after a cd that it cannot follow, and nothing else', () => {
+    for (const command of ['cd "$X"; rm foo', 'cd "$X" && rm ./foo', 'cd; rm foo', 'cd -; rm foo', 'cd ~; rm foo', 'cd ~/x; rm foo', 'pushd "$X"; rm foo', 'pushd; rm foo', 'popd; rm foo', 'cd $(pwd)/x; rm foo',
+      'cd "$X"; mv a b', 'cd "$X"; sed -i s/a/b/ f', 'cd /dev && cd "$X" && rm foo', 'cd "$X"; chmod 600 f', 'cd "$X"; truncate -s 0 f', 'cd "$X"; ln -sf a b']) {
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+      expect(check(command).decision, command).toBe('deny');
+    }
+    expect(check('cd "$X"; rm foo', '/tmp').reason).toMatch(/a relative path after a cd that the guard cannot follow/);
+  });
+
+  it.each([
+    'cd "$X"; ls', 'cd "$X"; rm /tmp/foo', 'cd "$X"; echo x > foo', 'cd "$X"; echo x > null', 'cd "$X"; cp a b', 'cd "$X"; cat foo', 'cd "$X"; rm "$f"', 'cd "$X"; rm "a$f"', 'cd "$X"; find . -name x',
+    'cd "$X"; tar -xf a.tar -C out', 'cd "$X"; unzip a.zip -d out', 'cd "$X"; git rm foo', 'cd "$X"; ls | xargs echo', 'cd "$X"; echo foo | tee out',
+    'cd /tmp && rm null', 'cd /tmp; rm null', 'cd /tmp/x && rm ./null', 'cd /dev/shm && rm x', 'cd /dev/shm/ && rm null', 'cd /dev && cd /tmp && rm null', 'cd /dev && cd .. && rm null',
+    'cd /dev && ls null', 'cd /dev && cat null', 'cd /dev && echo x > null', 'cd /dev && echo x >> null', 'cd /dev && cp x null', 'cd /dev && ls | xargs echo', 'cd /dev && echo hello | xargs echo', 'cd /dev && stat null',
+    'cd /dev && rm /tmp/x', 'cd /dev && rm ../tmp/x', 'cd /dev && rm shm/x', 'cd /dev && rm ./shm/x',
+    '(cd /dev; ls); rm null', '(cd /dev && ls) && rm null', 'cd /dev && echo null | xargs echo', 'cd /tmp && echo null | xargs rm', 'echo null | xargs rm', 'cd /dev && sudo echo null | xargs rm', 'cd /tmp || cd /dev; rm /tmp/x',
+    'cd /dev && tar -xf a.tar -C /tmp', 'cd /dev && tar -xf a.tar -C /tmp b', 'cd /dev/shm && tar -xf a.tar', 'cd /dev && tar -tf a.tar', 'cd /dev && tar -xOf a.tar', 'cd /dev && unzip -l a.zip', 'cd /dev && unzip a.zip -d /tmp', 'cd /tmp && tar -xf a.tar', 'tar -xf a.tar', 'unzip a.zip',
+  ])('allows %j', (command) => {
+    expect(check(command, '/tmp').decision).toBe('allow');
+    expect(check(command).decision).toBe('allow');
+  });
+
+  it('allows the same operations when the session is outside /dev, in /dev/shm, or the hook gave no directory', () => {
+    for (const command of each((d) => d)) {
+      expect(check(command, '/tmp').decision, command).toBe('allow');
+      expect(check(command, '/dev/shm').decision, command).toBe('allow');
+      expect(check(command).decision, command).toBe('allow');
+    }
+    for (const command of ['rm null', 'rm ./null', 'ls', 'cat null', 'echo x > null', 'mv null /tmp/x']) expect(check(command, '/dev').decision === 'deny', command).toBe(command.startsWith('rm') || command.startsWith('mv'));
+    for (const cwd of ['', 'relative/dir', 'C:\\Users\\x', '/dev/\u0000']) expect(check('rm null', cwd).decision, JSON.stringify(cwd)).toBe('allow');
+  });
+
+  it('allows the redirects of a harmless device through a link, in a relative name and after cd, and refuses the others', () => {
+    const link = join(dir, 'devlink');
+    for (const command of [`echo x > ${link}/null`, `echo x >> ${link}/zero`, `echo x | tee ${link}/null`, `dd if=x of=${link}/null`, `cat x > ${join(dir, 'nulllink')}`]) expect(check(command, '/tmp').decision, command).toBe('allow');
+    for (const command of [`echo x > ${link}/sda`, `echo x | tee ${link}/sda`, `dd if=x of=${link}/sda`, `echo x > ${link}/../dev/sda`]) expect(check(command, '/tmp').decision, command).toBe('deny');
+  });
+
+  it('allows a link to an ordinary directory, and a link to a device that the command removes or replaces as a link', () => {
+    const nulllink = join(dir, 'nulllink');
+    const plainlink = join(dir, 'plainlink');
+    for (const command of [`rm ${plainlink}/f`, `rm ${plainlink}`, `mv /tmp/x ${plainlink}`, `mv /tmp/x ${plainlink}/f`, `cp /tmp/x ${plainlink}/f`, `ln -sf /tmp/x ${plainlink}/f`, `sed -i s/a/b/ ${plainlink}/f`, `find ${plainlink} -name x`,
+      `rm ${nulllink}`, `rm -f ${nulllink}`, `unlink ${nulllink}`, `mv ${nulllink} /tmp/x`, `mv /tmp/x ${nulllink}`, `cp --remove-destination /tmp/x ${nulllink}`, `ln -sf /tmp/x ${nulllink}`, `install /tmp/x ${nulllink}`,
+      `sed -i s/a/b/ ${nulllink}`, `perl -i -pe 's/a/b/' ${nulllink}`, `cp /tmp/x ${nulllink}`, `rm ${join(dir, 'devlink')}`, `unlink ${join(dir, 'devlink')}`, `find ${join(dir, 'devlink')} -delete`, `find ${join(dir, 'devlink')} -name x`]) {
+      expect(check(command, '/tmp').decision, command).toBe('allow');
+    }
+  });
+
+  it('refuses what the tools do to the device behind a link: they follow it, or enter it when it names a directory', () => {
+    const nulllink = join(dir, 'nulllink');
+    const devlink = join(dir, 'devlink');
+    for (const command of [`truncate -s 0 ${nulllink}`, `chmod 600 ${nulllink}`, `chown nobody ${nulllink}`, `touch ${nulllink}`, `sed -i --follow-symlinks s/a/b/ ${nulllink}`, `rm ${devlink}/`, `rm -r ${devlink}/`,
+      `mv /tmp/x ${devlink}`, `cp --remove-destination /tmp/x ${devlink}`, `ln -sf /tmp/x ${devlink}`, `install /tmp/x ${devlink}`, `cp -t ${devlink} /tmp/x`, `mv -t ${devlink} /tmp/x`, `find ${devlink}/ -delete`, `find -L ${devlink} -delete`, `find -H ${devlink} -delete`]) {
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+    }
+  });
+
+  // sed takes any unambiguous prefix of --follow-symlinks (measured with sed 4.9: --fo is the shortest, --f is ambiguous with --file) and then edits the target
+  it('reads an abbreviation of --follow-symlinks like the option', () => {
+    const nulllink = join(dir, 'nulllink');
+    for (const option of ['--follow-symlinks', '--follow-symlink', '--follow', '--foll', '--fol', '--fo']) {
+      expect(check(`sed ${option} -i s/a/b/ ${nulllink}`, '/tmp').decision, option).toBe('deny');
+      expect(check(`sed -i ${option} s/a/b/ ${nulllink}`, '/tmp').decision, option).toBe('deny');
+    }
+    for (const option of ['--f', '--follow-symlinkz', '--fx']) expect(check(`sed ${option} -i s/a/b/ ${nulllink}`, '/tmp').decision, option).toBe('allow');
+  });
+
+  // the same for the other long options of sed that the guard reads (measured with sed 4.9: --i, --e, --li and --fi are the shortest; --expression=TEXT with
+  // the text attached leaves the first operand a file)
+  it.each([
+    ['sed --i s/a/b/ /dev/null', 'deny'], ['sed --in s/a/b/ /dev/null', 'deny'], ['sed --e=s/a/b/ --in /dev/null', 'deny'], ['sed --exp=s/a/b/ --in-place /dev/null', 'deny'],
+    ['sed --fi=/tmp/s.sed -i /dev/null', 'deny'], ['sed --fil /tmp/s.sed -i /dev/null', 'deny'], ['sed --lin=5 -i s/a/b/ /dev/null', 'deny'], ['sed --li 5 -i s/a/b/ /dev/null', 'deny'],
+    ['sed --i s/a/b/ /tmp/x', 'allow'], ['sed --e=p --in /tmp/x', 'allow'], ['sed --fi /tmp/s.sed --i /tmp/x', 'allow'], ['sed --li 5 -i s/a/b/ /tmp/x', 'allow'],
+  ])('reads the abbreviated long options of sed in place: %s is %s', (command, expected) => {
+    expect(check(command, '/tmp').decision).toBe(expected);
+  });
+
+  // touch, chown and chgrp change the link itself with -h or --no-dereference (measured with coreutils 9.4: --no-d is the shortest prefix, --d is --dereference
+  // for chown and chgrp, the last of them counts)
+  it('reads -h and --no-dereference of touch, chown and chgrp as changes of the link itself', () => {
+    const nulllink = join(dir, 'nulllink');
+    const devlink = join(dir, 'devlink');
+    for (const command of [`touch -h ${nulllink}`, `touch --no-dereference ${nulllink}`, `touch --no-d ${nulllink}`, `touch -ch ${nulllink}`, `touch -hd 2001-01-01 ${nulllink}`, `touch -h -d 2001-01-01 ${nulllink}`,
+      `chown -h nobody ${nulllink}`, `chown --no-dereference nobody ${nulllink}`, `chown --no-d nobody ${nulllink}`, `chown -hR nobody ${nulllink}`, `chown --dereference -h nobody ${nulllink}`,
+      `chgrp -h nogroup ${nulllink}`, `chgrp --no-dereference nogroup ${nulllink}`, `chgrp --no-d nogroup ${nulllink}`, `chgrp --deref -h nogroup ${nulllink}`]) {
+      expect(check(command, '/tmp').decision, command).toBe('allow');
+    }
+    for (const command of [`touch ${nulllink}`, `touch -dh ${nulllink}`, `touch -d 2001-01-01 ${nulllink}`, `touch -r x ${nulllink}`, `chown nobody ${nulllink}`, `chown -h --dereference nobody ${nulllink}`, `chown -h --d nobody ${nulllink}`,
+      `chown --no-dereference --dereference nobody ${nulllink}`, `chgrp -h --deref nogroup ${nulllink}`, `chgrp nogroup ${nulllink}`, `touch -h ${devlink}/null`, `chown -h nobody ${devlink}/null`, `touch -h /dev/null`, `chown -h nobody /dev/null`]) {
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+    }
+  });
+
+  // -T and ln -n replace a link to a directory instead of entering it, and chmod -h leaves a link alone (measured with coreutils 9.4: ln -sf x LINK puts x into the
+  // directory, ln -sfn, ln -sfT, mv -T, install -T and cp -T --remove-destination replace the link; --no-t and --no-d are the shortest prefixes)
+  it('reads -T, ln -n and chmod -h like the tools', () => {
+    const nulllink = join(dir, 'nulllink');
+    const devlink = join(dir, 'devlink');
+    for (const command of [`ln -sfn /tmp/x ${devlink}`, `ln -sfT /tmp/x ${devlink}`, `ln -sf --no-dereference /tmp/x ${devlink}`, `ln -sf --no-d /tmp/x ${devlink}`, `ln -sf --no-target-directory /tmp/x ${devlink}`,
+      `ln -sf --no-t /tmp/x ${devlink}`, `mv -T /tmp/x ${devlink}`, `mv --no-target-directory /tmp/x ${devlink}`, `install -T /tmp/x ${devlink}`, `cp -T --remove-destination /tmp/x ${devlink}`,
+      `chmod -h 600 ${nulllink}`, `chmod --no-dereference 600 ${nulllink}`]) {
+      expect(check(command, '/tmp').decision, command).toBe('allow');
+    }
+    for (const command of [`ln -sf /tmp/x ${devlink}`, `cp -n --remove-destination /tmp/x ${devlink}`, `mv -n /tmp/x ${devlink}`, `install -c /tmp/x ${devlink}`, `ln -sf -t ${devlink} /tmp/x`,
+      `chmod 600 ${nulllink}`, `chmod -h 600 /dev/null`, `chmod -h 600 ${devlink}/null`, `ln -sfn /tmp/x ${devlink}/null`, `mv -T /tmp/x ${devlink}/null`]) {
+      expect(check(command, '/tmp').decision, command).toBe('deny');
+    }
+  });
+
+  it('reads cd like the shell: -P and -- are options, a group does not end the cd and a subshell or a pipeline does, a cd after || is unknown, an empty target stays', () => {
+    expect(check('(cd /dev); rm null', '/tmp').decision).toBe('allow');
+    expect(check('{ cd /dev; }; rm null', '/tmp').decision).toBe('deny');
+    expect(check('cd /dev && cd /tmp || true; rm null', '/tmp').decision).toBe('deny'); // the second cd may have failed
+    expect(check('cd /dev | cat; rm null', '/tmp').decision).toBe('allow'); // the cd of a pipeline runs in a subshell
+    expect(check('cd ""; rm null', '/dev').decision).toBe('deny');
+    expect(check('cd "" && rm null', '/tmp').decision).toBe('allow');
+    expect(check('cd -L /tmp && rm null', '/dev').decision).toBe('allow');
+    expect(check('cd -- /tmp && rm null', '/dev').decision).toBe('allow');
+  });
+
+  it('still reads a path with a variable as unknown, and a relative path without a directory of the session as before', () => {
+    expect(check('rm "$X/null"', '/dev').decision).toBe('allow');
+    expect(check('rm "null$X"', '/dev').decision).toBe('allow');
+    expect(check('cd /dev && rm "$X"').decision).toBe('allow');
+    expect(check('rm ~/null', '/dev').decision).toBe('allow');
+  });
+
+  it('resolves at most a few hundred paths per command and keeps reading the rest as text', () => {
+    const many = Array.from({ length: 5000 }, (_, i) => `f${i}`).join(' ');
+    const started = Date.now();
+    expect(check(`rm ${many}`, '/tmp').decision).toBe('allow');
+    expect(check(`rm ${many} /dev/null`, '/tmp').decision).toBe('deny');
+    expect(check(`rm ${many} ${join(dir, 'devlink')}/null`, '/tmp').decision).toBe('allow'); // beyond the budget only the text counts
+    expect(check(`rm ${Array.from({ length: 100 }, (_, i) => `f${i}`).join(' ')} ${join(dir, 'devlink')}/null`, '/tmp').decision).toBe('deny');
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it('refuses a file tool on a relative path when the session is in /dev, or on a path through a link', () => {
+    const call = (tool: string, field: string, path: string, cwd?: string) => shell.runShellChecks(tool, { session_id: 's', tool_name: tool, cwd, tool_input: { [field]: path } }, { platform: 'linux', env: {}, logDir: undefined });
+    for (const [tool, field] of [['Write', 'file_path'], ['Edit', 'file_path'], ['MultiEdit', 'file_path'], ['NotebookEdit', 'notebook_path']]) {
+      expect(call(tool, field, 'null', '/dev').decision, tool).toBe('deny');
+      expect(call(tool, field, './zero', '/dev').decision, tool).toBe('deny');
+      expect(call(tool, field, `${join(dir, 'devlink')}/null`, '/tmp').decision, tool).toBe('deny');
+      expect(call(tool, field, 'devlink/null', dir).decision, tool).toBe('deny');
+      expect(call(tool, field, 'null', '/tmp').decision, tool).toBe('allow');
+      expect(call(tool, field, 'null').decision, tool).toBe('allow');
+      expect(call(tool, field, `${join(dir, 'plainlink')}/f`, '/dev').decision, tool).toBe('allow');
+    }
+  });
+});
+
+// Round 6: wrapper directories, cd in pipelines and conditionals, abbreviated options, bsdtar members and options that do not follow a link. Text only, nothing is run.
+describe('/dev guard: spellings of round 6', () => {
+  const check = (command: string, cwd?: string) => shell.checkBashCommand(command, { platform: 'linux', syntax: false, env: {}, devNullProbe: probeOf('healthy'), cwd });
+  // env -C and --chdir (any prefix of the long option, the last one counts alone) put the wrapped command in another directory
+  it.each([
+    ['env -C /dev rm null', '/tmp'], ['env -C /dev -i rm null', '/tmp'], ['env -iC /dev rm null', '/tmp'], ['env -C/dev rm null', '/tmp'], ['env --chdir=/dev rm null', '/tmp'], ['env --chdir /dev rm null', '/tmp'],
+    ['env --chd /dev rm null', '/tmp'], ['env --c=/dev rm null', '/tmp'], ['env --ch=/dev rm ./null', '/tmp'], ['env -C /tmp -C /dev rm null', '/tmp'], ['env -C / env -C dev rm null', '/tmp'],
+    ['cd /tmp && env -C /dev rm null', '/tmp'], ['env -C /dev FOO=1 rm null', '/tmp'], ['env -C /dev sudo rm null', '/tmp'], ['env -C /dev mv null /tmp/x', '/tmp'], ['env -C /dev truncate -s 0 null', undefined],
+    ['env -C dev rm null', '/'], ['env -C "$X" rm foo', '/tmp'], ['env -C /dev -S "rm null"', '/tmp'], ["env -C /dev -S 'rm null'", '/tmp'], ['env -C /dev env rm null', '/tmp'],
+  ])('refuses %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('deny');
+  });
+
+  it.each([
+    ['env -C /dev -C /tmp rm null', '/dev'], ['env -C /tmp rm null', '/dev'], ['env -C /dev rm /tmp/x', '/tmp'], ['env -C dev rm null', '/tmp'], ['env -C /dev ls', '/tmp'], ['env -C /dev echo hi; rm null', '/tmp'],
+    ['env -C /tmp -C / env -C tmp rm null', '/dev'], ['env -C / -C dev rm null', '/tmp'], ['cd /dev && env -C /tmp rm null', '/tmp'], ['env -C "$X" rm /tmp/x', '/tmp'], ['env -C /dev cat null', '/tmp'], ['env --chdir=/tmp rm null', '/dev'],
+  ])('allows %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('allow');
+  });
+  // a cd in a pipeline or in the background runs in a subshell: the directory stays (bash 5.2, lastpipe off)
+  it.each([
+    ['cd /dev; cd /tmp | true; rm null', '/tmp'], ['cd /dev; true | cd /tmp; rm null', '/tmp'], ['cd /dev; cd /tmp & rm null', '/tmp'], ['cd /dev; cd /tmp |& cat; rm null', '/tmp'], ['cd /dev; pushd /tmp | true; rm null', '/tmp'],
+    ['cd /dev; true | popd; rm null', '/tmp'], ['cd /dev; cd "$X" | true; rm null', '/tmp'], ['cd /dev; cd /tmp & wait; rm null', '/tmp'], ['rm null; cd /tmp | cat', '/dev'], ['cd /tmp | true; rm null', '/dev'], ['echo x | cd /tmp; rm null', '/dev'],
+  ])('refuses %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('deny');
+  });
+
+  it.each([
+    ['cd /tmp; cd /dev | true; rm null', '/tmp'], ['cd /tmp; true | cd /dev; rm null', '/tmp'], ['cd /tmp; cd /dev & rm null', '/tmp'], ['cd /tmp; pushd /dev | true; rm null', '/tmp'], ['cd /tmp; cd "$X" | true; rm null', '/tmp'],
+    ['cd /dev | true; rm null', '/tmp'], ['true | cd /dev; rm null', '/tmp'], ['cd /dev | true; cd /tmp; rm null', '/dev'], ['cd /dev; cd /tmp; rm null', '/tmp'], ['cd "$X" | true; rm foo', '/tmp'],
+  ])('allows %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('allow');
+  });
+  // a cd that may not run leaves the directory unknown once the chain or the body ends (measured with bash 5.2: it is skipped after a failed && and a false if)
+  it.each([
+    ['cd /dev; false && cd /tmp; rm null', '/tmp'], ['cd /dev; false && cd /tmp && true; rm null', '/tmp'], ['cd /dev; true && cd /tmp; rm null', '/tmp'], ['cd /dev; if false; then cd /tmp; fi; rm null', '/tmp'],
+    ['cd /dev; if false; then :; else cd /tmp; fi; rm null', '/tmp'], ['cd /dev; if false; then :; elif true; then cd /tmp; fi; rm null', '/tmp'], ['cd /dev; for i in 1; do cd /tmp; done; rm null', '/tmp'],
+    ['cd /dev; while false; do cd /tmp; done; rm null', '/tmp'], ['cd /dev; case x in y) cd /tmp;; esac; rm null', '/tmp'], ['cd /dev; case x in x) cd /tmp;; esac; rm null', '/tmp'], ['cd /dev; false && { cd /tmp; }; rm null', '/tmp'],
+    ['cd /tmp; false && cd /dev; rm null', '/tmp'], ['cd /tmp; if false; then cd /dev; fi; rm foo', '/tmp'], ['cd /tmp && cd /dev || cd /tmp; rm null', '/tmp'], ['ls && cd /dev; rm null', '/tmp'],
+    ['cd /dev; if true; then cd /tmp; fi; rm null', '/tmp'], ['cd /dev; until false; do cd /tmp; done; rm null', '/tmp'],
+  ])('refuses %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('deny');
+  });
+
+  it.each([
+    ['cd /tmp && rm null', '/dev'], ['make && cd /tmp && rm null', '/dev'], ['true && cd /tmp; rm null', '/tmp'], ['cd /dev && cd /tmp && rm null', '/tmp'], ['ls && cd /tmp && ls && rm null', '/tmp'], ['cd /tmp; if false; then cd /tmp; fi; rm null', '/tmp'],
+    ['cd /tmp; case x in y) ls;; esac; rm null', '/tmp'], ['false && ls; rm null', '/tmp'], ['if cd /tmp; then rm null; fi', '/dev'], ['cd /tmp; for i in 1; do ls; done; rm null', '/dev'],
+    ['cd /dev; if false; then cd /tmp; fi; rm /tmp/x', '/tmp'], ['cd /dev; false && cd /tmp; ls', '/tmp'], ['cd /dev; false && cd /tmp; echo x > null', '/tmp'],
+  ])('allows %j (session in %j)', (command, cwd) => {
+    expect(check(command, cwd).decision).toBe('allow');
+  });
+
+  // a value option of tar written as a prefix takes the next word too (measured with GNU tar 1.35: --la, --listed-i and --index-f are taken, --sparse and
+  // --xattrs are flags whose next word is a member); here the word is -C, which is then a value and not a directory step
+  it.each([
+    ['cd /; tar -xf /tmp/a.tar x --labe -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --la -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --lab -C /tmp dev/null', 'deny'],
+    ['cd /; tar -xf /tmp/a.tar x --label -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --listed-i -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --index-f -C /tmp dev/null', 'deny'],
+    ['cd /; tar -xf /tmp/a.tar x --volno-f -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --rsh-c -C /tmp dev/null', 'deny'], ['cd /; tar -xf /tmp/a.tar x --exclude-f -C /tmp dev/null', 'deny'],
+    ['cd /; tar x --labe -C -f /tmp/a.tar dev/null', 'deny'],
+    ['cd /; tar -xf /tmp/a.tar x --sparse -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --xattrs -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --list -C /tmp dev/null', 'allow'],
+    ['cd /; tar -xf /tmp/a.tar x --checkpoint -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --labe=L -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --verbose -C /tmp dev/null', 'allow'],
+    ['cd /; tar -xf /tmp/a.tar x --labe L -C /tmp dev/null', 'allow'],
+  ])('reads the prefixes of the value options of tar: %s is %s', (command, expected) => {
+    expect(check(command).decision).toBe(expected);
+  });
+
+  // bsdtar reads every word after its first member as a member, an option too (measured with bsdtar 3.7.4: a late -C, --cd or --exclude is a name that is not
+  // in the archive); GNU tar applies -C from its place on
+  it.each([
+    ['cd /; bsdtar -xf /tmp/a.tar x -C /tmp dev/null', 'deny'], ['cd /; bsdtar -xf /tmp/a.tar x --cd /tmp dev/null', 'deny'], ['cd /; bsdtar -xf /tmp/a.tar x --directory /tmp dev/null', 'deny'],
+    ['cd /; bsdtar -xf /tmp/a.tar dev/null -C /tmp', 'deny'], ['cd /; bsdtar -xf /tmp/a.tar x -C /tmp -C /tmp2 dev/null', 'deny'], ['cd /; bsdtar -xf /tmp/a.tar x --strip-components=1 dev/null', 'deny'],
+    ['cd /; bsdtar -xf /tmp/a.tar -C /tmp x dev/null', 'allow'], ['cd /; bsdtar -C /tmp -xf /tmp/a.tar dev/null', 'allow'], ['cd /; bsdtar -xf /tmp/a.tar x -C /tmp', 'allow'],
+    ['cd /; bsdtar -xf /tmp/a.tar -C /tmp x -C /tmp2 y', 'allow'], ['cd /; bsdtar -xf /tmp/a.tar --strip-components=1 dev/null', 'allow'],
+    ['cd /; tar -xf /tmp/a.tar x -C /tmp dev/null', 'allow'], ['cd /; tar -xf /tmp/a.tar x --directory /tmp dev/null', 'allow'],
+  ])('reads the words after the first member of bsdtar as members: %s is %s', (command, expected) => {
+    expect(check(command).decision).toBe(expected);
+  });
+
+  // a cd inside a command substitution runs in a subshell (measured with bash 5.2: echo $(cd A); pwd prints the directory it started in)
+  it.each([
+    ['cd /dev; echo $(cd /tmp); rm null', '/tmp', 'deny'], ['cd /dev; echo `cd /tmp`; rm null', '/tmp', 'deny'], ['cd /dev; cat <(cd /tmp); rm null', '/tmp', 'deny'], ['cd /dev; echo "$(cd /tmp)"; rm null', '/tmp', 'deny'],
+    ['echo $(cd /tmp); rm null', '/dev', 'deny'], ['cd /dev; echo $(cd /tmp && ls); echo $(pwd); rm null', '/tmp', 'deny'],
+    ['cd /dev; echo $(cd /tmp; rm null)', '/tmp', 'allow'], ['cd /tmp; echo $(cd /dev); rm null', '/tmp', 'allow'], ['cd /tmp; echo $(ls); rm null', '/dev', 'allow'],
+  ])('keeps the directory after a cd in a substitution: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
+
+  // a group or a compound command that is piped or put in the background runs in a subshell (measured with bash 5.2: { cd B; } | cat; pwd and if true; then cd B; fi &
+  // keep the directory, { cd B; } && true does not)
+  it.each([
+    ['cd /dev; { cd /tmp; } | cat; rm null', 'deny'], ['cd /dev; { cd /tmp; } & rm null', 'deny'], ['cd /dev; { cd /tmp; } |& cat; rm null', 'deny'], ['cd /dev; if true; then cd /tmp; fi | cat; rm null', 'deny'],
+    ['cd /dev; for i in 1; do cd /tmp; done | cat; rm null', 'deny'], ['cd /dev; while true; do cd /tmp; break; done & rm null', 'deny'], ['cd /dev; case x in x) cd /tmp;; esac | cat; rm null', 'deny'],
+    ['cd /dev; { { cd /tmp; } | cat; }; rm null', 'deny'], ['cd /dev; { { cd /tmp; }; } | cat; rm null', 'deny'],
+    ['cd /dev; { cd /tmp; } && true; rm null', 'allow'], ['cd /dev; { cd /tmp; }; rm null', 'allow'], ['cd /dev; { cd /tmp; } > out.txt; rm null', 'allow'], ['cd /dev; { cd /tmp; rm null; } | cat', 'allow'],
+    ['cd /dev; if cd /tmp; then rm null; fi', 'allow'], ['cd /dev; { cd /tmp; } || true; rm null', 'allow'],
+  ])('keeps the directory after a piped or background group: %s is %s', (command, expected) => {
+    expect(check(command, '/tmp').decision).toBe(expected);
+  });
+
+  // a long option of a wrapper written as a prefix takes its value in the next word (measured: env --unse, env --un, nice --a, timeout --s and --k, stdbuf --o, ionice
+  // --classd and xargs --process do), so the word after it is not the command
+  it.each([
+    ['env --unse FOO rm /dev/null', 'deny'], ['env --un FOO rm /dev/null', 'deny'], ['nice --adj 5 rm /dev/null', 'deny'], ['nice --a 5 rm /dev/null', 'deny'], ['timeout --sig KILL 5 rm /dev/null', 'deny'],
+    ['timeout --k 1 5 rm /dev/null', 'deny'], ['stdbuf --out L rm /dev/null', 'deny'], ['sudo --us root rm /dev/null', 'deny'], ['sudo --gro wheel rm /dev/null', 'deny'], ['ionice --classd 1 rm /dev/null', 'deny'],
+    ['echo /dev/null | xargs --max-a 1 rm', 'deny'], ['echo /dev/null | xargs --delim x rm', 'deny'], ['env --chd /tmp rm null', 'allow'], ['env --chd=/tmp rm null', 'allow'],
+    ['env --unse FOO echo /dev/null', 'allow'], ['nice --adj 5 ls /dev/null', 'allow'], ['sudo --us root ls /dev/null', 'allow'], ['env --ignore-environment rm /dev/null', 'deny'],
+  ])('reads a prefix of a long option of a wrapper as the option: %s is %s', (command, expected) => {
+    expect(check(command, '/dev').decision).toBe(expected);
+  });
+
+  // --block-signal, --default-signal and --ignore-signal of env take their list only after an equals sign (measured with env 9.4: env --ignore-signal INT echo runs INT)
+  it.each([
+    ['env --block-signal rm /dev/null', 'deny'], ['env --default-signal rm /dev/null', 'deny'], ['env --ignore-signal rm /dev/null', 'deny'], ['env --ignore-signal=INT rm /dev/null', 'deny'],
+    ['env --block-signal=INT --default-signal rm /dev/null', 'deny'], ['env --ignore-signal rm null', 'deny'], ['env --block-signal ls /dev/null', 'allow'], ['env --argv0 x rm /dev/null', 'deny'],
+  ])('reads the signal options of env as attached only: %s is %s', (command, expected) => {
+    expect(check(command, '/dev').decision).toBe(expected);
+  });
+
+  // the first command of a group or a condition after a pipe runs in the subshell of that part of the pipeline, and the whole group leaves the directory behind
+  // (measured with bash 5.2: true | { cd B; pwd; } prints B, true | { cd B; }; pwd and true | { true; cd B; }; pwd print the directory it started in)
+  it.each([
+    ['true | { cd /dev; rm null; }', '/tmp', 'deny'], ['true |& { cd /dev; rm null; }', '/tmp', 'deny'], ['true && true | { cd /dev; rm null; }', '/tmp', 'deny'], ['true | { { cd /dev; rm null; }; }', '/tmp', 'deny'],
+    ['true | { { cd /dev; }; rm null; }', '/tmp', 'deny'], ['true | if cd /dev; then rm null; fi', '/tmp', 'deny'], ['true | while cd /dev; do rm null; break; done', '/tmp', 'deny'], ['true |\n{ cd /dev; rm null; }', '/tmp', 'deny'],
+    ['true | { true; cd /tmp; }; rm null', '/dev', 'deny'], ['true | { cd /tmp; }; rm null', '/dev', 'deny'], ['true | { { true; cd /tmp; }; }; rm null', '/dev', 'deny'], ['true | if true; then true; cd /tmp; fi; rm null', '/dev', 'deny'],
+    ['true | while true; do true; cd /tmp; break; done; rm null', '/dev', 'deny'], ['true | for i in 1; do true; cd /tmp; done; rm null', '/dev', 'deny'], ['true | case x in x) true; cd /tmp;; esac; rm null', '/dev', 'deny'],
+    ['true | { cd /tmp; rm null; }', '/dev', 'allow'], ['true | { cd /dev; }; rm null', '/tmp', 'allow'], ['true | { true; cd /dev; }; rm null', '/tmp', 'allow'], ['true | { cd /dev; } && rm null', '/tmp', 'allow'],
+    ['true | { cd /dev | cat; rm null; }', '/tmp', 'allow'],
+  ])('reads a group after a pipe as a subshell of its own: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
+
+  // a group or a compound command after && or ||, in the body of a condition or loop or in a branch of a case may not run
+  it.each([
+    ['false && { true; cd /tmp; }; rm null', '/dev', 'deny'], ['true || { true; cd /tmp; }; rm null', '/dev', 'deny'], ['false && x && { true; cd /tmp; }; rm null', '/dev', 'deny'],
+    ['if false; then { true; cd /tmp; }; fi; rm null', '/dev', 'deny'], ['case x in y) { true; cd /tmp; };; esac; rm null', '/dev', 'deny'], ['false && while true; do true; cd /tmp; break; done; rm null', '/dev', 'deny'],
+    ['false && if true; then true; cd /tmp; fi; rm null', '/dev', 'deny'], ['true && { cd /dev; rm null; }', '/tmp', 'deny'], ['true && { true; cd /dev; rm null; }', '/tmp', 'deny'],
+    ['true && { ls; }; rm null', '/tmp', 'allow'], ['cd /tmp && { rm null; }', '/dev', 'allow'], ['false || { true; }; rm null', '/tmp', 'allow'], ['{ true; cd /tmp; }; rm null', '/dev', 'allow'],
+    ['true && { { true; cd /tmp; }; rm null; }', '/dev', 'allow'],
+  ])('reads the directory after a group that may not run as unknown: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
+
+  // a newline after &&, ||, a pipe operator or the pattern of a case ends no command (measured with bash 5.2: false &&, then cd B on the next line, keeps the directory);
+  // time is a keyword and its cd moves the shell
+  it.each([
+    ['false &&\ncd /tmp; rm null', '/dev', 'deny'], ['true ||\ncd /tmp; rm null', '/dev', 'deny'], ['true |\ncd /tmp; rm null', '/dev', 'deny'], ['true |&\n\ncd /tmp; rm null', '/dev', 'deny'],
+    ['false && # why\ncd /tmp; rm null', '/dev', 'deny'], ['false ||\n\ntrue &&\ncd /tmp; rm null', '/dev', 'deny'], ['case x in y)\ncd /tmp;; esac; rm null', '/dev', 'deny'], ['false &&\n{ true; cd /tmp; }; rm null', '/dev', 'deny'],
+    ['echo /dev/null |\nxargs rm', '/tmp', 'deny'], ['ls /dev |&\n\nxargs rm', '/tmp', 'deny'],
+    ['true |\ncd /dev; rm null', '/tmp', 'allow'], ['cd /tmp\nrm null', '/dev', 'allow'], ['true;\ncd /tmp; rm null', '/dev', 'allow'], ['time cd /tmp; rm null', '/dev', 'allow'], ['time -p cd /tmp; rm null', '/dev', 'allow'],
+    ['(false) && cd /tmp; rm null', '/dev', 'deny'], ["<<< 'rm /dev/null'\nbash", '/tmp', 'allow'], ['>out.txt\ntime -f x rm /dev/null', '/tmp', 'allow'],
+  ])('keeps the operator before a command across newlines: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
+  });
+
+  // in a protected directory under /dev a newline after then, else or do ends no command either (measured with bash 5.2: if false, then cd B on the next line,
+  // keeps the directory); a cd on such a line that ends in a protected directory still counts as run, and nothing changes elsewhere
+  it.each([
+    ['if false; then\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['if true; then :; else\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['for i in; do\ncd /tmp\ndone; rm null', '/dev', 'deny'],
+    ['if false; then # why\n\ncd /tmp\nfi; rm null', '/dev', 'deny'], ['if false\nthen\n{ true; cd /tmp; }\nfi; rm null', '/dev', 'deny'], ['cd /dev\nif false; then\ncd /tmp\nfi\nrm null', '/tmp', 'deny'],
+    ['if x; then\ncd /dev\necho x > sda\nfi', '/tmp', 'deny'], ['while x; do\ncd /dev\ndone; echo x > sda', '/tmp', 'deny'], ['if x; then\ncd disk\nfi; echo x > sda', '/dev', 'deny'],
+    ['if x; then\n{ cd disk; }\nfi; echo x > sda', '/dev', 'deny'], ['if x; then\nif y; then\ncd disk\nfi\nfi; tee sda', '/dev', 'deny'],
+    ['if false; then\ncd /dev/shm\nfi; rm null', '/dev', 'deny'], ['cd /dev\nif x; then\n:\nfi; cd /tmp; true || cd /dev; echo x > log', '/tmp', 'allow'],
+    ['if x; then\ncd build\nrm cache\nfi', '/tmp', 'allow'],
+    ['echo then\ncd /dev; rm null', '/tmp', 'deny'], ['echo do\ncd /tmp; rm null', '/dev', 'allow'], ['if true; then >/tmp/log\ncd /tmp; rm null; fi', '/dev', 'allow'],
+    ['if x; then\ncd /tmp\nfi; rm null\ncd /tmp\nrm null', '/tmp', 'allow'],
+  ])('keeps the body open across the newline after then, else and do: %s (session in %s) is %s', (command, cwd, expected) => {
+    expect(check(command, cwd).decision).toBe(expected);
   });
 });
