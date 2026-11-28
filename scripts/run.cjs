@@ -914,8 +914,19 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook, options
 //
 // `process.argv[1]` is restored to the hook path so entry guards of the form
 // `import.meta.url === pathToFileURL(process.argv[1]).href` still fire.
+//
+// A hook that gives up on stdin under its own deadline (the readSessionEndFrame
+// 25ms/100ms deadlines and the readStdin timeout destroy the stream without
+// EOF) cannot release the worker stdio MessagePort: destroying the worker-side
+// stream leaves the port referenced, so the thread idled until the runner
+// budget expired, the hook's protocol output was discarded, and a bogus
+// timeout was reported. Once the stream is destroyed the hook has provably
+// given up on stdin; unreferencing the port then hands the thread's lifetime
+// back to the hook itself and the worker exits naturally, with its own output
+// and exit code, as soon as the hook finishes. The poll is unref'd so it
+// never extends the worker's lifetime on its own.
 const WORKER_STDIN_BOOTSTRAP = `
-const { workerData } = require('node:worker_threads');
+const { workerData, MessagePort } = require('node:worker_threads');
 const { fileURLToPath } = require('node:url');
 const targetUrl = workerData.omcWorkerTarget;
 process.argv[1] = fileURLToPath(targetUrl);
@@ -926,6 +937,20 @@ function drainUnreadStdin() {
   if (stdin.listenerCount('data') > 0 || stdin.listenerCount('readable') > 0) return;
   try { stdin.resume(); } catch { /* already closed */ }
 }
+function unrefGivenUpStdinPort() {
+  const stdin = process.stdin;
+  if (!stdin || stdin.readableEnded) return true;
+  if (!stdin.destroyed) return false;
+  const portSymbol = Object.getOwnPropertySymbols(stdin).find((s) => stdin[s] instanceof MessagePort);
+  if (portSymbol) {
+    try { stdin[portSymbol].unref(); } catch { /* already released */ }
+  }
+  return true;
+}
+const stdinPortPoll = setInterval(() => {
+  if (unrefGivenUpStdinPort()) clearInterval(stdinPortPoll);
+}, 10);
+stdinPortPoll.unref();
 import(targetUrl).then(
   () => { setImmediate(drainUnreadStdin); },
   (error) => {

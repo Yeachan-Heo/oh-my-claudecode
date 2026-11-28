@@ -30,11 +30,14 @@ const SAMPLING_DEADLINE_MS = 30_000;
 // Above the sampling deadline plus a last slow sample, so a failure keeps its diagnostics.
 const SAMPLED_TEST_TIMEOUT_MS = 100_000;
 const CONTROL_INPUT = 'not a SessionEnd frame';
+// What a hook prints when stdin gave it no frame it can use.
+const FALLBACK_OUTPUT = JSON.stringify({ continue: true, suppressOutput: true });
 // The manifest lock gives up after about 4.8s: a contender must be gone before that.
 const MANIFEST_LOCK_WAIT_MS = 4_800;
-// A run.cjs foreground budget that no healthy hook with a closed stdin reaches,
-// and the later point at which the test ends a process that never exits. A hook
-// that blocks on something that never answers fails on these whatever the load is.
+// A run.cjs foreground budget that no healthy hook reaches, with a closed stdin
+// or with one that stays open and empty, and the later point at which the test
+// ends a process that never exits. A hook that blocks on something that never
+// answers fails on these whatever the load is.
 const UNREACHED_BUDGET_MS = 20_000;
 const HANG_CEILING_MS = 25_000;
 // Captured before any test points HOME at one of its projects.
@@ -51,6 +54,8 @@ interface ExitResult {
   code: number | null;
   signal: NodeJS.Signals | null;
   timedOut: boolean;
+  /** The output run.cjs forwarded; a run it ended at its budget forwards none. */
+  stdout: string;
   stderr: string;
   /** When the budget report of run.cjs arrived, if there was one. */
   reportMs: number | undefined;
@@ -75,12 +80,14 @@ function runUntilClose(
         CLAUDE_PLUGIN_ROOT: REPO_ROOT,
         CLAUDE_CONFIG_DIR: join(cwd, '.claude'),
       },
-      stdio: ['pipe', 'ignore', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
     let timedOut = false;
+    let stdout = '';
     let stderr = '';
     let reportMs: number | undefined;
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => {
       stderr += chunk;
       if (reportMs === undefined && stderr.includes('exiting fail-open')) reportMs = Date.now() - startedAt;
@@ -92,7 +99,7 @@ function runUntilClose(
 
     child.once('close', (code, signal) => {
       clearTimeout(timer);
-      resolve({ elapsedMs: Date.now() - startedAt, code, signal, timedOut, stderr, reportMs });
+      resolve({ elapsedMs: Date.now() - startedAt, code, signal, timedOut, stdout, stderr, reportMs });
     });
 
     if (input !== undefined) child.stdin.end(input);
@@ -335,8 +342,21 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
     );
   }, SAMPLED_TEST_TIMEOUT_MS);
 
-  it.each(SESSION_END_SCRIPTS)('%s exits with no bytes and an open stdin pipe', async (_name, script) => {
-    await expectPromptBudgetExit(script, () => undefined, HANG_CEILING_MS);
+  // No byte ever arrives and stdin is never ended: the hook gives up on it at its
+  // own read deadline and prints the fallback. It then has to leave by itself,
+  // well short of the budget that used to end it and discard that output.
+  it.each(SESSION_END_SCRIPTS)('%s exits by itself with no bytes and an open stdin pipe', async (_name, script) => {
+    const env = { NODE_ENV: 'test', OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS: String(UNREACHED_BUDGET_MS) };
+    await expectWithinLimits(async () => {
+      const control = await controlRunMs(script, createProject(), env);
+      const result = await runUntilClose(script, createProject(), undefined, HANG_CEILING_MS, env);
+      expectOwnExit(result);
+      expect(result.stdout.trim()).toBe(FALLBACK_OUTPUT);
+      return { control, hook: result.elapsedMs };
+    }, (sample) => ({
+      'hook over its control run': [sample.hook - sample.control, OVERHEAD_MARGIN_MS],
+      'hook before the budget by less than its control run': [sample.hook + sample.control - UNREACHED_BUDGET_MS, 0],
+    }));
   }, SAMPLED_TEST_TIMEOUT_MS);
 
   it.skipIf(!HAS_GENERATED_DIST).each(SESSION_END_SCRIPTS)('%s terminates a live manifest-lock contender within the foreground ceiling', async (_name, script) => {
