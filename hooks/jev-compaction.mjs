@@ -106,7 +106,33 @@
  * and read back like those of the pastes (same directory, same retention), when the module's own result is certain, or before the plan with
  * OMC_JEV_COMPACT_TARGET_PERCENT; `shadow` counts only; the record gets `replies`.
  *
- * Secrets in the paste, reply and agent stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
+ * Verdicts of Jev on blocks of text (OMC_JEV_COMPACT_BLOCKS=off|shadow|active; off when unset or anything else; the one switch also steers the second round, active only, and the series of traces, counted only in shadow, below). In a conversation with the API form, a state
+ * directory and a session id, Jev rates each block (a paragraph, a closed fenced code block or a closed pasted tag of the user's own words or of an assistant
+ * row; a whole message block of an agent row) of the rows before the tail on four levels: 3 and 2 leave the block word for word, 1 and 0 move it to a file of
+ * the pastes directory and leave a trace, `[block moved at compaction: <n> chars in b/<file>...]` (level 1 adds the first BLOCK_HEAD_CHARS
+ * characters, a direct reply its first and last ones); the directory the letter stands for is named once, in the header `[compaction trace files: b/ = <dir>]` that opens the result. A block with no verdict stays word for word, whatever its length, age or author: those are signals in
+ * the question, not rules. The verdicts are files in the pastes directory, so a block is asked about once; the pass at the end of a turn (in the background)
+ * and the one before the module's own request to compact fill them earlier. `shadow` asks, counts and writes the verdict files but changes nothing; `active`
+ * acts only while the point itself is active. OMC_JEV_COMPACT_VERDICTS=off asks no question, OMC_JEV_COMPACT_BLOCK_QUESTIONS=shared states the wording of the
+ * question once per request, OMC_JEV_COMPACT_WINDOW_CHARS sets the window of Jev in bytes (8000 or more), OMC_JEV_COMPACT_FULL_INPUT=active bounds the user's
+ * words in a request by that window alone, and OMC_JEV_COMPACT_JEV_STAGES=active lets the verdicts decide what the stages of pasted text, long replies and agent messages to files decide by
+ * fixed lengths while the verdicts run (the agent trim stays). The record gets `blocks` (counts and levels) and, with the switch set while the blocks switch is not off, `jev_stages`; the
+ * background and preflight passes write a `verdicts_fill` record. See the section "verdicts of Jev on blocks of text" below for the rules.
+ *
+ * Second round (with the verdicts applied and the token cascade): when the prediction is still above the target after the second pass of the cascade, the results Jev rated and the
+ * blocks Jev kept (level 2-3) stand in one queue in the order of Jev's ratings and come down from the lowest until the target is reached (a result to a trace and then removed, a block to
+ * level 1); a tie at the edge of the choice is put to Jev once, and the passes of the cascade after the second one run as the reserve. OMC_JEV_COMPACT_OWNER_LAST=active puts the owner's
+ * blocks last in that queue. The checks of the blocks for a secret have their own budget, BLOCK_SCAN_BUDGET_CHARS. The record gets `f2`; see "second round" below.
+ *
+ * Series of traces (the same switch, OMC_JEV_COMPACT_BLOCKS). Two or more traces of the module on neighbouring lines of one row (a removed call, a moved reply, a moved agent
+ * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round every series of the rows before the tail
+ * (the rows the blocks left, less the rows another stage changes) that the check for a secret lets through is rated by Jev with the question of the round and stands in the queue
+ * with the results and the blocks; a series that comes down merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces
+ * go word for word to a file in the pastes directory (with the header of the block files when a block trace is among them), written and read back like the other files. The series
+ * count in the floor like the blocks. In a direct reply the trace of a reply, of a block or of an agent's message is never merged. The record gets `series` (the merge) and
+ * `f2.series_question`; `shadow` counts the candidates (`f2.candidates.series`).
+ *
+ * Secrets in the paste, reply, agent and block stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
  * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added. The check is bounded (maskSecrets
  * is quadratic on one long word): a text beyond SCAN_MAX_CHARS, or beyond the SCAN_BUDGET_CHARS one stage checks in one compaction, counts as unchecked
@@ -184,6 +210,12 @@ const HOST_MS = 2000;
 const BATCH = 40;
 const MAX_REQUESTS = 6;
 const REQUEST_MS = 6000;
+// The window of Jev for the questions about blocks: the size in BYTES of the request body (UTF-8). The API refused a body of about 66 KB and took 56 KB, so 40000 stays
+// under it with room; a request refused as too large is asked again in half of it. OMC_JEV_COMPACT_WINDOW_CHARS (8000 or more) overrides it.
+const JEV_WINDOW_BYTES = 40000;
+const windowBytesOf = (cfg) => cfg?.windowChars ?? JEV_WINDOW_BYTES;
+// OMC_JEV_COMPACT_FULL_INPUT=active: the user's words in the header of a question about a block get a quarter of the window, bounded by it alone.
+const ownerLimitsOf = (cfg) => (cfg?.fullInput ? { chars: Math.floor(windowBytesOf(cfg) / 4), messages: Infinity } : undefined);
 const TOTAL_MS = 8000;
 // Default share of the characters kept (OMC_JEV_COMPACT_TARGET, 0.1-0.9).
 const DEFAULT_TARGET = 0.5;
@@ -311,6 +343,10 @@ const REPLY_KEEP_TURNS = 6;
 const PASTE_TRACE_PREFIX = '[pasted text moved at compaction: ';
 const REPLY_TRACE_PREFIX = '[reply moved at compaction: ';
 const AGENT_TRACE_PREFIX = '[agent message moved at compaction, not from the user: ';
+const BLOCK_TRACE_PREFIX = '[block moved at compaction: ';
+// The header of the files the traces of blocks name (once per compaction, the first row of the result): the traces carry the letter and the file name only.
+const TRACE_HEADER_PREFIX = '[compaction trace files: ';
+const BLOCK_LETTER = 'b';
 const PASTE_QUESTIONS = {
   pasted: {
     type: 'noul',
@@ -433,6 +469,9 @@ const NOT_USER_PREFIXES = [
 // one of these is the user's text, as before. The stages themselves always count them; readConfig adds them to the list userTask reads.
 const STAGE_NOT_USER_PREFIXES = ['[agent message moved at compaction', '[compacted] '];
 const STAGE_NOT_USER = [...NOT_USER_PREFIXES, ...STAGE_NOT_USER_PREFIXES];
+// While the blocks act (readConfig: `blockTraces`) a row that opens with a moved block or the header of the trace files is no user's text either.
+const STAGE_NOT_USER_BLOCKS = [...STAGE_NOT_USER, '[block moved at compaction', '[compaction trace files: '];
+const notUserOf = (blockTraces) => (blockTraces ? STAGE_NOT_USER_BLOCKS : STAGE_NOT_USER);
 // Rows a hook or the host puts in as a user message are not the user's words for the paste and reply stages, which protect the user's newest messages and
 // the replies to them: a row the host flags isMeta, and a row that opens with one of these prefixes (the host's rows for a stop hook, a goal, a CI monitor
 // event, another session, an image, a re-invoked skill and a usage limit) or with one of OMC_JEV_COMPACT_HOOK_ROW_PREFIXES (empty by default).
@@ -685,6 +724,7 @@ function freshState() {
     turnCount: 0, lastAttempt: -Infinity, hostCannot: false, compactWindow: undefined, windowTurn: -Infinity,
     cachedConfig: undefined, cachedAt: -Infinity, growthArmed: false, growthBase: undefined, skipBase: undefined, ownCompactInFlight: false,
     batchRefusedUntil: new Map(), pendingAfter: undefined, moduleRev: undefined, agentChecked: undefined,
+    blockVerdicts: new Map(), blockHeld: new Map(), blockBackground: { busy: false, at: -Infinity, run: undefined, stop: false },
   };
 }
 let session = freshState();
@@ -730,6 +770,13 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_OWNER_MARKERS: await $.env.get('OMC_JEV_COMPACT_OWNER_MARKERS'),
     OMC_JEV_COMPACT_LONG_REPLIES: await $.env.get('OMC_JEV_COMPACT_LONG_REPLIES'),
     OMC_JEV_COMPACT_HOOK_ROW_PREFIXES: await $.env.get('OMC_JEV_COMPACT_HOOK_ROW_PREFIXES'),
+    OMC_JEV_COMPACT_BLOCKS: await $.env.get('OMC_JEV_COMPACT_BLOCKS'),
+    OMC_JEV_COMPACT_VERDICTS: await $.env.get('OMC_JEV_COMPACT_VERDICTS'),
+    OMC_JEV_COMPACT_BLOCK_QUESTIONS: await $.env.get('OMC_JEV_COMPACT_BLOCK_QUESTIONS'),
+    OMC_JEV_COMPACT_WINDOW_CHARS: await $.env.get('OMC_JEV_COMPACT_WINDOW_CHARS'),
+    OMC_JEV_COMPACT_FULL_INPUT: await $.env.get('OMC_JEV_COMPACT_FULL_INPUT'),
+    OMC_JEV_COMPACT_OWNER_LAST: await $.env.get('OMC_JEV_COMPACT_OWNER_LAST'),
+    OMC_JEV_COMPACT_JEV_STAGES: await $.env.get('OMC_JEV_COMPACT_JEV_STAGES'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
     OMC_JEV_BREAKER_DIR: await $.env.get('OMC_JEV_BREAKER_DIR'),
@@ -783,6 +830,10 @@ export async function readConfig($) {
   const notifications = ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_NOTIFICATIONS ?? '').trim());
   const pastes = pasteMode(env.OMC_JEV_COMPACT_PASTES);
   const replies = pasteMode(env.OMC_JEV_COMPACT_LONG_REPLIES);
+  const blocks = pasteMode(env.OMC_JEV_COMPACT_BLOCKS);
+  // The lines of moved blocks and the header of the trace files are read as traces of the module (the long replies, the direct replies, the estimate of tokens, the user's words) only while
+  // the blocks act (`active`, with the point active); `shadow` only counts and every other value leaves them as plain text, as in the module without the blocks.
+  const blockTraces = blocks === 'active' && mode === 'active';
   return {
     mode,
     key: env.TYPESAFE_API_KEY,
@@ -796,7 +847,7 @@ export async function readConfig($) {
     tokenAccounting: String(env.OMC_JEV_COMPACT_TOKEN_ACCOUNTING ?? '').trim() === '1',
     maxWindowTokens: windowInt(env.OMC_JEV_COMPACT_MAX_WINDOW_TOKENS),
     // Token rates and the prediction shortfall (the defaults of DEFAULT_RATES unless OMC_JEV_COMPACT_RATES overrides some).
-    rates: ratesFrom(env.OMC_JEV_COMPACT_RATES),
+    rates: { ...ratesFrom(env.OMC_JEV_COMPACT_RATES), blockTraces },
     // Token cascade (off unless set to a two-digit share from 20 to 80).
     targetPercent: /^\d{2}$/.test(String(env.OMC_JEV_COMPACT_TARGET_PERCENT ?? '').trim()) ? fraction(env.OMC_JEV_COMPACT_TARGET_PERCENT, undefined, 20, 80) : undefined,
     // Switches: 1 and active turn them on; 0, off, any other value and unset leave them off.
@@ -815,7 +866,7 @@ export async function readConfig($) {
     // removed with a trace) instead of staying word for word.
     notifications,
     // The user's-words check reads the stages' trace prefixes only while one of the four stages is on (STAGE_NOT_USER_PREFIXES).
-    notUserPrefixes: agentTrim || notifications || pastes !== 'off' || replies !== 'off' ? STAGE_NOT_USER : NOT_USER_PREFIXES,
+    notUserPrefixes: blockTraces ? STAGE_NOT_USER_BLOCKS : agentTrim || notifications || pastes !== 'off' || replies !== 'off' ? STAGE_NOT_USER : NOT_USER_PREFIXES,
     autoCompactWindow: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,
     configDir: env.CLAUDE_CONFIG_DIR ? slash(env.CLAUDE_CONFIG_DIR) : undefined,
     home: homeForState ? slash(homeForState) : undefined,
@@ -830,6 +881,18 @@ export async function readConfig($) {
     // Row prefixes of the paste and reply stages: the built-in ones, then the comma separated list of OMC_JEV_COMPACT_HOOK_ROW_PREFIXES.
     hookRowPrefixes: [...HOOK_ROW_PREFIXES, ...String(env.OMC_JEV_COMPACT_HOOK_ROW_PREFIXES ?? '').split(',').map((x) => x.trim()).filter(Boolean)],
     replies,
+    // Verdicts of Jev on blocks of text (off unless OMC_JEV_COMPACT_BLOCKS says shadow or active): `verdicts` off asks no question (the verdict files that exist still apply), `blockQuestions`
+    // shared puts the wording of the question once in the state of a request, `windowChars` is the window of Jev in bytes (8000 or more), `fullInput` bounds the user's words in the
+    // header of a request by the window alone, `jevStages` lets the verdicts decide what the paste and reply stages and the agent messages to files decide by fixed lengths.
+    blocks,
+    blockTraces,
+    verdicts: String(env.OMC_JEV_COMPACT_VERDICTS ?? '').trim().toLowerCase() === 'off' ? 'off' : 'active',
+    blockQuestions: String(env.OMC_JEV_COMPACT_BLOCK_QUESTIONS ?? '').trim().toLowerCase() === 'shared' ? 'shared' : 'full',
+    windowChars: /^[1-9]\d{3,6}$/.test(String(env.OMC_JEV_COMPACT_WINDOW_CHARS ?? '').trim()) && Number(env.OMC_JEV_COMPACT_WINDOW_CHARS) >= 8000 ? Number(env.OMC_JEV_COMPACT_WINDOW_CHARS) : undefined,
+    fullInput: String(env.OMC_JEV_COMPACT_FULL_INPUT ?? '').trim() === 'active',
+    jevStages: String(env.OMC_JEV_COMPACT_JEV_STAGES ?? '').trim() === 'active',
+    // In the second round the owner's blocks that Jev kept (level 2-3) go after every other candidate; they come down only when nothing else is left (default off).
+    ownerLast: String(env.OMC_JEV_COMPACT_OWNER_LAST ?? '').trim() === 'active',
   };
 }
 
@@ -1493,7 +1556,7 @@ function noteHeads(text) {
   }
   return heads;
 }
-function sourceByTask(text, outputs) {
+function sourceByTask(text, outputs, wideFrame = false) {
   let worst = 'known';
   let at = 0;
   let blocks = 0;
@@ -1503,7 +1566,7 @@ function sourceByTask(text, outputs) {
     const outside = text.slice(at, open ? open.index : text.length);
     // Once per stretch between blocks: a second marker there leaves the first without a block (its own line is no host line), so only one marker is looked at.
     const m = worst === 'unknown' ? -1 : outside.indexOf(NOTE_MARKER);
-    if (m >= 0 && (!open || outside.indexOf(NOTE_MARKER, m + NOTE_MARKER.length) >= 0 || !withoutTags(outside.slice(m + NOTE_MARKER.length)).split('\n').every((l) => !l.trim() || NOTE_HOST_LINE.test(l.trim())))) worst = 'unknown';
+    if (m >= 0 && (!open || outside.indexOf(NOTE_MARKER, m + NOTE_MARKER.length) >= 0 || !withoutTags(outside.slice(m + NOTE_MARKER.length)).split('\n').every((l) => !l.trim() || hostLineOf(wideFrame).test(l.trim())))) worst = 'unknown';
     if (!open) break;
     const close = text.indexOf('</task-notification>', open.index);
     const end = close < 0 ? text.length : close + '</task-notification>'.length;
@@ -2160,8 +2223,8 @@ function queuedOf(messages, api) {
 // counts as one, after its row; other delivered messages do not. The part of each that is cleaned, as written
 // (`mention`, in lower case; an omitted line can let a later line into the budget), is only matched against the
 // results the user names (markMentioned) and is never sent.
-function userTask(messages, instructions, queued = new Map(), privatePaths = [], notUserPrefixes = NOT_USER_PREFIXES) {
-  let left = USER_CHARS;
+function userTask(messages, instructions, queued = new Map(), privatePaths = [], notUserPrefixes = NOT_USER_PREFIXES, limits = { chars: USER_CHARS, messages: USER_MESSAGES }) {
+  let left = limits.chars;
   const clean = (text) => maskSecrets(omitSecretLines(text, privatePaths));
   const mention = [];
   const raw = instructions ? headPart(String(instructions), left + MASK_SLACK_CHARS) : '';
@@ -2171,9 +2234,9 @@ function userTask(messages, instructions, queued = new Map(), privatePaths = [],
     left -= instr.length;
   }
   const picked = [];
-  for (let i = messages.length - 1; i >= 0 && picked.length < USER_MESSAGES && left > 0; i--) {
+  for (let i = messages.length - 1; i >= 0 && picked.length < limits.messages && left > 0; i--) {
     const words = [...userWords(messages[i], notUserPrefixes), ...(queued.get(i) || []).flatMap(blockWords)];
-    for (let k = words.length - 1; k >= 0 && picked.length < USER_MESSAGES && left > 0; k--) {
+    for (let k = words.length - 1; k >= 0 && picked.length < limits.messages && left > 0; k--) {
       const part = headPart(words[k], left + MASK_SLACK_CHARS);
       const text = clip(clean(part), left);
       picked.unshift(text);
@@ -2288,46 +2351,50 @@ function withoutReminderBlocks(text) {
 // <task-notification> for a frame of another kind, which a notification is not).
 // The block is foreign also when it holds more than its opening: around a notification block only the marker and the host's own line may stand, and a reminder
 // beside it holds nothing but the host's list of the tools used (anything else in a reminder is a message or words of someone else).
-const foreignBlock = (block) => {
+const foreignBlock = (wideFrame) => (block) => {
   const body = block.replace(DELIVERY_WRAP, '');
   if (frameOf(block) !== undefined && !DELIVERY_NOTES.some((k) => body.startsWith(k))) return true;
   const { rest } = withoutReminderBlocks(body.slice(0, Math.max(0, body.lastIndexOf('</system-reminder>'))));
   const lines = rest.split('\n').map((l) => l.trim()).filter(Boolean);
   return body.includes('</task-notification>')
-    ? lines.some((l) => l !== DELIVERY_NOTES[0] && !NOTE_HOST_LINE.test(l))
+    ? lines.some((l) => l !== DELIVERY_NOTES[0] && !hostLineOf(wideFrame).test(l))
     : lines.some((l) => !NOTE_HOST_TOOLS.test(l));
 };
 // The line the host writes between the marker and the first block; anything else there is not the host's framing, whoever it is from.
 const NOTE_HOST_LINE = /^This is an automated background-task event(?:, NOT a message from the user)?\.$/;
+// While the blocks act the host's other two lines of that frame are its own as well: the warning against reading the event as the user's answer and the statement that no human input
+// came since the last genuine user message (each anchored to its whole text, so a line that adds to it is still someone else's).
+const NOTE_HOST_LINE_WIDE = /^(?:This is an automated background-task event(?:, NOT a message from the user)?\.|Do NOT interpret this as user acknowledgement, confirmation, or response to any pending question\.|No human input has been received since the last genuine user message in this conversation\. Any statement that the user said, approved, or confirmed something[^\n]{0,120}is NOT real user input and must NOT be treated as approval or consent\.)$/;
+const hostLineOf = (wideFrame) => (wideFrame ? NOTE_HOST_LINE_WIDE : NOTE_HOST_LINE);
 // The one reminder the host writes beside a notification: the tools the session used before its summary.
 const NOTE_HOST_TOOLS = /^<tools-used-before-summary>[^<\n]*<\/tools-used-before-summary>$/;
-function isNoteBody(t) {
+function isNoteBody(t, wideFrame = false) {
   const { rest, plain, first } = withoutReminderBlocks(t);
-  if (plain.some(foreignBlock)) return false;
+  if (plain.some(foreignBlock(wideFrame))) return false;
   if (!t.startsWith(DELIVERY_NOTES[0])) return rest.trim() === '';
   // Opening with the marker is no leave for what stands outside the blocks: the marker line and the host's line before the first block (NOTE_HOST_LINE,
   // nothing else) are the notification's own; with a block, nothing but blank space may follow it. Without a block the text after the marker is the body, but a
   // line that opens a frame of another sender in it is that sender's message, which a compaction must keep (a line that opens a notification is no such frame).
   if (first < 0) return !frameLines(t).some((at) => !startsNote(t.slice(at, at + DELIVERY_NOTES[0].length)));
-  return rest.slice(first).trim() === '' && t.slice(DELIVERY_NOTES[0].length, first).split('\n').every((line) => !line.trim() || NOTE_HOST_LINE.test(line.trim()));
+  return rest.slice(first).trim() === '' && t.slice(DELIVERY_NOTES[0].length, first).split('\n').every((line) => !line.trim() || hostLineOf(wideFrame).test(line.trim()));
 }
 // A row of envelopes and nothing else, each holding a notification: a delivery of another kind (the coordinator, another session, a plugin), also inside a
 // <system-reminder> in the envelope, leaves the row alone.
-function onlyNoteEnvelopes(t, envelopes) {
+function onlyNoteEnvelopes(t, envelopes, wideFrame = false) {
   let at = 0;
   for (const e of envelopes) {
-    if (t.slice(at, e.from).trim() || !isNoteBody(e.text.slice(e.text.indexOf('">') + 2, e.text.lastIndexOf(ENVELOPE_CLOSE)).trim())) return false;
+    if (t.slice(at, e.from).trim() || !isNoteBody(e.text.slice(e.text.indexOf('">') + 2, e.text.lastIndexOf(ENVELOPE_CLOSE)).trim(), wideFrame)) return false;
     at = e.to;
   }
   return !t.slice(at).trim();
 }
-export function isNotification(m) {
+export function isNotification(m, blockTraces = false) {
   if (m.role !== 'user' || (m.toolResults && m.toolResults.length) || typeof m.text !== 'string' || !m.text) return false;
   // The marker first: a row without one is no notification, and its words are not read at all.
-  if (!DELIVERY_NOTES.some((k) => m.text.includes(k)) || userWords(m, STAGE_NOT_USER).length) return false;
+  if (!DELIVERY_NOTES.some((k) => m.text.includes(k)) || userWords(m, notUserOf(blockTraces)).length) return false;
   const t = m.text.trim();
   const envelopes = envelopesOf(t);
-  return envelopes.length ? onlyNoteEnvelopes(t, envelopes) : isNoteBody(t);
+  return envelopes.length ? onlyNoteEnvelopes(t, envelopes, blockTraces) : isNoteBody(t, blockTraces);
 }
 // What the notification says in a line: its <summary>, else the first line of its body after the marker.
 // `l` without its <...> tags (each replaced by a space): the result of l.replace(/<[^>]*>/g, ' ') in one pass; a '<' with no '>' after it ends the search.
@@ -2365,7 +2432,7 @@ export function noteSummary(text) {
 
 // Candidates: tool results outside the first message and the last KEEP_LAST messages whose call is
 // in an earlier assistant message.
-function findCandidates(messages, privatePaths, notifications = false) {
+function findCandidates(messages, privatePaths, notifications = false, blockTraces = false) {
   const outputs = backgroundOutputFiles(messages, privatePaths);
   const uses = new Map();
   messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) uses.set(u.tool_use_id, { i, u }); });
@@ -2373,9 +2440,9 @@ function findCandidates(messages, privatePaths, notifications = false) {
   const out = [];
   for (let i = 1; i < tailStart; i++) {
     const m = messages[i];
-    if (notifications && isNotification(m)) {
+    if (notifications && isNotification(m, blockTraces)) {
       // A notification that names the output file of a call on a secret path takes on the secrecy of that call (a trace, never sent to Jev).
-      const bySource = sourceByTask(m.text, outputs);
+      const bySource = sourceByTask(m.text, outputs, blockTraces);
       const c = {
         id: `${NOTE_TOOL}-${i}`, note: true, resIdx: i, useIdx: -1, use: { tool: NOTE_TOOL, input: {} }, res: { text: m.text, isError: false },
         summary: noteSummary(m.text), inputChars: 0, resultChars: m.text.length,
@@ -2432,7 +2499,8 @@ function findCandidates(messages, privatePaths, notifications = false) {
 // non-text result to a trace), pass `short_or_trace` (a result Jev scored under SHORT_COPY_MIN_SCORE to a trace, the others to a short copy when that
 // saves tokens), pass `trace_all` (every remaining result to a trace), pass `drop` (every result still at a trace, least needed first, removed with its call). A pinned
 // result (a task-list call, or a trace that saves no tokens) stays whole. The keep decisions go to `keep` as allocate sets them. Returns the
-// pass reached, the target and the predicted tokens after.
+// pass reached, the target and the predicted tokens after. `opts.stopAfterA` ends after the second pass (the second round goes on from there, in Jev's order), and
+// `opts.resume` goes on from the keep decisions the candidates hold (what the second round set) and runs only the passes that follow it.
 // A forced result (a secret, or a non-text result) goes to a trace first, whatever its score; a pinned one is never cut by the cascade and is
 // not counted in the floor.
 const isForced = (c) => c.secret || !c.textOnly;
@@ -2444,7 +2512,7 @@ const isPinned = (c, rates = DEFAULT_RATES, shape = undefined) => {
   const t = itemTokens(c, rates);
   return t.full - t.trace + (shape?.marginal(c) ?? 0) <= 0;
 };
-export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES, shape = undefined) {
+export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES, shape = undefined, opts = {}) {
   const costs = new Map(candidates.map((c) => [c, itemTokens(c, rates)]));
   // The blocks and messages the decisions take off the list come on top of the candidates' costs (shapeOf).
   const overhead = shape?.tracker();
@@ -2456,11 +2524,13 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES,
   const setKeep = (c, keep) => { removed += saved(c, keep) - saved(c, c.keep ?? 'full'); overhead?.set(c, keep); c.keep = keep; };
   const left = () => tokensBefore - removed - (overhead?.removed() ?? 0);
   const reached = () => left() <= target;
-  for (const c of candidates) c.keep = 'full';
-  let pass = 'forced';
-  for (const c of candidates) if (isForced(c)) setKeep(c, 'trace');
+  const resume = opts.resume === true;
+  if (resume) for (const c of candidates) { const was = c.keep ?? 'full'; c.keep = 'full'; if (was !== 'full') setKeep(c, was); }
+  else for (const c of candidates) c.keep = 'full';
+  let pass = resume ? 'reserve' : 'forced';
+  if (!resume) for (const c of candidates) if (isForced(c)) setKeep(c, 'trace');
   const free = candidates.filter((c) => !isForced(c) && !isPinned(c, rates, shape)).sort((a, b) => a.score - b.score || a.resIdx - b.resIdx);
-  if (!reached()) {
+  if (!resume && !reached()) {
     pass = 'short_or_trace';
     for (const c of free) {
       if (reached()) break;
@@ -2474,6 +2544,7 @@ export function cascade(candidates, tokensBefore, target, rates = DEFAULT_RATES,
       }
     }
   }
+  if (opts.stopAfterA) return { pass, target, predicted: Math.max(0, Math.round(left())) };
   if (!reached()) {
     pass = 'trace_all';
     for (const c of free) {
@@ -2600,10 +2671,18 @@ export function prefixTokens(detail) {
 export function tokenCeiling(maxWindowTokens, rates = DEFAULT_RATES) {
   return maxWindowTokens ? Math.floor(maxWindowTokens / (1 + rates.PREDICTION_SHORTFALL)) : undefined;
 }
+// The rule's target of the token cascade: the usual target before the owner's limit, then the limit from the configured window ceiling (absent by default).
+function ruleTargetOf(win, cfg) {
+  const raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
+  const ceiling = tokenCeiling(cfg.maxWindowTokens, cfg.rates);
+  return ceiling === undefined ? raw : Math.min(raw, ceiling);
+}
 
 // A one-line trace of the module, wherever it stands in a text: at its start or after a line break. A removed item (traceLine), a reply moved to a file and
 // an agent's message moved to a file each fill their line; the trace of a pasted text stands inside a line (PASTE_TRACE_PREFIX, see withoutPasteMarks).
 const TRACE_LINE = new RegExp(`(?:^|\\n)(?:\\[compacted\\] |${escapeRegExp(REPLY_TRACE_PREFIX)}|${escapeRegExp(AGENT_TRACE_PREFIX)})[^\\n]*`, 'g');
+// With `rates.blockTraces` (the blocks act) the lines of moved blocks and the header of the trace files are traces too.
+const TRACE_LINE_BLOCKS = new RegExp(`(?:^|\\n)(?:\\[compacted\\] |${escapeRegExp(REPLY_TRACE_PREFIX)}|${escapeRegExp(AGENT_TRACE_PREFIX)}|${escapeRegExp(BLOCK_TRACE_PREFIX)}|${escapeRegExp(TRACE_HEADER_PREFIX)})[^\\n]*`, 'g');
 // The API list in tokens by class: a call costs RATE_IN a character of its name and input, a result RATE_OUT, a reminder or a text beside a result
 // RATE_NOTE, the user's words RATE_OWN (a text that userWords reads as the user's: not a summary, a notice or a host block), the assistant's text
 // RATE_ATXT, a trace of any of the module's stages RATE_TRACE, each non-ASCII character RATE_NON_ASCII more, RATE_BLOCK a block and RATE_MESSAGE a message spread over its blocks,
@@ -2622,7 +2701,7 @@ export function listTokens(api, rates = DEFAULT_RATES) {
       if (b.type === 'text') {
         const t = strOf(b.text);
         let inTraces = 0;
-        const lines = t.replace(TRACE_LINE, (x) => { inTraces += x.length; return ''; });
+        const lines = t.replace(rates.blockTraces ? TRACE_LINE_BLOCKS : TRACE_LINE, (x) => { inTraces += x.length; return ''; });
         const rest = withoutPasteMarks(lines);
         inTraces += lines.length - rest.length;
         // Whose the text is, is read from what stands outside the trace lines: a trace of the module at the start of a row does not make the text after it the user's own.
@@ -2651,7 +2730,7 @@ export function listTokens(api, rates = DEFAULT_RATES) {
 function besideResultGap(texts, rates) {
   let gap = 0;
   for (const t of texts) {
-    const lines = t.replace(TRACE_LINE, '');
+    const lines = t.replace(rates.blockTraces ? TRACE_LINE_BLOCKS : TRACE_LINE, '');
     if (userWords({ role: 'user', text: lines }).length) gap += (rates.RATE_NOTE - rates.RATE_OWN) * withoutPasteMarks(lines).length;
   }
   return gap;
@@ -3657,11 +3736,11 @@ function nonTextUserRows(messages, api) {
 
 // The rows that hold the user's words for the paste and reply stages: a user row with words of the user's own that is no hook or host row (isMeta, or
 // opening with one of `prefixes`).
-function ownerRows(messages, prefixes) {
+function ownerRows(messages, prefixes, blockTraces = false) {
   const rows = [];
   messages.forEach((m, i) => {
     if (m.isMeta === true || typeof m.text !== 'string' || prefixes.some((p) => m.text.trimStart().startsWith(p))) return;
-    if (userWords(m, STAGE_NOT_USER).length) rows.push(i);
+    if (userWords(m, notUserOf(blockTraces)).length) rows.push(i);
   });
   return rows;
 }
@@ -3675,7 +3754,7 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new
   if (!api) { stats.reason = 'no_api_form'; return []; }
   const images = nonTextUserRows(messages, api);
   if (images.unmatched) { stats.reason = 'image_unmatched'; return []; }
-  const users = ownerRows(messages, cfg.hookRowPrefixes);
+  const users = ownerRows(messages, cfg.hookRowPrefixes, cfg.blockTraces);
   const before = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
   const limit = cfg.pasteMaxChars;
   const found = [];
@@ -3820,17 +3899,18 @@ export function replyTrace(chars, text, path) {
   return `${REPLY_TRACE_PREFIX}${chars} chars, full text in ${path}; start: ${quoted(text.slice(0, REPLY_TRACE_HEAD))}; end: ${quoted(text.slice(-REPLY_TRACE_TAIL))}]`;
 }
 
-// A line that starts a trace of this module or of the compaction (a removed call, pasted text, a moved reply).
-const isTraceLine = (line) => line.startsWith('[compacted] ') || line.startsWith(PASTE_TRACE_PREFIX) || line.startsWith(REPLY_TRACE_PREFIX);
+// A line that starts a trace of this module or of the compaction (a removed call, pasted text, a moved reply; with `blockTraces` also a moved block and the header of the trace files,
+// which the stages that act without the blocks switch (the long replies, the direct replies) do not read as traces while that switch is off).
+const isTraceLine = (line, blockTraces = false) => line.startsWith('[compacted] ') || line.startsWith(PASTE_TRACE_PREFIX) || line.startsWith(REPLY_TRACE_PREFIX) || (blockTraces && (line.startsWith(BLOCK_TRACE_PREFIX) || line.startsWith(TRACE_HEADER_PREFIX)));
 
 // Whether a text holds nothing but such traces and blank lines: the row a tool-only assistant message becomes once its calls are removed.
-const onlyTraceLines = (text) => text.split('\n').every((line) => !line.trim() || isTraceLine(line));
+const onlyTraceLines = (text, blockTraces) => text.split('\n').every((line) => !line.trim() || isTraceLine(line, blockTraces));
 
 /**
  * Runs of text between trace lines (a line that starts a trace of this module or of the compaction), from a non-empty line to a
  * non-empty line, of at least `minChars` characters: [{start, end}].
  */
-export function replyRuns(text, minChars = REPLY_MIN_CHARS) {
+export function replyRuns(text, minChars = REPLY_MIN_CHARS, blockTraces = false) {
   const runs = [];
   let start = -1;
   let end = -1;
@@ -3839,7 +3919,7 @@ export function replyRuns(text, minChars = REPLY_MIN_CHARS) {
     const nl = text.indexOf('\n', i);
     const lineEnd = nl === -1 ? text.length : nl;
     const line = text.slice(i, lineEnd);
-    if (isTraceLine(line)) close();
+    if (isTraceLine(line, blockTraces)) close();
     else if (line.trim()) { if (start < 0) start = i; end = lineEnd; }
     i = lineEnd + 1;
   }
@@ -3902,7 +3982,7 @@ export function withoutPasteMarks(text) {
  * The interval runs to the next user message, so a notification in the middle does not end it. Over-protection costs tokens, never text.
  * Only the structure decides; whether the reply confirms or corrects what the user said is not for the code to read.
  */
-export function directReplyRows(messages, users, delivered = []) {
+export function directReplyRows(messages, users, delivered = [], blockTraces = false) {
   const rows = new Set();
   const sent = new Set(delivered);
   const bounds = [...new Set([...users, ...sent])].sort((a, b) => a - b);
@@ -3913,7 +3993,7 @@ export function directReplyRows(messages, users, delivered = []) {
     let last = -1;
     for (let j = row + 1; j < stop; j++) {
       const m = messages[j];
-      if (m.role === 'assistant' && typeof m.text === 'string' && m.text.trim() && !onlyTraceLines(m.text)) { if (first < 0) first = j; last = j; }
+      if (m.role === 'assistant' && typeof m.text === 'string' && m.text.trim() && !onlyTraceLines(m.text, blockTraces)) { if (first < 0) first = j; last = j; }
     }
     if (first >= 0) { rows.add(first); rows.add(last); }
   });
@@ -3946,7 +4026,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return []; }
   if (!sessionId) { stats.reason = 'no_session'; return []; }
   if (!api) { stats.reason = 'no_api_form'; return []; }
-  const users = ownerRows(messages, cfg.hookRowPrefixes);
+  const users = ownerRows(messages, cfg.hookRowPrefixes, cfg.blockTraces);
   // A message the user typed during a tool turn is a user message too, though no row shows it: it stands after the row it is anchored to (queuedOf).
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
@@ -3959,7 +4039,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   );
   stats.limit_row = limit;
   const skip = nonTextAssistantRows(messages, api);
-  const direct = directReplyRows(messages, users, delivered);
+  const direct = directReplyRows(messages, users, delivered, cfg.blockTraces);
   const jobs = [];
   const budget = { left: SCAN_BUDGET_CHARS, deadline };
   for (let row = 0; row < limit; row++) {
@@ -3969,7 +4049,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
     if (skip.has(row)) { stats.skipped_blocks++; continue; }
     if (direct.has(row)) { stats.direct_replies++; continue; }
     stats.considered++;
-    for (const run of replyRuns(m.text)) {
+    for (const run of replyRuns(m.text, REPLY_MIN_CHARS, cfg.blockTraces)) {
       stats.runs++;
       const text = m.text.slice(run.start, run.end);
       const held = secretCheck(text, cfg.privatePaths, budget);
@@ -4030,7 +4110,7 @@ function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionI
   const from = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
   if (skip && !skip.unmatched) {
     try {
-      trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates, deadline });
+      trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates, deadline, blockTraces: cfg.blockTraces });
       stats = trim.stats;
     } catch (error) { trim = undefined; stats = { error: clip(oneLine(String(error?.message ?? error)), 200) }; }
   }
@@ -4219,7 +4299,7 @@ export function trimAgentRows(messages, opts = {}) {
     const row = m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.length <= AGENT_ROW_MAX_CHARS ? m.text : undefined;
     const lead = row === undefined ? '' : row.trimStart();
     const agent = (lead.startsWith(TRIM_HEAD) || lead.startsWith('<teammate-message')) && /<\/(?:teammate-message|agent-message|cross-session-message)>/.test(row);
-    if (!agent || skip.has(i) || queued.has(i) || userWords(m, STAGE_NOT_USER).length || row.includes(QUEUED_PREFIX)) {
+    if (!agent || skip.has(i) || queued.has(i) || userWords(m, notUserOf(opts.blockTraces)).length || row.includes(QUEUED_PREFIX)) {
       if (agent && (skip.has(i) || queued.has(i))) stats.anchored++; // anchored: kept with its frame
       learn(m);
       continue;
@@ -4390,7 +4470,7 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
       if (i === 0 || i >= tail) continue;
       const m = messages[i];
       if (skip.has(i)) { stats.skipped_blocks++; continue; }
-      if (userWords(m, STAGE_NOT_USER).length || m.text.includes(QUEUED_PREFIX) || AGENT_BARE.test(m.text) || !framingOnly(m.text)) { stats.owner_words++; continue; }
+      if (userWords(m, notUserOf(cfg.blockTraces)).length || m.text.includes(QUEUED_PREFIX) || AGENT_BARE.test(m.text) || !framingOnly(m.text)) { stats.owner_words++; continue; }
       if (queued.has(i)) { stats.queued_anchor++; continue; }
       if (senders.get(i).some((x) => x.json && !x.idle)) { stats.pending_json++; continue; }
       if (i >= limit) continue;
@@ -4423,6 +4503,1035 @@ export async function moveAgentMessages($, cfg, messages, opts = {}) {
     }
   } catch { stats.error = 1; }
   return { rows, stats };
+}
+
+// --- verdicts of Jev on blocks of text (OMC_JEV_COMPACT_BLOCKS=off|shadow|active, off when unset) ------------------------------------------------
+// With the switch on, in a session with the API form, a state directory and a session id at hand, Jev rates the BLOCKS of the rows before the tail on four levels and
+// the code only carries the levels out. A block is a paragraph, a closed fenced code block or a closed <pasted_content> tag of a row with the user's own words (in a
+// subagent: the messages of the session that gave the task) or of an assistant row, and a whole <teammate-message>, <agent-message> or <cross-session-message> block of
+// an agent row. Level 3 and 2 leave a block word for word. Level 1 and 0 move it to a file (the <state dir>/compaction-pastes/<session>/<sha256 of the text, 32 hex>.txt
+// of the other stages) and leave a trace, [block moved at compaction: <chars> chars, full text in <path>...]: level 0 the length and the path, level 1 also the first
+// BLOCK_HEAD_CHARS characters, a direct reply (directReplyRows) whatever the level its first and last REPLY_TRACE_HEAD and REPLY_TRACE_TAIL characters. A run of
+// neighbouring blocks that go the same way is one trace. A block with no verdict stays word for word, whatever its length, age or author: those are signals in the
+// question, never rules. Every block goes to Jev whole (one above the window in consecutive parts of one item; its level is the highest of its parts) after the checks of
+// the paste stage: one that names a secret or private path, that masking changes or that is beyond the scan limits stays in the conversation and is never sent. The
+// verdicts are files, <state dir>/compaction-pastes/<session>/verdict-block-<key>.json (key: the author and a hash of the text), so a block is asked about once and a
+// verdict made under another wording of the question is none. The compaction reads them and asks for what is missing within its deadline; the pass in the background at
+// the end of a turn (turn.complete) and the one before the module's own request to compact fill them earlier. `shadow` asks, counts and writes the verdict files but
+// changes nothing; `active` acts only while the point itself is active. OMC_JEV_COMPACT_VERDICTS=off: no question (the verdict files that exist still apply);
+// OMC_JEV_COMPACT_BLOCK_QUESTIONS=shared: the wording of the question and the levels stand once in the state of a request; OMC_JEV_COMPACT_WINDOW_CHARS: the window of
+// Jev in bytes of the request body; OMC_JEV_COMPACT_FULL_INPUT=active: the user's words in the header of a request are bounded by the window alone (a quarter of it);
+// OMC_JEV_COMPACT_JEV_STAGES=active: while the verdicts run (active, a key, the API form), the stages that decide by fixed lengths, counts and the user's style
+// (pasted text, long replies, agents' messages to files) do not run; the agent trim stays (it is lossless).
+const BLOCK_HEAD_CHARS = 60; // level 1: the start of the block that stays in the trace
+const BLOCK_PART_MIN = 2000; // the smallest part of a block above the window, in bytes of its JSON
+const BLOCK_ITEM_OVERHEAD = 60; // bytes per item beyond its fields and its question (keys, commas)
+const BLOCK_PARALLEL = 4; // requests of the verdicts at once
+const BLOCK_SCAN_BUDGET_CHARS = 200000; // the characters of the blocks one pass checks for a secret (the budget of the pastes and replies is SCAN_BUDGET_CHARS): the largest conversation measured needed 195924
+const BLOCK_ROUNDS = 4; // a request the endpoint refuses as too large (400) is asked again in half the window, this many times at most
+const BLOCK_READ_MAX = 600; // verdict files read in one pass
+const BLOCK_FILE_PARALLEL = 8; // file calls at once (verdict files, moved text)
+const BLOCK_BACKGROUND_GAP_MS = 20000; // the pass in the background reads the whole conversation: at most one in this time
+const BLOCK_BACKGROUND_MS = 30000; // and it ends by then (no deadline of the turn: the host may end first, and the compaction makes up the rest)
+const BLOCK_BACKGROUND_REQUEST_MS = 3000;
+const BLOCK_AUTHOR = { w: 'owner', a: 'assistant', g: 'agent', t: 'task_giver' };
+const BLOCK_KIND = { w: 'owner_message', a: 'assistant_reply', g: 'agent_report', t: 'task_giver_message' };
+const BLOCK_LEVELS = [
+  'Not needed: it concerns a finished task or none; only a trace with the file stays (the length, no start of the text).',
+  `Probably not needed: it concerns a finished, abandoned or no task; the start (${BLOCK_HEAD_CHARS} characters), the length and the file stay.`,
+  'May be useful: work on an open task may come back to its details; the block stays word for word.',
+  'Needed word for word: without its literal text an open task cannot be finished; the block stays word for word.',
+];
+const BLOCK_QUESTION = "Is the block still needed word for word for further work on the owner's tasks? What the owner asked for and decided in their messages is the direction of the agent's work. There is no task list in the state: open tasks are inferred from the owner's messages (`task` holds only the latest of them, earlier ones are among the blocks). `budget` is a signal of the size of the conversation against its limit, not an order to lower levels.";
+const BLOCK_FOCUS = 'Judge the effect on further work if only a trace and a file were left of the block. The rules of judging are in `block_rules`.';
+const BLOCK_RULES = `The fields of a block (author, pasted, length, age_turns, current_turn, in_tail, has_file, repeated, first_message, owner_style, row) are signals for your judgement, not rules; the author too: in the session of an agent the messages of the task giver (author task_giver) are the command of that session. Judge whether further work on the owner's tasks will use the literal text of the block, not whether it was needed before. The full text of the block stays in a file and in the transcript, so a mistake is cheap. The levels describe the effect: 3 the task cannot be finished without the literal text of the block, 2 work on the task may come back to its details, 1 the block concerns a finished, abandoned or no task and the start (${BLOCK_HEAD_CHARS} characters), the length and the file stay, 0 it concerns a finished task or none and only a trace with the file stays.`;
+// The version of the question: a verdict made under another wording is none (readBlockVerdicts), its block is asked again.
+function fnv(text, seed = 0x811c9dc5) {
+  let h = seed;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+const contentHash = (text) => fnv(text) + fnv(text, 0x050c5d1f);
+const BLOCK_QUESTION_VERSION = contentHash([BLOCK_QUESTION, BLOCK_FOCUS, BLOCK_LEVELS.join('\n'), BLOCK_RULES].join('\0')).slice(0, 8);
+
+const BLOCK_FENCE = /^ {0,3}(```|~~~)/;
+// A line that starts a trace of this module or of the compaction (a removed call, pasted text, a moved reply or block, an agent message).
+const isStageTraceLine = (line) => isTraceLine(line, true) || line.startsWith(AGENT_TRACE_PREFIX);
+// Whether a closing fence of the same kind stands in [from, to).
+function closedFence(text, from, to, mark) {
+  for (let i = from; i < to;) {
+    const nl = text.indexOf('\n', i);
+    const end = nl === -1 || nl >= to ? to : nl + 1;
+    const m = BLOCK_FENCE.exec(text.slice(i, end));
+    if (m && m[1] === mark) return true;
+    i = end;
+  }
+  return false;
+}
+// The paragraphs and closed fenced code blocks of text[from, to): a paragraph (the lines between blank lines) with a trace line in it is no block, whole, so the text that
+// stands next to traces stays beside them; a block ends before its last line break.
+function lineBlocks(text, from, to, out) {
+  let i = from;
+  let start = -1;
+  let fence = '';
+  let traced = false; // the paragraph in hand holds a trace line
+  const noCloser = new Set(); // a fence mark with no closing fence after one opener has none after a later one either
+  const flush = (end) => {
+    if (start >= 0 && !traced) {
+      let e = end;
+      if (text[e - 1] === '\n') e -= text[e - 2] === '\r' ? 2 : 1;
+      if (e > start && text.slice(start, e).trim()) out.push({ kind: 'text', start, end: e });
+    }
+    start = -1;
+    traced = false;
+  };
+  while (i < to) {
+    const nl = text.indexOf('\n', i);
+    const end = nl === -1 || nl >= to ? to : nl + 1;
+    const line = text.slice(i, end);
+    if (fence) {
+      const m = BLOCK_FENCE.exec(line);
+      if (m && m[1] === fence) { fence = ''; flush(end); }
+      i = end;
+      continue;
+    }
+    const open = BLOCK_FENCE.exec(line);
+    if (open && !noCloser.has(open[1])) {
+      if (closedFence(text, end, to, open[1])) { flush(i); start = i; fence = open[1]; i = end; continue; }
+      noCloser.add(open[1]);
+    }
+    if (/^[ \t\r]*\n?$/.test(line)) { flush(i); i = end; continue; }
+    if (start < 0) start = i;
+    if (isStageTraceLine(line)) traced = true;
+    i = end;
+  }
+  flush(to);
+}
+/** The blocks of a text in order: {kind: 'text' | 'tag', start, end}. A closed <pasted_content> tag is one block; traces and blank lines are none, and the lines of an unclosed fence are read as a paragraph. */
+export function splitBlocks(text) {
+  const out = [];
+  let at = 0;
+  for (const t of pasteTags(text)) {
+    if (t.start > at) lineBlocks(text, at, t.start, out);
+    out.push({ kind: 'tag', start: t.start, end: t.end });
+    at = t.end;
+  }
+  if (at < text.length) lineBlocks(text, at, text.length, out);
+  return out;
+}
+
+/** What replaces a run of blocks of `chars` characters: the length and the file (`file` is the letter and the name, `b/<name>`: the directory stands once in the header of the
+ * compaction, traceHeader); mode 'start' also its first BLOCK_HEAD_CHARS characters, 'floor' the first and the last ones of a reply.
+ * A run of an agent's blocks (`agent`) opens as the trace of an agent's message does, so the row is still no message of the user. */
+export function blockTrace(chars, text, file, mode = 'bare', agent = false) {
+  if (agent) return `${AGENT_TRACE_PREFIX}${file} (${chars} chars)${mode === 'bare' ? '' : `; start: ${quoted(text.slice(0, BLOCK_HEAD_CHARS))}`}]`;
+  const start = mode === 'bare' ? '' : `; start: ${quoted(text.slice(0, mode === 'floor' ? REPLY_TRACE_HEAD : BLOCK_HEAD_CHARS))}`;
+  const end = mode === 'floor' ? `; end: ${quoted(text.slice(-REPLY_TRACE_TAIL))}` : '';
+  return `${BLOCK_TRACE_PREFIX}${chars} chars in ${file}${start}${end}]`;
+}
+/** The header of the traces, once per compaction in the first row of the result: the directory the letter of a trace stands for. */
+const TRACE_HEADER_OPEN = `${TRACE_HEADER_PREFIX}${BLOCK_LETTER}/ = `;
+export const traceHeader = (dir) => `${TRACE_HEADER_OPEN}${dir}]`;
+// Only the whole generated header is one: a message of the user that opens with the same words and goes on is the user's.
+const isHeaderRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.startsWith(TRACE_HEADER_OPEN) && m.text.endsWith(']') && !m.text.includes('\n');
+const blockFileOf = (hash) => `${BLOCK_LETTER}/${hash}.txt`;
+// The tokens of a block by the class of its author and the characters past ASCII (the rates of the module).
+const blockTokens = (rates, author, text) => ({ w: rates.RATE_OWN, a: rates.RATE_ATXT }[author] ?? rates.RATE_NOTE) * text.length + rates.RATE_NON_ASCII * nonAscii(text);
+const blockDir = (cfg, sessionId) => `${cfg.pasteDir}/${safeName(sessionId)}`;
+const blockVerdictPath = (cfg, sessionId, key) => `${blockDir(cfg, sessionId)}/verdict-block-${key}.json`;
+// The tokens one block gives back when it goes to the shortest trace (level 0), the file path counted at its real length.
+const blockGain = (cfg, it, mode = 'bare') => Math.max(0, blockTokens(cfg.rates, it.author, it.body) - cfg.rates.RATE_TRACE * blockTrace(it.chars, it.body, blockFileOf('0'.repeat(32)), mode, it.author === 'g').length);
+
+// The turns of a conversation: `age[i]` is the number of user messages after row i (the turns it has lived), `tail` the first row of the tail the paste and reply stages keep (the
+// third newest user message and the sixth newest turn, whichever is earlier). `userRows` are the rows with the user's words, sorted.
+function turnFacts(rows, userRows) {
+  const turns = [];
+  rows.forEach((m, i) => { if (m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trim()) turns.push(i); });
+  const tail = Math.min(userRows.length >= REPLY_KEEP_OWNERS ? userRows[userRows.length - REPLY_KEEP_OWNERS] : 0, turns.length >= REPLY_KEEP_TURNS ? turns[turns.length - REPLY_KEEP_TURNS] : 0);
+  const age = new Array(rows.length).fill(0);
+  const isUser = new Set(userRows);
+  for (let i = rows.length - 1, n = 0; i >= 0; i--) { age[i] = n; if (isUser.has(i)) n++; }
+  return { age, tail };
+}
+// The blocks of the rows before `ctx.limit` that a verdict can name. `rows` are the rows as the agent trim leaves them. ctx: limit, skipUser and skipAssistant (rows the host
+// cannot rebuild from text), userUnmatched (an image or file no row shows: no user row is touched), queued (delivered blocks anchored to rows), users (rows with the user's own
+// words), delivered (rows a message typed during a tool turn is anchored to) and agent (the session is a subagent's: the user's rows are the messages of the task giver). Returns {rows: Map row -> {author, direct, blocks: [{start, end, key}]}, items (one per key, with
+// `count` places), stats}. A row that holds results, a delivered block's anchor, a host block or a block the host cannot rebuild stays whole, whatever its blocks.
+function blockRows(cfg, rows, ctx) {
+  const stats = { rows: 0, blocks: 0, host_blocks: 0, skipped_non_text: 0, queued_anchor: 0, image_unmatched: 0, owner_words: 0, pending_json: 0 };
+  const found = new Map();
+  const byKey = new Map();
+  const owners = new Set(ctx.users);
+  const userRows = [...new Set([...ctx.users, ...ctx.delivered])].sort((a, b) => a - b);
+  const { age, tail } = turnFacts(rows, userRows);
+  const direct = directReplyRows(rows, ctx.users, ctx.delivered, true);
+  for (let i = 0; i < Math.min(ctx.limit, rows.length); i++) {
+    const m = rows[i];
+    if (m.trimDrop === true || typeof m.text !== 'string' || !m.text.trim() || (m.toolResults || []).length) continue;
+    let author;
+    let list;
+    if (m.role === 'assistant') {
+      if (ctx.skipAssistant?.has(i)) { stats.skipped_non_text++; continue; }
+      author = 'a';
+    } else if (m.role === 'user') {
+      if (ctx.userUnmatched) { stats.image_unmatched++; continue; }
+      if (ctx.skipUser?.has(i)) { stats.skipped_non_text++; continue; }
+      if (isAgentRow(m)) {
+        if (owners.has(i) || m.text.includes(QUEUED_PREFIX) || AGENT_BARE.test(m.text) || !framingOnly(m.text)) { stats.owner_words++; continue; }
+        if (agentSenders(m.text).some((x) => x.json && !x.idle)) { stats.pending_json++; continue; }
+        author = 'g';
+        list = agentBlocks(m.text).blocks.map((b) => ({ kind: 'agent', start: b.at, end: b.end }));
+      } else if (owners.has(i)) {
+        if (cutHostBlocks(m.text) !== m.text || m.text.includes(ENVELOPE_CLOSE)) { stats.host_blocks++; continue; }
+        author = 'w';
+      } else continue;
+    } else continue;
+    if (ctx.queued.has(i)) { stats.queued_anchor++; continue; }
+    list ??= splitBlocks(m.text);
+    const lead = author === 'g' && agentSenders(m.text).some((x) => x.who === AGENT_LEAD);
+    const giver = lead || (ctx.agent === true && author === 'w'); // a message of the task giver is the command of the session of an agent (a signal for Jev, no rule)
+    const floor = author === 'a' && direct.has(i);
+    const blocks = [];
+    for (const b of list) {
+      const body = m.text.slice(b.start, b.end);
+      if (!body.trim()) continue;
+      const key = `${author}-${contentHash(body)}`;
+      blocks.push({ start: b.start, end: b.end, key });
+      stats.blocks++;
+      const seen = byKey.get(key);
+      const signals = { age_turns: age[i], current_turn: age[i] === 0, in_tail: i >= tail };
+      if (seen) { Object.assign(seen, signals, { repeated: true, row: i, count: seen.count + 1 }); continue; }
+      byKey.set(key, { key, author, body, row: i, chars: body.length, pasted: b.kind === 'tag', first_message: i === 0, giver, owner_style: author === 'w' && ownerMarked(body, cfg.ownerMarkers), repeated: false, count: 1, ...signals });
+    }
+    if (!blocks.length) continue;
+    stats.rows++;
+    found.set(i, { author, direct: floor, blocks });
+  }
+  return { rows: found, items: [...byKey.values()], stats };
+}
+
+// The blocks of one compaction (or pass): blockRows on `trimmed`, the rows as the agent trim leaves them, with the skip sets the paste and reply stages use (read from `messages`, the
+// rows as they came). Returns {rows, items, stats, messages: trimmed, sessionId, verdicts: Map key -> verdict, potential}.
+function planBlocks(cfg, messages, trimmed, api, queued, keepFrom, sessionId, agent = false) {
+  const images = nonTextUserRows(messages, api);
+  const users = ownerRows(messages, cfg.hookRowPrefixes, true);
+  const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
+  const found = blockRows(cfg, trimmed, { limit: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skipUser: images.rows, userUnmatched: images.unmatched, skipAssistant: nonTextAssistantRows(messages, api), queued, users, delivered, agent });
+  const potential = found.items.reduce((sum, it) => (it.chars <= cfg.pasteMaxChars && !namesSecretPath(it.body, cfg.privatePaths) ? sum + blockGain(cfg, it) * it.count : sum), 0);
+  return { ...found, messages: trimmed, sessionId, verdicts: new Map(), potential };
+}
+
+// The verdicts this process knows (and the keys it found held back by a secret), by session: the files are read once.
+const sessionMap = (map, sessionId, make) => { if (!map.has(sessionId)) map.set(sessionId, make()); return map.get(sessionId); };
+// The settings a verdict depends on besides the text: the private paths a block may not name (a verdict made under other ones is none, and its block is checked again).
+const blockSettings = (cfg) => contentHash(JSON.stringify(cfg.privatePaths ?? []));
+const validVerdict = (v, key, settings) => Boolean(v) && typeof v === 'object' && v.key === key && v.question_version === BLOCK_QUESTION_VERSION && v.settings === settings && Number.isInteger(v.level) && v.level >= 0 && v.level < QUESTION_CRITERIA.length;
+
+// One call of `work` for each of `list`, BLOCK_FILE_PARALLEL at a time.
+async function inParallel(list, work) {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(BLOCK_FILE_PARALLEL, list.length) }, async () => { while (next < list.length) await work(list[next++]); }));
+}
+
+// The verdicts the session has: the process's own first, then the files (at most BLOCK_READ_MAX, within `deadline`). A file that does not read, or was made under
+// another question, is none. Returns Map key -> verdict; `unread` (a Set) receives the keys left past BLOCK_READ_MAX, whose files were not looked at (the next pass reads them).
+async function readBlockVerdicts($, cfg, sessionId, keys, deadline, unread = new Set()) {
+  const cache = sessionMap(session.blockVerdicts, sessionId, () => new Map());
+  const settings = blockSettings(cfg);
+  const out = new Map();
+  const wanted = [];
+  for (const key of keys) { const v = cache.get(key); if (v?.settings === settings) out.set(key, v); else wanted.push(key); }
+  if (!wanted.length || !cfg.pasteDir) return out;
+  const gate = { deadline, stalled: false };
+  for (const key of wanted.slice(BLOCK_READ_MAX)) unread.add(key);
+  await inParallel(wanted.slice(0, BLOCK_READ_MAX), async (key) => {
+    const r = await fsCall($, gate, () => $.fs.read(blockVerdictPath(cfg, sessionId, key)));
+    if (typeof r.value !== 'string') return;
+    try {
+      const v = JSON.parse(r.value);
+      if (validVerdict(v, key, settings)) { out.set(key, v); cache.set(key, v); }
+    } catch { /* a verdict that does not read is none */ }
+  });
+  return out;
+}
+// One file per answered block, BLOCK_FILE_PARALLEL at a time, none begun after `deadline`. Returns the number written.
+async function writeBlockVerdicts($, cfg, sessionId, list, deadline) {
+  if (!cfg.pasteDir || !list.length) return 0;
+  const gate = { deadline, stalled: false };
+  let written = 0;
+  await inParallel(list, async (v) => {
+    const r = await fsCall($, gate, () => $.fs.write(blockVerdictPath(cfg, sessionId, v.key), JSON.stringify(v)));
+    if ('value' in r) written++;
+  });
+  return written;
+}
+
+// Pieces of at most `size` characters, cut at a line break when one stands in the last fifth, never inside a surrogate pair.
+function chunksOf(text, size) {
+  const out = [];
+  for (let at = 0; at < text.length;) {
+    let end = Math.min(text.length, at + size);
+    if (end < text.length) {
+      const nl = text.lastIndexOf('\n', end - 1);
+      if (nl > at + size * 0.8) end = nl + 1;
+      const code = text.charCodeAt(end - 1);
+      if (code >= 0xd800 && code <= 0xdbff) end--;
+    }
+    out.push(text.slice(at, end));
+    at = end;
+  }
+  return out;
+}
+const jsonBytes = (text) => (text ? utf8Bytes(JSON.stringify(text)) : 0);
+// The question about one block, in the shape the documentation of the endpoint gives: the block and the task by their paths in backticks (`full`, the default). With
+// `shared` the wording and the levels stand once in the state of a request (`block_assessment`) and the question of a block names the block and the short names of the levels.
+const BLOCK_LEVEL_NAMES = BLOCK_LEVELS.map((what) => what.split(':')[0]);
+const sharedWording = (text) => text.replace(/\bthe block\b/, 'the block named in the question');
+function blockQuestion(name, mode = 'full') {
+  if (mode === 'shared') return { type: 'score', instructions: `Rate the block \`blocks.${name}\` by the question and the levels in \`block_assessment\`.`, criteria: BLOCK_LEVEL_NAMES };
+  return {
+    type: 'score',
+    instructions: { question: BLOCK_QUESTION.replace('the block', `the block \`blocks.${name}\``), compare: [`\`blocks.${name}\``, '`task`'], focus: BLOCK_FOCUS },
+    criteria: BLOCK_LEVELS.map((what) => ({ what })),
+  };
+}
+const sharedAssessment = () => ({ block_assessment: { question: sharedWording(BLOCK_QUESTION), levels: BLOCK_LEVELS } });
+// The fields of one block (or one part of it) in the request.
+function blockFields(it, part) {
+  const key = it.giver ? 't' : it.author;
+  return {
+    row: it.row, kind: BLOCK_KIND[key], author: BLOCK_AUTHOR[key], text: part.text, length: it.chars, pasted: it.pasted, first_message: it.first_message,
+    owner_style: it.owner_style, age_turns: it.age_turns, current_turn: it.current_turn, in_tail: it.in_tail, has_file: true, repeated: it.repeated,
+    part: part.z > 1 ? { nr: part.nr, of: part.z } : null,
+    ...(it.giver ? { from_task_giver: true } : {}),
+  };
+}
+// The header of a request (the user's last words and the /compact instructions) takes at most a third of the window.
+function blockHeader(user, windowBytes, extra) {
+  const limit = Math.floor(windowBytes / 3);
+  const total = user.task.reduce((s, x) => s + utf8Bytes(x), 0);
+  const task = total <= limit ? user.task : user.task.map((x) => { const allowed = Math.max(500, Math.floor((limit * utf8Bytes(x)) / total / 1.2)); return x.length > allowed ? headTail(x, Math.floor(allowed * 0.6), Math.floor(allowed * 0.4)) : x; });
+  return { task, ...(user.instructions ? { compact_instructions: user.instructions } : {}), ...(extra ?? {}) };
+}
+// Items into requests that fit the window: a block larger than the window in consecutive parts, whole blocks packed one after another.
+// [{state, questions, map: Map question -> {it, nr, z}}]
+function packBlockRequests(items, header, windowBytes, mode = 'full') {
+  const shared = mode === 'shared';
+  const budget = Math.max(BLOCK_PART_MIN * 2, windowBytes - utf8Bytes(JSON.stringify(header)) - jsonBytes(BLOCK_RULES) - (shared ? utf8Bytes(JSON.stringify(sharedAssessment())) : 0) - 40);
+  const fixed = (it) => utf8Bytes(JSON.stringify(blockFields(it, { text: '', nr: 1, z: 2 }))) + utf8Bytes(JSON.stringify(blockQuestion('b999', mode))) + BLOCK_ITEM_OVERHEAD;
+  const entries = [];
+  for (const it of items) {
+    const own = fixed(it);
+    if (own + jsonBytes(it.body) <= budget) { entries.push({ it, nr: 1, z: 1, text: it.body, size: own + jsonBytes(it.body) }); continue; }
+    // The window counts the body of the request: a part is cut by the size of its JSON form (quotes and line breaks grow it), not by its characters.
+    const piece = Math.max(BLOCK_PART_MIN, budget - own);
+    const size = Math.max(BLOCK_PART_MIN / 2, Math.floor((piece / Math.max(1, jsonBytes(it.body) / Math.max(1, it.body.length))) * 0.95));
+    const parts = chunksOf(it.body, size);
+    parts.forEach((text, k) => entries.push({ it, nr: k + 1, z: parts.length, text, size: own + jsonBytes(text) }));
+  }
+  const groups = [];
+  let cur;
+  for (const en of entries) {
+    if (!cur || (cur.size + en.size > budget && cur.entries.length)) { cur = { size: 0, entries: [] }; groups.push(cur); }
+    cur.entries.push(en);
+    cur.size += en.size;
+  }
+  return groups.map((g) => {
+    const blocks = {};
+    const questions = {};
+    const map = new Map();
+    g.entries.forEach((en, n) => {
+      const q = `b${n + 1}`;
+      map.set(q, en);
+      blocks[q] = blockFields(en.it, en);
+      questions[q] = blockQuestion(q, mode);
+    });
+    return { state: { ...header, blocks, block_rules: BLOCK_RULES, ...(shared ? sharedAssessment() : {}) }, questions, map };
+  });
+}
+
+// Jev's verdicts for blocks: packs them into requests, asks BLOCK_PARALLEL at a time through the module's own admission (the process cap, the shared breaker and request limit) and
+// returns {verdicts: Map key -> verdict, stats}. A block is rated when every part of it was answered; the level is the highest of its parts. A request refused as too large (400) is
+// asked again in half the window. opts: header(windowBytes) -> the header of a request, deadline (no request starts after it, and one gets what is left of it), requestMs, sessionId,
+// writeDeadline, low (the pass in the background: only a failure with a pause of its own counts), cancel (a function: true stops the pass).
+async function askBlockVerdicts($, cfg, items, opts) {
+  const stats = { items: items.length, requests: 0, started: 0, held: 0, answered: 0, unanswered: 0, split: 0, reduced: 0, failed: 0, written: 0 };
+  const verdicts = new Map();
+  const levels = new Map(); // block -> {done, z, max, noul}
+  const started = new Set();
+  const failures = [];
+  let pending = items;
+  let windowBytes = windowBytesOf(cfg);
+  for (let round = 0; pending.length && round < BLOCK_ROUNDS; round++) {
+    if (opts.cancel?.()) break;
+    const requests = packBlockRequests(pending, opts.header(windowBytes), windowBytes, cfg.blockQuestions);
+    stats.requests += requests.length;
+    const split = new Set();
+    for (const r of requests) for (const en of r.map.values()) if (en.z > 1) split.add(en.it);
+    stats.split = Math.max(stats.split, split.size);
+    const results = new Array(requests.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < requests.length) {
+        const k = next++;
+        if (opts.cancel?.() || Date.now() >= opts.deadline) { results[k] = { skipped: true }; continue; }
+        const admission = await admitRequest($, cfg, opts.deadline);
+        if (admission.skip) { results[k] = { held: admission.skip }; continue; }
+        const t0 = Date.now();
+        const timeoutMs = Math.min(opts.requestMs, opts.deadline - t0);
+        if (timeoutMs < 500) { session.requests--; results[k] = { skipped: true }; continue; }
+        const r = await withDeadline($, askJev($, cfg, requests[k].state, requests[k].questions), timeoutMs);
+        // Shared failure bookkeeping may finish later, but cannot extend the deadline.
+        const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
+        if (Date.now() < opts.deadline) await withDeadline($, recording, opts.deadline - Date.now());
+        results[k] = { ...r, ms: Date.now() - t0 };
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker));
+    const redo = new Set();
+    results.forEach((r, k) => {
+      if (!r || r.skipped) return;
+      if (r.held) { stats.held++; return; }
+      for (const en of requests[k].map.values()) started.add(en.it);
+      stats.started++;
+      if (!r.value) {
+        if (r.error?.status === 400) { for (const en of requests[k].map.values()) redo.add(en.it); return; }
+        failures.push(classifyFailure(r));
+        return;
+      }
+      for (const [q, en] of requests[k].map) {
+        const s = scoreOf(r.value[q]);
+        const scaled = s === undefined ? NaN : s * (QUESTION_CRITERIA.length - 1);
+        if (!(Math.abs(scaled - Math.round(scaled)) <= 1e-9)) continue; // a block answer is a whole level: no answer, or a fraction of one, is no verdict
+        const row = levels.get(en.it) ?? { done: 0, z: en.z, max: -1, noul: 0 };
+        row.done++;
+        row.max = Math.max(row.max, Math.round(scaled));
+        row.noul = Math.max(row.noul, s);
+        levels.set(en.it, row);
+      }
+    });
+    for (const it of redo) levels.delete(it);
+    pending = [...redo];
+    windowBytes = Math.floor(windowBytes / 2);
+    if (windowBytes < BLOCK_PART_MIN * 3) break;
+    if (pending.length) stats.reduced++;
+  }
+  const ts = isoNow();
+  const files = [];
+  for (const it of items) {
+    const row = levels.get(it);
+    if (row && row.done === row.z) {
+      const v = { key: it.key, kind: 'block', level: row.max, noul: Math.round(row.noul * 1000) / 1000, question_version: BLOCK_QUESTION_VERSION, settings: blockSettings(cfg), parts: row.z, chars: it.chars, ts };
+      verdicts.set(it.key, v);
+      files.push(v);
+      stats.answered++;
+    } else stats.unanswered++;
+  }
+  stats.failed = failures.length;
+  noteFailures(opts.low ? failures.filter((f) => f.pauseMs) : failures, Date.now());
+  if (files.length) {
+    const cache = sessionMap(session.blockVerdicts, opts.sessionId, () => new Map());
+    for (const v of files) cache.set(v.key, v);
+    stats.written = await writeBlockVerdicts($, cfg, opts.sessionId, files, opts.writeDeadline ?? opts.deadline);
+  }
+  return { verdicts, stats };
+}
+
+// The verdicts of the blocks of `plan` (blockRows): the ones the process or the files hold, and Jev's for the rest, within `ctx.deadline`. Sets plan.verdicts. A block is asked only when it
+// can be moved at all: not beyond the scan limits, with a trace shorter than its text in tokens, naming no secret path and unchanged by masking. ctx: user (userTask), deadline, requestMs,
+// minAge (only blocks that lived this many turns), low, cancel, writeDeadline, extra (fields of the header). Returns the counts; never rejects.
+async function ensureBlockVerdicts($, cfg, plan, ctx) {
+  const sessionId = plan.sessionId;
+  const stats = { items: plan.items.length, aged: 0, eligible: 0, known: 0, secret: 0, unchecked: 0, too_long: 0, too_short: 0 };
+  try {
+    const held = sessionMap(session.blockHeld, sessionId, () => new Set()); // blocks a secret holds back: the check is a function of the text
+    const items = plan.items.filter((it) => it.age_turns >= (ctx.minAge ?? 0));
+    stats.aged = items.length;
+    const eligible = items.filter((it) => {
+      if (held.has(it.key)) { stats.secret++; return false; }
+      if (it.chars > cfg.pasteMaxChars) { stats.too_long++; return false; }
+      if (blockGain(cfg, it) <= 0) { stats.too_short++; return false; }
+      return true;
+    });
+    stats.eligible = eligible.length;
+    const unread = new Set();
+    const known = await readBlockVerdicts($, cfg, sessionId, eligible.map((it) => it.key), ctx.deadline, unread);
+    for (const [key, v] of known) plan.verdicts.set(key, v);
+    stats.known = known.size;
+    // The checks for a secret run on the blocks to ask about, the largest first (masking has quadratic patterns), within the budget of the check.
+    const budget = { left: BLOCK_SCAN_BUDGET_CHARS, deadline: ctx.deadline };
+    const toAsk = [];
+    for (const it of eligible.filter((x) => !known.has(x.key) && !unread.has(x.key)).sort((a, b) => b.chars - a.chars)) {
+      const why = secretCheck(it.body, cfg.privatePaths, budget, cfg.pasteMaxChars);
+      if (why === 'secret') { held.add(it.key); stats.secret++; } else if (why) stats.unchecked++; else toAsk.push(it);
+    }
+    stats.asked = toAsk.length;
+    if (!toAsk.length) return stats;
+    const run = await askBlockVerdicts($, cfg, toAsk, {
+      header: (win) => blockHeader(ctx.user, win, ctx.extra),
+      deadline: ctx.deadline, requestMs: ctx.requestMs ?? REQUEST_MS, sessionId, writeDeadline: ctx.writeDeadline, low: ctx.low === true, cancel: ctx.cancel,
+    });
+    for (const [key, v] of run.verdicts) plan.verdicts.set(key, v);
+    stats.ask = run.stats;
+  } catch (error) { stats.error = clip(oneLine(String(error?.message ?? error)), 200); }
+  return stats;
+}
+
+// The runs of the blocks that Jev took off (level 0 or 1) and the files they go to; writes the files (within `deadline`) and returns {edits: Map row -> rebuilt row, stats}. A run stays
+// whole when its file could not be written and read back in time, when a secret stands at the joint of its blocks, or when its trace would not pay in tokens. `shadow` counts what
+// would move and writes nothing. Never rejects.
+async function moveBlocks($, cfg, plan, deadline, mode = 'active', hold = new Set()) {
+  const stats = { rows: plan.rows.size, blocks: 0, no_verdict: 0, levels: [0, 0, 0, 0], runs: 0, secret: 0, too_short: 0, written: 0, reused: 0, write_failed: 0, timed_out: 0, held_rows: 0, moved: 0, moved_chars: 0, moved_tokens: 0, trace_chars: 0 };
+  const edits = new Map();
+  try {
+    const jobs = [];
+    for (const [row, info] of plan.rows) {
+      if (hold.has(row)) { stats.held_rows++; continue; }
+      const text = plan.messages[row].text;
+      let run;
+      for (const b of info.blocks) {
+        stats.blocks++;
+        const v = plan.verdicts.get(b.key);
+        if (!v) { stats.no_verdict++; run = undefined; continue; }
+        stats.levels[v.level]++;
+        if (v.level >= 2) { run = undefined; continue; }
+        if (run && !text.slice(run.end, b.start).trim()) { run.parts.push(b); run.end = b.end; run.bare = run.bare && v.level === 0; } else { run = { row, author: info.author, floor: info.direct, start: b.start, end: b.end, bare: v.level === 0, parts: [b] }; jobs.push(run); }
+      }
+    }
+    stats.runs = jobs.length;
+    const ready = [];
+    for (const job of jobs) {
+      const text = plan.messages[job.row].text;
+      job.text = text.slice(job.start, job.end);
+      // Each block was checked when it was asked about; what a run adds is the joints between its blocks (a secret may stand over the break between two of them).
+      const joint = job.parts.slice(1).some((b, k) => {
+        const around = text.slice(Math.max(job.parts[k].start, job.parts[k].end - 200), Math.min(b.end, b.start + 200));
+        return namesSecretPath(around, cfg.privatePaths) || maskSecrets(around) !== around;
+      });
+      if (joint) { stats.secret++; continue; }
+      const hash = (await sha256Hex(job.text)).slice(0, 32);
+      job.path = `${blockDir(cfg, plan.sessionId)}/${hash}.txt`;
+      job.trace = blockTrace(job.text.length, job.text, blockFileOf(hash), job.floor ? 'floor' : job.bare ? 'bare' : 'start', job.author === 'g');
+      job.tokens = blockTokens(cfg.rates, job.author, job.text);
+      if (job.tokens <= cfg.rates.RATE_TRACE * job.trace.length) { stats.too_short++; continue; }
+      ready.push(job);
+    }
+    const gate = { deadline, stalled: false };
+    if (mode === 'active') {
+      await inParallel(ready, async (job) => {
+        const saved = await savePaste($, gate, job.path, job.text);
+        if (saved === 'written' || saved === 'reused') { stats[saved]++; job.saved = true; } else stats[saved === 'timeout' ? 'timed_out' : 'write_failed']++;
+      });
+    } else for (const job of ready) job.saved = true;
+    const byRow = new Map();
+    for (const job of ready) {
+      if (!job.saved) continue;
+      stats.moved++;
+      stats.moved_chars += job.text.length;
+      stats.moved_tokens += job.tokens;
+      stats.trace_chars += job.trace.length;
+      byRow.set(job.row, [...(byRow.get(job.row) ?? []), job]);
+    }
+    if (mode === 'active') for (const [row, list] of byRow) {
+      const m = plan.messages[row];
+      let text = '';
+      let at = 0;
+      // A trace stands on a line of its own (the estimate prices a trace line at the trace rate, and a later pass reads it as a trace and no block).
+      for (const j of list.sort((a, b) => a.start - b.start)) {
+        const before = m.text.slice(at, j.start);
+        text += before + (j.start > 0 && !(before || text).endsWith('\n') ? '\n' : '') + j.trace + (j.end < m.text.length && m.text[j.end] !== '\n' ? '\n' : '');
+        at = j.end;
+      }
+      text += m.text.slice(at);
+      edits.set(row, m.role === 'assistant' ? { ...m, text } : { role: m.role, text, toolUses: m.toolUses || [] });
+    }
+  } catch { stats.error = 1; }
+  return { edits, stats };
+}
+// What the blocks moved to files take off the prediction: their tokens less those of their traces.
+const blockSavedTokens = (st, rates) => st.moved_tokens - rates.RATE_TRACE * st.trace_chars;
+
+// The signals every question about a block carries: `budget` (the target of the cascade, when there is one, and the size of the conversation in the tokens of the module's
+// counter) and `census` (its blocks by author). Signals for Jev, never rules; `limit` null: the budget names no limit.
+function blockSignals(rates, tokens, items, prefix, limit) {
+  const census = {};
+  for (const it of items) {
+    const entry = (census[BLOCK_AUTHOR[it.author]] ??= { blocks: 0, tokens: 0 });
+    entry.blocks++;
+    entry.tokens += Math.round(blockTokens(rates, it.author, it.body));
+  }
+  const budget = { ...(limit === null ? {} : { limit_tokens: limit }), host_fixed_tokens: prefix, tokens_before: Math.round(tokens), ...(limit === null ? {} : { to_remove_estimate: Math.max(0, Math.round(tokens - limit)) }) };
+  return { budget, census };
+}
+
+// The verdicts of everything in a conversation that has none, asked (the pass in the background: what lived at least one turn, `low`; the one before the module's own request to
+// compact: all of it). `messages` is the transcript the caller read. Returns the counts or {skipped}; never rejects.
+async function fillBlockVerdicts($, cfg, messages, ctx) {
+  try {
+    if (cfg.mode !== 'active' || cfg.blocks === 'off' || cfg.verdicts === 'off' || !cfg.key || !cfg.pasteDir || !Array.isArray(messages)) return { skipped: 'off' };
+    const sessionId = await sessionIdOf($);
+    if (!sessionId) return { skipped: 'no_session' };
+    const read = await withDeadline($, Promise.resolve().then(() => $.session.messages({ as: 'api' })), HOST_MS);
+    const api = apiFormOf(read.value);
+    if (!api) return { skipped: 'no_api_form' };
+    const keepFrom = openLoopStart(messages, groupsOf(messages, api));
+    if (!keptCallsIn(messages, keepFrom, api)) return { skipped: 'tail_calls' };
+    const delivered = queuedOf(messages, api);
+    const queued = delivered ? delivered.rows : new Map();
+    const stage = agentStageOf($, cfg, undefined, messages, api, queued, keepFrom, sessionId, ctx.deadline);
+    const plan = planBlocks(cfg, messages, stage.trimmed, api, queued, keepFrom, sessionId);
+    if (!plan.items.length) return { items: 0 };
+    const user = userTask(messages, undefined, queued, cfg.privatePaths, cfg.notUserPrefixes, ownerLimitsOf(cfg));
+    let prefix = 0;
+    let limit = null;
+    const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }), ctx.deadline);
+    prefix = prefixTokens(detail);
+    if (cfg.targetPercent !== undefined) {
+      const usage = await hostValue($, () => $.session.usage(), ctx.deadline);
+      const win = await resolveWindow($, cfg, detail, usage, ctx.deadline);
+      if (win) limit = ruleTargetOf(win, cfg);
+    }
+    const extra = blockSignals(cfg.rates, prefix + listTokens(api, cfg.rates), plan.items, prefix, limit);
+    const stats = await ensureBlockVerdicts($, cfg, plan, { ...ctx, user, extra });
+    return { rows: plan.stats.rows, blocks: plan.stats.blocks, ...stats };
+  } catch (error) { return { skipped: 'error', error: clip(oneLine(String(error?.message ?? error)), 200) }; }
+}
+
+// The verdicts before the module's own request to compact: whatever the pass in the background is asking is waited for (no second question about the same blocks), then everything
+// without a verdict is asked, and one record says what came of it. Never rejects.
+async function fillBeforeCompaction($, cfg, messages) {
+  try {
+    const deadline = Date.now() + TOTAL_MS;
+    if (session.blockBackground.run) { session.blockBackground.stop = true; await withDeadline($, session.blockBackground.run, TOTAL_MS); }
+    const fill = await fillBlockVerdicts($, cfg, messages, { deadline, requestMs: REQUEST_MS });
+    if (!fill.skipped) {
+      let sessionId;
+      try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
+      await writeRecord($, cfg, { ts: isoNow(), point: POINT, event: 'verdicts_fill', session_id: sessionId ?? null, agent_id: null, ...fill });
+    }
+  } catch { /* the fill never breaks the request */ }
+}
+
+// At the end of a turn of the main loop (ownThreshold), in the background and with no deadline of the turn: the verdicts of the blocks that lived at least one turn. One pass at a time, at most one in
+// BLOCK_BACKGROUND_GAP_MS; a compaction that starts stops the pass. Never rejects. The pass that did not finish before the host ended is made up by fillBeforeCompaction and the compaction.
+async function backgroundBlockVerdicts($, cfg) {
+  const state = session.blockBackground;
+  if (state.busy || Date.now() - state.at < BLOCK_BACKGROUND_GAP_MS) return;
+  state.busy = true;
+  state.stop = false;
+  state.at = Date.now();
+  let done;
+  const mine = new Promise((resolve) => { done = resolve; });
+  state.run = mine;
+  try {
+    if (cfg.mode !== 'active' || cfg.blocks === 'off' || cfg.verdicts === 'off' || session.compacting > 0 || session.hostCannot || (await blockedReason($, cfg, Date.now(), undefined))) return;
+    const read = await withDeadline($, Promise.resolve().then(() => $.session.messages()), HOST_MS);
+    if (!Array.isArray(read.value) || session.compacting > 0) return;
+    await fillBlockVerdicts($, cfg, read.value, { minAge: 1, low: true, deadline: Date.now() + BLOCK_BACKGROUND_MS, requestMs: BLOCK_BACKGROUND_REQUEST_MS, cancel: () => session.compacting > 0 || state.stop });
+  } catch { /* the pass in the background never breaks a turn */ } finally {
+    state.busy = false;
+    done();
+    if (state.run === mine) state.run = undefined;
+  }
+}
+// --- end of verdicts of Jev on blocks of text -----------------------------------------------------------------------------------------------
+
+// --- second round: Jev's order, one queue for the results and the blocks (OMC_JEV_COMPACT_BLOCKS=active) -------------------------------------------------------------
+//
+// After the second pass of the cascade (a secret or non-text result to a trace, a result Jev scored low to a trace) the prediction may still be above the target. The second
+// round (`reduceToLimit`) then puts every item that Jev rated and that can still come down into one queue, in the order of Jev's ratings (a low rating is the least needed word for
+// word), takes them from the lowest rating and stops at the target; the passes that follow in the cascade (`resume`) stay as the reserve for a missing answer of Jev. The items are the
+// results of tools (to a trace, then removed with the call) and the blocks of text that Jev kept (level 2-3, to level 1: a trace with a file). The rating of a result is the answer of the first
+// round, that of a block the score of its verdict. An item without a rating is not in the queue. A tie at the edge of the choice is put to Jev once (askTie); the code settles what stays
+// tied, in the order of entry. With OMC_JEV_COMPACT_OWNER_LAST=active the owner's blocks that Jev kept stand behind every other item.
+const F2_MAX_ROUNDS = 5; // the number of rounds limits the cost, not the choice
+const F2_STOP_MS = 1200; // no round starts this close to the deadline
+const F2_QUESTION = `The conversation after the compaction is above its target (f2.goal_tokens; what still has to come off: f2.to_remove_tokens), so some items have to come down. The item named in the question stays word for word now: it is the result of a tool, a block of text or a series of traces (field \`kind\`). Rate how much further work on the owner's tasks really needs its text word for word; a low rating means that giving it up is easiest. The code decides how many come down: it stops at the target and takes the items from the lowest rating. Rate every item honestly, without lowering ratings because of the size of the conversation. What coming down does: a block stays as a trace with a file (its first ${BLOCK_HEAD_CHARS} characters, its length, the file; the full text is in the file), the result of a tool as a trace with the name of the tool, a series as one line with the number of traces and a file with their full list. The rules of the levels are in \`block_rules\`.`;
+
+// The entries of the results Jev rated (a result comes down to a trace, then to nothing), in the order of the candidates. `gain` is in the tokens of the candidates' costs.
+function resultEntries(candidates, rates, shape) {
+  const entries = [];
+  for (const c of candidates) {
+    if (!c.answered || isForced(c) || isPinned(c, rates, shape) || c.keep === 'drop') continue;
+    const t = itemTokens(c, rates);
+    const now = t[c.keep ?? 'full'];
+    if (c.keep !== 'trace' && now - t.trace > 0) entries.push({ id: `w:${c.id}`, kind: 'result', score: c.score, gain: now - t.trace, tokens: t.full, c, to: 'trace' });
+    const dropGain = Math.min(now, t.trace) - t.drop;
+    if (dropGain > 0) entries.push({ id: `w:${c.id}:drop`, kind: 'result', score: c.score, gain: dropGain, tokens: t.full, c, to: 'drop', ...(c.keep !== 'trace' ? { requires: `w:${c.id}` } : {}) });
+  }
+  return entries;
+}
+
+// What a direct reply gives back when its blocks come down: neighbouring lowered blocks go to one run with one trace (the floor trace of the whole run), so the gain is that of the row,
+// not the sum of its blocks; a run moves only when it pays, so a run that does not gains 0. `lowered(key)` says which blocks of the row are lowered.
+function floorRowGain(cfg, plan, row, lowered) {
+  const text = plan.messages[row].text;
+  let gain = 0;
+  let run;
+  const close = () => {
+    if (!run) return;
+    const fragment = text.slice(run.start, run.end);
+    gain += Math.max(0, run.tokens - cfg.rates.RATE_TRACE * blockTrace(fragment.length, fragment, blockFileOf('0'.repeat(32)), 'floor').length);
+    run = undefined;
+  };
+  for (const b of plan.rows.get(row).blocks) {
+    if (!lowered(b.key)) { close(); continue; }
+    const tokens = blockTokens(cfg.rates, 'a', text.slice(b.start, b.end));
+    if (run && !text.slice(run.end, b.start).trim()) { run.end = b.end; run.tokens += tokens; } else { close(); run = { start: b.start, end: b.end, tokens }; }
+  }
+  close();
+  return gain;
+}
+
+// The entries of the blocks Jev kept (level 2-3) on rows no other stage changed: one per block, the blocks of a direct reply one per row. `patch` is the verdict the block carries
+// out with when the entry is taken (level 1). The owner's blocks are `late` with OMC_JEV_COMPACT_OWNER_LAST.
+function blockEntries(cfg, plan, hold) {
+  const entries = [];
+  const direct = new Map();
+  const lowered = (key) => { const v = plan.verdicts.get(key); return Boolean(v) && v.level < 2; };
+  for (const it of plan.items) {
+    const v = plan.verdicts.get(it.key);
+    const info = plan.rows.get(it.row);
+    if (!v || v.level < 2 || !info || hold.has(it.row)) continue;
+    if (info.direct) { direct.set(it.row, [...(direct.get(it.row) ?? []), it]); continue; }
+    const gain = blockGain(cfg, it, 'start');
+    if (gain > 0) entries.push({ id: `b:${it.key}`, kind: 'block', score: v.noul, gain, tokens: blockTokens(cfg.rates, it.author, it.body), item: it, ...(cfg.ownerLast && it.author === 'w' ? { late: true } : {}), patch: [[it.key, { ...v, level: 1, f2: true }]] });
+  }
+  for (const [row, group] of direct) {
+    const keys = new Set(group.map((it) => it.key));
+    const gain = floorRowGain(cfg, plan, row, (key) => lowered(key) || keys.has(key)) - floorRowGain(cfg, plan, row, lowered);
+    if (gain <= 0) continue;
+    const body = group.map((it) => it.body).join('\n\n');
+    entries.push({ id: `b:row-${contentHash(body)}`, kind: 'block', score: Math.max(...group.map((it) => plan.verdicts.get(it.key).noul)), gain, tokens: group.reduce((n, it) => n + blockTokens(cfg.rates, it.author, it.body), 0), item: { ...group[0], body, chars: body.length }, patch: group.map((it) => [it.key, { ...plan.verdicts.get(it.key), level: 1, f2: true }]) });
+  }
+  return entries;
+}
+
+// The order and the stop: entries {id, score, gain} (`score`: Jev's rating, low = least needed; `gain`: the tokens that coming down saves), `need` tokens to come off. Takes from the lowest
+// score (equal scores in the order of entry) until the gains cover `need`; nothing else orders them (not age, not length, not author). {chosen, saved, short, tie}: `short` when all of them
+// together do not cover `need`; `tie` when the score at the edge of the choice stands behind it too: {group, below, restNeed}, the caller may ask Jev about the group and choose again.
+export function chooseByRank(cands, need) {
+  const sorted = cands.map((c, i) => ({ ...c, _i: i })).sort((x, y) => x.score - y.score || x._i - y._i);
+  let saved = 0;
+  let k = 0;
+  while (k < sorted.length && saved < need) { saved += sorted[k].gain; k++; }
+  if (saved < need) return { chosen: sorted, saved, short: true, tie: undefined };
+  if (k === 0) return { chosen: [], saved: 0, short: false, tie: undefined };
+  const edge = sorted[k - 1].score;
+  const first = sorted.findIndex((x) => x.score === edge);
+  let last = first;
+  while (last + 1 < sorted.length && sorted[last + 1].score === edge) last++;
+  const below = sorted.slice(0, first);
+  const tie = last >= k ? { group: sorted.slice(first, last + 1), below, restNeed: need - below.reduce((n, x) => n + x.gain, 0) } : undefined;
+  return { chosen: sorted.slice(0, k), saved, short: false, tie };
+}
+
+// The second round. `c.entries`, `c.pred` (the prediction before), `c.goal`, `c.deadline`, `c.askTie(group, restNeed)` (optional: one question about a tie group, the answers go to the
+// `score` of the entries). Lowers in rounds from the lowest score and stops at the goal; an entry with `requires` is open only once that one is taken (a result's removal after its trace);
+// entries `late` wait behind every other open one. {lowered [{...entry, by}], f2}.
+export async function reduceToLimit(c) {
+  const f2 = {
+    goal_tokens: Math.round(c.goal), predicted_before: Math.max(0, Math.round(c.pred)), to_remove_tokens: Math.max(0, Math.round(c.pred - c.goal)), candidates: {}, rounds: [], lowered: { items: 0, tokens: 0, by_kind: {} },
+    saved_by_stop: { items: 0, tokens: 0 }, ties: { asked: 0, errors: 0, groups: 0, group_items: 0, by_code: { items: 0, tokens: 0 } },
+  };
+  for (const x of c.entries) f2.candidates[x.kind] = (f2.candidates[x.kind] || 0) + 1;
+  let pred = c.pred;
+  const taken = new Set();
+  const lowered = [];
+  const tieAsked = new Set();
+  while (pred > c.goal && f2.rounds.length < F2_MAX_ROUNDS && Date.now() < c.deadline - F2_STOP_MS) {
+    const open = c.entries.filter((x) => !taken.has(x.id) && (!x.requires || taken.has(x.requires)));
+    if (!open.length) { f2.reason = 'no_items'; break; }
+    const rest = open.some((x) => !x.late) ? open.filter((x) => !x.late) : open;
+    const need = pred - c.goal;
+    const t0 = Date.now();
+    let pick = chooseByRank(rest, need);
+    let byCode;
+    if (pick.tie) {
+      const key = pick.tie.group.map((x) => x.id).join(',');
+      f2.ties.groups++;
+      f2.ties.group_items += pick.tie.group.length;
+      if (c.askTie && !tieAsked.has(key)) {
+        tieAsked.add(key);
+        f2.ties.asked++;
+        // chooseByRank returns copies: the answers go to the entries themselves.
+        const byId = new Map(rest.map((x) => [x.id, x]));
+        // A failing question does not break the compaction: the code settles the tie, and the failure is counted.
+        try { await c.askTie(pick.tie.group.map((x) => byId.get(x.id)), Math.max(0, pick.tie.restNeed)); } catch (error) { f2.ties.errors++; f2.ties.error ??= clip(oneLine(String(error?.message ?? error)), 200); }
+        pick = chooseByRank(rest, need);
+      }
+      if (pick.tie) {
+        const inGroup = new Set(pick.tie.group.map((x) => x.id));
+        const chosen = pick.chosen.filter((x) => inGroup.has(x.id));
+        byCode = new Set(chosen.map((x) => x.id));
+        f2.ties.by_code.items += chosen.length;
+        f2.ties.by_code.tokens += Math.round(chosen.reduce((n, x) => n + x.tokens, 0));
+      }
+    }
+    for (const x of pick.chosen) {
+      taken.add(x.id);
+      lowered.push({ ...x, by: byCode?.has(x.id) ? 'code' : 'jev' });
+      pred -= x.gain;
+      f2.lowered.items++;
+      f2.lowered.tokens += Math.round(x.gain);
+      f2.lowered.by_kind[x.kind] = (f2.lowered.by_kind[x.kind] || 0) + 1;
+    }
+    f2.rounds.push({ need_tokens: Math.round(need), chosen: pick.chosen.length, gain_tokens: Math.round(pick.saved), short: pick.short, tie: Boolean(pick.tie), predicted_after: Math.round(pred), ms: Date.now() - t0 });
+    if (!pick.chosen.length) { f2.reason = 'no_change'; break; }
+  }
+  for (const x of c.entries) if (!taken.has(x.id) && !x.requires) { f2.saved_by_stop.items++; f2.saved_by_stop.tokens += Math.round(x.gain); }
+  f2.predicted_after = Math.max(0, Math.round(pred));
+  if (pred <= c.goal) f2.reason ??= lowered.length ? 'goal_reached' : 'below_goal';
+  else f2.reason ??= f2.rounds.length >= F2_MAX_ROUNDS ? 'round_limit' : 'deadline';
+  const late = c.entries.filter((x) => x.late);
+  if (late.length) f2.late_owner_blocks = { candidates: late.length, lowered: lowered.filter((x) => x.late).length };
+  return { lowered, f2 };
+}
+
+// One question to Jev about a tie group (the items stay as they are, only their scores change): the items in requests that fit the window, BLOCK_PARALLEL at a time through the module's
+// own admission, within `ctx.deadline`. An item that no answer reaches keeps its score. ctx: user, goal, restNeed, deadline, rateOnly (the first rating of the series, not a tie).
+async function askTie($, cfg, group, ctx) {
+  const named = group.map((x, n) => ({ x, name: `t${n + 1}` }));
+  const fieldsOf = ({ x }) => (x.kind === 'result'
+    ? { kind: 'tool_result', tool: x.c.note ? NOTE_LABEL : x.c.use.tool, input: x.c.note ? '' : clip(oneLine(maskSecrets(sentInputJson(x.c.use.input, cfg.privatePaths).slice(0, STATE_INPUT_CHARS * 4 + MASK_SLACK_CHARS))), STATE_INPUT_CHARS), result: maskedHeadTail(x.c.res.text || '', STATE_HEAD_CHARS, STATE_TAIL_CHARS, cfg.privatePaths), chars: x.c.resultChars, ...(x.c.res.isError ? { error: true } : {}) }
+    : x.kind === 'series'
+      ? { row: x.item.row, kind: 'trace_series', author: 'module', text: x.item.body, length: x.item.chars, age_turns: x.item.age_turns, current_turn: x.item.current_turn, in_tail: x.item.in_tail, has_file: true, repeated: x.item.repeated, agent_session: x.item.agent_session, series: x.item.f2 }
+      : { ...blockFields(x.item, { text: x.item.body, nr: 1, z: 1 }) });
+  const windowBytes = windowBytesOf(cfg);
+  const header = blockHeader(ctx.user, windowBytes, { f2: { goal_tokens: Math.round(ctx.goal), to_remove_tokens: Math.round(ctx.restNeed), ...(ctx.rateOnly ? {} : { tie_group: true }) } });
+  const budget = Math.max(BLOCK_PART_MIN * 2, windowBytes - utf8Bytes(JSON.stringify(header)) - jsonBytes(BLOCK_RULES) - 40);
+  const requests = [];
+  let cur;
+  for (const n of named) {
+    const fields = fieldsOf(n);
+    const textKey = n.x.kind === 'result' ? 'result' : 'text';
+    const size = jsonBytes(fields) + BLOCK_ITEM_OVERHEAD;
+    if (size > budget) {
+      const allowed = Math.max(500, Math.floor((fields[textKey].length - (size - budget)) * 0.9));
+      fields[textKey] = headTail(fields[textKey], Math.floor(allowed * 0.6), Math.floor(allowed * 0.4));
+    }
+    const own = jsonBytes(fields) + BLOCK_ITEM_OVERHEAD;
+    if (!cur || (cur.size + own > budget && cur.items.length)) { cur = { size: 0, items: [] }; requests.push(cur); }
+    cur.items.push({ n, fields });
+    cur.size += own;
+  }
+  const failures = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < requests.length) {
+      const req = requests[next++];
+      if (Date.now() >= ctx.deadline) continue;
+      const admission = await admitRequest($, cfg, ctx.deadline);
+      if (admission.skip) continue;
+      const t0 = Date.now();
+      const timeoutMs = Math.min(REQUEST_MS, ctx.deadline - t0);
+      if (timeoutMs < 500) { session.requests--; continue; }
+      const items = {};
+      const questions = {};
+      for (const { n, fields } of req.items) {
+        items[n.name] = fields;
+        questions[n.name] = { type: 'score', instructions: `${F2_QUESTION} The item is \`items.${n.name}\`.`, criteria: BLOCK_LEVELS.map((what) => ({ what })) };
+      }
+      const r = await withDeadline($, askJev($, cfg, { ...header, items, block_rules: BLOCK_RULES }, questions), timeoutMs);
+      const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
+      if (Date.now() < ctx.deadline) await withDeadline($, recording, ctx.deadline - Date.now());
+      if (!r.value) { failures.push(classifyFailure(r)); continue; }
+      for (const { n } of req.items) { const s = scoreOf(r.value[n.name]); if (s !== undefined) n.x.score = s; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker));
+  noteFailures(failures, Date.now());
+}
+// --- end of the second round ------------------------------------------------------------------------------------------------------------------------------------------
+
+// --- series of traces (OMC_JEV_COMPACT_BLOCKS) --------------------------------------------------
+// Two or more traces of the module on neighbouring lines of one row (SERIES_MIN; only white space between them) are a series, and a series that is asked for merges into one
+// line that names a file holding the traces word for word. A series merges only whole, as a unit, and only where the row may be edited: before the tail, outside the rows the
+// host cannot rebuild from text, and, in a direct reply, never over the trace of a reply, of a block or of an agent's message. Which series to merge is not decided here: the caller passes the keys.
+const SERIES_MIN = 2;
+const SERIES_NOTE = '[compacted] traces merged:';
+const SERIES_NOTE_RE = /^\[compacted\] traces merged: (\d+) calls, (\d+) replies, (\d+) others; list in /;
+const seriesNote = (stats, path) => `${SERIES_NOTE} ${stats.calls} calls, ${stats.replies} replies, ${stats.others} others; list in ${path}`;
+const seriesTok = (text, rates) => rates.RATE_TRACE * text.length + rates.RATE_NON_ASCII * nonAscii(text);
+const seriesPath = (cfg, sessionId, name) => `${cfg.pasteDir}/${safeName(sessionId)}/${name}.txt`;
+// The paths of the module's own files stand in its traces (a reply, an agent's message, a merged series). They are no secret, and a name of 32 hexadecimal digits is what the masker
+// takes for one, so the check reads the text with them out (as the agent stage reads a trace without its path).
+const ownFilePaths = (cfg) => new RegExp(`${escapeRegExp(cfg.pasteDir)}/[A-Za-z0-9_-]{1,80}/[0-9a-f]{32}\\.txt|\\b${BLOCK_LETTER}/[0-9a-f]{32}\\.txt`, 'g');
+// A row a series may stand in: text, no tool result.
+const seriesRowOk = (m) => typeof m.text === 'string' && m.text.trim() && !(m.toolResults || []).length;
+
+// The traces of the module in a text, one per line, from the first character of the line to its end: a removed call (`[compacted] `), a reply moved to a file, an agent's
+// message moved to a file and a block moved to a file. The trace of a pasted text stands inside a line and is no span, so it ends a series like any other text.
+function seriesSpans(text, protect = false) {
+  const spans = [];
+  for (let at = 0; at < text.length;) {
+    const nl = text.indexOf('\n', at);
+    const end = nl < 0 ? text.length : nl;
+    const kind = text.startsWith('[compacted] ', at) ? 'call' : text.startsWith(REPLY_TRACE_PREFIX, at) ? 'reply' : text.startsWith(AGENT_TRACE_PREFIX, at) || text.startsWith(BLOCK_TRACE_PREFIX, at) ? 'other' : undefined;
+    if (kind) spans.push({ start: at, end, kind, ...(protect && kind !== 'call' ? { fixed: true } : {}) }); // in a direct reply (protect) the trace of a reply or of a message stays as it is
+    at = end + 1;
+  }
+  return spans;
+}
+
+/**
+ * The series of a text: runs of at least SERIES_MIN neighbouring traces. [{start, end, text, stats}]; stats: traces, calls, replies, others, tools (calls by tool), errors, file
+ * (some trace names a file). A line merged by an earlier compaction joins a new series with its own counts. In a direct reply (`protect`) a trace that stays fixed
+ * is no member of a series and ends the one beside it.
+ */
+export function seriesRuns(text, protect = false) {
+  const runs = [];
+  let cur;
+  for (const sp of seriesSpans(text, protect)) {
+    if (sp.fixed) { cur = undefined; continue; }
+    if (cur && !text.slice(cur.end, sp.start).trim()) { cur.end = sp.end; cur.spans.push(sp); } else { cur = { start: sp.start, end: sp.end, spans: [sp] }; runs.push(cur); }
+  }
+  return runs.filter((r) => r.spans.length >= SERIES_MIN).map((r) => {
+    const stats = { traces: 0, calls: 0, replies: 0, others: 0, tools: {}, errors: 0, file: false };
+    for (const sp of r.spans) {
+      const line = text.slice(sp.start, sp.end);
+      const note = SERIES_NOTE_RE.exec(line);
+      if (note) { stats.calls += Number(note[1]); stats.replies += Number(note[2]); stats.others += Number(note[3]); stats.traces += Number(note[1]) + Number(note[2]) + Number(note[3]); stats.file = true; continue; }
+      stats.traces++;
+      if (sp.kind === 'reply') stats.replies++;
+      else if (sp.kind === 'other') stats.others++;
+      else {
+        stats.calls++;
+        const tool = /^\[compacted\] ([^\s(]+)/.exec(line)?.[1];
+        if (tool) stats.tools[tool] = (stats.tools[tool] || 0) + 1;
+        if (/ - error of \d+ chars removed$/.test(line)) stats.errors++;
+      }
+      if (/full text in | in b\/[0-9a-f]+\.txt|^\[agent message moved/.test(line)) stats.file = true;
+    }
+    return { start: r.start, end: r.end, text: text.slice(r.start, r.end), stats };
+  });
+}
+
+/**
+ * Which rows a series may stand in: [0, tail) less `fixed` (the rows the host cannot rebuild from text: server blocks in an assistant row, an image or a file in a user row,
+ * a user row a delivered message is anchored to), and `direct`, the direct replies. `reason` says that nothing can be told: no API form, or a message with an image that matches no row.
+ */
+export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) {
+  if (!api) return { reason: 'no_api_form' };
+  const images = nonTextUserRows(messages, api);
+  if (images.unmatched) return { reason: 'image_unmatched' };
+  const fixed = new Set([...nonTextAssistantRows(messages, api), ...images.rows]);
+  for (const [row] of queued) if (messages[row]?.role === 'user') fixed.add(row);
+  const users = ownerRows(messages, cfg.hookRowPrefixes, true);
+  const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
+  const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
+  return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
+}
+
+/**
+ * The series for Jev and for the second round of the cascade: one item per text of a series (the same series in several rows is one item with its rows), with what merging it
+ * gains in tokens (the traces at RATE_TRACE less the one line that replaces them, its path planned at the length of a file's). {kind, key, body, row (the last row), rows, chars, run,
+ * gain, repeated, age_turns, current_turn, in_tail (of the last row), f2: what Jev is told of the series}. `key` is the text of the series. `agent`: the session is a subagent's.
+ */
+export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
+  const byKey = new Map();
+  if (ctx.reason) return [];
+  const planned = seriesPath(cfg, sessionId, '0'.repeat(32));
+  for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
+    const m = messages[i];
+    if (!seriesRowOk(m) || ctx.fixed.has(i)) continue;
+    for (const run of seriesRuns(m.text, ctx.direct.has(i))) {
+      const seen = byKey.get(run.text);
+      const signals = { age_turns: ctx.facts.age[i], current_turn: ctx.facts.age[i] === 0, in_tail: i >= ctx.facts.tail };
+      if (seen) { Object.assign(seen, signals, { row: i, repeated: true }); seen.rows.push(i); continue; }
+      const gain = Math.max(0, seriesTok(run.text, cfg.rates) - seriesTok(seriesNote(run.stats, planned), cfg.rates));
+      const { traces, calls, replies, others, tools, errors, file } = run.stats;
+      byKey.set(run.text, {
+        kind: 'series', key: run.text, body: run.text, row: i, rows: [i], chars: run.text.length, run, gain, repeated: false, ...signals, agent_session: agent,
+        f2: { kind: 'trace_series', traces, calls, replies, others, tools, errors, has_file: file, tokens: Math.round(seriesTok(run.text, cfg.rates)), gain_tokens: Math.round(gain) },
+      });
+    }
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * Merges the series whose keys are in `keys` (the texts of the series): one line `[compacted] traces merged: N calls, M replies, K others; list in <file>` in place of the
+ * traces, and the file holds them word for word. Same files and same checks as the stages that move text: the state directory, `savePaste`, a secret check within the budget of
+ * the scan; a series stays whole when its file cannot be written and read back in time, or when the check holds it. `record.series` holds the counts. Returns the new text of each
+ * changed row by its row index (none unless active). Never rejects. `ctx` is seriesContext's.
+ */
+export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId, deadline) {
+  const mode = cfg.blocks === 'active' && cfg.mode === 'active' ? 'active' : 'shadow';
+  const stats = { mode, series: 0, traces: 0, tokens_before: 0, tokens_after: 0, files: 0, written: 0, reused: 0, write_failed: 0, secret: 0, unchecked: 0, timed_out: 0, ...(mode === 'active' ? { installed: false } : {}) };
+  record.series = stats;
+  const edited = new Map();
+  if (ctx.reason) { stats.reason = ctx.reason; return edited; }
+  if (!cfg.pasteDir) { stats.reason = 'no_state_dir'; return edited; }
+  if (!sessionId) { stats.reason = 'no_session'; return edited; }
+  try {
+    const gate = { deadline, stalled: false };
+    const budget = { left: SCAN_BUDGET_CHARS, deadline };
+    const own = ownFilePaths(cfg);
+    const done = new Map(); // text of a series -> {path} or {}: the same series in several rows gets one file
+    const paths = new Set();
+    for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
+      const m = messages[i];
+      if (!seriesRowOk(m) || ctx.fixed.has(i)) continue;
+      const runs = seriesRuns(m.text, ctx.direct.has(i)).filter((r) => keys.has(r.text));
+      let text = m.text;
+      for (const run of [...runs].reverse()) {
+        let r = done.get(run.text);
+        if (!r) {
+          // The block traces in it name their files by letter: the file carries the header that says which directory the letter stands for.
+          const lines = `${run.text.trim()}\n`;
+          const file = lines.includes(BLOCK_TRACE_PREFIX) || lines.includes(`${AGENT_TRACE_PREFIX}${BLOCK_LETTER}/`) ? `${traceHeader(blockDir(cfg, sessionId))}\n${lines}` : lines;
+          const held = secretCheck(lines.replace(own, 'file.txt'), cfg.privatePaths, budget);
+          r = {};
+          if (held) stats[held]++;
+          else {
+            const path = seriesPath(cfg, sessionId, (await sha256Hex(file)).slice(0, 32));
+            const saved = mode === 'active' ? await savePaste($, gate, path, file) : 'planned';
+            if (saved === 'written' || saved === 'reused' || saved === 'planned') { if (saved !== 'planned') stats[saved]++; r = { path }; }
+            else stats[saved === 'timeout' ? 'timed_out' : 'write_failed']++;
+          }
+          done.set(run.text, r);
+        }
+        if (!r.path) continue;
+        const note = seriesNote(run.stats, r.path);
+        text = text.slice(0, run.start) + note + text.slice(run.end);
+        paths.add(r.path);
+        stats.series++;
+        stats.traces += run.stats.traces;
+        stats.tokens_before += seriesTok(run.text, cfg.rates);
+        stats.tokens_after += seriesTok(note, cfg.rates);
+        if (mode === 'active') edited.set(i, text);
+      }
+    }
+    stats.files = paths.size;
+  } catch { stats.error = 1; }
+  return edited;
+}
+
+// The series of one compaction (or pass): seriesContext on `messages` (the rows as they came), the items on `rows` (the rows as the stages before leave them). `potential` is what merging
+// them all gives back (every series once, as the floor counts it); a series that names a secret path is no part of it, as with the blocks.
+function planSeries(cfg, messages, rows, api, queued, keepFrom, sessionId, agent = false) {
+  const ctx = seriesContext(cfg, messages, api, keepFrom, queued);
+  const items = seriesItems(cfg, rows, ctx, sessionId, agent);
+  const own = ownFilePaths(cfg);
+  const potential = items.reduce((sum, it) => (namesSecretPath(it.body.replace(own, 'file.txt'), cfg.privatePaths) ? sum : sum + it.gain), 0);
+  return { ctx, items, potential };
+}
+
+// The series as entries of the second round: one per series, with its gain and the tokens it holds; a series that the check for a secret holds (it would stay whole) is not asked
+// about and is no entry. The ratings come from Jev (askTie with `rateOnly`); an entry without one is left out of the queue. {entries, stats: {items, secret, unchecked}}.
+function seriesEntries(cfg, items, deadline) {
+  const stats = { items: items.length, secret: 0, unchecked: 0 };
+  const budget = { left: SCAN_BUDGET_CHARS, deadline };
+  const own = ownFilePaths(cfg);
+  const entries = [];
+  for (const it of items) {
+    if (it.gain <= 0) continue;
+    const held = secretCheck(it.body.replace(own, 'file.txt'), cfg.privatePaths, budget);
+    if (held) { stats[held]++; continue; }
+    entries.push({ id: `s:${contentHash(it.key)}`, kind: 'series', gain: it.gain, tokens: seriesTok(it.body, cfg.rates), item: it });
+  }
+  return { entries, stats };
 }
 
 async function decide($, e, cfg, record, started) {
@@ -4480,7 +5589,7 @@ async function decide($, e, cfg, record, started) {
   // text, which would split the kept message: the summary runs instead.
   if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
-  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
+  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
   record.candidates = candidates.length;
   if (cfg.notifications) record.notifications = candidates.filter((c) => c.note).length;
   const envelopes = envelopeChars(messages, queued, candidates);
@@ -4491,9 +5600,31 @@ async function decide($, e, cfg, record, started) {
   const envelopeTokens = cfg.rates.RATE_NOTE * envelopes;
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target is the rule's target, a share of the window).
-  const stage = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline, takeAgentChecks(record.session_id, cfg));
+  // Verdicts of Jev on blocks of text (OMC_JEV_COMPACT_BLOCKS): off without the API form, a state directory or a session; `shadow` also while the point itself is not active. They ask
+  // only while the point is active and OMC_JEV_COMPACT_VERDICTS is not off. With OMC_JEV_COMPACT_JEV_STAGES=active the verdicts that run (active) decide what the paste and reply stages
+  // and the agent messages to files decide by fixed lengths: those do not run (the agent trim stays).
+  const blocksMode = cfg.blocks !== 'off' && api && cfg.pasteDir && record.session_id ? (cfg.blocks === 'active' && cfg.mode !== 'active' ? 'shadow' : cfg.blocks) : 'off';
+  const blockOn = blocksMode !== 'off' && cfg.verdicts !== 'off' && cfg.mode === 'active';
+  const jevStagesOn = cfg.jevStages && blocksMode === 'active' && blockOn;
+  if (cfg.jevStages && cfg.blocks !== 'off') record.jev_stages = { applied: jevStagesOn };
+  if (jevStagesOn) cfg = { ...cfg, pastes: 'off', replies: 'off' };
+  const stageRead = agentStageOf($, cfg, e.agentId, messages, api, queued, keepFrom, record.session_id, deadline, takeAgentChecks(record.session_id, cfg));
+  const stage = jevStagesOn ? { ...stageRead, opts: undefined } : stageRead;
   if (stage.stats) record.agent_trim = stage.stats;
   const { trimmed, trimTokens, opts: agentOpts, plan: planAgents } = stage;
+  // The blocks of the rows before the tail: a plan, nothing is asked or written yet.
+  let blockPlan;
+  if (blocksMode !== 'off') {
+    try { blockPlan = planBlocks(cfg, messages, trimmed, api, queued, keepFrom, record.session_id, e.agentId !== undefined); } catch { record.blocks = { error: 1 }; }
+  }
+  // What the blocks may give back (every one at level 0): counted by the floor and the gate below only while the verdicts are applied.
+  const blocksPotential = blockPlan && blocksMode === 'active' && blockOn ? blockPlan.potential : 0;
+  // The series of traces count in the floor like the blocks: what merging them gives back (the same switch, the same gate).
+  let seriesPlan;
+  if (blocksMode !== 'off') {
+    try { seriesPlan = planSeries(cfg, messages, trimmed, api, queued, keepFrom, record.session_id, e.agentId !== undefined); } catch { seriesPlan = undefined; }
+  }
+  const seriesPotential = seriesPlan && blocksMode === 'active' && blockOn ? seriesPlan.potential : 0;
   // The blocks and messages that the keep decisions take off the list, which the predictions in tokens count with the costs of the candidates (shapeOf).
   const shapeFrom = (rows) => (tokenMode ? shapeOf(messages, candidates, { rows, group, keepFrom, queued, rates: cfg.rates }) : undefined);
   let shape = shapeFrom(trimmed);
@@ -4504,7 +5635,7 @@ async function decide($, e, cfg, record, started) {
     // reach the same bound (the floor below is the check that follows the tokens); without it the gate is the characters alone.
     // The text the agent stage takes off (the trim, and with the stage active the reports it moves to files) is part of the cut: a session of reports that no
     // result of its own would carry is for the plan below, which counts the stage, and not for the summary.
-    const stageTokens = cfg.targetPercent === undefined ? 0 : await agentStageTokens(cfg, stage);
+    const stageTokens = cfg.targetPercent === undefined ? 0 : (await agentStageTokens(cfg, stage)) + blocksPotential + seriesPotential;
     const cut = cfg.targetPercent === undefined ? undefined : cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens, shape);
     if (cut) record.max_reduction_tokens = cut.listed ? Math.round((cut.removable / cut.listed) * 1000) / 1000 : 0;
     if (!cut || !worthInTokens(cut)) return { fallback: 'too_few_results' };
@@ -4517,6 +5648,7 @@ async function decide($, e, cfg, record, started) {
   let manual = false;
   let ruleTarget;
   let agentsFloor = 0;
+  let blocksFloor = 0;
   let known;
   if (cfg.targetPercent !== undefined) {
     // The host reads are made once, within the compaction's deadline, and the token accounting below uses them again.
@@ -4537,8 +5669,7 @@ async function decide($, e, cfg, record, started) {
     known.win = win; // the window that governs the cut: the token accounting records it as it is
     // The rule's target: the usual target before the owner's limit (`raw`), then the limit from the configured window ceiling (absent by default).
     const raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
-    const ceiling = tokenCeiling(cfg.maxWindowTokens, cfg.rates);
-    ruleTarget = ceiling === undefined ? raw : Math.min(raw, ceiling);
+    ruleTarget = ruleTargetOf(win, cfg);
     manual = tokens.tokens <= raw;
     if (!manual) {
       // With the stage active the floor counts what it plans to save (a plan, no write), so a session full of agents' reports is not handed to the
@@ -4551,7 +5682,13 @@ async function decide($, e, cfg, record, started) {
         agentsFloor = Math.max(0, movedTokens(planned.stats));
         record.floor_agents_tokens = Math.round(agentsFloor);
       }
-      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor + envelopeTokens - thinking.removed, cfg.rates, shape);
+      // every block at level 0 (no verdict yet) and every series merged, held to the same bound after the cascade
+      if (blocksPotential || seriesPotential) {
+        blocksFloor = blocksPotential + seriesPotential;
+        if (blocksPotential) record.floor_blocks_tokens = Math.round(blocksPotential);
+        if (seriesPotential) record.floor_series_tokens = Math.round(seriesPotential);
+      }
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor - blocksFloor + envelopeTokens - thinking.removed, cfg.rates, shape);
       record.floor_pred = Math.max(0, Math.round(floor));
       if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
@@ -4635,7 +5772,18 @@ async function decide($, e, cfg, record, started) {
   record.requests = runs.length;
   // Pasted text: the requests go out next to the scoring ones; the files wait for the result (below), or for the plan with a token target.
   const pasted = cfg.pastes === 'off' || e.agentId !== undefined ? undefined : startPastes($, cfg, record, messages, api, keepFrom, deadline, queued);
-  const [results] = await Promise.all([Promise.all(runs), pasted?.asks]);
+  // The questions about the blocks go out next to the scoring requests (the verdict files are read when none is asked: shadow, the verdicts off, a point that is not active).
+  let blocksAsk;
+  let blockUser = user;
+  if (blockPlan) {
+    blockUser = cfg.fullInput ? userTask(messages, typeof e.instructions === 'string' && e.instructions.trim() ? e.instructions : undefined, queued, cfg.privatePaths, cfg.notUserPrefixes, ownerLimitsOf(cfg)) : user;
+    const prefix = known?.detail ? prefixTokens(known.detail) : 0;
+    const extra = blockSignals(cfg.rates, tokens ? tokens.tokens : prefix + listTokens(api, cfg.rates), blockPlan.items, prefix, ruleTarget ?? null);
+    blocksAsk = blockOn
+      ? ensureBlockVerdicts($, cfg, blockPlan, { user: blockUser, deadline, requestMs: REQUEST_MS, extra })
+      : readBlockVerdicts($, cfg, record.session_id, blockPlan.items.map((it) => it.key), deadline).then((known0) => { for (const [key, v] of known0) blockPlan.verdicts.set(key, v); return { known: known0.size }; }, () => ({ error: 1 }));
+  }
+  const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);
   record.jev_ms = results.map((r) => r.ms);
   let answered = 0;
   const failures = [];
@@ -4681,8 +5829,29 @@ async function decide($, e, cfg, record, started) {
   let pasteSwaps;
   let stageTokens = 0;
   let rows = agentMoved.size ? trimmed.map((m, i) => agentMoved.get(i) ?? m) : trimmed;
-  if (cfg.targetPercent === undefined) allocate(candidates, before, cfg.target, envelopes);
-  else {
+  let blockEdits = new Map();
+  let blockSaved = 0;
+  let seriesEdits = new Map(); // the text of the rows in which series were merged
+  let seriesSaved = 0;
+  const currentRows = () => rows.map((m, i) => (seriesEdits.has(i) ? { ...m, text: seriesEdits.get(i) } : blockEdits.get(i) ?? m));
+  // The header of the files the traces of blocks name stands in the first row of the result whenever the result holds such a trace (the header of an earlier compaction is replaced by it).
+  const holdsBlockTrace = (m) => typeof m.text === 'string' && (m.text.includes(BLOCK_TRACE_PREFIX) || m.text.includes(`${AGENT_TRACE_PREFIX}${BLOCK_LETTER}/`));
+  const headerOf = () => (blocksMode === 'active' && blockPlan && currentRows().some(holdsBlockTrace) ? traceHeader(blockDir(cfg, record.session_id)) : undefined);
+  const headerTokens = () => {
+    const header = headerOf();
+    return header === undefined ? 0 : cfg.rates.RATE_TRACE * (header.length - messages.filter(isHeaderRow).reduce((n, m) => n + m.text.length, 0));
+  };
+  // A row another stage changes is not carried out a second time by the blocks: the rows the agent messages moved, and, with a token target, the ones the reply and paste stages move.
+  const moveBlockRows = async (hold) => {
+    if (!blockPlan) return;
+    const moved = await moveBlocks($, cfg, blockPlan, deadline, blocksMode, hold);
+    record.blocks = { mode: blocksMode, ...blockPlan.stats, verdicts: blockAsked, ...moved.stats, installed: false };
+    if (moved.edits.size) { blockEdits = moved.edits; blockSaved = blockSavedTokens(moved.stats, cfg.rates); }
+  };
+  if (cfg.targetPercent === undefined) {
+    allocate(candidates, before, cfg.target, envelopes);
+    await moveBlockRows(new Set([...agentMoved.keys(), ...(pasted ? pasted.jobs.filter((j) => j.yes).map((j) => j.row) : [])]));
+  } else {
     // Token cascade (OMC_JEV_COMPACT_TARGET_PERCENT): the target and the prediction are in tokens; they start from the host's count,
     // and the envelopes that build adds to the rows it rebuilds come on top of it (envelopeTokens); the delivered text is in the count already.
     // A manual compaction: the scores decide; a prediction still above the target (the cascade's own target) goes on to the cascade, as the rule does.
@@ -4705,18 +5874,73 @@ async function decide($, e, cfg, record, started) {
         shape = shapeFrom(rows);
       }
     }
-    const base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens - thinking.removed;
+    const blockHold = new Set([...agentMoved.keys(), ...(replyEdits ? replyEdits.keys() : []), ...messages.flatMap((m, i) => (pasteSwaps?.has(m) ? [i] : []))]);
+    await moveBlockRows(blockHold);
+    stageTokens += blockSaved;
+    let base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens - thinking.removed + headerTokens();
     let plan;
-    if (manual) {
+    if (blocksMode === 'active' && blockOn) {
+      // The second round (OMC_JEV_COMPACT_BLOCKS=active): the first pass (or the scores alone, for a manual compaction) comes first, and a prediction still above the target goes to the
+      // round that lowers the results and the blocks in Jev's order; the cascade then goes on as the reserve (the passes after the second one, from the state the round left).
+      const first = manual ? manualPlan(candidates, base, cfg.rates, shape) : cascade(candidates, base, target, cfg.rates, shape, { stopAfterA: true });
+      plan = first;
+      if (first.predicted > target) {
+        // The series of traces on the rows the blocks left (their traces may stand beside the old ones now): Jev rates them with the question of the round, then they stand in the queue
+        // with the results and the blocks. The rows another stage changes stay out (blockHold), as for the blocks.
+        const seriesCtx = seriesPlan?.ctx && !seriesPlan.ctx.reason ? seriesContext(cfg, messages, api, keepFrom, queued) : undefined;
+        let seriesRated = { entries: [], stats: { items: 0, secret: 0, unchecked: 0 } };
+        if (seriesCtx && !seriesCtx.reason) {
+          for (const r of blockHold) seriesCtx.fixed.add(r);
+          seriesRated = seriesEntries(cfg, seriesItems(cfg, currentRows(), seriesCtx, record.session_id, e.agentId !== undefined), deadline);
+          if (seriesRated.entries.length) await askTie($, cfg, seriesRated.entries, { user: blockUser, goal: target, restNeed: first.predicted - target, deadline, rateOnly: true });
+        }
+        const seriesAnswered = seriesRated.entries.filter((x) => typeof x.score === 'number');
+        const out = await reduceToLimit({
+          entries: [...resultEntries(candidates, cfg.rates, shape), ...(blockPlan ? blockEntries(cfg, blockPlan, blockHold) : []), ...seriesAnswered], pred: first.predicted, goal: target, deadline,
+          askTie: (group, restNeed) => askTie($, cfg, group, { user: blockUser, goal: target, restNeed, deadline }),
+        });
+        let executed = 0;
+        const seriesKeys = new Set();
+        for (const x of out.lowered) {
+          if (x.kind === 'result') x.c.keep = x.to;
+          else if (x.kind === 'series') seriesKeys.add(x.item.key);
+          else for (const [key, v] of x.patch) blockPlan.verdicts.set(key, v);
+        }
+        // The blocks that came down are carried out again with their new levels (the files that exist are reused): what they take off the prediction comes off the base.
+        if (out.lowered.some((x) => x.kind === 'block')) {
+          const savedBefore = blockSaved;
+          const headerBefore = headerTokens();
+          await moveBlockRows(blockHold);
+          executed = blockSaved - savedBefore;
+          base += headerTokens() - headerBefore - executed;
+        }
+        // The series that came down are merged on the rows as they stand now (after the blocks were carried out again): one line and a file, the tokens come off the base.
+        if (seriesKeys.size) {
+          const headerBefore = headerTokens();
+          seriesEdits = await mergeSeries($, cfg, record, currentRows(), seriesCtx, seriesKeys, record.session_id, deadline);
+          if (seriesEdits.size) {
+            seriesSaved = record.series.tokens_before - record.series.tokens_after;
+            base += headerTokens() - headerBefore - seriesSaved;
+          }
+        }
+        const afterRound = cascade(candidates, base, Infinity, cfg.rates, shape, { resume: true }).predicted;
+        plan = cascade(candidates, base, target, cfg.rates, shape, { resume: true });
+        const reserve = Math.max(0, afterRound - plan.predicted);
+        plan.pass = reserve > 0 ? plan.pass : out.lowered.length ? 'F2' : first.pass;
+        if (reserve > 0 && out.f2.reason === 'goal_reached') out.f2.reason = 'reserve';
+        record.f2 = { mode: 'active', ...out.f2, pass_a: first.pass, predicted_after_a: first.predicted, predicted_after_f2: afterRound, reserve: { tokens: reserve, pass: reserve > 0 ? plan.pass : null }, executed_blocks_tokens: Math.round(executed), series_question: { ...seriesRated.stats, answered: seriesAnswered.length } };
+      } else record.f2 = { mode: 'active', goal_tokens: Math.round(target), predicted_before: first.predicted, to_remove_tokens: 0, reason: 'below_goal', pass_a: first.pass };
+    } else if (manual) {
       plan = manualPlan(candidates, base, cfg.rates, shape);
       if (plan.predicted > target) plan = cascade(candidates, base, target, cfg.rates, shape);
     } else plan = cascade(candidates, base, target, cfg.rates, shape);
+    if (blocksMode === 'shadow') record.f2 = { mode: 'shadow', candidates: { result: candidates.filter((c) => c.answered && !isForced(c) && !isPinned(c, cfg.rates, shape)).length, block: blockPlan ? [...blockPlan.verdicts.values()].filter((v) => v.level >= 2).length : 0, series: seriesPlan ? seriesPlan.items.length : 0 } };
     Object.assign(record, { cut: plan.pass === 'manual' ? 'manual_scores' : 'cascade', cascade_pass: plan.pass, cascade_target_tokens: target, cascade_predicted_tokens: plan.predicted, tokens_after_pred: plan.predicted, cascade_tokens_source: tokens.source, cascade_dropped: candidates.filter((c) => c.keep === 'drop').length });
     // Host handoff: a manual or automatic compaction that removes less than HOST_MIN_CUT of the tokens is left to the host's summary (the record
     // keeps the numbers). The module's own requests and other mods' plugin compactions are not handled here.
     // The files were planned to spare the host's summary (the floor counted them): when the writes fell short and the plan still ends above the bound the
     // floor is held to, the summary runs.
-    if (agentsFloor > 0 && plan.predicted > record.threshold - FLOOR_MARGIN * record.window) { record.floor_after_agents = plan.predicted; return { fallback: 'text_above_threshold' }; }
+    if ((agentsFloor > 0 || blocksFloor > 0) && plan.predicted > record.threshold - FLOOR_MARGIN * record.window) { record.floor_after_agents = plan.predicted; return { fallback: 'text_above_threshold' }; }
     if (cfg.handoff && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && (e.trigger === 'manual' || e.trigger === 'auto')) return { fallback: 'cut_below_host_min' };
     // The module's own request (`$.session.compact()` of ownThreshold, trigger `plugin`) that would stay under HOST_MIN_CUT is rejected, not handed over:
     // the host's summary is what it replaces, and nothing forces a compaction yet. compact() answers it with a skip. A `plugin` compaction asked by
@@ -4724,6 +5948,8 @@ async function decide($, e, cfg, record, started) {
     if (cfg.ownSkip && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && e.trigger === 'plugin' && session.ownCompactInFlight) return { fallback: 'cut_below_host_min_skipped', skip: true, tokensBefore: tokens.tokens };
   }
   const stats = {};
+  if (blockEdits.size) rows = rows.map((m, i) => blockEdits.get(i) ?? m);
+  if (seriesEdits.size) rows = rows.map((m, i) => (seriesEdits.has(i) ? { ...m, text: seriesEdits.get(i) } : m));
   // What the text stages moved is marked installed (`installed` of their stats) only once the result is certain, at the end: a fallback after the files were
   // written (the cascade's checks above, a build that fails) returns the host's summary, which holds none of it.
   let pastesInstalled = false;
@@ -4736,6 +5962,8 @@ async function decide($, e, cfg, record, started) {
       if (!pasteSwaps) shape = shapeFrom(rows); // no cascade ran: the accounting reads the rows the stage left
     }
   }
+  const header = headerOf();
+  if (header !== undefined) rows = rows.map((m) => (isHeaderRow(m) ? { ...m, trimDrop: true } : m));
   let built = build(rows, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   if (cfg.replies !== 'off' && e.agentId === undefined) {
@@ -4745,6 +5973,7 @@ async function decide($, e, cfg, record, started) {
       repliesInstalled = true;
     }
   }
+  if (header !== undefined) built.unshift({ role: 'user', text: header, toolUses: [], toolResults: [] });
   const after = built.reduce((s, m) => s + messageChars(m), stats.queuedKeptChars);
   const hist = [0, 0, 0, 0];
   for (const c of asked) if (c.answered) hist[Math.min(3, Math.round(c.score * 3))]++;
@@ -4766,11 +5995,13 @@ async function decide($, e, cfg, record, started) {
     unanswered: asked.length - answered,
   });
   // What the installed text stages took off, with or without the cascade: a stage that moved nothing (shadow, writes that failed, or a fallback) counts for nothing.
-  const installedTokens = trimTokens + agentTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0);
+  const installedTokens = trimTokens + agentTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0) + blockSaved + seriesSaved;
   if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known, shape, thinking));
   if (agentMoved.size) record.agent_messages.installed = true;
   if (pastesInstalled) pasted.stats.installed = true;
   if (repliesInstalled) record.replies.installed = true;
+  if (blockEdits.size) record.blocks.installed = true;
+  if (seriesEdits.size) record.series.installed = true;
   return { messages: built, before, after, predicted: record.tokens_after_pred, tokensBefore: tokens?.tokens, tokensAfter: record.tokens_after_pred };
 }
 
@@ -4845,6 +6076,8 @@ async function ownThreshold($, e, next) {
   try {
     if (e.agentId !== undefined || session.compacting > 0 || session.hostCannot) return result;
     session.turnCount++;
+    // The verdicts of the blocks of text that lived a turn, in the background and never awaited (the pass never rejects); the configuration is the one an earlier turn read.
+    if (session.cachedConfig && session.cachedConfig.blocks !== 'off') void backgroundBlockVerdicts($, session.cachedConfig);
     // While the growth gate is armed every turn reads the usage, not only every MIN_TURNS_BETWEEN turns.
     if (!session.growthArmed && session.turnCount - session.lastAttempt < MIN_TURNS_BETWEEN) return result;
     if (!session.cachedConfig || Date.now() - session.cachedAt > CONFIG_TTL_MS) { session.cachedConfig = await readConfig($); session.cachedAt = Date.now(); }
@@ -4892,7 +6125,7 @@ async function ownThreshold($, e, next) {
     session.lastAttempt = session.turnCount;
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
-    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications);
+    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces);
     // The blocks and messages that the cuts take off the list count with the costs of the candidates, as in decide (shapeOf), from the API form once it is read.
     const shapeIn = (apiForm, rows) => {
       const group = groupsOf(messages, apiForm);
@@ -4904,7 +6137,8 @@ async function ownThreshold($, e, next) {
     let api;
     // What the agent stage takes off counts as a cut too, as in decide (the cascade only: the stage's plan is part of the cascade's prediction).
     let stageTokens = 0;
-    const stageCounts = cfg.targetPercent !== undefined && cfg.agentTrim;
+    const blocksCount = cfg.blocks === 'active' && cfg.verdicts !== 'off' && Boolean(cfg.pasteDir); // the verdicts on blocks of text take text off too (the point is active here); without the state directory (blocksMode) nothing can be written
+    const stageCounts = cfg.targetPercent !== undefined && (cfg.agentTrim || blocksCount);
     // With the token cascade a session that fails the characters is measured in tokens (cutInTokens): an image has no characters and costs thousands of tokens.
     const tooSmall = () => (!before || removable / before < MIN_REDUCTION || removable / CHARS_PER_TOKEN < OWN_MIN_GAIN * window)
       && (cfg.targetPercent === undefined || !worthInTokens(cutInTokens(candidates, messages, api, envelopes, cfg.rates, stageTokens, shape), OWN_MIN_GAIN * window));
@@ -4931,7 +6165,7 @@ async function ownThreshold($, e, next) {
     // Not even the floor (every removable result gone) cuts HOST_MIN_CUT of the tokens: the request would only end in a skip after Jev's scores. The floor counts
     // results only, so with a stage on that takes text off as well (agent trim, long replies, pasted text) it is no proof: decide holds the request to the same
     // bound with the text of those stages in its plan, and answers it with a skip. Held after the API read, with the deliveries in the shape.
-    const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active';
+    const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active' || blocksCount;
     if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates, shape) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     // Only a session that the results alone do not carry needs the stage's scans: the compaction it asks for makes them otherwise.
     if (stageCounts && api && tooSmall()) {
@@ -4944,13 +6178,20 @@ async function ownThreshold($, e, next) {
           const stage = agentStageOf($, cfg, undefined, messages, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, Date.now() + TOTAL_MS);
           // The checks go to the compaction that follows (takeAgentChecks); one that does not follow leaves them to the next preflight, which replaces them.
           if (stage.opts && sessionId) session.agentChecked = { id: sessionId, paths: JSON.stringify(cfg.privatePaths), checked: stage.opts.checked };
-          stageTokens = await agentStageTokens(cfg, stage);
+          stageTokens = await agentStageTokens(cfg, cfg.jevStages && blocksCount ? { ...stage, opts: undefined } : stage);
+          // What the blocks may give back (every one at level 0), as the floor of decide counts it.
+          if (blocksCount && sessionId) {
+            stageTokens += planBlocks(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
+            stageTokens += planSeries(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
+          }
         } catch { stageTokens = 0; }
       }
     }
     if (tooSmall()) return result;
     let reason;
     let detailText = '';
+    // The verdicts of the blocks, so the compaction that follows finds them (a record `verdicts_fill` says what came of it).
+    if (cfg.blocks !== 'off') await fillBeforeCompaction($, cfg, messages);
     try {
       session.ownCompactInFlight = true;
       const done = await $.session.compact();

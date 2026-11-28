@@ -2871,10 +2871,31 @@ describe('jev-compaction module: settings fallback for the options of the stages
     ['OMC_JEV_COMPACT_OWNER_MARKERS', 'my marker', (c) => c.ownerMarkers, ['my marker'], []],
     ['OMC_JEV_COMPACT_LONG_REPLIES', 'active', (c) => c.replies, 'active', 'off'],
     ['OMC_JEV_COMPACT_HOOK_ROW_PREFIXES', 'Custom note:', (c) => c.hookRowPrefixes.includes('Custom note:'), true, false],
+    ['OMC_JEV_COMPACT_BLOCKS', 'active', (c) => c.blocks, 'active', 'off'],
+    ['OMC_JEV_COMPACT_VERDICTS', 'off', (c) => c.verdicts, 'off', 'active'],
+    ['OMC_JEV_COMPACT_BLOCK_QUESTIONS', 'shared', (c) => c.blockQuestions, 'shared', 'full'],
+    ['OMC_JEV_COMPACT_WINDOW_CHARS', '9000', (c) => c.windowChars, 9000, undefined],
+    ['OMC_JEV_COMPACT_FULL_INPUT', 'active', (c) => c.fullInput, true, false],
+    ['OMC_JEV_COMPACT_JEV_STAGES', 'active', (c) => c.jevStages, true, false],
+    ['OMC_JEV_COMPACT_OWNER_LAST', 'active', (c) => c.ownerLast, true, false],
   ];
   // The keys readConfig read before those options (the other keys of its environment table).
   const READ_BEFORE = ['OMC_JEV', 'TYPESAFE_API_KEY', 'OMC_JEV_ENDPOINT', 'OMC_JEV_LOG_DIR', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_EXCERPT_CHARS_COMPACTION', 'OMC_JEV_COMPACT_AT_PERCENT', 'OMC_JEV_COMPACT_TARGET', 'OMC_JEV_COMPACT_TOAST', 'OMC_JEV_COMPACT_PRIVATE_PATHS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_BREAKER_DIR', 'OS', 'USERPROFILE', 'HOME'];
   const configFor = (env, settingsEnv) => { const fake = fakeDollar({ env, settingsEnv }); return readConfig(fake.$).then((cfg) => ({ cfg, calls: fake.calls })); };
+
+  it('blockTraces (the lines of moved blocks read as traces by the long replies, the direct replies, the estimate and the words of the user) is on only for the blocks switch active with the point active', async () => {
+    const point = { OMC_JEV: 'compaction:active', TYPESAFE_API_KEY: 'test-key' };
+    const traces = async (env) => { const { cfg } = await configFor(env); expect(cfg.rates.blockTraces).toBe(cfg.blockTraces); return cfg.blockTraces; };
+    expect(await traces({ ...point, OMC_JEV_COMPACT_BLOCKS: 'active' })).toBe(true);
+    expect(await traces({ ...point, OMC_JEV_COMPACT_BLOCKS: ' ACTIVE ' })).toBe(true);
+    for (const value of [undefined, 'off', 'shadow', '1', 'bogus']) expect(await traces({ ...point, ...(value === undefined ? {} : { OMC_JEV_COMPACT_BLOCKS: value }) }), String(value)).toBe(false);
+    expect(await traces({ OMC_JEV_COMPACT_BLOCKS: 'active' })).toBe(false);
+    // The user's words read for the question to Jev skip a row that opens with a moved block only while the blocks act (the stages that are on keep their own list).
+    const skips = async (env) => (await configFor(env)).cfg.notUserPrefixes.includes('[block moved at compaction');
+    expect(await skips({ ...point, OMC_JEV_COMPACT_BLOCKS: 'active' })).toBe(true);
+    for (const value of [undefined, 'off', 'shadow', 'bogus']) expect(await skips({ ...point, OMC_JEV_COMPACT_PASTES: 'active', ...(value === undefined ? {} : { OMC_JEV_COMPACT_BLOCKS: value }) }), String(value)).toBe(false);
+    expect((await configFor({ ...point, OMC_JEV_COMPACT_PASTES: 'active' })).cfg.notUserPrefixes).toContain('[agent message moved at compaction');
+  });
 
   it('lists every option readConfig reads beyond the ones it read before', () => {
     const source = readFileSync(join(root, 'hooks', 'jev-compaction.mjs'), 'utf8');
@@ -4435,6 +4456,62 @@ describe('jev-compaction module: pasted text (OMC_JEV_COMPACT_PASTES)', () => {
       const runs = replyRuns(text);
       expect(runs.map((r) => text.slice(r.start, r.end).length)).toEqual([602, 500]);
       expect(replyRuns(text, 100).map((r) => text.slice(r.start, r.end).length)).toEqual([602, 100, 500]);
+    });
+
+    it('a moved block and the header of the trace files end a run only when the caller says the blocks act', () => {
+      const moved = '[block moved at compaction: 5000 chars in b/abc.txt]';
+      const header = '[compaction trace files: b/ = /p]';
+      const text = `${'a'.repeat(300)}\n${moved}\n${'b'.repeat(300)}\n${header}\n${'c'.repeat(300)}\n`;
+      const sizes = (runs) => runs.map((r) => text.slice(r.start, r.end).length);
+      expect(sizes(replyRuns(text))).toEqual([300 + 1 + moved.length + 1 + 300 + 1 + header.length + 1 + 300]);
+      expect(sizes(replyRuns(text, 200, false))).toEqual([300 + 1 + moved.length + 1 + 300 + 1 + header.length + 1 + 300]);
+      expect(sizes(replyRuns(text, 200, true))).toEqual([300, 300, 300]);
+    });
+
+    it('a row of a moved block alone is a reply row for directReplyRows until the caller says the blocks act', () => {
+      const moved = '[block moved at compaction: 5000 chars in b/abc.txt]';
+      const rows = [U('first'), A('answer'), A(moved), A('final'), A(moved)];
+      expect([...directReplyRows(rows, [0])].sort((a, b) => a - b)).toEqual([1, 4]);
+      expect([...directReplyRows(rows, [0], [], false)].sort((a, b) => a - b)).toEqual([1, 4]);
+      expect([...directReplyRows(rows, [0], [], true)].sort((a, b) => a - b)).toEqual([1, 3]);
+    });
+
+    it('the long replies split a reply at the lines of moved blocks only while the blocks switch acts: unset, off and any other value read as in the module without blocks', async () => {
+      const part = (name) => long(name, 700);
+      const line = '[block moved at compaction: 5000 chars in b/abc.txt]';
+      const mixed = `${part('one')}\n${line}\n${part('two')}\n[compaction trace files: b/ = /p]\n${part('three')}`;
+      const messages = replyConversation(8, { middle: (k) => (k === 1 ? mixed : long(`reply${k}`)) });
+      const runFor = async (blocks) => compactPastes(messages, { env: { ...REPLIES, OMC_JEV_COMPACT_VERDICTS: 'off', ...(blocks === undefined ? {} : { OMC_JEV_COMPACT_BLOCKS: blocks }) } });
+      const movedBlockLines = (run) => [...run.files.values()].filter((text) => text.includes('[block moved at compaction') || text.includes('[compaction trace files')).length;
+      for (const blocks of [undefined, 'off', 'bogus', '1', 'shadow']) {
+        const run = await runFor(blocks);
+        expect(movedBlockLines(run), String(blocks)).toBe(1);
+        expect(run.record.replies.moved, String(blocks)).toBe(2);
+      }
+      const active = await runFor('active');
+      expect(movedBlockLines(active)).toBe(0);
+      expect(active.record.replies.moved).toBe(4);
+    });
+
+    it('a user row that opens with a moved block is the user\'s words, so a reply before it is a direct reply, until the blocks act', async () => {
+      const base = replyConversation(8, { middle: (k) => (k <= 2 ? long(`reply${k}`) : `Part ${k} notes.`) });
+      const at = base.findIndex((m) => m.text === 'Part 1 is done.');
+      const rows = [...base.slice(0, at), U('[block moved at compaction: 900 chars in b/abc.txt]'), ...base.slice(at)].map((m, k) => Object.freeze({ ...m, handle: `h${k}` }));
+      const runFor = (blocks) => compactPastes(rows, { env: { ...REPLIES, OMC_JEV_COMPACT_VERDICTS: 'off', ...(blocks === undefined ? {} : { OMC_JEV_COMPACT_BLOCKS: blocks }) } });
+      // Without the extra row two old middle replies move. With it as the user's words the question before it ends at the first middle reply, which becomes its last reply and stays,
+      // and the replies after the row make one more interval with one direct reply: one more direct reply than without the row.
+      const plain = await compactPastes(base, { env: { ...REPLIES, OMC_JEV_COMPACT_VERDICTS: 'off' } });
+      expect(plain.record.replies.moved).toBe(2);
+      const direct = plain.record.replies.direct_replies;
+      for (const blocks of [undefined, 'off', 'bogus', 'shadow']) {
+        const run = await runFor(blocks);
+        expect(run.record.replies, String(blocks)).toMatchObject({ moved: 1, direct_replies: direct + 1 });
+        expect(replyOf(run.out, long('reply1')), String(blocks)).toBeDefined();
+      }
+      // With the blocks acting the row is a trace, not words: as without it.
+      const active = await runFor('active');
+      expect(active.record.replies).toMatchObject({ moved: 2, direct_replies: direct });
+      expect(replyOf(active.out, long('reply1'))).toBeUndefined();
     });
 
     it('keeps a run that names a secret or that masking changes, and a reply that saves less than 150 characters', async () => {
