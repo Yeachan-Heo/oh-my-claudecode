@@ -176,6 +176,15 @@ psm_render_template() {
     content="${content//--- UNTRUSTED DATA ---/$marker_open}"
     content="${content//--- END UNTRUSTED DATA ---/$marker_close}"
 
+    # bash 5.2+ enables patsub_replacement by default, which turns every "&"
+    # in a replacement into the matched placeholder ("A & B" -> "A {{KEY}} B").
+    # Values are PR/issue text, so turn it off while substituting them.
+    local restore_patsub=false
+    if shopt -q patsub_replacement 2>/dev/null; then
+        shopt -u patsub_replacement
+        restore_patsub=true
+    fi
+
     # Single-pass substitution: replace all placeholders with values
     # without escaping first. This prevents partial patterns from being
     # created by sequential substitution (e.g., "--- END UNTRUST" from one
@@ -186,6 +195,10 @@ psm_render_template() {
         # Direct substitution - no pre-escaping
         content="${content//\{\{${key}\}\}/$value}"
     done
+
+    if [[ "$restore_patsub" == true ]]; then
+        shopt -s patsub_replacement
+    fi
 
     # Post-substitution: escape any delimiters that might have been
     # reconstructed or injected via substituted values (now that placeholders are gone).

@@ -113,6 +113,16 @@ printf '{{VAL}}' > "$TEMPLATE_TMP"
 result=$(psm_render_template "$TEMPLATE_TMP" "VAL=foo&bar")
 assert_equals "handles ampersand in value" "foo&bar" "$result"
 
+# 7b. The caller's patsub_replacement setting (bash 5.2+) is left as it was
+if shopt -q patsub_replacement 2>/dev/null; then
+    psm_render_template "$TEMPLATE_TMP" "VAL=foo&bar" > /dev/null
+    if shopt -q patsub_replacement; then
+        pass "restores patsub_replacement"
+    else
+        fail "restores patsub_replacement" "left disabled after rendering"
+    fi
+fi
+
 # ── _psm_pane_has_claude_prompt ───────────────────────────────────────────────
 
 echo ""
