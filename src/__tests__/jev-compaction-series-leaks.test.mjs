@@ -191,10 +191,17 @@ describe('what leaves with a series: the names of the tools in the numbers about
 
   it('reads an MCP name part by part: a long name of plain words is counted as written, a part that a mask changes is not', async () => {
     const plain = ['mcp__plugin_context7_context7__resolve-library-id', 'mcp__plugin_context7_context7__get-library-docs', 'mcp__k8s__pods_list_in_namespace'];
-    const hidden = [`mcp__srv__${XAI}`, `mcp__${ASIA}__list`, join('mcp__server__Zq8Tr4Lm2XpB9KwD', '__', TAIL), 'mcp__srv__password='];
+    const hidden = [`mcp__srv__${XAI}`, join('mcp__server__Zq8Tr4Lm2XpB9KwD', '__', TAIL), 'mcp__srv__password='];
     const run = await compact(seriesOf([...plain, ...hidden].map(named).join('\n')));
     const { tools } = run.asked.find((x) => x.text.includes('file-31.txt')).series;
     expect(tools).toEqual({ ...Object.fromEntries(plain.map((name) => [name, 1])), masked_tool: hidden.length, Read: 6 });
+  });
+
+  it('holds a series whose MCP name part is a temporary AWS key id, as it does for AKIA (#5184)', async () => {
+    for (const name of [`mcp__${ASIA}__list`, `mcp__srv__${ASIA}`, `mcp__${ASIA.replace('ASIA', 'AKIA')}__list`]) {
+      const run = await compact(seriesOf(['mcp__k8s__pods_list_in_namespace', name].map(named).join('\n')));
+      expect(run.asked.some((x) => x.text.includes('file-31.txt')), name).toBe(false);
+    }
   });
 
   it('counts a name that a mask changes at the start of its trace under the neutral name too', async () => {

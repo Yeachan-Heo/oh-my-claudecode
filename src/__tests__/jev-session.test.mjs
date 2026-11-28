@@ -834,7 +834,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
     'Read ~/vault-notes/q3.txt and ' + join(home, 'vault-notes', 'a.md') + ' first.',
     'Then /VOL/ACME-LEDGER//2026/sum.csv, X:/acme\\plans\\draft.docx; also "/depot/zeta.books" and `/vol/acme-ledger`.',
     'Keep /vol/acme-ledgers/open.csv, /depot/zetaXbooks and /vol/acme-ledger.old/y as they are; ab stays.',
-    'A bare entry like kappa-box/a.txt counts at the start of a path, not as docs/kappa-box here.',
+    'A bare entry like kappa-box/a.txt counts at the start of a path and after a separator, as in docs/kappa-box.',
   ].join('\n');
   const wholeBrief = { OMC_JEV_EXCERPT_CHARS: '4000' }; // the query keeps the whole brief of these tests
 
@@ -846,7 +846,7 @@ console.log(JSON.stringify(Array.from({ length: n }, () => ({ pid: null }))));
       'Read [private path] and [private path] first.',
       'Then [private path], [private path]; also "[private path]" and `[private path]`.',
       'Keep /vol/acme-ledgers/open.csv, /depot/zetaXbooks and /vol/acme-ledger.old/y as they are; ab stays.',
-      'A bare entry like [private path] counts at the start of a path, not as docs/kappa-box here.',
+      'A bare entry like [private path] counts at the start of a path and after a separator, as in docs/[private path].',
     ].join('\n'));
     assert.equal(state.description, 'Track [private path]');
     assert.ok(r.row.result === 'decided' && r.row.brief === '[private path]' && r.row.cwd === '[private path]', js(r.row));
