@@ -6,7 +6,7 @@ import { getOMCConfig } from '../../features/auto-update.js';
 import { buildConfigFromEnv, getEnabledPlatforms, getNotificationConfig } from '../../notifications/config.js';
 import type { NotificationPlatform } from '../../notifications/types.js';
 import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
-import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath, withProjectIdentifierScope } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath, resolveSessionStatePaths, withProjectIdentifierScope } from '../../lib/worktree-paths.js';
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 import { canClearStateForSession, clearModeStateFile, clearStateFileLockedIf, readModeStateWithMeta } from '../../lib/mode-state-io.js';
 import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepareCoreManifest, readSessionEndJob } from './cleanup-manifest.js';
@@ -125,27 +125,40 @@ function getLegacyPlatformsCoveredByNotifications(
 }
 
 /**
- * Read agent tracking to get spawn/completion counts
+ * Read agent tracking to get spawn/completion counts.
+ *
+ * The subagent tracker writes `subagent-tracking-state.json`, session-scoped
+ * when the session id is known. Plain `subagent-tracking.json` is the file
+ * from before session scoping, still read so older installs keep working.
  */
-function getAgentCounts(directory: string): { spawned: number; completed: number } {
-  const trackingPath = path.join(getOmcRoot(directory), 'state', 'subagent-tracking.json');
-
-  if (!fs.existsSync(trackingPath)) {
-    return { spawned: 0, completed: 0 };
-  }
-
+function getAgentCounts(directory: string, sessionId?: string): { spawned: number; completed: number } {
+  const candidates: string[] = [];
   try {
-    const content = fs.readFileSync(trackingPath, 'utf-8');
-    const tracking = JSON.parse(content);
-
-    interface AgentTrackingEntry { status: string }
-    const spawned = tracking.agents?.length || 0;
-    const completed = tracking.agents?.filter((a: AgentTrackingEntry) => a.status === 'completed').length || 0;
-
-    return { spawned, completed };
-  } catch (_error) {
-    return { spawned: 0, completed: 0 };
+    const paths = resolveSessionStatePaths('subagent-tracking', sessionId || undefined, directory);
+    candidates.push(paths.effectiveRead, paths.legacy);
+  } catch {
+    // An invalid session id must not be used to build a path.
+    candidates.push(resolveSessionStatePaths('subagent-tracking', undefined, directory).legacy);
   }
+  candidates.push(path.join(getOmcRoot(directory), 'state', 'subagent-tracking.json'));
+
+  for (const trackingPath of new Set(candidates)) {
+    if (!fs.existsSync(trackingPath)) continue;
+    try {
+      const content = fs.readFileSync(trackingPath, 'utf-8');
+      const tracking = JSON.parse(content);
+
+      interface AgentTrackingEntry { status: string }
+      const spawned = tracking.agents?.length || 0;
+      const completed = tracking.agents?.filter((a: AgentTrackingEntry) => a.status === 'completed').length || 0;
+
+      return { spawned, completed };
+    } catch (_error) {
+      continue;
+    }
+  }
+
+  return { spawned: 0, completed: 0 };
 }
 
 /**
@@ -241,7 +254,7 @@ export function getSessionStartTime(directory: string, sessionId?: string): stri
 export function recordSessionMetrics(directory: string, input: SessionEndInput): SessionMetrics {
   const endedAt = new Date().toISOString();
   const startedAt = getSessionStartTime(directory, input.session_id);
-  const { spawned, completed } = getAgentCounts(directory);
+  const { spawned, completed } = getAgentCounts(directory, input.session_id);
   const modesUsed = getModesUsed(directory);
 
   const metrics: SessionMetrics = {
