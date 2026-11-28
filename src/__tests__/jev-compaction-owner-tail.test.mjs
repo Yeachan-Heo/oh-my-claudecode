@@ -296,6 +296,22 @@ describe('OWNER_TAIL: the goal, the overflow and the boundaries', () => {
   });
 });
 
+describe('OWNER_TAIL: the decision is repeated down to no protection', () => {
+  // Two boundaries, each with a long answer after it: the message of the user, then the one of another session. With a higher count of the host the floor is over
+  // the bound with the first boundary, then also with the second, and the third decision protects nothing.
+  const answer = (word) => Array.from({ length: 20 }, (_, k) => para(`${word}${k}`, 3000)).join('\n\n');
+  const run = async (tokens) => {
+    const rows = [ownerRow('Q small'), assistantRow(answer('omega')), ownerRow(CROSS('done')), assistantRow(answer('psi'))];
+    return compactRecord(await compactOnce(ending(rows), { env: { ...ON, ...CASCADE }, usage: hostUsage(tokens) }, { trigger: 'manual' }));
+  };
+
+  it('takes the first boundary, the next one, then none, when the floor is over the bound with each boundary whose text fits it', async () => {
+    expect(await run(150000)).toMatchObject({ result: 'jev', owner_tail_applied: true, owner_tail_tier: 0, owner_tail: { boundary: 'owner', overflow: false } });
+    expect(await run(175000)).toMatchObject({ result: 'jev', owner_tail_applied: true, owner_tail_tier: 1, owner_tail: { boundary: 'cross_session', overflow: false } });
+    expect(await run(190000)).toMatchObject({ result: 'jev', owner_tail_applied: false, owner_tail: { boundary: 'old', overflow: true } });
+  });
+});
+
 describe('OWNER_TAIL: the usage of every request, also of the decisions that were given up', () => {
   // The write of the block files fails, so the plan stays over the bound after the questions were asked: the compaction is decided again for each boundary.
   const run = (extra) => {

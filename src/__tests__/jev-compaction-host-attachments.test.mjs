@@ -161,6 +161,15 @@ describe('HOST_ATTACHMENTS: the user rows of text lose their handle and the old 
     expect(withFold.tokens_after_pred).toBe(without.tokens_after_pred);
   });
 
+  it("a reminder in the own text of a result is no attachment; one more of the same in the API form is", async () => {
+    const quoted = reminder('UserPromptSubmit hook additional context: quoted in a file the call read.');
+    const messages = rows().map((m) => (m.toolResults?.[0]?.tool_use_id === 't1' ? Object.freeze({ ...m, toolResults: [{ ...m.toolResults[0], text: `RESULT-1 ${quoted}\n${'x'.repeat(3000)}` }] }) : m));
+    const record = compactRecord(await run(HA, { messages, extras: {} }));
+    expect(record).toMatchObject({ result: 'jev', attachments_dropped: 0, attachments_back: 0, attachments_kinds: {} });
+    const added = apiWith(messages, {}).map((a) => ({ ...a, content: a.content.map((b) => (b.tool_use_id === 't1' && b.type === 'tool_result' ? { ...b, content: `${b.content}\n\n${quoted}` } : b)) }));
+    expect(compactRecord(await run(HA, { messages, api: added }))).toMatchObject({ attachments_dropped: 1, attachments_kinds: { hook_context: 1 } });
+  });
+
   it('an envelope of the module is no attachment, and an escaped opener is read as the row it shows', async () => {
     const messages = withRows([assistantRow('First answer.'), ownerRow('<system-reminder>\nmy pasted note\n</system-reminder>')], 30);
     const own = '<system-reminder id="jev-1">\nsome carried text\n</system-reminder id="jev-1">';
