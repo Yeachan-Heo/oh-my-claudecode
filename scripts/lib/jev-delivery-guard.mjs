@@ -39,7 +39,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, setPriority } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { parseJevEnv } from '../jev-resolve.mjs';
@@ -52,6 +52,8 @@ export const DELIVERY_ALERT_PERCENT = 95;
 // this alarm, and so does more minutes than this of holding back (the union of the openings' time).
 export const TIMEOUTS_ALERT_OPENINGS = 20;
 export const TIMEOUTS_ALERT_MINUTES = 60;
+// Blind alarm (OMC_JEV_GUARD_BLIND_ALARM=1): fewer decisions in the window than this are too few for the alarm.
+const BLIND_MIN_DECISIONS = 10;
 const DAY_MS = 24 * 3600 * 1000;
 const STALE_RESULT_MS = 2 * DAY_MS; // a daily result older than this is not shown
 const SESSION_RECORD_MAX_AGE_MS = 14 * DAY_MS;
@@ -75,10 +77,16 @@ export function isGuardEnabled(env = process.env, permissionMode) {
 //                                   the effort may not reach) are counted apart and leave the share
 //   OMC_JEV_GUARD_USE_MARKER=1      leave out the decisions of calls with a `use` marker (applied.jsonl, source "marker")
 //   OMC_JEV_GUARD_TIMEOUTS_ALARM=1  count the breaker's openings caused by missing responses and alarm when there are many
+//   OMC_JEV_GUARD_BLIND_ALARM=1     count the decisions with no agent meta.json found (`noMeta`) and alarm when of 10 or more decisions
+//                                   more than half have none (the guard cannot see the agents, so its share says nothing) or none can
+//                                   be evaluated
+// OMC_JEV_GUARD_PROJECT_DIRS lists more Claude Code project directories to read (see projectDirs); without it only the configuration
+// directory's `projects` is read.
 const switchOn = (env, name) => String(env?.[name] ?? '').trim() === '1';
 export const isEffortCheckEnabled = (env = process.env) => switchOn(env, 'OMC_JEV_GUARD_EFFORT');
 export const isUseMarkerCheckEnabled = (env = process.env) => switchOn(env, 'OMC_JEV_GUARD_USE_MARKER');
 export const isTimeoutsAlarmEnabled = (env = process.env) => switchOn(env, 'OMC_JEV_GUARD_TIMEOUTS_ALARM');
+export const isBlindAlarmEnabled = (env = process.env) => switchOn(env, 'OMC_JEV_GUARD_BLIND_ALARM');
 
 /** OMC_JEV_GUARD_MIN_TIMEOUT_S: a positive number of seconds, else the default. */
 export function minTimeoutSeconds(env = process.env) {
@@ -265,7 +273,20 @@ function deliveryPart(result) {
   const percent = typeof result.deliveredPercent === 'number' ? result.deliveredPercent : null;
   // Use full-precision percent if available (production), otherwise fall back to rounded percent (tests/legacy)
   const thresholdPercent = typeof result.deliveredPercentFull === 'number' ? result.deliveredPercentFull : percent;
-  if (!(interrupted > 0 || (thresholdPercent !== null && thresholdPercent < DELIVERY_ALERT_PERCENT))) return null;
+  // The blind alarm fires when, of enough decisions, more than half have no agent meta.json (the guard cannot see the agents) or
+  // none can be evaluated. The `noMeta` field exists only with OMC_JEV_GUARD_BLIND_ALARM=1; without it there is no blind alarm.
+  const decided = Number(result.decisions) || 0;
+  const enough = typeof result.noMeta === 'number' && decided >= BLIND_MIN_DECISIONS;
+  const unseen = enough && result.noMeta / decided > 0.5;
+  const blind = unseen || (enough && !(result.withAgent > 0));
+  if (!(interrupted > 0 || blind || (thresholdPercent !== null && thresholdPercent < DELIVERY_ALERT_PERCENT))) return null;
+  if (blind) {
+    // With at most half of the meta.json files missing and nothing evaluated, the rest are calls the share leaves out.
+    const what = unseen ? 'the guard cannot see the agents' : 'the guard can evaluate none of them';
+    const rest = unseen ? '' : `, ${decided - result.noMeta} named or \`use\` marker calls`;
+    const advice = unseen ? '; check the Claude Code project directories (OMC_JEV_GUARD_PROJECT_DIRS) and OMC_JEV_LOG_DIR' : '';
+    return `Jev delivery guard: of ${decided} decisions in the last ${result.windowHours} h ${what} (${result.withAgent ?? 0} evaluated, ${result.noMeta} without meta.json${rest})${advice}. PreToolUse:Agent hooks interrupted: ${interrupted} (hooks of other commands: ${Number(result.interruptedOtherHooks) || 0}).`;
+  }
   // With the `use` marker left out of the count the share no longer holds it against the hook.
   const markerLeftOut = typeof result.markerDecisions === 'number';
   const alone = markerLeftOut ? 'forceInherit' : 'a `use` marker or forceInherit';
@@ -418,6 +439,7 @@ export function promptCheck(data, options = {}) {
 
 /** Files under `dir` (depth-limited) whose name matches and whose mtime is not older than `since`. */
 function listFiles(dir, matches, since, depth = 0, found = []) {
+  if (Array.isArray(dir)) { for (const each of dir) listFiles(each, matches, since, depth, found); return found; } // a list of directories
   let entries;
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return found; }
   for (const entry of entries) {
@@ -620,9 +642,27 @@ export function countOpenings(dir, since, until, { prune = false, wall = Date.no
  * Jev's active model-routing decisions (shadow.jsonl lines with a tool_use_id) whose model is the one
  * in the agent's meta.json. Decisions with no agent found are left out of the share.
  */
+/**
+ * The Claude Code project directories read for transcripts and agent meta.json: `projects` of the configuration directory,
+ * then the directories listed in OMC_JEV_GUARD_PROJECT_DIRS (separated like PATH), without duplicates.
+ */
+export function projectDirs(configDir, env = process.env) {
+  const dirs = [join(configDir, 'projects')];
+  for (const extra of String(env.OMC_JEV_GUARD_PROJECT_DIRS ?? '').split(delimiter)) if (extra.trim()) dirs.push(extra.trim());
+  const seen = new Set();
+  return dirs.filter((dir) => {
+    const key = process.platform === 'linux' ? resolve(dir) : resolve(dir).toLowerCase(); // case-insensitive file systems
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function computeDelivery({ logDir, configDir = getClaudeConfigDir(), now = Date.now(), windowMs = DAY_MS, env = process.env, pruneOpenings = false } = {}) {
   const since = now - windowMs;
-  const projectsDir = join(configDir, 'projects');
+  const projectsDir = projectDirs(configDir, env);
+  const blindAlarm = isBlindAlarmEnabled(env);
+  let noMeta = 0; // decisions with no agent meta.json found
   // With forceInherit the hook leaves the model of some calls alone: the share would say nothing then.
   // Decisions are read over the settled window (since - SETTLE_MS, now - SETTLE_MS]: a decision younger
   // than SETTLE_MS may not have an agent yet, and shifting the whole window instead of trimming its tail
@@ -640,7 +680,7 @@ export async function computeDelivery({ logDir, configDir = getClaudeConfigDir()
     for (const [id, wanted] of decisions) {
       if (markers.has(id)) { result.markerDecisions++; continue; }
       const meta = metas.get(id);
-      if (!meta) continue;
+      if (!meta) { noMeta++; continue; }
       const wantedModel = withEffort ? wanted.model : wanted;
       if (withEffort && typeof meta.name === 'string' && meta.name.trim() !== '') {
         result.namedAgents++;
@@ -653,11 +693,12 @@ export async function computeDelivery({ logDir, configDir = getClaudeConfigDir()
   } else {
     const models = readAgentModels(projectsDir, since - SETTLE_MS - 3600 * 1000);
     for (const [id, wanted] of decisions) {
-      if (!models.has(id)) continue;
+      if (!models.has(id)) { noMeta++; continue; }
       result.withAgent++;
       if (modelMatches(models.get(id), wanted, env)) result.delivered++;
     }
   }
+  if (blindAlarm) result.noMeta = noMeta;
   if (result.withAgent > 0) {
     const fullPercent = (1000 * result.delivered) / result.withAgent / 10;
     result.deliveredPercentFull = fullPercent;

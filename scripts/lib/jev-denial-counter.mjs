@@ -194,7 +194,10 @@ function degreeFor(n, k) {
 
 /** The escalation text appended to the denial. `info` carries guard, counts, limits and the stage (or the broken-state note). */
 function stageText(degree, info) {
-  const { guard, n, sessionCount, k, windowS, maxSession, unreadable, ceiling } = info;
+  const { guard, n, sessionCount, k, windowS, maxSession, unreadable, ceiling, provider } = info;
+  if (ceiling && provider) { // a provider process at the session ceiling: the one recognized exit form, no release
+    return `[DENIAL COUNTER: BLOCKED] Guard ${guard} has denied ${sessionCount} times in this session (ceiling ${maxSession}, never reset); end your turn with a line \`BLOCKED: <reason, at least 20 characters>\`; no further attempts of the same call.`;
+  }
   if (ceiling) {
     return `[DENIAL COUNTER: SESSION CEILING] Guard ${guard} has denied ${sessionCount} times in this session (ceiling ${maxSession}, never reset). Denials are not released; end this step another way or end your turn with a line \`BLOCKED: <reason, at least 20 characters>\`.`;
   }
@@ -242,7 +245,8 @@ export function registerDenial({ stateDir, statePath, sessionId, agentId, guard,
   const k = denialK(env);
   const windowMs = denialWindowMs(env);
   const maxSession = denialSessionMax(env);
-  const releasable = guard === RELEASABLE_GUARD && !agentId && isDenialSwitchOn('OMC_JEV_DENIAL_RELEASE', env);
+  const providerProcess = Boolean(env?.OMC_PROVIDER); // the marker of a provider process (see docs/PROVIDER-WORKERS.md)
+  const releasable = guard === RELEASABLE_GUARD && !agentId && !providerProcess && isDenialSwitchOn('OMC_JEV_DENIAL_RELEASE', env); // never a release in a provider process
   const packageKey = typeof call.packageKey === 'string' && call.packageKey.trim()
     ? call.packageKey.trim()
     : lastAssistantMessageId(call.transcriptPath);
@@ -326,6 +330,10 @@ export function registerDenial({ stateDir, statePath, sessionId, agentId, guard,
         if (!state.released || typeof state.released !== 'object' || Array.isArray(state.released)) state.released = {};
         state.released[guard] = ts;
         result = { key, n: counted.n, sessionCount, degree: 0, release: true, action: 'release', state: 'ok', text: '' };
+      } else if (providerProcess) { // a provider process: the BLOCKED text, no release
+        result.text = stageText(DEGREE_BLOCK, { ...base, sessionCount, ceiling: true, provider: true });
+        result.degree = DEGREE_BLOCK;
+        fire('blocked');
       } else {
         result.text = stageText(DEGREE_BLOCK, { ...base, sessionCount, ceiling: true });
         result.degree = DEGREE_BLOCK;
@@ -351,7 +359,7 @@ export function registerDenial({ stateDir, statePath, sessionId, agentId, guard,
 
   if (result.action) {
     const kind = result.release ? 'release' : (result.action.startsWith('state-') ? 'state' : 'denial');
-    const outcome = result.release ? 'passed' : 'denied';
+    const outcome = result.release ? 'passed' : (result.action === 'blocked' ? 'blocked' : 'denied'); // 'blocked': the ceiling of a provider process
     const id = writeDenialRow({
       kind, session_id: sessionId || null, agent_id: agentId || null,
       guard, key: hash, n: result.n, sessionCount: result.sessionCount, k, maxSession,
