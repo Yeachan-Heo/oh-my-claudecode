@@ -4,6 +4,11 @@
  * drives it: register(on) collects the handlers, a fake `$` keeps the files in memory and stubs $.http.fetch (the only fake of the Jev side).
  */
 
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL, URL as NodeUrl } from 'node:url';
+
 import { register } from '../../hooks/jev-compaction.mjs';
 
 export const STATE = '/home/u/.omc/state/jev';
@@ -159,4 +164,22 @@ export function scenarios() {
 }
 export async function outcomeOfScenario(scenario, extraEnv = {}) {
   return outcomeOf(await compactOnce(scenario.messages, { env: { ...scenario.env, ...extraEnv }, usage: hostUsage(150000) }, scenario.event));
+}
+
+// Loads a copy of the compaction module with one statement injected at an anchored line, for the tests of the exception path of the usage switch.
+// In this module no natural exception can fire with a request in flight: every Jev call site wraps askJev in withDeadline (which never rejects),
+// the admission and the shared failure bookkeeping fail open, and row-shape breakage throws before the requests go out or after every request has
+// settled. The tests therefore put a throw where such an exception would land mid decision. The copy goes to a fresh temporary directory of its
+// own and its relative imports are rewritten to the absolute URLs of the real files, so the copy loads anywhere. The anchor must match exactly one
+// place; a missing or repeated match fails the run that asked for the copy.
+export async function moduleCopy(anchor, injection, before = false) {
+  let source = readFileSync(new NodeUrl('../../hooks/jev-compaction.mjs', import.meta.url), 'utf8');
+  // The copy keeps its relative imports resolvable by naming the real files by their absolute URL.
+  source = source.replace(/(from\s+')(\.[^']+)(')/g, (_m, head, spec, tail) => head + new NodeUrl(spec, new NodeUrl('../../hooks/jev-compaction.mjs', import.meta.url)).href + tail);
+  const hits = source.split(anchor).length - 1;
+  if (hits !== 1) throw new Error(`the anchor of the injected throw matches ${hits} places, not one`);
+  const dir = mkdtempSync(join(tmpdir(), 'jev-compaction-usage-'));
+  const path = join(dir, 'jev-compaction.mjs');
+  writeFileSync(path, before ? source.replace(anchor, `${injection}\n${anchor}`) : source.replace(anchor, `${anchor}${injection}`));
+  return await import(pathToFileURL(path).href);
 }

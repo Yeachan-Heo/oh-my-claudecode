@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { readConfig } from '../../hooks/jev-compaction.mjs';
-import { ACTIVE_ENV, CASCADE, assistantRow, compactOnce, compactRecord, fakeDollar, filler, hostUsage, jevAnswers, load, okResponse, outcomeOfScenario, ownerRow, para, pastedTag, scenarios, until, withRows, frozen } from './jev-compaction-tail-harness.mjs';
+import { ACTIVE_ENV, CASCADE, PASTES, assistantRow, compactOnce, compactRecord, fakeDollar, filler, hostUsage, jevAnswers, load, okResponse, outcomeOfScenario, ownerRow, para, pastedTag, scenarios, until, withRows, frozen, moduleCopy } from './jev-compaction-tail-harness.mjs';
 
 const USAGE = { OMC_JEV_COMPACT_JEV_USAGE: '1' };
 const SECOND_ROUND = { ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active', OMC_JEV_COMPACT_TARGET_PERCENT: '55' };
@@ -60,6 +60,7 @@ describe('JEV_USAGE: the switch', () => {
     expect(on.out).toEqual(off.out);
     expect(on.calls.fetch.map((c) => c.body)).toEqual(off.calls.fetch.map((c) => c.body));
   });
+
 });
 
 describe('JEV_USAGE: every request to Jev has an entry', () => {
@@ -202,5 +203,185 @@ describe('JEV_USAGE: the passes that fill the verdicts', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(fake.blockRequests()).toHaveLength(0);
     expect(fake.records()).toEqual([]);
+  });
+});
+
+describe('JEV_USAGE: the exception path (the entries of the requests still open)', () => {
+  // In this module no natural exception can fire with a request in flight (the harness comment of moduleCopy names the reasons), so each throw is injected
+  // into a copy of the module at an anchored line, which must match exactly once. Without the fix the record is written before the entries of the requests
+  // that went out are added, so every test here fails on the base module.
+  const slowMetered = ({ kinds = [], ms = 60 } = {}) => {
+    let n = 0;
+    return async (body) => {
+      const answers = body.state?.results ? Object.fromEntries(Object.keys(body.questions).map((q) => [q, { type: 'score', score: 0.6, confidence: 0.9 }])) : jevAnswers(body);
+      const payload = okResponse({ answers, usage: { input_tokens: 100 + ++n, output_tokens: 7 }, model: 'jev-x' });
+      if (kinds.includes('scoring') && body.state?.results) await new Promise((resolve) => setTimeout(resolve, ms));
+      if (kinds.includes('pastes') && body.questions?.pasted) await new Promise((resolve) => setTimeout(resolve, ms));
+      if (kinds.includes('blocks') && body.state?.blocks) await new Promise((resolve) => setTimeout(resolve, ms));
+      if (kinds.includes('ties') && body.state?.items) await new Promise((resolve) => setTimeout(resolve, ms));
+      return payload;
+    };
+  };
+
+  // The scoring loop throws while building the second batch: the first one is still open, the drain waits for its answer.
+  it('an exception while the second batch is being built keeps the entry of the first, still open', async () => {
+    const mod = await moduleCopy(
+      'for (let b = 0; b * BATCH < asked.length; b++) {',
+      "\n    if (b === 1) throw new Error('injected: the second batch never went out');",
+    );
+    const run = await compactOnce(withRows([], 60), { env: { ...ACTIVE_ENV, ...USAGE }, mod, respond: slowMetered({ kinds: ['scoring'], ms: 40 }) });
+    const record = compactRecord(run);
+    expect(record.reason).toBe('exception');
+    expect(record.jev_usage).toHaveLength(1);
+    expect(record.jev_usage[0]).toEqual({ model: 'jev-x', input_tokens: 101, output_tokens: 7, cost_usd: null });
+    expect(record.jev_ms).toHaveLength(1);
+  });
+
+  // The scoring entries are added in one step after every answer is collected; a throw at that point keeps all of them, in batch order.
+  it('an exception after the answers are collected but before the entries are added keeps all of them, in batch order', async () => {
+    const mod = await moduleCopy(
+      'record.jev_ms = results.map((r) => r.ms);',
+      "  throw new Error('injected: the answers are in, the entries are not added');",
+      true,
+    );
+    const run = await compactOnce(withRows([], 60), { env: { ...ACTIVE_ENV, ...USAGE }, mod, respond: slowMetered() });
+    const record = compactRecord(run);
+    expect(record.reason).toBe('exception');
+    expect(record.jev_usage).toHaveLength(run.calls.fetch.length);
+    expect(record.jev_ms).toHaveLength(run.calls.fetch.length);
+    expect(record.jev_usage.map((entry) => entry.input_tokens)).toEqual([101, 102]);
+    expect(record.jev_usage[1]).not.toHaveProperty('purpose');
+  });
+
+  // The paste question goes out next to the scoring requests; a throw before the answers are collected keeps its entry too, with real usage of the
+  // answer that arrived after the throw.
+  it('an exception with a paste question still open keeps its entry with the purpose pastes', async () => {
+    const mod = await moduleCopy(
+      'const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);',
+      "  await new Promise((resolve) => setTimeout(resolve, 20)); throw new Error('injected: the paste answer is still open');",
+      true,
+    );
+    const rows = [ownerRow(`Please check the report below.\n\n${pastedTag(filler('alpha', 3000))}\n\nThanks.`), ownerRow('Next.')];
+    const run = await compactOnce(withRows(rows), { env: { ...ACTIVE_ENV, ...USAGE, OMC_JEV_COMPACT_PASTES: 'active' }, mod, respond: slowMetered({ kinds: ['pastes'], ms: 60 }) });
+    const record = compactRecord(run);
+    const pastes = run.calls.fetch.filter((c) => c.body.questions?.pasted).length;
+    expect(pastes).toBe(1);
+    expect(record.reason).toBe('exception');
+    expect(record.jev_usage).toHaveLength(run.calls.fetch.length);
+    expect(record.jev_usage.filter((entry) => entry.purpose === 'pastes')).toHaveLength(pastes);
+    expect(record.jev_usage.find((entry) => entry.purpose === 'pastes').input_tokens).not.toBeNull();
+  });
+
+  // The questions about blocks go out next to the scoring requests; a throw before the answers are collected keeps their entries, each with its purpose.
+  it('an exception with block questions still open keeps their entries with the purpose blocks', async () => {
+    const mod = await moduleCopy(
+      'const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);',
+      "  await new Promise((resolve) => setTimeout(resolve, 20)); throw new Error('injected: the block answers are still open');",
+      true,
+    );
+    const run = await compactOnce(session(), { env: { ...SECOND_ROUND, ...USAGE }, mod, respond: slowMetered({ kinds: ['blocks'], ms: 60 }), usage: high });
+    const record = compactRecord(run);
+    const blocks = run.blockRequests().length;
+    expect(blocks).toBeGreaterThan(0);
+    expect(record.reason).toBe('exception');
+    expect(record.jev_usage).toHaveLength(run.calls.fetch.length);
+    expect(record.jev_usage.filter((entry) => entry.purpose === 'blocks')).toHaveLength(blocks);
+    expect(record.jev_usage.filter((entry) => entry.purpose === 'blocks').every((entry) => entry.input_tokens !== null)).toBe(true);
+    expect(record.jev_ms).toHaveLength(run.calls.fetch.length - blocks);
+  });
+
+  // The questions of the second round are answered one by one; a worker that throws before its entry is added leaves the entries of the requests still
+  // open missing, but the decision goes on as before (the round catches the error).
+  it('an exception in the second round keeps the entries of the requests still open, the decision unchanged', async () => {
+    const mod = await moduleCopy(
+      "noteJevUsage(cfg, 'second_round', r);",
+      "      throw new Error('injected: the tie answers are still open');",
+      true,
+    );
+    const run = await compactOnce(session(), { env: { ...SECOND_ROUND, ...USAGE }, mod, respond: slowMetered({ kinds: ['ties'], ms: 50 }), usage: high });
+    const record = compactRecord(run);
+    const ties = run.calls.fetch.filter((c) => c.body.state?.items).length;
+    expect(ties).toBeGreaterThan(0);
+    expect(record.result).toBe('jev');
+    expect(record.jev_usage).toHaveLength(run.calls.fetch.length);
+    expect(record.jev_usage.filter((entry) => entry.purpose === 'second_round')).toHaveLength(ties);
+    expect(record.jev_usage.filter((entry) => entry.purpose === 'second_round').every((entry) => entry.input_tokens !== null)).toBe(true);
+  });
+
+  // Without the usage switch the exception changes nothing: no entry is added, no record gains a field, and the answer and the requests are the ones of
+  // the same run with the switch (the drain adds record fields only).
+  it('without the switch an exception adds no field and changes nothing in the answer or the requests', async () => {
+    const mod = await moduleCopy(
+      'const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);',
+      "  await new Promise((resolve) => setTimeout(resolve, 20)); throw new Error('injected: the paste answer is still open');",
+      true,
+    );
+    const rows = [ownerRow(`Please check the report below.\n\n${pastedTag(filler('alpha', 3000))}\n\nThanks.`), ownerRow('Next.')];
+    const run = (extra) => compactOnce(withRows(rows), { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active', ...extra }, mod, respond: slowMetered({ kinds: ['pastes'], ms: 60 }) });
+    const off = await run({});
+    const on = await run(USAGE);
+    expect(compactRecord(off)).not.toHaveProperty('jev_usage');
+    expect(compactRecord(off)).not.toHaveProperty('cost_basis');
+    expect(on.out).toEqual(off.out);
+    expect(on.calls.fetch.map((c) => c.body)).toEqual(off.calls.fetch.map((c) => c.body));
+  });
+
+  // A pass in the background: a worker that throws before its entry is added leaves the entries of the requests still open missing; the pass still
+  // writes its verdicts_fill record with them.
+  it('a pass in the background keeps the entries of the requests still open in its verdicts_fill record', async () => {
+    const mod = await moduleCopy(
+      "noteJevUsage(cfg, 'blocks', r);",
+      "      throw new Error('injected: the block answers are still open');",
+      true,
+    );
+    const blocksText = [para('pi', 700, 'LV1'), para('tau', 700, 'LV3'), para('rho', 700)].join('\n\n');
+    const messages = () => withRows([ownerRow(blocksText)], 30, { chars: 4000 });
+    const bgEnv = { ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active' };
+    const turnEnd = (handlers, fake) => handlers['turn.complete'](fake.$, Object.freeze({}), async () => ({}));
+    const twoTurns = async (fake) => { const handlers = load(mod); await turnEnd(handlers, fake); await turnEnd(handlers, fake); };
+    const fake = fakeDollar({ env: { ...bgEnv, ...USAGE }, messages: messages(), respond: slowMetered({ kinds: ['blocks'], ms: 40 }), usage: hostUsage(150000) });
+    await twoTurns(fake);
+    expect(await until(() => fake.records().some((r) => r.event === 'verdicts_fill'))).toBe(true);
+    const fill = fake.records().find((r) => r.event === 'verdicts_fill');
+    const blocks = fake.blockRequests().length;
+    expect(blocks).toBeGreaterThan(0);
+    expect(fill.jev_usage).toHaveLength(blocks);
+    expect(fill.jev_usage.every((entry) => entry.purpose === 'blocks')).toBe(true);
+    expect(fill.jev_usage.every((entry) => entry.input_tokens !== null)).toBe(true);
+  });
+
+  // The decision is repeated (the owner tail, the floor over the bound with the first boundary): the entries of the given up decisions stay marked
+  // `abandoned`, and the entries of the final decision, whose requests are still open at the throw, join without the mark.
+  const TAIL_ENV = { ...ACTIVE_ENV, OMC_JEV_COMPACT_BLOCKS: 'active', OMC_JEV_COMPACT_JEV_STAGES: 'active', OMC_JEV_COMPACT_TAIL_BY_LOOP: 'active', OMC_JEV_COMPACT_OWNER_TAIL: 'active' };
+  const cross = (text) => `<cross-session-message from="track-1">${text}</cross-session-message>`;
+  const ending = (rows) => {
+    const base = withRows([], 30, { chars: 4000 });
+    return frozen([...base.slice(0, -2), ...rows]);
+  };
+
+  it('an exception in a repeated decision keeps the entries of the final decision and the given up ones marked abandoned', async () => {
+    const mod = await moduleCopy(
+      'const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);',
+      "  if (cfg.ownerTailDemote === 1) { await new Promise((resolve) => setTimeout(resolve, 20)); throw new Error('injected: the answers of the final decision are still open'); }",
+      true,
+    );
+    const old = Array.from({ length: 24 }, (_, k) => para(`old${k}`, 3000)).join('\n\n');
+    const replyA = para('omega', 60000);
+    const replyB = para('psi', 30000);
+    const rows = [ownerRow(old), assistantRow('Noted.'), ownerRow('Q small'), assistantRow(replyA), ownerRow(cross('done')), assistantRow(replyB)];
+    const run = await compactOnce(ending(rows), {
+      env: { ...TAIL_ENV, ...CASCADE, ...USAGE },
+      mod,
+      usage: hostUsage(190000),
+      respond: slowMetered(),
+      failWrite: (p) => p.startsWith(PASTES) && p.endsWith('.txt'),
+    }, { trigger: 'manual' });
+    const record = compactRecord(run);
+    const given = record.jev_usage.filter((entry) => entry.abandoned);
+    expect(given.length).toBeGreaterThan(0);
+    expect(record.reason).toBe('exception');
+    expect(record.jev_usage).toHaveLength(run.calls.fetch.length);
+    expect(record.jev_usage.slice(-given.length)).toEqual(given);
+    expect(record.jev_usage.slice(0, record.jev_ms?.length ?? 0).some((entry) => entry.abandoned)).toBe(false);
   });
 });

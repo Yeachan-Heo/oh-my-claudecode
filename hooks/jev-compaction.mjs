@@ -174,6 +174,9 @@
  * `purpose`; the others carry `purpose` (pastes, blocks, second_round). When the owner tail makes the compaction decide again, the entries of the decisions that
  * were given up follow with `abandoned: true`. `cost_basis` is `reported` when an answer carries a cost, else `unknown`. The pass before the
  * module's own request puts both fields into its `verdicts_fill` record, and a pass in the background that asked something writes such a record of its own.
+ * When the decision ends with an exception, the module waits for the requests it has already sent (each ends by its own timeout, never beyond the
+ * decision deadline) before the record is written, and the record holds their entries: the scoring ones first, in batch order, the others in the
+ * order in which they ended.
  *
  * Host attachments (OMC_JEV_COMPACT_HOST_ATTACHMENTS=1 or true, off by default; without it the user rows of text keep their handles and no record gains a field).
  * The host keeps what is no row (instructions, lists of skills, agents and tools, hook contexts, the text of used skills) in the group of the row before it, and a
@@ -3661,6 +3664,61 @@ function noteJevUsage(cfg, purpose, r) {
   (record.jev_usage ??= []).push({ ...jevUsageOf(r.value), purpose });
   if (costBasisOf(jevMetaOf(r.value)?.raw) === 'reported') record.cost_basis = 'reported';
   else record.cost_basis ??= 'unknown';
+  releaseJevUsage(cfg, r); // the entry is in the record, so its slot must not be drained again
+}
+
+// The exception path of the usage switch: the requests whose entries are not in the record yet ride in a tracker of the decision (cfg.usagePending, only
+// with the usage switch). A slot settles once and carries its order among the settled; it leaves the tracker when its entry is added, so no entry is
+// doubled: noteJevUsage takes the settled slot of its answer out, and the scoring entries are added in one step for all batches (releaseScoringUsage).
+// When the decision ends with an exception, the drain waits for the requests still tracked (each ends by its own timeout, never beyond the decision
+// deadline) and adds their entries: the scoring ones first, in batch order, parallel to jev_ms, then the others in the order in which they ended.
+// Missing data stays null; every request keeps exactly one entry.
+function newJevUsagePending() {
+  return { slots: new Set(), order: 0 };
+}
+function trackJevUsage(cfg, purpose, promise) {
+  const pending = cfg.usagePending;
+  if (!pending) return promise;
+  const slot = { purpose, value: undefined, settled: false, order: 0, promise };
+  pending.slots.add(slot);
+  promise.then(
+    (value) => { slot.value = value; slot.order = ++pending.order; slot.settled = true; },
+    () => { slot.value = undefined; slot.order = ++pending.order; slot.settled = true; },
+ );
+  return promise;
+}
+// The entry of this answer is in the record: its slot must not be drained again.
+function releaseJevUsage(cfg, value) {
+  const pending = cfg.usagePending;
+  if (!pending) return;
+  for (const slot of pending.slots) if (slot.settled && slot.value === value) { pending.slots.delete(slot); return; }
+}
+// The scoring entries are added in one step for all batches (in decide); their slots leave the tracker there.
+function releaseScoringUsage(cfg) {
+  const pending = cfg.usagePending;
+  if (!pending) return;
+  for (const slot of [...pending.slots]) if (slot.purpose === undefined) pending.slots.delete(slot);
+}
+// Waits for the requests whose entries are not in the record yet and adds the entries. A slot that left the tracker in the normal way counts no more,
+// so no entry is doubled. Never rejects.
+async function drainJevUsage(record, pending) {
+  if (!pending || !pending.slots.size) return;
+  const open = [...pending.slots];
+  await Promise.all(open.map((s) => s.promise.catch(() => undefined)));
+  const still = open.filter((s) => pending.slots.has(s));
+  const sent = still.filter((s) => s.purpose === undefined);
+  const others = still.filter((s) => s.purpose !== undefined).sort((a, b) => a.order - b.order);
+  if (sent.length) {
+    // The scoring entries first, parallel to jev_ms, in batch order (the order in which the batches went out).
+    record.jev_ms = sent.map((s) => (s.value?.ms ?? null));
+    record.jev_usage = [...sent.map((s) => jevUsageOf(s.value?.value)), ...(record.jev_usage ?? [])];
+    record.cost_basis = sent.some((s) => costBasisOf(jevMetaOf(s.value?.value)?.raw) === 'reported') ? 'reported' : (record.cost_basis ?? 'unknown');
+  }
+  for (const s of others) {
+    (record.jev_usage ??= []).push({ ...jevUsageOf(s.value?.value), purpose: s.purpose });
+    if (costBasisOf(jevMetaOf(s.value?.value)?.raw) === 'reported') record.cost_basis = 'reported';
+    else record.cost_basis ??= 'unknown';
+  }
 }
 
 // Score 0-1 from an answer on the four levels (0-3), else undefined.
@@ -3949,7 +4007,7 @@ async function askPaste($, cfg, text, deadline) {
   const t0 = Date.now();
   if (t0 >= deadline) { session.requests--; return { held: true }; }
   const timeoutMs = Math.min(REQUEST_MS, deadline - t0);
-  const r = await withDeadline($, askJev($, cfg, { fragment: { text, chars: text.length } }, PASTE_QUESTIONS), timeoutMs);
+  const r = await trackJevUsage(cfg, 'pastes', withDeadline($, askJev($, cfg, { fragment: { text, chars: text.length } }, PASTE_QUESTIONS), timeoutMs));
   noteJevUsage(cfg, 'pastes', r);
   const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
   if (Date.now() < deadline) await withDeadline($, recording, deadline - Date.now());
@@ -5030,7 +5088,7 @@ async function askBlockVerdicts($, cfg, items, opts) {
         const t0 = Date.now();
         const timeoutMs = Math.min(opts.requestMs, opts.deadline - t0);
         if (timeoutMs < 500) { session.requests--; results[k] = { skipped: true }; continue; }
-        const r = await withDeadline($, askJev($, cfg, requests[k].state, requests[k].questions), timeoutMs);
+        const r = await trackJevUsage(cfg, 'blocks', withDeadline($, askJev($, cfg, requests[k].state, requests[k].questions), timeoutMs));
         noteJevUsage(cfg, 'blocks', r);
         // Shared failure bookkeeping may finish later, but cannot extend the deadline.
         const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
@@ -5038,7 +5096,12 @@ async function askBlockVerdicts($, cfg, items, opts) {
         results[k] = { ...r, ms: Date.now() - t0 };
       }
     };
-    await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker));
+    // A worker that throws leaves the entries of the requests that went out missing: the drain waits for the ones still open (each ends by its own
+    // timeout) and adds their entries, then the error goes on to the catch of ensureBlockVerdicts as before.
+    await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker)).catch(async (error) => {
+      await drainJevUsage(cfg.usageRecord, cfg.usagePending);
+      throw error;
+    });
     const redo = new Set();
     results.forEach((r, k) => {
       if (!r || r.skipped) return;
@@ -5218,6 +5281,8 @@ function blockSignals(rates, tokens, items, prefix, limit) {
 // The verdicts of everything in a conversation that has none, asked (the pass in the background: what lived at least one turn, `low`; the one before the module's own request to
 // compact: all of it). `messages` is the transcript the caller read. Returns the counts or {skipped}; never rejects.
 async function fillBlockVerdicts($, cfg, messages, ctx) {
+  const used = {}; // the usage of the requests of this pass (OMC_JEV_COMPACT_JEV_USAGE)
+  let pending; // the requests whose entries are not in the record yet
   try {
     if (cfg.mode !== 'active' || cfg.blocks === 'off' || cfg.verdicts === 'off' || !cfg.key || !cfg.pasteDir || !Array.isArray(messages)) return { skipped: 'off' };
     const sessionId = await sessionIdOf($);
@@ -5246,10 +5311,16 @@ async function fillBlockVerdicts($, cfg, messages, ctx) {
       if (win) limit = ruleTargetOf(win, cfg);
     }
     const extra = blockSignals(cfg.rates, prefix + listTokens(api, cfg.rates), plan.items, prefix, limit);
-    const used = {}; // the usage of the requests of this pass (OMC_JEV_COMPACT_JEV_USAGE)
-    const stats = await ensureBlockVerdicts($, cfg.jevUsage ? { ...cfg, usageRecord: used } : cfg, plan, { ...ctx, user, extra });
+    pending = cfg.jevUsage ? newJevUsagePending() : undefined;
+    const stats = await ensureBlockVerdicts($, cfg.jevUsage ? { ...cfg, usageRecord: used, usagePending: pending } : cfg, plan, { ...ctx, user, extra });
     return { rows: plan.stats.rows, blocks: plan.stats.blocks, ...stats, ...used };
-  } catch (error) { return { skipped: 'error', error: clip(oneLine(String(error?.message ?? error)), 200) }; }
+  } catch (error) {
+    // The requests still tracked wait for their answers (each ends by its own timeout) and their entries go into the record this pass writes; without
+    // the usage switch nothing is tracked and the catch returns as before.
+    await drainJevUsage(used, pending);
+    if (cfg.jevUsage && used.jev_usage) used.cost_basis ??= 'unknown';
+    return { skipped: 'error', error: clip(oneLine(String(error?.message ?? error)), 200), ...used };
+  }
 }
 
 // The verdicts before the module's own request to compact: whatever the pass in the background is asking is waited for (no second question about the same blocks), then everything
@@ -5259,7 +5330,9 @@ async function fillBeforeCompaction($, cfg, messages) {
     const deadline = Date.now() + TOTAL_MS;
     if (session.blockBackground.run) { session.blockBackground.stop = true; await withDeadline($, session.blockBackground.run, TOTAL_MS); }
     const fill = await fillBlockVerdicts($, cfg, messages, { deadline, requestMs: REQUEST_MS });
-    if (!fill.skipped) {
+    // A pass that threw after requests went out still writes its record, because the catch of fillBlockVerdicts drains the entries of the requests
+    // still tracked into it.
+    if (!fill.skipped || fill.jev_usage) {
       let sessionId;
       try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
       await writeRecord($, cfg, { ts: isoNow(), point: POINT, event: 'verdicts_fill', session_id: sessionId ?? null, agent_id: null, ...fill });
@@ -5489,7 +5562,7 @@ async function askTie($, cfg, group, ctx) {
         items[n.name] = fields;
         questions[n.name] = { type: 'score', instructions: `${F2_QUESTION} The item is \`items.${n.name}\`.`, criteria: BLOCK_LEVELS.map((what) => ({ what })) };
       }
-      const r = await withDeadline($, askJev($, cfg, { ...header, items, block_rules: BLOCK_RULES }, questions), timeoutMs);
+      const r = await trackJevUsage(cfg, 'second_round', withDeadline($, askJev($, cfg, { ...header, items, block_rules: BLOCK_RULES }, questions), timeoutMs));
       noteJevUsage(cfg, 'second_round', r);
       const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
       if (Date.now() < ctx.deadline) await withDeadline($, recording, ctx.deadline - Date.now());
@@ -5497,7 +5570,12 @@ async function askTie($, cfg, group, ctx) {
       for (const { n } of req.items) { const s = scoreOf(r.value[n.name]); if (s !== undefined) n.x.score = s; }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker));
+  // A worker that throws (no throw can come out of the request itself) leaves the entries of the requests that went out missing: the drain waits for
+  // the ones still open (each ends by its own timeout) and adds their entries, then the error goes on as before (its caller catches it).
+  await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker)).catch(async (error) => {
+    await drainJevUsage(cfg.usageRecord, cfg.usagePending);
+    throw error;
+  });
   noteFailures(failures, Date.now());
 }
 // --- end of the second round ------------------------------------------------------------------------------------------------------------------------------------------
@@ -6718,8 +6796,8 @@ function ownerProtectedCfg(cfg, messages, early) {
 }
 // --- end of the owner tail ----------------------------------------------------------------------------------------------------------------------
 
-async function decide($, e, cfg, record, started) {
-  if (cfg.jevUsage) cfg = { ...cfg, usageRecord: record }; // every request of this decision adds to its record
+async function decide($, e, cfg, record, started, pending) {
+  if (cfg.jevUsage) cfg = { ...cfg, usageRecord: record, usagePending: pending }; // every request of this decision adds to its record
   const messages = Array.isArray(e.messages) ? e.messages : [];
   let before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
@@ -6967,14 +7045,14 @@ async function decide($, e, cfg, record, started) {
     const t0 = Date.now();
     if (t0 >= deadline) { session.requests--; held = { mode: 'deadline' }; break; }
     const timeoutMs = Math.min(REQUEST_MS, deadline - t0);
-    runs.push(
+    runs.push(trackJevUsage(cfg, undefined,
       withDeadline($, askJev($, cfg, state, questions), timeoutMs).then(async (r) => {
         // Shared failure bookkeeping may finish later, but cannot extend this decision's budget.
         const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
         if (Date.now() < deadline) await withDeadline($, recording, deadline - Date.now());
         return { ...r, batch, ms: Date.now() - t0 };
       }),
-    );
+    ));
   }
   if (held) {
     // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
@@ -7009,6 +7087,7 @@ async function decide($, e, cfg, record, started) {
     // The scoring entries first, parallel to jev_ms, then those of the other requests in the order in which they ended.
     record.jev_usage = [...results.map((r) => jevUsageOf(r.value)), ...(record.jev_usage ?? [])];
     record.cost_basis = results.some((r) => costBasisOf(jevMetaOf(r.value)?.raw) === 'reported') ? 'reported' : (record.cost_basis ?? 'unknown');
+    releaseScoringUsage(cfg); // their entries are in the record now
   }
   let answered = 0;
   const failures = [];
@@ -7281,8 +7360,9 @@ async function compact($, e, next) {
     const initial = { ...record }; // the record a repeated decision starts from
     const abandoned = []; // the usage of the requests of the decisions that were repeated
     let reported = false;
+    const pending = cfg.jevUsage ? newJevUsagePending() : undefined; // the requests whose entries are not in the record yet
     try {
-      decision = await decide($, e, cfg, record, started);
+      decision = await decide($, e, cfg, record, started, pending);
       // Owner tail: the floor or the plan with the protected text (nothing of it can be lowered) is over the bound of the host. The compaction is decided again with the
       // next boundary, down to the overflow (no protection, or with `keep` the text kept and the gates off), instead of going to the host's summary, which takes the text too.
       for (let again = 0; again < 3 && (decision.fallback === 'floor_above_threshold' || decision.fallback === 'text_above_threshold') && record.owner_tail_applied === true && !record.owner_tail.overflow; again++) {
@@ -7293,11 +7373,14 @@ async function compact($, e, next) {
         }
         for (const key of Object.keys(record)) delete record[key];
         Object.assign(record, initial);
-        decision = await decide($, e, { ...cfg, ownerTailDemote: demote }, record, started);
+        decision = await decide($, e, { ...cfg, ownerTailDemote: demote }, record, started, pending);
       }
     } catch (error) {
       decision = { fallback: 'exception' };
       record.error = clip(oneLine(maskSecrets(String(error?.message ?? error))), 200);
+      // Every request that went out keeps its entry: the ones whose answers are not in the record yet wait for them (each ends by its own timeout,
+      // never beyond the decision deadline) and their entries go in here, before the entries of the given up decisions follow marked `abandoned`.
+      await drainJevUsage(record, pending);
     }
     // Every request sent keeps its entry: those of the repeated decisions follow, marked `abandoned`.
     if (abandoned.length) {
