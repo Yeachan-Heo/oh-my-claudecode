@@ -189,6 +189,71 @@ function foldBlockScalarRows(rows: BlockScalarRow[]): string {
 }
 
 /**
+ * YAML tags and anchors (`!!str `, `!local `, `&name `) right before a scalar.
+ * A verbatim tag (`!<tag:yaml.org,2002:str> `) may hold commas and brackets.
+ */
+const NODE_PROPERTIES = /(?:(?:!<[^\s>]+>|[!&][^\s,[\]{}]*)\s+)+$/;
+
+/**
+ * Drop a trailing YAML comment from a one-line value. A `#` starts a comment only
+ * at the start of the value or after whitespace, and never inside a quoted scalar,
+ * so `a#b`, `docs/#x` and `"a #b"` are kept.
+ */
+function stripTrailingComment(value: string): string {
+  let quote: "'" | '"' | null = null;
+  let closedAt = -1;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (quote) {
+      if (quote === '"' && char === "\\") {
+        i++;
+      } else if (char === quote) {
+        if (quote === "'" && value[i + 1] === "'") i++;
+        else {
+          quote = null;
+          closedAt = i;
+        }
+      }
+      continue;
+    }
+    // A verbatim tag (`!<tag:example.com,2026:a'b> `) may hold quotes, so skip it whole.
+    if (char === "!" && value[i + 1] === "<" && (i === 0 || /[\s[{,]/.test(value[i - 1]))) {
+      const tagEnd = value.indexOf(">", i + 2);
+      if (tagEnd > i + 2 && !/\s/.test(value.slice(i + 2, tagEnd))) {
+        i = tagEnd;
+        continue;
+      }
+    }
+    if (char === '"' || char === "'") {
+      // A quote opens a scalar only where a flow node can start:
+      // - at the start of the value, after `[`, `{` or `,`, or after the `? `
+      //   of an explicit key (`{? "k # x": v}`);
+      // - after the `:` of a mapping value, when whitespace follows it, or
+      //   right after a key that ends with a quote or a collection, as in
+      //   JSON-style `{"k":"v"}` or `{[k]:"v"}`.
+      // A tag or anchor may come first (`!!str "a # b"`). In `[a:", b]` the
+      // quote is part of the plain scalar `a:"`.
+      const before = value.slice(0, i).replace(NODE_PROPERTIES, "");
+      const afterQuotedKey =
+        closedAt >= 0 && /^\s*:\s*$/.test(value.slice(closedAt + 1, i).replace(NODE_PROPERTIES, ""));
+      if (
+        /(?:^|[[{,])\s*(?:\?\s+)?$/.test(before) ||
+        /:\s+$/.test(before) ||
+        /[\]}]\s*:$/.test(before) ||
+        afterQuotedKey
+      ) {
+        quote = char;
+      }
+      continue;
+    }
+    if (char === "#" && (i === 0 || value[i - 1] === " " || value[i - 1] === "\t")) {
+      return value.slice(0, i).trimEnd();
+    }
+  }
+  return value;
+}
+
+/**
  * Parse YAML-like frontmatter from markdown content.
  * Returns { metadata, body } where metadata is a flat string map.
  */
@@ -234,7 +299,7 @@ export function parseFrontmatter(content: string): {
       if (colonIndex === -1) continue;
 
       const key = line.slice(0, colonIndex).trim();
-      const rawValue = line.slice(colonIndex + 1).trim();
+      const rawValue = stripTrailingComment(line.slice(colonIndex + 1).trim());
 
       const blockHeader = parseBlockScalarHeader(rawValue);
       if (blockHeader) {

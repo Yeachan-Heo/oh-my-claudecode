@@ -572,3 +572,110 @@ describe("parseFrontmatter block scalars", () => {
     });
   });
 });
+
+describe("parseFrontmatter trailing comments", () => {
+  const parse = (yaml: string) => parseFrontmatter(`---\n${yaml}\n---\nbody`).metadata;
+
+  it("drops a trailing comment from plain, quoted and flow values", () => {
+    expect(
+      parse(
+        [
+          "model: opus # Requires deep reasoning",
+          'name: "my-skill"  # quoted',
+          "agent: 'planner' # single",
+          'aliases: [a, "b #c"] # list',
+          "empty: # nothing here",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      model: "opus",
+      name: "my-skill",
+      agent: "planner",
+      aliases: '[a, "b #c"]',
+      empty: "",
+    });
+  });
+
+  it("keeps a # that is not preceded by whitespace or is inside quotes", () => {
+    expect(
+      parse(
+        [
+          "path: docs/#x/**",
+          "lang: C#",
+          'quoted: "a #b"',
+          "single: 'it''s #fine'",
+          "apostrophe: don't #x",
+        ].join("\n"),
+      ),
+    ).toEqual({
+      path: "docs/#x/**",
+      lang: "C#",
+      quoted: "a #b",
+      single: "it's #fine",
+      apostrophe: "don't",
+    });
+  });
+
+  it("skips an escaped double quote and treats a tab before # as whitespace", () => {
+    expect(parse(['d: "a \\" #b" # c', "t: x\t# tab"].join("\n"))).toEqual({
+      d: 'a \\" #b',
+      t: "x",
+    });
+  });
+
+  it("does not open a quote after a colon inside a plain flow item", () => {
+    const { aliases } = parse('aliases: [a:", "b # c", working]');
+    expect(aliases).toBe('[a:", "b # c", working]');
+    expect(parseFrontmatterAliases(aliases)).toEqual(['a:"', "b # c", "working"]);
+    expect(parse('map: {k: "v # x"} # c').map).toBe('{k: "v # x"}');
+  });
+
+  it("opens a quote after an explicit key or a collection key", () => {
+    expect(parse('metadata: {? "label # x": value}').metadata).toBe('{? "label # x": value}');
+    expect(parse('metadata: {[label]:"a # b"}').metadata).toBe('{[label]:"a # b"}');
+    expect(parse("metadata: {{k: v}:'a # b'} # c").metadata).toBe("{{k: v}:'a # b'}");
+    expect(parse('note: a?"b # c"').note).toBe('a?"b');
+  });
+
+  it("opens a quote after a YAML tag or anchor", () => {
+    expect(parse('description: !!str "Use # carefully"').description).toBe('!!str "Use # carefully"');
+    expect(parse("description: &d 'Use # carefully' # c").description).toBe("&d 'Use # carefully'");
+    expect(parse('map: {k: !!str "v # x"}').map).toBe('{k: !!str "v # x"}');
+    expect(parse('note: Hello !world "x # y"').note).toBe('Hello !world "x');
+  });
+
+  it("opens a quote after a verbatim YAML tag", () => {
+    expect(parse('description: !<tag:yaml.org,2002:str> "Use # carefully"').description).toBe(
+      '!<tag:yaml.org,2002:str> "Use # carefully"',
+    );
+    expect(parse("map: {k: !<tag:yaml.org,2002:str> 'v # x'} # c").map).toBe(
+      "{k: !<tag:yaml.org,2002:str> 'v # x'}",
+    );
+    expect(parse('items: [!<tag:example.com,2026:x[1]> "a # b"]').items).toBe(
+      '[!<tag:example.com,2026:x[1]> "a # b"]',
+    );
+    expect(parse('note: Hello !<a,b> "x # y"').note).toBe('Hello !<a,b> "x');
+  });
+
+  it("ignores quotes inside a verbatim YAML tag", () => {
+    expect(parse("description: !<tag:example.com,2026:foo,'bar> 'Use # carefully'").description).toBe(
+      "!<tag:example.com,2026:foo,'bar> 'Use # carefully'",
+    );
+    expect(parse('map: {k: !<tag:x,"y> "v # x"} # c').map).toBe('{k: !<tag:x,"y> "v # x"}');
+    expect(parse(`note: Hello !<a,'b> "x # y"`).note).toBe(`Hello !<a,'b> "x`);
+    expect(parse("note: !<a 'b # c'").note).toBe("!<a 'b # c'");
+  });
+
+  it("opens a quote right after the colon of a quoted key", () => {
+    expect(parse('metadata: {"label":"a # b"}').metadata).toBe('{"label":"a # b"}');
+    expect(parse("metadata: {'label':'a # b'} # c").metadata).toBe("{'label':'a # b'}");
+    expect(parse('aliases: [a:", "b # c", working]').aliases).toBe('[a:", "b # c", working]');
+  });
+
+  it("reads a commented alias list as a list", () => {
+    expect(parseFrontmatterAliases(parse("aliases: [foo, bar] # legacy").aliases)).toEqual([
+      "foo",
+      "bar",
+    ]);
+  });
+});
