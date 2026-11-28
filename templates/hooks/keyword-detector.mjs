@@ -186,6 +186,12 @@ function isReviewSeedContext(text) {
   return REVIEW_SEED_OUTCOME_RES.filter(re => re.test(preview)).length >= 2;
 }
 
+// A line-anchored pattern that opens with `\s*` rescans one run of blank lines from every line start,
+// which takes quadratic or cubic time on long runs. The block quote and table patterns make everything
+// after that leading whitespace optional: a line start that leads to no match consumes the run once and
+// the replacer puts it back. The text they remove is unchanged.
+const keepUnlessMatched = (run, matched) => (matched === undefined ? run : '');
+
 function sanitizeForKeywordDetection(text) {
   return stripPastedCommandPayloads(text)
     // 0. Strip HTML/markdown comments before tag stripping
@@ -193,13 +199,13 @@ function sanitizeForKeywordDetection(text) {
     // 1. Strip XML-style tag blocks; closing-tag attributes stay on one line and stop at adjacent tags.
     .replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1(?:[ \t][^<>\r\n]*)?>/g, '')
     // 2. Strip self-closing XML tags: <tag-name />, <tag-name attr="val" />
-    .replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, '')
+    .replace(/<\w[\w-]*(?:\s[^>]*)?\/>/g, '')
     // 3. Strip URLs: http://... or https://... up to whitespace
     .replace(/https?:\/\/[^\s)>\]]+/g, '')
     // 3.5 Strip block quotes and markdown table rows - these are usually reference content
-    .replace(/^\s*>\s.*$/gm, '')
-    .replace(/^\s*\|(?:[^|\n]*\|){2,}\s*$/gm, '')
-    .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|){1,}\s*$/gm, '')
+    .replace(/^\s*(>\s.*$)?/gm, keepUnlessMatched)
+    .replace(/^\s*(\|(?:[^|\n]*\|){2,}\s*$)?/gm, keepUnlessMatched)
+    .replace(/^\s*((?:\|\s*)?:?-{3,}:?\s*\|(?:\s*:?-{3,}:?\s*\|)*\s*$)?/gm, keepUnlessMatched)
     // 4. Strip file paths — uses lookbehind (Node.js supports it). Requires at least one
     // slash-terminated directory segment (?:SEG+\/)+ so bare slash-commands like /ralph are NOT
     // stripped (the .mjs has no pre-sanitization slash handler for them). Directory/stem segments
@@ -208,7 +214,11 @@ function sanitizeForKeywordDetection(text) {
     // in a .ext, OR an ASCII-only extensionless name — so a no-space CJK directive following a path
     // (e.g. src/auth.tsをコードレビューして) is NOT consumed by a greedy CJK tail and the alias
     // still activates.
-    .replace(/(?<=^|[\s"'`(])(?:\/)?(?:[\w.\-　-鿿가-힯Ѐ-ӿ؀-ۿऀ-ॿ฀-๿က-႟]+\/)+(?:[\w.\-　-鿿가-힯Ѐ-ӿ؀-ۿऀ-ॿ฀-๿က-႟]*\.\w+|[\w.\-]+)/gm, '')
+    // The ideographic space U+3000 is both whitespace and inside the segment ranges, so without the
+    // second lookbehind every character of a long run of them would start another scan of the rest of
+    // the run. A position right after a U+3000 that is itself a possible start never wins over that
+    // earlier one, so it is skipped.
+    .replace(/(?<=^|[\s"'`(])(?<!(?:^|[\s"'`(])\u3000)(?:\/)?(?:[\w.\-\u3000-\u9FFF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0E00-\u0E7F\u1000-\u109F]+\/)+(?:[\w.\-\u3000-\u9FFF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0E00-\u0E7F\u1000-\u109F]*\.\w+|[\w.\-]+)/gm, '')
     // 5. Strip markdown code blocks (existing)
     .replace(/```[\s\S]*?```/g, '')
     // 6. Strip inline code (existing)
@@ -218,7 +228,7 @@ function sanitizeForKeywordDetection(text) {
 const PASTED_MAGIC_KEYWORD_HEADER_PATTERN =
   /^\s*\[MAGIC KEYWORDS?(?: DETECTED)?:.*$/i;
 const ROLE_BOUNDARY_PATTERN =
-  /^<\s*\/?\s*(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
+  /^<\s*(?:\/\s*)?(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
 const SKILL_TRANSCRIPT_LINE_PATTERN =
   /^\s*Skill:\s+oh-my-(?:claudecode|codex):/i;
 const USER_REQUEST_LINE_PATTERN = /^\s*User request(?:\s*\([^)]*\))?:\s*$/i;
@@ -369,7 +379,9 @@ const REFERENCE_META_PATTERNS = [
   /(?:เปรียบเทียบ|ต่างกัน|ความต่าง|เอกสาร|บทความ|ไกด์|คู่มือ|เกี่ยวกับ|เหมือน)/u,
 ];
 const REFERENCE_EXPLANATION_PATTERNS = [
-  /(?:^|\n)\s*(?:결론|특징|예시|요약|장점|단점|설명)\s*[:：]/u,
+  // Korean section labels (conclusion, features, example, summary, pros, cons, explanation). Only the
+  // whitespace of the label's own line is skipped: every earlier line break is its own start position.
+  /(?:^|\n)[^\S\n]*(?:\uACB0\uB860|\uD2B9\uC9D5|\uC608\uC2DC|\uC694\uC57D|\uC7A5\uC810|\uB2E8\uC810|\uC124\uBA85)\s*[:\uFF1A]/u,
   /\b(?:summary|conclusion|key\s+points?|example|examples|pros|cons|overview)\s*:/i,
   /[^\n]{1,80}=\s*["“]/,
   /[→⇒]/,
@@ -963,7 +975,7 @@ const AUTOPILOT_MARKDOWN_MARKS = /[*_`#>]+/g;
 const AUTOPILOT_LIST_PREFIX = /^[\s\-+]*(?:\d+[.)]\s+)?/;
 const AUTOPILOT_REFERENCE_LABEL_LINE = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:/i;
 // A heading line that is only the label ("## Documentation") also marks what follows as reference text.
-const AUTOPILOT_REFERENCE_HEADING = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*:?[ \t]*$/i;
+const AUTOPILOT_REFERENCE_HEADING = /^[ \t]*(?:docs?|documentation|summary|status|logs?|release\s+notes|changelog|readme|examples?|output|result|results|description|title|commit|trigger|triggers|keywords?)[ \t]*(?::[ \t]*)?$/i;
 const AUTOPILOT_NOUN_USE_BEFORE = /(?<![\p{L}\d])(?:the|a|an|this|that|these|those|last|previous|our|my|its|your|their)\s+$/iu;
 const AUTOPILOT_COMMIT_LINE_BEFORE = /(?<![\p{L}\d])[0-9a-f]{7,40}\s+$/iu;
 // A line with any non-ASCII letter (Hangul, kana, Han, Thai, Cyrillic, Arabic, Polish diacritics, ...) is not
@@ -1026,7 +1038,7 @@ function hasExplicitAutopilotInvocationContext(text, position, keywordLength, ke
   // "autopilot fix the parser (why it fails)" activates because the keyword is outside the parens.
   // "Please do the following (use autopilot to replace ? with ! in the template)" activates because
   // the parenthesized clause is not a true question (? is an example character, not sentence-final).
-  const sentenceText = text.slice(lineStart, lineEnd).replace(/\s+$/, '');
+  const sentenceText = text.slice(lineStart, lineEnd).trimEnd();
   if (sentenceText.endsWith(')')) {
     const parenStart = sentenceText.lastIndexOf('(');
     if (parenStart >= 0) {
@@ -1104,7 +1116,7 @@ function hasActionableAutopilotKeyword(text, pattern) {
     }
     const afterAlias = searchText.slice(match.index + match[0].length, match.index + match[0].length + 60);
     const ownLine = /^[ \t]*$/.test(linePrefix)
-      && !AUTOPILOT_REFERENCE_HEADING.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').replace(/\s+$/, ''))
+      && !AUTOPILOT_REFERENCE_HEADING.test(previousLine.replace(AUTOPILOT_MARKDOWN_MARKS, '').replace(AUTOPILOT_LIST_PREFIX, '').trimEnd())
       && (AUTOPILOT_COMMAND_AFTER.test(afterAlias) || AUTOPILOT_COLON_VERB.test(afterAlias));
     const from = ownLine ? lineStart : Math.max(0, match.index - AUTOPILOT_CONTEXT_WINDOW);
     const to = ownLine ? lineEnd : match.index + match[0].length + AUTOPILOT_CONTEXT_WINDOW;
