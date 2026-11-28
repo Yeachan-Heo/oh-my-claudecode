@@ -168,7 +168,7 @@
  * messages or more is compacted. The first and the newest user message stay as they are in the paste stage.
  *
  * Usage of Jev's requests (OMC_JEV_COMPACT_JEV_USAGE=1 or active, off by default; without it no record gains a field and no record is added). The record of a
- * compaction gets `jev_usage`, one entry per request sent to Jev: `model` (as the answer names it, masked and cut to JEV_MODEL_MAX_CHARS characters),
+ * compaction gets `jev_usage`, one entry per request sent to Jev: `model` (as the answer names it, through both secret masks and cut to JEV_MODEL_MAX_CHARS characters),
  * `input_tokens`, `output_tokens` and `cost_usd` (always null; a missing value is null, never 0). The scoring requests come first, parallel to `jev_ms` and without
  * `purpose`; the others carry `purpose` (pastes, blocks, second_round). When the owner tail makes the compaction decide again, the entries of the decisions that
  * were given up follow with `abandoned: true`. `cost_basis` is `reported` when an answer carries a cost, else `unknown`. The pass before the
@@ -3635,10 +3635,11 @@ function withJevMeta(answers, meta) {
   return answers;
 }
 const jevMetaOf = (answers) => answers?.[JEV_META_KEY];
-// The model name is text of the server and goes into the record: masked, on one line, and cut. The mask reads a bounded start of it.
+// The model name is text of the server and goes into the record: through both masks (the shared one under the mask of a series), on one line, and cut. The masks
+// read a bounded start of it.
 const JEV_MODEL_MAX_CHARS = 100;
 const JEV_MODEL_SCAN_CHARS = 600;
-const usageModel = (model) => (typeof model === 'string' ? clip(oneLine(maskSecrets(model.slice(0, JEV_MODEL_SCAN_CHARS))), JEV_MODEL_MAX_CHARS) : null);
+const usageModel = (model) => (typeof model === 'string' ? clip(oneLine(cleanForJevLong(maskSecrets(model.slice(0, JEV_MODEL_SCAN_CHARS)))), JEV_MODEL_MAX_CHARS) : null);
 // Only finite token counts of zero or more; anything else is no data.
 function sanitizeJevUsage(usage) {
   const isCount = (n) => Number.isFinite(n) && n >= 0;

@@ -149,6 +149,16 @@ describe('JEV_USAGE: the model name is text of the server', () => {
     expect(across.length).toBeLessThanOrEqual(100);
   });
 
+  it('goes through the mask of a series too, which knows keys the shared mask leaves', async () => {
+    // Made-up keys, put together here, too short for the rule of the shared mask on long strings.
+    for (const parts of [['gsk_', 'AbCdEfGh', '12345678', 'IjKlMnOp'], ['xai-', 'AbCdEfGh', '12345678', 'IjKlMn'], ['ASIA', 'QWER5TYU', 'IOP7ASDF']]) {
+      const key = parts.join('');
+      const model = await modelOf(`served by ${key}`);
+      expect(model, parts[0]).not.toContain(parts[1]);
+      expect(model, parts[0]).toContain('served by ');
+    }
+  });
+
   it('is null when the answer names none or something that is no text', async () => {
     for (const model of [undefined, 7, { name: 'x' }, null]) expect(await modelOf(model), String(JSON.stringify(model))).toBeNull();
   });
