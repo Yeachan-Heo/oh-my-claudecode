@@ -6,8 +6,9 @@
  * the write that follows it is widened (the listing of the pool directory waits a moment), so a read-modify-write
  * outside the pool lock fails these tests. The identity tests check which reservation a start or a stop takes.
  */
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -161,6 +162,105 @@ describe('concurrent callers of the pool', () => {
     const dir3 = tempDir();
     const results3 = await inParallel(dir3, 8, `return pool.reserveSession({ dir, counted: 1, limit: 3, lockBudgetMs: ${LONG_BUDGET_MS} });`);
     expect(results3.filter((result) => result.ok)).toHaveLength(2);
+  }, 60_000);
+});
+
+describe('a lock database that is still being set up', () => {
+  // The file-lock fallback of a host without the SQLite binding has no database to set up.
+  const hasSqliteBinding = (() => {
+    try {
+      new (createRequire(STATE_LOCK_URL)('better-sqlite3'))(':memory:').close();
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const hasPs = process.platform !== 'win32' && spawnSync('ps', ['-p', String(process.pid), '-o', 'lstart=']).status === 0;
+  const PROBE_TEST_BUDGET_MS = 20_000; // a call that is not served fails the test after this long
+
+  /** A pool directory named `state`: the search for the lock database stops there, so it is the one inside, wherever the temporary directory is. */
+  function poolDirectory() {
+    const dir = join(tempDir(), 'state');
+    mkdirSync(dir);
+    return dir;
+  }
+
+  const exitOf = (child) => new Promise((resolve) => child.on('close', resolve));
+
+  /**
+   * Another process that holds the write lock of the new lock database of `dir`, as the process that creates its table does
+   * on a slow disk, and lets go 1.5 s after the file `calling` appears: far past the busy timeout of the default budget.
+   * The file `releasing` exists once it is about to let go, so a call that returned without it never waited for this process.
+   */
+  async function holdNewLockDatabase(dir) {
+    const [held, calling, releasing] = ['held', 'calling', 'releasing'].map((name) => join(dir, name));
+    const script = `
+      import { existsSync, writeFileSync } from 'node:fs';
+      import { createRequire } from 'node:module';
+      const Database = createRequire(${JSON.stringify(STATE_LOCK_URL)})('better-sqlite3');
+      const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      const database = new Database(${JSON.stringify(join(dir, '.state-mutation-locks.db'))});
+      database.exec('BEGIN EXCLUSIVE');
+      writeFileSync(${JSON.stringify(held)}, 'held');
+      for (let waited = 0; !existsSync(${JSON.stringify(calling)}) && waited < 20_000; waited += 5) pause(5);
+      pause(1500);
+      writeFileSync(${JSON.stringify(releasing)}, 'releasing');
+      database.exec('COMMIT');
+      database.close();
+    `;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: 'ignore' });
+    const exited = exitOf(child);
+    const stop = async () => {
+      if (child.exitCode === null) child.kill();
+      await exited;
+    };
+    for (let waited = 0; !existsSync(held) && waited < 20_000; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
+    if (!existsSync(held)) {
+      await stop();
+      throw new Error('the other process did not take the lock of the database');
+    }
+    return { calling, releasing, exited, stop };
+  }
+
+  it.runIf(hasSqliteBinding)('is waited for within a longer lock budget, so the session ceiling still refuses', async () => {
+    const dir = poolDirectory();
+    const rival = await holdNewLockDatabase(dir);
+    try {
+      writeFileSync(rival.calling, 'calling');
+      expect(reserveSession({ dir, counted: 1, limit: 1, lockBudgetMs: LONG_BUDGET_MS })).toEqual({ ok: false, inFlight: 0 });
+      expect(existsSync(rival.releasing)).toBe(true);
+      expect(await rival.exited).toBe(0);
+    } finally {
+      await rival.stop();
+    }
+  }, 60_000);
+
+  // Outside Linux the own process identity comes from a command, which only runs while the probe window of the acquisition is
+  // open. The caller is a fresh process, which has no identity cached yet, and takes the macOS path of the probe.
+  it.runIf(hasSqliteBinding && hasPs)('leaves a longer lock budget time for the identity probe that follows the setup on macOS', async () => {
+    const dir = poolDirectory();
+    const rival = await holdNewLockDatabase(dir);
+    const script = `
+      import { writeFileSync } from 'node:fs';
+      const { reserveSession } = await import(${JSON.stringify(MODULE_URL)});
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      writeFileSync(${JSON.stringify(rival.calling)}, 'calling');
+      console.log(JSON.stringify(reserveSession({ dir: ${JSON.stringify(dir)}, counted: 1, limit: 1, lockBudgetMs: ${PROBE_TEST_BUDGET_MS} })));
+    `;
+    const caller = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const exited = exitOf(caller);
+    let output = '';
+    caller.stdout.on('data', (chunk) => { output += chunk; });
+    try {
+      expect(await exited).toBe(0);
+      expect(JSON.parse(output)).toEqual({ ok: false, inFlight: 0 });
+      expect(existsSync(rival.releasing)).toBe(true);
+      expect(await rival.exited).toBe(0);
+    } finally {
+      if (caller.exitCode === null) caller.kill();
+      await exited;
+      await rival.stop();
+    }
   }, 60_000);
 });
 

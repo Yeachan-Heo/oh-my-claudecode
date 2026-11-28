@@ -76,7 +76,12 @@ const LOCK_BUDGET_MS = 700;
  */
 function underPoolLock(dir, fn, budgetMs = LOCK_BUDGET_MS) {
   const budget = Number.isFinite(budgetMs) && budgetMs > 0 ? budgetMs : LOCK_BUDGET_MS;
-  const lock = withStateFileLockAtPathSync(join(dir, '.pool.lock'), fn, true, Math.ceil(budget / 8), LOCK_BUSY_MS, LOCK_PROBE_MS, budget);
+  // The setup of a new lock database gives up for good once a wait has outlasted the busy timeout. On macOS and Windows the
+  // probe of the own process identity that follows the setup only runs while the probe window is open. So a longer budget
+  // lengthens both. The budget is not a hard ceiling: each setup statement and the first transaction can wait up to the
+  // busy timeout on its own, so a contended call can return later than its budget.
+  const longer = budget > LOCK_BUDGET_MS;
+  const lock = withStateFileLockAtPathSync(join(dir, '.pool.lock'), fn, true, Math.ceil(budget / 8), longer ? budget : LOCK_BUSY_MS, longer ? budget : LOCK_PROBE_MS, budget);
   return lock.acquired === true || lock.callbackRan === true;
 }
 
