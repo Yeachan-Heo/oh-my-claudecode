@@ -22,12 +22,13 @@ const metered = ({ cost, fail, extra = {} } = {}) => {
     return okResponse({ answers, usage: { input_tokens: 100 + ++n, output_tokens: 7, ...(paid === undefined ? {} : { cost_usd: paid }) }, model: 'jev-x', ...extra });
   };
 };
-// Forty steps with a block of level 1, 2 or 3 in the text of each (a tie among the blocks of level 2) and a request of the user of level 2 before every eighth step.
-const session = () => {
+// Forty steps with a block of level 1, 2 or 3 in the text of each (a tie among the blocks of level 2) and a request of the user of level 2 before every eighth step;
+// `extra(i)` is added to the text of step i.
+const session = (extra = () => '') => {
   const rows = [{ role: 'user', text: 'Task: look at the notes and report.' }];
   for (let i = 1; i <= 40; i++) {
     if (i % 8 === 0) rows.push(ownerRow(`Request ${i} (LV2) ${filler(`ask${i}`, 900)}`), assistantRow(`Answer to the message ${i}.`));
-    rows.push({ role: 'assistant', text: `Step ${i} note (${['', 'LV1', 'LV2', 'LV3'][i % 4]}) ${filler(`detail${i}`, 900)}`, toolUses: [{ tool_use_id: `t${i}`, tool: 'Bash', input: { command: `cat notes-${i}.txt` } }] });
+    rows.push({ role: 'assistant', text: `Step ${i} note (${['', 'LV1', 'LV2', 'LV3'][i % 4]}) ${filler(`detail${i}`, 900)}${extra(i)}`, toolUses: [{ tool_use_id: `t${i}`, tool: 'Bash', input: { command: `cat notes-${i}.txt` } }] });
     rows.push({ role: 'user', text: '', toolResults: [{ tool_use_id: `t${i}`, text: `RESULT-${i} ${'x'.repeat(5000)}`, isError: false }] });
   }
   rows.push(ownerRow('Good, now sum up the results.'), assistantRow('Summary: done.'));
@@ -204,6 +205,26 @@ describe('JEV_USAGE: the passes that fill the verdicts', () => {
     expect(fake.blockRequests()).toHaveLength(0);
     expect(fake.records()).toEqual([]);
   });
+
+  // The error of a pass that threw goes into its record through the mask, as the error of a compaction does: a key in the message comes out
+  // masked, from the catch of the questions about blocks (a worker that threw, the entries of the requests still open beside it) and from the
+  // catch of the pass (it threw after its questions were answered). Made-up key, put together here.
+  const KEY = `ghp_${'A1b2C3d4'.repeat(5)}`;
+  const thrown = (what) => `throw new Error('injected ${KEY}: ${what}');`;
+  it.each([
+    ['a worker of the questions throws', "noteJevUsage(cfg, 'blocks', r);", `      ${thrown('the block answers are still open')}`, undefined],
+    ['the pass throws after its questions were answered', 'return { rows: plan.stats.rows, blocks: plan.stats.blocks, ...stats, ...used };', `    ${thrown('after the questions')}`, 'error'],
+  ])('the record of the pass before the own request carries the error masked when %s', async (_label, anchor, injection, skipped) => {
+    const mod = await moduleCopy(anchor, injection, true);
+    const fake = fakeDollar({ env: { ...env, ...USAGE, OMC_JEV_COMPACT_AT_PERCENT: '50', ...CASCADE }, messages: messages(), usage: hostUsage(150000), respond: metered() });
+    await turnEnd(load(mod), fake);
+    const fill = fake.records().find((r) => r.event === 'verdicts_fill');
+    expect(fake.blockRequests().length).toBeGreaterThan(0);
+    expect(fill.jev_usage).toHaveLength(fake.blockRequests().length);
+    expect(fill.skipped).toBe(skipped);
+    expect(fill.error).toContain('injected ghp_***');
+    expect(JSON.stringify(fill)).not.toContain(KEY.slice(4, 20));
+  });
 });
 
 describe('JEV_USAGE: the exception path (the entries of the requests still open)', () => {
@@ -220,6 +241,18 @@ describe('JEV_USAGE: the exception path (the entries of the requests still open)
       if (kinds.includes('blocks') && body.state?.blocks) await new Promise((resolve) => setTimeout(resolve, ms));
       if (kinds.includes('ties') && body.state?.items) await new Promise((resolve) => setTimeout(resolve, ms));
       return payload;
+    };
+  };
+  // The question about a pasted tag goes out only after an asynchronous digest, which a loaded machine can make slower than the 20 ms the injected
+  // throw waits: the decision would then end before the question went out. The copy of the module awaits OUT, the promise the double of Jev
+  // fulfils when the question went out (every run makes its own), so the question is out and still open when the throw comes.
+  const OUT = 'jevCompactionPastedOut';
+  const pastedOut = (respond) => {
+    let out;
+    globalThis[OUT] = new Promise((resolve) => { out = () => { delete globalThis[OUT]; resolve(); }; });
+    return async (body) => {
+      if (body.questions?.pasted) out();
+      return respond(body);
     };
   };
 
@@ -258,11 +291,11 @@ describe('JEV_USAGE: the exception path (the entries of the requests still open)
   it('an exception with a paste question still open keeps its entry with the purpose pastes', async () => {
     const mod = await moduleCopy(
       'const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);',
-      "  await new Promise((resolve) => setTimeout(resolve, 20)); throw new Error('injected: the paste answer is still open');",
+      "  await globalThis.jevCompactionPastedOut; throw new Error('injected: the paste answer is still open');",
       true,
     );
     const rows = [ownerRow(`Please check the report below.\n\n${pastedTag(filler('alpha', 3000))}\n\nThanks.`), ownerRow('Next.')];
-    const run = await compactOnce(withRows(rows), { env: { ...ACTIVE_ENV, ...USAGE, OMC_JEV_COMPACT_PASTES: 'active' }, mod, respond: slowMetered({ kinds: ['pastes'], ms: 60 }) });
+    const run = await compactOnce(withRows(rows), { env: { ...ACTIVE_ENV, ...USAGE, OMC_JEV_COMPACT_PASTES: 'active' }, mod, respond: pastedOut(slowMetered({ kinds: ['pastes'], ms: 60 })) });
     const record = compactRecord(run);
     const pastes = run.calls.fetch.filter((c) => c.body.questions?.pasted).length;
     expect(pastes).toBe(1);
@@ -313,11 +346,11 @@ describe('JEV_USAGE: the exception path (the entries of the requests still open)
   it('without the switch an exception adds no field and changes nothing in the answer or the requests', async () => {
     const mod = await moduleCopy(
       'const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);',
-      "  await new Promise((resolve) => setTimeout(resolve, 20)); throw new Error('injected: the paste answer is still open');",
+      "  await globalThis.jevCompactionPastedOut; throw new Error('injected: the paste answer is still open');",
       true,
     );
     const rows = [ownerRow(`Please check the report below.\n\n${pastedTag(filler('alpha', 3000))}\n\nThanks.`), ownerRow('Next.')];
-    const run = (extra) => compactOnce(withRows(rows), { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active', ...extra }, mod, respond: slowMetered({ kinds: ['pastes'], ms: 60 }) });
+    const run = (extra) => compactOnce(withRows(rows), { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_PASTES: 'active', ...extra }, mod, respond: pastedOut(slowMetered({ kinds: ['pastes'], ms: 60 })) });
     const off = await run({});
     const on = await run(USAGE);
     expect(compactRecord(off)).not.toHaveProperty('jev_usage');
@@ -383,5 +416,75 @@ describe('JEV_USAGE: the exception path (the entries of the requests still open)
     expect(record.jev_usage).toHaveLength(run.calls.fetch.length);
     expect(record.jev_usage.slice(-given.length)).toEqual(given);
     expect(record.jev_usage.slice(0, record.jev_ms?.length ?? 0).some((entry) => entry.abandoned)).toBe(false);
+  });
+
+  // One entry per request, none doubled and none lost: the tokens of the entries, sorted, are the tokens the double of Jev handed out to the
+  // requests one by one.
+  const oneEntryPerRequest = (run) => {
+    const record = compactRecord(run);
+    expect(record.jev_usage.map((entry) => entry.input_tokens).sort((a, b) => a - b)).toEqual(run.calls.fetch.map((_c, k) => 101 + k));
+    return record;
+  };
+
+  // The series of traces are rated with the question of the second round from the decision itself, which has no catch of its own: a worker that
+  // throws there drains in the catch of the question, and the error goes on to the catch of the compaction, which drains the same tracker again.
+  // The two drains give one entry per request: the entry of the series is added once.
+  const call = (n) => `[compacted] Read(file-${n}.txt) - result of ${1000 + n} chars removed`;
+  const series = (from) => [call(from), call(from + 1), call(from + 2), call(from + 3)].join('\n');
+  const withSeries = (i) => (i === 3 || i === 7 ? `\n\n${series(1)}` : i === 6 ? `\n\n${series(11)}` : '');
+  const isSeries = (body) => Object.values(body.state?.items ?? {}).some((item) => item.kind === 'trace_series');
+  it('an exception in the rating of the series, drained by the question and again by the compaction, keeps one entry per request', async () => {
+    const mod = await moduleCopy("noteJevUsage(cfg, 'second_round', r);", "      throw new Error('injected: the series answers are still open');", true);
+    const run = await compactOnce(session(withSeries), { env: { ...SECOND_ROUND, ...USAGE }, mod, respond: metered(), usage: high });
+    const record = oneEntryPerRequest(run);
+    const asked = run.calls.fetch.filter((c) => isSeries(c.body)).length;
+    expect(asked).toBe(1);
+    expect(record.reason).toBe('exception');
+    expect(record.jev_usage.filter((entry) => entry.purpose === 'second_round')).toHaveLength(asked);
+  });
+
+  // A worker of the questions about blocks throws while the scoring request is still open: the drain of the catch of the questions adds the
+  // entries of the workers that threw, ensureBlockVerdicts catches the error and the decision goes on, adding the scoring entry itself. The scoring
+  // entry is added once: one entry per request.
+  it('a worker of the block questions that throws while the scoring is still open leaves the scoring entry to the decision', async () => {
+    const mod = await moduleCopy("noteJevUsage(cfg, 'blocks', r);", "        throw new Error('injected: a block worker throws');", true);
+    const run = await compactOnce(session(), { env: { ...SECOND_ROUND, ...USAGE }, mod, respond: slowMetered({ kinds: ['scoring'], ms: 80 }), usage: high });
+    const record = oneEntryPerRequest(run);
+    expect(run.blockRequests().length).toBeGreaterThan(0);
+    expect(record.result).toBe('jev');
+    expect(record.jev_ms).toHaveLength(run.calls.fetch.length - run.blockRequests().length);
+    expect(record.jev_usage.filter((entry) => entry.purpose === undefined)).toHaveLength(record.jev_ms.length);
+  });
+
+  // The entries a drain adds for the requests other than the scoring follow the order in which those requests ended. The answers about blocks
+  // wait for the test, which lets them go from the last request to the first; every worker throws, so the drain of the catch of the questions
+  // adds them all. No timer decides the order.
+  it('the entries the drain adds follow the order in which the requests ended, not the order in which they went out', async () => {
+    const mod = await moduleCopy("noteJevUsage(cfg, 'blocks', r);", "        throw new Error('injected: a block worker throws');", true);
+    let n = 0;
+    let open = false; // an answer about blocks that comes late goes out at once
+    const sent = []; // every request: its kind and the tokens handed out to it, in the order in which they went out
+    const waiting = []; // what lets an answer about blocks go
+    const respond = (body) => {
+      const kind = body.state?.results ? 'scoring' : body.state?.blocks ? 'blocks' : 'other';
+      const input_tokens = 100 + ++n;
+      sent.push({ kind, tokens: input_tokens });
+      const answers = kind === 'scoring' ? Object.fromEntries(Object.keys(body.questions).map((q) => [q, { type: 'score', score: 0.6, confidence: 0.9 }])) : jevAnswers(body);
+      const payload = okResponse({ answers, usage: { input_tokens, output_tokens: 7 }, model: 'jev-x' });
+      return kind === 'blocks' && !open ? new Promise((resolve) => waiting.push(() => resolve(payload))) : payload;
+    };
+    const going = compactOnce(session(), { env: { ...SECOND_ROUND, ...USAGE }, mod, respond, usage: high });
+    expect(await until(() => waiting.length >= 2)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the questions of a round go out together: the rest have arrived
+    while (waiting.length) { waiting.pop()(); await new Promise((resolve) => setTimeout(resolve, 0)); } // the last request first
+    open = true;
+    const run = await going;
+    const record = oneEntryPerRequest(run);
+    const scoring = sent.filter((s) => s.kind === 'scoring');
+    const blocks = sent.filter((s) => s.kind === 'blocks').map((s) => s.tokens);
+    // The scoring entries first; then the ones the drain added, in the order in which their answers came.
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    expect(record.jev_usage.map((entry) => entry.purpose ?? 'scoring')).toEqual([...scoring.map(() => 'scoring'), ...blocks.map(() => 'blocks')]);
+    expect(record.jev_usage.map((entry) => entry.input_tokens)).toEqual([...scoring.map((s) => s.tokens), ...blocks.reverse()]);
   });
 });

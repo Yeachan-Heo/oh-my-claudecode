@@ -176,7 +176,7 @@
  * module's own request puts both fields into its `verdicts_fill` record, and a pass in the background that asked something writes such a record of its own.
  * When the decision ends with an exception, the module waits for the requests it has already sent (each ends by its own timeout, never beyond the
  * decision deadline) before the record is written, and the record holds their entries: the scoring ones first, in batch order, the others in the
- * order in which they ended.
+ * order in which they ended. A request whose entry a drain added gets no second one, from a later drain or from the decision going on.
  *
  * Host attachments (OMC_JEV_COMPACT_HOST_ATTACHMENTS=1 or true, off by default; without it the user rows of text keep their handles and no record gains a field).
  * The host keeps what is no row (instructions, lists of skills, agents and tools, hook contexts, the text of used skills) in the group of the row before it, and a
@@ -3700,10 +3700,14 @@ function releaseScoringUsage(cfg) {
   for (const slot of [...pending.slots]) if (slot.purpose === undefined) pending.slots.delete(slot);
 }
 // Waits for the requests whose entries are not in the record yet and adds the entries. A slot that left the tracker in the normal way counts no more,
-// so no entry is doubled. Never rejects.
-async function drainJevUsage(record, pending) {
+// and the slots the drain handled leave the tracker with their entries, so a second drain of the same tracker adds nothing again (the catch of a
+// question drains, then its error goes on to the catch of the compaction, which drains once more). A drain inside the decision (the catch of a
+// question; `scoring` false) leaves the scoring requests out: the decision adds their entries itself when it goes on, else the drain of the catch
+// of the compaction does, so they are added once. Never rejects.
+async function drainJevUsage(record, pending, scoring = true) {
   if (!pending || !pending.slots.size) return;
-  const open = [...pending.slots];
+  const open = [...pending.slots].filter((s) => scoring || s.purpose !== undefined);
+  if (!open.length) return;
   await Promise.all(open.map((s) => s.promise.catch(() => undefined)));
   const still = open.filter((s) => pending.slots.has(s));
   const sent = still.filter((s) => s.purpose === undefined);
@@ -3719,6 +3723,7 @@ async function drainJevUsage(record, pending) {
     if (costBasisOf(jevMetaOf(s.value?.value)?.raw) === 'reported') record.cost_basis = 'reported';
     else record.cost_basis ??= 'unknown';
   }
+  for (const s of still) pending.slots.delete(s);
 }
 
 // Score 0-1 from an answer on the four levels (0-3), else undefined.
@@ -5097,9 +5102,10 @@ async function askBlockVerdicts($, cfg, items, opts) {
       }
     };
     // A worker that throws leaves the entries of the requests that went out missing: the drain waits for the ones still open (each ends by its own
-    // timeout) and adds their entries, then the error goes on to the catch of ensureBlockVerdicts as before.
+    // timeout) and adds their entries, then the error goes on to the catch of ensureBlockVerdicts as before. The scoring requests that are open
+    // beside them (the decision asks both at once) stay to the decision, which goes on and adds their entries itself.
     await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker)).catch(async (error) => {
-      await drainJevUsage(cfg.usageRecord, cfg.usagePending);
+      await drainJevUsage(cfg.usageRecord, cfg.usagePending, false);
       throw error;
     });
     const redo = new Set();
@@ -5187,7 +5193,7 @@ async function ensureBlockVerdicts($, cfg, plan, ctx) {
     });
     for (const [key, v] of run.verdicts) plan.verdicts.set(key, v);
     stats.ask = run.stats;
-  } catch (error) { stats.error = clip(oneLine(String(error?.message ?? error)), 200); }
+  } catch (error) { stats.error = clip(oneLine(maskSecrets(String(error?.message ?? error))), 200); } // masked: the pass writes it into its record
   return stats;
 }
 
@@ -5319,7 +5325,7 @@ async function fillBlockVerdicts($, cfg, messages, ctx) {
     // the usage switch nothing is tracked and the catch returns as before.
     await drainJevUsage(used, pending);
     if (cfg.jevUsage && used.jev_usage) used.cost_basis ??= 'unknown';
-    return { skipped: 'error', error: clip(oneLine(String(error?.message ?? error)), 200), ...used };
+    return { skipped: 'error', error: clip(oneLine(maskSecrets(String(error?.message ?? error))), 200), ...used }; // the error masked, as in the catch of compact
   }
 }
 
@@ -5573,7 +5579,7 @@ async function askTie($, cfg, group, ctx) {
   // A worker that throws (no throw can come out of the request itself) leaves the entries of the requests that went out missing: the drain waits for
   // the ones still open (each ends by its own timeout) and adds their entries, then the error goes on as before (its caller catches it).
   await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker)).catch(async (error) => {
-    await drainJevUsage(cfg.usageRecord, cfg.usagePending);
+    await drainJevUsage(cfg.usageRecord, cfg.usagePending, false);
     throw error;
   });
   noteFailures(failures, Date.now());
