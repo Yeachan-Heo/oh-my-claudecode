@@ -95,6 +95,7 @@ import {
 } from "./worker-launch-ack.js";
 import { resolveRuntimeCliPath } from "./runtime-owner-client.js";
 import { readFencedPaneTree } from "./pane-tree-read.js";
+import { ensureProviderEventsLog } from "./provider-events.js";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
@@ -4129,6 +4130,14 @@ export async function spawnOwnedWorkerInPane(
     ...(config.launchContext ? { context: config.launchContext } : {}),
   });
   try {
+    // The provider event hook appends only to this file and never creates it.
+    // Display-only, so a log that cannot be created must not block the launch.
+    if (config.provider === "claude")
+      await ensureProviderEventsLog(
+        config.launchStateCwd,
+        config.teamName,
+        config.workerName,
+      ).catch(() => undefined);
     const launchEnv: Record<string, string> = {
       ...config.envVars,
       OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,

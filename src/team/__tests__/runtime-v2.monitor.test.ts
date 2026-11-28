@@ -216,6 +216,101 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     );
   });
 
+  it('shows the latest hook event of the current attempt and decides nothing from it', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-provider-event-'));
+    isolateFixtureRoot(cwd);
+    await writeConfigAndTask('pending');
+    const teamRoot = teamStateRoot(cwd, 'demo-team');
+    const config = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf-8'));
+    config.workers[0].launch_attempt_id = 'attempt-current';
+    await writeFile(join(teamRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+
+    const without = await monitorTeamV2('demo-team', cwd);
+    expect(without?.workers[0]?.providerEvent).toEqual({ event: 'none', ageSeconds: null });
+
+    const now = Date.now();
+    await writeFile(join(teamRoot, 'workers', 'worker-1', 'provider-events.jsonl'), [
+      { v: 1, event: 'SessionStart', at: now - 20_000, attempt: 'attempt-current' },
+      { v: 1, event: 'UserPromptSubmit', at: now - 12_000, attempt: 'attempt-current' },
+      { v: 1, event: 'Stop', at: now - 1_000, attempt: 'attempt-old' },
+    ].map(record => JSON.stringify(record)).join('\n') + '\n', 'utf-8');
+    const withEvents = await monitorTeamV2('demo-team', cwd);
+    const shown = withEvents?.workers[0]?.providerEvent;
+    if (process.platform === 'win32') {
+      expect(shown).toEqual({ event: 'none', ageSeconds: null });
+    } else {
+      expect(shown?.event).toBe('UserPromptSubmit');
+      expect(shown?.ageSeconds).toBeGreaterThanOrEqual(12);
+      expect(shown?.ageSeconds).toBeLessThan(60);
+    }
+    expect(withEvents?.recommendations).toEqual(without?.recommendations);
+    expect(withEvents?.nonReportingWorkers).toEqual(without?.nonReportingWorkers);
+    expect(withEvents?.deadWorkers).toEqual(without?.deadWorkers);
+  });
+
+  it('reads the hook events under the team root whether the config records it absolute, relative or not at all', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-provider-event-root-'));
+    isolateFixtureRoot(cwd);
+    await writeConfigAndTask('pending');
+    const teamRoot = teamStateRoot(cwd, 'demo-team');
+    const config = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf-8'));
+    config.workers[0].launch_attempt_id = 'attempt-current';
+    await writeFile(join(teamRoot, 'workers', 'worker-1', 'provider-events.jsonl'),
+      `${JSON.stringify({ v: 1, event: 'Stop', at: Date.now() - 5_000, attempt: 'attempt-current' })}\n`, 'utf-8');
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+    const shownWith = async (stateRoot: string | undefined) => {
+      if (stateRoot === undefined) delete config.team_state_root;
+      else config.team_state_root = stateRoot;
+      await writeFile(join(teamRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+      return (await monitorTeamV2('demo-team', cwd))?.workers[0]?.providerEvent.event;
+    };
+    // The process runs elsewhere, so a root left relative would resolve against the wrong directory.
+    const elsewhere = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-elsewhere-'));
+    const previousCwd = process.cwd();
+    process.chdir(elsewhere);
+    try {
+      const shown = {
+        absolute: await shownWith(teamRoot),
+        relative: await shownWith('.omc/state/team/demo-team'),
+        unset: await shownWith(undefined),
+      };
+      const expected = process.platform === 'win32' ? 'none' : 'Stop';
+      expect(shown).toEqual({ absolute: expected, relative: expected, unset: expected });
+    } finally {
+      process.chdir(previousCwd);
+      await rm(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('shows hook event ages as whole seconds, never below zero', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-monitor-provider-event-age-'));
+    isolateFixtureRoot(cwd);
+    await writeConfigAndTask('pending');
+    const teamRoot = teamStateRoot(cwd, 'demo-team');
+    const config = JSON.parse(await readFile(join(teamRoot, 'config.json'), 'utf-8'));
+    config.workers[0].launch_attempt_id = 'attempt-current';
+    await writeFile(join(teamRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+    const ageFor = async (at: number) => {
+      await writeFile(join(teamRoot, 'workers', 'worker-1', 'provider-events.jsonl'),
+        `${JSON.stringify({ v: 1, event: 'Stop', at, attempt: 'attempt-current' })}\n`, 'utf-8');
+      return (await monitorTeamV2('demo-team', cwd))?.workers[0]?.providerEvent.ageSeconds;
+    };
+
+    // Only Date is frozen, so the monitor's file I/O and timers still run.
+    const now = Date.parse('2026-11-20T12:00:00.000Z');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    try {
+      // A clock that ran ahead of the monitor's shows age 0, not a negative age.
+      expect(await ageFor(now + 60_000)).toBe(0);
+      expect(await ageFor(now - 12_500)).toBe(12);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not flag a busy pane, even one whose output quotes a trust dialog', async () => {
     const snapshot = await monitorWithPane(
       'omc-runtime-v2-monitor-busy-trust-',

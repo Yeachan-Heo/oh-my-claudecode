@@ -1,0 +1,40 @@
+ ▐▛███▛█   Claude Code v2.1.328
+▝▜██████▀  claude-does-not-exist with high effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/omc-e0-XXXX/s4.0Nmq
+
+⚠ Model "claude-does-not-exist" isn't recognized · context assumed to be 1m tokens · update Claude Code, or see the docs
+
+❯ Reply with only the uppercase form of the word e0-done-4 and nothing else.                                            
+
+⏺ There's an issue with the selected model (claude-does-not-exist). It may not exist or you may not have access         
+  to it. Run /model to pick a different model.                                                                        
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Once fixed, resend your message                                                                                       
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [OMC#5.8.4] | Model: claude-does-not-e... | effort:high | 5h:0%(0h0m) wk:0%(0d0h) fable:0%(0d0h) | ctx:0%
+  ⏵⏵ bypass permissions on (shift+tab to cycle)                                                                       
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

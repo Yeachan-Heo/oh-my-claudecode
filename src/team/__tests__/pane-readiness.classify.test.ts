@@ -62,6 +62,10 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/2.1.325/idle.txt': 'idlePrompt',
   'claude/2.1.325/trust-just-answered.txt': '',
   'claude/2.1.325/trust.txt': 'trust:claude_directory idlePrompt',
+  'claude/2.1.328/busy-long-turn.txt': 'idlePrompt busy',
+  'claude/2.1.328/done.txt': 'idlePrompt',
+  'claude/2.1.328/idle-after-esc-interrupt.txt': 'idlePrompt',
+  'claude/2.1.328/idle-after-stopfailure.txt': 'idlePrompt',
   // Claude Code's first-run dialogs are read only by the startup wait (detectClaudeStartupDialog).
   'claude/2.1.328/bypass-permissions-yes-focused.txt': 'idlePrompt',
   'claude/2.1.328/bypass-permissions.txt': 'idlePrompt',
@@ -69,6 +73,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   'claude/2.1.328/fullscreen-renderer.txt': 'idlePrompt',
   'claude/2.1.328/idle-after-fullscreen-renderer.txt': 'idlePrompt',
   'claude/2.1.328/trust-yes-focused.txt': 'trust:claude_directory idlePrompt',
+  'claude/2.1.328/trust.txt': 'trust:claude_directory idlePrompt',
   'claude/2.1.329/onboarding-security-notes.txt': '',
   'claude/2.1.329/onboarding-theme.txt': 'idlePrompt',
   'claude/2.1.330/bypass-permissions-body-partial.txt': '',

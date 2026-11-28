@@ -10,7 +10,7 @@
  * - 'draining' worker status for graceful transitions during scale_down
  */
 
-import { join, resolve } from "path";
+import { isAbsolute, join, resolve } from "path";
 import { mkdir, readFile, rm } from "fs/promises";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -24,6 +24,10 @@ import {
   validateWorkerLaunchDescriptor,
   type CliAgentType,
 } from "./model-contract.js";
+import {
+  withProviderEventSettingsArgs,
+  writeProviderEventSettings,
+} from "./provider-events.js";
 import { CANONICAL_TEAM_ROLES } from "../shared/types.js";
 import type { CanonicalTeamRole } from "../shared/types.js";
 import { normalizeDelegationRole } from "../features/delegation-routing/types.js";
@@ -82,6 +86,7 @@ import {
   absPath,
   canonicalTeamCwd,
   canonicalTeamStatePath,
+  canonicalTeamStateRoot,
   teamStateRoot as resolveTeamStateRoot,
 } from "./state-paths.js";
 import { writeWorkerOverlay } from "./worker-bootstrap.js";
@@ -736,6 +741,11 @@ export async function scaleUpOwned(
 
       const teamStateRoot =
         config.team_state_root ?? resolveTeamStateRoot(leaderCwd, sanitized);
+      // Instance validation proved a relative configured root names this directory,
+      // but this process and a worktree worker may run in another one.
+      const launchStateRoot = isAbsolute(teamStateRoot)
+        ? teamStateRoot
+        : canonicalTeamStateRoot(leaderCwd, sanitized);
       const worktreeMode: TeamWorktreeMode = config.worktree_mode ?? "disabled";
 
       // Resolve the monotonic worker index counter
@@ -1326,7 +1336,14 @@ export async function scaleUpOwned(
                 ? { reasoningEffort: workerReasoningEffort }
                 : {}),
             });
-            launchArgs = args;
+            // Recovery relaunches from this saved argv, so the hook settings stay with it.
+            launchArgs = withProviderEventSettingsArgs(
+              workerAgentType,
+              args,
+              launchStateRoot,
+            );
+            if (launchArgs.length !== args.length)
+              await writeProviderEventSettings(launchStateRoot);
           } catch (error) {
             return await rollbackScaleUp(
               `Failed strict provider argv construction for ${workerName} (${workerAgentType}): ${error instanceof Error ? error.message : String(error)}`,
@@ -1403,7 +1420,7 @@ export async function scaleUpOwned(
               env,
               canonical && hasExplicitOwnedRole ? canonical : undefined,
             ),
-            OMC_TEAM_STATE_ROOT: teamStateRoot,
+            OMC_TEAM_STATE_ROOT: launchStateRoot,
             OMC_TEAM_LEADER_CWD: leaderCwd,
             ...(worktree
               ? {

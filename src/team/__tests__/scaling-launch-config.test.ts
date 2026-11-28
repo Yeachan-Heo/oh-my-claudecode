@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'fs/promises';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'path';
+import { execFileSync } from 'node:child_process';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'os';
 import type { CliAgentType } from '../model-contract.js';
 import type { TeamConfig, TmuxServerIdentity } from '../types.js';
+import { ensureProviderEventsLog, providerEventsPath } from '../provider-events.js';
 import { absPath, teamStateRoot, TeamPaths } from '../state-paths.js';
 import {
   activateTeamInstanceUnderLock,
@@ -13,6 +16,9 @@ import {
   withTeamInstanceLifecycleLock,
 } from '../team-instance.js';
 
+const PROVIDER_EVENT_HOOK = join(
+  dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'scripts', 'team-provider-event-hook.mjs',
+);
 const TEAM_INSTANCE_ID = '22222222-2222-4222-8222-222222222222';
 type WorkerLivenessInput = Parameters<typeof import('../tmux-session.js').getWorkerLiveness>[0];
 type WorkerLiveness = Awaited<ReturnType<typeof import('../tmux-session.js').getWorkerLiveness>>;
@@ -408,6 +414,155 @@ describe('scaleUp launch config', () => {
       const candidate = monitorMocks.saveTeamConfigAtRevision.mock.calls[index]?.[0] as TeamConfig;
       return candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting');
     })!).toBeLessThan(splitIndex);
+  });
+
+  it.each([
+    ['non-bare', ['/usr/bin/claude', '--dangerously-skip-permissions'], true],
+    ['--bare', ['/usr/bin/claude', '--dangerously-skip-permissions', '--bare'], false],
+  ] as const)('gives a %s claude scale-up worker the hook settings only when it does not run --bare', async (
+    _label: string,
+    workerArgv: readonly string[],
+    hooked: boolean,
+  ) => {
+    modelContractMocks.buildWorkerArgv.mockReturnValue(workerArgv);
+    const settingsPath = join(teamStateRoot(cwd, 'demo-team'), 'provider-event-hooks.json');
+    const expectedArgs = hooked
+      ? [...workerArgv.slice(1), '--settings', settingsPath]
+      : workerArgv.slice(1);
+
+    const result = await scaleUp(
+      'demo-team',
+      1,
+      'claude',
+      [{ subject: 'demo', description: 'demo task' }],
+      cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({ ok: true, newWorkerCount: 1 });
+    expect(tmuxSessionMocks.spawnOwnedWorkerInPane).toHaveBeenCalledWith(
+      'demo-session:0',
+      expect.anything(),
+      expect.objectContaining({ provider: 'claude', launchBinary: '/usr/bin/claude', launchArgs: expectedArgs }),
+    );
+    // Recovery relaunches from the saved descriptor, so it must carry the same argv.
+    const reservation = monitorMocks.saveTeamConfigAtRevision.mock.calls
+      .map(([candidate]) => candidate as TeamConfig)
+      .find(candidate => candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting'));
+    expect(reservation!.workers[0]!.launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: expectedArgs });
+    if (hooked) {
+      const settings = JSON.parse(await readFile(settingsPath, 'utf-8')) as {
+        hooks: Record<string, Array<{ hooks: Array<{ type: string; command: string }> }>>;
+      };
+      expect(Object.keys(settings.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure']);
+      for (const [event, entries] of Object.entries(settings.hooks)) {
+        expect(entries[0]!.hooks[0]).toMatchObject({ type: 'command' });
+        expect(entries[0]!.hooks[0]!.command).toMatch(new RegExp(`team-provider-event-hook\\.mjs' ${event}$`));
+      }
+    } else {
+      expect(existsSync(settingsPath)).toBe(false);
+    }
+  });
+
+  it.each(['alias', 'canonical'] as const)('launches a claude scale-up worker under an absolute configured team root as the config records it (%s)', async spelling => {
+    modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--dangerously-skip-permissions']);
+    // The storage anchor may be a symlink, so the recorded root can name the canonical one through it.
+    const canonicalRoot = teamStateRoot(cwd, 'demo-team');
+    const alias = join(cwd, '.omc-state-alias');
+    await symlink(process.env.OMC_STATE_DIR!, alias, 'junction');
+    process.env.OMC_STATE_DIR = alias;
+    const aliasRoot = teamStateRoot(cwd, 'demo-team');
+    expect(aliasRoot).not.toBe(canonicalRoot);
+    // The environment names the alias in both cases, so only the config can yield the canonical spelling.
+    const recordedRoot = spelling === 'alias' ? aliasRoot : canonicalRoot;
+    config = makeConfig({ team_state_root: recordedRoot });
+    expect(await realpath(recordedRoot)).toBe(canonicalRoot);
+
+    const result = await scaleUp(
+      'demo-team',
+      1,
+      'claude',
+      [{ subject: 'demo', description: 'demo task' }],
+      cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({ ok: true, newWorkerCount: 1 });
+    const launch = tmuxSessionMocks.spawnOwnedWorkerInPane.mock.calls[0]?.[2] as unknown as
+      { launchArgs: string[]; envVars: Record<string, string> };
+    expect(launch.launchArgs.slice(-2)).toEqual(['--settings', join(recordedRoot, 'provider-event-hooks.json')]);
+    expect(launch.envVars.OMC_TEAM_STATE_ROOT).toBe(recordedRoot);
+  });
+
+  it('rolls back a claude scale-up whose hook settings cannot be written', async () => {
+    modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--dangerously-skip-permissions']);
+    // A directory in its place: the settings rename fails.
+    const settingsPath = join(teamStateRoot(cwd, 'demo-team'), 'provider-event-hooks.json');
+    await mkdir(settingsPath);
+
+    const result = await scaleUp(
+      'demo-team',
+      1,
+      'claude',
+      [{ subject: 'demo', description: 'demo task' }],
+      cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Failed strict provider argv construction for worker-1 (claude)') });
+    expect(tmuxSessionMocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    // Rolled back: no reservation blocks the next scale-up and no worker directory stays.
+    expect(monitorMocks.saveTeamConfigAtRevision.mock.calls.some(([candidate]) => (candidate as TeamConfig).active_scale_up)).toBe(true);
+    expect(monitorMocks.currentConfig).toMatchObject({ worker_count: 0, workers: [] });
+    expect((monitorMocks.currentConfig as unknown as TeamConfig).active_scale_up).toBeUndefined();
+    expect(existsSync(absPath(cwd, TeamPaths.workerDir('demo-team', 'worker-1')))).toBe(false);
+  });
+
+  it('launches a claude scale-up worker under the absolute team root when the config records it relative and the caller runs elsewhere', async () => {
+    modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--dangerously-skip-permissions']);
+    config = makeConfig({ team_state_root: TeamPaths.root('demo-team') });
+    const teamRoot = teamStateRoot(cwd, 'demo-team');
+    const settingsPath = join(teamRoot, 'provider-event-hooks.json');
+    const expectedArgs = ['--dangerously-skip-permissions', '--settings', settingsPath];
+    const elsewhere = await mkdtemp(join(tmpdir(), 'omc-scaling-elsewhere-'));
+    const previousCwd = process.cwd();
+    process.chdir(elsewhere);
+    try {
+      const result = await scaleUp(
+        'demo-team',
+        1,
+        'claude',
+        [{ subject: 'demo', description: 'demo task' }],
+        cwd,
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+      );
+
+      expect(result).toMatchObject({ ok: true, newWorkerCount: 1 });
+      expect(existsSync(settingsPath)).toBe(true);
+      const launch = tmuxSessionMocks.spawnOwnedWorkerInPane.mock.calls[0]?.[2] as unknown as
+        { launchArgs: string[]; envVars: Record<string, string> };
+      expect(launch.launchArgs).toEqual(expectedArgs);
+      expect(launch.envVars.OMC_TEAM_STATE_ROOT).toBe(teamRoot);
+      // Recovery relaunches from the saved descriptor, so it must carry the same argv.
+      const reservation = monitorMocks.saveTeamConfigAtRevision.mock.calls
+        .map(([candidate]) => candidate as TeamConfig)
+        .find(candidate => candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting'));
+      expect(reservation!.workers[0]!.launch_descriptor!.args).toEqual(expectedArgs);
+
+      if (process.platform !== 'win32') {
+        // A worktree worker's hook runs outside the leader directory.
+        await ensureProviderEventsLog(cwd, 'demo-team', 'worker-1');
+        execFileSync(process.execPath, [PROVIDER_EVENT_HOOK, 'Stop'], {
+          cwd: elsewhere,
+          env: { ...launch.envVars, OMC_WORKER_LAUNCH_ATTEMPT_ID: 'attempt-1' },
+        });
+        expect(JSON.parse(await readFile(providerEventsPath(teamRoot, 'worker-1'), 'utf-8')))
+          .toMatchObject({ event: 'Stop', attempt: 'attempt-1' });
+      }
+    } finally {
+      process.chdir(previousCwd);
+      await rm(elsewhere, { recursive: true, force: true });
+    }
   });
 
   it('passes the immutable team defaults to scale-up resolution', async () => {
