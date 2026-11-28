@@ -6,12 +6,13 @@ stateDiagram-v2
     s4: Checking second try
     s5: Wrong password, 1 try left
     s6: Checking last try
+    [*] --> s2
   }
   s7: Reset email sent
   s8: Signed in
   s9: Locked out
   [*] --> s0
-  s0 --> s2: YouSubmitAPassword
+  s0 --> s1: YouSubmitAPassword
   s2 --> s8: ThePasswordIsRight
   s2 --> s3: ThePasswordIsWrong
   s7 --> s0: YouSetANewPassword

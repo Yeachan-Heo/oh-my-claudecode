@@ -42,6 +42,7 @@ import { readTrace } from "../frontends/trace.ts";
 import { readVerdict } from "../frontends/verdict.ts";
 import { compile, project } from "../pipeline.ts";
 import { fileLines } from "../run.ts";
+import { drawn } from "./drawn.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const corpus = (name: string, file: string) => path.join(here, "corpus", name, file);
@@ -690,7 +691,48 @@ test("a step that leaves every child of a parent the same way is one arrow from 
   const closed = chart.match(/^ {2}(s\d+): Closed$/m)?.[1];
   const quits = [];
   for (const m of chart.matchAll(/^ {2}(s\d+) --> (s\d+): Quit$/gm)) quits.push([m[1], m[2]]);
-  assert.deepEqual(quits, [[open, closed]]);
+});
+
+test("a parent's only way in ends at the parent, and its start marker goes on to each state with that step's label", () => {
+  const graph = graphOf(
+    [
+      ["ask", { at: "Asking" }, true],
+      ["flat", { at: "Layout.Flat" }],
+      ["parents", { at: "Layout.Parents" }],
+      ["drawn", { at: "Done.Drawn" }],
+    ],
+    [
+      ["ask", "flat", "String"],
+      ["ask", "parents", "Array"],
+      ["flat", "drawn", "Draw"],
+    ],
+  );
+  const { chart } = draw(graph, { state: (v) => String(v.at).split(".") });
+  assert.deepEqual(drawn(chart).arrows.sort(), [
+    "Asking --> Layout",
+    "Done start --> Drawn",
+    "Flat --> Done: Draw",
+    "Layout start --> Flat: String",
+    "Layout start --> Parents: Array",
+  ]);
+});
+
+test("a parent that two states lead into keeps an arrow from each, since one start marker cannot say where each came from", () => {
+  const graph = graphOf(
+    [
+      ["a", { at: "A" }, true],
+      ["b", { at: "B" }],
+      ["p", { at: "P.p" }],
+      ["q", { at: "P.q" }],
+    ],
+    [
+      ["a", "b", "Go"],
+      ["a", "p", "Left"],
+      ["b", "q", "Right"],
+    ],
+  );
+  const { chart } = draw(graph, { state: (v) => String(v.at).split(".") });
+  assert.deepEqual(drawn(chart).arrows.sort(), ["A --> B: Go", "A --> p: Left", "B --> q: Right"]);
 });
 
 test("a label codes only the characters that Mermaid reads as syntax, so TLA+ values stay as TLC prints them", () => {

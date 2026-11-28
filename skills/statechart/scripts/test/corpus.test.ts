@@ -383,6 +383,44 @@ for (const [width, height, config, status, drawn, chart, header] of [
     },
   );
 
+for (const [what, tla, where] of [
+  [
+    "an unknown name",
+    ["---- MODULE Broken ----", "VARIABLE x", "Init == x = 0", "Next == x' = y", "===="],
+    /^line 4, col 14 to line 4, col 14 of module Broken\n+Unknown operator: `y'\.$/m,
+  ],
+  [
+    "a parse error",
+    ["---- MODULE Broken ----", "VARIABLE x", "Init == x = = 0", "Next == x' = x", "===="],
+    /^Encountered "0" at line 3, column 15/m,
+  ],
+  [
+    "twelve unknown names",
+    [
+      "---- MODULE Broken ----",
+      "VARIABLE x",
+      "Init == x = 0",
+      ...Array.from({ length: 12 }, (_, i) => `D${i} == u${i}`),
+      "Next == x' = x",
+      "====",
+    ],
+    /^\*\*\* Errors: 12\n+line 4, col 7 to line 4, col 8 of module Broken\n+Unknown operator: `u0'\.$/m,
+  ],
+] as const)
+  test(
+    `a spec with ${what} gets SANY's line and column, not a Java stack trace`,
+    { skip },
+    async () => {
+      const base = writeSpec("Broken", [...tla], "INIT Init\nNEXT Next\n");
+      await assert.rejects(check(`${base}.tla`, `${base}.cfg`), (error: Error) => {
+        assert.match(error.message, /^SANY could not read .*Broken\.tla \(exit 1\):\n/);
+        assert.match(error.message, where);
+        assert.doesNotMatch(error.message, /^\s+at tla2sany\./m);
+        return true;
+      });
+    },
+  );
+
 test(
   "check() leaves no statechart- folder in the temp dir when it returns and when it throws",
   { skip },

@@ -7,7 +7,8 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 // import.meta.dirname needs Node 21.2/20.11; derive the directory portably.
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-import { killGroup, messageOf } from "./run.ts";
+import { killGroup } from "./kill.ts";
+import { messageOf } from "./run.ts";
 
 const USAGE = `Usage: statechart SPEC.tla [--config FILE] [--view FILE] [--out DIR]
 
@@ -117,26 +118,20 @@ try {
         env: { ...process.env, TMPDIR: tmp, TEMP: tmp, TMP: tmp },
       },
     );
-    if (process.platform === "win32")
-      janitor = spawn(
-        process.execPath,
-        [...runtime, path.join(scriptDir, "janitor.ts"), String(worker.pid), stage, tmp],
-        { detached: true, windowsHide: true, stdio: ["pipe", "ignore", "ignore"] },
-      );
-    janitor ??= spawn(
-      "/bin/sh",
-      [
-        "-c",
-        'while read -r line; do :; done; kill -s KILL -- "-$1"; rm -rf -- "$2" "$3"',
-        "sh",
-        String(worker.pid),
-        stage,
-        tmp,
-      ],
-      { detached: true, stdio: ["pipe", "ignore", "ignore"] },
+    janitor = spawn(
+      process.execPath,
+      [...runtime, path.join(scriptDir, "janitor.ts"), String(worker.pid), stage, tmp],
+      { detached: true, windowsHide: true, stdio: ["pipe", "ignore", "ignore"] },
     );
+    const toJanitor = janitor.stdin;
+    toJanitor?.on("error", () => {});
     const exited = new Promise<number>((resolve) =>
-      worker.on("exit", (code) => resolve(code ?? 2)),
+      worker.on("exit", (code) => {
+        // Tell the janitor the worker exited on its own: on Windows the pid
+        // can belong to another process by the time this pipe closes.
+        toJanitor?.write("exited\n");
+        resolve(code ?? 2);
+      }),
     );
     await Promise.race([stopped, exited]);
     // Before escalating to a group SIGKILL, give the worker a graceful
@@ -152,7 +147,9 @@ try {
       }
       await Promise.race([exited, new Promise((r) => setTimeout(r, 5_000).unref?.())]);
     }
-    await killGroup(worker.pid as number);
+    const running = worker.exitCode === null && worker.signalCode === null;
+    const groupOutlivesWorker = process.platform !== "win32";
+    if (worker.pid !== undefined && (running || groupOutlivesWorker)) await killGroup(worker.pid);
     const verdict = await exited;
     if (stop) {
       console.error(`${stop} stopped the check, so the command wrote nothing.`);
