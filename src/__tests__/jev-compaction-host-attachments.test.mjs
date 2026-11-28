@@ -73,7 +73,7 @@ describe('HOST_ATTACHMENTS: the switch', () => {
 describe('HOST_ATTACHMENTS: the user rows of text lose their handle and the old attachments of the host do not come back', () => {
   it('with the switch on every user row of text before the tail is built from its text without its handle, and the rows of text keep their words', async () => {
     const r = await run(HA);
-    expect(compactRecord(r)).toMatchObject({ result: 'jev', rebuilt_user: 4 }); // the three rows and the closing request
+    expect(compactRecord(r)).toMatchObject({ result: 'jev', rebuilt_user: 3 }); // the three rows; the closing request is the newest message
     for (const text of ['Task:', 'Second question', 'Third question']) {
       expect(row(r, text), text).toBeDefined();
       expect(row(r, text).handle, text).toBeUndefined();
@@ -114,7 +114,7 @@ describe('HOST_ATTACHMENTS: the user rows of text lose their handle and the old 
     expect(row(r, 'Plain row').handle).toBeUndefined();
     expect(row(r, 'Task:').handle).toBeUndefined();
     const record = compactRecord(r);
-    expect(record).toMatchObject({ rebuilt_user: 3, attachments_dropped: 1, attachments_back: 2 });
+    expect(record).toMatchObject({ rebuilt_user: 2, attachments_dropped: 1, attachments_back: 2 });
     expect(record.attachments_back_tokens).toBe(rate(SKILLS, INVOKED));
     const withImage = apiWith(rows(), { 2: [SKILLS] }).map((a, k) => (k === 2 ? { ...a, content: [...a.content, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] } : a));
     const image = await run(HA, { api: withImage });
@@ -134,7 +134,7 @@ describe('HOST_ATTACHMENTS: the user rows of text lose their handle and the old 
     const on = await run(HA, { extras });
     expect(row(on, 'Second question').text).toMatch(/^Second question\n<system-reminder id="jev-1">/);
     expect(row(on, 'Second question').text).toContain('Hello from the track.');
-    expect(compactRecord(on)).toMatchObject({ rebuilt_user: 4, queued_other: 1, attachments_kinds: { instructions: 1 } }); // the message is no attachment
+    expect(compactRecord(on)).toMatchObject({ rebuilt_user: 3, queued_other: 1, attachments_kinds: { instructions: 1 } }); // the message is no attachment
     const off = await run(ACTIVE_ENV, { extras });
     expect(row(off, 'Second question').handle).toBe('h2');
     expect(row(off, 'Second question').text).not.toContain('Hello from the track.');
@@ -209,7 +209,7 @@ describe('HOST_ATTACHMENTS: the user rows of text lose their handle and the old 
     const session = reminder(`SessionStart:compact hook additional context: ${para('note', 800)}`);
     const messages = withRows([assistantRow('First answer.'), ownerRow('Look at [Image #1] please'), assistantRow('Seen.'), ownerRow('Plain row'), assistantRow('Third answer.')], 30);
     const record = compactRecord(await run(HA, { messages, extras: { 2: [added, INSTR, session], 4: [listed, INSTR, session] } }));
-    expect(record).toMatchObject({ rebuilt_user: 3, attachments_dropped: 3, attachments_back: 3 });
+    expect(record).toMatchObject({ rebuilt_user: 2, attachments_dropped: 3, attachments_back: 3 });
     // The list: the entries that did not come back. The instructions: nothing, as one came back. The session hook: again, whatever came back.
     expect(record.attachments_resent_tokens).toBe(Math.round(0.43 * (listed.length - added.length + session.length)));
   });
@@ -264,6 +264,59 @@ describe('HOST_ATTACHMENTS: a row the host flags isMeta', () => {
   });
 });
 
+describe('HOST_ATTACHMENTS: the newest message of the user', () => {
+  const FILE = reminder('Called the Read tool with the following input: {"file_path":"/x/a.ts"}');
+  const HOOK = reminder('UserPromptSubmit hook additional context: use the project rules.');
+  const DATE = reminder("Today's date is 2000-01-01.");
+  const ASKED = 'Fix the bug in @src/a.ts please.';
+  // The message the open loop works on stands before it; an older message of the user stands at row 0.
+  const working = (...after) => frozen([
+    ...conversation(30).slice(0, -2),
+    ownerRow(ASKED),
+    ...after,
+    { role: 'assistant', text: 'Working.', toolUses: [{ tool_use_id: 'z1', tool: 'Bash', input: { command: 'ls' } }] },
+    { role: 'user', text: '', toolResults: [{ tool_use_id: 'z1', text: 'a.ts b.ts', isError: false }] },
+  ]);
+  const NEWEST = 61;
+
+  it.each([
+    ['alone', {}],
+    ['with the owner tail and the tail by the open loop', { OMC_JEV_COMPACT_OWNER_TAIL: 'active', OMC_JEV_COMPACT_TAIL_BY_LOOP: 'active' }],
+  ])('keeps its handle, so its files and hook contexts come back, %s; older rows lose theirs', async (_, extra) => {
+    const r = await run({ ...HA, ...extra }, { messages: working(), extras: { 0: [INVOKED], [NEWEST]: [FILE, HOOK] } });
+    expect(row(r, ASKED).handle).toBe(`h${NEWEST}`);
+    expect(row(r, 'Task:').handle).toBeUndefined();
+    expect(compactRecord(r)).toMatchObject({ result: 'jev', rebuilt_user: 1, attachments_kinds: { invoked_skills: 1 }, attachments_back: 2 });
+    expect(compactRecord(r).attachments_back_tokens).toBe(rate(FILE, HOOK));
+  });
+
+  it('keeps the handles of the rows after it in its turn, the one the attachments are counted with among them', async () => {
+    const monitor = '<ci-monitor-event>the build is red</ci-monitor-event>';
+    const messages = working(ownerRow(monitor));
+    const r = await run(HA, { messages, extras: { [NEWEST + 1]: [FILE] } });
+    expect(row(r, ASKED).handle).toBe(`h${NEWEST}`);
+    expect(row(r, monitor).handle).toBe(`h${NEWEST + 1}`);
+    expect(compactRecord(r)).toMatchObject({ attachments_dropped: 0, attachments_back: 1 });
+  });
+
+  it('is the newest row with words of the user: a later row of a hook is rebuilt like an older one', async () => {
+    const hook = 'Stop hook feedback: keep going';
+    const messages = frozen([...conversation(30).slice(0, -2), ownerRow(ASKED), assistantRow('Done.'), ownerRow(hook), assistantRow('Going on.')]);
+    const r = await run(HA, { messages, extras: { [NEWEST]: [FILE], [NEWEST + 2]: [HOOK] } });
+    expect(row(r, ASKED).handle).toBe(`h${NEWEST}`);
+    expect(row(r, hook).handle).toBeUndefined();
+    expect(compactRecord(r)).toMatchObject({ attachments_kinds: { hook_context: 1 }, attachments_back: 1 });
+  });
+
+  it('is rebuilt for the advisor reminder only when the host announces again every attachment of its turn', async () => {
+    const lossless = await run(HA, { messages: working(), extras: { [NEWEST]: [ADVISOR, DATE] } });
+    expect(compactRecord(lossless)).toMatchObject({ result: 'jev', advisor_blocks: 1, attachments_dropped: 2 });
+    expect(row(lossless, ASKED).handle).toBeUndefined();
+    const lossy = await run(HA, { messages: working(), extras: { [NEWEST]: [ADVISOR, FILE] } });
+    expect(compactRecord(lossy)).toMatchObject({ result: 'fallback', reason: 'advisor_newest_row' });
+  });
+});
+
 describe('HOST_ATTACHMENTS: the advisor', () => {
   it('a reminder in the turn of a row of text rebuilds that row; the record counts the reminders', async () => {
     const r = await run(HA, { extras: { 2: [ADVISOR] } });
@@ -309,9 +362,11 @@ describe('HOST_ATTACHMENTS: the advisor', () => {
 
 describe('HOST_ATTACHMENTS with the other switches', () => {
   it('a protected row of the owner tail stays word for word when it is rebuilt, with a delivered message after it', async () => {
-    const messages = withRows([assistantRow('First answer.'), ownerRow('Please finish it.'), assistantRow('FINAL ANSWER is here.')], 30);
-    const r = await run({ ...HA, OMC_JEV_COMPACT_OWNER_TAIL: 'active' }, { messages, extras: { 0: [INSTR], 2: [FRAME('Status of the track.')] } });
-    expect(compactRecord(r)).toMatchObject({ result: 'jev', owner_tail_applied: true, owner_tail: { violations: 0 }, rebuilt_user: 3 });
+    // The newest message of the user is rebuilt only for the advisor, when its turn holds nothing that would be lost.
+    const messages = frozen([...conversation(30).slice(0, -2), ownerRow('Please finish it.'), assistantRow('FINAL ANSWER is here.')]);
+    const at = messages.length - 2;
+    const r = await run({ ...HA, OMC_JEV_COMPACT_OWNER_TAIL: 'active' }, { messages, extras: { 0: [INSTR], [at]: [ADVISOR, FRAME('Status of the track.')] } });
+    expect(compactRecord(r)).toMatchObject({ result: 'jev', owner_tail_applied: true, owner_tail: { violations: 0, from_idx: at }, rebuilt_user: 2 });
     const owner = row(r, 'Please finish it.');
     expect(owner.handle).toBeUndefined();
     expect(owner.text).toMatch(/^Please finish it\.\n<system-reminder id="jev-1">/);
@@ -335,7 +390,7 @@ describe('HOST_ATTACHMENTS with the other switches', () => {
       list.push(ownerRow('Second question'), assistantRow('Summary: done.'));
       const messages = frozen(list);
       const env = { ...HA, OMC_JEV_COMPACT_BLOCKS: 'active', OMC_JEV_COMPACT_TARGET_PERCENT: '60' };
-      const r = await compactOnce(messages, { env, api: apiWith(messages, { [messages.length - 2]: [skill] }), respond, usage: hostUsage(190000) });
+      const r = await compactOnce(messages, { env, api: apiWith(messages, { 0: [skill] }), respond, usage: hostUsage(190000) });
       expect(compactRecord(r)).toMatchObject({ result: 'jev', attachments_dropped: 1, attachments_kinds: { invoked_skills: 1 } });
       return { sent: r.calls.fetch.map((c) => c.init.body).join('\n'), written: [...r.files.values()].join('\n') };
     };

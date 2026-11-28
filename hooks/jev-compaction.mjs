@@ -177,10 +177,14 @@
  * Host attachments (OMC_JEV_COMPACT_HOST_ATTACHMENTS=1 or true, off by default; without it the user rows of text keep their handles and no record gains a field).
  * The host keeps what is no row (instructions, lists of skills, agents and tools, hook contexts, the text of used skills) in the group of the row before it, and a
  * row that keeps its handle comes back with its group. With the switch on each user row of text before the open tool loop is built from its text, with the messages
- * delivered after it in their envelopes, and the host announces again what it finds missing. A row keeps its handle when the host flags it isMeta, in a turn with
- * an image, a document or a /goal record, without text or with [Image #N], or in a turn the API form does not place; without the API form nothing is taken off.
- * When the row of an advisor reminder cannot be rebuilt, or the API form does not show the start of a long conversation, the compaction goes to the summary
- * (advisor_image, advisor_command, advisor_no_row, advisor_in_tail, advisor_meta_row, advisor_form_cut). The predictions take off the attachments that go less what the host announces again. The record gets
+ * delivered after it in their envelopes, and the host announces again what it finds missing. The newest message of the user (as the owner tail reads it, with or
+ * without that switch) keeps its handle, and so do the rows of text after it in its turn. A row also keeps its handle when the host flags it isMeta, in a turn
+ * with an image, a document or a /goal record, without text or with [Image #N], or in a turn the API form does not place; without the API form nothing is taken
+ * off. The host never announces again these kinds, so they are gone from the older rows after the compaction: instructions_reread, environment_update,
+ * date_change, invoked_skills, file, compact_file_reference, hook_context, task_status, edited_file, nested_memory, image_paths, host_reminder, and skill_text,
+ * meta and other. When the row of an advisor reminder cannot be rebuilt (the turn of the newest message too, if it holds one of these kinds), or the API form
+ * does not show the start of a long conversation, the compaction goes to the summary (advisor_image, advisor_command, advisor_no_row, advisor_in_tail,
+ * advisor_meta_row, advisor_newest_row, advisor_form_cut). The predictions take off the attachments that go less what the host announces again. The record gets
  * `rebuilt_user`, `advisor_blocks`, `attachments_dropped`, `attachments_dropped_tokens`, `attachments_kinds`, `attachments_kinds_tokens`, `attachments_skills`
  * (names of used skills: masked and cut; a name or skill directory that names a secret or private path is left out), `attachments_back`,
  * `attachments_back_tokens`, `attachments_back_from_results_tokens` and `attachments_resent_tokens`; see "host attachments" below.
@@ -6215,14 +6219,17 @@ async function archiveStep($, cfg, record, mode, candidates, rows, keepFrom, gro
 // The host keeps every entry that is no row (an attachment, a local command's record, an isMeta message, a system entry) in the group of the row before it, and a row
 // that keeps its handle comes back with its whole group. So with the switch on a user row of text before keepFrom is built from its text (build, `drop`), with the
 // messages delivered after it in their envelopes, and its group (instructions, lists of skills and agents, deltas of tools, memory files, the old text of used
-// skills, hook contexts) does not come back; the host announces again what it finds missing in the list after the boundary. A row keeps its handle for a technical
-// reason only: it stands from keepFrom on (the open loop), its turn holds an image, a document or a /goal record (which renders to nothing and which the host does
-// not rebuild), it has no text or holds [Image #N], the API form does not place its turn, or the host flags it isMeta (built from its text it would lose the flag
-// and count as a message of the user in the next compaction).
+// skills, hook contexts) does not come back; the host announces again what it finds missing in the list after the boundary. The newest message of the user keeps its
+// handle, so the files it names and the context its hooks added stay with the request being worked on, and so do the rows of text after it in its turn (the
+// attachments of a turn are counted with its last user row). Any other row keeps its handle for a technical reason only: it stands from keepFrom on (the open
+// loop), its turn holds an image, a document or a /goal record (which renders to nothing and which the host does not rebuild), it has no text or holds
+// [Image #N], the API form does not place its turn, or the host flags it isMeta (built from its text it would lose the flag and count as a message of the user in
+// the next compaction).
 // The advisor: the host takes the advisor's model from the last advisor_tool attachment of the list before its first request after a compaction, so the row that
 // carries the advisor's reminder (the last user row of its turn) is rebuilt too and the host announces the advisor again from the setting; a carrier that cannot be
 // rebuilt without a loss hands the compaction to the host's summary (advisor_image, advisor_command, advisor_no_row, advisor_in_tail, advisor_meta_row,
-// advisor_form_cut).
+// advisor_newest_row, advisor_form_cut). The turn of the newest message of the user is rebuilt for the advisor only when the host announces again every
+// attachment it holds.
 // The kinds of attachments are told by the first line the host renders each with, so their table follows the version of the host.
 const API_FORM_MAX = 4096; // the number of messages the host's API form keeps (a cut form shows less than the conversation)
 const GOAL_COMMAND = /^\s*<command-name>\s*\/goal\b/i;
@@ -6324,6 +6331,7 @@ const HOST_ATTACHMENTS = [
 const RESENT = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === true).map(([kind]) => kind));
 const LIST_KINDS = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === 'list').map(([kind]) => kind));
 const ALWAYS_RESENT = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === 'always').map(([kind]) => kind));
+const ANNOUNCED_AGAIN = new Set([...RESENT, ...LIST_KINDS, ...ALWAYS_RESENT]); // every other kind is gone for good with the row that is rebuilt
 const SKILL_TEXT = /^Base directory for this skill: ([^\n]+)/m;
 const skillNames = (t) => [...t.matchAll(/^### Skill: ([^\n]+)/gm)].map((x) => x[1].trim());
 // The host shows a user text that opens with <system-reminder ...> in the API form with that first "<" as "&lt;": a block is compared with the rows after this is undone.
@@ -6378,10 +6386,11 @@ const textRebuildable = (m, i, keepFrom, imageRows) => m.role === 'user' && !(m.
   && Boolean(rowText(m.text)) && !/\[Image #\d+\]/.test(m.text) && !GOAL_COMMAND.test(m.text) && !imageRows.has(i);
 const resultRebuilt = (m) => m.role === 'user' && (m.toolResults || []).length > 0 && m.toolResults.every(textOnlyResult);
 // The API form read turn by turn (the messages between two assistant messages) against the rows. Returns {rows (the rows that carry an advisor reminder), text (the
-// user rows of text that are rebuilt without their handle: the rows of a turn that holds no image and no /goal record, advisor or not), blocks (advisor reminders
+// user rows of text that are rebuilt without their handle: the rows of a turn that holds no image and no /goal record, advisor or not, less the row `newest` (the
+// newest message of the user) and those after it in its turn), blocks (advisor reminders
 // found), blocked (a reason the compaction goes to the summary), dropped, back, coveredBack, resent (the characters of what goes, what comes back and what the host
 // announces again)}; null without the API form.
-function carrierRows(messages, api, keepFrom) {
+function carrierRows(messages, api, keepFrom, newest) {
   if (!Array.isArray(api) || !api.length) return null;
   const imageRows = nonTextUserRows(messages, api).rows;
   const rowOfResult = new Map();
@@ -6454,12 +6463,7 @@ function carrierRows(messages, api, keepFrom) {
     const known = lo !== undefined && hi !== undefined;
     let carrier;
     if (known) for (let k = Math.min(hi, messages.length) - 1; k >= lo; k--) if (messages[k].role === 'user') { carrier = k; break; }
-    // The rows of text of the turn lose their handle unless a technical reason keeps it (an image or a /goal record in the turn).
-    if (known && !goal && !image) for (let k = lo; k < Math.min(hi, messages.length); k++) if (textRebuildable(messages[k], k, keepFrom, imageRows)) out.text.add(k);
-    const rebuilt = (k) => k !== undefined && (out.text.has(k) || resultRebuilt(messages[k]));
-    // Every attachment of the turn stands in the carrier's group (no user row: the assistant row before the turn, rebuilt before keepFrom), also one the host folded
-    // into the content of a result: it goes when the carrier is rebuilt and comes back with it otherwise.
-    const goes = carrier !== undefined ? rebuilt(carrier) : known && !first && before !== undefined && before < keepFrom;
+    const pieces = []; // [attachment, covered]; whether they go depends on the rows of the turn that are rebuilt
     const piece = (p, covered) => {
       if (goes) {
         out.dropped.n++;
@@ -6489,7 +6493,7 @@ function carrierRows(messages, api, keepFrom) {
           if (r === undefined) continue;
           const own = messages[r].toolResults.find((x) => x.tool_use_id === b.tool_use_id)?.text || '';
           const shown = splitReminders(own).reminders;
-          for (const t of blockTexts(b)) for (const p of attachmentPieces(t, shown, false)) piece(p, covered);
+          for (const t of blockTexts(b)) for (const p of attachmentPieces(t, shown, false)) pieces.push([p, covered]);
           continue;
         }
         if (b.type !== 'text' || typeof b.text !== 'string') continue;
@@ -6497,12 +6501,24 @@ function carrierRows(messages, api, keepFrom) {
         if (isOwnEnvelopes(t)) continue;
         if (deliveryOf(t)) continue; // a delivered message is carried by queuedOf
         if (textRows.has(rowText(t)) || textRows.has(rowText(b.text))) continue; // a row's text the host shows in another turn
-        for (const p of attachmentPieces(t)) piece(p, covered);
+        for (const p of attachmentPieces(t)) pieces.push([p, covered]);
       }
     }
     // The advisor's reminder in the turn.
     let found = 0;
     for (const b of blocks) for (const t of blockTexts(b)) found += advisorNotes(t);
+    // The newest message of the user keeps its handle, with the rows after it in its turn; for the advisor alone the turn is rebuilt when nothing is lost by it.
+    const holdsNewest = known && newest >= lo && newest < Math.min(hi, messages.length);
+    const keepsNewest = holdsNewest && !(found && pieces.every(([p]) => ANNOUNCED_AGAIN.has(p.kind)));
+    // The rows of text of the turn lose their handle unless a technical reason keeps it (an image or a /goal record in the turn).
+    if (known && !goal && !image) {
+      for (let k = lo; k < Math.min(hi, messages.length); k++) if (!(keepsNewest && k >= newest) && textRebuildable(messages[k], k, keepFrom, imageRows)) out.text.add(k);
+    }
+    const rebuilt = (k) => k !== undefined && (out.text.has(k) || resultRebuilt(messages[k]));
+    // Every attachment of the turn stands in the carrier's group (no user row: the assistant row before the turn, rebuilt before keepFrom), also one the host folded
+    // into the content of a result: it goes when the carrier is rebuilt and comes back with it otherwise.
+    const goes = carrier !== undefined ? rebuilt(carrier) : known && !first && before !== undefined && before < keepFrom;
+    for (const [p, covered] of pieces) piece(p, covered);
     if (!found) return;
     out.blocks += found;
     if (image) block('advisor_image');
@@ -6521,6 +6537,7 @@ function carrierRows(messages, api, keepFrom) {
     if (!rowText(text) || /\[Image #\d+\]/.test(text)) { block('advisor_image'); return; }
     if (GOAL_COMMAND.test(text)) { block('advisor_command'); return; }
     if (m.isMeta === true) { block('advisor_meta_row'); return; }
+    if (keepsNewest) { block('advisor_newest_row'); return; }
     out.rows.add(carrier);
   };
   for (const a of api) {
@@ -6609,6 +6626,7 @@ const isCrossSessionRow = (m) => m.role === 'user' && !(m.toolResults || []).len
 const isOwnerWords = (m, cfg) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.isMeta !== true
   && !cfg.hookRowPrefixes.some((p) => m.text.trimStart().startsWith(p)) && userWords(m, notUserOf(cfg.blockTraces)).length > 0;
 export const isOwnerTailRow = (m, cfg) => isOwnerWords(m, cfg) || (cfg.ownerTailCrossSession === 'on' && isCrossSessionRow(m));
+const newestOwnerRow = (messages, cfg) => messages.findLastIndex((m) => isOwnerWords(m, cfg)); // -1 without one
 
 /** The boundaries a compaction tries, the one with the most protected text first: the newest row of the user (with `on`, of the user or another session), then with `fallback` the newest message of another session after it. */
 export function ownerTailTiers(messages, cfg) {
@@ -6748,7 +6766,7 @@ async function decide($, e, cfg, record, started) {
   if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
   // Host attachments: the user rows of text that are rebuilt without their handle, the carriers of the advisor among them; a carrier that cannot be rebuilt without a
   // loss hands the compaction to the summary.
-  const hostAtt = cfg.hostAttachments ? carrierRows(messages, api, keepFrom) : null;
+  const hostAtt = cfg.hostAttachments ? carrierRows(messages, api, keepFrom, newestOwnerRow(messages, cfg)) : null;
   if (cfg.hostAttachments) {
     Object.assign(record, hostAttachmentRecord(hostAtt, cfg.rates, cfg.privatePaths));
     if (hostAtt?.blocked) return { fallback: hostAtt.blocked };
