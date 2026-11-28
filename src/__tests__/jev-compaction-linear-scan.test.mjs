@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   advisorNotes, agentBlocks, cutHostBlocks, isNotification, noteSummary, otherFrame, preludeLength, splitReminders, withoutPasteMarks, withoutTags, withoutTrailingClosers,
 } from '../../hooks/jev-compaction.mjs';
+import { ACTIVE_ENV, apiOf, compactOnce, compactRecord, conversation, frozen } from './jev-compaction-tail-harness.mjs';
 
 const HOST_BLOCK = /<(system-reminder|task-notification|teammate-message|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr)\b[^>]*>[\s\S]*?<\/\1>/g;
 const PRELUDE = /^\s*<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>\s*/;
@@ -157,5 +158,25 @@ describe('a text of tens of thousands of tags without partners is read in a frac
     expect(splitReminders(SHAPES.reminderOpen)).toEqual({ reminders: [], rest: SHAPES.reminderOpen });
     expect(splitReminders(SHAPES.reminderClosed).reminders).toHaveLength(N);
     expect([advisorNotes(SHAPES.advisorOpen), advisorNotes(SHAPES.advisorEndsInText), advisorNotes(SHAPES.advisorBlank)]).toEqual([0, 0, 0]);
+  });
+});
+
+describe('a result whose own text holds tens of thousands of reminders, with the host attachments', () => {
+  // Each reminder of the API form is matched against those of the result's own text; a search through a list of them is quadratic. In reverse order every
+  // search reads the whole list, whatever the engine saves on taking off the head of a list.
+  it.each([
+    ['a few notes repeated in the order of the text', (k) => k % 3, (list) => list],
+    ['different notes in reverse order', (k) => k, (list) => [...list].reverse()],
+  ])('is read in linear time, %s, and counts none of them as an attachment', async (_, note, ordered) => {
+    const reminders = Array.from({ length: 64_000 }, (_, k) => `<system-reminder>\nNote ${note(k)}\n</system-reminder>`);
+    const rows = conversation(30);
+    rows[4] = { ...rows[4], toolResults: [{ ...rows[4].toolResults[0], text: `RESULT-2 ${reminders.join('\n')}` }] };
+    const messages = frozen(rows);
+    const inApi = `RESULT-2 ${ordered(reminders).join('\n')}`;
+    const api = apiOf(messages).map((a) => ({ ...a, content: a.content.map((b) => (b.tool_use_id === 't2' && b.type === 'tool_result' ? { ...b, content: inApi } : b)) }));
+    const started = Date.now();
+    const run = await compactOnce(messages, { env: { ...ACTIVE_ENV, OMC_JEV_COMPACT_HOST_ATTACHMENTS: '1' }, api });
+    expect(Date.now() - started).toBeLessThan(LIMIT_MS);
+    expect(compactRecord(run)).toMatchObject({ result: 'jev', attachments_dropped: 0, attachments_back: 0 });
   });
 });

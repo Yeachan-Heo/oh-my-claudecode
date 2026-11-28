@@ -6353,15 +6353,16 @@ function attachmentKind(text) {
   return deliveryOf(text) || deliveryOf(body) ? 'delivery' : 'other';
 }
 // The attachments in a text the rows do not show: each reminder, and with `rest` the text around them as one piece of kind `meta` (an isMeta message: the text of a
-// skill, the continuation of a hook). `known`: the reminders a row's own text holds (the text of a result), taken off once each.
-function attachmentPieces(text, known = [], rest = true) {
+// skill, the continuation of a hook). `known`: the reminders a row's own text holds (the text of a result) with how often each stands there; as many of each are
+// taken off. Counted, not searched in a list, so the time stays linear in the number of reminders.
+function attachmentPieces(text, known = new Map(), rest = true) {
   if (typeof text !== 'string' || !text.trim()) return [];
-  const left = [...known];
+  const taken = new Map();
   const out = [];
   const { reminders, rest: outside } = splitReminders(text);
   for (const m of reminders) {
-    const at = left.indexOf(m);
-    if (at >= 0) { left.splice(at, 1); continue; }
+    const n = taken.get(m) || 0;
+    if (n < (known.get(m) || 0)) { taken.set(m, n + 1); continue; }
     const kind = attachmentKind(m);
     if (kind === 'delivery') continue;
     out.push(kind === 'invoked_skills' ? { kind, chars: m.length, names: skillNames(m) } : { kind, chars: m.length });
@@ -6492,7 +6493,8 @@ function carrierRows(messages, api, keepFrom, newest) {
           const r = rowOfResult.get(b.tool_use_id);
           if (r === undefined) continue;
           const own = messages[r].toolResults.find((x) => x.tool_use_id === b.tool_use_id)?.text || '';
-          const shown = splitReminders(own).reminders;
+          const shown = new Map();
+          for (const x of splitReminders(own).reminders) shown.set(x, (shown.get(x) || 0) + 1);
           for (const t of blockTexts(b)) for (const p of attachmentPieces(t, shown, false)) pieces.push([p, covered]);
           continue;
         }
