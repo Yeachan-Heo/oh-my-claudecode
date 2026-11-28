@@ -3,18 +3,34 @@
 // (see five-hour-guard-support.ts); the guard runs with a 0.2 s tick and a 5 s heartbeat, the hook with a 0.1 s poll.
 // The budgets of the waits are generous on purpose: the tests check what happens, not how fast.
 import { afterAll, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, closeSync, constants as fsConstants, copyFileSync, existsSync, openSync, truncateSync, linkSync, lstatSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { chmodSync, closeSync, constants as fsConstants, copyFileSync, existsSync, openSync, truncateSync, linkSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
   ENV, CONFIG_DIR, HOME_DIR, ENTRY_MODULE, GUARD, HOOK, SETTINGS_TOOL, UNIT, PYBIN, generatedCommand, HAS_PYTHON3, cleanup, fixture, hookHeld, hookInput, hookPasses, now, pauseDoc,
-  readJson, readText, runPyCode, runSync, sleep, spawnPy, spawnPyCode, startHook, waitFor, writeCache, writePause, type Fixture, type Proc,
+  readJson, readText, runPyCode, runSync, shellQuote, sleep, spawnPy, spawnPyCode, startHook, waitFor, writeCache, writePause, type Fixture, type Proc,
 } from './five-hour-guard-support.js';
 
 afterAll(cleanup);
 
 const HOUR_MS = 3600e3;
 const MAX_RESET_AHEAD_MS = 5 * HOUR_MS + 900e3; // the guard believes no reset time further ahead than a window plus 15 minutes
+// A command of another hook that is not read to its end. A state or pause file that holds something else than the guard writes there
+// stops the start; a log file of that kind does not (the guard starts and appends nothing to it). The caller checks that the file is
+// as it was.
+function expectUnread(r: SpawnSyncReturns<string>, key: string, label: string, why?: RegExp) {
+  if (key === 'log_file') {
+    expect(r.status, `${label}: ${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout, label).toMatch(/WARNING \(hook-unread\): \d+ command\(s\) in .* are not read to their end/);
+    expect(r.stdout, label).toMatch(/the log file .* is a program that a command in .* runs: nothing is appended to it/);
+    if (why) expect(r.stdout, label).toMatch(why);
+  } else {
+    expect(r.status, `${label}: ${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr, label).toMatch(/not read to its end/);
+    if (why) expect(r.stderr, label).toMatch(why);
+  }
+  expect(r.stderr, label).not.toMatch(/Traceback/);
+}
 // a pid that belonged to a process that has ended
 function deadPid(): number {
   for (let i = 0; i < 20; i++) {
@@ -263,8 +279,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     mkdirSync(pauseDir);
     writeFileSync(v.cfg, JSON.stringify({ usage_cache: v.cache, pause_file: join(pauseDir, 'pause.json'), state_file: v.state, log_file: v.log }), 'utf8');
     const blocked = fixture('pause-blocked', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
-    // the replace of the pause file fails (a full disk): the write fails, and a single check says so by its status
-    const once = runPyCode(['import os, runpy, sys', 'def full(*a, **k): raise OSError(28, "No space left on device")', 'os.replace = full',
+    // the temporary file of a write cannot be created (a full disk): the write fails, and a single check says so by its status
+    const once = runPyCode(['import os, runpy, sys', 'real = os.open', 'def full(path, *a, **k):', '    if str(path).endswith(".tmp"): raise OSError(28, "No space left on device")', '    return real(path, *a, **k)', 'os.open = full',
       'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n'), [GUARD, ...guardArgs(blocked, ['--once'])]);
     expect(once.status, 'a failed tick under --once is status 1').toBe(1);
     expect(once.stdout).toMatch(/ERROR: tick failed/);
@@ -1213,10 +1229,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
       writeFileSync(f.settings, entry('five-hour-guard-hook.py'), 'utf8');
       writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
-      await waitFor(() => /ERROR: tick failed.*(the hook entry in .* names five-hour-guard-hook\.py, which is the state_file of this guard|command runs a file that only the session of the hook can find)/.test(readText(f.log) + g.out) || readText(state) !== 'the program\n', 20000, 'the refusal');
+      await waitFor(() => /ERROR: tick failed.*(the hook entry in .* names five-hour-guard-hook\.py, which is the state_file of this guard|the registered hook five-hour-guard-hook\.py is the state_file of this guard)/.test(readText(f.log) + g.out) || readText(state) !== 'the program\n', 20000, 'the refusal');
       await sleep(600);
     } finally { await stopGuard(g); }
-    expect(readText(f.log) + g.out, 'the pause was refused (the bare word of the entry is a program that the PATH of the session may find: the command is refused, and nothing is appended to the log, so the notice is on stdout)').toMatch(/ERROR: tick failed.*(the hook entry in .* names five-hour-guard-hook\.py, which is the state_file of this guard|command runs a file that only the session of the hook can find)/);
+    expect(readText(f.log) + g.out, 'the pause was refused').toMatch(/ERROR: tick failed.*(the hook entry in .* names five-hour-guard-hook\.py, which is the state_file of this guard|the registered hook five-hour-guard-hook\.py is the state_file of this guard)/);
     expect(readText(state), 'the program is intact').toBe('the program\n');
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
     const again = runSync(GUARD, ['--config', f.cfg, '--once'], { cwd: f.dir });   // the same settings at the start
@@ -1281,7 +1297,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
       writeFileSync(f.settings, entry('python3'), 'utf8');
       writeCache(f, { pct: 98, resetMs: Date.now() + HOUR_MS });
-      await waitFor(() => /ERROR: tick failed.*is not read to its end/.test(g.out) || readText(state) !== 'the program\n', 20000, 'the refusal');   // (the log is blocked too while a command is not read to its end: the guard says it on its standard output)
+      await waitFor(() => /ERROR: tick failed.*is not read to its end/.test(g.out) || readText(state) !== 'the program\n', 20000, 'the refusal');   // (the guard says it on its standard output, beside its log)
       await sleep(600);
     } finally { await stopGuard(g); }
     expect(g.out, 'the pause was refused: the PATH of the session decides which python3 runs, which the guard does not know').toMatch(/ERROR: tick failed.*is not read to its end.*bin\/python3: nothing is written/);
@@ -1439,7 +1455,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       ';;; && || | & ( ) < >',
       `echo '' "" '' ${PYBIN} '' ''`,
     ];
-    const overLimit = [`python3 ${'a;'.repeat(30000)}`, 'x'.repeat(70000), Array.from({ length: 5000 }, (_, i) => `/tmp/script-${i}.py`).join(' '), `${'$(python3 '.repeat(2000)}`];   // a command that a limit cuts short is not read to its end: the guard refuses (see the test of the limits)
+    const overLimit = [`python3 ${'a;'.repeat(30000)}`, 'x'.repeat(70000), Array.from({ length: 5000 }, (_, i) => `/tmp/script-${i}.py`).join(' '), `${'$(python3 '.repeat(2000)}`];   // a command that a limit cuts short is not read to its end: the guard says so and goes on (see the test of the limits)
     const handlers = hostile.map((command) => ({ type: 'command', command }));
     const settings = {
       hooks: {
@@ -1465,9 +1481,11 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of overLimit) {
       writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'x', hooks: [{ type: 'command', command }] }] } }), 'utf8');
       const cut = start(f.log);
-      expect(cut.status, `a command over a limit is refused: ${cut.stdout}${cut.stderr}`).toBe(2);
-      expect(cut.stderr).toMatch(/not read to its end/);
+      expect(cut.status, `a command over a limit does not stop the guard: ${cut.stdout}${cut.stderr}`).toBe(0);
+      expect(cut.stdout).toMatch(/WARNING \(hook-unread\)/);
       expect(cut.stderr).not.toMatch(/Traceback/);
+      expectUnread(start(victim), 'log_file', 'beside a command over a limit');
+      expect(readText(victim), 'a file that holds something else is intact').toBe('# a hook of another tool\n');
     }
     writeFileSync(f.settings, JSON.stringify(settings), 'utf8');
     const ok = start(f.log);
@@ -1713,8 +1731,13 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (let i = 0; i < 4100; i++) writeFileSync(join(many, `f${i}`), '', 'utf8');
     writeFileSync(f.settings, settings(`cat ${many}/*`), 'utf8');
     const cut = start({ state_file: join(f.dir, 'elsewhere.state') });
-    expect(cut.status, `${cut.stdout.slice(0, 300)}${cut.stderr.slice(0, 300)}`).toBe(2);
-    expect(cut.stderr).toMatch(/too many files to scan/);
+    expect(cut.status, `${cut.stdout.slice(0, 300)}${cut.stderr.slice(0, 300)}`).toBe(0);
+    expect(cut.stdout).toMatch(/WARNING \(hook-unread\)[^\n]*too many files to scan/);
+    writeFileSync(join(many, 'f1'), '#!/bin/sh\n', 'utf8');
+    const kept = start({ state_file: join(many, 'f1') });
+    expect(kept.status, `${kept.stdout.slice(0, 300)}${kept.stderr.slice(0, 300)}`).toBe(2);
+    expect(kept.stderr).toMatch(/too many files to scan/);
+    expect(readText(join(many, 'f1'))).toBe('#!/bin/sh\n');
 
     // a settings rewrite after the start: the pattern now matches the log file
     const logPath = join(hooks, 'late-log.py');
@@ -1760,8 +1783,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.settings, settings(command), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: script });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe('# the script that the command runs after cd\n');
       }
     }
@@ -1791,10 +1813,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readText(logPath), 'the program of the other hook is intact').toBe(program);
     expect(existsSync(f.pause), 'no pause was published').toBe(false);
     writeFileSync(f.settings, settings(`cd ${hooks}; late`), 'utf8');   // without that PATH the program is not read to its end
-    const bare = start({ log_file: logPath });
-    expect(bare.status, `${bare.stdout}${bare.stderr}`).toBe(2);
-    expect(bare.stderr).toMatch(/not read to its end/);
+    expectUnread(start({ log_file: logPath }), 'log_file', 'without the PATH');
     expect(readText(logPath), 'still intact').toBe(program);
+    expect(existsSync(f.pause), 'and the pause is published beside it').toBe(true);
   });
 
   it('a guard that starts while settings.json cannot be read writes nothing until one read of it succeeds, and a missing settings.json is a read that succeeded', async () => {
@@ -1899,13 +1920,12 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
       }
     }
-    // a name that is used before the assignment is the session's: the later value is not what the command runs, so the guard refuses to start (the assignments of the first list, after their use)
+    // a name that is used before the assignment is the session's: the later value is not what the command runs, so the command is not read to its end (the assignments of the first list, after their use)
     for (const command of [`python3 "$DIR/audit"; DIR=${hooks}`, `A=/x B=${hooks}; python3 "$B/$FILE"; FILE=audit`]) {
       writeFileSync(f.settings, settings(command), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: script });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
       }
     }
@@ -1913,8 +1933,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     writeFileSync(f.settings, settings(`DIR=${hooks}; cd "$DIR" && audit`), 'utf8');
     for (const key of ['log_file', 'state_file', 'pause_file']) {
       const r = start({ [key]: script });
-      expect(r.status, `a program after cd as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-      expect(r.stderr, `a program after cd as ${key}`).toMatch(/not read to its end/);
+      expectUnread(r, key, `a program after cd as ${key}`);
     }
     // a variable that nothing assigns is the session's: a word that ends the path of the file is not read to its end, a word with another ending is read as before
     writeFileSync(f.settings, settings('python3 "$DIR/audit"'), 'utf8');
@@ -1949,10 +1968,12 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         writeFileSync(f.settings, settings(command), 'utf8');
         for (const key of ['log_file', 'state_file', 'pause_file']) {
           const r = start({ [key]: script });
-          expect(r.status, `${command} as ${key} (${where}): ${r.stdout}${r.stderr}`).toBe(2);
-          // (a name that nothing at that place gives a value to may be set in the session, so what ends the word decides: refused, not read)
-          if (where === 'the guard has no CLAUDE_CONFIG_DIR' && !form.includes('${HOME}')) expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);   // (the form with braces inside the word is read inside out, as before)
-          else expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+          // (a name that nothing at that place gives a value to may be set in the session, so what ends the word decides: not read)
+          if (where === 'the guard has no CLAUDE_CONFIG_DIR' && !form.includes('${HOME}')) expectUnread(r, key, `${command} as ${key}`);   // (the form with braces inside the word is read inside out, as before)
+          else {
+            expect(r.status, `${command} as ${key} (${where}): ${r.stdout}${r.stderr}`).toBe(2);
+            expect(r.stderr, `${command} as ${key}`).toContain(`"${key}" (${script}) and "program of another hook" (${script}) are the same file`);
+          }
           expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
         }
       }
@@ -2069,8 +2090,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.settings, settings(command), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: script });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(readText(script), `${command} as ${key}: the program is intact`).toBe(text);
       }
     }
@@ -2215,9 +2235,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.settings, settings(command, { FHG_A: value }), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: file });
-        expect(r.status, `${expression} of ${value} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        if (made.includes('/')) expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
-        else expect(r.stderr, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`).toMatch(/not read to its end/);   // (no PATH is given: the guard refuses to read it, as it refuses a collision)
+        if (made.includes('/')) {
+          expect(r.status, `${expression} of ${value} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        } else expectUnread(r, key, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`);   // (no PATH is given: the word is not read, as a collision is not written over)
         expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
       }
     }
@@ -2257,13 +2278,14 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.settings, settings(made === file ? `python3 "${expression}"` : `cd ${hooks}; python3 "${expression}"`, env), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: file });
-        expect(r.status, `${expression} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        if (made.includes('/')) expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
-        else expect(r.stderr, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`).toMatch(/not read to its end/);   // (no PATH is given: the guard refuses to read it, as it refuses a collision)
+        if (made.includes('/')) {
+          expect(r.status, `${expression} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        } else expectUnread(r, key, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`);   // (no PATH is given: the word is not read, as a collision is not written over)
         expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
       }
     }
-    // a name that nobody sets in the pattern cuts nothing for the shell of the hook, but the session may set it: the scan cannot know what is cut, so the guard refuses to start
+    // a name that nobody sets in the pattern cuts nothing for the shell of the hook, but the session may set it: the scan cannot know what is cut, so the command is not read to its end
     const unknown = '${FHG_A%$FHG_NOBODY}';
     expect(spawnSync('sh', ['-c', `FHG_A='${hooks}/audit.py'; printf %s "${unknown}"`], { encoding: 'utf8' }).stdout, 'sh cuts nothing').toBe(`${hooks}/audit.py`);
     writeFileSync(f.settings, settings(`python3 "${unknown}"`, { FHG_A: `${hooks}/audit.py` }), 'utf8');
@@ -2272,7 +2294,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(refusal.stderr).toMatch(/not read to its end/);
   });
 
-  it('a command substitution in the command of another hook (a dollar and a parenthesis, or a backtick, outside single quotes) is a command that is not read to its end: the guard refuses to start; text that is no substitution is read as before', () => {
+  it('a command substitution in the command of another hook (a dollar and a parenthesis, or a backtick, outside single quotes) is a command that is not read to its end: the guard keeps the file; text that is no substitution is read as before', () => {
     const f = fixture('foreign-substitution', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2295,8 +2317,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of substitutions) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, key);
-        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${JSON.stringify(command)} as ${key}`);
+        expect(readText(audit), `${JSON.stringify(command)} as ${key}: the program is intact`).toBe('# the script that the command runs\n');
         expect(r.stderr).not.toMatch(/Traceback/);
       }
     }
@@ -2314,7 +2336,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(named.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
   });
 
-  it('an arithmetic expansion in the command of another hook ($((...)) and $[...]) names a file like a substitution does, so the command is not read to its end: the guard refuses to start; single quotes and a backslash keep it text', () => {
+  it('an arithmetic expansion in the command of another hook ($((...)) and $[...]) names a file like a substitution does, so the command is not read to its end: the guard keeps the file; single quotes and a backslash keep it text', () => {
     const f = fixture('foreign-arithmetic', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2342,7 +2364,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start(`python3 "${hooks}/a$FHG_NOBODY"`, a2).status, 'a variable of the session ends the word').toBe(2);
   });
 
-  it('an extended glob pattern (@(a|b), ?(a), *(a), +(a), !(a)) outside quotes in the command of another hook is a word that the scan cannot expand, so the command is not read to its end: the guard refuses to start; a quoted pattern and the plain * and ? are read as before', () => {
+  it('an extended glob pattern (@(a|b), ?(a), *(a), +(a), !(a)) outside quotes in the command of another hook is a word that the scan cannot expand, so the command is not read to its end: the guard keeps the file; a quoted pattern and the plain * and ? are read as before', () => {
     const f = fixture('foreign-extglob', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2377,7 +2399,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('the name of a shell option that changes what a glob pattern matches (nocaseglob, dotglob, globstar) in the command of another hook is a mode that the scan does not model, so the command is not read to its end: the guard refuses to start, whether the option is given as -O, as shopt or in BASHOPTS; a command without such a name is read as before', () => {
+  it('the name of a shell option that changes what a glob pattern matches (nocaseglob, dotglob, globstar) in the command of another hook is a mode that the scan does not model, so the command is not read to its end: the guard keeps the file, whether the option is given as -O, as shopt or in BASHOPTS; a command without such a name is read as before', () => {
     const f = fixture('foreign-glob-modes', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     const dots = join(f.dir, 'dots');
@@ -2420,7 +2442,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a builtin that assigns to a variable it is given by name (printf -v, read, let, mapfile, readarray, getopts, declare -n) in the command of another hook leaves the variable unknown, so the command is not read to its end: the guard refuses to start, also where the builtin stands in a quoted command; a command without such a builtin is read as before', () => {
+  it('a builtin that assigns to a variable it is given by name (printf -v, read, let, mapfile, readarray, getopts, declare -n) in the command of another hook leaves the variable unknown, so the command is not read to its end: the guard keeps the file, also where the builtin stands in a quoted command; a command without such a builtin is read as before', () => {
     const f = fixture('foreign-name-setters', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2453,6 +2475,131 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       const r = start(command, settingsEnv);
       expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
     }
+  });
+
+  it('a BASHOPTS in the env of settings.json that names a shell option that changes what a glob pattern matches (nocaseglob, dotglob, globstar) makes every command a command that is not read to its end: the guard keeps the file, whatever the text of the command says; a BASHOPTS with other options, and no BASHOPTS, are read as before', () => {
+    const f = fixture('foreign-inherited-bashopts', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '# the script that the command runs\n';
+    const audit = join(hooks, 'audit');
+    writeFileSync(audit, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string, env: Record<string, unknown>) => {
+      writeFileSync(f.settings, JSON.stringify({ env, hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: audit, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    if (HAS_BASH) {   // what Bash makes of the pattern with the option in the environment
+      expect(spawnSync('bash', ['-c', `printf %s ${hooks}/AUD*`], { encoding: 'utf8', env: { ...process.env, BASHOPTS: 'nocaseglob' } }).stdout, 'BASHOPTS turns the option on').toBe(audit);
+    }
+    const command = `bash -c 'python3 ${hooks}/AUD*'`;
+    for (const value of ['nocaseglob', 'dotglob', 'globstar', 'extglob:nocaseglob', 'dotglob:globstar']) {
+      const r = start(command, { BASHOPTS: value });
+      expect(r.status, `${value}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, value).toMatch(/not read to its end/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+      expect(readText(audit), `${value}: the file is intact`).toBe(text);
+    }
+    // another option, no BASHOPTS, and a value that is no text name nothing: the command is read as before (its pattern does not match the file of the other case)
+    for (const env of [{ BASHOPTS: 'extglob' }, {}, { BASHOPTS: 7 }, { OTHER: 'nocaseglob' }]) {
+      const r = start(command, env);
+      expect(r.status, `${JSON.stringify(env)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
+  it('an append assignment NAME+=value in a command of another hook is not modelled, so the command is not read to its end: the guard keeps the file, also where it stands in a quoted command or after export or declare; a +=, outside quotes, in the middle of a word or in a word that is quoted, is read as before', () => {
+    const f = fixture('foreign-append-assignment', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
+    const hooks = join(f.dir, 'hooks');
+    mkdirSync(hooks);
+    const text = '#!/bin/sh\necho ran\n';
+    const audit = join(hooks, 'audit');
+    const appended = `${audit}.py`;
+    writeFileSync(appended, text, { mode: 0o755 });
+    const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
+    const start = (command: string) => {
+      writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [ours, { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+      writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: appended, log_file: f.log, settings_file: f.settings }), 'utf8');
+      return runSync(GUARD, ['--config', f.cfg, '--once']);
+    };
+    if (HAS_BASH) {   // what Bash makes of the append: the variable holds the two parts together
+      expect(spawnSync('bash', ['-c', 'FHG_A=/x/audit; FHG_A+=.py; printf %s "$FHG_A"'], { encoding: 'utf8' }).stdout, 'the suffix is appended').toBe('/x/audit.py');
+    }
+    const refused = [`FHG_A=${audit}; FHG_A+=.py; python3 "$FHG_A"`, `bash -c 'FHG_A=${audit}; FHG_A+=.py; python3 "$FHG_A"'`, `FHG_A=${audit}\nFHG_A+=.py\npython3 "$FHG_A"`, `export FHG_A+=.py; python3 "$FHG_A"`,
+      `declare FHG_A+=.py; python3 other`, `FHG_A+=.py python3 other`, `true && FHG_A+=x`, 'echo a+=b'];   // (the last is data to echo, which the scan cannot tell from an assignment: a false alarm)
+    for (const command of refused) {
+      const r = start(command);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(command)).toMatch(/not read to its end/);
+      expect(r.stderr).not.toMatch(/Traceback/);
+      expect(readText(appended), `${JSON.stringify(command)}: the file is intact`).toBe(text);
+    }
+    // no append, or a += that is no assignment word: read as before
+    for (const command of [`FHG_A=${audit}; python3 other`, 'echo "FHG_A+=.py"', "echo 'FHG_A+=.py'", `python3 ${hooks}/dir/FHG_A+=.py`, `python3 ${hooks}/other`, 'echo x']) {
+      const r = start(command);
+      expect(r.status, `${JSON.stringify(command)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+
+  it('a state file is put in place like a pause file: a file that comes in at its path after the check of the settings and before the state is written is kept and the write fails, whether a state file was there or not; without one coming in the state is written as before', () => {
+    // the arrival is injected when the temporary file of the write is created: after the check of the settings, before the file is put in place
+    const driver = ['import os, runpy, sys', 'state, real, arrivals = sys.argv[1], os.open, []',
+      'def late(path, *args, **kw):', '    if str(path).startswith(state + ".") and str(path).endswith(".tmp") and sys._getframe(1).f_code.co_name == "write_json" and not arrivals:',
+      '        arrivals.append(1)', '        open(state + ".a", "w").write("foreign program\\n")', '        os.replace(state + ".a", state)',
+      '    return real(path, *args, **kw)',
+      'os.open = late', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = fixture('state-late-arrival-existing', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.state, 'old state\n', 'utf8');
+    const r = runPyCode(driver, [f.state, GUARD, ...guardArgs(f, ['--once'])]);
+    expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*changed since it was validated and is not replaced/);
+    expect(readText(f.state), 'the file that came in over the old state is kept').toBe('foreign program\n');
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    const g = fixture('state-late-arrival-absent', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const first = runPyCode(driver, [g.state, GUARD, ...guardArgs(g, ['--once'])]);
+    expect(first.stdout, `${first.stdout}${first.stderr}`).toMatch(/ERROR: tick failed.*appeared meanwhile/);
+    expect(readText(g.state), 'the file that came in where no state was is kept').toBe('foreign program\n');
+    expect(readdirSync(g.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    // nobody comes in: the first state is written, and a state that was there is replaced
+    const h = fixture('state-clean-first', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    guardOnce(h);
+    expect(readJson(h.state).paused, 'the first state is written').toBe(true);
+    const k = fixture('state-clean-existing', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(k.state, 'old state\n', 'utf8');
+    guardOnce(k);
+    expect(readJson(k.state).paused, 'the old state is replaced').toBe(true);
+    expect(readdirSync(k.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+  });
+
+  it('where two paths cannot be exchanged (macOS, Windows) the state file and the renewal of the pause are put in place by a plain replace after one more look at the file, and a file that came in since the look is still kept', () => {
+    // the C library cannot be loaded, so the guard has no exchange of two paths
+    const none = ['import ctypes, os, runpy, sys', 'def none(*args, **kw):', '    raise OSError("no library")', 'ctypes.CDLL = none'];
+    // a foreign file takes the path of the state file right after the look that write_json makes before it puts the file in place (the first look is the one at the start of the write)
+    const arrival = ['state, real, looks = sys.argv[1], os.lstat, []', 'def look(path, *args, **kw):', '    found = real(path, *args, **kw)',
+      '    if str(path) == state and sys._getframe(1).f_code.co_name == "write_json":', '        looks.append(1)', '        if len(looks) == 2:',
+      '            open(state + ".a", "w").write("foreign program\\n")', '            os.replace(state + ".a", state)', '    return found', 'os.lstat = look'];
+    const run = (lines: string[], f2: Fixture) => runPyCode([...none, ...lines, 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n'), [f2.state, GUARD, ...guardArgs(f2, ['--once'])]);
+    const f = fixture('no-exchange-state-existing', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(f.state, 'old state\n', 'utf8');
+    const first = run([], f);
+    expect(first.stdout, `${first.stdout}${first.stderr}`).not.toContain('ERROR');
+    expect(readJson(f.state).paused, 'the state that was there is replaced by the new one').toBe(true);
+    expect(existsSync(f.pause), 'the first pause file is published by a hard link').toBe(true);
+    const before = readJson(f.pause).valid_until;
+    const renewal = run([], f);
+    expect(renewal.stdout, `${renewal.stdout}${renewal.stderr}`).not.toContain('ERROR');
+    expect(readJson(f.pause).valid_until, 'the pause is renewed without the exchange').toBeGreaterThan(before);
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    const g = fixture('no-exchange-state-first', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    const written = run([], g);
+    expect(written.stdout, `${written.stdout}${written.stderr}`).not.toContain('ERROR');
+    expect(readJson(g.state).paused, 'the first state is written').toBe(true);
+    // the look at the file right before the plain replace keeps a file that came in after the look of write_json
+    const h = fixture('no-exchange-state-arrival', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
+    writeFileSync(h.state, 'old state\n', 'utf8');
+    const late = run(arrival, h);
+    expect(late.stdout, `${late.stdout}${late.stderr}`).toMatch(/ERROR: tick failed.*cannot be put in place/);
+    expect(readText(h.state), 'the file that came in over the old state is kept').toBe('foreign program\n');
+    expect(readdirSync(h.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
   });
 
   it('a relative entry of a PATH (of the command, of the env of settings.json) is looked up from each directory that the command names (cd DIR; PATH=bin audit), also with env -C, an entry of . or an empty one; a directory that does not exist adds nothing', () => {
@@ -2585,7 +2732,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
         expect(readText(script), `${command}: the program is intact`).toBe(text);
       }
     }
-    // an assignment in front of the command is not seen by the words of that command (the shell expands them first): sh makes audit0 of this word, and the guard cannot know the value, so it refuses to start
+    // an assignment in front of the command is not seen by the words of that command (the shell expands them first): sh makes audit0 of this word, and the guard cannot know the value, so the command is not read to its end
     expect(spawnSync('/bin/sh', ['-c', `X=ab true; printf %s "${hooks}/audit\${#X}"`], { encoding: 'utf8' }).stdout, 'sh does not see X').toBe(`${hooks}/audit0`);
     const scoped = start(`X=ab python3 ${hooks}/audit\${#X}`, join(hooks, 'audit2'));
     expect(scoped.status, 'a scoped assignment').toBe(2);
@@ -2693,9 +2840,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       writeFileSync(f.settings, settings(made === file ? `python3 "${expression}"` : `cd ${hooks}; python3 "${expression}"`, { FHG_A: value }), 'utf8');
       for (const key of ['log_file', 'state_file', 'pause_file']) {
         const r = start({ [key]: file });
-        expect(r.status, `${expression} of ${value} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        if (made.includes('/')) expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
-        else expect(r.stderr, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`).toMatch(/not read to its end/);   // (no PATH is given: the guard refuses to read it, as it refuses a collision)
+        if (made.includes('/')) {
+          expect(r.status, `${expression} of ${value} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
+          expect(r.stderr, `${expression} as ${key}`).toContain(`"${key}" (${file}) and "program of another hook" (${file}) are the same file`);
+        } else expectUnread(r, key, `${expression} as ${key}: a bare word is a program that the PATH of the session may find`);   // (no PATH is given: the word is not read, as a collision is not written over)
         expect(readText(file), `${expression} as ${key}: the program is intact`).toBe(text);
       }
     }
@@ -2704,7 +2852,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start({ state_file: join(hooks, 'other') }).status, 'the escaped * is a character').toBe(0);
   });
 
-  it('a control sequence in a Bash quote (dollar, apostrophe, backslash, c) is a command that is not read to its end: the guard refuses to start, also in a quoted command; the other escapes are decoded as before, and the same text as data is no reason to refuse', () => {
+  it('a control sequence in a Bash quote (dollar, apostrophe, backslash, c) is a command that is not read to its end: the guard keeps the file, also in a quoted command; the other escapes are decoded as before, and the same text as data is no reason to refuse', () => {
     const f = fixture('foreign-ansi-c-control', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2720,8 +2868,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of [`python3 $'${hooks}/a\\cbdit'`, `python3 x $'\\cA'`, `sh -c "python3 $'${hooks}/a\\cbdit'"`]) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, key);
-        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/control sequence in a Bash quote.*not read to its end/s);
+        expectUnread(r, key, `${JSON.stringify(command)} as ${key}`, /control sequence in a Bash quote/);
+        expect(readText(audit), `${JSON.stringify(command)} as ${key}: the program is intact`).toBe('# the script that the command runs\n');
         expect(r.stderr).not.toMatch(/Traceback/);
       }
     }
@@ -2736,7 +2884,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(decoded.stderr).toContain(`"state_file" (${audit}) and "program of another hook" (${audit}) are the same file`);
   });
 
-  it('a quote in the pattern of a trimming expression, where the shell removes it and the scan would keep it as a character ("${A%\'.py\'}"), is a command that is not read to its end: the guard refuses to start; patterns without a quote, with a backslash or with an unquoted quote are read as before', () => {
+  it('a quote in the pattern of a trimming expression, where the shell removes it and the scan would keep it as a character ("${A%\'.py\'}"), is a command that is not read to its end: the guard keeps the file; patterns without a quote, with a backslash or with an unquoted quote are read as before', () => {
     const f = fixture('foreign-trim-pattern-quotes', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2758,8 +2906,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of [`${value} python3 "\${A%'.py'}"`, `${value} python3 "\${A%%\\"x\\"}"`, `${value} sh -c 'python3 "\${A%".py"}"'`]) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, key);
-        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/quote in the pattern of a trimming expression/);
+        expectUnread(r, key, `${JSON.stringify(command)} as ${key}`, /quote in the pattern of a trimming expression/);
+        expect(readText(audit), `${JSON.stringify(command)} as ${key}: the program is intact`).toBe('# the script that the command runs\n');
         expect(r.stderr).not.toMatch(/Traceback/);
       }
     }
@@ -2800,8 +2948,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const [command, reason] of refused) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, key);
-        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(reason);
+        expectUnread(r, key, `${JSON.stringify(command)} as ${key}`, reason);
+        expect(readText(audit), `${JSON.stringify(command)} as ${key}: the program is intact`).toBe('# the script that the command runs\n');
         expect(r.stderr).not.toMatch(/Traceback/);
       }
     }
@@ -2861,7 +3009,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a path of another hook that is relative where the command names no directory is run from the directory of the session, which the guard does not know: when it ends the path of a file the guard writes the guard refuses to start; a cd, an absolute path or a name that no file of the guard has settles it as before', () => {
+  it('a path of another hook that is relative where the command names no directory is run from the directory of the session, which the guard does not know: when it ends the path of a file the guard writes the guard keeps the file; a cd, an absolute path or a name that no file of the guard has settles it as before', () => {
     const f = fixture('foreign-session-directory', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
     mkdirSync(join(project, 'sub'), { recursive: true });
@@ -2882,8 +3030,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       for (const command of [`python3 ${word}`, `true; python3 ${word} x`, `sh -c 'python3 ${word}'`, `python3 -u --log=${word}`]) {
         for (const key of ['state_file', 'pause_file', 'log_file']) {
           const r = start(command, { [key]: file });
-          expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-          expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+          expectUnread(r, key, `${command} as ${key}`);
           expect(r.stderr).not.toMatch(/Traceback/);
           expect(readText(file), `${command} as ${key}: the file is intact`).toBe(text);
         }
@@ -2900,7 +3047,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a directory that a word of the command only names (an argument) does not move the working directory: a relative path that ends the path of a file the guard writes is still run from the directory of the session and the guard refuses to start; a cd, pushd, -C, --directory or --chdir settles it as before', () => {
+  it('a directory that a word of the command only names (an argument) does not move the working directory: a relative path that ends the path of a file the guard writes is still run from the directory of the session and the guard keeps the file; a cd, pushd, -C, --directory or --chdir settles it as before', () => {
     const f = fixture('foreign-session-directory-argument', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
     const other = join(f.dir, 'other');   // a directory that the command names as an argument
@@ -2922,8 +3069,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       for (const command of [`python3 ${word} ${other}`, `python3 ${word} --flag ${other}`, `python3 ${other} ${word}`, `ls ${other}; python3 ${word}`, `sh -c 'python3 ${word} ${other}'`, `python3 -u --log=${word} --out ${other}`]) {
         for (const key of ['state_file', 'pause_file', 'log_file']) {
           const r = start(command, { [key]: file });
-          expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-          expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+          expectUnread(r, key, `${command} as ${key}`);
           expect(r.stderr).not.toMatch(/Traceback/);
           expect(readText(file), `${command} as ${key}: the file is intact`).toBe(text);
         }
@@ -2950,7 +3096,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a program of another hook that the PATH of the guard does not find is looked up on the PATH of the session, which the guard does not know: when its name is that of a file the guard writes the guard refuses to start; a PATH that the guard, the command or the settings has, or a name that no file of the guard has, settles it as before', () => {
+  it('a program of another hook that the PATH of the guard does not find is looked up on the PATH of the session, which the guard does not know: when its name is that of a file the guard writes the guard keeps the file; a PATH that the guard, the command or the settings has, or a name that no file of the guard has, settles it as before', () => {
     const f = fixture('foreign-session-path', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -2970,8 +3116,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of ['audit', 'exec audit', 'command audit', 'env audit --flag', 'true; audit', 'if true; then audit; fi', "sh -c 'audit --flag'", 'FOO=1 audit', '[ -f x ] || audit']) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
       }
@@ -2989,7 +3134,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start('sh -c "exit 0"; python3 -I x', { state_file: audit }).status, 'programs of the PATH of the guard').toBe(0);
   });
 
-  it('a cd that does not move the working directory of the word after it (in a subshell, a pipe, the background, before ||, a group in a pipe) does not settle a relative path: the guard still takes the directory of the session as a candidate and refuses to start; a cd of the same chain (after ;, &&, a newline, in a group or a subshell that holds both), and -C, --directory and --chdir of the command itself settle it', () => {
+  it('a cd that does not move the working directory of the word after it (in a subshell, a pipe, the background, before ||, a group in a pipe) does not settle a relative path: the guard still takes the directory of the session as a candidate and keeps the file; a cd of the same chain (after ;, &&, a newline, in a group or a subshell that holds both), and -C, --directory and --chdir of the command itself settle it', () => {
     const f = fixture('foreign-session-directory-chain', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
     const other = join(f.dir, 'other');   // a directory that a cd names
@@ -3020,8 +3165,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of refused(other)) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: file });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(file), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3039,7 +3183,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a cd that stands after then, else, elif, do or case may not run, so it moves nothing that is known: the file of the directory of the session stays a candidate and the guard refuses to start, while the directory it names is one more candidate; a cd before the branch, and one in no branch, still move the chain', () => {
+  it('a cd that stands after then, else, elif, do or case may not run, so it moves nothing that is known: the file of the directory of the session stays a candidate and the guard keeps the file, while the directory it names is one more candidate; a cd before the branch, and one in no branch, still move the chain', () => {
     const f = fixture('foreign-session-directory-branch', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
     const other = join(f.dir, 'other');   // a directory that a cd names
@@ -3064,8 +3208,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of notRun(other)) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: file });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(file), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3083,7 +3226,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('an option or a cd word that stands after the word a simple command runs is an argument of the program and moves nothing (python3 ./audit --chdir DIR, -C DIR, --directory=DIR, echo cd; ./audit, python3 ./audit cd DIR): the guard keeps the directory of the session as a candidate and refuses to start; a wrapper option in front of the word (env -C DIR, env --chdir DIR, env --chdir=DIR) and a cd that the shell runs settle it as before', () => {
+  it('an option or a cd word that stands after the word a simple command runs is an argument of the program and moves nothing (python3 ./audit --chdir DIR, -C DIR, --directory=DIR, echo cd; ./audit, python3 ./audit cd DIR): the guard keeps the directory of the session as a candidate and keeps the file; a wrapper option in front of the word (env -C DIR, env --chdir DIR, env --chdir=DIR) and a cd that the shell runs settle it as before', () => {
     const f = fixture('foreign-session-directory-position', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project');   // the working directory of the session: the guard runs in another one
     const other = join(f.dir, 'other');   // a directory that the command names
@@ -3111,8 +3254,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of refused(other)) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: file });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(file), `${command} as ${key}: the file is intact`).toBe('echo from-project\n');
       }
@@ -3130,7 +3272,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a pattern of a trimming expression (%, %%, #, ##) that holds a parameter that nothing gives a value to is a pattern whose cut the scan cannot know (the session may have it), so the guard refuses to start; a pattern that the settings, the command or a default word fills in, and a pattern with no parameter, are read as before', () => {
+  it('a pattern of a trimming expression (%, %%, #, ##) that holds a parameter that nothing gives a value to is a pattern whose cut the scan cannot know (the session may have it), so the guard keeps the file; a pattern that the settings, the command or a default word fills in, and a pattern with no parameter, are read as before', () => {
     const f = fixture('foreign-trimming-pattern-parameter', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3153,8 +3295,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of refused) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, settings, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3169,7 +3310,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('an assignment in front of a command (NAME=x cmd, env NAME=x cmd) is that command\'s alone, and unset takes a name away: a parameter that only such an assignment or the session gives is a word the scan cannot know, so the guard refuses to start; an assignment that stands alone, after export or as ${NAME:=word}, and an assignment that a quoted command in the same simple command gets, are read as before', () => {
+  it('an assignment in front of a command (NAME=x cmd, env NAME=x cmd) is that command\'s alone, and unset takes a name away: a parameter that only such an assignment or the session gives is a word the scan cannot know, so the guard keeps the file; an assignment that stands alone, after export or as ${NAME:=word}, and an assignment that a quoted command in the same simple command gets, are read as before', () => {
     const f = fixture('foreign-assignment-scope', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3198,8 +3339,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of refused) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3213,7 +3353,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a standalone assignment, an export or a default-assigning expansion gives its name a value only to the commands and words after it: a name that is used before it is the one the session has, so the guard refuses to start; an assignment before the use settles it, as unset takes it away from the next command on', () => {
+  it('a standalone assignment, an export or a default-assigning expansion gives its name a value only to the commands and words after it: a name that is used before it is the one the session has, so the guard keeps the file; an assignment before the use settles it, as unset takes it away from the next command on', () => {
     const f = fixture('foreign-assignment-order', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3237,8 +3377,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of [...used, unsetBefore]) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${JSON.stringify(command)} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${JSON.stringify(command)} as ${key}: the file is intact`).toBe(text);
       }
@@ -3249,7 +3388,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('an assignment gives its name a value for the commands after it only where the shell has made it: one that stands first or after a semicolon or a new line and that no pipe or ampersand follows, not one after && or || (that may be notMade), in a subshell, in a pipeline or in the background: the name is then still the one the session has, so the guard refuses to start', () => {
+  it('an assignment gives its name a value for the commands after it only where the shell has made it: one that stands first or after a semicolon or a new line and that no pipe or ampersand follows, not one after && or || (that may be notMade), in a subshell, in a pipeline or in the background: the name is then still the one the session has, so the guard keeps the file', () => {
     const f = fixture('foreign-assignment-control', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3273,8 +3412,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of [...notMade, ...afterAnd]) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${JSON.stringify(command)} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${JSON.stringify(command)} as ${key}: the file is intact`).toBe(text);
       }
@@ -3286,7 +3424,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('an assignment that stands in a branch or a loop body (after then, else, elif or do) settles no name for the commands after it, since the body may not run: the name is then still the one the session has, so the guard refuses to start; an assignment before the branch, and a command with no such word, are read as before', () => {
+  it('an assignment that stands in a branch or a loop body (after then, else, elif or do) settles no name for the commands after it, since the body may not run: the name is then still the one the session has, so the guard keeps the file; an assignment before the branch, and a command with no such word, are read as before', () => {
     const f = fixture('foreign-assignment-branch', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3311,8 +3449,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of notMade) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${JSON.stringify(command)} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${JSON.stringify(command)} as ${key}: the file is intact`).toBe(text);
       }
@@ -3324,7 +3461,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('an assignment that stands in a case arm (after case) settles no name for the commands after it, as one in a branch does: the arm may not run, so the name is still the one the session has and the guard refuses to start; an assignment before the case, and a command with no case, are read as before', () => {
+  it('an assignment that stands in a case arm (after case) settles no name for the commands after it, as one in a branch does: the arm may not run, so the name is still the one the session has and the guard keeps the file; an assignment before the case, and a command with no case, are read as before', () => {
     const f = fixture('foreign-assignment-case', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3348,8 +3485,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of notMade) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${JSON.stringify(command)} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${JSON.stringify(command)} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${JSON.stringify(command)} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${JSON.stringify(command)} as ${key}: the file is intact`).toBe(text);
       }
@@ -3361,7 +3497,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a default or error operator (-, :-, =, :=, ?, :?) does not settle a parameter: where nothing at that place gives the name a value, the session may have one and the shell then uses it, so the guard refuses to start when the word is the whole expansion or ends the path of a file it writes; a name that the settings or an earlier assignment give, and an expansion with something else after it, are read as before', () => {
+  it('a default or error operator (-, :-, =, :=, ?, :?) does not settle a parameter: where nothing at that place gives the name a value, the session may have one and the shell then uses it, so the guard keeps the file when the word is the whole expansion or ends the path of a file it writes; a name that the settings or an earlier assignment give, and an expansion with something else after it, are read as before', () => {
     const f = fixture('foreign-default-operator', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3381,8 +3517,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(printed(command), `${command}: the shell takes the value of the session`).toBe(audit);
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3422,8 +3557,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of [...unknown, `pushd "$FHG_DIR/other"; ./audit ${unrelated}`]) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3463,8 +3597,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of [...relative, `cd child; python3 ./audit ${unrelated}`, `env --directory child ./audit ${unrelated}`, `pushd child; ./audit ${unrelated}`, `cd; ./audit ${unrelated}`, `cd -; ./audit ${unrelated}`]) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3484,7 +3617,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start(`cd child; ./other ${unrelated}`, { state_file: audit }).status).toBe(0);
   });
 
-  it('a PATH that the command or the settings give is the PATH of the hook only when no component of it holds a parameter that nothing gives a value to (PATH=$DIR:$PATH, DIR only in the session), and only in the simple command that has it (PATH=dir true; audit): the guard cannot tell which file a bare name runs, so it refuses to start; a PATH whose parameters the settings, the command or a default word fill in settles it as before', () => {
+  it('a PATH that the command or the settings give is the PATH of the hook only when no component of it holds a parameter that nothing gives a value to (PATH=$DIR:$PATH, DIR only in the session), and only in the simple command that has it (PATH=dir true; audit): the guard cannot tell which file a bare name runs, so it keeps the file; a PATH whose parameters the settings, the command or a default word fill in settles it as before', () => {
     const f = fixture('foreign-session-path-component', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // the directory that only the session has in FHG_DIR
     const usr = join(f.dir, 'usr-bin');   // on the PATH of the guard
@@ -3512,8 +3645,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const [command, settingsEnv] of refused) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit }, settingsEnv);
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
       }
@@ -3529,7 +3661,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a PATH= word that stands after the program of a simple command is an argument, not the PATH of that program: the guard cannot tell which file a bare name runs and refuses to start, while a PATH= word in front of the program, also after env, settles it as before', () => {
+  it('a PATH= word that stands after the program of a simple command is an argument, not the PATH of that program: the guard cannot tell which file a bare name runs and keeps the file, while a PATH= word in front of the program, also after env, settles it as before', () => {
     const f = fixture('foreign-path-argument', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // on the PATH of the session only
     const usr = join(f.dir, 'usr-bin');   // on the PATH of the guard
@@ -3553,8 +3685,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of ['audit PATH=/nonexistent/safe', `audit PATH=${usr}`, 'audit --flag PATH=/nonexistent/safe', 'true; audit PATH=/nonexistent/safe']) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
       }
@@ -3566,7 +3697,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a $PATH in the value that a PATH= word gives is the PATH that the session has before the assignment, not the one the guard has: where no PATH is given before it the guard cannot tell which file a bare name runs, so it refuses to start; a PATH that the settings or an earlier assignment give, and a PATH= word with no $PATH in it, settle it as before', () => {
+  it('a $PATH in the value that a PATH= word gives is the PATH that the session has before the assignment, not the one the guard has: where no PATH is given before it the guard cannot tell which file a bare name runs, so it keeps the file; a PATH that the settings or an earlier assignment give, and a PATH= word with no $PATH in it, settle it as before', () => {
     const f = fixture('foreign-path-self-reference', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // on the PATH of the session only
     const usr = join(f.dir, 'usr-bin');   // on the PATH of the guard only
@@ -3591,8 +3722,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       expect(spawnSync('sh', ['-c', command], { encoding: 'utf8', env: guardOnly }).stdout, `${command}: the guard has another PATH, and finds another file`).toBe('guard\n');
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
       }
@@ -3610,7 +3740,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start('PATH=/nonexistent/safe:$PATH other', { state_file: audit }).status, 'a name that no file of the guard has').toBe(0);
   });
 
-  it('a bare word anywhere in a simple command that has a command word is looked up on the PATH of the session as the program it may be (timeout 5 audit, nice -n 5 audit, stdbuf -oL audit, sudo audit): the guard cannot tell which words a wrapper runs, so it refuses to start when the word is the name of a file the guard writes and no PATH is given; an absolute path, a PATH of the command or a name that no file of the guard has settles it as before', () => {
+  it('a bare word anywhere in a simple command that has a command word is looked up on the PATH of the session as the program it may be (timeout 5 audit, nice -n 5 audit, stdbuf -oL audit, sudo audit): the guard cannot tell which words a wrapper runs, so it keeps the file when the word is the name of a file the guard writes and no PATH is given; an absolute path, a PATH of the command or a name that no file of the guard has settles it as before', () => {
     const f = fixture('foreign-wrapped-operand', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // on the PATH of the session only
     mkdirSync(project);
@@ -3631,8 +3761,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of ['timeout 5 audit', 'nice -n 5 audit', 'stdbuf -oL audit', 'sudo audit', 'setsid audit', 'xargs audit', 'timeout 5 env audit', 'true; timeout 5 audit --flag']) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
       }
@@ -3655,7 +3784,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('an unbraced special parameter in the command of another hook (dollar and ?, $, !, #, *, @ or -), also inside double quotes, is a word that the scan cannot know, so the guard refuses to start; single quotes, a backslash, a dollar before a blank or at the end, the braced forms and the other parameters are read as before', () => {
+  it('an unbraced special parameter in the command of another hook (dollar and ?, $, !, #, *, @ or -), also inside double quotes, is a word that the scan cannot know, so the guard keeps the file; single quotes, a backslash, a dollar before a blank or at the end, the braced forms and the other parameters are read as before', () => {
     const f = fixture('foreign-special-parameter', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3677,8 +3806,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of refused) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit1 });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit1), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3695,7 +3823,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a program of another hook that the PATH of the guard does find is still looked up on the PATH of the session when the command and the settings give no PATH: a file that the guard knows does not tell which one runs, so the guard refuses to start when the name is that of a file the guard writes; a PATH of the command or of the settings settles it as before', () => {
+  it('a program of another hook that the PATH of the guard does find is still looked up on the PATH of the session when the command and the settings give no PATH: a file that the guard knows does not tell which one runs, so the guard keeps the file when the name is that of a file the guard writes; a PATH of the command or of the settings settles it as before', () => {
     const f = fixture('foreign-session-path-shadow', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const project = join(f.dir, 'project-bin');   // first on the PATH of the session
     const usr = join(f.dir, 'usr-bin');   // on the PATH of the guard and after the first on the one of the session
@@ -3720,8 +3848,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         for (const env of [guardOnly, sessionEnv]) {   // (a guard that has both directories, in either order, does not know the PATH of the session either)
           const r = start(command, { [key]: audit }, {}, env);
-          expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-          expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+          expectUnread(r, key, `${command} as ${key}`);
           expect(r.stderr).not.toMatch(/Traceback/);
           expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
         }
@@ -3741,7 +3868,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start('sh -c "exit 0"; python3 -I x', { state_file: audit }).status, 'programs that are no file of the guard').toBe(0);
   });
 
-  it('a variable that only the session of the hook has (the guard, the settings and the command give it no value) is the session\'s: when the word is that variable alone or ends the path of a file the guard writes the guard refuses to start; a word with another ending, a default word and a variable that the guard, the settings or the command give a value are read as before', () => {
+  it('a variable that only the session of the hook has (the guard, the settings and the command give it no value) is the session\'s: when the word is that variable alone or ends the path of a file the guard writes the guard keeps the file; a word with another ending, a default word and a variable that the guard, the settings or the command give a value are read as before', () => {
     const f = fixture('foreign-session-variable', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3763,8 +3890,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       'python3 ${FHG_SESSION_DIR}/audit', 'python3 -u --log=$FHG_SESSION_AUDIT', "sh -c 'python3 \"$FHG_SESSION_AUDIT\" x'", 'true; "$FHG_SESSION_AUDIT"']) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
       }
@@ -3791,7 +3917,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a variable that the guard has in its own environment is a candidate, not the value that the hook gets: a session that has another value (the guard has an old file, the session the file the guard writes) is not read to its end and the guard refuses to start; a value of the settings or of the command settles it, and the value of the guard stays a candidate beside it', () => {
+  it('a variable that the guard has in its own environment is a candidate, not the value that the hook gets: a session that has another value (the guard has an old file, the session the file the guard writes) is not read to its end and the guard keeps the file; a value of the settings or of the command settles it, and the value of the guard stays a candidate beside it', () => {
     const f = fixture('foreign-session-other-value', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     const old = join(f.dir, 'old');
@@ -3816,8 +3942,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of ['python3 "$FHG_OTHER_AUDIT"', 'python3 $FHG_OTHER_AUDIT', 'python3 "${FHG_OTHER_AUDIT}"', 'python3 "$FHG_OTHER_DIR/audit"', 'python3 ${FHG_OTHER_DIR}/audit', "sh -c 'python3 \"$FHG_OTHER_AUDIT\" x'", 'true; "$FHG_OTHER_AUDIT"']) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit }, {}, guardEnv);
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
       }
@@ -3838,7 +3963,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(start('python3 "${FHG_OTHER_AUDIT:-x}"', { state_file: audit }, {}, guardEnv).status, 'the expansion alone: a default word does not settle the name').toBe(2);
   });
 
-  it('a parameter expansion that the scan does not model (replacement, case change, a transformation with @, indirection, a slice, an array) is not read to its end, so the guard refuses to start; a plain ${NAME}, the modeled operators and braces without a dollar are read as before', () => {
+  it('a parameter expansion that the scan does not model (replacement, case change, a transformation with @, indirection, a slice, an array) is not read to its end, so the guard keeps the file; a plain ${NAME}, the modeled operators and braces without a dollar are read as before', () => {
     const f = fixture('foreign-unmodeled-expansion', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const hooks = join(f.dir, 'hooks');
     mkdirSync(hooks);
@@ -3864,8 +3989,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       for (const command of [`python3 "${expression}"`, `bash -c 'python3 "${expression}"'`, `true; python3 -u --log=${expression}`]) {
         for (const key of ['state_file', 'pause_file', 'log_file']) {
           const r = start(command, { [key]: audit });
-          expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-          expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+          expectUnread(r, key, `${command} as ${key}`);
           expect(r.stderr).not.toMatch(/Traceback/);
           expect(readText(audit), `${command} as ${key}: the file is intact`).toBe(text);
         }
@@ -3885,7 +4009,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('HOME and a leading ~ are the home directory of the session, which the guard does not know when a session has another one: the guard refuses to start when the word ends the path of a file the guard writes; another ending, and a HOME that the settings or the command give, are read as before', () => {
+  it('HOME and a leading ~ are the home directory of the session, which the guard does not know when a session has another one: the guard keeps the file when the word ends the path of a file the guard writes; another ending, and a HOME that the settings or the command give, are read as before', () => {
     const f = fixture('foreign-session-home', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     const home = join(f.dir, 'home');   // the home directory of the session: the guard has another one (ENV)
     mkdirSync(join(home, 'bin'), { recursive: true });
@@ -3905,8 +4029,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     for (const command of ['python3 ~/bin/audit', 'python3 $HOME/bin/audit', 'python3 "${HOME}/bin/audit"', "sh -c 'python3 ~/bin/audit x'", 'python3 -u --log=~/bin/audit']) {
       for (const key of ['state_file', 'pause_file', 'log_file']) {
         const r = start(command, { [key]: audit });
-        expect(r.status, `${command} as ${key}: ${r.stdout}${r.stderr}`).toBe(2);
-        expect(r.stderr, `${command} as ${key}`).toMatch(/not read to its end/);
+        expectUnread(r, key, `${command} as ${key}`);
         expect(r.stderr).not.toMatch(/Traceback/);
         expect(readText(audit), `${command} as ${key}: the program is intact`).toBe(text);
       }
@@ -3923,7 +4046,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a command of another hook that a limit cuts short is not read to its end, so the guard refuses to start and to write: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
+  it('a command of another hook that a limit cuts short is not read to its end, so the guard does not write over a file that it may name: more than 4096 words, 65536 characters, 4096 files or three levels of quoted commands', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const cases: Array<[string, (audit: string) => string, RegExp]> = [
       ['words', (audit) => `env ${words(4100)} ${audit}`, /too many words to scan/],
@@ -3946,7 +4069,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     }
   });
 
-  it('a command that grows past a limit after the start stops every write of the guard, and a command that stays within the limits does not', () => {
+  it('a command that grows past a limit after the start stops a write of the guard over a file that holds something else, and a command that stays within the limits does not', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `A${i}=x`).join(' ');
     const f = fixture('scan-limit-after-start', { cache: { pct: 99, resetMs: Date.now() + HOUR_MS } });
     const ours = { matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] };
@@ -4293,9 +4416,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a stored pause that is over at start is cleared even when the state file cannot be written: an ERROR line, not a traceback', () => {
     const f = fixture('start-write-fails', { cache: { pct: 50, resetMs: Date.now() + HOUR_MS } });
     writeFileSync(f.state, JSON.stringify({ paused: true, since: now() - 700, resume_at: now() - 10 }), 'utf8');
-    const code = ['import os, runpy, sys', 'real = os.replace',
-      'def fail_on_state(src, dst, *a, **k):', '    if str(dst).endswith("state.json"): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
-      'os.replace = fail_on_state', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const code = ['import os, runpy, sys', 'real = os.open',
+      'def fail_on_state(path, *a, **k):', '    if "state.json." in str(path) and str(path).endswith(".tmp"): raise OSError(30, "Read-only file system")', '    return real(path, *a, **k)',
+      'os.open = fail_on_state', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const r = runPyCode(code, [GUARD, ...guardArgs(f, ['--once'])]);
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(1); // the tick tries again, the write fails again
     expect(r.stdout).toMatch(/ERROR: cannot leave the stored pause cleanly at start/);
@@ -4310,9 +4433,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('a pause is left in this order: the state is written first, the pause file removed after, so a failed write leaves the pause in force (also across a restart)', async () => {
     const f = fixture('state-write-retry', { cache: { pct: 97, resetMs: Date.now() + 3000 } });
     const flag = join(f.dir, 'break-state');
-    const code = ['import os, runpy, sys', 'real = os.replace', 'flag = sys.argv[1]',
-      'def maybe_fail(src, dst, *a, **k):', '    if str(dst).endswith("state.json") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
-      'os.replace = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const code = ['import os, runpy, sys', 'real = os.open', 'flag = sys.argv[1]',
+      'def maybe_fail(path, *a, **k):', '    if "state.json." in str(path) and str(path).endswith(".tmp") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(path, *a, **k)',
+      'os.open = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const g = spawnPyCode(code, [flag, GUARD, ...guardArgs(f, ['--margin', '0.5'])]);
     try {
       await waitFor(() => existsSync(f.pause), 20000, 'pause file');
@@ -4330,9 +4453,9 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
   it('an early resume whose state write fails keeps the pause (file and disk) even when the cache turns stale; it ends when the write works and a reading shows it', async () => {
     const f = fixture('early-resume-retry', { cache: { pct: 97, resetMs: Date.now() + HOUR_MS } });
     const flag = join(f.dir, 'break-state');
-    const code = ['import os, runpy, sys', 'real = os.replace', 'flag = sys.argv[1]',
-      'def maybe_fail(src, dst, *a, **k):', '    if str(dst).endswith("state.json") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(src, dst, *a, **k)',
-      'os.replace = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const code = ['import os, runpy, sys', 'real = os.open', 'flag = sys.argv[1]',
+      'def maybe_fail(path, *a, **k):', '    if "state.json." in str(path) and str(path).endswith(".tmp") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real(path, *a, **k)',
+      'os.open = maybe_fail', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const g = spawnPyCode(code, [flag, GUARD, ...guardArgs(f, ['--max-age', '3'])]);
     try {
       await waitFor(() => existsSync(f.pause), 20000, 'pause file');
@@ -4600,7 +4723,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     copyFileSync(HOOK, copy);
     chmodSync(copy, 0o644);
     const exec644 = `[ -f ${f.pause} ] && [ -f ${copy} ] || exit 0; exec ${copy} --pause-file ${f.pause} # five-hour-guard-entry`;
-    const cases: Array<{ name: string; command: string; paste: string; also?: RegExp; refused?: boolean }> = [
+    const cases: Array<{ name: string; command: string; paste: string; also?: RegExp; unread?: boolean }> = [
       { name: 'no shell check at all', command: `exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`, paste: gen() },
       { name: 'no check of the interpreter', command: `[ -f ${f.pause} ] && [ -f ${HOOK} ] || exit 0; exec ${PYBIN} -I ${HOOK} --pause-file ${f.pause}`, paste: gen() },
       { name: 'a stale pause file in the shell check', command: gen().replace(`[ -f ${f.pause} ]`, '[ -f /old/pause.json ]'), paste: gen() },
@@ -4611,7 +4734,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       { name: 'no pause file at all', command: `exec ${PYBIN} -I ${HOOK}`, paste: gen() },
       { name: '--pause-file without a value', command: `exec ${PYBIN} -I ${HOOK} --pause-file`, paste: gen() },
       { name: 'a hook log and no pause file', command: `exec ${PYBIN} -I ${HOOK} --log ${f.dir}/hook.log`, paste: gen() },
-      { name: 'a relative pause file', command: gen({ pause: rel(f.pause) }), paste: gen(), refused: true },   // (the bare name of the pause file is a word that the PATH of the session may find: the guard refuses to read the entry, which says more than a warning)
+      { name: 'a relative pause file', command: gen({ pause: rel(f.pause) }), paste: gen(), unread: true },   // (the bare name of the pause file is a word that the PATH of the session may find: the entry is not read to its end, which is said too)
       { name: 'a poll interval written by hand', command: `${gen()} --poll 3600`, paste: gen() },
     ];
     for (const key of [false, true]) {
@@ -4628,15 +4751,8 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       }
       for (const c of cases) {
         put(c.command);
-        if (c.refused) {
-          const r = runSync(GUARD, guardArgs(f, ['--once']), { cwd: f.dir });
-          expect(r.status, `${c.name}: ${r.stdout}${r.stderr}`).toBe(2);
-          expect(r.stderr, c.name).toMatch(/not read to its end/);
-          put(c.paste);
-          expect(run(), `${c.name}: the pasted entry`).not.toMatch(/WARNING/);
-          continue;
-        }
         const out = run();
+        if (c.unread) expect(out, c.name).toMatch(/WARNING \(hook-unread\)/);
         const warnings = out.split('\n').filter((l) => /is not the entry this guard generates/.test(l));
         expect(warnings, `${c.name}: one drift warning`).toHaveLength(1);
         expect(warnings[0].endsWith(`: ${c.paste}`), `${c.name}: the entry to paste is ${c.paste}, got ${warnings[0]}`).toBe(true);
@@ -4754,7 +4870,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
     expect(readJson(f.pause).valid_until, 'a renewal of an unchanged file still renews it').toBeGreaterThanOrEqual(before);
   });
 
-  it('a pause file that is swapped for a foreign file right after the identity check of a renewal, before the file is put in place, is kept where it is: nothing at the path is destroyed, with the exchange of two paths and where the system cannot do it (the renewal then fails, and the pause is not renewed)', () => {
+  it('a pause file that is swapped for a foreign file right after the identity check of a renewal, before the file is put in place, is kept where it is: nothing at the path is destroyed, with the exchange of two paths and where the system cannot do it (a plain replace after one more look: the renewal goes through unless a file came in)', () => {
     const f = fixture('renewal-late-swap', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     guardOnce(f);   // enters the pause; the next run renews it
     expect(readJson(f.pause).paused, 'the pause is in force').toBe(true);
@@ -4766,19 +4882,20 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       '    return found',
       'os.lstat = swap'];
     // the system has no exchange of two paths (the C library cannot be loaded, as on macOS and Windows, or the file system refuses it)
-    const noExchange = ['import ctypes', 'def none(*args, **kw):', '    raise OSError("no such library")', 'ctypes.CDLL = none'];
+    const noExchange = ['import ctypes', 'real_cdll, pause_path = ctypes.CDLL, sys.argv[1]', 'class NoSwap:', '    def __init__(self, library):', '        self.library = library',
+      '    def renameat2(self, *args):', '        return -1 if os.fsdecode(args[3]) == pause_path else self.library.renameat2(*args)', 'ctypes.CDLL = lambda *args, **kw: NoSwap(real_cdll(*args, **kw))'];
     const run = (lines: string[], f2: Fixture) => runPyCode(['import os, runpy, sys', ...lines, 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n'), [f2.pause, GUARD, ...guardArgs(f2, ['--once'])]);
     const r = run(swap, f);
     expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*changed since it was validated and is not replaced/);
     expect(readText(f.pause), 'the file that came in after the check is still at the path, untouched').toBe('foreign file\n');
     expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
-    // without the exchange the file is not replaced either: the renewal fails, whether a file came in or not
+    // without the exchange the renewal goes through by a plain replace while the file is the one that was validated; a file that came in is still kept
     const g = fixture('renewal-no-exchange', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     guardOnce(g);
-    const before = readText(g.pause);
-    const refused = run(noExchange, g);
-    expect(refused.stdout, `${refused.stdout}${refused.stderr}`).toMatch(/ERROR: tick failed.*cannot be put in place without replacing a file that was not looked at/);
-    expect(readText(g.pause), 'the pause file is not touched').toBe(before);
+    const before = readJson(g.pause).valid_until;
+    const renewed = run(noExchange, g);
+    expect(renewed.stdout, `${renewed.stdout}${renewed.stderr}`).not.toContain('ERROR');
+    expect(readJson(g.pause).valid_until, 'the pause file is renewed without the exchange').toBeGreaterThan(before);
     const late = run([...noExchange, ...swap], g);
     expect(late.stdout, `${late.stdout}${late.stderr}`).toMatch(/ERROR: tick failed.*cannot be put in place/);
     expect(readText(g.pause), 'a file that came in after the check survives where the exchange is missing').toBe('foreign file\n');
@@ -4824,7 +4941,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       '        open(pause + ".a", "w").write("foreign file A\\n")', '        os.replace(pause + ".a", pause)',
       '    return found',
       'class Library:', '    def __init__(self, library):', '        self.library = library',
-      '    def renameat2(self, *args):', '        done = self.library.renameat2(*args)', '        calls.append(1)',
+      '    def renameat2(self, *args):', '        if os.fsdecode(args[3]) != pause:', '            return self.library.renameat2(*args)', '        done = self.library.renameat2(*args)', '        calls.append(1)',
       '        if len(calls) == 1:', '            open(pause + ".b", "w").write("foreign file B\\n")', '            os.replace(pause + ".b", pause)',
       '        return done',
       'os.lstat, ctypes.CDLL = swap, lambda *args, **kw: Library(real_cdll(*args, **kw))', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
@@ -4849,7 +4966,7 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
       '        open(pause + ".a", "w").write("foreign file A\\n")', '        os.replace(pause + ".a", pause)',
       '    return found',
       'class Library:', '    def __init__(self, library):', '        self.library = library',
-      '    def renameat2(self, *args):', '        calls.append(1)', '        return self.library.renameat2(*args) if len(calls) == 1 else -1',
+      '    def renameat2(self, *args):', '        if os.fsdecode(args[3]) != pause:', '            return self.library.renameat2(*args)', '        calls.append(1)', '        return self.library.renameat2(*args) if len(calls) == 1 else -1',
       'os.lstat, ctypes.CDLL = swap, lambda *args, **kw: Library(real_cdll(*args, **kw))', 'sys.argv = sys.argv[2:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const r = runPyCode(driver, [f.pause, GUARD, ...guardArgs(f, ['--once'])]);
     const kept = readdirSync(f.dir).filter((n) => n.endsWith('.tmp'));
@@ -4950,13 +5067,17 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard', { timeout: 90000 }, () => {
 
   it('where hard links are not supported and the pause cannot be put in place, the reservation is removed only while it is still the reservation: a foreign file that takes its place in the last moment before the removal is kept', () => {
     // the cleanup that follows a failed publication looks at the path (the second look of write_json: the first is the check of the reservation) and then takes the reservation away; the foreign file comes in right after that look
-    const driver = ['import ctypes, errno, os, runpy, sys', 'target, late, real_lstat, looks = sys.argv[1], sys.argv[2] == "1", os.lstat, []',
-      'def nolink(a, b, *args, **kw):', '    raise OSError(errno.EPERM, "Operation not permitted")',
-      'def none(*args, **kw):', '    raise OSError("no such library")',
+    // there is no exchange either, so the pause would be put in place by a plain replace: that is refused too, so that the publication fails after the reservation was made
+    const driver = ['import ctypes, errno, os, runpy, sys', 'target, late, real_lstat, real_link, real_replace, real_cdll, looks = sys.argv[1], sys.argv[2] == "1", os.lstat, os.link, os.replace, ctypes.CDLL, []',
+      'def nolink(a, b, *args, **kw):', '    if str(b) != target:', '        return real_link(a, b, *args, **kw)', '    raise OSError(errno.EPERM, "Operation not permitted")',
+      'def noreplace(a, b, *args, **kw):', '    if str(b) != target:', '        return real_replace(a, b, *args, **kw)', '    raise OSError(errno.EPERM, "the file cannot be put in place")',
+      'class NoSwap:', '    def __init__(self, library):', '        self.library = library',
+      '    def renameat2(self, *args):', '        return -1 if os.fsdecode(args[3]) == target else self.library.renameat2(*args)',
+      'def none(*args, **kw):', '    return NoSwap(real_cdll(*args, **kw))',
       'def look(path, *args, **kw):', '    found = real_lstat(path, *args, **kw)',
       '    if str(path) == target and sys._getframe(1).f_code.co_name == "write_json":', '        looks.append(1)', '        if late and len(looks) == 2:', '            os.unlink(target)', '            open(target, "w").write("foreign file\\n")',
       '    return found',
-      'os.link, os.lstat, ctypes.CDLL = nolink, look, none', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+      'os.link, os.lstat, os.replace, ctypes.CDLL = nolink, look, noreplace, none', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
     const f = fixture('no-link-reservation-cleanup-swap', { cache: { pct: 98, resetMs: Date.now() + HOUR_MS } });
     const r = runPyCode(driver, [f.pause, '1', GUARD, ...guardArgs(f, ['--once'])]);
     expect(r.stdout, `${r.stdout}${r.stderr}`).toMatch(/ERROR: tick failed.*cannot be put in place/);
@@ -5738,5 +5859,526 @@ describe('five-hour guard unit template', () => {
     const execStart = spaced.split('\n').find((l) => l.startsWith('ExecStart=')) ?? '';
     const argv = Array.from(execStart.slice('ExecStart='.length).matchAll(/"([^"]*)"|(\S+)/g), (m) => m[1] ?? m[2]);
     expect(argv, 'the executable, the script and the configuration file are one argument each').toEqual(['/opt/my tools/bin/python3', '-I', '/opt/my tools/guard/five-hour-guard.py', '--config', '/etc/my tools/x.json']);
+  });
+});
+
+// helpers of the describe blocks below
+const PROGRAM_TEXT = '#!/bin/sh\necho a program of another tool\n';
+const guardEntry = (f: Fixture) => ({ matcher: '*', hooks: [{ type: 'command', command: generatedCommand(f.pause, HOOK, PYBIN), timeout: 21600 }] });
+const writeBeside = (f: Fixture, command: string) =>
+  writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [guardEntry(f), { matcher: 'Bash', hooks: [{ type: 'command', command }] }] } }), 'utf8');
+const writeConfig = (f: Fixture, over: Record<string, unknown> = {}) =>
+  writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, settings_file: f.settings, ...over }), 'utf8');
+const nearLimit = (name: string, pct = 98) => fixture(name, { cache: { pct, resetMs: Date.now() + HOUR_MS } });
+const setUsage = (f: Fixture, pct: number) => writeCache(f, { pct, resetMs: Date.now() + HOUR_MS });
+
+describe.skipIf(!HAS_PYTHON3)('five-hour guard beside a hook command that is not read to its end', { timeout: 90000 }, () => {
+  const UNREAD = ['echo "$(date)" >/dev/null', 'echo `date` >/dev/null', 'read -r line', 'echo "$?"'];
+
+  it('a hook or status line whose command is not read to its end does not stop the guard: --dry-run exits 0, the guard pauses at the threshold, renews the pause, ends it and says which command it cannot read', () => {
+    const forms: Array<[string, (f: Fixture) => void]> = [
+      ...UNREAD.map((command): [string, (f: Fixture) => void] => [command, (f) => writeBeside(f, command)]),
+      ['echo "$(whoami)"', (f) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [guardEntry(f)] }, statusLine: { type: 'command', command: 'echo "$(whoami)"' } }), 'utf8')],
+    ];
+    forms.forEach(([command, write], i) => {
+      const f = nearLimit(`unread-start-${i}`);
+      writeConfig(f);
+      write(f);
+      const dry = runSync(GUARD, guardArgs(f, ['--dry-run']));
+      expect(dry.status, `${command}: ${dry.stdout}${dry.stderr}`).toBe(0);
+      expect(dry.stdout, command).toMatch(/WARNING \(hook-unread\): 1 command\(s\) in .*settings\.json are not read to their end/);
+      expect(dry.stdout, 'the warning shows the command').toContain(command.slice(0, 14));
+      expect(existsSync(f.pause), '--dry-run writes nothing').toBe(false);
+      const first = guardOnce(f);
+      expect(first.stdout, command).not.toMatch(/ERROR/);
+      const published = readJson(f.pause);
+      expect(published.paused, command).toBe(true);
+      expect(readJson(f.state).paused, command).toBe(true);
+      const renewal = guardOnce(f);
+      expect(renewal.stdout, command).not.toMatch(/ERROR/);
+      expect(readJson(f.pause).valid_until, `${command}: the pause is renewed`).toBeGreaterThan(published.valid_until);
+      expect(readText(f.log), 'the guard appends to its own log').toMatch(/WARNING \(hook-unread\)[\s\S]*THRESHOLD/);
+      setUsage(f, 10);
+      const end = guardOnce(f);
+      expect(end.stdout, command).not.toMatch(/ERROR/);
+      expect(existsSync(f.pause), `${command}: the pause ends`).toBe(false);
+      expect(readJson(f.state).paused, command).toBe(false);
+    });
+  });
+
+  it('such a command that appears in settings.json after the start stops neither the pause nor its renewal nor its end', async () => {
+    const f = nearLimit('unread-after-start', 50);
+    writeConfig(f);
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [guardEntry(f)] } }), 'utf8');
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeBeside(f, 'echo "$(date)"');
+      setUsage(f, 98);
+      await waitFor(() => existsSync(f.pause), 20000, 'the pause');
+      const first = readJson(f.pause).valid_until;
+      await waitFor(() => readJson(f.pause).valid_until > first, 20000, 'the renewal');
+      setUsage(f, 10);
+      await waitFor(() => !existsSync(f.pause), 20000, 'the end of the pause');
+    } finally { await stopGuard(g); }
+    expect(g.out).not.toMatch(/ERROR/);
+    expect(g.out).toMatch(/WARNING \(hook-unread\)/);
+    expect(g.out).toMatch(/RESUMED \(window reset seen early/);
+  });
+
+  it('beside such a command a state or pause file that holds something else stops the start and stays as it is, and a log with other text is not appended to while the pause goes on', () => {
+    const foreign: Array<[string, string]> = [
+      ['state_file', PROGRAM_TEXT], ['state_file', '{"paused": "no"}'], ['state_file', '{"paused": false, "since": "yesterday"}'], ['state_file', '[true]'],
+      ['pause_file', PROGRAM_TEXT], ['pause_file', '{"paused": false}'],
+    ];
+    foreign.forEach(([key, text], i) => {
+      const f = nearLimit(`unread-foreign-${i}`);
+      const target = join(f.dir, 'program');
+      writeFileSync(target, text, 'utf8');
+      writeConfig(f, { [key]: target });
+      writeBeside(f, 'echo "$(date)"');
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${key} ${text}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, `${key} ${text}`).toMatch(new RegExp(`is not read to its end, and "${key}" \\(.*program\\) holds something else`));
+      expect(readText(target), `${key}: kept`).toBe(text);
+    });
+    const linked = nearLimit('unread-linked-state');
+    writeFileSync(join(linked.dir, 'real-state'), '{"paused": false}', 'utf8');
+    symlinkSync(join(linked.dir, 'real-state'), linked.state);
+    writeConfig(linked);
+    writeBeside(linked, 'echo "$(date)"');
+    const link = runSync(GUARD, guardArgs(linked, ['--once']));
+    expect(link.status, `a link is not what the guard writes: ${link.stdout}${link.stderr}`).toBe(2);
+    expect(lstatSync(linked.state).isSymbolicLink()).toBe(true);
+
+    for (const text of [PROGRAM_TEXT, 'plain notes\n']) {
+      const f = nearLimit('unread-foreign-log');
+      const target = join(f.dir, 'program');
+      writeFileSync(target, text, 'utf8');
+      writeConfig(f, { log_file: target });
+      writeBeside(f, 'echo "$(date)"');
+      const r = guardOnce(f);
+      expect(readJson(f.pause).paused, 'the pause goes on').toBe(true);
+      expect(readText(target), 'the log with other text is kept').toBe(text);
+      expect(r.stdout).toMatch(/the log file .*program is a program that a command in .*settings\.json runs: nothing is appended to it/);
+      unlinkSync(f.pause);
+      unlinkSync(f.state);
+    }
+  });
+
+  it('beside such a command the files that the guard wrote before are its own: a stored state, an empty file and a log of its lines are written', () => {
+    const states = ['{"paused": false}', '{"paused": false, "since": null, "resume_at": null}', ''];
+    states.forEach((text, i) => {
+      const f = nearLimit(`unread-own-${i}`);
+      writeFileSync(f.state, text, 'utf8');
+      writeFileSync(f.log, i === 2 ? '' : '2026-01-02 03:04:05 an earlier line\n', 'utf8');
+      writeConfig(f);
+      writeBeside(f, 'echo "$(date)"');
+      const r = guardOnce(f);
+      expect(r.stdout, JSON.stringify(text)).not.toMatch(/ERROR/);
+      expect(readJson(f.pause).paused, JSON.stringify(text)).toBe(true);
+      expect(readJson(f.state).paused, JSON.stringify(text)).toBe(true);
+      expect(readText(f.log), JSON.stringify(text)).toMatch(/THRESHOLD/);
+    });
+  });
+
+  it('beside such a command the log is looked at before every line: one that becomes something else right after a line is not appended to', () => {
+    // two lines within the second for which a look is otherwise kept (the clock of that is stopped), the log replaced between them
+    const driver = ['import os, runpy, sys, time', 'time.monotonic = lambda: 1000.0', 'guard, log, text = sys.argv[1], sys.argv[2], sys.argv[3]', 'sys.argv = [guard] + sys.argv[4:]',
+      'g = runpy.run_path(guard, run_name="guard_functions")', 'g["log"]("first line")', 'print("appended:", "first line" in open(log).read(), flush=True)',
+      'with open(log + ".new", "w") as f: f.write(text)', 'os.replace(log + ".new", log)', 'g["log"]("second line")', 'g["log"]("third line")'].join('\n');
+    const f = nearLimit('unread-log-between-lines', 50);
+    writeConfig(f);
+    writeBeside(f, 'echo "$(date)"');
+    const r = runPyCode(driver, [GUARD, f.log, PROGRAM_TEXT, ...guardArgs(f)]);
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stdout, 'the log of the guard was written').toMatch(/appended: True/);
+    expect(readText(f.log), 'the file that took its place is kept').toBe(PROGRAM_TEXT);
+    expect(r.stdout.match(/nothing is appended to it/g), 'a look that refuses is still kept: one notice').toHaveLength(1);
+  });
+
+  it('beside such a command a state file that becomes something else under a running guard is not written: the pause is refused with an error that names the command', async () => {
+    const f = nearLimit('unread-state-turns-foreign', 50);
+    writeConfig(f);
+    writeBeside(f, 'echo "$(date)"');
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      writeFileSync(f.state, PROGRAM_TEXT, 'utf8');
+      setUsage(f, 98);
+      await waitFor(() => /ERROR: tick failed/.test(g.out) || readText(f.state) !== PROGRAM_TEXT, 20000, 'the refusal');
+      await sleep(600);
+    } finally { await stopGuard(g); }
+    expect(g.out).toMatch(/ERROR: tick failed.*echo "\$\(date\)".*is not read to its end and .*state\.json holds something else than what this guard writes there/);
+    expect(readText(f.state), 'the program is intact').toBe(PROGRAM_TEXT);
+    expect(existsSync(f.pause), 'no pause was published').toBe(false);
+  });
+
+  it('the hook log and the files that an entry with the marker runs stay protected when the entry is not read to its end', () => {
+    const f = nearLimit('unread-entry');
+    writeConfig(f);
+    const command = generatedCommand(f.pause, HOOK, PYBIN, f.state).replace(' # five-hour-guard-entry', ' "$(true)" # five-hour-guard-entry');
+    writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+    const r = runSync(GUARD, guardArgs(f, ['--once']));
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.stderr).toMatch(/"state_file" .* and "registered hook log" .* are the same file/);
+    expect(existsSync(f.state)).toBe(false);
+  });
+});
+
+describe.skipIf(!HAS_PYTHON3)('five-hour guard and an entry of an installation that moved', { timeout: 90000 }, () => {
+  const movedForms: Array<[string, (f: Fixture, hook: string) => string]> = [
+    ['with the checks of the hook and the interpreter, without the marker', (f, hook) => generatedCommand(f.pause, hook, PYBIN, f.hookLog).replace(' # five-hour-guard-entry', '')],
+    ['the older form without those checks', (f, hook) => `[ -f ${shellQuote(f.pause)} ] && [ -f ${shellQuote(hook)} ] || exit 0; exec ${shellQuote(PYBIN)} -I ${shellQuote(hook)} --pause-file ${shellQuote(f.pause)} --log ${shellQuote(f.hookLog)}`],
+    ['the older form without a hook log', (f, hook) => `[ -f ${shellQuote(f.pause)} ] && [ -f ${shellQuote(hook)} ] || exit 0; exec ${shellQuote(PYBIN)} -I ${shellQuote(hook)} --pause-file ${shellQuote(f.pause)}`],
+  ];
+  const installElsewhere = (f: Fixture) => {
+    const dir = join(f.dir, 'old install');
+    mkdirSync(dir, { recursive: true });
+    const hook = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, hook);
+    return { dir, hook };
+  };
+  const onlyEntry = (f: Fixture, command: string) => writeFileSync(f.settings, JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } }), 'utf8');
+
+  it('an entry that add wrote for this pause file with the scripts in another directory is the entry of this guard: it starts and pauses, asks to replace the entry, and says so when its hook is gone', () => {
+    movedForms.forEach(([name, build], i) => {
+      const f = nearLimit(`moved-entry-${i}`);
+      const old = installElsewhere(f);
+      writeConfig(f, { hook_log_file: f.hookLog });
+      onlyEntry(f, build(f, old.hook));
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(0);
+      expect(readJson(f.pause).paused, name).toBe(true);
+      expect(r.stdout, name).toMatch(/is not the entry this guard generates/);
+      expect(r.stdout, name).not.toMatch(/NOT registered/);
+      expect(r.stdout, name).not.toMatch(/is missing or cannot be/);
+      rmSync(old.dir, { recursive: true });
+      unlinkSync(f.pause);
+      unlinkSync(f.state);
+      const gone = guardOnce(f);
+      expect(gone.stdout, name).toMatch(/WARNING \(start\): the hook entry in .*: its hook .*old install\/five-hour-guard-hook\.py is missing or cannot be read, so the entry lets every call through during a pause/);
+    });
+  });
+
+  it('a command that only resembles such an entry is another tool\'s: with one more word or another file name it names the pause file as a foreign hook does', () => {
+    const variants: Array<[string, (f: Fixture, hook: string) => string]> = [
+      ['one more command', (f, hook) => `${movedForms[0][1](f, hook)} ; true`],
+      ['one more word', (f, hook) => `${movedForms[1][1](f, hook)} --poll 1`],
+      ['another file name', (f, hook) => movedForms[0][1](f, `${hook}.old`)],
+    ];
+    variants.forEach(([name, build], i) => {
+      const f = nearLimit(`moved-lookalike-${i}`);
+      const old = installElsewhere(f);
+      writeConfig(f, { hook_log_file: f.hookLog });
+      onlyEntry(f, build(f, old.hook));
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, name).toMatch(/"pause_file" .* and "program of another hook" .* are the same file/);
+    });
+  });
+
+  it('the wiring check names a hook or an interpreter of the entry that is not there, and not one given by a relative path or with a variable', () => {
+    const f = nearLimit('entry-files-missing');
+    writeConfig(f);
+    const gone = join(f.dir, 'gone', 'five-hour-guard-hook.py');
+    onlyEntry(f, generatedCommand(f.pause, gone, PYBIN));
+    const noHook = guardOnce(f);
+    expect(noHook.stdout).toMatch(/its hook .*gone\/five-hour-guard-hook\.py is missing or cannot be read/);
+    expect(noHook.stdout).not.toMatch(/its interpreter/);
+    const plain = join(f.dir, 'not-executable');
+    writeFileSync(plain, PROGRAM_TEXT, 'utf8');
+    onlyEntry(f, generatedCommand(f.pause, HOOK, plain));
+    const noPython = guardOnce(f);
+    expect(noPython.stdout).toMatch(/its interpreter .*not-executable is missing or cannot be run/);
+    expect(noPython.stdout).not.toMatch(/its hook/);
+    for (const [hook, python] of [['hooks/five-hour-guard-hook.py', 'python3'], ['/nonexistent/$TOOLS/five-hour-guard-hook.py', '/nonexistent/${PY}/python3']]) {
+      onlyEntry(f, generatedCommand(f.pause, hook, python));
+      const unknown = guardOnce(f);
+      expect(unknown.stdout, hook).not.toMatch(/is missing or cannot be/);
+    }
+  });
+});
+
+// a program for pause_command (argv: mode, report file): it reports its start and the end of its input. "quit" ends at once with status 3,
+// "outlive" goes on after the end of its input until it is terminated, "deaf" also ignores that and has to be killed, "linger" goes on for a
+// few seconds after the end of its input and then ends by itself
+const PAUSE_PROGRAM = [
+  'import os, signal, sys, time',
+  'mode, report = sys.argv[1], sys.argv[2]',
+  'def note(text):',
+  "    with open(report, 'a') as f:",
+  "        f.write(text + '\\n')",
+  'def terminated(*args):',
+  "    note('terminated')",
+  '    sys.exit(0)',
+  "if mode == 'deaf':",
+  '    signal.signal(signal.SIGTERM, signal.SIG_IGN)',
+  "elif mode == 'outlive':",
+  '    signal.signal(signal.SIGTERM, terminated)',
+  "note('start %d' % os.getpid())",
+  "if mode == 'quit':",
+  '    sys.exit(3)',
+  'sys.stdin.read()',
+  "note('end of input')",
+  "if mode in ('outlive', 'deaf'):",
+  '    time.sleep(40)',
+  "elif mode == 'linger':",
+  '    time.sleep(6)',
+  "note('left')",
+].join('\n');
+describe.skipIf(!HAS_PYTHON3)('five-hour guard pause_command', { timeout: 90000 }, () => {
+  const pauseProgram = (f: Fixture, mode: string) => {
+    const program = join(f.dir, 'pause-program.py');
+    writeFileSync(program, PAUSE_PROGRAM, 'utf8');
+    const report = join(f.dir, `report-${mode}.txt`);
+    return { report, command: [PYBIN, '-I', program, mode, report] };
+  };
+  const starts = (report: string) => readText(report).match(/^start /gm)?.length ?? 0;
+
+  it('pause_command runs for as long as a pause lasts, once, and reads the end of its input when the pause is over', async () => {
+    const f = nearLimit('pause-command', 50);
+    const p = pauseProgram(f, 'wait');
+    writeFileSync(f.cfg, JSON.stringify({ usage_cache: f.cache, pause_file: f.pause, state_file: f.state, log_file: f.log, pause_command: [...p.command, f.pause] }), 'utf8');
+    const g = startGuard(f);
+    try {
+      await waitFor(() => /guard start/.test(readText(f.log)), 20000, 'the start');
+      await sleep(600);
+      expect(starts(p.report), 'not run while there is no pause').toBe(0);
+      setUsage(f, 98);
+      await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+      const first = readJson(f.pause).valid_until;
+      await waitFor(() => readJson(f.pause).valid_until > first + 0.5, 20000, 'a few renewals');
+      expect(starts(p.report), 'one process for the whole pause').toBe(1);
+      expect(readText(p.report), 'its input is open while the pause lasts').not.toMatch(/end of input/);
+      setUsage(f, 10);
+      await waitFor(() => /left/.test(readText(p.report)), 20000, 'the end of the command');
+      await waitFor(() => /pause_command ended \(status 0\)/.test(readText(f.log)), 20000, 'the line in the log');
+      expect(existsSync(f.pause)).toBe(false);
+    } finally { await stopGuard(g); }
+    expect(g.out).toMatch(/pause_command started \(pid \d+\)/);
+    expect(g.out).not.toMatch(/ERROR|WARNING \(pause-command/);
+  });
+
+  it.each([
+    ['an early resume', 0],
+    ['the resume time', 7200],
+  ])('pause_command ends with the pause also when the state cannot be written at %s, and the error is still reported', async (name, ahead) => {
+    // argv: flag file, seconds; while the flag file is there the state cannot be written and the clock of the guard is that far ahead
+    const driver = ['import os, runpy, sys, time', 'real_open, real_time, flag, ahead = os.open, time.time, sys.argv[1], int(sys.argv[2])',
+      'def broken(path, *a, **k):', '    if "state.json." in str(path) and str(path).endswith(".tmp") and os.path.exists(flag): raise OSError(30, "Read-only file system")', '    return real_open(path, *a, **k)',
+      'os.open = broken', 'time.time = lambda: real_time() + (ahead if os.path.exists(flag) else 0)', 'sys.argv = sys.argv[3:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = nearLimit(`pause-command-unwritable-${ahead}`);
+    const p = pauseProgram(f, 'wait');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    const flag = join(f.dir, 'break-state');
+    const g = spawnPyCode(driver, [flag, String(ahead), GUARD, ...guardArgs(f)]);
+    try {
+      await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+      writeFileSync(flag, '');
+      if (!ahead) setUsage(f, 10);
+      await waitFor(() => /end of input/.test(readText(p.report)), 20000, `the end of the command at ${name}`);
+      await waitFor(() => /pause_command ended \(status 0\)[\s\S]*ERROR: tick failed.*Read-only file system/.test(g.out), 20000, 'the error of the failed write');
+      await sleep(600); // a few more tries to leave the pause
+      expect(starts(p.report), 'not run again while the end of the pause is tried again').toBe(1);
+      expect(existsSync(f.pause), 'the pause file is not removed before the state is written').toBe(true);
+      expect(readJson(f.state).paused).toBe(true);
+      expect(g.out).not.toMatch(/RESUMED/);
+      unlinkSync(flag);
+      if (ahead) {
+        await waitFor(() => starts(p.report) === 2, 20000, 'a pause that goes on runs it again');
+        setUsage(f, 10);
+      }
+      await waitFor(() => !existsSync(f.pause), 20000, 'the pause ends once the state can be written');
+    } finally { await stopGuard(g); }
+  });
+
+  it('pause_command ends with a guard that is stopped, and with one that is killed, and does not keep the locks of the guard', async () => {
+    for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+      const f = nearLimit(`pause-command-${signal}`);
+      const p = pauseProgram(f, signal === 'SIGKILL' ? 'linger' : 'wait');
+      writeConfig(f, { pause_command: p.command, settings_file: '' });
+      const g = startGuard(f);
+      try {
+        await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+        g.child.kill(signal);
+        await waitFor(() => /end of input/.test(readText(p.report)), 20000, `the end of the input after ${signal}`);
+        if (signal === 'SIGKILL') {
+          expect(readText(p.report), 'the command is still running').not.toMatch(/left/);
+          const next = runSync(GUARD, guardArgs(f, ['--once']));
+          expect(next.status, `a new guard starts while the old command still runs: ${next.stdout}${next.stderr}`).toBe(0);
+        }
+      } finally { await stopGuard(g); }
+      await waitFor(() => /left/.test(readText(p.report)), 20000, 'the command ends by itself');
+    }
+  });
+
+  it('a pause_command that ends while the pause lasts is run again at the next check, with a warning, and the pause goes on', async () => {
+    const f = nearLimit('pause-command-quits');
+    const p = pauseProgram(f, 'quit');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    const g = startGuard(f);
+    try {
+      await waitFor(() => starts(p.report) >= 3, 30000, 'the command run again');
+      expect(readJson(f.pause).paused).toBe(true);
+    } finally { await stopGuard(g); }
+    expect(g.out).toMatch(/WARNING \(pause-command-ended\): pause_command ended with status 3 while the pause lasts: it is run again/);
+    expect(g.out).not.toMatch(/ERROR/);
+  });
+
+  it('the first start of pause_command in a pause is logged; a start again in the same pause is a warning that --warn-every limits', async () => {
+    const f = nearLimit('pause-command-started');
+    const p = pauseProgram(f, 'quit');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    const g = startGuard(f);
+    const first = () => g.out.match(/ pause_command started \(pid \d+\)/g)?.length ?? 0;
+    const again = () => g.out.match(/WARNING \(pause-command-started\): pause_command started again \(pid \d+\)/g)?.length ?? 0;
+    try {
+      await waitFor(() => starts(p.report) >= 4, 30000, 'the command run again and again');
+      setUsage(f, 10);
+      await waitFor(() => /RESUMED/.test(g.out), 20000, 'the end of the first pause');
+      expect(first(), g.out).toBe(1);
+      expect(again(), g.out).toBe(1);
+      const before = starts(p.report);
+      setUsage(f, 98);
+      await waitFor(() => starts(p.report) >= before + 3, 30000, 'the command of the second pause run again');
+    } finally { await stopGuard(g); }
+    expect(first(), 'the first start of the second pause is logged').toBe(2);
+    expect(again(), 'the limit holds across pauses, as for any warning').toBe(1);
+  });
+
+  it('a pause_command that goes on after the end of its input is terminated, and one that ignores that is killed', async () => {
+    for (const [mode, line] of [['outlive', /pause_command ended \(status 0\)/], ['deaf', /pause_command ended \(status -9\)/]] as const) {
+      const f = nearLimit(`pause-command-${mode}`);
+      const p = pauseProgram(f, mode);
+      writeConfig(f, { pause_command: p.command, settings_file: '' });
+      const g = startGuard(f);
+      try {
+        await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+        setUsage(f, 10);
+        await waitFor(() => line.test(g.out), 40000, `${mode}: the end of the command`);
+        expect(existsSync(f.pause), 'the waiting calls were released').toBe(false);
+      } finally { await stopGuard(g); }
+      expect(/terminated/.test(readText(p.report)), mode).toBe(mode === 'outlive');
+    }
+  });
+
+  it('pause_command is not run by --dry-run or --test-pause; --once runs it and ends it with the process; a program that cannot be run is a warning and the pause goes on', () => {
+    const f = nearLimit('pause-command-modes');
+    const p = pauseProgram(f, 'wait');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    expect(runSync(GUARD, guardArgs(f, ['--dry-run'])).status).toBe(0);
+    expect(runSync(GUARD, guardArgs(f, ['--test-pause', '0.3'])).status).toBe(0);
+    expect(starts(p.report)).toBe(0);
+    const once = guardOnce(f);
+    expect(once.stdout).toMatch(/pause_command started[\s\S]*pause_command ended/);
+    const g = nearLimit('pause-command-broken');
+    const broken = join(g.dir, 'broken');
+    writeFileSync(broken, '#!/nonexistent-interpreter\n', 'utf8');
+    chmodSync(broken, 0o755);
+    writeConfig(g, { pause_command: [broken], settings_file: '' });
+    const r = guardOnce(g);
+    expect(r.stdout).toMatch(/WARNING \(pause-command\): cannot run pause_command .*: the pause goes on without it/);
+    expect(readJson(g.pause).paused).toBe(true);
+  });
+
+  it('where no lock is available pause_command ends when the pause is found to be that of another running process, and that pause is left alone', async () => {
+    const noLocks = ['import runpy, sys', 'sys.modules["fcntl"] = None', 'sys.modules["msvcrt"] = None', 'sys.argv = sys.argv[1:]', 'runpy.run_path(sys.argv[0], run_name="__main__")'].join('\n');
+    const f = nearLimit('pause-command-other-owner');
+    const p = pauseProgram(f, 'wait');
+    writeConfig(f, { pause_command: p.command, settings_file: '' });
+    const g = spawnPyCode(noLocks, [GUARD, ...guardArgs(f)]);
+    const other = JSON.stringify(pauseDoc({ pid: process.pid, valid_until: now() + 3600 }));   // the process of this test: alive, with a current heartbeat
+    try {
+      await waitFor(() => starts(p.report) === 1, 20000, 'the start of the command');
+      writeFileSync(`${f.pause}.other`, other, 'utf8');
+      renameSync(`${f.pause}.other`, f.pause);
+      await waitFor(() => /ERROR: tick failed.*belongs to the running process/.test(g.out), 20000, 'the renewal that is refused');
+      expect(readText(p.report), 'its input is open while the stored pause lasts').not.toMatch(/end of input/);
+      setUsage(f, 10);
+      await waitFor(() => /end of input/.test(readText(p.report)), 20000, 'the end of the command');
+      await waitFor(() => /the state is left as it is and the pause is left alone[\s\S]*pause_command ended \(status 0\)/.test(g.out), 20000, 'the lines in the log');
+      expect(g.exited, 'the guard goes on').toBe(false);
+      expect(readText(f.pause), 'the pause of the other process').toBe(other);
+    } finally { await stopGuard(g); }
+    expect(readText(f.pause), 'also after the stop').toBe(other);
+  });
+
+  it('a pause_command that is not a list of an executable file and arguments, or that names a file the guard writes, stops the start; the pause file may be named', () => {
+    const f = nearLimit('pause-command-config', 50);
+    const plain = join(f.dir, 'not-executable');
+    writeFileSync(plain, PROGRAM_TEXT, 'utf8');
+    const bad: Array<[unknown, RegExp]> = [
+      ['/bin/true', /"pause_command" must be a list of strings/],
+      [['/bin/true', 3], /"pause_command" must be a list of strings/],
+      [['/bin/true', ''], /"pause_command" must be a list of strings/],
+      [{}, /"pause_command" must be a list of strings/],
+      [['true'], /is not the absolute path of an executable file/],
+      [[plain], /is not the absolute path of an executable file/],
+      [[join(f.dir, 'nothing-here')], /is not the absolute path of an executable file/],
+      [[PYBIN, f.state], /"pause_command" names .*state\.json, which is the state_file of this guard/],
+      [[PYBIN, f.log], /"pause_command" names .*guard\.log, which is the log_file of this guard/],
+      [[PYBIN, `${f.pause}.lock`], /which is the lock of the pause file of this guard/],
+    ];
+    for (const [value, message] of bad) {
+      writeConfig(f, { pause_command: value, settings_file: '' });
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${JSON.stringify(value)}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.stderr, JSON.stringify(value)).toMatch(message);
+      expect(r.stderr).not.toMatch(/Traceback/);
+    }
+    for (const value of [[], null, [PYBIN, '-c', 'pass', f.pause]]) {
+      writeConfig(f, { pause_command: value, settings_file: '' });
+      const r = runSync(GUARD, guardArgs(f, ['--once']));
+      expect(r.status, `${JSON.stringify(value)}: ${r.stdout}${r.stderr}`).toBe(0);
+    }
+  });
+});
+
+// the guard runs where two paths cannot be exchanged (macOS, Windows), and the first `count` renames or replaces of the pause file are refused as
+// Windows refuses them while another process holds the file open (argv: pause file, replace or rename, count, "arrival" to put a foreign file there)
+const HELD_OPEN_DRIVER = [
+  'import ctypes, os, runpy, sys',
+  'def none(*args, **kw):',
+  '    raise OSError("no library")',
+  'ctypes.CDLL = none',
+  'pause, what, left, arrival = sys.argv[1], sys.argv[2], [int(sys.argv[3])], sys.argv[4]',
+  'real = getattr(os, what)',
+  'def step(source, target, *args, **kw):',
+  "    if str(target if what == 'replace' else source) == pause and left[0] > 0:",
+  '        left[0] -= 1',
+  "        if arrival == 'arrival':",
+  "            open(pause + '.a', 'w').write('foreign file\\n')",
+  "            os.rename(pause + '.a', pause)",
+  "        raise PermissionError(13, 'the file is open in another process')",
+  '    return real(source, target, *args, **kw)',
+  'setattr(os, what, step)',
+  'sys.argv = sys.argv[5:]',
+  "runpy.run_path(sys.argv[0], run_name='__main__')",
+].join('\n');
+
+describe.skipIf(!HAS_PYTHON3)('five-hour guard where a replace or a rename is refused', { timeout: 90000 }, () => {
+  it('a replace or a rename of the pause file that is refused while another process holds it open is tried again, a file that came in meanwhile is kept, and a refusal that stays is an error', () => {
+    const run = (f: Fixture, what: string, count: number, arrival = '') => runPyCode(HELD_OPEN_DRIVER, [f.pause, what, String(count), arrival, GUARD, ...guardArgs(f, ['--once'])]);
+    const f = nearLimit('held-open-renewal');
+    guardOnce(f);
+    let before = readJson(f.pause).valid_until;
+    const brief = run(f, 'replace', 3);
+    expect(brief.stdout, `${brief.stdout}${brief.stderr}`).not.toMatch(/ERROR/);
+    expect(readJson(f.pause).valid_until, 'renewed after the refusals').toBeGreaterThan(before);
+    before = readJson(f.pause).valid_until;
+    const lasting = run(f, 'replace', 1000);
+    expect(lasting.stdout).toMatch(/ERROR: tick failed.*PermissionError/);
+    expect(readJson(f.pause).valid_until, 'the pause that was there stays').toBe(before);
+    expect(readdirSync(f.dir).filter((n) => n.endsWith('.tmp')), 'no temporary file is left').toEqual([]);
+    setUsage(f, 10);
+    const end = run(f, 'rename', 3);
+    expect(end.stdout, `${end.stdout}${end.stderr}`).not.toMatch(/ERROR|cannot remove/);
+    expect(existsSync(f.pause), 'removed after the refusals').toBe(false);
+    const g = nearLimit('held-open-arrival');
+    guardOnce(g);
+    const late = run(g, 'replace', 1, 'arrival');
+    expect(late.stdout).toMatch(/ERROR: tick failed.*cannot be put in place/);
+    expect(readText(g.pause), 'the file that came in between two tries is kept').toBe('foreign file\n');
   });
 });
