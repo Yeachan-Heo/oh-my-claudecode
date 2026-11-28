@@ -95,6 +95,12 @@ export OMC_SKIP_HOOKS="keyword-detector,notepad"
 
 Separate hook names with commas to skip only those hooks.
 
+## Five-hour limit guard (opt-in, not part of the plugin hook set)
+
+`tools/five-hour-guard/` holds a guard process and a `PreToolUse` hook for people who run many sessions on one Claude subscription. It works only with a Claude subscription (OAuth login) and only while something keeps OMC's usage cache fresh: the OMC status line with rate limits shown (`elements.rateLimits` is not `false`) or a running `omc wait`; without that the guard holds nothing and says so in its log. The guard reads the five-hour usage that OMC already caches (`.usage-cache-anthropic.json` under `plugins/oh-my-claudecode/` in the Claude Code configuration directory). At a threshold (97 % by default) it writes a pause file, and the hook makes every tool call of every session that loads it wait until the window resets plus a margin. Nothing is denied and no signal is sent, so sessions stay alive and keep their id. A dead guard releases the sessions after a heartbeat deadline, and a missing, unreadable or expired pause file means "not paused" (fail-open).
+
+Nothing is registered by default: `hooks/hooks.json` and the hook set of the plugin do not change, and the hook runs only after you add its entry to your own `settings.json` with `five-hour-guard-settings.py add`. The optional `OMC_FIVE_HOUR_GUARD_CONFIG` variable names the JSON configuration file of the guard and of the settings tool (the hook reads no configuration file). The guard acts before the limit, while `omc wait` acts after it. See [tools/five-hour-guard/README.md](../tools/five-hour-guard/README.md) for the input, the configuration, the sessions that are never held, the emergency release and the limits.
+
 ---
 
 ## Lifecycle Events

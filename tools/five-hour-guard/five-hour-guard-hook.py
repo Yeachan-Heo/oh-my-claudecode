@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+# PreToolUse hook for the five-hour limit guard (five-hour-guard.py). While the guard's pause file says "paused", every tool
+# call of every session that loads this hook WAITS here (no signal is sent to the session; it stays alive and keeps its id
+# and its connections). When the guard removes the pause file the hook returns at once and the tool call proceeds. The hook
+# never denies a call and never prints anything, so the model gets no reason to retry and makes no extra API request while
+# it waits.
+#
+# Fail-open on purpose: unreadable or invalid pause file, no heartbeat from the guard (`valid_until` in the pause file is
+# rewritten by the guard every tick and has passed), a deadline passed by DEADLINE_GRACE_S, or a deadline further ahead than
+# the guard ever writes it (`valid_until` more than MAX_VALID_AHEAD_S, `resume_at` more than MAX_RESUME_AHEAD_S from now) all
+# mean "not paused". A dead guard, or a pause file written with absurd times, can therefore never wedge sessions.
+#
+#   five-hour-guard-hook.py --pause-file <file> [--log <file>] [--poll <seconds>]
+# Both paths come from the hook command that five-hour-guard-settings.py writes into settings.json; the hook reads no
+# configuration file (it runs on every tool call). Without --pause-file there is nothing to wait for: exit 0. --poll is the
+# time between two readings of the pause file while a call waits (2 s unless given); it is kept between MIN_POLL_S and MAX_POLL_S,
+# so that a hand-written value can neither spin a processor nor keep a call long after the pause has ended.
+import json, math, os, re, stat, sys, time
+from urllib.parse import urlparse
+
+DEADLINE_GRACE_S = 900       # never hold longer than this past the stored resume time
+MAX_VALID_AHEAD_S = 3600     # the guard renews valid_until every tick and sets it at most 1800 s ahead
+MAX_RESUME_AHEAD_S = 21600   # a window is 5 hours; the guard believes no reset time further than 5 h 15 min, plus a margin of at most 30 min
+MAX_PAUSE_BYTES = 1048576   # the pause document is about 200 bytes plus the exclude list, which the guard keeps under 64 KiB: a larger file is no pause, and is not read in full
+MIN_POLL_S = 0.1             # --poll 0 would spin a processor for the whole pause
+MAX_POLL_S = 5               # a call is released at most one poll after the pause file is removed or its valid_until has lapsed: --poll 3600 must not keep it for an hour
+
+
+def arg(name, default=None):
+    a = sys.argv
+    return a[a.index(name) + 1] if name in a and a.index(name) + 1 < len(a) else default
+
+
+PAUSE_FILE = arg('--pause-file')
+LOG = arg('--log')
+try:
+    POLL_S = float(arg('--poll', '2'))
+except ValueError:
+    POLL_S = 2.0
+if not math.isfinite(POLL_S):
+    POLL_S = 2.0
+POLL_S = min(max(POLL_S, MIN_POLL_S), MAX_POLL_S)
+
+
+def pause_state():
+    """Return the pause dict when a pause is in force, else None (fail-open)."""
+    try:
+        if not stat.S_ISREG(os.lstat(PAUSE_FILE).st_mode):
+            return None   # a link is not the file the guard writes (it can lead to the pause of another guard); the guard never owns one
+        # opened without following a link, and the opened descriptor is checked: a regular file swapped for a link after the look above
+        # is refused by the open (a FIFO is not waited for either: O_NONBLOCK), so the content read is that of a regular file
+        fd = os.open(PAUSE_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+        with os.fdopen(fd, 'rb') as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return None
+            raw = f.read(MAX_PAUSE_BYTES + 1)   # a regular file of any size (a mistaken path, a sparse file) is never read to its end
+            if len(raw) > MAX_PAUSE_BYTES:
+                return None
+            p = json.loads(raw)
+    except Exception:
+        return None
+    now = time.time()
+    try:
+        if type(p.get('v')) is not int or p['v'] != 2:
+            return None   # not the document the guard publishes (version 2)
+        if p.get('paused') is not True:
+            return None   # "false", 1 or "true" are not a pause: only the JSON value true is
+        valid_until, resume_at = p['valid_until'], p['resume_at']
+        if type(p.get('pid')) is not int or type(p.get('since')) not in (int, float) or not math.isfinite(p['since']):
+            return None   # not the whole document the guard writes (the guard itself would not own such a file)
+        if not all(type(x) in (int, float) and math.isfinite(x) for x in (valid_until, resume_at)):
+            return None   # a string, a boolean, NaN or infinity: NaN and infinity would compare false and hold for ever
+        for key in ('exclude', 'only'):
+            if not isinstance(p.get(key, []), list) or not all(isinstance(x, str) for x in p.get(key, [])):
+                return None   # a string would be read as a list of one-letter prefixes
+        if now > valid_until:
+            return None
+        if now > resume_at + DEADLINE_GRACE_S:
+            return None
+        if valid_until > now + MAX_VALID_AHEAD_S:
+            return None
+        if resume_at > now + MAX_RESUME_AHEAD_S:
+            return None
+    except Exception:
+        return None
+    return p
+
+
+def log(msg):
+    if not LOG:
+        return
+    try:
+        # no link at the final component and nothing but a regular file: a link put in a shared directory must not redirect the write
+        if not hasattr(os, 'O_NOFOLLOW'):   # Windows: there is no flag for it, so a link or a reparse point at the path is refused before the open
+            try:
+                st = os.lstat(LOG)
+            except FileNotFoundError:
+                st = None
+            if st is not None and (stat.S_ISLNK(st.st_mode) or getattr(st, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0)):
+                return
+        fd = os.open(LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0), 0o644)
+        try:
+            if stat.S_ISREG(os.fstat(fd).st_mode):
+                os.write(fd, (time.strftime('%Y-%m-%d %H:%M:%S ') + msg + '\n').encode('utf-8', 'replace'))
+        finally:
+            os.close(fd)
+    except Exception:
+        pass
+
+
+# The provider rule of src/config/models.ts (isBedrock, isVertexAI, getProviderDetectionModelEnvValues), kept here because this script
+# imports nothing: the flags accept 1 and true; a model id of Bedrock or Vertex is a provider signal where the flag was not passed on
+# to the process; the model is the direct CLAUDE_MODEL / ANTHROPIC_MODEL (the first that is not blank) and, only when neither is set,
+# the tier models of OMC and Claude Code (medium, high, low; the first that is set of each). The settings tool removes the same
+# variables from the environment of its probe (PROVIDER_ENV_KEYS in five_hour_guard_entry.py).
+DIRECT_MODEL_KEYS = ('CLAUDE_MODEL', 'ANTHROPIC_MODEL')
+TIER_MODEL_KEYS = (('OMC_MODEL_MEDIUM', 'CLAUDE_CODE_BEDROCK_SONNET_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL'),
+                   ('OMC_MODEL_HIGH', 'CLAUDE_CODE_BEDROCK_OPUS_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'),
+                   ('OMC_MODEL_LOW', 'CLAUDE_CODE_BEDROCK_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'))
+BEDROCK_MODEL_ID = re.compile(r'^((us|eu|ap|apac|global)\.anthropic\.|anthropic\.claude)', re.I)
+BEDROCK_ARN = re.compile(r'^arn:aws(-[^:]+)?:bedrock:', re.I)
+BEDROCK_PROFILE = re.compile(r':(inference-profile|application-inference-profile)/', re.I)
+
+
+def provider_flag(value):
+    return str(value or '').strip().lower() in ('1', 'true')
+
+
+def provider_model_ids():
+    """The model values the provider is read from (getProviderDetectionModelEnvValues): the direct model when one is set, else the tier models."""
+    env = os.environ
+    for key in DIRECT_MODEL_KEYS:
+        if env.get(key, '').strip():
+            return [env[key].strip()]
+    found = []
+    for keys in TIER_MODEL_KEYS:
+        for key in keys:
+            if env.get(key, '').strip():
+                found.append(env[key].strip())
+                break
+    return found
+
+
+def provider_model_id(model_id):
+    """A Bedrock model id (prefixed, or an inference-profile ARN of a Claude model) or a Vertex id (vertex_ai/...)."""
+    if BEDROCK_MODEL_ID.match(model_id):
+        return True
+    if BEDROCK_ARN.match(model_id) and BEDROCK_PROFILE.search(model_id) and 'claude' in model_id.lower():
+        return True
+    return model_id.lower().startswith('vertex_ai/')
+
+
+def foreign_provider():
+    """Sessions that do not draw on the Anthropic subscription window are never held: they authenticate with an API key or
+    an auth token, route through Bedrock, Vertex or Foundry (flag set, or a model id of Bedrock or Vertex in the model variables),
+    or use a base URL whose host is not anthropic.com (the host is compared, not the text: `proxy-anthropic.com` is foreign,
+    `API.ANTHROPIC.COM` is not)."""
+    env = os.environ
+    if any(env.get(k, '').strip() for k in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')):
+        return True
+    if any(provider_flag(env.get(k)) for k in ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')):
+        return True
+    if any(provider_model_id(m) for m in provider_model_ids()):
+        return True
+    base = env.get('ANTHROPIC_BASE_URL', '').strip()
+    if not base:
+        return False
+    try:
+        host = (urlparse(base if '://' in base else '//' + base).hostname or '').rstrip('.').lower()
+    except ValueError:
+        return True   # not a URL we can read: not Anthropic's, and the hook is fail-open
+    return not (host == 'anthropic.com' or host.endswith('.anthropic.com'))
+
+
+def spared(p, sid):
+    """True when this pause document does not hold the session: an excluded prefix, or `only` naming other sessions."""
+    if any(sid.startswith(x) for x in p.get('exclude', []) if x):
+        return True
+    only = [x for x in p.get('only', []) if x]
+    return bool(only) and not any(sid.startswith(x) for x in only)   # a test pause aimed at chosen sessions holds nobody else
+
+
+def main():
+    if not PAUSE_FILE:
+        return 0
+    p = pause_state()
+    if p is None:
+        return 0
+    try:
+        raw = sys.stdin.read()
+        ev = json.loads(raw) if raw.strip() else {}
+    except Exception:
+        ev = {}
+    if not isinstance(ev, dict):
+        ev = {}   # a list or a text on stdin is no event: the call is held like any other
+    sid = str(ev.get('session_id') or '')
+    if spared(p, sid):
+        return 0
+    if foreign_provider():
+        return 0
+    t0 = time.time()
+    who = f"{sid[:8]} {ev.get('tool_name', '?')}" + (f" agent={ev.get('agent_id')}" if ev.get('agent_id') else '')
+    log(f'hold-start {who}')
+    while True:
+        current = pause_state()
+        if current is None or spared(current, sid):   # a replacement (a restart with another exclude) is judged like the first document
+            break
+        time.sleep(POLL_S)
+    log(f'hold-end {who} waited={int(time.time() - t0)}s')
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception:
+        sys.exit(0)
