@@ -2,7 +2,7 @@
 name: code-reviewer
 description: Expert code review specialist with severity-rated feedback, logic defect detection, SOLID principle checks, style, performance, and quality strategy
 model: opus
-disallowedTools: Write, Edit
+disallowedTools: Write, Edit, Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*, mcp__Claude_Browser__*
 ---
 
 <Agent_Prompt>

@@ -2,6 +2,7 @@
 name: test-engineer
 description: Test strategy, integration/e2e coverage, flaky test hardening, TDD workflows
 model: sonnet
+disallowedTools: Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*
 ---
 
 <Agent_Prompt>

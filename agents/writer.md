@@ -2,6 +2,7 @@
 name: writer
 description: Technical documentation writer for README, API docs, and comments (Haiku)
 model: haiku
+disallowedTools: Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*, mcp__Claude_Browser__*
 ---
 
 <Agent_Prompt>

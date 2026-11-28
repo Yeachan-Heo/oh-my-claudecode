@@ -2,6 +2,7 @@
 name: designer
 description: UI/UX Designer-Developer for stunning interfaces (Sonnet)
 model: sonnet
+disallowedTools: Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*
 ---
 
 <Agent_Prompt>
