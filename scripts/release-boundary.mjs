@@ -650,6 +650,23 @@ export function assertTrigger({ tag, sha, cwd = process.cwd() }) {
   if (committedReleaseBody !== releaseBody) {
     fail(`${releaseBodyPath} must match the contents committed at HEAD`);
   }
+
+  // The committed body is published verbatim as the GitHub Release, so it must
+  // describe this version, not a previous one (#5173). Versions match as whole
+  // tokens so 5.8.1 is not satisfied by 5.8.10 or 5.8.1-rc.1.
+  const versionToken = (prefix) => new RegExp(`(?<![\\w.-])${escapeRegExp(`${prefix}${version}`)}(?![\\w.-])`);
+  const releaseBodyHeading = committedReleaseBody.match(/^# +(.+)$/m)?.[1];
+  if (!releaseBodyHeading || !versionToken('v').test(releaseBodyHeading)) {
+    fail(`${releaseBodyPath} first heading must name v${version} (found: ${releaseBodyHeading ?? 'no heading'})`);
+  }
+  if (!versionToken(`${PACKAGE_NAME}@`).test(committedReleaseBody)) {
+    fail(`${releaseBodyPath} must contain the install line for ${PACKAGE_NAME}@${version}`);
+  }
+  for (const [, compareRange] of committedReleaseBody.matchAll(/\/compare\/([^\s)]+)/g)) {
+    if (!compareRange.endsWith(`...v${version}`)) {
+      fail(`${releaseBodyPath} compare link must end with ...v${version} (found: ${compareRange})`);
+    }
+  }
   return { version, sha: expectedSha };
 }
 
