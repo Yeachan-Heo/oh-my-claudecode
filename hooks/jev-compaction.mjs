@@ -177,10 +177,10 @@
  * Host attachments (OMC_JEV_COMPACT_HOST_ATTACHMENTS=1 or true, off by default; without it the user rows of text keep their handles and no record gains a field).
  * The host keeps what is no row (instructions, lists of skills, agents and tools, hook contexts, the text of used skills) in the group of the row before it, and a
  * row that keeps its handle comes back with its group. With the switch on each user row of text before the open tool loop is built from its text, with the messages
- * delivered after it in their envelopes, and the host announces again what it finds missing. A row keeps its handle in a turn with an image, a document or a /goal
- * record, without text or with [Image #N], or in a turn the API form does not place; without the API form nothing is taken off. When the row of an advisor reminder
- * cannot be rebuilt, or the API form does not show the start of a long conversation, the compaction goes to the summary (advisor_image, advisor_command,
- * advisor_no_row, advisor_in_tail, advisor_form_cut). The predictions take off the attachments that go less what the host announces again. The record gets
+ * delivered after it in their envelopes, and the host announces again what it finds missing. A row keeps its handle when the host flags it isMeta, in a turn with
+ * an image, a document or a /goal record, without text or with [Image #N], or in a turn the API form does not place; without the API form nothing is taken off.
+ * When the row of an advisor reminder cannot be rebuilt, or the API form does not show the start of a long conversation, the compaction goes to the summary
+ * (advisor_image, advisor_command, advisor_no_row, advisor_in_tail, advisor_meta_row, advisor_form_cut). The predictions take off the attachments that go less what the host announces again. The record gets
  * `rebuilt_user`, `advisor_blocks`, `attachments_dropped`, `attachments_dropped_tokens`, `attachments_kinds`, `attachments_kinds_tokens`, `attachments_skills`
  * (names of used skills: masked and cut; a name or skill directory that names a secret or private path is left out), `attachments_back`,
  * `attachments_back_tokens`, `attachments_back_from_results_tokens` and `attachments_resent_tokens`; see "host attachments" below.
@@ -6217,10 +6217,12 @@ async function archiveStep($, cfg, record, mode, candidates, rows, keepFrom, gro
 // messages delivered after it in their envelopes, and its group (instructions, lists of skills and agents, deltas of tools, memory files, the old text of used
 // skills, hook contexts) does not come back; the host announces again what it finds missing in the list after the boundary. A row keeps its handle for a technical
 // reason only: it stands from keepFrom on (the open loop), its turn holds an image, a document or a /goal record (which renders to nothing and which the host does
-// not rebuild), it has no text or holds [Image #N], or the API form does not place its turn.
+// not rebuild), it has no text or holds [Image #N], the API form does not place its turn, or the host flags it isMeta (built from its text it would lose the flag
+// and count as a message of the user in the next compaction).
 // The advisor: the host takes the advisor's model from the last advisor_tool attachment of the list before its first request after a compaction, so the row that
 // carries the advisor's reminder (the last user row of its turn) is rebuilt too and the host announces the advisor again from the setting; a carrier that cannot be
-// rebuilt without a loss hands the compaction to the host's summary (advisor_image, advisor_command, advisor_no_row, advisor_in_tail, advisor_form_cut).
+// rebuilt without a loss hands the compaction to the host's summary (advisor_image, advisor_command, advisor_no_row, advisor_in_tail, advisor_meta_row,
+// advisor_form_cut).
 // The kinds of attachments are told by the first line the host renders each with, so their table follows the version of the host.
 const API_FORM_MAX = 4096; // the number of messages the host's API form keeps (a cut form shows less than the conversation)
 const GOAL_COMMAND = /^\s*<command-name>\s*\/goal\b/i;
@@ -6372,7 +6374,7 @@ function blockTexts(b) {
 }
 const contentBlocks = (a) => (typeof a.content === 'string' ? [{ type: 'text', text: a.content }] : a.content.filter((b) => b && typeof b === 'object'));
 // A user row of text the host can rebuild from its text alone (a row of the open loop, a row with an image, a /goal record cannot be).
-const textRebuildable = (m, i, keepFrom, imageRows) => m.role === 'user' && !(m.toolResults || []).length && i < keepFrom
+const textRebuildable = (m, i, keepFrom, imageRows) => m.role === 'user' && !(m.toolResults || []).length && i < keepFrom && m.isMeta !== true
   && Boolean(rowText(m.text)) && !/\[Image #\d+\]/.test(m.text) && !GOAL_COMMAND.test(m.text) && !imageRows.has(i);
 const resultRebuilt = (m) => m.role === 'user' && (m.toolResults || []).length > 0 && m.toolResults.every(textOnlyResult);
 // The API form read turn by turn (the messages between two assistant messages) against the rows. Returns {rows (the rows that carry an advisor reminder), text (the
@@ -6518,6 +6520,7 @@ function carrierRows(messages, api, keepFrom) {
     const text = typeof m.text === 'string' ? m.text : '';
     if (!rowText(text) || /\[Image #\d+\]/.test(text)) { block('advisor_image'); return; }
     if (GOAL_COMMAND.test(text)) { block('advisor_command'); return; }
+    if (m.isMeta === true) { block('advisor_meta_row'); return; }
     out.rows.add(carrier);
   };
   for (const a of api) {

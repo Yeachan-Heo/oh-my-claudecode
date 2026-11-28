@@ -220,6 +220,50 @@ describe('HOST_ATTACHMENTS: the user rows of text lose their handle and the old 
   });
 });
 
+describe('HOST_ATTACHMENTS: a row the host flags isMeta', () => {
+  // A row of a hook with no known prefix stands between the question of the user, with its answer, and the open loop.
+  const QUESTION = 'Real question: fix the parser.';
+  const NOTE = 'Keep going until the tests pass.';
+  const flagged = () => frozen([
+    ...conversation(30).slice(0, -2),
+    ownerRow(`${QUESTION}\n\n<pasted_content id="1">${para('log', 3000)}</pasted_content>\n\n${para('detail', 300)}`),
+    assistantRow('FINAL ANSWER is here.'),
+    { role: 'user', text: NOTE, isMeta: true },
+    { role: 'assistant', text: 'Working.', toolUses: [{ tool_use_id: 'z1', tool: 'Bash', input: { command: 'ls' } }] },
+    { role: 'user', text: '', toolResults: [{ tool_use_id: 'z1', text: 'a.ts b.ts', isError: false }] },
+  ]);
+
+  it('keeps its handle and its flag through two compactions, so the next one still protects the message of the user', async () => {
+    const env = { ...HA, OMC_JEV_COMPACT_OWNER_TAIL: 'active' };
+    const messages = flagged();
+    const at = messages.findIndex((m) => m.text === NOTE);
+    const first = await run(env, { messages, extras: { [at]: [INSTR] } });
+    expect(compactRecord(first)).toMatchObject({ result: 'jev', owner_tail: { boundary: 'owner', violations: 0 }, attachments_back: 1 });
+    expect(row(first, NOTE)).toMatchObject({ handle: `h${at}`, isMeta: true });
+    const again = frozen(first.out.messages.map((m) => ({ ...m })));
+    const second = await run(env, { messages: again, extras: {} });
+    expect(compactRecord(second)).toMatchObject({ result: 'jev', owner_tail: { boundary: 'owner', violations: 0, protected_rows: 3 } });
+    expect(again[compactRecord(second).owner_tail.from_idx].text.startsWith(QUESTION)).toBe(true);
+    expect(row(second, NOTE).isMeta).toBe(true);
+  });
+
+  it('is not the newest message of the user for the paste stage of the next compaction', async () => {
+    const stages = { ...HA, OMC_JEV_COMPACT_TAIL_BY_LOOP: 'active', OMC_JEV_COMPACT_PASTES: 'active', OMC_JEV_COMPACT_PASTE_MIN_CHARS: '400', OMC_JEV_COMPACT_PASTE_YES: '0.7' };
+    const first = await run(HA, { messages: flagged(), extras: {} });
+    const again = frozen(first.out.messages.map((m) => ({ ...m })));
+    const second = await run(stages, { messages: again, extras: {} });
+    // The paste of the newest message of the user stays, as that message does.
+    expect(row(second, QUESTION).text).toContain('<pasted_content id="1">');
+    expect(compactRecord(second).pastes).toMatchObject({ tags: 0 });
+  });
+
+  it('as the carrier of the advisor reminder it cannot be rebuilt: the compaction goes to the summary', async () => {
+    const messages = flagged();
+    const at = messages.findIndex((m) => m.text === NOTE);
+    expect(compactRecord(await run(HA, { messages, extras: { [at]: [ADVISOR] } }))).toMatchObject({ result: 'fallback', reason: 'advisor_meta_row' });
+  });
+});
+
 describe('HOST_ATTACHMENTS: the advisor', () => {
   it('a reminder in the turn of a row of text rebuilds that row; the record counts the reminders', async () => {
     const r = await run(HA, { extras: { 2: [ADVISOR] } });
