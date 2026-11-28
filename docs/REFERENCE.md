@@ -1049,7 +1049,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `psm`                     | Deprecated compatibility alias for `project-session-manager`                    | `/oh-my-claudecode:psm`                     |
 | `ralph`                   | Persistence loop until verified completion                                     | `/oh-my-claudecode:ralph`                   |
 | `ralplan`                 | Consensus planning entrypoint                                                   | `/oh-my-claudecode:ralplan`                 |
-| `reflect`                  | Three-reviewer transcript audit proposing concrete skill edits                 | `/oh-my-claudecode:reflect`                 |
+| `reflect`                  | Transcript mining for durable learnings, routed to concrete skill edits        | `/oh-my-claudecode:reflect`                 |
 | `recall`                  | Reconstruct working context from artifacts in trust order                      | `/oh-my-claudecode:recall`                  |
 | `release`                 | Automated release workflow                                                      | `/oh-my-claudecode:release`                 |
 | `refit`                   | Cross-session retrospective; instrument evidence to user-approved environment fixes | `/oh-my-claudecode:refit` |
@@ -1148,7 +1148,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:show-me-your-work`                    | Start (or read) the append-only decision trail                                                |
 | `/oh-my-claudecode:release`                              | Automated release workflow                                                                    |
 | `/oh-my-claudecode:refit [--scope <area>] [--last <N sessions>]` | Retrospect on OMC instrumentation and propose user-approved environment fixes            |
-| `/oh-my-claudecode:reflect`                              | Three-reviewer transcript audit proposing skill edits                                         |
+| `/oh-my-claudecode:reflect`                              | Transcript mining for durable learnings, routed to skill edits                                |
 | `/oh-my-claudecode:remember <note>`                      | Save durable session memory                                                                   |
 | `/oh-my-claudecode:research <question>`                  | Investigate an open question and return grounded findings                                      |
 | `/oh-my-claudecode:self-improve <topic>`                 | Run the autonomous code-improvement workflow                                                   |

@@ -1,6 +1,6 @@
 ---
 name: how
-description: Walk through how a subsystem works — a fast explorer maps the territory, an explainer writes the layered walkthrough. Use for "how does X work", onboarding on unfamiliar code, or before changing a subsystem you cannot yet explain.
+description: "Walk through how a subsystem works — one read-only explainer pass, presented as a layered walkthrough a senior engineer could onboard from. For \"how does X work\" or onboarding on unfamiliar code."
 aliases: []
 metadata:
   credits:
@@ -14,31 +14,32 @@ metadata:
 
 # How
 
-Explain how a subsystem works, layered so each layer stands alone. Two roles,
-two passes:
+Explain how a subsystem works, layered so each layer stands alone. If the
+scope is ambiguous, state your interpretation and explore; the user can
+redirect.
 
-1. **Explore** (read-only, fast): dispatch `oh-my-claudecode:explore` to map
-   the subsystem — entry points, main flows, data shapes, state, external
-   calls, and the files that own each. Explorer returns a map with file:line
-   citations, not prose.
-2. **Explain** (lead): write the walkthrough from the map, reading the cited
-   code yourself where the claim is load-bearing.
+## Workflow
 
-## Output shape
+1. **Explain**: dispatch one read-only subagent (`oh-my-claudecode:explore`)
+   that explores and explains in one pass. Give it the user's question and
+   this brief:
 
-- **One paragraph**: what the subsystem does and for whom, no jargon.
-- **Walkthrough**: the main path end to end, step by step, each step citing
-  `file:line`. Diverge into how errors and retries are handled at the point
-  they occur.
-- **Edge cases and invariants**: what must stay true for the walkthrough to
-  hold, and what happens when it does not.
-- **Boundaries**: what this subsystem deliberately does not do.
+   > You are writing an architectural explanation for a senior engineer.
+   > Explore the codebase and write an explanation that a senior engineer
+   > unfamiliar with this area could read and walk away with a solid mental
+   > model — enough to start working in it confidently. Every behavioral
+   > claim cites the `file:line` you read it from; an uncited claim is
+   > labeled a guess. Layer the explanation: one paragraph on what the
+   > subsystem does and for whom, then the main path end to end with each
+   > step cited, then the edge cases and invariants, then what the
+   > subsystem deliberately does not do.
+
+2. **Present** the subagent's output. Light edits for clarity or context
+   from the conversation are fine; do not substantially rewrite it.
 
 ## Rules
 
-- Every behavioral claim cites code you or the explorer read this session;
-  an uncited claim is labeled a guess.
-- The walkthrough explains the code as it is, not as it should be; design
-  critique belongs to `why` and `review`.
 - Size the depth to the ask: a routing question gets one paragraph plus the
   relevant slice, not the full walkthrough.
+- The walkthrough explains the code as it is, not as it should be; design
+  critique belongs to `why` and `review`.

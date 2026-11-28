@@ -43,8 +43,10 @@ itself should decide.
    proceed and report the interpretation you took (`principles` skill,
    Never block on the human).
 
-The deliverable is the rewritten brief, deeper not bigger, with choices
-that are the user's left open instead of decided.
+The deliverable is the rewritten brief, deeper not bigger. The brief asks
+the agent to prototype any choice an experiment can settle and recommend an
+option based on what it observed; product or preference choices that no
+experiment can settle stay with the user instead of decided.
 
 ## Rules
 

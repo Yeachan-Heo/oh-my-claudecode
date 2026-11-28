@@ -1,6 +1,6 @@
 ---
 name: architect
-description: "Settle types and module shape before cross-boundary code — competing designs explored in parallel, compared on API surface and invariants, decision recorded with rejected alternatives and an accepted-deviations register."
+description: "Settle types and module shape before cross-boundary code: sketch two shapes, pick by ownership and caller load, record rejected alternatives. For a large or contested design, arena decides instead."
 aliases: []
 metadata:
   credits:
@@ -18,6 +18,9 @@ Design before steel. When a change crosses a function boundary, explore
 competing shapes first and commit to one with a written rationale — the
 cheapest moment to reject a design is before it has code on it.
 
+For a large or contested design, run the `arena` skill instead of sketching
+alone.
+
 ## When to use
 
 - new module, new API, changed signature other files call
@@ -31,21 +34,21 @@ cheapest moment to reject a design is before it has code on it.
 
 ## Workflow
 
-1. **Frame**: name the problem in one sentence, the consumers of the design,
-   and the invariants it must preserve.
-2. **Explore 2-3 competing designs in parallel** — dispatch
-   `oh-my-claudecode:architect` subagents, each producing: the core types, the module boundary, the API
-   surface, and how each invariant is preserved. Distinct shapes, not
-   variations of one idea.
-3. **Compare** criterion by criterion: API surface size, boundary clarity,
-   invariant preservation, migration cost, deletion ease. Tie-break toward
-   the smaller API and cleaner boundary (`minimal-code-discipline`).
-4. **Record the decision**: chosen design, why the losers lost, and an
+1. **Trace** every system the change touches — entry points, the data each
+   owns, who calls it. Naming a file is not grounding.
+2. **Sketch two structurally distinct shapes** — types, signatures, module
+   boundaries — whole-shape alternatives, not point fixes inside one idea.
+3. **Pick** the shape where each piece of state has one owner, each task has
+   one way to do it, and callers need to know least; tie-break toward the
+   smaller API and cleaner boundary (`minimal-code-discipline`).
+4. **Record the decision**: chosen design, why the loser lost, and an
    accepted-deviations register the implementation will reconcile against
    (each deviation: what changed vs the sketch, and the acceptance source).
 5. **Hand off**: the design and its invariant list travel with the
    `execute` brief; implementation reconciles deviations rather than
-   rediscovering the design.
+   rediscovering the design. Redesign instead of patching if workarounds
+   repeat — the signal is a pattern, not single instances
+   (`principles` skill, Redesign from first principles).
 
 ## Rules
 
