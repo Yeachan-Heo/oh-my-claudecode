@@ -99,6 +99,7 @@ describe('series mask: flags, headers, addresses and token shapes', () => {
     ['a gsk_ key behind a percent escape', 'q=a%3Dgsk_' + 'abcdEF12', 'q=a%3Dgsk_***', undefined],
     ['a temporary AWS key id with more characters after it', 'id ASIA' + 'ABCDABCDABCDABCDx', 'id ASIA' + 'ABCDABCDABCDABCDx', undefined],
     ['a JWT', 'key eyJ' + 'abcdEF12abcdEF12.eyJ' + 'abcdEF12abcdEF12.sigabcdEF12abcdEF12', 'key eyJ***', undefined],
+    ['a JWT-shaped run with no dot stays', 'key eyJ' + 'abcdEF12', 'key eyJ' + 'abcdEF12', undefined],
     ['a long run of letters and digits', 'key a1B2a1B2a1B2a1B2a1B2a1B2a1B2a1B2a1B2a1B2', 'key ***', undefined],
     ['a long base64 run', 'key aB3+/aB3+/aB3+/aB3+/aB3+/aB3+/aB3+/aB3+/aB3+/aB3+/', 'key ***', undefined],
   ])('%s', (_, text, asked, written) => {
@@ -170,5 +171,35 @@ describe('series mask: the check of what is left and long texts', () => {
 
   it('gives no file text for one line longer than the mask reads at once', () => {
     expect(archiveMaskedLong('z '.repeat(105000))).toBeUndefined();
+  });
+
+  it('gives no file text when masking grows a text past the round limit', () => {
+    // Thirty secret-path lines grow by 23 characters each when replaced by the marker, so the
+    // text passes the bound between the rounds; the single long line without a newline stops
+    // the middle cut from firing on the grown text, so only the cap inside the rounds drops it.
+    const text = '.env\n'.repeat(30) + 'x'.repeat(199350);
+    expect(text.length).toBe(199500);
+    expect(archiveMaskedLong(text)).toBeUndefined();
+    expect(fileText(text)).toBeUndefined();
+  });
+
+  it('gives no file text when masking does not settle within the allowed rounds', () => {
+    // The key "pass" repeats behind scattered colons and a brace, so every round still changes
+    // the text. After the three allowed rounds the made-up value is visible, and only the final
+    // check (one more mask) sees the change and drops the whole text instead of returning it.
+    const text = '"pass":} pass":d": pass":d":' + 'madeup' + 'Value77';
+    expect(archiveMaskedLong(text)).toBeUndefined();
+    expect(fileText(text)).toBeUndefined();
+  });
+
+  it('returns the text when one more mask after the allowed rounds changes nothing', () => {
+    // The same shape one value shorter: the three allowed rounds settle the text, so the final
+    // check compares equal and the masked text is returned.
+    expect(archiveMaskedLong('"pass":} pass":h')).toBe('"pass":"***" pass":"***"');
+  });
+
+  it('replaces a line that holds two values behind secret words with one line', () => {
+    const text = 'first\nsecret key value Qw7e8R9t0y then secret value Ab3cD4eF2\nlast';
+    expect(fileText(text)).toBe('first\n*** [line with a possible secret replaced]\nlast');
   });
 });

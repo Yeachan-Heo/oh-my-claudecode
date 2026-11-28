@@ -23,6 +23,7 @@ import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { initJobDb, getActiveJobs, getRecentJobs, getJobStats } from '../../lib/job-state-db.js';
 import { findPrdPath, getPrdStatus, readPrdFromPath } from '../ralph/prd.js';
 import { readBoulderState, getPlanProgress } from '../../features/boulder-state/index.js';
+import { loadContextText } from '../../../scripts/lib/context-text-loader.mjs';
 
 // ============================================================================
 // Types
@@ -411,9 +412,27 @@ export async function createCompactCheckpoint(
 }
 
 /**
- * Format checkpoint summary for context injection
+ * The writer of the text cleaning module (scripts/lib/context-text-sanitize.mjs) that the summary uses when the
+ * caller passes it, for the prompts of the active modes that it quotes from their state files.
  */
-export function formatCompactSummary(checkpoint: CompactCheckpoint): string {
+export interface SummaryCleaner {
+  cleanHostText(value: unknown, max?: number): string;
+}
+
+// With the cleaning writer a quoted mode prompt is one cleaned line of at most this many characters.
+const MAX_MODE_PROMPT_CHARS = 500;
+
+/**
+ * Format checkpoint summary for context injection
+ * Without `cleaner` the summary quotes the mode prompts as they are.
+ */
+export function formatCompactSummary(
+  checkpoint: CompactCheckpoint,
+  cleaner?: SummaryCleaner | null,
+): string {
+  const quote = (text: string): string =>
+    cleaner ? cleaner.cleanHostText(text, MAX_MODE_PROMPT_CHARS) : text;
+
   const lines: string[] = [
     "# PreCompact Checkpoint",
     "",
@@ -431,13 +450,13 @@ export function formatCompactSummary(checkpoint: CompactCheckpoint): string {
     if (checkpoint.active_modes.autopilot) {
       const ap = checkpoint.active_modes.autopilot;
       lines.push(`- **Autopilot** (Phase: ${ap.phase})`);
-      lines.push(`  Original Idea: ${ap.originalIdea}`);
+      lines.push(`  Original Idea: ${quote(ap.originalIdea)}`);
     }
 
     if (checkpoint.active_modes.ralph) {
       const ralph = checkpoint.active_modes.ralph;
       lines.push(`- **Ralph** (Iteration: ${ralph.iteration})`);
-      lines.push(`  Prompt: ${ralph.prompt}`);
+      lines.push(`  Prompt: ${quote(ralph.prompt)}`);
     }
 
 
@@ -564,8 +583,8 @@ async function doProcessPreCompact(
     }
   }
 
-  // Format summary for context injection
-  const summary = formatCompactSummary(checkpoint);
+  // Format summary for context injection. The cleaning module is loaded only with OMC_CONTEXT_TEXT_SANITIZE on.
+  const summary = formatCompactSummary(checkpoint, await loadContextText());
 
   // Note: hookSpecificOutput only supports PreToolUse, UserPromptSubmit, PostToolUse
   // Use systemMessage for custom hook events like PreCompact

@@ -150,6 +150,49 @@
  * `archive_timed_out`, `archive_ms`, `archive_marker`; `archive_planned` in shadow) and `merged_traces`, `merged_items`. A marker file in the session directory is touched by every compaction
  * that archives; scripts/lib/jev-compaction-state.mjs removes session directories whose newest file is older than OMC_JEV_ARCHIVE_DAYS days.
  *
+ * Owner tail (OMC_JEV_COMPACT_OWNER_TAIL=active, off by default; without it the three options below do nothing). The newest message of the user and the text of
+ * every assistant row after it stay word for word in any compaction: no stage moves a block, a pasted tag, a long reply, an agent message or a series out of them,
+ * and Jev is not asked about their blocks; calls and results after the message are compacted as usual. When the fixed prefix with the protected text is over the
+ * threshold less FLOOR_MARGIN of the window (token cascade; also when the floor or the final prediction with it is over that bound), the next boundary is tried
+ * (OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION=fallback, the default: the newest message of another session after the user's; `on` counts such messages like the
+ * user's, `off` ignores them), and past the last one nothing is protected (OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW unset), or with `keep` the last boundary stays while
+ * it is under the threshold and the gates that hand the compaction to the summary are off. Subagents have no owner tail unless
+ * OMC_JEV_COMPACT_OWNER_TAIL_AGENTS=active. A protected text that came out changed leaves the conversation as it was: a skip that opens with OWNER_TAIL_SKIP, no
+ * summary. An automatic compaction goes to the summary instead (reason owner_tail_changed): the host asked because the context is near its limit, and a violation
+ * that repeats would keep it from ever shrinking. The record gets `owner_tail` (from_idx, rows, tokens, violations, goal_yielded, overflow, boundary, protected_rows), `owner_tail_applied`,
+ * `owner_tail_tier` and `owner_tail_violations`; see "owner tail" below.
+ *
+ * The tail by the open tool loop (OMC_JEV_COMPACT_TAIL_BY_LOOP=active, off by default; without it "the last KEEP_LAST rows" below stand as written). The tail that
+ * the cut and the stages leave alone is then the open tool loop alone, whose rows keep their handles, and nothing at a turn boundary: the results, notifications,
+ * agent messages, pasted tags and blocks of the last KEEP_LAST rows are treated like older ones, with the same checks for secrets and private paths (a long reply
+ * stays before the last user messages and turns as before; the series of traces stop at the open loop with the switch or without it). A conversation of three
+ * messages or more is compacted. The first and the newest user message stay as they are in the paste stage.
+ *
+ * Usage of Jev's requests (OMC_JEV_COMPACT_JEV_USAGE=1 or active, off by default; without it no record gains a field and no record is added). The record of a
+ * compaction gets `jev_usage`, one entry per request sent to Jev: `model` (as the answer names it, through both secret masks and cut to JEV_MODEL_MAX_CHARS characters),
+ * `input_tokens`, `output_tokens` and `cost_usd` (always null; a missing value is null, never 0). The scoring requests come first, parallel to `jev_ms` and without
+ * `purpose`; the others carry `purpose` (pastes, blocks, second_round). When the owner tail makes the compaction decide again, the entries of the decisions that
+ * were given up follow with `abandoned: true`. `cost_basis` is `reported` when an answer carries a cost, else `unknown`. The pass before the
+ * module's own request puts both fields into its `verdicts_fill` record, and a pass in the background that asked something writes such a record of its own.
+ * When the decision ends with an exception, the module waits for the requests it has already sent (each ends by its own timeout, never beyond the
+ * decision deadline) before the record is written, and the record holds their entries: the scoring ones first, in batch order, the others in the
+ * order in which they ended. A request whose entry a drain added gets no second one, from a later drain or from the decision going on.
+ *
+ * Host attachments (OMC_JEV_COMPACT_HOST_ATTACHMENTS=1 or true, off by default; without it the user rows of text keep their handles and no record gains a field).
+ * The host keeps what is no row (instructions, lists of skills, agents and tools, hook contexts, the text of used skills) in the group of the row before it, and a
+ * row that keeps its handle comes back with its group. With the switch on each user row of text before the open tool loop is built from its text, with the messages
+ * delivered after it in their envelopes, and the host announces again what it finds missing. The newest message of the user (as the owner tail reads it, with or
+ * without that switch) keeps its handle, and so do the rows of text after it in its turn. A row also keeps its handle when the host flags it isMeta, in a turn
+ * with an image, a document or a /goal record, without text or with [Image #N], or in a turn the API form does not place; without the API form nothing is taken
+ * off. The host never announces again these kinds, so they are gone from the older rows after the compaction: instructions_reread, environment_update,
+ * date_change, invoked_skills, file, compact_file_reference, hook_context, task_status, edited_file, nested_memory, image_paths, host_reminder, and skill_text,
+ * meta and other. When the row of an advisor reminder cannot be rebuilt (the turn of the newest message too, if it holds one of these kinds), or the API form
+ * does not show the start of a long conversation, the compaction goes to the summary (advisor_image, advisor_command, advisor_no_row, advisor_in_tail,
+ * advisor_meta_row, advisor_newest_row, advisor_form_cut). The predictions take off the attachments that go less what the host announces again. The record gets
+ * `rebuilt_user`, `advisor_blocks`, `attachments_dropped`, `attachments_dropped_tokens`, `attachments_kinds`, `attachments_kinds_tokens`, `attachments_skills`
+ * (names of used skills: masked and cut; a name or skill directory that names a secret or private path is left out), `attachments_back`,
+ * `attachments_back_tokens`, `attachments_back_from_results_tokens` and `attachments_resent_tokens`; see "host attachments" below.
+ *
  * Secrets in the paste, reply, agent and block stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
  * a session with secrets in such text keeps that text whole in the conversation until masked archiving is added. The check is bounded (maskSecrets
@@ -220,6 +263,9 @@ import { RESIDUAL_SECRET, archiveMaskedLong, cleanForJevLong, maskResidualLines 
 const POINT = 'compaction';
 // The last messages stay whole: the work in flight.
 const KEEP_LAST = 6;
+// The first row of the tail the stages leave alone, at most keepFrom (the first row that keeps its handle). With OMC_JEV_COMPACT_TAIL_BY_LOOP=active the tail is
+// the open tool loop alone, and nothing at a turn boundary; else it is also the last KEEP_LAST rows.
+const tailEnd = (cfg, keepFrom, length) => (cfg.tailByLoop ? keepFrom : Math.min(keepFrom, Math.max(1, length - KEEP_LAST)));
 // Cap on the host call for the API form of the conversation: a call that never settles must not hold
 // the compaction.
 const HOST_MS = 2000;
@@ -796,6 +842,13 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_FULL_INPUT: await $.env.get('OMC_JEV_COMPACT_FULL_INPUT'),
     OMC_JEV_COMPACT_OWNER_LAST: await $.env.get('OMC_JEV_COMPACT_OWNER_LAST'),
     OMC_JEV_COMPACT_ARCHIVE: await $.env.get('OMC_JEV_COMPACT_ARCHIVE'),
+    OMC_JEV_COMPACT_JEV_USAGE: await $.env.get('OMC_JEV_COMPACT_JEV_USAGE'),
+    OMC_JEV_COMPACT_TAIL_BY_LOOP: await $.env.get('OMC_JEV_COMPACT_TAIL_BY_LOOP'),
+    OMC_JEV_COMPACT_HOST_ATTACHMENTS: await $.env.get('OMC_JEV_COMPACT_HOST_ATTACHMENTS'),
+    OMC_JEV_COMPACT_OWNER_TAIL: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL'),
+    OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION'),
+    OMC_JEV_COMPACT_OWNER_TAIL_AGENTS: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL_AGENTS'),
+    OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW: await $.env.get('OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW'),
     OMC_JEV_COMPACT_JEV_STAGES: await $.env.get('OMC_JEV_COMPACT_JEV_STAGES'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
@@ -916,6 +969,17 @@ export async function readConfig($) {
     // Archive of calls and results (off unless OMC_JEV_COMPACT_ARCHIVE says shadow or active): the files of the cut results go to <state dir>/compaction-archive.
     archive: archiveModeOf(env.OMC_JEV_COMPACT_ARCHIVE),
     archiveDir: stateDir ? `${stateDir}/compaction-archive` : undefined,
+    // Usage and model of every request of Jev in the records (off unless 1 or active).
+    jevUsage: ['1', 'active'].includes(String(env.OMC_JEV_COMPACT_JEV_USAGE ?? '').trim()),
+    // The tail kept whole is the open tool loop alone, not also the last KEEP_LAST rows (off unless active).
+    tailByLoop: String(env.OMC_JEV_COMPACT_TAIL_BY_LOOP ?? '').trim() === 'active',
+    // Host attachments (off unless 1 or true): the user rows of text lose their handle, so the host's old attachments in their groups do not come back.
+    hostAttachments: ['1', 'true'].includes(String(env.OMC_JEV_COMPACT_HOST_ATTACHMENTS ?? '').trim().toLowerCase()),
+    // Owner tail (off unless active): the newest message of the user and the text of the answers after it stay word for word. The three options act only with it.
+    ownerTail: String(env.OMC_JEV_COMPACT_OWNER_TAIL ?? '').trim() === 'active',
+    ownerTailCrossSession: crossSessionMode(env.OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION),
+    ownerTailAgents: String(env.OMC_JEV_COMPACT_OWNER_TAIL_AGENTS ?? '').trim() === 'active',
+    ownerTailOverflow: String(env.OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW ?? '').trim() === 'keep' ? 'keep' : 'revert',
   };
 }
 
@@ -2468,13 +2532,13 @@ export function noteSummary(text) {
   return clip(line, TRACE_INPUT_CHARS);
 }
 
-// Candidates: tool results outside the first message and the last KEEP_LAST messages whose call is
-// in an earlier assistant message.
-function findCandidates(messages, privatePaths, notifications = false, blockTraces = false) {
+// Candidates: tool results outside the first message and before `tailFrom` (unset: before the last KEEP_LAST messages) whose call is
+// in an earlier assistant message. The options stand in one object, so that a parameter added after it cannot take their place.
+function findCandidates(messages, privatePaths, notifications = false, { blockTraces = false, tailFrom } = {}) {
   const outputs = backgroundOutputFiles(messages, privatePaths);
   const uses = new Map();
   messages.forEach((m, i) => { if (m.role === 'assistant') for (const u of m.toolUses || []) uses.set(u.tool_use_id, { i, u }); });
-  const tailStart = Math.max(1, messages.length - KEEP_LAST);
+  const tailStart = tailFrom ?? Math.max(1, messages.length - KEEP_LAST);
   const out = [];
   for (let i = 1; i < tailStart; i++) {
     const m = messages[i];
@@ -3367,7 +3431,7 @@ function serverBlocks(messages, api, keepFrom) {
 // the one message of its group (groupsOf), placed at the group's first row with content, so the result
 // rows that follow pair with it and the host gives it a new message.id; from keepFrom on
 // (openLoopStart) the rows keep their handles.
-function build(messages, candidates, keepFrom, group, stats, queued = new Map()) {
+function build(messages, candidates, keepFrom, group, stats, queued = new Map(), drop = new Set()) {
   const byId = new Map();
   const notes = new Map();
   for (const c of candidates) { if (c.note) notes.set(c.resIdx, c); else byId.set(c.id, c); }
@@ -3379,6 +3443,7 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
   stats.joinedRows = 0;
   stats.queuedCarried = 0;
   stats.queuedKeptChars = 0;
+  stats.rebuiltUser = 0;
   const merged = new Map();
   for (const [i, m] of messages.entries()) {
     if (m.trimDrop === true) continue; // agent trim: a row left without a block
@@ -3436,6 +3501,14 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
       stats.queuedCarried += own.length;
       if (!results.length && !text) continue;
       out.push({ role: 'user', text, toolUses: [], toolResults: results });
+      continue;
+    }
+    // A user row of text in `drop` (host attachments) is built from its text with the messages delivered after it, so the host does not bring back its group.
+    if (m.role === 'user' && drop.has(i)) {
+      const { own, text } = carriedText(m, queued.get(i));
+      stats.queuedCarried += own.length;
+      stats.rebuiltUser++;
+      if (text.trim()) out.push({ role: 'user', text, toolUses: [], toolResults: [] });
       continue;
     }
     // A row kept as it is gets the messages delivered after it back from the host.
@@ -3555,7 +3628,102 @@ async function askJev($, cfg, state, questions) {
     invalid.invalid = true;
     throw invalid;
   }
-  return body.answers;
+  return cfg.jevUsage ? withJevMeta(body.answers, { usage: sanitizeJevUsage(body.usage), raw: body.usage, model: usageModel(body.model) }) : body.answers;
+}
+
+// Usage of Jev's requests (OMC_JEV_COMPACT_JEV_USAGE). The usage and the model of an answer ride along with the answers as a non-enumerable property: spread,
+// Object.keys and JSON.stringify do not see it, so no reader of the answers changes and no question name collides with it.
+const JEV_META_KEY = '__jevMeta';
+function withJevMeta(answers, meta) {
+  Object.defineProperty(answers, JEV_META_KEY, { value: meta, enumerable: false, configurable: true });
+  return answers;
+}
+const jevMetaOf = (answers) => answers?.[JEV_META_KEY];
+// The model name is text of the server and goes into the record: through both masks (the shared one under the mask of a series), on one line, and cut. The masks
+// read a bounded start of it.
+const JEV_MODEL_MAX_CHARS = 100;
+const JEV_MODEL_SCAN_CHARS = 600;
+const usageModel = (model) => (typeof model === 'string' ? clip(oneLine(cleanForJevLong(maskSecrets(model.slice(0, JEV_MODEL_SCAN_CHARS)))), JEV_MODEL_MAX_CHARS) : null);
+// Only finite token counts of zero or more; anything else is no data.
+function sanitizeJevUsage(usage) {
+  const isCount = (n) => Number.isFinite(n) && n >= 0;
+  return isCount(usage?.input_tokens) && isCount(usage?.output_tokens) ? { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens } : undefined;
+}
+// 'reported' only when the answer itself carries a cost; otherwise 'unknown' (no cost is derived from a price list).
+const costBasisOf = (usage) => (['total_cost_usd', 'cost_usd', 'cost'].some((k) => Number.isFinite(usage?.[k])) ? 'reported' : 'unknown');
+// One entry per request: the model and the tokens of its answer. No data is null, never 0; the cost is null.
+function jevUsageOf(answers) {
+  const meta = jevMetaOf(answers);
+  return { model: meta?.model ?? null, input_tokens: meta?.usage?.input_tokens ?? null, output_tokens: meta?.usage?.output_tokens ?? null, cost_usd: null };
+}
+// The requests other than the scoring of results (the question about a pasted tag, the questions about blocks, the tie of the second round) add their entry, with its
+// `purpose`, to the record being written (cfg.usageRecord). A request that failed counts too.
+function noteJevUsage(cfg, purpose, r) {
+  const record = cfg.usageRecord;
+  if (!record) return;
+  (record.jev_usage ??= []).push({ ...jevUsageOf(r.value), purpose });
+  if (costBasisOf(jevMetaOf(r.value)?.raw) === 'reported') record.cost_basis = 'reported';
+  else record.cost_basis ??= 'unknown';
+  releaseJevUsage(cfg, r); // the entry is in the record, so its slot must not be drained again
+}
+
+// The exception path of the usage switch: the requests whose entries are not in the record yet ride in a tracker of the decision (cfg.usagePending, only
+// with the usage switch). A slot settles once and carries its order among the settled; it leaves the tracker when its entry is added, so no entry is
+// doubled: noteJevUsage takes the settled slot of its answer out, and the scoring entries are added in one step for all batches (releaseScoringUsage).
+// When the decision ends with an exception, the drain waits for the requests still tracked (each ends by its own timeout, never beyond the decision
+// deadline) and adds their entries: the scoring ones first, in batch order, parallel to jev_ms, then the others in the order in which they ended.
+// Missing data stays null; every request keeps exactly one entry.
+function newJevUsagePending() {
+  return { slots: new Set(), order: 0 };
+}
+function trackJevUsage(cfg, purpose, promise) {
+  const pending = cfg.usagePending;
+  if (!pending) return promise;
+  const slot = { purpose, value: undefined, settled: false, order: 0, promise };
+  pending.slots.add(slot);
+  promise.then(
+    (value) => { slot.value = value; slot.order = ++pending.order; slot.settled = true; },
+    () => { slot.value = undefined; slot.order = ++pending.order; slot.settled = true; },
+ );
+  return promise;
+}
+// The entry of this answer is in the record: its slot must not be drained again.
+function releaseJevUsage(cfg, value) {
+  const pending = cfg.usagePending;
+  if (!pending) return;
+  for (const slot of pending.slots) if (slot.settled && slot.value === value) { pending.slots.delete(slot); return; }
+}
+// The scoring entries are added in one step for all batches (in decide); their slots leave the tracker there.
+function releaseScoringUsage(cfg) {
+  const pending = cfg.usagePending;
+  if (!pending) return;
+  for (const slot of [...pending.slots]) if (slot.purpose === undefined) pending.slots.delete(slot);
+}
+// Waits for the requests whose entries are not in the record yet and adds the entries. A slot that left the tracker in the normal way counts no more,
+// and the slots the drain handled leave the tracker with their entries, so a second drain of the same tracker adds nothing again (the catch of a
+// question drains, then its error goes on to the catch of the compaction, which drains once more). A drain inside the decision (the catch of a
+// question; `scoring` false) leaves the scoring requests out: the decision adds their entries itself when it goes on, else the drain of the catch
+// of the compaction does, so they are added once. Never rejects.
+async function drainJevUsage(record, pending, scoring = true) {
+  if (!pending || !pending.slots.size) return;
+  const open = [...pending.slots].filter((s) => scoring || s.purpose !== undefined);
+  if (!open.length) return;
+  await Promise.all(open.map((s) => s.promise.catch(() => undefined)));
+  const still = open.filter((s) => pending.slots.has(s));
+  const sent = still.filter((s) => s.purpose === undefined);
+  const others = still.filter((s) => s.purpose !== undefined).sort((a, b) => a.order - b.order);
+  if (sent.length) {
+    // The scoring entries first, parallel to jev_ms, in batch order (the order in which the batches went out).
+    record.jev_ms = sent.map((s) => (s.value?.ms ?? null));
+    record.jev_usage = [...sent.map((s) => jevUsageOf(s.value?.value)), ...(record.jev_usage ?? [])];
+    record.cost_basis = sent.some((s) => costBasisOf(jevMetaOf(s.value?.value)?.raw) === 'reported') ? 'reported' : (record.cost_basis ?? 'unknown');
+  }
+  for (const s of others) {
+    (record.jev_usage ??= []).push({ ...jevUsageOf(s.value?.value), purpose: s.purpose });
+    if (costBasisOf(jevMetaOf(s.value?.value)?.raw) === 'reported') record.cost_basis = 'reported';
+    else record.cost_basis ??= 'unknown';
+  }
+  for (const s of still) pending.slots.delete(s);
 }
 
 // Score 0-1 from an answer on the four levels (0-3), else undefined.
@@ -3655,13 +3823,18 @@ function noteFailures(failures, now) {
 // or one with a result that may change (a candidate); a row kept by its handle gets its blocks back as they were.
 // A notification row is rebuilt only when its keep decision replaces it, so its envelopes are not in the sum: they are set on the candidate, measured on the
 // replacement row build writes (`envelope`: a trace or a short copy, text outside the envelopes; `envelopeDrop`: no text), and charged by that decision
-// (itemTokens, allocate).
-function envelopeChars(messages, queued, candidates) {
+// (itemTokens, allocate). A user row of text in `rebuild` (host attachments) is rebuilt too, so its envelopes are in the sum.
+function envelopeChars(messages, queued, candidates, rebuild) {
   const changing = new Set(candidates.map((c) => c.resIdx));
   const noteRows = new Map(candidates.filter((c) => c.note).map((c) => [c.resIdx, c]));
   let envelopes = 0;
   for (const [i, blocks] of queued) {
     const m = messages[i];
+    if (rebuild?.has(i) && m.role === 'user' && !(m.toolResults || []).length) {
+      const c = carriedText(m, blocks);
+      envelopes += c.text.length - (m.text || '').length - rawChars(c.own);
+      continue;
+    }
     if (!((m.toolResults || []).length || noteRows.has(i)) || !((m.toolResults || []).every(textOnlyResult) || changing.has(i))) continue;
     const note = noteRows.get(i);
     if (note) {
@@ -3793,12 +3966,12 @@ function planPastes(messages, api, keepFrom, cfg, sessionId, stats, queued = new
   const images = nonTextUserRows(messages, api);
   if (images.unmatched) { stats.reason = 'image_unmatched'; return []; }
   const users = ownerRows(messages, cfg.hookRowPrefixes, cfg.blockTraces);
-  const before = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
+  const before = tailEnd(cfg, keepFrom, messages.length);
   const limit = cfg.pasteMaxChars;
   const found = [];
   // The first and the newest user message stay as they are.
   for (const row of users.slice(1, -1)) {
-    if (row >= before || images.rows.has(row)) continue;
+    if (row >= before || images.rows.has(row) || cfg.ownerProtected?.has(row)) continue;
     const text = messages[row].text;
     const tags = pasteTags(text);
     stats.tags += tags.length;
@@ -3839,7 +4012,8 @@ async function askPaste($, cfg, text, deadline) {
   const t0 = Date.now();
   if (t0 >= deadline) { session.requests--; return { held: true }; }
   const timeoutMs = Math.min(REQUEST_MS, deadline - t0);
-  const r = await withDeadline($, askJev($, cfg, { fragment: { text, chars: text.length } }, PASTE_QUESTIONS), timeoutMs);
+  const r = await trackJevUsage(cfg, 'pastes', withDeadline($, askJev($, cfg, { fragment: { text, chars: text.length } }, PASTE_QUESTIONS), timeoutMs));
+  noteJevUsage(cfg, 'pastes', r);
   const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
   if (Date.now() < deadline) await withDeadline($, recording, deadline - Date.now());
   if (!r.value) { noteFailures([classifyFailure(r)], Date.now()); return {}; }
@@ -4071,7 +4245,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   const turns = [];
   messages.forEach((m, i) => { if (m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trim()) turns.push(i); });
   const limit = Math.min(
-    Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)),
+    tailEnd(cfg, keepFrom, messages.length),
     userRows.length >= REPLY_KEEP_OWNERS ? userRows[userRows.length - REPLY_KEEP_OWNERS] : 0,
     turns.length >= REPLY_KEEP_TURNS ? turns[turns.length - REPLY_KEEP_TURNS] : 0,
   );
@@ -4082,7 +4256,7 @@ async function planReplies(cfg, messages, api, keepFrom, sessionId, stats, queue
   const budget = { left: SCAN_BUDGET_CHARS, deadline };
   for (let row = 0; row < limit; row++) {
     const m = messages[row];
-    if (m.role !== 'assistant' || !m.text) continue;
+    if (m.role !== 'assistant' || !m.text || cfg.ownerProtected?.has(row)) continue;
     stats.assistant_rows++;
     if (skip.has(row)) { stats.skipped_blocks++; continue; }
     if (direct.has(row)) { stats.direct_replies++; continue; }
@@ -4145,7 +4319,7 @@ function agentStageOf($, cfg, agentId, messages, api, queued, keepFrom, sessionI
   let trim;
   let stats;
   const skip = cfg.agentTrim && agentId === undefined && api ? nonTextUserRows(messages, api) : undefined;
-  const from = Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST));
+  const from = tailEnd(cfg, keepFrom, messages.length);
   if (skip && !skip.unmatched) {
     try {
       trim = trimAgentRows(messages, { keepFrom: from, skipRows: skip.rows, queuedRows: queued, statePattern: cfg.agentStates, deadline, blockTraces: cfg.blockTraces });
@@ -4706,6 +4880,7 @@ function blockRows(cfg, rows, ctx) {
   for (let i = 0; i < Math.min(ctx.limit, rows.length); i++) {
     const m = rows[i];
     if (m.trimDrop === true || typeof m.text !== 'string' || !m.text.trim() || (m.toolResults || []).length) continue;
+    if (ctx.protect?.has(i)) continue; // no verdict touches a protected row of the owner tail
     let author;
     let list;
     if (m.role === 'assistant') {
@@ -4754,7 +4929,7 @@ function planBlocks(cfg, messages, trimmed, api, queued, keepFrom, sessionId, ag
   const images = nonTextUserRows(messages, api);
   const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
-  const found = blockRows(cfg, trimmed, { limit: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), skipUser: images.rows, userUnmatched: images.unmatched, skipAssistant: nonTextAssistantRows(messages, api), queued, users, delivered, agent });
+  const found = blockRows(cfg, trimmed, { limit: tailEnd(cfg, keepFrom, messages.length), skipUser: images.rows, userUnmatched: images.unmatched, skipAssistant: nonTextAssistantRows(messages, api), queued, users, delivered, agent, protect: cfg.ownerProtected });
   const potential = found.items.reduce((sum, it) => (it.chars <= cfg.pasteMaxChars && !namesSecretPath(it.body, cfg.privatePaths) ? sum + blockGain(cfg, it) * it.count : sum), 0);
   return { ...found, messages: trimmed, sessionId, verdicts: new Map(), potential };
 }
@@ -4918,14 +5093,21 @@ async function askBlockVerdicts($, cfg, items, opts) {
         const t0 = Date.now();
         const timeoutMs = Math.min(opts.requestMs, opts.deadline - t0);
         if (timeoutMs < 500) { session.requests--; results[k] = { skipped: true }; continue; }
-        const r = await withDeadline($, askJev($, cfg, requests[k].state, requests[k].questions), timeoutMs);
+        const r = await trackJevUsage(cfg, 'blocks', withDeadline($, askJev($, cfg, requests[k].state, requests[k].questions), timeoutMs));
+        noteJevUsage(cfg, 'blocks', r);
         // Shared failure bookkeeping may finish later, but cannot extend the deadline.
         const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
         if (Date.now() < opts.deadline) await withDeadline($, recording, opts.deadline - Date.now());
         results[k] = { ...r, ms: Date.now() - t0 };
       }
     };
-    await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker));
+    // A worker that throws leaves the entries of the requests that went out missing: the drain waits for the ones still open (each ends by its own
+    // timeout) and adds their entries, then the error goes on to the catch of ensureBlockVerdicts as before. The scoring requests that are open
+    // beside them (the decision asks both at once) stay to the decision, which goes on and adds their entries itself.
+    await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker)).catch(async (error) => {
+      await drainJevUsage(cfg.usageRecord, cfg.usagePending, false);
+      throw error;
+    });
     const redo = new Set();
     results.forEach((r, k) => {
       if (!r || r.skipped) return;
@@ -5011,7 +5193,7 @@ async function ensureBlockVerdicts($, cfg, plan, ctx) {
     });
     for (const [key, v] of run.verdicts) plan.verdicts.set(key, v);
     stats.ask = run.stats;
-  } catch (error) { stats.error = clip(oneLine(String(error?.message ?? error)), 200); }
+  } catch (error) { stats.error = clip(oneLine(maskSecrets(String(error?.message ?? error))), 200); } // masked: the pass writes it into its record
   return stats;
 }
 
@@ -5105,6 +5287,8 @@ function blockSignals(rates, tokens, items, prefix, limit) {
 // The verdicts of everything in a conversation that has none, asked (the pass in the background: what lived at least one turn, `low`; the one before the module's own request to
 // compact: all of it). `messages` is the transcript the caller read. Returns the counts or {skipped}; never rejects.
 async function fillBlockVerdicts($, cfg, messages, ctx) {
+  const used = {}; // the usage of the requests of this pass (OMC_JEV_COMPACT_JEV_USAGE)
+  let pending; // the requests whose entries are not in the record yet
   try {
     if (cfg.mode !== 'active' || cfg.blocks === 'off' || cfg.verdicts === 'off' || !cfg.key || !cfg.pasteDir || !Array.isArray(messages)) return { skipped: 'off' };
     const sessionId = await sessionIdOf($);
@@ -5116,23 +5300,33 @@ async function fillBlockVerdicts($, cfg, messages, ctx) {
     if (!keptCallsIn(messages, keepFrom, api)) return { skipped: 'tail_calls' };
     const delivered = queuedOf(messages, api);
     const queued = delivered ? delivered.rows : new Map();
+    // With the owner tail the reads of the host come first, as in decide, so that Jev is not asked about the blocks of a protected row.
+    const early = cfg.ownerTail && cfg.targetPercent !== undefined ? await ownerTailReads($, cfg, ctx.deadline) : undefined;
+    cfg = ownerProtectedCfg(cfg, messages, early);
     const stage = agentStageOf($, cfg, undefined, messages, api, queued, keepFrom, sessionId, ctx.deadline);
     const plan = planBlocks(cfg, messages, stage.trimmed, api, queued, keepFrom, sessionId);
     if (!plan.items.length) return { items: 0 };
     const user = userTask(messages, undefined, queued, cfg.privatePaths, cfg.notUserPrefixes, ownerLimitsOf(cfg));
     let prefix = 0;
     let limit = null;
-    const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }), ctx.deadline);
+    const detail = early ? early.detail : await hostValue($, () => $.session.usage({ breakdown: 'summary' }), ctx.deadline);
     prefix = prefixTokens(detail);
     if (cfg.targetPercent !== undefined) {
-      const usage = await hostValue($, () => $.session.usage(), ctx.deadline);
-      const win = await resolveWindow($, cfg, detail, usage, ctx.deadline);
+      const usage = early ? early.usage : await hostValue($, () => $.session.usage(), ctx.deadline);
+      const win = early ? early.win : await resolveWindow($, cfg, detail, usage, ctx.deadline);
       if (win) limit = ruleTargetOf(win, cfg);
     }
     const extra = blockSignals(cfg.rates, prefix + listTokens(api, cfg.rates), plan.items, prefix, limit);
-    const stats = await ensureBlockVerdicts($, cfg, plan, { ...ctx, user, extra });
-    return { rows: plan.stats.rows, blocks: plan.stats.blocks, ...stats };
-  } catch (error) { return { skipped: 'error', error: clip(oneLine(String(error?.message ?? error)), 200) }; }
+    pending = cfg.jevUsage ? newJevUsagePending() : undefined;
+    const stats = await ensureBlockVerdicts($, cfg.jevUsage ? { ...cfg, usageRecord: used, usagePending: pending } : cfg, plan, { ...ctx, user, extra });
+    return { rows: plan.stats.rows, blocks: plan.stats.blocks, ...stats, ...used };
+  } catch (error) {
+    // The requests still tracked wait for their answers (each ends by its own timeout) and their entries go into the record this pass writes; without
+    // the usage switch nothing is tracked and the catch returns as before.
+    await drainJevUsage(used, pending);
+    if (cfg.jevUsage && used.jev_usage) used.cost_basis ??= 'unknown';
+    return { skipped: 'error', error: clip(oneLine(maskSecrets(String(error?.message ?? error))), 200), ...used }; // the error masked, as in the catch of compact
+  }
 }
 
 // The verdicts before the module's own request to compact: whatever the pass in the background is asking is waited for (no second question about the same blocks), then everything
@@ -5142,7 +5336,9 @@ async function fillBeforeCompaction($, cfg, messages) {
     const deadline = Date.now() + TOTAL_MS;
     if (session.blockBackground.run) { session.blockBackground.stop = true; await withDeadline($, session.blockBackground.run, TOTAL_MS); }
     const fill = await fillBlockVerdicts($, cfg, messages, { deadline, requestMs: REQUEST_MS });
-    if (!fill.skipped) {
+    // A pass that threw after requests went out still writes its record, because the catch of fillBlockVerdicts drains the entries of the requests
+    // still tracked into it.
+    if (!fill.skipped || fill.jev_usage) {
       let sessionId;
       try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
       await writeRecord($, cfg, { ts: isoNow(), point: POINT, event: 'verdicts_fill', session_id: sessionId ?? null, agent_id: null, ...fill });
@@ -5165,7 +5361,9 @@ async function backgroundBlockVerdicts($, cfg) {
     if (cfg.mode !== 'active' || cfg.blocks === 'off' || cfg.verdicts === 'off' || session.compacting > 0 || session.hostCannot || (await blockedReason($, cfg, Date.now(), undefined))) return;
     const read = await withDeadline($, Promise.resolve().then(() => $.session.messages()), HOST_MS);
     if (!Array.isArray(read.value) || session.compacting > 0) return;
-    await fillBlockVerdicts($, cfg, read.value, { minAge: 1, low: true, deadline: Date.now() + BLOCK_BACKGROUND_MS, requestMs: BLOCK_BACKGROUND_REQUEST_MS, cancel: () => session.compacting > 0 || state.stop });
+    const fill = await fillBlockVerdicts($, cfg, read.value, { minAge: 1, low: true, deadline: Date.now() + BLOCK_BACKGROUND_MS, requestMs: BLOCK_BACKGROUND_REQUEST_MS, cancel: () => session.compacting > 0 || state.stop });
+    // With the usage switch, a pass in the background that asked something leaves a record of what it used; without it the pass writes none.
+    if (fill.jev_usage) await writeRecord($, cfg, { ts: isoNow(), point: POINT, event: 'verdicts_fill', session_id: (await sessionIdOf($)) ?? null, agent_id: null, background: true, ...fill });
   } catch { /* the pass in the background never breaks a turn */ } finally {
     state.busy = false;
     done();
@@ -5370,14 +5568,20 @@ async function askTie($, cfg, group, ctx) {
         items[n.name] = fields;
         questions[n.name] = { type: 'score', instructions: `${F2_QUESTION} The item is \`items.${n.name}\`.`, criteria: BLOCK_LEVELS.map((what) => ({ what })) };
       }
-      const r = await withDeadline($, askJev($, cfg, { ...header, items, block_rules: BLOCK_RULES }, questions), timeoutMs);
+      const r = await trackJevUsage(cfg, 'second_round', withDeadline($, askJev($, cfg, { ...header, items, block_rules: BLOCK_RULES }, questions), timeoutMs));
+      noteJevUsage(cfg, 'second_round', r);
       const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
       if (Date.now() < ctx.deadline) await withDeadline($, recording, ctx.deadline - Date.now());
       if (!r.value) { failures.push(classifyFailure(r)); continue; }
       for (const { n } of req.items) { const s = scoreOf(r.value[n.name]); if (s !== undefined) n.x.score = s; }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker));
+  // A worker that throws (no throw can come out of the request itself) leaves the entries of the requests that went out missing: the drain waits for
+  // the ones still open (each ends by its own timeout) and adds their entries, then the error goes on as before (its caller catches it).
+  await Promise.all(Array.from({ length: Math.min(BLOCK_PARALLEL, requests.length) }, worker)).catch(async (error) => {
+    await drainJevUsage(cfg.usageRecord, cfg.usagePending, false);
+    throw error;
+  });
   noteFailures(failures, Date.now());
 }
 // --- end of the second round ------------------------------------------------------------------------------------------------------------------------------------------
@@ -5535,6 +5739,7 @@ export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) 
   if (images.unmatched) return { reason: 'image_unmatched' };
   const fixed = new Set([...nonTextAssistantRows(messages, api), ...images.rows]);
   for (const [row] of queued) if (messages[row]?.role === 'user') fixed.add(row);
+  for (const row of cfg.ownerProtected ?? []) fixed.add(row); // a protected row of the owner tail is no place for a series
   const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
@@ -6096,12 +6301,514 @@ async function archiveStep($, cfg, record, mode, candidates, rows, keepFrom, gro
   Object.assign(record, { merged_traces: merged.filter((e) => e.merged).length, merged_items: merged.reduce((n, e) => n + (e.merged ? e.ids.length : 0), 0) });
 }
 
-async function decide($, e, cfg, record, started) {
+// --- host attachments (OMC_JEV_COMPACT_HOST_ATTACHMENTS=1 or true) -------------------------------------------------------------------------------
+// The host keeps every entry that is no row (an attachment, a local command's record, an isMeta message, a system entry) in the group of the row before it, and a row
+// that keeps its handle comes back with its whole group. So with the switch on a user row of text before keepFrom is built from its text (build, `drop`), with the
+// messages delivered after it in their envelopes, and its group (instructions, lists of skills and agents, deltas of tools, memory files, the old text of used
+// skills, hook contexts) does not come back; the host announces again what it finds missing in the list after the boundary. The newest message of the user keeps its
+// handle, so the files it names and the context its hooks added stay with the request being worked on, and so do the rows of text after it in its turn (the
+// attachments of a turn are counted with its last user row). Any other row keeps its handle for a technical reason only: it stands from keepFrom on (the open
+// loop), its turn holds an image, a document or a /goal record (which renders to nothing and which the host does not rebuild), it has no text or holds
+// [Image #N], the API form does not place its turn, or the host flags it isMeta (built from its text it would lose the flag and count as a message of the user in
+// the next compaction).
+// The advisor: the host takes the advisor's model from the last advisor_tool attachment of the list before its first request after a compaction, so the row that
+// carries the advisor's reminder (the last user row of its turn) is rebuilt too and the host announces the advisor again from the setting; a carrier that cannot be
+// rebuilt without a loss hands the compaction to the host's summary (advisor_image, advisor_command, advisor_no_row, advisor_in_tail, advisor_meta_row,
+// advisor_newest_row, advisor_form_cut). The turn of the newest message of the user is rebuilt for the advisor only when the host announces again every
+// attachment it holds.
+// The kinds of attachments are told by the first line the host renders each with, so their table follows the version of the host.
+const API_FORM_MAX = 4096; // the number of messages the host's API form keeps (a cut form shows less than the conversation)
+const GOAL_COMMAND = /^\s*<command-name>\s*\/goal\b/i;
+const REMINDER_OPEN = '<system-reminder>\n';
+const REMINDER_CLOSE = '\n</system-reminder>';
+// The reminders of a text, each from an opener to the first closing line after it, and the text without them. One pass: after an opener without a closing line no
+// later opener has one either, so the scan stops there (a lazy regular expression reads to the end from every one of them, which is quadratic).
+export function splitReminders(text) {
+  const reminders = [];
+  const rest = [];
+  let at = 0;
+  for (let from = text.indexOf(REMINDER_OPEN); from >= 0; from = text.indexOf(REMINDER_OPEN, at)) {
+    const close = text.indexOf(REMINDER_CLOSE, from + REMINDER_OPEN.length);
+    if (close < 0) break;
+    rest.push(text.slice(at, from));
+    at = close + REMINDER_CLOSE.length;
+    reminders.push(text.slice(from, at));
+  }
+  rest.push(text.slice(at));
+  return { reminders, rest: rest.join('') };
+}
+// The advisor's reminder in its three forms: the instructions (under this heading), the sentence of an announcement and the sentence of the removal.
+const ADVISOR_HEADING = '# Advisor Tool\n';
+const ADVISOR_SENTENCES = [
+  'The advisor tool is available; the advisor instructions announced earlier apply.',
+  'The advisor tool is no longer available; disregard the earlier advisor instructions.',
+];
+// How many reminders of the advisor a text holds: each opens the text (after blank space) or follows an empty line, and an empty line or blank space to the end
+// follows its closing line. One pass: the openers are read in order, and the closing line that ends the instructions is searched only forward.
+export function advisorNotes(text) {
+  if (typeof text !== 'string' || !text.includes(REMINDER_OPEN)) return 0;
+  const blankFrom = text.trimEnd().length;
+  const ends = (close) => text.startsWith(REMINDER_CLOSE, close) && (close + REMINDER_CLOSE.length >= blankFrom || text.startsWith('\n\n', close + REMINDER_CLOSE.length));
+  let closing = -1; // the closing line found last that ends the instructions
+  let none = false; // no such line stands further on
+  // Where the reminder whose body starts at `body` ends; -1 when there is none.
+  const endOf = (body) => {
+    if (!text.startsWith(ADVISOR_HEADING, body)) {
+      const sentence = ADVISOR_SENTENCES.find((s) => text.startsWith(s, body));
+      return sentence && ends(body + sentence.length) ? body + sentence.length + REMINDER_CLOSE.length : -1;
+    }
+    const first = body + ADVISOR_HEADING.length;
+    if (!none && closing < first) {
+      closing = text.indexOf(REMINDER_CLOSE, first);
+      while (closing >= 0 && !ends(closing)) closing = text.indexOf(REMINDER_CLOSE, closing + 1);
+      none = closing < 0;
+    }
+    return none ? -1 : closing + REMINDER_CLOSE.length;
+  };
+  let count = 0;
+  let at = 0; // where the next reminder may start
+  const take = (opener) => {
+    const end = endOf(opener + REMINDER_OPEN.length);
+    if (end < 0) return false;
+    count++;
+    at = end;
+    return true;
+  };
+  const head = text.length - text.trimStart().length;
+  if (text.startsWith(REMINDER_OPEN, head)) take(head);
+  const opener = `\n\n${REMINDER_OPEN}`;
+  for (let p = text.indexOf(opener, at); p >= 0; p = text.indexOf(opener, at)) if (!take(p + 2)) at = p + 1;
+  return count;
+}
+// One rendered attachment of the host (a reminder) and its kind, by the first line the host renders it with. The third value says what the host does when the list
+// after the boundary lacks the attachment: true, it announces it again; 'list', it is a list the host keeps as a set of entries (a delta that comes back leaves the
+// rest of the list to be announced again); 'always', one is added after every compaction whatever was taken off (SessionStart hooks); false, it is never announced
+// again (used skills and a restored file come back only in the pack of the host's own compaction; hook contexts, task states and file notes come from events).
+const HOST_ATTACHMENTS = [
+  ['instructions', /^Codebase and user instructions are shown below/, true],
+  ['instructions_reread', /^Instruction files were re-read /, false],
+  ['session_context', /^(?:As you answer the user's questions, you can use the following context|The session context was re-read )/, true],
+  ['skill_listing', /^(?:The following skills are available for use with|New skills discovered in )/, 'list'],
+  ['agent_listing', /^(?:Available agent types for the Agent tool|New agent types are now available for the Agent tool|The following agent types are no longer available)/, 'list'],
+  ['deferred_tools', /^(?:The following tools just became available|The following deferred tools are now available)/, 'list'],
+  ['deferred_tools', /^(?:Definitions of the following tools were loaded earlier|The following (?:deferred )?tools are no longer available)/, 'list'],
+  ['mcp_instructions', /^(?:# MCP Server Instructions\b|The following MCP servers have disconnected)/, 'list'],
+  ['environment', /^# Environment\n/, true],
+  ['environment_update', /^# Environment update\b/, false],
+  ['model', /^You are powered by the model named /, true],
+  ['language', /^# Language\n/, true],
+  ['date', /^Today's date is /, true],
+  ['date_change', /^The date has changed\./, false],
+  ['advisor_tool', /^(?:# Advisor Tool\n|The advisor tool is (?:available|no longer available))/, true],
+  ['auto_mode', /^While (?:bypass permissions|auto) mode is active/, true],
+  ['remote_session_change', /^From here on, do not add attribution lines/, true],
+  ['invoked_skills', /^The following skills were invoked EARLIER/, false],
+  ['file', /^(?:Called the Read tool with the following input|Result of calling the Read tool)/, false],
+  ['compact_file_reference', /^Note: [^\n]+ was read before the last conversation was summarized/, false],
+  ['hook_session_start', /^SessionStart(?::[^\n]*)? hook (?:additional context|success): /, 'always'],
+  ['hook_context', /^[A-Za-z][\w.]*(?::[^\n]*)? hook (?:additional context|success|blocking error from command|stopped continuation)\b/, false],
+  ['task_status', /^(?:Background (?:agent|shell|monitor) |Task )/, false],
+  ['edited_file', /^Note: [^\n]+ changed on disk since you last read it/, false],
+  ['nested_memory', /^Contents of [^\n]+:\n/, false],
+  ['image_paths', /^The \d+ attached images?, in display order, are also saved at /, false],
+  ['host_reminder', /^(?:The user hasn't heard from you in a while|The task tools haven't been used recently|The user included the keyword "ultrathink")/, false],
+  ['host_reminder', /^(?:The user's message contains \/|## Exited Auto Mode|<total_tokens>|<tools-used-before-summary>)/, false],
+];
+const RESENT = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === true).map(([kind]) => kind));
+const LIST_KINDS = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === 'list').map(([kind]) => kind));
+const ALWAYS_RESENT = new Set(HOST_ATTACHMENTS.filter(([, , again]) => again === 'always').map(([kind]) => kind));
+const ANNOUNCED_AGAIN = new Set([...RESENT, ...LIST_KINDS, ...ALWAYS_RESENT]); // every other kind is gone for good with the row that is rebuilt
+const SKILL_TEXT = /^Base directory for this skill: ([^\n]+)/m;
+const skillNames = (t) => [...t.matchAll(/^### Skill: ([^\n]+)/gm)].map((x) => x[1].trim());
+// The host shows a user text that opens with <system-reminder ...> in the API form with that first "<" as "&lt;": a block is compared with the rows after this is undone.
+const unescapedOpener = (text) => (typeof text === 'string' ? text.replace(/^(\s*)&lt;(system-reminder\b)/, '$1<$2') : text);
+// A text made only of envelopes of this module (carriedText: <system-reminder id="jev-N">).
+function isOwnEnvelopes(text) {
+  const found = envelopesOf(text);
+  let at = 0;
+  for (const e of found) {
+    if (text.slice(at, e.from).trim() || !e.text.startsWith('<system-reminder id="jev-')) return false;
+    at = e.to;
+  }
+  return found.length > 0 && !text.slice(at).trim();
+}
+// The kind of one reminder; a message delivered while a turn ran (deliveryOf) is no attachment (queuedOf carries it).
+function attachmentKind(text) {
+  const body = text.replace(/^\s*<system-reminder>\n/, '');
+  for (const [kind, re] of HOST_ATTACHMENTS) if (re.test(body)) return kind;
+  return deliveryOf(text) || deliveryOf(body) ? 'delivery' : 'other';
+}
+// The attachments in a text the rows do not show: each reminder, and with `rest` the text around them as one piece of kind `meta` (an isMeta message: the text of a
+// skill, the continuation of a hook). `known`: the reminders a row's own text holds (the text of a result) with how often each stands there; as many of each are
+// taken off. Counted, not searched in a list, so the time stays linear in the number of reminders.
+function attachmentPieces(text, known = new Map(), rest = true) {
+  if (typeof text !== 'string' || !text.trim()) return [];
+  const taken = new Map();
+  const out = [];
+  const { reminders, rest: outside } = splitReminders(text);
+  for (const m of reminders) {
+    const n = taken.get(m) || 0;
+    if (n < (known.get(m) || 0)) { taken.set(m, n + 1); continue; }
+    const kind = attachmentKind(m);
+    if (kind === 'delivery') continue;
+    out.push(kind === 'invoked_skills' ? { kind, chars: m.length, names: skillNames(m) } : { kind, chars: m.length });
+  }
+  const around = rest ? outside : '';
+  if (around.trim()) {
+    const sk = SKILL_TEXT.exec(around);
+    out.push(sk ? { kind: 'skill_text', chars: around.length, names: [sk[1].trim()], directory: true } : { kind: 'meta', chars: around.length });
+  }
+  return out;
+}
+// The texts of a block an attachment's reminder may stand in: a text block, the content of a tool_result (a string, or its text blocks).
+function blockTexts(b) {
+  if (b.type === 'text') return [b.text];
+  if (b.type !== 'tool_result') return [];
+  if (typeof b.content === 'string') return [b.content];
+  return Array.isArray(b.content) ? b.content.filter((x) => x && x.type === 'text').map((x) => x.text) : [];
+}
+const contentBlocks = (a) => (typeof a.content === 'string' ? [{ type: 'text', text: a.content }] : a.content.filter((b) => b && typeof b === 'object'));
+// A user row of text the host can rebuild from its text alone (a row of the open loop, a row with an image, a /goal record cannot be).
+const textRebuildable = (m, i, keepFrom, imageRows) => m.role === 'user' && !(m.toolResults || []).length && i < keepFrom && m.isMeta !== true
+  && Boolean(rowText(m.text)) && !/\[Image #\d+\]/.test(m.text) && !GOAL_COMMAND.test(m.text) && !imageRows.has(i);
+const resultRebuilt = (m) => m.role === 'user' && (m.toolResults || []).length > 0 && m.toolResults.every(textOnlyResult);
+// The API form read turn by turn (the messages between two assistant messages) against the rows. Returns {rows (the rows that carry an advisor reminder), text (the
+// user rows of text that are rebuilt without their handle: the rows of a turn that holds no image and no /goal record, advisor or not, less the row `newest` (the
+// newest message of the user) and those after it in its turn), blocks (advisor reminders
+// found), blocked (a reason the compaction goes to the summary), dropped, back, coveredBack, resent (the characters of what goes, what comes back and what the host
+// announces again)}; null without the API form.
+function carrierRows(messages, api, keepFrom, newest) {
+  if (!Array.isArray(api) || !api.length) return null;
+  const imageRows = nonTextUserRows(messages, api).rows;
+  const rowOfResult = new Map();
+  const rowOfUse = new Map();
+  const textRows = new Map(); // rowText -> {rows: user rows with that text, ascending, at: the next one to take}
+  const asstRows = new Map();
+  const add = (list, t, i) => { const e = list.get(t); if (e) e.rows.push(i); else list.set(t, { rows: [i], at: 0 }); };
+  messages.forEach((m, i) => {
+    if (m.role === 'user') {
+      for (const r of m.toolResults || []) if (!rowOfResult.has(r.tool_use_id)) rowOfResult.set(r.tool_use_id, i);
+      const t = rowText(m.text);
+      if (t) add(textRows, t, i);
+    } else if (m.role === 'assistant') {
+      for (const u of m.toolUses || []) if (!rowOfUse.has(u.tool_use_id)) rowOfUse.set(u.tool_use_id, i);
+      const t = rowText(m.text);
+      if (t) add(asstRows, t, i);
+    }
+  });
+  let cursor = 0;
+  // The first row of `list` at or after the cursor and `lo`, before `hi`; rows are taken in order, so two rows with the same text are two turns.
+  const next = (list, text, lo = 0, hi = Infinity) => {
+    const e = list.get(text);
+    if (!e) return undefined;
+    const from = Math.max(cursor, lo);
+    while (e.at < e.rows.length && e.rows[e.at] < from) e.at++;
+    return e.at < e.rows.length && e.rows[e.at] < hi ? e.rows[e.at++] : undefined;
+  };
+  const out = {
+    rows: new Set(), text: new Set(), blocks: 0, blocked: undefined,
+    dropped: { n: 0, chars: 0, uncovered: 0, kinds: {}, charsByKind: {}, max: new Map(), skills: new Map() }, // skills: name or directory -> is a directory
+    back: { n: 0, chars: 0, kinds: new Set(), byKind: new Map() }, coveredBack: 0,
+  };
+  const block = (reason) => { if (!out.blocked) out.blocked = reason; };
+  let seenAssistant = false;
+  let headShown = false;
+  let before; // the last row of the assistant message before the turn (undefined: none, or not placed)
+  let stretch = [];
+  const flush = (nextFirst) => {
+    const st = stretch;
+    stretch = [];
+    const first = !seenAssistant;
+    const msgs = st.map((a) => [a, contentBlocks(a)]);
+    const blocks = [];
+    const textAt = new Map(); // block -> the row its text shows
+    const anchors = [];
+    const lo0 = first ? 0 : before === undefined ? 0 : before + 1;
+    const hi0 = nextFirst === undefined ? Infinity : nextFirst;
+    for (const [, bs] of msgs) {
+      for (const b of bs) {
+        blocks.push(b);
+        if (b.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) anchors.push(rowOfResult.get(b.tool_use_id));
+        else if (b.type === 'text' && typeof b.text === 'string') {
+          const r = next(textRows, rowText(b.text), lo0, hi0) ?? next(textRows, rowText(unescapedOpener(b.text)), lo0, hi0);
+          if (r !== undefined) { anchors.push(r); textAt.set(b, r); }
+        }
+      }
+    }
+    if (anchors.length) cursor = Math.max(cursor, Math.max(...anchors) + 1);
+    if (first && anchors.includes(0)) headShown = true;
+    const image = blocks.some((b) => b.type !== 'text' && b.type !== 'tool_result');
+    const goal = blocks.some((b) => b.type === 'text' && typeof b.text === 'string' && GOAL_COMMAND.test(b.text));
+    // The user rows of the turn stand between the rows of the assistant messages around it.
+    let lo = first ? 0 : before === undefined ? undefined : before + 1;
+    let hi = nextFirst;
+    if (anchors.length) {
+      const top = Math.max(...anchors);
+      if (lo === undefined) { lo = top; while (lo > 0 && messages[lo - 1].role === 'user') lo--; }
+      if (hi === undefined) { hi = top + 1; while (hi < messages.length && messages[hi].role === 'user') hi++; }
+    }
+    const known = lo !== undefined && hi !== undefined;
+    let carrier;
+    if (known) for (let k = Math.min(hi, messages.length) - 1; k >= lo; k--) if (messages[k].role === 'user') { carrier = k; break; }
+    const pieces = []; // [attachment, covered]; whether they go depends on the rows of the turn that are rebuilt
+    const piece = (p, covered) => {
+      if (goes) {
+        out.dropped.n++;
+        out.dropped.chars += p.chars;
+        if (!covered) out.dropped.uncovered += p.chars;
+        out.dropped.kinds[p.kind] = (out.dropped.kinds[p.kind] || 0) + 1;
+        out.dropped.charsByKind[p.kind] = (out.dropped.charsByKind[p.kind] || 0) + p.chars;
+        out.dropped.max.set(p.kind, Math.max(out.dropped.max.get(p.kind) || 0, p.chars));
+        for (const name of p.names || []) out.dropped.skills.set(name, p.directory === true);
+      } else {
+        out.back.n++;
+        out.back.chars += p.chars;
+        out.back.kinds.add(p.kind);
+        out.back.byKind.set(p.kind, (out.back.byKind.get(p.kind) || 0) + p.chars);
+        if (covered) out.coveredBack += p.chars;
+      }
+    };
+    for (const [a, bs] of msgs) {
+      let msgRow;
+      for (const b of bs) if (b.type === 'tool_result' && rowOfResult.has(b.tool_use_id)) msgRow = Math.max(msgRow ?? -1, rowOfResult.get(b.tool_use_id));
+      // A user message with results: its hidden text goes with its row in the count of `messages` (a rebuilt result row), so it is `covered`.
+      const covered = a.role === 'user' && msgRow !== undefined && resultRebuilt(messages[msgRow]);
+      for (const b of bs) {
+        if (textAt.has(b)) continue;
+        if (b.type === 'tool_result') {
+          const r = rowOfResult.get(b.tool_use_id);
+          if (r === undefined) continue;
+          const own = messages[r].toolResults.find((x) => x.tool_use_id === b.tool_use_id)?.text || '';
+          const shown = new Map();
+          for (const x of splitReminders(own).reminders) shown.set(x, (shown.get(x) || 0) + 1);
+          for (const t of blockTexts(b)) for (const p of attachmentPieces(t, shown, false)) pieces.push([p, covered]);
+          continue;
+        }
+        if (b.type !== 'text' || typeof b.text !== 'string') continue;
+        const t = unescapedOpener(b.text);
+        if (isOwnEnvelopes(t)) continue;
+        if (deliveryOf(t)) continue; // a delivered message is carried by queuedOf
+        if (textRows.has(rowText(t)) || textRows.has(rowText(b.text))) continue; // a row's text the host shows in another turn
+        for (const p of attachmentPieces(t)) pieces.push([p, covered]);
+      }
+    }
+    // The advisor's reminder in the turn.
+    let found = 0;
+    for (const b of blocks) for (const t of blockTexts(b)) found += advisorNotes(t);
+    // The newest message of the user keeps its handle, with the rows after it in its turn; for the advisor alone the turn is rebuilt when nothing is lost by it.
+    const holdsNewest = known && newest >= lo && newest < Math.min(hi, messages.length);
+    const keepsNewest = holdsNewest && !(found && pieces.every(([p]) => ANNOUNCED_AGAIN.has(p.kind)));
+    // The rows of text of the turn lose their handle unless a technical reason keeps it (an image or a /goal record in the turn).
+    if (known && !goal && !image) {
+      for (let k = lo; k < Math.min(hi, messages.length); k++) if (!(keepsNewest && k >= newest) && textRebuildable(messages[k], k, keepFrom, imageRows)) out.text.add(k);
+    }
+    const rebuilt = (k) => k !== undefined && (out.text.has(k) || resultRebuilt(messages[k]));
+    // Every attachment of the turn stands in the carrier's group (no user row: the assistant row before the turn, rebuilt before keepFrom), also one the host folded
+    // into the content of a result: it goes when the carrier is rebuilt and comes back with it otherwise.
+    const goes = carrier !== undefined ? rebuilt(carrier) : known && !first && before !== undefined && before < keepFrom;
+    for (const [p, covered] of pieces) piece(p, covered);
+    if (!found) return;
+    out.blocks += found;
+    if (image) block('advisor_image');
+    if (goal) block('advisor_command');
+    if (!known) { block('advisor_no_row'); return; }
+    if (carrier === undefined) {
+      // No user row: the attachment stands behind the assistant message before the turn, which is rebuilt before keepFrom.
+      if (first) block('advisor_no_row');
+      else if (before >= keepFrom) block('advisor_in_tail');
+      return;
+    }
+    const m = messages[carrier];
+    if ((m.toolResults || []).length) { if (!m.toolResults.every(textOnlyResult)) block('advisor_image'); return; } // a result row of text is rebuilt anyway, the tail's too
+    if (carrier >= keepFrom) { block('advisor_in_tail'); return; }
+    const text = typeof m.text === 'string' ? m.text : '';
+    if (!rowText(text) || /\[Image #\d+\]/.test(text)) { block('advisor_image'); return; }
+    if (GOAL_COMMAND.test(text)) { block('advisor_command'); return; }
+    if (m.isMeta === true) { block('advisor_meta_row'); return; }
+    if (keepsNewest) { block('advisor_newest_row'); return; }
+    out.rows.add(carrier);
+  };
+  for (const a of api) {
+    if (!a || typeof a !== 'object' || !(Array.isArray(a.content) || typeof a.content === 'string')) continue;
+    if (a.role !== 'assistant') { stretch.push(a); continue; }
+    let lo;
+    let hi;
+    for (const b of contentBlocks(a)) if (b.type === 'tool_use' && rowOfUse.has(b.id)) { const r = rowOfUse.get(b.id); lo = Math.min(lo ?? r, r); hi = Math.max(hi ?? r, r); }
+    if (lo === undefined) {
+      for (const b of contentBlocks(a)) {
+        if (b.type !== 'text' || typeof b.text !== 'string') continue;
+        const r = next(asstRows, rowText(b.text));
+        if (r !== undefined) { lo = hi = r; break; }
+      }
+    }
+    if (!seenAssistant && lo === 0) headShown = true;
+    flush(lo);
+    before = hi;
+    seenAssistant = true;
+    if (hi !== undefined) cursor = Math.max(cursor, hi + 1);
+  }
+  flush(messages.length);
+  // An API form the host cut (it keeps the last API_FORM_MAX messages) shows less than the conversation: told by a head the form does not show.
+  if (!headShown && (api.length >= API_FORM_MAX / 2 || messages.length > API_FORM_MAX)) block('advisor_form_cut');
+  // The host announces again a kind of RESENT none of whose attachments come back: about as long as the longest one taken off; of a list the entries the pieces that
+  // come back do not hold; of ALWAYS_RESENT the longest taken off whatever comes back.
+  out.resent = 0;
+  for (const [k, n] of out.dropped.max) {
+    if (ALWAYS_RESENT.has(k)) out.resent += n;
+    else if (LIST_KINDS.has(k)) out.resent += Math.max(0, n - (out.back.byKind.get(k) || 0));
+    else if (RESENT.has(k) && !out.back.kinds.has(k)) out.resent += n;
+  }
+  return out;
+}
+// The names of used skills for the record. Each is text of the conversation (a heading of the used skills, or the directory a skill was loaded from), so it goes in
+// only when the whole of it names no secret path and no private path of the user's list; a directory gives its last part. The name then goes through both masks, the
+// shared one under the mask of a series (they read a bounded start of it), is put on one line and cut.
+const SKILL_NAMES_MAX = 50;
+const SKILL_NAME_MAX_CHARS = 80;
+const SKILL_NAME_SCAN_CHARS = 600;
+function recordedSkillNames(skills, privatePaths) {
+  const out = new Set();
+  for (const [text, directory] of skills) {
+    if (out.size >= SKILL_NAMES_MAX) break;
+    if (namesSecretPath(text, privatePaths)) continue;
+    const name = directory ? text.split(/[\\/]+/).filter(Boolean).pop() ?? '' : text;
+    const shown = clip(oneLine(cleanForJevLong(maskSecrets(name.slice(0, SKILL_NAME_SCAN_CHARS)))), SKILL_NAME_MAX_CHARS);
+    if (shown) out.add(shown);
+  }
+  return [...out];
+}
+// The record fields of the attachments the rebuilt rows take off (tokens at RATE_ATT per character) and of those that come back with rows that keep their handle.
+function hostAttachmentRecord(a, rates, privatePaths) {
+  if (!a) return { attachments_dropped: null };
+  const tok = (chars) => Math.round(rates.RATE_ATT * chars);
+  return {
+    advisor_blocks: a.blocks,
+    attachments_dropped: a.dropped.n, attachments_dropped_tokens: tok(a.dropped.chars), attachments_kinds: a.dropped.kinds,
+    attachments_kinds_tokens: Object.fromEntries(Object.entries(a.dropped.charsByKind).map(([k, c]) => [k, tok(c)])),
+    attachments_skills: recordedSkillNames(a.dropped.skills, privatePaths),
+    attachments_back: a.back.n, attachments_back_tokens: tok(a.back.chars), attachments_back_from_results_tokens: tok(a.coveredBack),
+    attachments_resent_tokens: tok(a.resent),
+  };
+}
+// The user rows of text that build writes without their handle, and the tokens the prediction takes off for them: what goes, less what the host announces again (the
+// attachments of result rows are not counted: the host's count holds them either way).
+const rowsWithoutHandle = (a) => (a ? new Set([...a.text, ...a.rows]) : undefined);
+const attachmentTokens = (a, rates) => (a ? rates.RATE_ATT * (a.dropped.uncovered - a.resent - a.coveredBack) : 0);
+// --- end of the host attachments ----------------------------------------------------------------------------------------------------------------
+
+// --- owner tail (OMC_JEV_COMPACT_OWNER_TAIL=active) ----------------------------------------------------------------------------------------------
+// The newest message of the user and the text of the answers after it (the text of the assistant rows, not their calls) stay word for word in any compaction, also at
+// a turn boundary and for a plugin's request. What else comes after it (calls and results of tools, reports of agents, messages of other sessions, notifications) is
+// compacted like the rest, and the open tool loop keeps its handles as ever. The protected rows (cfg.ownerProtected) are left out of the stages of pasted text,
+// long replies, blocks and series; the agent stage leaves a row of the user and one that opens with a block of another session by its own rules. After the build
+// ownerTailViolations checks that every protected text is still there: one that came out changed leaves the conversation as it was (a skip, so the host's summary
+// does not run either), except in an automatic compaction, which goes to the host's summary: with a skip alone a repeated violation would never let the context
+// shrink.
+// The user's message is a user row without results that holds words of the user's own (userWords) and that no hook or the host put in (isMeta, hookRowPrefixes). A
+// message of another session is a row that opens with CROSS_SESSION_PREFIX: OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION `on` counts it like a message of the user (the
+// boundary is the newest of both kinds), `off` ignores it, `fallback` (the default) takes the user's row as the first boundary and the newest message of another
+// session after it as the next one, tried when the protected text is too large.
+const CROSS_SESSION_PREFIX = '<cross-session-message';
+export const OWNER_TAIL_SKIP = 'jev-compaction-owner-tail:'; // opens the text of this skip; ownThreshold tells it from OWN_SKIP_PREFIX
+const crossSessionMode = (raw) => {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return v === 'on' || v === 'off' ? v : 'fallback';
+};
+const isCrossSessionRow = (m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.trimStart().startsWith(CROSS_SESSION_PREFIX);
+// While the blocks act, a row that is only a moved block or the header of the trace files holds no words of the user (as in ownerRows).
+const isOwnerWords = (m, cfg) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.isMeta !== true
+  && !cfg.hookRowPrefixes.some((p) => m.text.trimStart().startsWith(p)) && userWords(m, notUserOf(cfg.blockTraces)).length > 0;
+export const isOwnerTailRow = (m, cfg) => isOwnerWords(m, cfg) || (cfg.ownerTailCrossSession === 'on' && isCrossSessionRow(m));
+const newestOwnerRow = (messages, cfg) => messages.findLastIndex((m) => isOwnerWords(m, cfg)); // -1 without one
+
+/** The boundaries a compaction tries, the one with the most protected text first: the newest row of the user (with `on`, of the user or another session), then with `fallback` the newest message of another session after it. */
+export function ownerTailTiers(messages, cfg) {
+  const tiers = [];
+  const owner = messages.findLastIndex((m) => isOwnerTailRow(m, cfg));
+  if (owner >= 0) tiers.push(owner);
+  if (cfg.ownerTailCrossSession === 'fallback') {
+    const cross = messages.findLastIndex(isCrossSessionRow);
+    if (cross > owner) tiers.push(cross);
+  }
+  return tiers;
+}
+
+/** What is protected from the boundary row `from`: that row and every assistant row with text after it. */
+export function ownerTailProtected(messages, from) {
+  const rows = [from];
+  for (let i = from + 1; i < messages.length; i++) if (messages[i].role === 'assistant' && typeof messages[i].text === 'string' && messages[i].text.trim()) rows.push(i);
+  return { rows, user: messages[from].text, texts: rows.slice(1).map((i) => messages[i].text) };
+}
+
+/**
+ * The check of the built list before anything goes to the host: the protected message opens the text of a user row, and every protected text of the assistant stands in
+ * the text of the assistant rows, in order (build joins the rows of one message with a newline and may put the traces of its calls after its text). One name per
+ * protected element that is gone: `owner_text`, `assistant_text`.
+ */
+export function ownerTailViolations(built, prot) {
+  const bad = [];
+  if (!built.some((m) => m.role === 'user' && !(m.toolResults || []).length && typeof m.text === 'string' && m.text.startsWith(prot.user))) bad.push('owner_text');
+  const joined = built.filter((m) => m.role === 'assistant' && typeof m.text === 'string' && m.text).map((m) => m.text).join('\n');
+  let at = 0;
+  for (const text of prot.texts) {
+    const found = joined.indexOf(text, at);
+    if (found < 0) bad.push('assistant_text');
+    else at = found + text.length;
+  }
+  return bad;
+}
+
+// The reads of the host and the window, made before the stages are planned: the bound of the protected text needs them, and they are used again instead of new ones.
+async function ownerTailReads($, cfg, deadline) {
+  const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
+  const usage = await hostValue($, () => $.session.usage(), deadline);
+  return { detail, usage, win: await resolveWindow($, cfg, detail, usage, deadline) };
+}
+
+// The boundary of one compaction: the first of the tiers (from cfg.ownerTailDemote on) whose protected text with the fixed prefix stays under `bound`, the threshold of
+// the host less FLOOR_MARGIN of the window (without a window the first tier is taken). None fitting is an overflow: no protection, or with `keep` the last tier while it
+// stays under the threshold (`kept`: the gates that hand a floor over the bound to the host's summary are then off, as the summary would take the text too). In the main
+// loop a boundary at the first row protects nothing (the whole conversation would be protected); in a subagent, with the option, the prompt of its parent counts.
+// Returns {tail (for the record), kept} and, with protection, {prot, rows (the protected rows), fixed (the prefix with the protected text), tier}.
+function ownerTailPlan(cfg, messages, main, win, prefix) {
+  const tiers = main || cfg.ownerTailAgents ? ownerTailTiers(messages, cfg) : [];
+  const usable = tiers.filter((from) => from > 0 || !main);
+  const tokensOf = (prot) => Math.round(listTokens(rowsAsApi(prot.rows.map((i) => ({ role: messages[i].role, text: messages[i].text }))), cfg.rates));
+  const prots = usable.map((from) => ownerTailProtected(messages, from));
+  const sizes = prots.map(tokensOf);
+  const bound = win ? win.threshold - FLOOR_MARGIN * win.window : Infinity;
+  let pick;
+  for (let i = cfg.ownerTailDemote ?? 0; i < usable.length && pick === undefined; i++) if (prefix + sizes[i] <= bound) pick = i;
+  const overflow = usable.length > 0 && pick === undefined;
+  let kept = false;
+  if (overflow && cfg.ownerTailOverflow === 'keep' && win && prefix + sizes[usable.length - 1] <= win.threshold) { pick = usable.length - 1; kept = true; }
+  const shown = pick !== undefined ? usable[pick] : tiers[0];
+  const shownProt = pick !== undefined ? prots[pick] : shown === undefined ? undefined : ownerTailProtected(messages, shown);
+  const tail = {
+    from_idx: shown ?? null, rows: shown === undefined ? 0 : messages.length - shown, tokens: shownProt === undefined ? 0 : pick !== undefined ? sizes[pick] : tokensOf(shownProt),
+    violations: 0, goal_yielded: false, overflow, boundary: pick === undefined ? 'old' : isOwnerWords(messages[shown], cfg) ? 'owner' : 'cross_session',
+    protected_rows: shownProt === undefined ? 0 : shownProt.rows.length,
+  };
+  if (pick === undefined) return { tail, kept };
+  return { tail, kept, prot: prots[pick], rows: new Set(prots[pick].rows), fixed: prefix + sizes[pick], tier: pick };
+}
+
+// The protected rows of the main loop for a plan made outside decide (the pass that fills the verdicts, the estimate of the own threshold), taken as decide takes
+// them, so that no block of a protected row is asked about and no stage counts one. `early` is what ownerTailReads returned (none without the token cascade).
+function ownerProtectedCfg(cfg, messages, early) {
+  if (!cfg.ownerTail || !Array.isArray(messages)) return cfg;
+  const plan = ownerTailPlan(cfg, messages, true, early?.win, early ? prefixTokens(early.detail) : 0);
+  return plan.rows ? { ...cfg, ownerProtected: plan.rows } : cfg;
+}
+// --- end of the owner tail ----------------------------------------------------------------------------------------------------------------------
+
+async function decide($, e, cfg, record, started, pending) {
+  if (cfg.jevUsage) cfg = { ...cfg, usageRecord: record, usagePending: pending }; // every request of this decision adds to its record
   const messages = Array.isArray(e.messages) ? e.messages : [];
   let before = messages.reduce((s, m) => s + messageChars(m), 0);
   record.chars_before = before;
   const deadline = started + TOTAL_MS;
-  if (messages.length <= KEEP_LAST + 1) return { fallback: 'too_few_messages' };
+  if (messages.length <= (cfg.tailByLoop ? 2 : KEEP_LAST + 1)) return { fallback: 'too_few_messages' };
   // The rows of one API message are rebuilt together (groupsOf); only the last message of an open tool
   // loop keeps its handles, and then the API form has to hold every call of it: without it a call whose
   // result came back quickly starts a group of its own, and that message would be split.
@@ -6150,19 +6857,46 @@ async function decide($, e, cfg, record, started) {
   // The host restores a delivery after a row that keeps its handle, but a result row that is rebuilt carries it as
   // text, which would split the kept message: the summary runs instead.
   if (splitsTail(messages, queued, keepFrom, group)) return { fallback: 'queued_in_tail' };
+  // Host attachments: the user rows of text that are rebuilt without their handle, the carriers of the advisor among them; a carrier that cannot be rebuilt without a
+  // loss hands the compaction to the summary.
+  const hostAtt = cfg.hostAttachments ? carrierRows(messages, api, keepFrom, newestOwnerRow(messages, cfg)) : null;
+  if (cfg.hostAttachments) {
+    Object.assign(record, hostAttachmentRecord(hostAtt, cfg.rates, cfg.privatePaths));
+    if (hostAtt?.blocked) return { fallback: hostAtt.blocked };
+  }
+  const dropRows = rowsWithoutHandle(hostAtt);
+  const attachTokens = attachmentTokens(hostAtt, cfg.rates);
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
-  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
+  // With the tail by the open loop every row is looked at; the filter below leaves the loop out.
+  const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, { blockTraces: cfg.blockTraces, tailFrom: cfg.tailByLoop ? messages.length : undefined }).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
   record.candidates = candidates.length;
   // Archive: the planned path goes into every trace and cut before the floor and the cascade count their lengths (active only).
   const archMode = archiveModeIn(cfg, record);
   if (archMode === 'active') for (const c of candidates) { const path = archivePlannedPath(cfg, record.session_id, c); if (path) { c.archivePath = path; archiveCosts(c); } }
   if (cfg.notifications) record.notifications = candidates.filter((c) => c.note).length;
-  const envelopes = envelopeChars(messages, queued, candidates);
+  const envelopes = envelopeChars(messages, queued, candidates, dropRows);
   const removable = removableChars(candidates);
   // The envelopes build adds stay in every rebuilt row, so they come off what the results can give back.
   const net = removable - envelopes;
   // The envelopes are text the installed rows hold and the host's count does not: the predictions start from the count plus them.
   const envelopeTokens = cfg.rates.RATE_NOTE * envelopes;
+  // Owner tail: the protected rows are known before the stages are planned, so with the token cascade the host reads and the window come first.
+  let ownerPlan;
+  let early;
+  if (cfg.ownerTail) {
+    if (cfg.targetPercent !== undefined) early = await ownerTailReads($, cfg, deadline);
+    let win = early?.win;
+    if (win && e.trigger === 'auto' && e.agentId !== undefined) { // a subagent's window follows its estimate, as in the cascade below
+      const estimate = tokensBeforeOf(e, cfg, messages, api, early.detail, early.usage, thinking).tokens;
+      if (estimate < win.threshold) win = { window: Math.min(win.window, Math.round(estimate) + HOST_BUFFER), threshold: Math.max(1, Math.round(estimate)) };
+    }
+    ownerPlan = ownerTailPlan(cfg, messages, e.agentId === undefined, win, early ? prefixTokens(early.detail) : 0);
+    Object.assign(record, { owner_tail: ownerPlan.tail, owner_tail_applied: Boolean(ownerPlan.prot) });
+    if (ownerPlan.prot) {
+      record.owner_tail_tier = ownerPlan.tier;
+      cfg = { ...cfg, ownerProtected: ownerPlan.rows };
+    }
+  }
   // Agent trim: the host's frame of agents' messages and idle notifications out of the rows before the tail; lossless for the work, so before the floor and
   // the cascade, and its tokens come off the prediction (the cascade's target is the rule's target, a share of the window).
   // Verdicts of Jev on blocks of text (OMC_JEV_COMPACT_BLOCKS): off without the API form, a state directory or a session; `shadow` also while the point itself is not active. They ask
@@ -6220,10 +6954,10 @@ async function decide($, e, cfg, record, started) {
   let known;
   if (cfg.targetPercent !== undefined) {
     // The host reads are made once, within the compaction's deadline, and the token accounting below uses them again.
-    const detail = await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
-    const usage = await hostValue($, () => $.session.usage(), deadline);
+    const detail = early ? early.detail : await hostValue($, () => $.session.usage({ breakdown: 'summary' }), deadline);
+    const usage = early ? early.usage : await hostValue($, () => $.session.usage(), deadline);
     known = { detail, usage };
-    let win = await resolveWindow($, cfg, detail, usage, deadline);
+    let win = early ? early.win : await resolveWindow($, cfg, detail, usage, deadline);
     if (!win) return { fallback: 'no_window' };
     tokens = tokensBeforeOf(e, cfg, messages, api, detail, usage, thinking);
     if (e.trigger === 'auto') {
@@ -6236,8 +6970,10 @@ async function decide($, e, cfg, record, started) {
     Object.assign(record, { window: win.window, threshold: win.threshold, window_source: win.source });
     known.win = win; // the window that governs the cut: the token accounting records it as it is
     // The rule's target: the usual target before the owner's limit (`raw`), then the limit from the configured window ceiling (absent by default).
-    const raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
+    let raw = Math.floor(TARGET_UNCALIBRATED * usualTarget(win, cfg.targetPercent));
     ruleTarget = ruleTargetOf(win, cfg);
+    // Owner tail: nothing can come below the prefix with the protected text, so a goal under it goes up to it.
+    if (ownerPlan?.fixed > ruleTarget) { ruleTarget = ownerPlan.fixed; raw = Math.max(raw, ownerPlan.fixed); ownerPlan.tail.goal_yielded = true; }
     manual = tokens.tokens <= raw;
     if (!manual) {
       // With the stage active the floor counts what it plans to save (a plan, no write), so a session full of agents' reports is not handed to the
@@ -6256,9 +6992,9 @@ async function decide($, e, cfg, record, started) {
         if (blocksPotential) record.floor_blocks_tokens = Math.round(blocksPotential);
         if (seriesPotential) record.floor_series_tokens = Math.round(seriesPotential);
       }
-      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor - blocksFloor + envelopeTokens - thinking.removed, cfg.rates, shape);
+      const floor = floorPrediction(candidates, tokens.tokens - trimTokens - agentsFloor - blocksFloor - attachTokens + envelopeTokens - thinking.removed, cfg.rates, shape);
       record.floor_pred = Math.max(0, Math.round(floor));
-      if (floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
+      if (!ownerPlan?.kept && floor > win.threshold - FLOOR_MARGIN * win.window) return { fallback: 'floor_above_threshold' };
     }
   }
   const blocked = await blockedReason($, cfg, Date.now(), e.agentId);
@@ -6315,14 +7051,14 @@ async function decide($, e, cfg, record, started) {
     const t0 = Date.now();
     if (t0 >= deadline) { session.requests--; held = { mode: 'deadline' }; break; }
     const timeoutMs = Math.min(REQUEST_MS, deadline - t0);
-    runs.push(
+    runs.push(trackJevUsage(cfg, undefined,
       withDeadline($, askJev($, cfg, state, questions), timeoutMs).then(async (r) => {
         // Shared failure bookkeeping may finish later, but cannot extend this decision's budget.
         const recording = recordSharedFailure($, cfg, { ...r, short: timeoutMs < 1000 });
         if (Date.now() < deadline) await withDeadline($, recording, deadline - Date.now());
         return { ...r, batch, ms: Date.now() - t0 };
       }),
-    );
+    ));
   }
   if (held) {
     // A request held back by the shared breaker or limit is no failure of the endpoint. The results it
@@ -6353,6 +7089,12 @@ async function decide($, e, cfg, record, started) {
   }
   const [results, , blockAsked] = await Promise.all([Promise.all(runs), pasted?.asks, blocksAsk]);
   record.jev_ms = results.map((r) => r.ms);
+  if (cfg.jevUsage) {
+    // The scoring entries first, parallel to jev_ms, then those of the other requests in the order in which they ended.
+    record.jev_usage = [...results.map((r) => jevUsageOf(r.value)), ...(record.jev_usage ?? [])];
+    record.cost_basis = results.some((r) => costBasisOf(jevMetaOf(r.value)?.raw) === 'reported') ? 'reported' : (record.cost_basis ?? 'unknown');
+    releaseScoringUsage(cfg); // their entries are in the record now
+  }
   let answered = 0;
   const failures = [];
   for (const r of results) {
@@ -6445,7 +7187,7 @@ async function decide($, e, cfg, record, started) {
     const blockHold = new Set([...agentMoved.keys(), ...(replyEdits ? replyEdits.keys() : []), ...messages.flatMap((m, i) => (pasteSwaps?.has(m) ? [i] : []))]);
     await moveBlockRows(blockHold);
     stageTokens += blockSaved;
-    let base = tokens.tokens - trimTokens - agentTokens - stageTokens + envelopeTokens - thinking.removed + headerTokens();
+    let base = tokens.tokens - trimTokens - agentTokens - stageTokens - attachTokens + envelopeTokens - thinking.removed + headerTokens();
     let plan;
     if (blocksMode === 'active' && blockOn) {
       // The second round (OMC_JEV_COMPACT_BLOCKS=active): the first pass (or the scores alone, for a manual compaction) comes first, and a prediction still above the target goes to the
@@ -6508,8 +7250,9 @@ async function decide($, e, cfg, record, started) {
     // keeps the numbers). The module's own requests and other mods' plugin compactions are not handled here.
     // The files were planned to spare the host's summary (the floor counted them): when the writes fell short and the plan still ends above the bound the
     // floor is held to, the summary runs.
-    if ((agentsFloor > 0 || blocksFloor > 0) && plan.predicted > record.threshold - FLOOR_MARGIN * record.window) { record.floor_after_agents = plan.predicted; return { fallback: 'text_above_threshold' }; }
-    if (cfg.handoff && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && (e.trigger === 'manual' || e.trigger === 'auto')) return { fallback: 'cut_below_host_min' };
+    if ((agentsFloor > 0 || blocksFloor > 0) && !ownerPlan?.kept && plan.predicted > record.threshold - FLOOR_MARGIN * record.window) { record.floor_after_agents = plan.predicted; return { fallback: 'text_above_threshold' }; }
+    // With protected text the small cut is made: the host's summary would take that text.
+    if (cfg.handoff && !ownerPlan?.prot && plan.predicted > (1 - HOST_MIN_CUT) * tokens.tokens && (e.trigger === 'manual' || e.trigger === 'auto')) return { fallback: 'cut_below_host_min' };
     // The module's own request (`$.session.compact()` of ownThreshold, trigger `plugin`) that would stay under HOST_MIN_CUT is rejected, not handed over:
     // the host's summary is what it replaces, and nothing forces a compaction yet. compact() answers it with a skip. A `plugin` compaction asked by
     // another mod is not ours to veto.
@@ -6533,16 +7276,26 @@ async function decide($, e, cfg, record, started) {
   const header = headerOf();
   if (header !== undefined) rows = rows.map((m) => (isHeaderRow(m) ? { ...m, trimDrop: true } : m));
   if (archMode !== 'off') await archiveStep($, cfg, record, archMode, candidates, rows, keepFrom, group, queued, started);
-  let built = build(rows, candidates, keepFrom, group, stats, queued);
+  let built = build(rows, candidates, keepFrom, group, stats, queued, dropRows);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   if (cfg.replies !== 'off' && e.agentId === undefined) {
     const edited = replyEdits ?? (await moveReplies($, cfg, record, messages, api, keepFrom, deadline, queued));
     if (edited.size) {
-      built = build(rows.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued);
+      built = build(rows.map((m, i) => (edited.has(i) ? { ...m, text: edited.get(i) } : m)), candidates, keepFrom, group, stats, queued, dropRows);
       repliesInstalled = true;
     }
   }
   if (header !== undefined) built.unshift({ role: 'user', text: header, toolUses: [], toolResults: [] });
+  // Owner tail: a protected text that is gone, whatever stage made it, leaves the conversation as it was (an automatic compaction: the host's summary runs); the
+  // record names the element, not its text.
+  if (ownerPlan?.prot) {
+    const bad = ownerTailViolations(built, ownerPlan.prot);
+    ownerPlan.tail.violations = bad.length;
+    if (bad.length) {
+      record.owner_tail_violations = bad.slice(0, 10);
+      return { fallback: 'owner_tail_changed', skip: e.trigger !== 'auto', skipText: `${OWNER_TAIL_SKIP} a protected text came out changed, nothing replaced`, tokensBefore: tokens?.tokens };
+    }
+  }
   const after = built.reduce((s, m) => s + messageChars(m), stats.queuedKeptChars);
   const hist = [0, 0, 0, 0];
   for (const c of asked) if (c.answered) hist[Math.min(3, Math.round(c.score * 3))]++;
@@ -6560,11 +7313,13 @@ async function decide($, e, cfg, record, started) {
     dropped_assistant: stats.droppedAssistant,
     joined_rows: stats.joinedRows,
     queued_carried: stats.queuedCarried,
+    ...(cfg.hostAttachments ? { rebuilt_user: stats.rebuiltUser } : {}),
     score_hist: hist,
     unanswered: asked.length - answered,
   });
   // What the installed text stages took off, with or without the cascade: a stage that moved nothing (shadow, writes that failed, or a fallback) counts for nothing.
-  const installedTokens = trimTokens + agentTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0) + (pastesInstalled ? movedTokens(pasted.stats) : 0) + blockSaved + seriesSaved;
+  const installedTokens = trimTokens + agentTokens + attachTokens - envelopeTokens + (repliesInstalled ? movedTokens(record.replies) : 0)
+    + (pastesInstalled ? movedTokens(pasted.stats) : 0) + blockSaved + seriesSaved;
   if (cfg.tokenAccounting) Object.assign(record, await tokenAccounting($, e, cfg, messages, api, candidates, installedTokens, deadline, known, shape, thinking));
   if (agentMoved.size) record.agent_messages.installed = true;
   if (pastesInstalled) pasted.stats.installed = true;
@@ -6608,11 +7363,35 @@ async function compact($, e, next) {
       ...(cfg.shared?.unavailable ? { shared_unavailable: true } : {}),
     };
     let decision;
+    const initial = { ...record }; // the record a repeated decision starts from
+    const abandoned = []; // the usage of the requests of the decisions that were repeated
+    let reported = false;
+    const pending = cfg.jevUsage ? newJevUsagePending() : undefined; // the requests whose entries are not in the record yet
     try {
-      decision = await decide($, e, cfg, record, started);
+      decision = await decide($, e, cfg, record, started, pending);
+      // Owner tail: the floor or the plan with the protected text (nothing of it can be lowered) is over the bound of the host. The compaction is decided again with the
+      // next boundary, down to the overflow (no protection, or with `keep` the text kept and the gates off), instead of going to the host's summary, which takes the text too.
+      for (let again = 0; again < 3 && (decision.fallback === 'floor_above_threshold' || decision.fallback === 'text_above_threshold') && record.owner_tail_applied === true && !record.owner_tail.overflow; again++) {
+        const demote = record.owner_tail_tier + 1;
+        if (record.jev_usage) {
+          abandoned.push(...record.jev_usage.map((entry) => ({ ...entry, abandoned: true })));
+          reported ||= record.cost_basis === 'reported';
+        }
+        for (const key of Object.keys(record)) delete record[key];
+        Object.assign(record, initial);
+        decision = await decide($, e, { ...cfg, ownerTailDemote: demote }, record, started, pending);
+      }
     } catch (error) {
       decision = { fallback: 'exception' };
       record.error = clip(oneLine(maskSecrets(String(error?.message ?? error))), 200);
+      // Every request that went out keeps its entry: the ones whose answers are not in the record yet wait for them (each ends by its own timeout,
+      // never beyond the decision deadline) and their entries go in here, before the entries of the given up decisions follow marked `abandoned`.
+      await drainJevUsage(record, pending);
+    }
+    // Every request sent keeps its entry: those of the repeated decisions follow, marked `abandoned`.
+    if (abandoned.length) {
+      record.jev_usage = [...(record.jev_usage ?? []), ...abandoned];
+      record.cost_basis = reported ? 'reported' : (record.cost_basis ?? 'unknown');
     }
     record.duration_ms = Date.now() - started;
     if (decision.fallback) Object.assign(record, { result: 'fallback', reason: decision.fallback });
@@ -6625,7 +7404,7 @@ async function compact($, e, next) {
       // armed here on purpose and skipBase records the tokens of this request, so the next one waits for OWN_MIN_GAIN of the window of growth from them
       // instead of paying for Jev's scores again after MIN_TURNS_BETWEEN turns.
       if (e.agentId === undefined) { session.growthArmed = true; session.growthBase = undefined; session.skipBase = decision.tokensBefore; }
-      return { skip: `${OWN_SKIP_PREFIX} cut under ${Math.round(HOST_MIN_CUT * 100)} % of the tokens, nothing replaced` };
+      return { skip: decision.skipText ?? `${OWN_SKIP_PREFIX} cut under ${Math.round(HOST_MIN_CUT * 100)} % of the tokens, nothing replaced` };
     }
     if (decision.fallback || cfg.mode !== 'active') return armGrowthGate(await next(e));
     if (cfg.toast) { try { $.ui.toast(`Jev compaction: ${decision.before} -> ${decision.after} chars`); } catch { /* optional */ } }
@@ -6694,7 +7473,7 @@ async function ownThreshold($, e, next) {
     session.lastAttempt = session.turnCount;
     const messages = await $.session.messages();
     let before = messages.reduce((s, m) => s + messageChars(m), 0);
-    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces);
+    const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, { blockTraces: cfg.blockTraces, tailFrom: cfg.tailByLoop ? openLoopStart(messages, groupsOf(messages, undefined)) : undefined });
     // The blocks and messages that the cuts take off the list count with the costs of the candidates, as in decide (shapeOf), from the API form once it is read.
     const shapeIn = (apiForm, rows) => {
       const group = groupsOf(messages, apiForm);
@@ -6724,9 +7503,15 @@ async function ownThreshold($, e, next) {
     if (!('value' in apiRead)) return result;
     api = apiFormOf(apiRead.value);
     const delivered = queuedOf(messages, api);
+    // Host attachments, as decide counts them: the envelopes of the rows of text it rebuilds, and in the floor below the attachments that go with them.
+    let hostAtt = null;
+    if (cfg.hostAttachments) {
+      const keepFrom = openLoopStart(messages, groupsOf(messages, api));
+      if (api && keptCallsIn(messages, keepFrom, api)) hostAtt = carrierRows(messages, api, keepFrom, newestOwnerRow(messages, cfg));
+    }
     if (delivered) {
       for (const blocks of delivered.rows.values()) before += rawChars(blocks);
-      envelopes = envelopeChars(messages, delivered.rows, candidates);
+      envelopes = envelopeChars(messages, delivered.rows, candidates, rowsWithoutHandle(hostAtt));
       removable = removableChars(candidates) - envelopes;
     }
     if (cfg.targetPercent !== undefined) shape = shapeIn(api, delivered ? delivered.rows : new Map());
@@ -6735,7 +7520,7 @@ async function ownThreshold($, e, next) {
     // results only, so with a stage on that takes text off as well (agent trim, long replies, pasted text) it is no proof: decide holds the request to the same
     // bound with the text of those stages in its plan, and answers it with a skip. Held after the API read, with the deliveries in the shape.
     const textStages = cfg.agentTrim || cfg.replies === 'active' || cfg.pastes === 'active' || blocksCount;
-    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens, cfg.rates, shape) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
+    if (cfg.ownSkip && cfg.targetPercent !== undefined && !textStages && tokens - floorPrediction(candidates, tokens - attachmentTokens(hostAtt, cfg.rates), cfg.rates, shape) < Math.max(OWN_MIN_GAIN * window, HOST_MIN_CUT * tokens)) return result;
     // Only a session that the results alone do not carry needs the stage's scans: the compaction it asks for makes them otherwise.
     if (stageCounts && api && tooSmall()) {
       // The rows that keep their handles, as decide finds them; without the API form that holds their calls there is no stage.
@@ -6744,14 +7529,16 @@ async function ownThreshold($, e, next) {
         try {
           let sessionId;
           try { sessionId = await $.session.id(); } catch { sessionId = undefined; }
-          const stage = agentStageOf($, cfg, undefined, messages, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, Date.now() + TOTAL_MS);
+          // Owner tail: the protected rows give nothing back.
+          const planCfg = ownerProtectedCfg(cfg, messages, cfg.ownerTail && cfg.targetPercent !== undefined ? await ownerTailReads($, cfg, Date.now() + TOTAL_MS) : undefined);
+          const stage = agentStageOf($, planCfg, undefined, messages, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, Date.now() + TOTAL_MS);
           // The checks go to the compaction that follows (takeAgentChecks); one that does not follow leaves them to the next preflight, which replaces them.
           if (stage.opts && sessionId) session.agentChecked = { id: sessionId, paths: JSON.stringify(cfg.privatePaths), checked: stage.opts.checked };
           stageTokens = await agentStageTokens(cfg, cfg.jevStages && blocksCount ? { ...stage, opts: undefined } : stage);
           // What the blocks may give back (every one at level 0), as the floor of decide counts it.
           if (blocksCount && sessionId) {
-            stageTokens += planBlocks(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
-            stageTokens += planSeries(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, false, Date.now() + TOTAL_MS).potential();
+            stageTokens += planBlocks(planCfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
+            stageTokens += planSeries(planCfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, false, Date.now() + TOTAL_MS).potential();
           }
         } catch { stageTokens = 0; }
       }
@@ -6764,7 +7551,7 @@ async function ownThreshold($, e, next) {
     try {
       session.ownCompactInFlight = true;
       const done = await $.session.compact();
-      if (done && typeof done.skip === 'string') { reason = cfg.ownSkip && done.skip.startsWith(OWN_SKIP_PREFIX) ? 'cut_below_host_min' : 'host_skipped'; detailText = done.skip; }
+      if (done && typeof done.skip === 'string') { reason = cfg.ownSkip && done.skip.startsWith(OWN_SKIP_PREFIX) ? 'cut_below_host_min' : done.skip.startsWith(OWNER_TAIL_SKIP) ? 'owner_tail_changed' : 'host_skipped'; detailText = done.skip; }
     } catch (error) {
       detailText = String(error?.message ?? error);
       reason = /headless|sdk|-p\b/i.test(detailText) ? 'host_cannot_compact' : /turn|in flight|running/i.test(detailText) ? 'host_turn_running' : 'host_error';
