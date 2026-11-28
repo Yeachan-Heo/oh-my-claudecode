@@ -21,12 +21,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // The closed vocabularies of the journal rows, as the denial counter writes them (scripts/lib/jev-denial-counter.mjs and the
-// handoff rows of scripts/lib/jev-handoff.mjs in the session guards change). They are a copy on purpose: the tool runs from a
-// plain repository checkout and must not import the hook library, so it also works on a machine that has only the journal.
-export const KINDS = ['denial', 'release', 'state', 'outcome', 'handoff'];
-export const RESULTS = ['denied', 'passed'];
+// handoff rows of scripts/lib/jev-handoff.mjs in the session guards change) and as the ultragoal Stop writes its release and
+// end rows (scripts/persistent-mode.mjs). They are a copy on purpose: the tool runs from a plain repository checkout and
+// must not import the hook library, so it also works on a machine that has only the journal.
+export const KINDS = ['denial', 'release', 'state', 'outcome', 'handoff', 'end'];
+export const RESULTS = ['denied', 'passed', 'blocked'];
 export const HANDOFF_EVENTS = ['warning', 'handoff-allowed', 'handoff-subagent', 'handoff-refused', 'handed-over-refused']; // the "action" of a handoff row
-export const REASON_CODES = ['guard_denial'];
+export const REASON_CODES = ['guard_denial', 'timeout', 'stop_release'];
 export const STATES = ['ok', 'broken', 'nan', 'lock-unavailable'];
 const DECISION_KINDS = ['denial', 'release', 'state']; // the decision rows; one outcome row references each of them
 
@@ -43,13 +44,17 @@ export function validateRow(w) {
   if (w.session_id !== null && typeof w.session_id !== 'string') errors.push('session_id');
   if (w.agent_id !== null && typeof w.agent_id !== 'string') errors.push('agent_id');
   if (w.truncated !== undefined && w.truncated !== true) errors.push('truncated');
-  if (DECISION_KINDS.includes(w.kind)) {
+  if (DECISION_KINDS.includes(w.kind) || w.kind === 'end') {
     if (typeof w.guard !== 'string' || !w.guard) errors.push('guard');
     if (typeof w.key !== 'string' || !/^[0-9a-f]{16}$/.test(w.key)) errors.push('key');
-    if (w.n !== null && typeof w.n !== 'number') errors.push('n');
-    if (w.sessionCount !== null && typeof w.sessionCount !== 'number') errors.push('sessionCount');
-    if (typeof w.k !== 'number' || w.k < 1) errors.push('k');
-    if (typeof w.maxSession !== 'number' || w.maxSession < 1) errors.push('maxSession');
+    if (w.kind === 'end') { // closes a series of Stop blocks: the count of its blocks, no counter fields (n, k, maxSession)
+      if (typeof w.sessionCount !== 'number') errors.push('sessionCount');
+    } else {
+      if (w.n !== null && typeof w.n !== 'number') errors.push('n');
+      if (w.sessionCount !== null && typeof w.sessionCount !== 'number') errors.push('sessionCount');
+      if (typeof w.k !== 'number' || w.k < 1) errors.push('k');
+      if (typeof w.maxSession !== 'number' || w.maxSession < 1) errors.push('maxSession');
+    }
     if (![0, 1, 2].includes(w.degree)) errors.push('degree');
     if (!RESULTS.includes(w.result)) errors.push('result');
     if (typeof w.action !== 'string' || !w.action) errors.push('action');

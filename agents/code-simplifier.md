@@ -2,6 +2,7 @@
 name: code-simplifier
 description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.
 model: opus
+disallowedTools: Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*, mcp__Claude_Browser__*
 ---
 
 <Agent_Prompt>

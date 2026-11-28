@@ -1,8 +1,9 @@
 """The hook entry of the five-hour limit guard: the one definition of the command that is registered in settings.json and of how that
-entry is recognised there (by ENTRY_MARKER, a fixed text that ends its command, or by the exact path of the hook: no command is analysed). Loaded by five-hour-guard.py
+entry is recognised there (by ENTRY_MARKER, a fixed text that ends its command, by the exact path of the hook, or as the very command that
+`add` writes or wrote for the same pause file with the hook in another directory: no other command is analysed). Loaded by five-hour-guard.py
 (drift check) and five-hour-guard-settings.py (add, check, remove, probe) from the directory the scripts are in; it is not run by itself
 and the hook script does not need it."""
-import math, re, shlex
+import math, os, re, shlex
 
 MARK = 'five-hour-guard-hook.py'
 ENTRY_MARKER = '# five-hour-guard-entry'   # a comment to the shell, last in the command of the entry that `add` writes: the entry is the handler whose command ends with this text after a blank (has_marker)
@@ -48,6 +49,47 @@ def entry_command(pause_file, hook, python, hook_log=None):
     q = shlex.quote
     cmd = f'[ -f {q(pause_file)} ] && [ -f {q(hook)} ] && [ -r {q(hook)} ] && [ -x {q(python)} ] || exit 0; exec {q(python)} -I {q(hook)} --pause-file {q(pause_file)}'
     return cmd + (f' --log {q(hook_log)}' if hook_log else '') + f' {ENTRY_MARKER}'
+
+
+def run_by(command):
+    """(interpreter, hook) of a command of the shape that `add` writes: the word after `exec` and the word after the `-I` behind it; (None,
+    None) for a command of another shape or one that cannot be split into words."""
+    try:
+        words = shlex.split(command, comments=True)
+    except ValueError:
+        return None, None
+    for i in range(len(words) - 3):
+        if words[i] == 'exec' and words[i + 2] == '-I':
+            return words[i + 1], words[i + 3]
+    return None, None
+
+
+def file_problems(command):
+    """The hook and the interpreter that a command of the shape `add` writes runs and that are not there: the shell test of such a command
+    ends with status 0 for a missing file (fail-open), so the entry holds no call, without a word. A list of sentences; a relative path or
+    one with a variable is not looked at, since only the session that runs it knows what it names."""
+    python, hook = run_by(command)
+    found = []
+    for what, path, mode, verb in (('hook', hook, os.R_OK, 'read'), ('interpreter', python, os.X_OK, 'run')):
+        if path and os.path.isabs(path) and '$' not in path and not (os.path.isfile(path) and os.access(path, mode)):
+            found.append(f'its {what} {path} is missing or cannot be {verb}, so the entry lets every call through during a pause')
+    return found
+
+
+def is_moved_entry(command, pause_file):
+    """Whether the command is the one that `add` writes for this pause file (also in its earlier forms, without the marker and without the
+    tests `-r` and `-x`) with a hook of the name of the guard's hook in any directory: an entry of an installation somewhere else. The whole
+    command is compared with what entry_command makes of its own interpreter, hook and log, so no other command is taken for it."""
+    if MARK not in command:
+        return False
+    python, hook = run_by(command)
+    if hook is None or os.path.basename(hook) != MARK:
+        return False
+    words = shlex.split(command, comments=True)
+    log = words[words.index('--log') + 1] if '--log' in words[:-1] else None
+    full = entry_command(pause_file, hook, python, log)[:-len(ENTRY_MARKER) - 1]
+    tests = f' && [ -r {shlex.quote(hook)} ] && [ -x {shlex.quote(python)} ]'
+    return command.rstrip() in (full, full.replace(tests, ''))
 
 
 def unescaped(text, i):
@@ -113,8 +155,9 @@ def strip_comments(command):
     return ''.join(out)
 
 
-def is_entry(handler, hook):
-    """Whether a hook handler is the entry of this guard: a command handler whose command ends with ENTRY_MARKER (what `add` writes now, see has_marker) or
+def is_entry(handler, hook, pause_file=None):
+    """Whether a hook handler is the entry of this guard: a command handler whose command ends with ENTRY_MARKER (what `add` writes now, see has_marker), is
+    the command of `add` for `pause_file` with the hook in another directory (is_moved_entry) or holds
     the exact path `hook` of the hook script, as a whole word of the command (it starts and ends at a blank, an operator of the shell or an
     end of the command: a character that is valid in a file name, such as `+`, `,`, `@`, `%`, `=`, `:` or `~`, is no boundary, so `hook.py+audit` is
     another file; a quote that opens at the start of the word closes at its end, `'hook'` and `"hook"`, so `'hook'+audit` and `audit'hook'` are other
@@ -128,4 +171,4 @@ def is_entry(handler, hook):
     path, edge = re.escape(hook), r'[^\s;&|()<>]'
     text = strip_comments(command)   # a path in a comment of the shell is never run
     quoted_command = lambda m: m.group(1) is not None or re.search(r'(?:^|[\s;&|()])-[A-Za-z]*c\s*$', text[:m.start()])   # an open quote in front of the path: the text of a command only after -c
-    return has_marker(command) or any((m.start() == 0 or unescaped(text, m.start() - 1)) and quoted_command(m) for m in re.finditer(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', text))
+    return has_marker(command) or bool(pause_file and is_moved_entry(command, pause_file)) or any((m.start() == 0 or unescaped(text, m.start() - 1)) and quoted_command(m) for m in re.finditer(rf'(?<!{edge})(?:([\'"]?){path}\1|[\'"]{path}(?=[\s;&|()<>]))(?!{edge})', text))

@@ -862,7 +862,7 @@ const delimiterLooksReal = (h) => h.quoted || /^[A-Za-z_][A-Za-z0-9_]*$/.test(h.
 // All checks for one Bash command. Returns { decision: 'allow' | 'deny', reason, context, checks, length, syntax }.
 // timeoutMs: limit of bash -n; the hook passes syntaxTimeoutMs(env) (OMC_SHELL_SYNTAX_TIMEOUT_MS, default 1 s).
 // devNullProbe: replaces the lstat probe of /dev/null that the repair recipe of the /dev guard consults.
-export function checkBashCommand(command, { platform = process.platform, env = process.env, syntax = true, bashPath, timeoutMs = SYNTAX_TIMEOUT_MS, devNullProbe } = {}) {
+export function checkBashCommand(command, { platform = process.platform, env = process.env, syntax = true, bashPath, timeoutMs = SYNTAX_TIMEOUT_MS, devNullProbe, cwd } = {}) {
   const text = String(command ?? '');
   const win = platform === 'win32';
   const checks = [];
@@ -887,7 +887,7 @@ export function checkBashCommand(command, { platform = process.platform, env = p
 
   if (!denials.length) {
     const tokenized = tokenizeBash(halved);
-    const dev = checkBashDevPath(text, tokenized, { platform, devNullProbe });
+    const dev = checkBashDevPath(text, tokenized, { platform, devNullProbe, cwd });
     checks.push(...dev.checks);
     if (dev.denial) denials.push(dev.denial);
     if (win && !denials.length) { // one denial at a time, as without the /dev guard
@@ -1336,7 +1336,7 @@ export function runShellChecks(toolName, data, { platform = process.platform, en
   const input = data?.tool_input || data?.toolInput || {};
   const command = typeof input.command === 'string' ? input.command : '';
   if (!command) return { decision: 'allow', reason: '', context: '', checks: [] };
-  const verdict = toolName === 'Bash' ? checkBashCommand(command, { platform, env, timeoutMs: syntaxTimeoutMs(env) }) : checkPowerShellCommand(command, { platform });
+  const verdict = toolName === 'Bash' ? checkBashCommand(command, { platform, env, timeoutMs: syntaxTimeoutMs(env), cwd: data?.cwd }) : checkPowerShellCommand(command, { platform });
   const durationMs = Math.round(Number(process.hrtime.bigint() - started) / 1e5) / 10;
   const row = {
     ts: new Date().toISOString(),

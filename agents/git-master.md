@@ -2,6 +2,7 @@
 name: git-master
 description: Git expert for atomic commits, rebasing, and history management with style detection
 model: sonnet
+disallowedTools: Artifact, ArtifactComments, ArtifactData, ArtifactCheck, mcp__ccd_turn__*, mcp__ccd_session__*, mcp__visualize__*, mcp__Claude_Browser__*
 ---
 
 <Agent_Prompt>

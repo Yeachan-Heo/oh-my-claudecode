@@ -256,27 +256,44 @@ describe('denial_log_summary.mjs schema validator', () => {
     expect(validateRow({ ...h, result: 'denied', action: 'handoff-refused' }).ok).toBe(true);
   });
 
+  it('accepts the rows of the ultragoal Stop and the blocked rows of a provider process', () => {
+    const ts = '2026-11-14T10:00:00.000Z';
+    const common = { ts, ts_ms: Date.parse(ts), point: 'denial' };
+    const release = { ...common, id: 'b1b2c3d4e5f60718', kind: 'release', session_id: 's1', agent_id: null, guard: 'ultragoal-stop', key: '0123456789abcdef', n: 7, sessionCount: 7, k: 7, maxSession: 50, degree: 0, result: 'passed', action: 'stop-progress-release', reason_code: 'timeout', effectiveness: null, state: 'ok', tool_name: null, tool_use_id: null };
+    const acknowledged = { ...release, id: 'b1b2c3d4e5f60719', n: null, sessionCount: null, action: 'stop-acknowledged-exit', reason_code: 'stop_release' };
+    const end = { ...common, id: 'b1b2c3d4e5f6071a', kind: 'end', session_id: 's1', agent_id: null, guard: 'ultragoal-stop', key: '0123456789abcdef', sessionCount: 0, degree: 0, result: 'passed', action: 'step-budget', reason_code: 'stop_release', effectiveness: null, state: 'ok', tool_name: null, tool_use_id: null };
+    const blocked = decision({ result: 'blocked', action: 'blocked', degree: 2 });
+    for (const row of [release, acknowledged, end, blocked, outcome(blocked.id as string, { result: 'blocked' })]) {
+      expect(validateRow(row), JSON.stringify(row)).toEqual({ ok: true, errors: [] });
+    }
+    for (const [field, value] of [['guard', ''], ['key', 'short'], ['sessionCount', null], ['degree', 3], ['result', 'ended'], ['action', ''], ['reason_code', 'finished'], ['state', 'gone']] as const) {
+      expect(validateRow({ ...end, [field]: value }).errors, field).toContain(field);
+    }
+    // Only the end row goes without the counter fields.
+    for (const field of ['n', 'k', 'maxSession']) {
+      expect(validateRow({ ...release, [field]: undefined }).errors, field).toContain(field);
+    }
+  });
+
   it('rejects the kinds and values that the writer does not emit', () => {
-    expect(validateRow(decision({ kind: 'end' })).errors).toContain('kind');
     expect(validateRow(decision({ kind: 'nudge' })).errors).toContain('kind');
-    expect(validateRow(decision({ result: 'blocked' })).errors).toContain('result');
+    expect(validateRow(decision({ result: 'allowed' })).errors).toContain('result');
     expect(validateRow(decision({ reason_code: 'missing_fact' })).errors).toContain('reason_code');
   });
 });
 
 describe('denial_log_summary.mjs validator sets', () => {
   // The validator keeps its own copy of the closed vocabularies of the journal rows on purpose (the tool runs from a
-  // plain checkout and does not import the hook library). The denial counter that writes the journal is not part of
-  // this change, so the sets are pinned here: they mirror the denial counter of the session guards change
-  // (scripts/lib/jev-denial-counter.mjs and the handoff rows of scripts/lib/jev-handoff.mjs). A vocabulary change there
-  // has to update the validator and this list together.
+  // plain checkout and does not import the hook library). The sets are pinned here: they mirror the writers of the
+  // journal (scripts/lib/jev-denial-counter.mjs, the handoff rows of scripts/lib/jev-handoff.mjs and the Stop rows of
+  // scripts/persistent-mode.mjs). A vocabulary change there has to update the validator and this list together.
   const sorted = (values: readonly string[]) => [...values].sort();
 
   it('pins the row kinds, results, handoff events, reason codes and states', () => {
-    expect(sorted(KINDS)).toEqual(sorted(['denial', 'release', 'state', 'outcome', 'handoff']));
-    expect(sorted(RESULTS)).toEqual(sorted(['denied', 'passed']));
+    expect(sorted(KINDS)).toEqual(sorted(['denial', 'release', 'state', 'outcome', 'handoff', 'end']));
+    expect(sorted(RESULTS)).toEqual(sorted(['denied', 'passed', 'blocked']));
     expect(sorted(HANDOFF_EVENTS)).toEqual(sorted(['warning', 'handoff-allowed', 'handoff-subagent', 'handoff-refused', 'handed-over-refused']));
-    expect(sorted(REASON_CODES)).toEqual(['guard_denial']);
+    expect(sorted(REASON_CODES)).toEqual(sorted(['guard_denial', 'timeout', 'stop_release']));
     expect(sorted(STATES)).toEqual(sorted(['ok', 'broken', 'nan', 'lock-unavailable']));
   });
 

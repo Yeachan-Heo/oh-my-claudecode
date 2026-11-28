@@ -11,15 +11,16 @@
 # after the backup is made and right before the replace the tool compares the file with what it read, reads again once when
 # it differs, and gives up (exit 2, nothing written) when it differs again. The instant between that comparison and the
 # rename remains: a rename has no compare-and-swap, so a write inside it is lost. Run `check` after `add` to see the result.
-# The hook entry is identified without analysing its command: by a fixed marker at the end of the command (a comment to the shell,
-# ENTRY_MARKER in five_hour_guard_entry.py), which `add` writes, or by the exact path of the hook (--hook) as a whole word of the command, which
-# is how the entries written by earlier versions of `add` are found. A handler that has neither (written by hand with another
-# path, or another tool's command that only has a similar file name or --pause-file among its words) is never changed; `check` then
-# says so and prints the entry to paste. So `add` twice is a no-op, `add` with the same or another hook path replaces the entry
-# in place when it carries the marker (an older entry is found by its path, so `add` with another path appends a second entry
-# to it), in one write (there is no moment without a hook entry). Only our hook is touched: when a group of settings.json holds
-# our hook next to another one, the other hook stays (in a group of its own, matcher kept). `add` refuses (exit 2) a hook,
-# interpreter or pause path that is not absolute and a hook or interpreter file that does not exist.
+# The hook entry is identified without analysing other commands: by a fixed marker at the end of the command (a comment to the shell,
+# ENTRY_MARKER in five_hour_guard_entry.py), which `add` writes, by the exact path of the hook (--hook) as a whole word of the command, which
+# is how the entries written by earlier versions of `add` are found, or because it is word for word the command that `add` writes or
+# wrote for the same pause file with a five-hour-guard-hook.py in another directory (an installation somewhere else). A handler that has
+# none of these (written by hand with another path, or another tool's command that only has a similar file name or --pause-file among
+# its words) is never changed; `check` then says so and prints the entry to paste. So `add` twice is a no-op, and `add` with the same or
+# another hook path replaces the entry in place, in one write (there is no moment without a hook entry). Only our hook is touched: when a
+# group of settings.json holds our hook next to another one, the other hook stays (in a group of its own, matcher kept). `add` refuses
+# (exit 2) a hook, interpreter or pause path that is not absolute and a hook or interpreter file that does not exist. `check` ends with
+# status 1 also when an entry of the guard names a hook or interpreter that is not there: such an entry lets every call through.
 # A missing settings.json: `add` creates it (an empty object plus the entry, mode 0600; the directory must exist),
 # `remove` has nothing to do (exit 0), `check` reports "not installed" (exit 1).
 # Configuration: the same JSON file as the guard (--config or OMC_FIVE_HOUR_GUARD_CONFIG); keys used here: settings_file,
@@ -186,7 +187,7 @@ def probe_hook(with_log=True):
 
 
 def hook_is_ours(h):
-    return ENTRY.is_entry(h, A.hook)   # a handler of another type (prompt, http) runs no command: it is not ours whatever its command field says
+    return ENTRY.is_entry(h, A.hook, PAUSE_FILE)   # a handler of another type (prompt, http) runs no command: it is not ours whatever its command field says
 
 
 def is_ours(group):
@@ -284,7 +285,10 @@ def run_once():
                 print(f"  matcher={g.get('matcher')} timeout={h.get('timeout')} command={h.get('command')}")
         if not ours and any(isinstance(h.get('command'), str) and MARK in h['command'] for g in pre for h in g.get('hooks', [])):
             print(f'a command that names {MARK} has no marker {ENTRY.ENTRY_MARKER!r}, so it is not the entry of this guard and `add` and `remove` leave it alone' + (f'; paste this entry (or run `add`): {command()}' if PAUSE_FILE else ''))
-        sys.exit(0 if ours else 1)
+        broken = [problem for g in ours for h in g['hooks'] if hook_is_ours(h) for problem in ENTRY.file_problems(h['command'])]
+        for problem in broken:
+            print(f'an entry of the guard holds nothing: {problem}; run `add` again')
+        sys.exit(0 if ours and not broken else 1)
 
     if A.action == 'add':
         if not PAUSE_FILE:

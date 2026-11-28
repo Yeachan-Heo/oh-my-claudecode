@@ -27,6 +27,7 @@ of the same meaning wins over the file. No path is built into the code except th
   settings_file  optional  settings.json checked for the hook entry (loud warning when it is missing)
   exclude        optional  list of session id prefixes whose tool calls are never held
   hook_log_file  optional  log of the hook; used by five-hour-guard-settings.py only
+  pause_command  optional  list: absolute path of a program and its arguments, run for as long as a pause lasts (see README.md)
 """
 import argparse, ctypes, datetime, fnmatch, glob, itertools, json, math, os, re, shlex, signal, stat, sys, time
 
@@ -73,7 +74,7 @@ ap.add_argument('--max-age', type=finite_float, default=180, help='data older th
 ap.add_argument('--margin', type=finite_float, default=150, help=f'resume this many seconds after the reset time (0 to {MAX_MARGIN_S})')
 ap.add_argument('--interval', type=finite_float, default=30, help=f'seconds between ticks (at least {MIN_INTERVAL_S:g})')
 ap.add_argument('--heartbeat', type=finite_float, default=None, help=f'pause file validity after each tick; the hook lets sessions go when it lapses (guard dead); from twice --interval plus {HEARTBEAT_SLACK_S} s to {MAX_HEARTBEAT_S} (default {DEFAULT_HEARTBEAT_S}, or twice --interval plus {HEARTBEAT_SLACK_S} s when that is more)')
-ap.add_argument('--warn-every', type=finite_float, default=600, help='at most one WARNING about the usage data (missing, stale, no percentage, implausible reset time) per this many seconds and kind')
+ap.add_argument('--warn-every', type=finite_float, default=600, help='at most one WARNING about the usage data (missing, stale, no percentage, implausible reset time), a hook command that is not read to its end or pause_command per this many seconds and kind')
 ap.add_argument('--test-pause', type=finite_float, default=0, metavar='SECONDS', help=f'install check: hold sessions for this many seconds (up to {MAX_TEST_PAUSE_S}), then release; touches no state')
 ap.add_argument('--test-only', default='', metavar='PREFIXES', help='with --test-pause: comma separated session id prefixes; only those sessions are held')
 ap.add_argument('--once', action='store_true', help='run a single tick and exit without cleaning a pause started by it (tests)')
@@ -211,7 +212,7 @@ def same_file(a, b):
 HOOK_PROGRAMS = {'hook script', 'registered hook', 'registered interpreter'}
 ENTRY_LOG = 'registered hook log'   # the value of --log in a hook entry that carries the marker: the hook appends a line to it for every call it holds
 ENTRY_FILE = 'file named by the hook entry'   # a word of the command of the hook entry in settings.json that the entry the guard generates does not have (another hook, interpreter or log path)
-UNSCANNED = 'command that cannot be read to its end'   # the entry for a command of another hook that a limit of command_programs cut short: the guard writes nothing while it is there
+UNSCANNED = 'command that cannot be read to its end'   # the entry for a command that command_programs cannot read to its end: while it is there, the guard writes a file only where that destroys nothing of somebody else (holds_own_output)
 OTHER_PROGRAM = 'program of another hook'   # a file that a command of any other hook (or the status line) in settings.json runs
 PROGRAM_LABELS = HOOK_PROGRAMS | {OTHER_PROGRAM, 'guard script', 'settings tool script', 'entry module'}
 READ_ONLY_LABELS = {'configuration file', 'usage_cache', 'usage_cache lock', 'settings_file'}   # files the guard only reads (many hooks name them): a command of another hook that names one is no collision
@@ -240,7 +241,7 @@ def may_be_one_file(la, pa, lb, pb):
 
 def collisions(files):
     """[(label a, path a, label b, path b)]: pairs of files that are one file and may not be."""
-    named = [(label, path) for label, path in files if path]
+    named = [(label, path) for label, path in files if path and label != UNSCANNED]   # (an unread command is a message, not a path)
     return [(la, pa, lb, pb) for i, (la, pa) in enumerate(named) for lb, pb in named[i + 1:]
             if not may_be_one_file(la, pa, lb, pb) and same_file(pa, pb)]
 
@@ -281,7 +282,7 @@ def command_hooks(groups):
     for g in groups if isinstance(groups, list) else []:
         if not isinstance(g, dict) or not isinstance(g.get('hooks', []), list):
             continue   # not a group of Claude Code: skipped here, so that the entries after it are still seen
-        found += [(g, h) for h in g.get('hooks', []) if ENTRY.is_entry(h, BUNDLED_HOOK)]
+        found += [(g, h) for h in g.get('hooks', []) if ENTRY.is_entry(h, BUNDLED_HOOK, PAUSE_FILE)]
     return found
 
 
@@ -299,8 +300,8 @@ CHDIR_WORDS = frozenset({'-C', '--directory', '--chdir'})   # options of a wrapp
 
 
 class ScanIncomplete(Exception):
-    """A command that command_programs cannot read to its end (a limit was reached): what it names may be a file of the guard, so the
-    guard writes nothing while it stands in settings.json (see UNSCANNED)."""
+    """A command that command_programs cannot read to its end (a limit was reached, or a construct whose result it cannot know): what it names
+    may be a file of the guard (see UNSCANNED)."""
 
 
 def command_word(words):
@@ -433,6 +434,9 @@ SUBSTITUTION_STARTS = ('$(', '$[', '$?', '$$', '$!', '$#', '$*', '$@', '$-')   #
 EXTGLOB_STARTS = ('?(', '*(', '+(', '@(', '!(')   # the operators of an extended glob pattern, which Bash reads where `extglob` is on (`bash -O extglob`, `shopt -s extglob` on an earlier line, `BASHOPTS` in the environment)
 
 
+APPEND_ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\+=')   # a word `NAME+=value`: it adds to the value that NAME has, which the scan does not combine
+
+
 GLOB_MODES = ('nocaseglob', 'dotglob', 'globstar')   # shell options (`bash -O NAME`, `shopt -s NAME`, `BASHOPTS`) that change which files a pattern matches: the scan does not model them
 
 
@@ -442,7 +446,8 @@ def has_substitution(command):
     `*(`, `+(`, `!(`): outside single quotes (also those of `$'...'`, where a backslash escapes) and not after a backslash (the substitutions also
     inside double quotes, a pattern only outside quotes). The result of a program, the value of a special parameter of the shell of the session
     and the files that an extended pattern matches cannot be known or modelled, so the file that they name is not found by reading the words. The
-    name of an option that changes what a pattern matches (GLOB_MODES) anywhere in the text does the same."""
+    name of an option that changes what a pattern matches (GLOB_MODES) anywhere in the text does the same, and so does an append assignment
+    `NAME+=value` at the start of a word outside quotes."""
     if any(mode in command for mode in GLOB_MODES):
         return True
     quote, i = None, 0
@@ -466,7 +471,7 @@ def has_substitution(command):
         elif command.startswith("$'", i):
             quote = "$'"
             i += 1
-        elif c == '`' or command.startswith(SUBSTITUTION_STARTS, i) or command.startswith(EXTGLOB_STARTS, i):
+        elif c == '`' or command.startswith(SUBSTITUTION_STARTS, i) or command.startswith(EXTGLOB_STARTS, i) or ((i == 0 or command[i - 1] in ' \t\n;&|(') and APPEND_ASSIGNMENT.match(command, i)):
             return True
         i += 1
     return False
@@ -761,7 +766,7 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     exclude = [] if exclude is None else exclude
     command = join_continuations(command) if depth == 0 and isinstance(command, str) else command   # (the text of a quoted word has had its continuations removed with the command around it)
     if has_substitution(command if depth > 0 else ENTRY.strip_comments(command)):   # at depth 0 a comment is no command (as in command_tokens); a quoted command is read as it is
-        raise ScanIncomplete('command has a command substitution, a special parameter of the shell, an extended glob pattern or the name of a shell option that changes what a glob pattern matches, whose result cannot be known')
+        raise ScanIncomplete('command has a command substitution, a special parameter of the shell, an extended glob pattern, the name of a shell option that changes what a glob pattern matches or an append assignment (NAME+=value), whose result cannot be known')
     tokens = command_tokens(command, depth > 0)
     if tokens is None:
         return []   # a command with a NUL character (no process can be started with one in its arguments) or one the shell cannot parse runs nothing
@@ -776,6 +781,8 @@ def command_programs(command, exclude=None, depth=0, inherited=(), values=None, 
     found = []
     assigned = {n: [own_value(n, x) for x in v] for n, v in (values or {}).items()}   # the NAME=value words of the whole command (and of the command it is quoted in)
     given_path = [os.path.expanduser(os.path.expandvars(d)) for v in assigned.get('PATH', []) for variant in parameter_variants(v, assigned) for d in variant.split(os.pathsep)]   # the PATH that settings.json gives the hook processes: the guard does not have it, the shell of the hook looks a bare word up there
+    if any(mode in v for v in assigned.get('BASHOPTS', []) for mode in GLOB_MODES):   # the `env` of settings.json (and a BASHOPTS= word) gives the shell an option that changes what a pattern matches, whatever the text of the command says
+        raise ScanIncomplete('BASHOPTS gives a shell option that changes what a glob pattern matches, which the scan does not model')
     settled = set(assigned)   # the names that have a value at the place that is looked at (settled_at below): the settings and the command it is quoted in, then what an assignment that stands alone (`A=x; cmd`) or after export, declare, typeset, readonly or local, and ${NAME:=word}, give from there on; an assignment in front of a command (`A=x cmd`, `env A=x cmd`) is that command's alone, but it stays a candidate for every word
     for words in simple:
         run = command_word(words)
@@ -926,8 +933,13 @@ def registered_runtime_files():
             try:   # one handler that cannot be read must not hide the ones after it
                 marked = ENTRY.has_marker(handler['command'])   # the roles of three words are read in the entry that `add` writes, not in a command found by its exact path
                 hooks, interpreters, logs = entry_roles(handler['command']) if marked else ([], [], [])
-                found += [(ENTRY_FILE, t) for t in command_programs(handler['command'], list(generated) + [t for t in logs if os.path.isabs(t)], values=env)]   # the log is a file of its own below, so no other word of the entry may be it
-                if marked:
+                try:
+                    words = command_programs(handler['command'], list(generated) + [t for t in logs if os.path.isabs(t)], values=env)   # the log is a file of its own below, so no other word of the entry may be it
+                except ScanIncomplete as e:
+                    words = []
+                    found.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
+                found += [(ENTRY_FILE, t) for t in words]
+                if marked:   # also where the command is not read to its end: its hook, interpreter and log stay protected
                     found += [('registered hook', t) for t in hooks] + [('registered interpreter', t) for t in interpreters] + [(ENTRY_LOG, t) for t in logs if os.path.isabs(t)]
             except ScanIncomplete as e:
                 found.append((UNSCANNED, f'{e}: {handler["command"][:60]}'))
@@ -976,9 +988,6 @@ def own_files():
     return [('guard script', os.path.abspath(__file__)), ('hook script', os.path.join(HERE, HOOK_NAME)),
             ('settings tool script', os.path.join(HERE, 'five-hour-guard-settings.py')), ('entry module', os.path.join(HERE, 'five_hour_guard_entry.py'))]
 
-for _label, _text in registered_runtime_files():
-    if _label == UNSCANNED:
-        fail(f'{_text}... in {SETTINGS or default_settings()} is not read to its end, so the guard cannot tell whether it names a file of the guard: shorten the command or remove the hook')
 check_distinct([*configured_files(), *registered_runtime_files(),
                 ('hook_log_file', CFG.get('hook_log_file') if isinstance(CFG.get('hook_log_file'), str) and '\0' not in CFG['hook_log_file'] else '')])
 check_writable_dir(PAUSE_FILE, 'pause_file')
@@ -1005,6 +1014,26 @@ def parse_exclude():
 
 
 EXCLUDE = parse_exclude()
+
+
+def parse_pause_command():
+    """The `pause_command` of the configuration: [] when it is not set, else the program (an absolute path of an executable file) and its
+    arguments. No word of it may be a file the guard writes, except the pause file, which the command may read."""
+    raw = CFG.get('pause_command')
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list) or not all(isinstance(x, str) and x and '\0' not in x for x in raw):
+        fail('"pause_command" must be a list of strings: the absolute path of a program, then its arguments')
+    if not (os.path.isabs(raw[0]) and os.path.isfile(raw[0]) and os.access(raw[0], os.X_OK)):
+        fail(f'the program of "pause_command" ({raw[0]}) is not the absolute path of an executable file')
+    for word in raw:
+        for label, path in written_files():
+            if label != 'pause_file' and same_file(word, path):
+                fail(f'"pause_command" names {word}, which is the {label} of this guard: a write of the guard would replace or change it')
+    return raw
+
+
+PAUSE_COMMAND = parse_pause_command()
 ONLY = [x for x in A.test_only.split(',') if x]
 
 
@@ -1049,7 +1078,9 @@ def log_is_program():
     """Whether log_file is a hook, interpreter or launcher that a registered entry names, or a program that a command of another hook runs
     (settings.json can be rewritten after the start): nothing is appended to a program. settings.json is read once per tick (safe_tick
     forgets the look) and at most once a second outside a tick, not for every line; a scan that finds a program no earlier scan found
-    forgets the look too (registered_runtime_files). The notice goes to stdout only, never through log()."""
+    forgets the look too (registered_runtime_files). While a command is not read to its end, a look that lets the line through is not
+    kept: it rests on what the log holds at that moment, so the next line looks again. The notice goes to stdout only, never through
+    log()."""
     now = time.monotonic()
     if LOG_LOOK[0] is None or now - LOG_LOOK[0] >= LOG_LOOK_S:
         try:
@@ -1059,9 +1090,10 @@ def log_is_program():
             blocked = True
         except Exception:
             blocked = False   # a look that fails never costs the log
-        LOG_LOOK[:] = [now, blocked]
+        unread = any(label == UNSCANNED for label, _ in LAST_SCAN[0])
+        LOG_LOOK[:] = [None if unread and not blocked else now, blocked]
         if blocked:
-            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard; a command there that is not read to its end blocks the log too)', flush=True)
+            print(f'{ts()} the log file {LOG} is a program that a command in {SETTINGS or default_settings()} runs: nothing is appended to it (change "log_file", or run five-hour-guard-settings.py add again for a hook entry of this guard; while a command there is not read to its end, a log file that holds other text than the lines of this guard counts as such a program)', flush=True)
     return LOG_LOOK[1]
 
 
@@ -1080,16 +1112,48 @@ def fix_hint(label):
     return 'check the configured paths' if label == OTHER_PROGRAM else 'run five-hour-guard-settings.py add again'
 
 
+OWN_LOG_LINE = re.compile(rb'\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ')   # how every line that log() writes starts
+
+
+def holds_own_output(path):
+    """Whether a write to the pause file, the state file or the log at `path` destroys nothing of somebody else: nothing is there, or a regular
+    file (not a link) that is empty or holds what this guard writes there: a pause document, a stored state, log lines. A file that cannot be
+    looked at counts as somebody else's."""
+    try:
+        st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode):
+            return False
+        if st.st_size == 0:
+            return True
+        if path == PAUSE_FILE:
+            return is_guard_pause(path)
+        with os.fdopen(os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)), 'rb') as f:
+            if path == LOG:
+                return OWN_LOG_LINE.match(f.read(20)) is not None
+            doc = load_json(f)
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return (path == STATE and isinstance(doc, dict) and type(doc.get('paused')) is bool
+            and all(doc.get(k) is None or type(doc.get(k)) in (int, float) for k in ('since', 'resume_at')))
+
+
 def refuse_program_overwrite(*paths):
     """A hook, interpreter or launcher that a registered entry names, or a program that another hook entry runs, is never replaced by a
     write of the guard: settings.json can be rewritten at any moment, so this is looked at at every write (the entry into a pause, each
-    renewal and the end of a pause). One look at settings.json serves all the paths of one write."""
+    renewal and the end of a pause). One look at settings.json serves all the paths of one write. A command that is not read to its end does
+    not stop a pause: what it names is not known, so while one is there a path is written only where that destroys nothing of somebody else
+    (holds_own_output)."""
     scanned = registered_runtime_files()
-    for label, text in scanned:
-        if label == UNSCANNED:   # what the command names is not known, so a file of the guard may be among it
-            raise OSError(f'{text}... in {SETTINGS or default_settings()} is not read to its end, so the guard cannot tell whether it names {paths[0] if paths else "a file of the guard"}: nothing is written (shorten the command or remove the hook)')
     if not SCANNED[0]:   # a session that loaded settings.json before it was damaged still runs its hooks, and none of them is known
         raise OSError(f'{SETTINGS or default_settings()} cannot be read and no earlier read of it succeeded, so the guard cannot tell whether a hook of it runs {paths[0] if paths else "a file of the guard"}: nothing is written until it can be read')
+    unread = next((text for label, text in scanned if label == UNSCANNED), None)
+    if unread is not None:   # what the command names is not known, so a file of the guard that holds something else may be among it
+        for path in paths:
+            if not holds_own_output(path):
+                raise OSError(f'{unread}... in {SETTINGS or default_settings()} is not read to its end and {path} holds something else than what this guard writes there, so the guard cannot tell whether '
+                              f'it names {path}: nothing is written (shorten the command, remove the hook or give the guard files of its own)')
     programs = [(label, program) for label, program in scanned if label in PROTECTED_LABELS]
     for path in paths:
         for label, program in programs:
@@ -1101,6 +1165,21 @@ def file_identity(st):
     return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
 
 
+REPLACE_TRIES = 5   # Windows refuses to replace or rename a file that another process holds open, as the hook does for the moment it reads the pause file
+REPLACE_RETRY_S = 0.05
+
+
+def while_held_open(step):
+    """Run a rename or a replace, again a few times while it is refused with PermissionError (Windows: the file is open in another process)."""
+    for attempt in range(REPLACE_TRIES):
+        try:
+            return step()
+        except PermissionError:
+            if attempt == REPLACE_TRIES - 1:
+                raise
+            time.sleep(REPLACE_RETRY_S)
+
+
 def take_away(path, identity, what):
     """Remove the file at `path` only while it has `identity`: the path is moved aside in one step, to a name that is new every time (a rename must not
     replace a file that was kept under one), and what was moved is compared with `identity`. A file that took the place in the instant between the
@@ -1108,7 +1187,7 @@ def take_away(path, identity, what):
     kept under its new name and the log says so, `what` being what it is not). True when the file was removed, False when it was another one;
     FileNotFoundError when there was none."""
     gone = f'{path}.{os.getpid()}.{os.urandom(6).hex()}.gone'
-    os.rename(path, gone)
+    while_held_open(lambda: os.rename(path, gone))
     if file_identity(os.lstat(gone)) == identity:
         os.unlink(gone)
         return True
@@ -1139,9 +1218,20 @@ def swap_in(tmp, path, expected, mine):
     paths are exchanged and what came out is looked at. The expected file is removed. Another file (it came in after the look) is put back by an
     exchange again, and what comes out of that is removed only when it is the new file; another one (a second arrival) stays under the temporary
     name (KeptAside, naming it). When the exchange back itself fails, the new file stays at the path (it is never empty) and the file that came in
-    stays under the temporary name (KeptAside, naming both). Where the two paths cannot be exchanged nothing is replaced: OSError."""
-    if not exchange(tmp, path):
-        raise OSError(f'the file {path} cannot be put in place without replacing a file that was not looked at (this system or its file system cannot exchange two paths, or nothing is at the path any more): nothing is replaced')
+    stays under the temporary name (KeptAside, naming both). Where the two paths cannot be exchanged the file is looked at once more and replaced by a plain replace, when it
+    still has the identity `expected`, and not replaced (OSError) when it has not; a replace that Windows refuses while the file is open
+    in another process is tried again, each time after a new look."""
+    if not exchange(tmp, path):   # this system or its file system cannot exchange two paths (macOS, Windows), or nothing is at the path any more: a plain replace, after one more look at the file that is expected
+        def replace_expected():
+            try:
+                unchanged = file_identity(os.lstat(path)) == expected
+            except FileNotFoundError:
+                unchanged = False
+            if not unchanged:
+                raise OSError(f'the file {path} cannot be put in place: it changed since it was validated, or is gone, and is not replaced')
+            os.replace(tmp, path)   # atomic for one file; a file that comes in between the look and this call is replaced, a window of microseconds that exists only where there is no exchange
+        while_held_open(replace_expected)
+        return
     try:   # what was at the path is under the temporary name now: whatever fails from here on, it is not removed with the new file
         if file_identity(os.lstat(tmp)) == expected:
             os.unlink(tmp)   # the file that was looked at, replaced
@@ -1164,11 +1254,18 @@ def write_json(path, obj, no_clobber=False, replaces=None):
     instead of a rename; where links are not supported the destination is reserved exclusively first). replaces: the lstat result of the
     file that this write renews; a file that is not that one any more when the file is put in place (somebody replaced the path since
     the validation) is kept and the write fails; a file that is gone is written like a first publication (no_clobber), so a file that comes in meanwhile is kept. A renewal and the replacing of the reservation (see
-    swap_in) put the new file in place by exchanging it with the file at the path, and where two paths cannot be exchanged they fail: the path
-    is never empty (the hook reads no pause file as no pause), and a file that came in after the validation is put back, not destroyed."""
+    swap_in) put the new file in place by exchanging it with the file at the path; where two paths cannot be exchanged they look at the file once more and
+    replace it with a plain replace. The path is never empty (the hook reads no pause file as no pause), and with the exchange a file that came in after the validation is put back, not destroyed. A write
+    with neither (the state file) renews the file that is at the path when the write starts, or is a first publication where there is none: it is
+    exchanged like the pause file, so where the exchange works no file that comes in after the check of the settings is destroyed."""
     if A.dry_run:
         return
     tmp = f'{path}.{os.getpid()}.{os.urandom(8).hex()}.tmp'   # a name that no other process can have made: nothing is removed to make room for it
+    if not no_clobber and replaces is None:   # a plain write (the state file) renews the file that is at the path before the settings are checked, or is a first publication where there is none: a file that comes in after the check is kept
+        try:
+            replaces = os.lstat(path)
+        except FileNotFoundError:
+            no_clobber = True
     refuse_program_overwrite(path)
     # exclusive and without following links: another account that can write to the directory cannot redirect the write
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o644)
@@ -1220,8 +1317,6 @@ def write_json(path, obj, no_clobber=False, replaces=None):
                     os.unlink(tmp)
                     return write_json(path, obj, no_clobber=True)
                 swap_in(tmp, path, file_identity(replaces), mine)
-                return
-            os.replace(tmp, path)
     except KeptAside:
         raise   # the file under the temporary name is not ours
     except BaseException:
@@ -1263,6 +1358,15 @@ def warn_data(kind, text):
         return
     WARNED[kind] = now
     log(f'WARNING ({kind}): {text}')
+
+
+def warn_unread():
+    """A command of settings.json that the scan cannot read to its end does not stop the guard (see refuse_program_overwrite), but it is said,
+    at most once per --warn-every seconds."""
+    unread = [text for label, text in registered_runtime_files() if label == UNSCANNED]
+    if unread:
+        warn_data('hook-unread', f'{len(unread)} command(s) in {SETTINGS or default_settings()} are not read to their end, so the guard cannot tell whether they name a file of the guard: '
+                  f'it writes its pause file, state file and log only where nothing, an empty file or its own earlier output is. First: {unread[0]}...')
 
 
 CACHE_READ_TRIES = 5     # OMC refreshes the cache by truncating it in place and writing it again: a read in between sees an empty or half-written document
@@ -1351,7 +1455,7 @@ def check_wiring(where):
     if ours and not any(m in (None, '', '*') for m in matchers):
         log(f'WARNING ({where}): the hook entry in {SETTINGS} has the matcher {matchers[0]!r}, which does not cover every tool: calls of other tools would go on during a pause. Run five-hour-guard-settings.py add again')
     for handler in handlers:
-        for problem in ENTRY.handler_problems(handler):
+        for problem in ENTRY.handler_problems(handler) + ENTRY.file_problems(handler['command']):
             log(f'WARNING ({where}): the hook entry in {SETTINGS}: {problem}. Run five-hour-guard-settings.py add again')
     runtime = configured_files()
     registered = registered_runtime_files()
@@ -1471,12 +1575,64 @@ def unpublish(strict=False):
     return True
 
 
+PAUSE_PROCESS = [None]   # the pause_command (subprocess.Popen) of the pause in force
+PAUSE_COMMAND_GRACE_S = 5   # the time pause_command has to end after its standard input is closed, and again after it is terminated
+PAUSE_COMMAND_LOGGED = [None]   # `since` of the pause for which a start of pause_command was logged
+
+
+def run_pause_command(since):
+    """Keep pause_command running while the pause that began at `since` lasts: it is started when the pause begins, and again at a later
+    tick when it has ended. Its standard input is a pipe that only the guard holds, so it reads the end of it when the pause is over and
+    also when the guard dies in any way. The first start of a pause is logged; a later one in the same pause is a warning, so a command
+    that ends at once does not write a line at every tick. A command that cannot be run is a warning: the pause goes on."""
+    process = PAUSE_PROCESS[0]
+    if not PAUSE_COMMAND or A.dry_run or (process is not None and process.poll() is None):
+        return
+    if process is not None:
+        warn_data('pause-command-ended', f'pause_command ended with status {process.returncode} while the pause lasts: it is run again')
+    import subprocess   # imported here and in end_pause_command: only a guard with a pause_command needs it
+    try:
+        PAUSE_PROCESS[0] = subprocess.Popen(PAUSE_COMMAND, stdin=subprocess.PIPE)
+    except (OSError, ValueError) as e:
+        PAUSE_PROCESS[0] = None
+        warn_data('pause-command', f'cannot run pause_command ({e!r}): the pause goes on without it')
+        return
+    if PAUSE_COMMAND_LOGGED[0] == since:
+        warn_data('pause-command-started', f'pause_command started again (pid {PAUSE_PROCESS[0].pid})')
+    else:
+        PAUSE_COMMAND_LOGGED[0] = since
+        log(f'pause_command started (pid {PAUSE_PROCESS[0].pid})')
+
+
+def end_pause_command():
+    """End the pause_command of a pause that is over: its standard input is closed; when it goes on, it is terminated, then killed (only this
+    child of the guard, never another process)."""
+    process, PAUSE_PROCESS[0] = PAUSE_PROCESS[0], None
+    if process is None:
+        return
+    import subprocess
+    try:
+        process.stdin.close()
+    except OSError:
+        pass
+    for push in (None, process.terminate, process.kill):
+        if push:
+            push()
+        try:
+            process.wait(timeout=PAUSE_COMMAND_GRACE_S)
+        except subprocess.TimeoutExpired:
+            continue
+        log(f'pause_command ended (status {process.returncode})')
+        return
+    log(f'ERROR: pause_command (pid {process.pid}) did not end')
+
+
 def enter_pause(state, pct, reset_ts):
     if not A.dry_run:
         check_pause_path()   # before anything is stored: a pause that cannot be published must not be remembered
         for label, path, out_label in program_collisions():
             raise OSError(f'the {label} {path} is the {out_label} of this guard: a pause would replace the program, so none is stored ({fix_hint(label)})')
-        refuse_program_overwrite(*[x for x in (STATE, PAUSE_FILE) if x])   # also a command that is not read to its end: no pause is remembered that cannot be written
+        refuse_program_overwrite(*[x for x in (STATE, PAUSE_FILE) if x])   # also, beside a command that is not read to its end, a file that holds something else: no pause is remembered that cannot be written
     state.update(paused=True, since=time.time(), resume_at=reset_ts + A.margin)
     log(f'THRESHOLD: 5h {pct} %, reset {ts(reset_ts)}; pause until {ts(state["resume_at"])}')
     hook_check('pause start')
@@ -1484,11 +1640,13 @@ def enter_pause(state, pct, reset_ts):
         return
     write_json(STATE, state)   # the durable state first: a pause file with no stored pause behind it would be removed as a leftover after a crash
     publish(state, pct)
+    run_pause_command(state['since'])
 
 
 def leave_pause(state, why):
-    """Leave the pause in this order: the state is written first, the pause file removed after. When the write fails nothing has
-    changed (the pause stays in force, in memory, on disk and as a file) and the next tick tries again; when the removal fails
+    """Leave the pause in this order: the state is written first, the pause file removed after. When the write fails the pause stays
+    as it is (in memory, on disk and as a file) and the next tick tries again; pause_command is ended all the same, since the failed
+    tick does not renew the pause file and the sessions are released when it lapses. When the removal fails
     the state is already unpaused and the removal is retried by the next tick (and by the next start, as a leftover). Where no lock names the
     owner, a pause file of a live process that is not this one is its pause (see live_owner): the state is not written then and the file is
     left alone, since a state of "not paused" under a live pause would have the next start remove that pause as a leftover. The locks are looked at
@@ -1501,10 +1659,17 @@ def leave_pause(state, why):
         state.update(paused=False, since=None, resume_at=None)   # this guard has no pause to keep any more
         state.pop('unlink_pending', None)
         log(f'the pause file {PAUSE_FILE} belongs to the running process {owner}: the state is left as it is and the pause is left alone')
+        end_pause_command()
         return
-    write_json(STATE, {**{k: v for k, v in state.items() if k != 'unlink_pending'}, 'paused': False, 'since': None, 'resume_at': None})
+    try:
+        write_json(STATE, {**{k: v for k, v in state.items() if k != 'unlink_pending'}, 'paused': False, 'since': None, 'resume_at': None})
+    except Exception:
+        end_pause_command()
+        raise
     state.update(paused=False, since=None, resume_at=None)
-    if not unpublish():
+    removed = unpublish()   # the waiting calls first, then pause_command, which may take a moment to end
+    end_pause_command()
+    if not removed:
         state['unlink_pending'] = True
         raise OSError(f'the pause file {PAUSE_FILE} could not be removed: the removal is tried again at the next tick')
     state.pop('unlink_pending', None)
@@ -1555,6 +1720,7 @@ def tick(state):
             return
     write_json(STATE, state)   # also here: a first write that failed has not stored the pause yet
     publish(state, pct)
+    run_pause_command(state['since'])
 
 
 def safe_tick(state):
@@ -1567,6 +1733,7 @@ def safe_tick(state):
             log('ERROR: a lock file of this guard was removed or replaced and another guard holds the new one: stopping, the pause file is left alone')
             STOP = True
             return False
+        warn_unread()
         tick(state)
         return True
     except Exception as e:
@@ -1723,6 +1890,11 @@ def main():
     signal.signal(signal.SIGINT, on_signal)
     if A.test_pause:
         return test_pause()
+    unread = [text for label, text in registered_runtime_files() if label == UNSCANNED]
+    for label, path in (('state_file', STATE), ('pause_file', PAUSE_FILE)) if unread else ():
+        if not holds_own_output(path):   # no pause could ever be written: say it now, not at the threshold
+            fail(f'{unread[0]}... in {SETTINGS or default_settings()} is not read to its end, and "{label}" ({path}) holds something else than what this guard writes there, so that command may run it: '
+                 'give the guard files of its own, or shorten the command or remove the hook')
     if os.path.lexists(PAUSE_FILE) and not is_guard_pause(PAUSE_FILE):   # lexists: a dangling link is somebody's path too
         # the start would remove it as a leftover: never remove a file that is not a pause of this guard (a mistyped path)
         fail(f'the file {PAUSE_FILE} exists and is not a pause file of this guard: it is left untouched; check "pause_file", or remove the file yourself')
@@ -1778,6 +1950,7 @@ def main():
                 # the unpaused state could not be written, or the first removal failed: the sessions are still released (a restart
                 # reads a stored pause and keeps it only while it lasts)
                 log('RESUMED (guard stopping, state not saved): pause file removed' if state.get('paused') else 'RESUMED (guard stopping, second try): pause file removed')
+        end_pause_command()   # also on an exit that leaves the pause file (--once, a lost lock): the command of this guard ends with it
     return 1 if LOCK_LOST[0] else 0
 
 

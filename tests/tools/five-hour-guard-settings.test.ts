@@ -126,7 +126,10 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     doc.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: '/x/last.py' }] } as never);
     write(f, doc);
 
-    expect(tool(f, 'check').status, 'the old entry is ours: it is found by its marker').toBe(0);
+    const check = tool(f, 'check');
+    expect(check.stdout, 'the old entry is ours: it is found by its marker').toMatch(/1 entry\/entries/);
+    expect(check.stdout, 'and its hook is not there').toMatch(/holds nothing: its hook \/old\/dir\/five-hour-guard-hook\.py is missing/);
+    expect(check.status).toBe(1);
     const r = tool(f, 'add');
     expect(r.status, r.stderr).toBe(0);
     const pre = readJson(f.settings).hooks.PreToolUse;
@@ -1050,5 +1053,68 @@ describe.skipIf(!HAS_PYTHON3)('five-hour guard settings tool', { timeout: 90000 
     const noPause = runSync(SETTINGS_TOOL, ['add', '--settings', target]);
     expect(noPause.status).toBe(2);
     expect(noPause.stderr).toMatch(/"pause_file" is not set/);
+  });
+
+  it('add replaces in place an entry of this pause file whose scripts are in another directory, also one without the marker, and remove takes it away; an entry of another pause file is left alone', () => {
+    const f = fixture('settings-moved-entry');
+    const dir = join(f.dir, 'old install');
+    mkdirSync(dir, { recursive: true });
+    const old = join(dir, 'five-hour-guard-hook.py');
+    copyFileSync(HOOK, old);
+    const forms = (pause: string) => ({
+      'with the checks, without the marker': `[ -f ${quote(pause)} ] && [ -f ${quote(old)} ] && [ -r ${quote(old)} ] && [ -x ${quote(PYBIN)} ] || exit 0; exec ${quote(PYBIN)} -I ${quote(old)} --pause-file ${quote(pause)} --log ${quote(f.hookLog)}`,
+      'without the checks and the log': `[ -f ${quote(pause)} ] && [ -f ${quote(old)} ] || exit 0; exec ${quote(PYBIN)} -I ${quote(old)} --pause-file ${quote(pause)}`,
+    });
+    const only = (command: string) => write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+    for (const [name, command] of Object.entries(forms(f.pause))) {
+      only(command);
+      const check = tool(f, 'check');
+      expect(check.status, `${name}: ${check.stdout}${check.stderr}`).toBe(0);
+      expect(check.stdout, name).toMatch(/1 entry\/entries/);
+      expect(tool(f, 'add').status, name).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre, `${name}: replaced in place, no second entry`).toHaveLength(1);
+      expect(pre[0].hooks[0].command, name).toBe(entryCommand(f));
+      only(command);
+      expect(tool(f, 'remove').stdout, name).toMatch(/remove: done/);
+      expect(readJson(f.settings).hooks ?? {}, name).toEqual({});
+    }
+    for (const [name, command] of Object.entries(forms(join(f.dir, 'pause-of-another-guard.json')))) {
+      only(command);
+      expect(tool(f, 'check').status, `${name}: another pause file`).toBe(1);
+      expect(tool(f, 'add').status, name).toBe(0);
+      const pre = readJson(f.settings).hooks.PreToolUse;
+      expect(pre.map((g: { hooks: Array<{ command: string }> }) => g.hooks[0].command), `${name}: the other entry stays`).toEqual([command, entryCommand(f)]);
+    }
+  });
+
+  it('check ends with status 1 and names the file when an entry of the guard runs a hook or an interpreter that is not there; add repairs it', () => {
+    const f = fixture('settings-missing-files');
+    const gone = join(f.dir, 'gone', 'five-hour-guard-hook.py');
+    const plain = join(f.dir, 'not-executable');
+    writeFileSync(plain, 'text\n', 'utf8');
+    const marked = (hook: string, python: string) => `[ -f ${quote(f.pause)} ] && [ -f ${quote(hook)} ] && [ -r ${quote(hook)} ] && [ -x ${quote(python)} ] || exit 0; exec ${quote(python)} -I ${quote(hook)} --pause-file ${quote(f.pause)} # five-hour-guard-entry`;
+    const only = (command: string) => write(f, { hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 21600 }] }] } });
+    const cases: Array<[string, RegExp]> = [
+      [marked(gone, PYBIN), /an entry of the guard holds nothing: its hook .*gone\/five-hour-guard-hook\.py is missing or cannot be read.*run `add` again/],
+      [marked(HOOK, plain), /an entry of the guard holds nothing: its interpreter .*not-executable is missing or cannot be run/],
+    ];
+    for (const [command, message] of cases) {
+      only(command);
+      const check = tool(f, 'check');
+      expect(check.status, `${check.stdout}${check.stderr}`).toBe(1);
+      expect(check.stdout).toMatch(/1 entry\/entries/);
+      expect(check.stdout).toMatch(message);
+      expect(tool(f, 'add').status).toBe(0);
+      const repaired = tool(f, 'check');
+      expect(repaired.status, `${repaired.stdout}`).toBe(0);
+      expect(repaired.stdout).not.toMatch(/holds nothing/);
+    }
+    for (const [hook, python] of [['hooks/five-hour-guard-hook.py', 'python3'], ['/nonexistent/$TOOLS/five-hour-guard-hook.py', '/nonexistent/${PY}/python3']]) {
+      only(marked(hook, python));
+      const unknown = tool(f, 'check');
+      expect(unknown.status, `${hook}: only the session knows what such a path names`).toBe(0);
+      expect(unknown.stdout, hook).not.toMatch(/holds nothing/);
+    }
   });
 });
