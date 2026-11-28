@@ -484,11 +484,22 @@ describe('OWNER_TAIL: the check after the build', () => {
 
   it('a protected text that came out changed leaves the conversation as it was: a skip, no summary of the host, the record names the element without its text', async () => {
     const broken = await patched(change);
-    for (const trigger of ['manual', 'auto', 'plugin']) {
+    for (const trigger of ['manual', 'plugin']) {
       const out = await compactOnce(rows(), { env: ON, mod: broken }, { trigger });
       expect(out.out, trigger).toEqual({ skip: expect.stringContaining(OWNER_TAIL_SKIP) });
       expect(out.seen, trigger).toHaveLength(0);
       expect(compactRecord(out), trigger).toMatchObject({ result: 'fallback', reason: 'owner_tail_changed', owner_tail_violations: ['assistant_text'], owner_tail: { violations: 1 } });
+      expect(JSON.stringify(compactRecord(out))).not.toContain('FINAL ANSWER');
+    }
+  });
+
+  it('an automatic compaction with a protected text that came out changed goes to the summary of the host, in the main loop and in a subagent', async () => {
+    const broken = await patched(change);
+    for (const [env, event] of [[ON, { trigger: 'auto' }], [{ ...ON, OMC_JEV_COMPACT_OWNER_TAIL_AGENTS: 'active' }, { trigger: 'auto', agentId: 'sub-1' }]]) {
+      const out = await compactOnce(rows(), { env, mod: broken }, event);
+      expect(out.seen).toHaveLength(1);
+      expect(out.out).toEqual({ messages: [{ role: 'user', text: 'SUMMARY', toolUses: [] }] });
+      expect(compactRecord(out)).toMatchObject({ result: 'fallback', reason: 'owner_tail_changed', owner_tail_violations: ['assistant_text'], owner_tail: { violations: 1 } });
       expect(JSON.stringify(compactRecord(out))).not.toContain('FINAL ANSWER');
     }
   });

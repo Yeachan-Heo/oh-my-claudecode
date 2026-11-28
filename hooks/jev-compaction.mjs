@@ -158,7 +158,8 @@
  * user's, `off` ignores them), and past the last one nothing is protected (OMC_JEV_COMPACT_OWNER_TAIL_OVERFLOW unset), or with `keep` the last boundary stays while
  * it is under the threshold and the gates that hand the compaction to the summary are off. Subagents have no owner tail unless
  * OMC_JEV_COMPACT_OWNER_TAIL_AGENTS=active. A protected text that came out changed leaves the conversation as it was: a skip that opens with OWNER_TAIL_SKIP, no
- * summary. The record gets `owner_tail` (from_idx, rows, tokens, violations, goal_yielded, overflow, boundary, protected_rows), `owner_tail_applied`,
+ * summary. An automatic compaction goes to the summary instead (reason owner_tail_changed): the host asked because the context is near its limit, and a violation
+ * that repeats would keep it from ever shrinking. The record gets `owner_tail` (from_idx, rows, tokens, violations, goal_yielded, overflow, boundary, protected_rows), `owner_tail_applied`,
  * `owner_tail_tier` and `owner_tail_violations`; see "owner tail" below.
  *
  * The tail by the open tool loop (OMC_JEV_COMPACT_TAIL_BY_LOOP=active, off by default; without it "the last KEEP_LAST rows" below stand as written). The tail that
@@ -6617,7 +6618,8 @@ const attachmentTokens = (a, rates) => (a ? rates.RATE_ATT * (a.dropped.uncovere
 // compacted like the rest, and the open tool loop keeps its handles as ever. The protected rows (cfg.ownerProtected) are left out of the stages of pasted text,
 // long replies, blocks and series; the agent stage leaves a row of the user and one that opens with a block of another session by its own rules. After the build
 // ownerTailViolations checks that every protected text is still there: one that came out changed leaves the conversation as it was (a skip, so the host's summary
-// does not run either).
+// does not run either), except in an automatic compaction, which goes to the host's summary: with a skip alone a repeated violation would never let the context
+// shrink.
 // The user's message is a user row without results that holds words of the user's own (userWords) and that no hook or the host put in (isMeta, hookRowPrefixes). A
 // message of another session is a row that opens with CROSS_SESSION_PREFIX: OMC_JEV_COMPACT_OWNER_TAIL_CROSS_SESSION `on` counts it like a message of the user (the
 // boundary is the newest of both kinds), `off` ignores it, `fallback` (the default) takes the user's row as the first boundary and the newest message of another
@@ -7199,13 +7201,14 @@ async function decide($, e, cfg, record, started) {
     }
   }
   if (header !== undefined) built.unshift({ role: 'user', text: header, toolUses: [], toolResults: [] });
-  // Owner tail: a protected text that is gone, whatever stage made it, leaves the conversation as it was; the record names the element, not its text.
+  // Owner tail: a protected text that is gone, whatever stage made it, leaves the conversation as it was (an automatic compaction: the host's summary runs); the
+  // record names the element, not its text.
   if (ownerPlan?.prot) {
     const bad = ownerTailViolations(built, ownerPlan.prot);
     ownerPlan.tail.violations = bad.length;
     if (bad.length) {
       record.owner_tail_violations = bad.slice(0, 10);
-      return { fallback: 'owner_tail_changed', skip: true, skipText: `${OWNER_TAIL_SKIP} a protected text came out changed, nothing replaced`, tokensBefore: tokens?.tokens };
+      return { fallback: 'owner_tail_changed', skip: e.trigger !== 'auto', skipText: `${OWNER_TAIL_SKIP} a protected text came out changed, nothing replaced`, tokensBefore: tokens?.tokens };
     }
   }
   const after = built.reduce((s, m) => s + messageChars(m), stats.queuedKeptChars);
