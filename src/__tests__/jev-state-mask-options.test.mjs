@@ -3,7 +3,7 @@
  * be written, as text, as an array of arguments and as an array of arguments with a window. One grid, built from the table: a row
  * that is added to the table is tested in all its forms, and the expected result of each cell is written out.
  */
-import { performance } from 'node:perf_hooks';
+import process from 'node:process';
 import { describe, expect, it } from 'vitest';
 
 import { CREDENTIAL_OPTIONS, PROGRAMS, WINDOW_MARGIN, maskJevState } from '../../scripts/lib/jev-state-mask.mjs';
@@ -323,6 +323,12 @@ describe('maskJevState: random commands, each with one option, against the table
 });
 
 describe('maskJevState: the cost of the options is the window, not the input', () => {
+  // CPU time of this process in ms. Time spent waiting for a free core, which grows with the load of the machine, does
+  // not count. The default pool of the test runner gives each test file its own process.
+  const cpuMs = () => {
+    const { user, system } = process.cpuUsage();
+    return (user + system) / 1000;
+  };
   const repeatTo = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
   // text shapes that a rule that backtracks or reads on from every start would take quadratic time on
   const shapes = {
@@ -348,9 +354,9 @@ describe('maskJevState: the cost of the options is the window, not the input', (
     const text = shapes[name](8 * 1024 * 1024);
     const times = [];
     for (let i = 0; i < 3; i++) {
-      const started = performance.now();
+      const started = cpuMs();
       maskJevState({ t: text }, { maxChars: MAX });
-      times.push(performance.now() - started);
+      times.push(cpuMs() - started);
     }
     expect(Math.min(...times)).toBeLessThan(300);
   });
@@ -361,9 +367,9 @@ describe('maskJevState: the cost of the options is the window, not the input', (
       const text = shapes[name](n);
       const best = [];
       for (let i = 0; i < 3; i++) {
-        const started = performance.now();
+        const started = cpuMs();
         maskJevState({ t: text });
-        best.push(performance.now() - started);
+        best.push(cpuMs() - started);
       }
       return Math.min(...best);
     };

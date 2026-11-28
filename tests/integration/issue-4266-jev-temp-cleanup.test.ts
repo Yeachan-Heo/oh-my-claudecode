@@ -56,11 +56,14 @@ function runActiveRecord(tempRoot: string, homeRoot: string) {
       OMC_JEV: "cleanup-test:active",
       TYPESAFE_API_KEY: "test-key",
       OMC_JEV_ENDPOINT: "http://127.0.0.1:1",
-      OMC_JEV_TIMEOUT_MS: "100",
+      // The endpoint refuses at once, so this limit only has to cover the cold
+      // start of the resolver: a loaded host takes more than the 600ms that a
+      // 100ms request timeout allows, and the call then returns no result.
+      OMC_JEV_TIMEOUT_MS: "10000",
       OMC_JEV_LOG_DIR: join(homeRoot, "logs"),
     },
     encoding: "utf8",
-    timeout: 5000,
+    timeout: 20_000,
   });
 }
 
