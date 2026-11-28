@@ -59,4 +59,13 @@ export class JevStateFieldOmittedError extends JevStateMaskError {}
  * a throwing toJSON) and JevStateFieldOmittedError when a non-empty string was omitted whole. With maxChars, a
  * string is cut to maxChars + WINDOW_MARGIN before it is masked, and no rule reads more of it than that window.
  */
-export function maskJevState(state: unknown, options?: { maxChars?: number }): unknown;
+export function maskJevState(
+  state: unknown,
+  options?: { maxChars?: number; hidePaths?: (text: string) => string; prose?: (text: string) => string },
+): unknown;
+
+/**
+ * The opt-in mask of secrets written in prose ("password Abc12345", "phone PIN 482913"), or undefined unless
+ * OMC_JEV_MASK_PROSE=1; OMC_JEV_MASK_PROSE_WORDS and OMC_JEV_MASK_PROSE_LINKS add words of other languages.
+ */
+export function secretProseMask(env: Record<string, string | undefined>): ((text: string) => string) | undefined;

@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, renameSync, statSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { privatePathMask } from '../../../scripts/lib/jev-private-paths.mjs';
 import type * as JevBreaker from '../../../scripts/lib/jev-breaker.mjs';
 import type * as JevStateMask from '../../../scripts/lib/jev-state-mask.mjs';
 import { JevClientError, queryJev } from './client.js';
@@ -202,15 +203,17 @@ const LOG_CONTEXT_MAX_CHARS = 1000;
  * The ids of one hook call for the Jev logs: tool_use_id, session_id, cwd,
  * agent_id, agent_type, prompt_id and request_id, read from a hook input
  * (snake or camel case). Only non-empty strings are kept, each cut to 1000
- * characters. Mirror of jevLogContextOf in scripts/jev-resolve.mjs.
+ * characters. A private path of OMC_JEV_COMPACT_PRIVATE_PATHS in cwd is
+ * hidden before the cut. Mirror of jevLogContextOf in scripts/jev-resolve.mjs.
  */
-export function jevLogContextOf(source: unknown): JevLogContext {
+export function jevLogContextOf(source: unknown, env: NodeJS.ProcessEnv = process.env): JevLogContext {
   const context: JevLogContext = {};
   if (!source || typeof source !== 'object') return context;
   const input = source as Record<string, unknown>;
+  const hidePaths = privatePathMask(env);
   for (const [field, names] of Object.entries(LOG_CONTEXT_FIELDS) as [keyof JevLogContext, readonly string[]][]) {
     const value = names.map((name) => input[name]).find((candidate): candidate is string => typeof candidate === 'string' && candidate !== '');
-    if (value !== undefined) context[field] = value.slice(0, LOG_CONTEXT_MAX_CHARS);
+    if (value !== undefined) context[field] = (field === 'cwd' && hidePaths ? hidePaths(value) : value).slice(0, LOG_CONTEXT_MAX_CHARS);
   }
   return context;
 }
@@ -334,7 +337,8 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   let maskedState: unknown;
   try {
     stateMaskModule ??= import('../../../scripts/lib/jev-state-mask.mjs');
-    maskedState = (await stateMaskModule).maskJevState(args.state, { maxChars: excerptCharsFor(args.point, config) });
+    const { maskJevState, secretProseMask } = await stateMaskModule;
+    maskedState = maskJevState(args.state, { maxChars: excerptCharsFor(args.point, config), hidePaths: privatePathMask(process.env), prose: secretProseMask(process.env) });
   } catch (error) {
     const omitted = error instanceof Error && error.name === 'JevStateFieldOmittedError';
     if (process.env.OMC_JEV_QUIET !== '1' && !runtime.maskWarned) {

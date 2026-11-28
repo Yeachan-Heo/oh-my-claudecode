@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetJevResolverState, resolveJudgment } from '../resolver.js';
 import type { JevQuestions } from '../types.js';
 
-const ENV_KEYS = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_ENDPOINT', 'OMC_JEV_QUIET', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING'] as const;
+const ENV_KEYS = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_ENDPOINT', 'OMC_JEV_QUIET', 'OMC_JEV_MAX_REQUESTS', 'OMC_JEV_BREAKER', 'OMC_JEV_MAX_RPM', 'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING', 'OMC_JEV_LOG_CONTEXT', 'OMC_JEV_COMPACT_PRIVATE_PATHS', 'OMC_JEV_MASK_PROSE'] as const;
 const QUESTIONS: JevQuestions = {
   route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
 };
@@ -293,6 +293,32 @@ describe('resolveJudgment state mask', () => {
       await resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', fetchFn: recordingFetch(bodies) });
       expect(bodies).toHaveLength(1);
       for (const text of [bodies[0], logText()]) expect(text).not.toContain('hunter2zzQ');
+    });
+  });
+
+  describe('the opt-in masks', () => {
+    const state = { prompt: 'sum /vol/acme-ledger/may.csv, password Abc12345' };
+    const logContext = { cwd: '/vol/acme-ledger/work', session_id: 's-1' };
+    const ask = async (bodies: string[]) => resolveJudgment({ point: 'model-routing', state, questions: QUESTIONS, twin: () => 'sonnet', logContext, fetchFn: recordingFetch(bodies) });
+
+    it('sends and logs the state and the cwd as before without them', async () => {
+      process.env.OMC_JEV_LOG_CONTEXT = '1';
+      const bodies: string[] = [];
+      await ask(bodies);
+      expect(JSON.parse(bodies[0]).state).toEqual(state);
+      expect(lastLogLine()).toMatchObject({ state, cwd: logContext.cwd });
+    });
+
+    it('hides listed paths and prose secrets in the body and in the log line', async () => {
+      process.env.OMC_JEV_LOG_CONTEXT = '1';
+      process.env.OMC_JEV_COMPACT_PRIVATE_PATHS = '/vol/acme-ledger';
+      process.env.OMC_JEV_MASK_PROSE = '1';
+      const bodies: string[] = [];
+      await ask(bodies);
+      const masked = { prompt: 'sum [private path], password ***' };
+      expect(JSON.parse(bodies[0]).state).toEqual(masked);
+      expect(lastLogLine()).toMatchObject({ state: masked, cwd: '[private path]', session_id: 's-1' });
+      expect(readFileSync(join(dir, 'log', 'shadow.jsonl'), 'utf8')).not.toMatch(/acme-ledger|Abc12345/);
     });
   });
 

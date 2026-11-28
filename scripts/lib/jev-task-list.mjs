@@ -252,6 +252,10 @@ const LIST_SECRET_RULES = [
   [/\b(github_pat_)[A-Za-z0-9_]{8,}/g, '$1***'],
   [/\b(xox[a-z]-)[A-Za-z0-9-]{8,}/g, '$1***'], // also xoxe- and the other letters
   [/\b(AKIA)[0-9A-Z]{12,}/g, '$1***'],
+  // Temporary AWS keys. The whole key shape only: "ASIA" also starts ordinary words in capitals.
+  [/\b(ASIA)[0-9A-Z]{16}\b/g, '$1***'],
+  // `gsk_` also starts the functions of GTK's GSK library and `xai-` ordinary package names: a key has 20 letters and digits.
+  [/\b(gsk_|xai-)[A-Za-z0-9]{20}[A-Za-z0-9_-]*/g, '$1***'],
   [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1***'],
 ];
 // "name = value" pairs. The head is matched only where a name starts (the character before is not a name character), so the work

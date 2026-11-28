@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { mask } = require('../../../scripts/provider/lib/redact.cjs');
+const { redactPatterns, secretsInText } = require('../../../scripts/provider/lib/advisor-input.cjs');
 
 describe.skipIf(process.platform === 'win32')('mask (secret redaction)', () => {
   it('(17) masks the six credential shapes, JSON fields and provider keys; labels stay; plain texts are unchanged', () => {
@@ -72,8 +73,31 @@ describe.skipIf(process.platform === 'win32')('mask (secret redaction)', () => {
     }
   });
 
+  it('masks Groq, xAI and AWS access keys and keeps names that only start like them', () => {
+    const twenty = 'AbCdEfGhIj0123456789';
+    expect(mask(`bad key gsk_${twenty} and xai-${twenty}`)).toBe('bad key gsk_[REDACTED] and xai-[REDACTED]');
+    expect(mask('ids AKIAIOSFODNN7EXAMPLE, ASIAIOSFODNN7EXAMPLE')).toBe('ids AKIA[REDACTED], ASIA[REDACTED]');
+    const kept = 'gsk_renderer_new_for_surface in xai-compatible-provider-config for ASIAPACIFIC';
+    expect(mask(kept)).toBe(kept);
+  });
+
   it('is idempotent on its own output', () => {
     const once = mask('sk-abc123def456ghi789 and token=fixture-1234');
     expect(mask(once)).toBe(once);
+  });
+});
+
+describe('the secret scan of the advisor input', () => {
+  const twenty = 'AbCdEfGhIj0123456789';
+
+  it('finds and redacts Groq, xAI and temporary AWS keys', () => {
+    const keys = [`gsk_${twenty}`, `xai-${twenty}_tail`, 'ASIAIOSFODNN7EXAMPLE'];
+    const text = `a ${keys.join(' b ')} c`;
+    expect(secretsInText(text)).toEqual([keys[2], keys[0], keys[1]]);
+    expect(redactPatterns(text)).toBe('a [REDACTED] b [REDACTED] b [REDACTED] c');
+  });
+
+  it('finds nothing in names that only start like them', () => {
+    expect(secretsInText('gsk_renderer_new_for_surface xai-compatible-provider-config ASIAPACIFIC EURASIAIOSFODNN7EXAMPLE')).toEqual([]);
   });
 });

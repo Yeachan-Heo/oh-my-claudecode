@@ -429,6 +429,8 @@ const SECRET_PATTERNS = [
   /-----BEGIN [A-Za-z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Za-z ]*PRIVATE KEY-----/g, // PEM keys
   /sk-[A-Za-z0-9_\-]{20,}/g, // keys of the form sk-...
   /AKIA[0-9A-Z]{16}/g, // AWS access key id
+  /\bASIA[0-9A-Z]{16}\b/g, // temporary AWS access key id (the whole key only: "ASIA" also starts words in capitals)
+  /\b(?:gsk_|xai-)[A-Za-z0-9]{20}[A-Za-z0-9_-]*/g, // 20 letters and digits: `gsk_` and `xai-` also start ordinary names
   /Bearer [A-Za-z0-9._\-]{20,}/g, // tokens of the Authorization header
   /(?:^|[+\- \t])([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*)\s*=\s*(["']?)(\S{12,})\2\s*$/gm, // lines and diff rows NAME=long value
 ];

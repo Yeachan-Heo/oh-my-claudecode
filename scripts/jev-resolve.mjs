@@ -21,6 +21,11 @@
  * the hook call (see jevLogContextOf). They go into the shadow-log line, the
  * result echoes `request_id`, and none of them is ever sent to Jev.
  *
+ * The state is masked before it is sent or logged (lib/jev-state-mask.mjs).
+ * Opt-in additions: OMC_JEV_COMPACT_PRIVATE_PATHS hides the listed paths in the
+ * state and in the cwd of the log context (lib/jev-private-paths.mjs), and
+ * OMC_JEV_MASK_PROSE=1 masks secrets written in prose in the state.
+ *
  * mode mirrors the resolver's ResolveMode contract: off (config gates),
  * shadow (twin decides, comparison recorded), active (Jev decides), degraded
  * (a Jev call was attempted and failed - caller falls back to its twin),
@@ -46,6 +51,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 
+import { privatePathMask } from "./lib/jev-private-paths.mjs";
 import { resolveOmcStateRoot } from "./lib/state-root.mjs";
 
 const DEFAULT_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
@@ -472,14 +478,16 @@ const LOG_CONTEXT_MAX_CHARS = 1000;
  * (the last two only for a tool call made inside a subagent), prompt_id, and
  * request_id (set by the hook script for each request). Only non-empty
  * strings are kept, each cut to 1000 characters; anything else is left out.
+ * A private path of OMC_JEV_COMPACT_PRIVATE_PATHS in cwd is hidden before the cut.
  * Mirror of jevLogContextOf in src/hooks/jev/resolver.ts.
  */
-export function jevLogContextOf(source) {
+export function jevLogContextOf(source, env = process.env) {
   const context = {};
   if (!source || typeof source !== "object") return context;
+  const hidePaths = privatePathMask(env);
   for (const [field, names] of Object.entries(LOG_CONTEXT_FIELDS)) {
     const value = names.map((name) => source[name]).find((candidate) => typeof candidate === "string" && candidate !== "");
-    if (value !== undefined) context[field] = value.slice(0, LOG_CONTEXT_MAX_CHARS);
+    if (value !== undefined) context[field] = (field === "cwd" && hidePaths ? hidePaths(value) : value).slice(0, LOG_CONTEXT_MAX_CHARS);
   }
   return context;
 }
@@ -635,7 +643,7 @@ export async function resolveRequest(
   // OMC_JEV_LOG_CONTEXT: the call's ids for every line of this request, and
   // the line's `jev` and confidence from the first question only (null when
   // Jev did not answer it).
-  const logContext = isJevLogContextEnabled(env) ? jevLogContextOf(request.context) : undefined;
+  const logContext = isJevLogContextEnabled(env) ? jevLogContextOf(request.context, env) : undefined;
   // Secrets are masked before the state is bounded, so before it is sent or logged; a string is cut to the
   // window that is sent (plus a margin) first, so the cost of the mask does not grow with the prompt. A state
   // that cannot be masked, a string that is a secret path whole, or a missing mask module sends nothing: fail
@@ -645,8 +653,8 @@ export async function resolveRequest(
   // other degraded rows of the resolver do.
   const rowTelemetry = isJevRowTelemetryEnabled(env);
   try {
-    const { maskJevState } = await import("./lib/jev-state-mask.mjs");
-    maskedState = maskJevState(request.state, { maxChars: resolveExcerptChars(request.point, env) });
+    const { maskJevState, secretProseMask } = await import("./lib/jev-state-mask.mjs");
+    maskedState = maskJevState(request.state, { maxChars: resolveExcerptChars(request.point, env), hidePaths: privatePathMask(env), prose: secretProseMask(env) });
   } catch (error) {
     const omitted = error?.name === "JevStateFieldOmittedError";
     if (String(env.OMC_JEV_QUIET ?? "").trim() !== "1") {

@@ -3,6 +3,8 @@
  * names a secret path is omitted, every string goes through maskSecrets, and the value under a key that
  * names a secret (password, token, ...) is replaced. Fail closed: a state this cannot mask completely
  * (a cycle, too deep, too large, a throwing toJSON) is an error, never a partial result.
+ * Two opt-in additions come in as options of maskJevState: the user's own private paths (hidePaths, from
+ * jev-private-paths.mjs) and secrets written in prose (prose, from secretProseMask here).
  *
  * No Node imports and no Node APIs, like jev-mask.mjs. The first part of SECRET_PATH is a copy of the
  * expression in hooks/jev-compaction.mjs (a hooks module may import only plain files of its plugin, and the
@@ -708,9 +710,10 @@ export const RUN_EXTENSION = 4096;
  *   old cut); a run longer than RUN_EXTENSION past the cut becomes "***" (fail closed);
  * - maskString then masks a "//user:value" that runs to the end of a cut text (the URL rule needs the "@",
  *   and its value class covers more than token characters, such as ! and #).
- * The tail is looked at on the original text, not after the key block rule has joined lines.
+ * The tail is looked at on the original text, not after the key block rule has joined lines. runChar tells the
+ * characters of a run: with the prose mask on, those of a value in prose, which are more than the token characters.
  */
-function cutAndCloseTail(text, end) {
+function cutAndCloseTail(text, end, runChar = TOKEN_CHAR) {
   const cut = text.slice(0, end);
   if (text[end] !== '\n') {
     const lineStart = cut.lastIndexOf('\n') + 1;
@@ -719,27 +722,120 @@ function cutAndCloseTail(text, end) {
     const line = cut.slice(lineStart) + (newline === -1 ? ahead : ahead.slice(0, newline));
     if (SECRET_PATH.test(line)) return cut.slice(0, lineStart) + SECRET_LINE;
   }
-  if (TOKEN_CHAR.test(cut[end - 1]) && TOKEN_CHAR.test(text[end])) {
+  if (runChar.test(cut[end - 1]) && runChar.test(text[end])) {
     // the cut is inside a run of token characters: let every rule see the whole run when it is short enough
     let stop = end;
-    while (stop < text.length && stop - end < RUN_EXTENSION && TOKEN_CHAR.test(text[stop])) stop++;
-    if (stop === text.length || !TOKEN_CHAR.test(text[stop])) return text.slice(0, stop);
+    while (stop < text.length && stop - end < RUN_EXTENSION && runChar.test(text[stop])) stop++;
+    if (stop === text.length || !runChar.test(text[stop])) return text.slice(0, stop);
     let start = end;
-    while (start > 0 && TOKEN_CHAR.test(cut[start - 1])) start--;
+    while (start > 0 && runChar.test(cut[start - 1])) start--;
     return cut.slice(0, start) + '***';
   }
   return cut;
 }
 
+// Secrets in prose: the built-in secret words, those after which digits alone are a value, and the words that link a
+// secret word to its value ("the token is ...", "set the password to ...").
+const PROSE_WORDS = ['password', 'passwd', 'passphrase', 'passcode', 'pin', 'token', 'secret', 'client[_ -]?secret', 'api[_ -]?key'];
+const PROSE_DIGIT_WORDS = ['password', 'passwd', 'passcode', 'pin'];
+const PROSE_LINKS = ['is', 'was', 'to'];
+const WORD_START = String.raw`(?<![\p{L}\p{N}_])`;
+const WORD_END = String.raw`(?![\p{L}\p{N}_])`;
+const PROSE_VALUE_CHAR = String.raw`[^\s"'\x60,;()<>\[\]{}]`;
+const PROSE_VALUE_REST = new RegExp(`${PROSE_VALUE_CHAR}*`, 'y');
+const PROSE_RUN_CHAR = new RegExp(PROSE_VALUE_CHAR); // a run that a cut must not split while the prose mask is on
+
+// The entries of a comma separated list as expression sources, the longest first; spaces inside an entry stand for
+// one to twenty spaces or tabs.
+const configuredWords = (value) => String(value ?? '')
+  .split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean)
+  .sort((a, b) => b.length - a.length)
+  .map((entry) => entry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[ \\t]{1,20}'));
+
+/**
+ * The opt-in mask of secrets in prose, or undefined unless OMC_JEV_MASK_PROSE=1: a secret word with its value but
+ * without the `name: value` shape that the other rules need ("password Abc12345", "the token is x7Kp2Qa9",
+ * "phone PIN 482913"). The value is one token of at least four characters with a digit and a letter (a word
+ * without a digit is prose: "token limit"); digits alone count after a password or PIN word, or where the value
+ * stands on a line or in a tab field of its own. Up to three words may stand between the secret word and the value
+ * only when a link word or sign comes right before the value ("the password for the panel is ..."), or after PIN
+ * when the value is digits. OMC_JEV_MASK_PROSE_WORDS and OMC_JEV_MASK_PROSE_LINKS (comma separated) add secret
+ * words and link words, for text in other languages; an added secret word counts as a password word. Every
+ * repetition before the value is bounded and a value is read to its end once, so the time grows linearly.
+ */
+export function secretProseMask(env) {
+  if (String(env.OMC_JEV_MASK_PROSE ?? '').trim() !== '1') return undefined;
+  const added = configuredWords(env.OMC_JEV_MASK_PROSE_WORDS);
+  const link = `[:=]|${WORD_START}(?:${[...PROSE_LINKS, ...configuredWords(env.OMC_JEV_MASK_PROSE_LINKS)].join('|')})${WORD_END}`;
+  const digitWord = new RegExp(`^(?:${[...PROSE_DIGIT_WORDS, ...added].join('|')})$`, 'iu');
+  const linkAtEnd = new RegExp(String.raw`(?:${link})$`, 'iu');
+  // A secret word; what stands up to its value, and the start of the value, are only looked at, so that a word
+  // inside them is read as a secret word too ("secret password ...").
+  const secretWord = new RegExp(
+    `${WORD_START}(${[...added, ...PROSE_WORDS].join('|')})${WORD_END}` +
+      String.raw`(?=((?:[ \t\r\n]{1,20}\p{L}{1,15}){0,3}?[ \t\r\n]{0,20}(?:(?:${link})[ \t\r\n]{0,20})?(?:\\{0,8}["'])?)` +
+      String.raw`(?=${PROSE_VALUE_CHAR}{0,200}\d)(${PROSE_VALUE_CHAR}{4,200}))`,
+    'giu',
+  );
+  return (text) => {
+    let out = '';
+    let done = 0;
+    for (const match of text.matchAll(secretWord)) {
+      const [, word, between, head] = match;
+      const start = match.index + word.length + between.length;
+      if (start < done) continue; // the value is masked already
+      PROSE_VALUE_REST.lastIndex = start + head.length;
+      const value = head + PROSE_VALUE_REST.exec(text)[0];
+      // A value at the end of a sentence carries its full stop, one in a quoted string a backslash before or after
+      // it: the core is tested and masked. Loops: a long run of dots inside a value must not cost quadratic time.
+      let from = 0;
+      let to = value.length;
+      while (to > 0 && '.!?\u2026\\'.includes(value[to - 1])) to--;
+      while (from < to && value[from] === '\\') from++;
+      const core = value.slice(from, to);
+      if (core.length < 4) continue;
+      const digits = /^\d+$/.test(core);
+      if (digits ? !(digitWord.test(word) || /[\t\r\n]/.test(between)) : !/\p{L}/u.test(core)) continue;
+      const read = between.replace(/[\s"'\\]+$/, '').trim();
+      const words = read.replace(linkAtEnd, '').trim();
+      if (words && words === read && !(digits && /^pin$/i.test(word))) continue;
+      out += `${text.slice(done, start + from)}***`;
+      done = start + to;
+    }
+    return out + text.slice(done);
+  };
+}
+
+// The user's private paths hidden. A line that names both a listed path and a built-in secret path is omitted here:
+// the listed path may be a part of the secret one, and the omission rule after the cut does not read a long line to
+// its end. Private key blocks are masked first, as the header of a block may be on such a line. A path holds no line
+// break: the lines are told apart only for a text that holds both kinds of path.
+const hideOwnPaths = (text, hide) => {
+  const hidden = hide(text);
+  if (hidden === text || !SECRET_PATH.test(text)) return hidden;
+  return maskPrivateKeys(text).split('\n').map((line) => {
+    const out = hide(line);
+    return out !== line && SECRET_PATH.test(line) ? SECRET_LINE : out;
+  }).join('\n');
+};
+
 /**
  * The text with secret-path lines omitted and secrets masked. Cut to maxChars + WINDOW_MARGIN first when
- * maxChars is given: the caller sends only the first maxChars characters (see cutAndCloseTail).
+ * maxChars is given: the caller sends only the first maxChars characters (see cutAndCloseTail). With hidePaths,
+ * the private paths are hidden before the cut, which then cannot leave a part of one, and before the secret mask,
+ * which cannot change a path before it is read; the whole string is read for them. With prose, it runs last, and
+ * the cut does not split a run of value characters: an earlier rule that shortens the text can bring the edge of the
+ * window into what is sent.
  */
-function maskString(text, maxChars) {
-  const cutText = maxChars !== undefined && text.length > maxChars + WINDOW_MARGIN;
-  const cut = cutText ? cutAndCloseTail(text, maxChars + WINDOW_MARGIN) : text;
+function maskString(text, maxChars, { hidePaths, prose }) {
+  const source = hidePaths ? hideOwnPaths(text, hidePaths) : text;
+  const cutText = maxChars !== undefined && source.length > maxChars + WINDOW_MARGIN;
+  const cut = cutText ? cutAndCloseTail(source, maxChars + WINDOW_MARGIN, prose ? PROSE_RUN_CHAR : TOKEN_CHAR) : source;
   const omitted = omitSecretLines(maskPrivateKeys(cut));
-  return maskSecrets(maskUserinfo(maskHeaders(maskOptions(omitted)), cutText), { keepGitHashes: true });
+  const masked = maskSecrets(maskUserinfo(maskHeaders(maskOptions(omitted)), cutText), { keepGitHashes: true });
+  return prose ? prose(masked) : masked;
 }
 
 /**
@@ -761,8 +857,11 @@ function fieldOmitted(masked, maxChars) {
  * masked, and no rule reads more of a string than that window (plus LINE_EXTENSION of its tail): the cost of the mask
  * then does not grow with the size of the state (it has a bound: MAX_STATE_NODES nodes, MAX_STATE_CHARS characters). A
  * name longer than the window (a key, the name of a pair, the first of two elements) is not read: it names a secret.
+ * hidePaths (privatePathMask of jev-private-paths.mjs) and prose (secretProseMask) are applied to every string and
+ * key that is kept; either one that throws makes the state unreadable, so it is not sent. hidePaths reads each of
+ * those strings whole, beyond the window, so with it the time grows with the size of the state.
  */
-export function maskJevState(state, { maxChars } = {}) {
+export function maskJevState(state, { maxChars, hidePaths, prose } = {}) {
   let nodes = 0;
   const ancestors = new Set();
   // With a window, a string is read up to cap characters (and its tail up to LINE_EXTENSION more) and the reads of the whole
@@ -815,7 +914,7 @@ export function maskJevState(state, { maxChars } = {}) {
       // A session id is no secret and a UUID looks like one to maskSecrets.
       if (sessionId && UUID.test(value)) return value;
       charge(value);
-      const masked = maskString(value, maxChars);
+      const masked = maskString(value, maxChars, { hidePaths, prose });
       if (fieldOmitted(masked, maxChars)) throw new JevStateFieldOmittedError('a string of the state is a secret path');
       return masked;
     }
@@ -853,7 +952,7 @@ export function maskJevState(state, { maxChars } = {}) {
         if (masked === undefined) continue;
         charge(k);
         // the secret path of a key is looked for as far as a cut key is read
-        const base = SECRET_PATH.test(k.length > cap + LINE_EXTENSION ? k.slice(0, cap + LINE_EXTENSION) : k) ? KEY_OMITTED : maskString(k, maxChars);
+        const base = SECRET_PATH.test(k.length > cap + LINE_EXTENSION ? k.slice(0, cap + LINE_EXTENSION) : k) ? KEY_OMITTED : maskString(k, maxChars, { hidePaths, prose });
         let name = base;
         if (Object.hasOwn(out, name)) {
           let n = nextSuffix.get(base) ?? 2;

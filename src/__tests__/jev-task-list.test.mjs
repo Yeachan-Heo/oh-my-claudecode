@@ -374,7 +374,8 @@ describe('task list: storage library', () => {
 
   it('masking keeps task names and masks key, token and secret values only', async () => {
     const sid = session();
-    const keep = ['File task-list-recovery-2026-11-10 to fix', 'Passed: 26 tests', 'tokens: 5 items', 'Key monkey=3 and task-list-abcdefghij'];
+    const keep = ['File task-list-recovery-2026-11-10 to fix', 'Passed: 26 tests', 'tokens: 5 items', 'Key monkey=3 and task-list-abcdefghij',
+      'Port gsk_renderer_new_for_surface', 'Add the xai-compatible-provider-config', 'Deploy to ASIAPACIFICREGION'];
     const hide = [
       ['api_key=abcdef123456', 'abcdef123456'],
       [`ghp_${'a1'.repeat(10)}`, 'a1a1a1a1a1a1'],
@@ -385,6 +386,9 @@ describe('task list: storage library', () => {
       [`${'sk'}_${'live'}_${'e5'.repeat(10)}`, 'e5e5e5e5e5e5'],
       [`${'hf'}_${'f6'.repeat(10)}`, 'f6f6f6f6f6f6'],
       [`${'npm'}_${'a7'.repeat(10)}`, 'a7a7a7a7a7a7'],
+      [`${'gsk'}_${'g8'.repeat(12)}`, 'g8g8g8g8g8g8'],
+      [`${'xai'}-${'x9'.repeat(12)}`, 'x9x9x9x9x9x9'],
+      [`${'ASIA'}${'T4'.repeat(8)}`, 'T4T4T4T4T4T4'],
       [`${'eyJ'}${'h1'.repeat(6)}.${'p2'.repeat(6)}.${'s3'.repeat(6)}`, 'p2p2p2p2p2p2'],
       ['Bearer abcdefgh12345678', 'abcdefgh12345678'],
       ['AUTH_TOKEN: "xyz-secret-1"', 'xyz-secret-1'],
