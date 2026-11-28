@@ -3199,6 +3199,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-replacement-');
       mocks.autoStartupEvidence = false;
       const fixture = await seedOwnerRecoveryFixture('codex', 'before-dispatch');
+      await seedOwnedRecoveryTask(fixture.teamName); // an idle recovery delivers no startup inbox, so the dead worker owns task 1
       configureOwnerPaneLifecycle();
       useFencedRetirement({ kill: mocks.killOwnedWorkerPane.getMockImplementation() });
       customize();
@@ -4232,6 +4233,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
       expect.objectContaining({ pane_id: '%2' }),
       expect.stringContaining('worker_startup_not_ready'),
+      expect.any(Function),
       expect.any(Function),
     );
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
