@@ -23,7 +23,8 @@
  *    out. MISSING_TO_NOTIFY `module_missing` within a day give one systemMessage. With
  *    OMC_JEV_COMPACT_REGISTRY_BY_WINDOW=1 the limits of that text (characters, changed files, git
  *    lines, tasks) are multiplied by window / REFERENCE_WINDOW, `window` being that of the claimed
- *    record (see registryBudgets), and a task list is written with up to TASKS_RECORD_CAP entries.
+ *    record (see registryBudgets), a task list is written with up to TASKS_RECORD_CAP entries, and the
+ *    text of every task is masked before it is written (see taskText).
  *
  * 4. Pasted-text retention. With OMC_JEV_COMPACT_PASTES the module writes the pasted text it moves out of the conversation to
  *    <state dir>/compaction-pastes/<session>/<hash>.txt (see its header). SessionStart (any source but `compact`) first touches
@@ -43,7 +44,8 @@
  *
  * <state dir> is OMC_JEV_LOG_DIR when set, else ~/.omc/state/jev: the module knows only the home
  * directory, not the project's state root. Registry text is masked with scripts/lib/jev-mask.mjs, the
- * masking the module uses for what it sends.
+ * masking the module uses for what it sends; task texts only with OMC_JEV_COMPACT_REGISTRY_BY_WINDOW=1,
+ * then also with scripts/lib/jev-series-mask.mjs.
  */
 
 import { appendFileSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -55,6 +57,7 @@ import { fileURLToPath } from 'node:url';
 import { parseJevEnv, resolveJevLogMaxBytes, rotateJevLog } from '../jev-resolve.mjs';
 import { atomicWriteFileSync } from './atomic-write.mjs';
 import { maskSecrets } from './jev-mask.mjs';
+import { cleanForJevLong } from './jev-series-mask.mjs';
 
 export const POINT = 'compaction';
 export const REGISTRY_CHARS = 1500;
@@ -85,6 +88,9 @@ const REFERENCE_WINDOW = 400_000;
 const REFERENCE_BUDGETS = { chars: REGISTRY_CHARS, files: MAX_FILES, git: MAX_GIT, tasks: MAX_TASKS };
 // With the switch on, a task list is written with up to this many entries; the limit of the text applies when the file is read.
 const TASKS_RECORD_CAP = 100;
+// The characters of one task written to the registry, and those of its start the masks read.
+const TASK_TEXT_CHARS = 150;
+const TASK_SCAN_CHARS = 600;
 // A window outside this range, in tokens, does not scale the limits.
 const REGISTRY_WINDOW_MIN = 10_000;
 const REGISTRY_WINDOW_MAX = 10_000_000;
@@ -116,6 +122,10 @@ export function registryBudgets(window) {
 
 // How many entries of a task list are written per event.
 const taskRecordCap = (env) => (registryByWindowOn(env) ? TASKS_RECORD_CAP : MAX_TASKS);
+
+// The text of a task as it is written. With the switch on more tasks are written and shown, so each goes through both masks first, the shared one under the mask of a
+// series (they read a bounded start of it).
+const taskText = (text, env) => oneLine(registryByWindowOn(env) ? cleanForJevLong(maskSecrets(String(text ?? '').slice(0, TASK_SCAN_CHARS))) : text, TASK_TEXT_CHARS);
 
 /** Directory of the registry and the module's spool. */
 export function stateDirOf(env = process.env) {
@@ -209,13 +219,13 @@ export function recordCompactionState(kind, data, env = process.env) {
       } else if (SHELL_TOOLS.has(tool) && typeof input.command === 'string' && GIT_CHANGE.test(input.command)) {
         events.push({ t: 'git', v: oneLine(maskSecrets(input.command, { keepGitHashes: true }), 200) });
       } else if (tool === 'TodoWrite' && Array.isArray(input.todos)) {
-        events.push({ t: 'tasks', v: input.todos.filter((x) => x && x.status !== 'completed').slice(0, taskRecordCap(env)).map((x) => ({ text: oneLine(x.content ?? x.activeForm, 150), status: String(x.status ?? '') })) });
+        events.push({ t: 'tasks', v: input.todos.filter((x) => x && x.status !== 'completed').slice(0, taskRecordCap(env)).map((x) => ({ text: taskText(x.content ?? x.activeForm, env), status: String(x.status ?? '') })) });
       } else if (/(^|__)update_plan$/.test(tool) && Array.isArray(input.items)) {
-        events.push({ t: 'tasks', v: input.items.filter((x) => x && x.status !== 'completed').slice(0, taskRecordCap(env)).map((x) => ({ text: oneLine(x.content, 150), status: String(x.status ?? '') })) });
+        events.push({ t: 'tasks', v: input.items.filter((x) => x && x.status !== 'completed').slice(0, taskRecordCap(env)).map((x) => ({ text: taskText(x.content, env), status: String(x.status ?? '') })) });
       } else if (tool === 'TaskCreate' && (input.subject || input.description)) {
-        events.push({ t: 'task+', id: taskIdOf(data.tool_response) ?? null, text: oneLine(input.subject || input.description, 150) });
+        events.push({ t: 'task+', id: taskIdOf(data.tool_response) ?? null, text: taskText(input.subject || input.description, env) });
       } else if (tool === 'TaskUpdate' && input.taskId !== undefined) {
-        events.push({ t: 'task~', id: String(input.taskId), status: String(input.status ?? ''), ...(input.subject ? { text: oneLine(input.subject, 150) } : {}) });
+        events.push({ t: 'task~', id: String(input.taskId), status: String(input.status ?? ''), ...(input.subject ? { text: taskText(input.subject, env) } : {}) });
       }
     }
     if (!events.length) return;

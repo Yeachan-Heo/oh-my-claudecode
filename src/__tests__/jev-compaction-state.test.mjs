@@ -728,6 +728,61 @@ describe('jev-compaction-state: registry limits by window (OMC_JEV_COMPACT_REGIS
     }
   });
 
+  // Made-up keys, put together here: the first is known to the shared mask, the other two only to the mask of a series.
+  const KEYS = [['sk-ant-', 'api03-', 'Zz9Yy8Xx7Ww6Vv5Uu4Tt3'], ['gsk_', 'a1B2c3D4', 'e5F6g7H8', 'i9J0k1L2'], ['ASIA', 'QWER5TYU', 'IOP7ASDF']].map((parts) => parts.join(''));
+  const withKeys = (env, sid) => {
+    // The keys stand among the first 15 tasks, which are written without the switch too, and further on, where only the longer list reaches.
+    const keyAt = (k) => (k % 20 >= 10 && k % 20 < 13 ? KEYS[(k % 20) - 10] : undefined);
+    const list = Array.from({ length: 40 }, (_, k) => ({ content: keyAt(k) ? `rotate ${keyAt(k)}` : `task ${pad(k)}`, activeForm: 'x', status: 'pending' }));
+    post(env, sid, 'TodoWrite', { todos: list });
+    post(env, sid, 'TodoWrite', { todos: [{ activeForm: `Rotating ${KEYS[1]}`, status: 'in_progress' }] });
+    post(env, sid, 'mcp__x__update_plan', { items: [{ content: `step ${KEYS[1]}`, status: 'pending' }, { content: `step ${KEYS[2]}`, status: 'pending' }] });
+    post(env, sid, 'TaskCreate', { subject: `create ${KEYS[1]}` }, { tool_response: { task: { id: '1' } } });
+    post(env, sid, 'TaskCreate', { description: `describe ${KEYS[2]}` }, { tool_response: { task: { id: '2' } } });
+    post(env, sid, 'TaskUpdate', { taskId: '1', status: 'in_progress', subject: `update ${KEYS[0]}` });
+    post(env, sid, 'TodoWrite', { todos: list });
+  };
+
+  it('masks the text of every task before it is written while the switch is on, so no longer list brings a key to the file or the context', () => {
+    const { env: base, sid, spool } = setup();
+    const env = { ...base, [SWITCH]: '1' };
+    withKeys(env, sid);
+    const written = readFileSync(registryPath(sid, undefined, env), 'utf8');
+    spoolRecord(spool, sid, { result: 'fallback', window: 1_000_000 });
+    const shown = afterSessionStart({ session_id: sid, source: 'compact' }, {}, env).context;
+    expect(tasksOf(shown)).toHaveLength(38);
+    for (const key of KEYS) for (const text of [written, shown]) expect(text).not.toContain(key.slice(-16));
+    const texts = eventsOf(env, sid).flatMap((e) => (e.t === 'tasks' ? e.v.map((x) => x.text) : [e.text]));
+    expect(texts).toHaveLength(40 + 1 + 2 + 3 + 40);
+    expect(texts).toContain('task 000');
+    for (const start of ['rotate ', 'Rotating ', 'step ', 'create ', 'describe ', 'update ']) expect(texts.some((t) => t.startsWith(start)), start).toBe(true);
+  });
+
+  it('reads a bounded start of a long task text for the masks and cuts it to 150 characters', () => {
+    const { env: base, sid } = setup();
+    const env = { ...base, [SWITCH]: '1' };
+    post(env, sid, 'TaskCreate', { subject: `${' '.repeat(590)}head${' '.repeat(20)}tail` });
+    post(env, sid, 'TaskCreate', { subject: 'word '.repeat(100) });
+    const [bounded, cut] = eventsOf(env, sid).map((e) => e.text);
+    expect(bounded).toBe('head');
+    expect(cut).toHaveLength(150);
+  });
+
+  it('writes the task texts as they stand without the switch', () => {
+    for (const value of [undefined, '', 'off', 'true']) {
+      const { env: base, sid } = setup();
+      const env = { ...base, [SWITCH]: value };
+      withKeys(env, sid);
+      post(env, sid, 'TaskCreate', { subject: `${' '.repeat(590)}head${' '.repeat(20)}tail` });
+      const events = eventsOf(env, sid);
+      expect(events[0].v.map((x) => x.text).slice(10, 13), String(value)).toEqual(KEYS.map((key) => `rotate ${key}`));
+      expect(events.slice(1, 6).flatMap((e) => (e.t === 'tasks' ? e.v.map((x) => x.text) : [e.text]))).toEqual([
+        `Rotating ${KEYS[1]}`, `step ${KEYS[1]}`, `step ${KEYS[2]}`, `create ${KEYS[1]}`, `describe ${KEYS[2]}`, `update ${KEYS[0]}`,
+      ]);
+      expect(events.at(-1).text).toBe('head tail');
+    }
+  });
+
   it('cuts the tasks when read: the first ones of a list, the newest of added ones', () => {
     const budgets = registryBudgets(200_000);
     const listed = setup();
