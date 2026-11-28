@@ -44,6 +44,7 @@ are summarized once per upstream source here rather than file-by-file.
 | `teach` skill | idea | pstack teach | how+why composition with a landing check |
 | `bro` skill | idea | pstack bro | plain-language restatement keeping every fact |
 | `sharpen` skill | idea | pstack sharpen | task aiming: consumer, done-check, non-goals, expert lens |
+| `reframe` skill | idea | pstack reframe | expert vocabulary for what the user is building: disambiguate, 8-12 terms, neighboring fields, rewrite |
 | `in-your-own-words` skill | idea | pstack in-your-own-words | goal/problem/success playback before work starts |
 | `recall` skill | idea | pstack recall | artifact-first context recovery in trust order |
 | `ketchup` skill | idea | pstack ketchup | session catch-up with executive summary and status lines |
