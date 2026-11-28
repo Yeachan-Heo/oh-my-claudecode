@@ -19,3 +19,18 @@ export function intentionallyWrong(dir) {
   // ↓ This is the construction the gate is designed to catch.
   return join(dir, '.omc', 'state', 'fixture.json');
 }
+
+export function homeStateIsStillWorkspaceState(home) {
+  // ↓ Caught too: only `join(home, '.omc', 'config.json')` is the global config.
+  return join(home, '.omc', 'state', 'fixture.json');
+}
+
+export function homeConfigOutsideTheResolver(home) {
+  // ↓ Caught too: `home` may name a workspace root outside getGlobalOmcConfigCandidates().
+  return join(home, '.omc', 'config.json');
+}
+
+export function getGlobalOmcConfigCandidates(home) {
+  // Not reported: the hook-side mirror of the per-user global config resolver.
+  return [join(home, '.omc', 'config.json')];
+}

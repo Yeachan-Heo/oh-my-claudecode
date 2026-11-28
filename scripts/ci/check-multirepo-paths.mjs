@@ -83,11 +83,26 @@ const GLOBAL_FIRST_ARG_PATTERNS = [
   /^(?:path\.)?join\(\s*CLAUDE_CONFIG_DIR\s*,/,
   /^(?:path\.)?join\(\s*configDir\s*,/,
 ];
+// Hook scripts that honor USERPROFILE/HOME mirror getGlobalOmcConfigCandidates()
+// and resolve the home directory into a local `home` first. Accept that name
+// only for the global config file, and only inside a function declaration with
+// that name, so `join(home, '.omc', 'state', ...)` and a workspace root that
+// happens to be called `home` are still reported.
+const HOME_CONFIG_FILE_PATTERN = /^(?:path\.)?join\(\s*home\s*,\s*(['"])\.omc\1\s*,\s*(['"])config\.json\2\s*\)$/;
+const GLOBAL_CONFIG_RESOLVER = 'getGlobalOmcConfigCandidates';
+function normalizeMatchText(matchText) {
+  // Args may span lines — normalize whitespace before matching.
+  return matchText.replace(/\s+/g, ' ').trim();
+}
 function isGlobalConfigMatch(matchText) {
   // matchText looks like: join(homedir(), '.omc', 'state', ...) or path.join(os.homedir(), '.omc', ...)
-  // Args may span lines — normalize whitespace before matching.
-  const normalized = matchText.replace(/\s+/g, ' ').trimStart();
+  const normalized = normalizeMatchText(matchText);
   return GLOBAL_FIRST_ARG_PATTERNS.some(re => re.test(normalized));
+}
+function isGlobalConfigResolverMatch(match) {
+  if (!HOME_CONFIG_FILE_PATTERN.test(normalizeMatchText(match.text()))) return false;
+  return match.ancestors().some(node =>
+    node.kind() === 'function_declaration' && node.field('name')?.text() === GLOBAL_CONFIG_RESOLVER);
 }
 
 const req = createRequire(resolve(REPO_ROOT, 'package.json'));
@@ -168,7 +183,7 @@ for (const filePath of walkFiles(searchRoot)) {
       const fullText = match.text();
       const text = fullText.trim().slice(0, 80);
       // Skip global-config constructions: homedir()/.omc, getClaudeConfigDir()/.omc, etc.
-      if (isGlobalConfigMatch(fullText)) continue;
+      if (isGlobalConfigMatch(fullText) || isGlobalConfigResolverMatch(match)) continue;
       hitLines.push(`  ${rel}:${line}  ${text}`);
       totalHits++;
     }

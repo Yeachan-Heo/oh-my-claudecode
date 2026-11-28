@@ -547,9 +547,26 @@ function refreshNamedWorkflowDispatch(path, expected) {
   return result;
 }
 
+// Mirrors src/utils/paths.ts:getGlobalOmcConfigCandidates('config.json'), as
+// scripts/code-simplifier.mjs does: OMC_HOME alone when set; otherwise the XDG
+// config root on Linux/Unix, then the legacy ~/.omc fallback.
+function getGlobalOmcConfigCandidates() {
+  const explicitRoot = process.env.OMC_HOME?.trim();
+  if (explicitRoot) return [join(explicitRoot, "config.json")];
+
+  const home = process.platform === "win32"
+    ? process.env.USERPROFILE || process.env.HOME || homedir()
+    : process.env.HOME || homedir();
+  const legacy = join(home, ".omc", "config.json");
+  if (process.platform === "win32" || process.platform === "darwin") return [legacy];
+
+  const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  return [...new Set([join(configHome, "omc", "config.json"), legacy])];
+}
+
 function getIdleCooldownSeconds() {
-  const configPath = join(homedir(), ".omc", "config.json");
-  const config = readJsonFile(configPath);
+  const configPath = getGlobalOmcConfigCandidates().find((candidate) => existsSync(candidate));
+  const config = configPath ? readJsonFile(configPath) : null;
   const val = config?.notificationCooldown?.sessionIdleSeconds;
   return typeof val === "number" ? val : 60;
 }
