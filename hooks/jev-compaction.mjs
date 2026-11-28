@@ -125,12 +125,30 @@
  * blocks last in that queue. The checks of the blocks for a secret have their own budget, BLOCK_SCAN_BUDGET_CHARS. The record gets `f2`; see "second round" below.
  *
  * Series of traces (the same switch, OMC_JEV_COMPACT_BLOCKS). Two or more traces of the module on neighbouring lines of one row (a removed call, a moved reply, a moved agent
- * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round every series of the rows before the tail
- * (the rows the blocks left, less the rows another stage changes) that the check for a secret lets through is rated by Jev with the question of the round and stands in the queue
- * with the results and the blocks; a series that comes down merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces
- * go word for word to a file in the pastes directory (with the header of the block files when a block trace is among them), written and read back like the other files. The series
- * count in the floor like the blocks. In a direct reply the trace of a reply, of a block or of an agent's message is never merged. The record gets `series` (the merge) and
+ * message, a moved block; only white space between them, a pasted-text trace ends a series) are a series. In the second round every series of the rows before the open tool loop
+ * (the rows the blocks left, less the rows another stage changes) that passes the checks below is rated by Jev with the question of the round, its
+ * text masked, and stands in the queue with the results and the blocks; a series that comes down merges into one line, `[compacted] traces merged: <n> calls, <n> replies, <n> others; list in <path>`, and the traces
+ * go to a file in the pastes directory (with the header of the block files when a block trace is among them), masked, written and read back like the other files. The checks: a series
+ * that names a private path (OMC_JEV_COMPACT_PRIVATE_PATHS) stays whole, and the check for a secret of the other stages reads the names of its tools (a name a mask changes is
+ * counted as `masked_tool` in what Jev is told); then the mask of a series (scripts/lib/jev-series-mask.mjs; the file keeps the paths of the module's own files whose files can be
+ * read), and a series that keeps a line the mask cannot clear stays whole; then the same
+ * check reads both masked texts, and a hit, a text beyond what it reads or no time left keeps the series whole too (not sent, not written, not counted). What leaves has the shared
+ * mask of the other stages under the mask of a series. The series count in the floor like the blocks. In a direct reply the trace of a reply, of a block or of an agent's message is never merged. The record gets `series` (the merge) and
  * `f2.series_question`; `shadow` counts the candidates (`f2.candidates.series`).
+ *
+ * Archive of calls and results (OMC_JEV_COMPACT_ARCHIVE=off|shadow|active; off when unset or anything else; needs a state directory). With `active`, while the point itself is active and the compaction has
+ * a session id, every call and result (or notification) that the cut traces, shortens or removes goes whole to <state dir>/compaction-archive/<session>/<tool_use_id>.txt (nothing in the conversation names the file
+ * of a result removed with its call): a head with the call
+ * and its input as masked JSON, then the result unchanged. The trace or the shortened result names the file (`; full call and result: <path>`) only after the file was written and read back
+ * equal, and each path counts in the lengths the floor and the cascade predict. Nothing is archived that may hold a secret (a secret or private path or a secret word in the input or in the
+ * result, a secret tool, a command that prints secrets, a result that masking would change), nor a result without text, an empty one, one over the host's write limit, or a text an earlier
+ * compaction cut (its trace keeps pointing at the first file, which is reused). The files are written ARCHIVE_PARALLEL at a time, none starts after ARCHIVE_BUDGET_MS from the start of the batch or
+ * after the compaction's own deadline, and after one host call that hit its cap none starts at all. Neighbouring traces of one identical call (same tool, same whole input) inside one API message,
+ * with nothing between them in the built conversation, merge into one line with a counter, `[compacted] Tool(input) x<n> - results of <chars> chars removed; full calls and results: <dir> (<files>)`;
+ * different calls of one target never merge. `shadow` (and `active` in a compaction that is not active) only counts what `active` would archive and merge: no file, no path, the conversation is
+ * built as with the switch off. The record gets `archive_mode`, the counts (`archive_written`, `archive_reused`, `archive_rewritten`, `archive_bytes`, `archive_skipped` by reason, `archive_errors`,
+ * `archive_timed_out`, `archive_ms`, `archive_marker`; `archive_planned` in shadow) and `merged_traces`, `merged_items`. A marker file in the session directory is touched by every compaction
+ * that archives; scripts/lib/jev-compaction-state.mjs removes session directories whose newest file is older than OMC_JEV_ARCHIVE_DAYS days.
  *
  * Secrets in the paste, reply, agent and block stages: a tag, run or agent message that names a secret or private path, or that masking changes, stays
  * in the conversation unmoved, and no file is written for it. This is deliberate: a copy with the secrets masked is not archived in its place, so
@@ -197,6 +215,7 @@
  */
 
 import { maskPrivateKeys, maskSecrets } from '../scripts/lib/jev-mask.mjs';
+import { RESIDUAL_SECRET, archiveMaskedLong, cleanForJevLong, maskResidualLines } from '../scripts/lib/jev-series-mask.mjs';
 
 const POINT = 'compaction';
 // The last messages stay whole: the work in flight.
@@ -776,6 +795,7 @@ export async function readConfig($) {
     OMC_JEV_COMPACT_WINDOW_CHARS: await $.env.get('OMC_JEV_COMPACT_WINDOW_CHARS'),
     OMC_JEV_COMPACT_FULL_INPUT: await $.env.get('OMC_JEV_COMPACT_FULL_INPUT'),
     OMC_JEV_COMPACT_OWNER_LAST: await $.env.get('OMC_JEV_COMPACT_OWNER_LAST'),
+    OMC_JEV_COMPACT_ARCHIVE: await $.env.get('OMC_JEV_COMPACT_ARCHIVE'),
     OMC_JEV_COMPACT_JEV_STAGES: await $.env.get('OMC_JEV_COMPACT_JEV_STAGES'),
     OMC_JEV_BREAKER: await $.env.get('OMC_JEV_BREAKER'),
     OMC_JEV_MAX_RPM: await $.env.get('OMC_JEV_MAX_RPM'),
@@ -893,6 +913,9 @@ export async function readConfig($) {
     jevStages: String(env.OMC_JEV_COMPACT_JEV_STAGES ?? '').trim() === 'active',
     // In the second round the owner's blocks that Jev kept (level 2-3) go after every other candidate; they come down only when nothing else is left (default off).
     ownerLast: String(env.OMC_JEV_COMPACT_OWNER_LAST ?? '').trim() === 'active',
+    // Archive of calls and results (off unless OMC_JEV_COMPACT_ARCHIVE says shadow or active): the files of the cut results go to <state dir>/compaction-archive.
+    archive: archiveModeOf(env.OMC_JEV_COMPACT_ARCHIVE),
+    archiveDir: stateDir ? `${stateDir}/compaction-archive` : undefined,
   };
 }
 
@@ -1374,13 +1397,28 @@ function inputSummary(tool, input) {
   return oneLine(text);
 }
 
-function namesSecretPath(value, privatePaths) {
-  if (SECRET_PATH.test(value)) return true;
+const namesSecretPath = (value, privatePaths) => SECRET_PATH.test(value) || namesPrivatePath(value, privatePaths);
+
+// A character of a path written as an escape: a JSON `\uXXXX` (behind any run of backslashes, as each further JSON string doubles it) or the `%XX` bytes of one
+// UTF-8 character in a URL. Only well-formed UTF-8 is matched, so no decoding throws (a thrown error costs far more than the scan); other bytes stay as written.
+// Each escape is of a bounded length, the text is decoded once (a double encoding stays as it is) and every run is read from its start only, so the scan stays linear.
+// A text longer than PATH_DECODE_MAX characters is not decoded: when it holds an escape it counts as naming a private path.
+const PATH_ESCAPE = /(?<!\\)\\+u([0-9a-fA-F]{4})|%(?:[0-7][0-9a-fA-F]|(?:[cC][2-9a-fA-F]|[dD][0-9a-fA-F])%[89abAB][0-9a-fA-F]|(?:[eE]0%[abAB]|[eE][dD]%[89]|[eE][1-9a-cA-CefEF]%[89abAB])[0-9a-fA-F]%[89abAB][0-9a-fA-F]|(?:[fF]0%[9abAB]|[fF]4%8|[fF][1-3]%[89abAB])[0-9a-fA-F](?:%[89abAB][0-9a-fA-F]){2})/g;
+const PATH_DECODE_MAX = 4194304;
+const pathEscape = (all, code) => (code !== undefined ? String.fromCharCode(parseInt(code, 16)) : decodeURIComponent(all));
+
+function namesPrivatePath(value, privatePaths) {
   if (!privatePaths.length) return false;
   // Every run of slashes and backslashes as one slash: a Windows path, its JSON form (C:\\Users\\x), an escaped
   // slash (\/home\/u) and a doubled slash all compare equal to the private path (linear, unlike slash()).
-  const v = String(value).replace(/[\\/]+/g, '/').toLowerCase();
-  return privatePaths.some((p) => v.includes(p));
+  const text = String(value);
+  const names = (s) => { const v = s.replace(/[\\/]+/g, '/').toLowerCase(); return privatePaths.some((p) => v.includes(p)); };
+  if (names(text)) return true;
+  // The text as written first, then with its escapes read: a path may hold what looks like an escape (`C:\data\ubeef`).
+  if (!text.includes('%') && !text.includes('\\u')) return false;
+  if (text.length > PATH_DECODE_MAX) return true;
+  const decoded = text.replace(PATH_ESCAPE, pathEscape);
+  return decoded !== text && names(decoded);
 }
 
 // The text with every line that names a secret or private path replaced by SECRET_LINE (exported for tests). Private
@@ -2283,9 +2321,9 @@ function markMentioned(candidates, user) {
 }
 
 function traceLine(c) {
-  if (c.note) return `[compacted] ${NOTE_LABEL} (${clip(c.summary, TRACE_INPUT_CHARS)}) - ${c.resultChars} chars removed`;
+  if (c.note) return `[compacted] ${NOTE_LABEL} (${clip(c.summary, TRACE_INPUT_CHARS)}) - ${c.resultChars} chars removed${archiveSuffix(c.archivePath)}`;
   const what = !c.textOnly ? 'non-text result (image or file) removed' : `${c.res.isError ? 'error' : 'result'} of ${c.resultChars} chars removed`;
-  return `[compacted] ${c.use.tool}(${clip(c.summary, TRACE_INPUT_CHARS)}) - ${what}`;
+  return `[compacted] ${c.use.tool}(${clip(c.summary, TRACE_INPUT_CHARS)}) - ${what}${archiveSuffix(c.archivePath)}`;
 }
 
 // A notification's cut keeps its summary and the first SHORT_CHARS of its <result> body (the part before it is the same fixed text in every
@@ -2300,9 +2338,9 @@ function shortText(c) {
     const kept = `${summary}<result>${body ? body[1].slice(0, SHORT_CHARS) : c.res.text.slice(0, SHORT_CHARS)}</result>`;
     // The source stays in the copy (the task ids and output files of the notification, the first few): the next compaction ties it to its call by them.
     const source = sourceFields(noteHeads(c.res.text).join('\n'), 8).map(([tag, value]) => `<${tag}>${value}</${tag}>\n`).join('');
-    return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${source}${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]\n</task-notification>`;
+    return `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n${source}${kept}\n[notification shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars${archiveSuffix(c.archivePath)}]\n</task-notification>`;
   }
-  return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars]`;
+  return `${c.res.text.slice(0, SHORT_CHARS)}\n[result shortened at compaction: kept ${SHORT_CHARS} of ${c.resultChars} chars${archiveSuffix(c.archivePath)}]`;
 }
 
 // The task list stays: every TaskCreate and TaskUpdate call, the newest TodoWrite call and the newest
@@ -3359,7 +3397,7 @@ function build(messages, candidates, keepFrom, group, stats, queued = new Map())
       const kept = [];
       for (const u of m.toolUses || []) {
         const c = byId.get(u.tool_use_id);
-        if (c && c.keep === 'trace') traces.push(c.trace);
+        if (c && c.keep === 'trace') { if (!c.mergedInto) traces.push(c.trace); }
         else if (!(c && c.keep === 'drop')) kept.push({ tool_use_id: u.tool_use_id, tool: u.tool, input: u.input });
       }
       const text = [m.text || '', ...traces].filter(Boolean).join('\n');
@@ -5295,7 +5333,7 @@ async function askTie($, cfg, group, ctx) {
   const fieldsOf = ({ x }) => (x.kind === 'result'
     ? { kind: 'tool_result', tool: x.c.note ? NOTE_LABEL : x.c.use.tool, input: x.c.note ? '' : clip(oneLine(maskSecrets(sentInputJson(x.c.use.input, cfg.privatePaths).slice(0, STATE_INPUT_CHARS * 4 + MASK_SLACK_CHARS))), STATE_INPUT_CHARS), result: maskedHeadTail(x.c.res.text || '', STATE_HEAD_CHARS, STATE_TAIL_CHARS, cfg.privatePaths), chars: x.c.resultChars, ...(x.c.res.isError ? { error: true } : {}) }
     : x.kind === 'series'
-      ? { row: x.item.row, kind: 'trace_series', author: 'module', text: x.item.body, length: x.item.chars, age_turns: x.item.age_turns, current_turn: x.item.current_turn, in_tail: x.item.in_tail, has_file: true, repeated: x.item.repeated, agent_session: x.item.agent_session, series: x.item.f2 }
+      ? { row: x.item.row, kind: 'trace_series', author: 'module', text: seriesQuestion(x.item.body), length: x.item.chars, age_turns: x.item.age_turns, current_turn: x.item.current_turn, in_tail: x.item.in_tail, has_file: true, repeated: x.item.repeated, agent_session: x.item.agent_session, series: x.item.f2 }
       : { ...blockFields(x.item, { text: x.item.body, nr: 1, z: 1 }) });
   const windowBytes = windowBytesOf(cfg);
   const header = blockHeader(ctx.user, windowBytes, { f2: { goal_tokens: Math.round(ctx.goal), to_remove_tokens: Math.round(ctx.restNeed), ...(ctx.rateOnly ? {} : { tie_group: true }) } });
@@ -5346,7 +5384,7 @@ async function askTie($, cfg, group, ctx) {
 
 // --- series of traces (OMC_JEV_COMPACT_BLOCKS) --------------------------------------------------
 // Two or more traces of the module on neighbouring lines of one row (SERIES_MIN; only white space between them) are a series, and a series that is asked for merges into one
-// line that names a file holding the traces word for word. A series merges only whole, as a unit, and only where the row may be edited: before the tail, outside the rows the
+// line that names a file holding the traces word for word. A series merges only whole, as a unit, and only where the row may be edited: before the open tool loop, outside the rows the
 // host cannot rebuild from text, and, in a direct reply, never over the trace of a reply, of a block or of an agent's message. Which series to merge is not decided here: the caller passes the keys.
 const SERIES_MIN = 2;
 const SERIES_NOTE = '[compacted] traces merged:';
@@ -5354,9 +5392,84 @@ const SERIES_NOTE_RE = /^\[compacted\] traces merged: (\d+) calls, (\d+) replies
 const seriesNote = (stats, path) => `${SERIES_NOTE} ${stats.calls} calls, ${stats.replies} replies, ${stats.others} others; list in ${path}`;
 const seriesTok = (text, rates) => rates.RATE_TRACE * text.length + rates.RATE_NON_ASCII * nonAscii(text);
 const seriesPath = (cfg, sessionId, name) => `${cfg.pasteDir}/${safeName(sessionId)}/${name}.txt`;
-// The paths of the module's own files stand in its traces (a reply, an agent's message, a merged series). They are no secret, and a name of 32 hexadecimal digits is what the masker
-// takes for one, so the check reads the text with them out (as the agent stage reads a trace without its path).
-const ownFilePaths = (cfg) => new RegExp(`${escapeRegExp(cfg.pasteDir)}/[A-Za-z0-9_-]{1,80}/[0-9a-f]{32}\\.txt|\\b${BLOCK_LETTER}/[0-9a-f]{32}\\.txt`, 'g');
+// The paths of the module's own files stand in its traces (a reply, an agent's message, a merged series). They are no secret, and a name of 32 hexadecimal digits is what the mask
+// takes for one, so the file of a series is masked with them out and holds them as they were. They are no private path either.
+// The files of the archive count whatever its switch says, as a conversation can still name them after it went off: a single path, and the list of a line merged from calls of one
+// identical call, `<dir>/ (a.txt, b.txt)`. To the checks a path whose names the mask would change (the ids a host makes aside) is no path of the module: it is masked
+// like any text; a file that is written keeps the paths whose files are there (seriesFileBody).
+// An id a host makes counts only where a name begins, so behind a token prefix the mask reads it with the rest of the name; hexadecimal digits and a UUID also only where it ends.
+const HOST_ID = /(?<![A-Za-z0-9_-])(?:(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}|[0-9a-f]{16}(?=\.txt|\/))(?![A-Za-z0-9_-])|toolu_(?:bdrk_|vrtx_)?[A-Za-z0-9]{20,32})/g;
+function plainOwnPath(cfg, path) {
+  const dir = [cfg.pasteDir, cfg.archiveDir].find((d) => d && path.startsWith(`${d}/`));
+  const names = (dir ? path.slice(dir.length + 1) : path).replace(HOST_ID, 'id');
+  return maskSecrets(names) === names && cleanForJevLong(names) === names;
+}
+const ARCHIVE_FILE = '[A-Za-z0-9_-]{1,80}\\.txt';
+const ownFilePaths = (cfg) => new RegExp(`${escapeRegExp(cfg.pasteDir)}/[A-Za-z0-9_-]{1,80}/[0-9a-f]{32}\\.txt|\\b${BLOCK_LETTER}/[0-9a-f]{32}\\.txt${cfg.archiveDir ? `|${escapeRegExp(cfg.archiveDir)}/[A-Za-z0-9_-]{1,80}/(?:${ARCHIVE_FILE}| \\(${ARCHIVE_FILE}(?:, ${ARCHIVE_FILE})*\\))` : ''}`, 'g');
+// The text of a series in the question to Jev: the shared mask of the other stages first (it reads forms the mask of a series cuts apart, as a value behind an escaped quote),
+// then the mask of a series.
+const seriesQuestion = (text) => cleanForJevLong(maskSecrets(text));
+// The text of the file of a series: the mask of a series, then a line that keeps a possible secret is replaced; undefined when the mask cannot clear the text.
+function seriesFileMask(text) {
+  let masked = archiveMaskedLong(text);
+  if (masked !== undefined) masked = maskResidualLines(masked);
+  return masked === undefined || RESIDUAL_SECRET.test(masked) ? undefined : masked;
+}
+const withOwnPaths = (masked, kept) => masked?.replace(/\u{e000}(\d+)\u{e000}/gu, (mark, n) => kept[n] ?? mark);
+// The file of a series keeps a path of the module's own files as it was only when every file it names can be read, so a name the shared mask hides leaves in it only as the
+// name of a file that is there. Any other text of that shape is masked like the text around it; so is a path whose read fails or comes too late.
+function namedFiles(cfg, sessionId, path) {
+  const list = /^(.*\/) \((.*)\)$/.exec(path); // the list of a merged line, `<dir>/ (a.txt, b.txt)`
+  if (list) return list[2].split(', ').map((name) => `${list[1]}${name}`);
+  return [path.startsWith(`${BLOCK_LETTER}/`) ? `${blockDir(cfg, sessionId)}${path.slice(BLOCK_LETTER.length)}` : path];
+}
+// The text of the file of a series as it is written; undefined when the mask cannot clear it. `there` maps each file read so far to whether it could be read; the files
+// not read yet are read ARCHIVE_PARALLEL at a time.
+async function seriesFileBody($, gate, cfg, sessionId, series, there) {
+  const own = ownFilePaths(cfg);
+  const text = series.replace(/\u{e000}/gu, '\u{fffd}');
+  const files = [...new Set(Array.from(text.matchAll(own), ([path]) => namedFiles(cfg, sessionId, path)).flat())].filter((file) => !there.has(file));
+  for (let at = 0; at < files.length; at += ARCHIVE_PARALLEL) {
+    await Promise.all(files.slice(at, at + ARCHIVE_PARALLEL).map(async (file) => there.set(file, typeof (await fsCall($, gate, () => $.fs.read(file))).value === 'string')));
+  }
+  const kept = [];
+  const marked = `${text.trim()}\n`.replace(own, (path) => (namedFiles(cfg, sessionId, path).every((file) => there.get(file)) ? `\u{e000}${kept.push(path) - 1}\u{e000}` : path));
+  return withOwnPaths(seriesFileMask(maskSecrets(marked)), kept);
+}
+// What may leave of one series, as text to Jev or as a file. A series that names a private path of the user's list stays whole. The names of its tools go to Jev in the
+// statistics (statTools), so secretCheck, the check of the other stages, reads each of them (the parts of an MCP name one by one). Then the mask of a series (a series
+// that keeps a line it cannot clear stays whole), and secretCheck reads both masked texts, the one of the file and the one of the question (the paths of the module's own files out of both): a hit, a text beyond what the check reads or no time left keeps
+// the series whole. What leaves a series that passed has the shared mask under the mask of a series (seriesQuestion for the question). Returns
+// {held: 'secret' | 'unchecked' | 'timed_out'} or {held: '', masked, kept}, the text of the file with its own paths as marks and the paths.
+function checkSeries(cfg, series, own, budget) {
+  if (namesPrivatePath(series.replace(own, 'file.txt'), cfg.privatePaths)) return { held: 'secret' };
+  const tools = new Set(Array.from(series.matchAll(/^\[compacted\] ([^\s(]+)/gm), (m) => m[1]));
+  for (const part of [...tools].flatMap((name) => (name.startsWith('mcp__') ? name.split('__') : [name]))) {
+    const held = secretCheck(part.replace(HOST_ID, 'id'), cfg.privatePaths, budget);
+    if (held) return { held };
+  }
+  // A mark stands for the n-th own path while the file is masked; the character of the marks is taken out of the text first, so the text of the conversation cannot name a path.
+  const text = series.replace(/\u{e000}/gu, '\u{fffd}');
+  const kept = [];
+  const marked = `${text.trim()}\n`.replace(own, (path) => (plainOwnPath(cfg, path) ? `\u{e000}${kept.push(path) - 1}\u{e000}` : path));
+  const first = seriesFileMask(marked);
+  if (first === undefined) return { held: 'secret' };
+  const file = first.replace(/\u{e000}\d+\u{e000}/gu, 'file.txt').trim();
+  const question = cleanForJevLong(text.replace(own, (path) => (plainOwnPath(cfg, path) ? 'file.txt' : path))).trim();
+  const held = secretCheck(file, cfg.privatePaths, budget) || (question === file ? '' : secretCheck(question, cfg.privatePaths, budget));
+  if (held) return { held };
+  const masked = seriesFileMask(maskSecrets(marked));
+  return masked === undefined ? { held: 'secret' } : { held: '', masked, kept };
+}
+// One checker serves the floor, the question and the file of a compaction, so a series gets one answer in all three and is checked once, within one budget of the scan.
+function seriesChecker(cfg, deadline) {
+  const budget = { left: SCAN_BUDGET_CHARS, deadline };
+  const done = new Map();
+  return (series) => {
+    if (!done.has(series)) done.set(series, checkSeries(cfg, series, ownFilePaths(cfg), budget));
+    return done.get(series);
+  };
+}
 // A row a series may stand in: text, no tool result.
 const seriesRowOk = (m) => typeof m.text === 'string' && m.text.trim() && !(m.toolResults || []).length;
 
@@ -5379,7 +5492,7 @@ function seriesSpans(text, protect = false) {
  * (some trace names a file). A line merged by an earlier compaction joins a new series with its own counts. In a direct reply (`protect`) a trace that stays fixed
  * is no member of a series and ends the one beside it.
  */
-export function seriesRuns(text, protect = false) {
+export function seriesRuns(text, protect = false, archive = false) {
   const runs = [];
   let cur;
   for (const sp of seriesSpans(text, protect)) {
@@ -5396,12 +5509,16 @@ export function seriesRuns(text, protect = false) {
       if (sp.kind === 'reply') stats.replies++;
       else if (sp.kind === 'other') stats.others++;
       else {
-        stats.calls++;
+        // With the archive on, a trace may end in the path of its file, and a line merged from calls of one identical call (`x<n>`) counts as n calls.
+        const times = archive ? Number(/^\[compacted\] [^\s(]+\([^\n]*?\) x(\d+) - /.exec(line.slice(0, 400))?.[1]) || 1 : 1;
+        stats.calls += times;
+        stats.traces += times - 1;
         const tool = /^\[compacted\] ([^\s(]+)/.exec(line)?.[1];
-        if (tool) stats.tools[tool] = (stats.tools[tool] || 0) + 1;
-        if (/ - error of \d+ chars removed$/.test(line)) stats.errors++;
+        if (tool) stats.tools[tool] = (stats.tools[tool] || 0) + times;
+        if (archive ? / - error of \d+ chars removed(?:; full call and result: .*)?$/.test(line) : / - error of \d+ chars removed$/.test(line)) stats.errors++;
+        else if (archive) stats.errors += Number(/ chars removed, including (\d+) errors?\b/.exec(line)?.[1]) || 0;
       }
-      if (/full text in | in b\/[0-9a-f]+\.txt|^\[agent message moved/.test(line)) stats.file = true;
+      if (/full text in | in b\/[0-9a-f]+\.txt|^\[agent message moved/.test(line) || (archive && /; full calls? and results?\b/.test(line))) stats.file = true;
     }
     return { start: r.start, end: r.end, text: text.slice(r.start, r.end), stats };
   });
@@ -5409,7 +5526,8 @@ export function seriesRuns(text, protect = false) {
 
 /**
  * Which rows a series may stand in: [0, tail) less `fixed` (the rows the host cannot rebuild from text: server blocks in an assistant row, an image or a file in a user row,
- * a user row a delivered message is anchored to), and `direct`, the direct replies. `reason` says that nothing can be told: no API form, or a message with an image that matches no row.
+ * a user row a delivered message is anchored to), and `direct`, the direct replies. `tail` is the first row that keeps its handle (`keepFrom`, the open tool loop), not the start of the
+ * last KEEP_LAST rows: a series in the newest rows before the open loop is merged too. `reason` says that nothing can be told: no API form, or a message with an image that matches no row.
  */
 export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) {
   if (!api) return { reason: 'no_api_form' };
@@ -5420,7 +5538,23 @@ export function seriesContext(cfg, messages, api, keepFrom, queued = new Map()) 
   const users = ownerRows(messages, cfg.hookRowPrefixes, true);
   const delivered = [...queued].filter(([, blocks]) => blocks.some((b) => deliveryOf(b) === 'user')).map(([row]) => row);
   const userRows = [...new Set([...users, ...delivered])].sort((a, b) => a - b);
-  return { tail: Math.min(keepFrom, Math.max(1, messages.length - KEEP_LAST)), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
+  return { tail: Math.min(keepFrom, messages.length), fixed, direct: directReplyRows(messages, users, delivered, true), facts: turnFacts(messages, userRows) };
+}
+
+// The statistics of a series name its tools to Jev. A name that a mask changes, alone or at the start of a trace, and one too long for a tool name are counted under one
+// neutral name. An MCP name is read as its server and the rest (read whole, a long name of plain words looks like a token); a server id that the shared mask takes for
+// a secret is counted there too.
+const STAT_NAME_MAX = 200;
+const STAT_NAME_HIDDEN = 'masked_tool';
+const MCP_NAME = /^mcp__(.*?)__(.*)$/s;
+function statTools(tools) {
+  const plain = (text) => [text, `[compacted] ${text}(`].every((s) => maskSecrets(s) === s && cleanForJevLong(s) === s);
+  const out = {};
+  for (const [name, count] of Object.entries(tools)) {
+    const key = name.length <= STAT_NAME_MAX && (MCP_NAME.exec(name)?.slice(1) ?? [name]).every(plain) ? name : STAT_NAME_HIDDEN;
+    out[key] = (out[key] || 0) + count;
+  }
+  return out;
 }
 
 /**
@@ -5435,7 +5569,7 @@ export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
   for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
     const m = messages[i];
     if (!seriesRowOk(m) || ctx.fixed.has(i)) continue;
-    for (const run of seriesRuns(m.text, ctx.direct.has(i))) {
+    for (const run of seriesRuns(m.text, ctx.direct.has(i), archivePathsOn(cfg))) {
       const seen = byKey.get(run.text);
       const signals = { age_turns: ctx.facts.age[i], current_turn: ctx.facts.age[i] === 0, in_tail: i >= ctx.facts.tail };
       if (seen) { Object.assign(seen, signals, { row: i, repeated: true }); seen.rows.push(i); continue; }
@@ -5443,7 +5577,7 @@ export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
       const { traces, calls, replies, others, tools, errors, file } = run.stats;
       byKey.set(run.text, {
         kind: 'series', key: run.text, body: run.text, row: i, rows: [i], chars: run.text.length, run, gain, repeated: false, ...signals, agent_session: agent,
-        f2: { kind: 'trace_series', traces, calls, replies, others, tools, errors, has_file: file, tokens: Math.round(seriesTok(run.text, cfg.rates)), gain_tokens: Math.round(gain) },
+        f2: { kind: 'trace_series', traces, calls, replies, others, tools: statTools(tools), errors, has_file: file, tokens: Math.round(seriesTok(run.text, cfg.rates)), gain_tokens: Math.round(gain) },
       });
     }
   }
@@ -5452,11 +5586,12 @@ export function seriesItems(cfg, messages, ctx, sessionId, agent = false) {
 
 /**
  * Merges the series whose keys are in `keys` (the texts of the series): one line `[compacted] traces merged: N calls, M replies, K others; list in <file>` in place of the
- * traces, and the file holds them word for word. Same files and same checks as the stages that move text: the state directory, `savePaste`, a secret check within the budget of
- * the scan; a series stays whole when its file cannot be written and read back in time, or when the check holds it. `record.series` holds the counts. Returns the new text of each
- * changed row by its row index (none unless active). Never rejects. `ctx` is seriesContext's.
+ * traces, and the file holds them, masked (archiveMaskedLong, then maskResidualLines; the paths of the module's own files whose files can be read stay as they were).
+ * Same files as the stages that move text: the state directory and `savePaste`. A series
+ * stays whole when its file cannot be written and read back in time, or when `check` holds it (seriesChecker: `secret`, `unchecked`, `timed_out`). `record.series` holds the
+ * counts. Returns the new text of each changed row by its row index (none unless active). Never rejects. `ctx` is seriesContext's.
  */
-export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId, deadline) {
+export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId, deadline, check = seriesChecker(cfg, deadline)) {
   const mode = cfg.blocks === 'active' && cfg.mode === 'active' ? 'active' : 'shadow';
   const stats = { mode, series: 0, traces: 0, tokens_before: 0, tokens_after: 0, files: 0, written: 0, reused: 0, write_failed: 0, secret: 0, unchecked: 0, timed_out: 0, ...(mode === 'active' ? { installed: false } : {}) };
   record.series = stats;
@@ -5466,25 +5601,25 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
   if (!sessionId) { stats.reason = 'no_session'; return edited; }
   try {
     const gate = { deadline, stalled: false };
-    const budget = { left: SCAN_BUDGET_CHARS, deadline };
-    const own = ownFilePaths(cfg);
     const done = new Map(); // text of a series -> {path} or {}: the same series in several rows gets one file
+    const there = new Map(); // own file named in a series -> whether it can be read
     const paths = new Set();
     for (let i = 0; i < Math.min(ctx.tail, messages.length); i++) {
       const m = messages[i];
       if (!seriesRowOk(m) || ctx.fixed.has(i)) continue;
-      const runs = seriesRuns(m.text, ctx.direct.has(i)).filter((r) => keys.has(r.text));
+      const runs = seriesRuns(m.text, ctx.direct.has(i), archivePathsOn(cfg)).filter((r) => keys.has(r.text));
       let text = m.text;
       for (const run of [...runs].reverse()) {
         let r = done.get(run.text);
         if (!r) {
-          // The block traces in it name their files by letter: the file carries the header that says which directory the letter stands for.
-          const lines = `${run.text.trim()}\n`;
-          const file = lines.includes(BLOCK_TRACE_PREFIX) || lines.includes(`${AGENT_TRACE_PREFIX}${BLOCK_LETTER}/`) ? `${traceHeader(blockDir(cfg, sessionId))}\n${lines}` : lines;
-          const held = secretCheck(lines.replace(own, 'file.txt'), cfg.privatePaths, budget);
+          const { held, masked, kept } = check(run.text);
           r = {};
-          if (held) stats[held]++;
+          // A shadow merge writes no file and reads none.
+          const body = held ? undefined : mode === 'active' ? await seriesFileBody($, gate, cfg, sessionId, run.text, there) : withOwnPaths(masked, kept);
+          if (body === undefined) stats[held || 'secret']++;
           else {
+            // The block traces in it name their files by letter: the file carries the header that says which directory the letter stands for.
+            const file = run.text.includes(BLOCK_TRACE_PREFIX) || run.text.includes(`${AGENT_TRACE_PREFIX}${BLOCK_LETTER}/`) ? `${traceHeader(blockDir(cfg, sessionId))}\n${body}` : body;
             const path = seriesPath(cfg, sessionId, (await sha256Hex(file)).slice(0, 32));
             const saved = mode === 'active' ? await savePaste($, gate, path, file) : 'planned';
             if (saved === 'written' || saved === 'reused' || saved === 'planned') { if (saved !== 'planned') stats[saved]++; r = { path }; }
@@ -5509,29 +5644,456 @@ export async function mergeSeries($, cfg, record, messages, ctx, keys, sessionId
 }
 
 // The series of one compaction (or pass): seriesContext on `messages` (the rows as they came), the items on `rows` (the rows as the stages before leave them). `potential` is what merging
-// them all gives back (every series once, as the floor counts it); a series that names a secret path is no part of it, as with the blocks.
-function planSeries(cfg, messages, rows, api, queued, keepFrom, sessionId, agent = false) {
+// them all gives back (every series once, as the floor counts it); a series that `check` holds is no part of it. Nothing is checked before the floor asks.
+function planSeries(cfg, messages, rows, api, queued, keepFrom, sessionId, agent = false, deadline = undefined) {
   const ctx = seriesContext(cfg, messages, api, keepFrom, queued);
   const items = seriesItems(cfg, rows, ctx, sessionId, agent);
-  const own = ownFilePaths(cfg);
-  const potential = items.reduce((sum, it) => (namesSecretPath(it.body.replace(own, 'file.txt'), cfg.privatePaths) ? sum : sum + it.gain), 0);
-  return { ctx, items, potential };
+  const check = seriesChecker(cfg, deadline);
+  return { ctx, items, check, potential: () => items.reduce((sum, it) => (it.gain > 0 && !check(it.body).held ? sum + it.gain : sum), 0) };
 }
 
-// The series as entries of the second round: one per series, with its gain and the tokens it holds; a series that the check for a secret holds (it would stay whole) is not asked
-// about and is no entry. The ratings come from Jev (askTie with `rateOnly`); an entry without one is left out of the queue. {entries, stats: {items, secret, unchecked}}.
-function seriesEntries(cfg, items, deadline) {
-  const stats = { items: items.length, secret: 0, unchecked: 0 };
-  const budget = { left: SCAN_BUDGET_CHARS, deadline };
-  const own = ownFilePaths(cfg);
+// The series as entries of the second round: one per series that gains something, with its gain and the tokens it holds; a series that `check` holds (it would stay whole)
+// is not asked about and is no entry. The ratings come from Jev (askTie with `rateOnly`, which sends the text masked); an entry without one is left out of the queue.
+// {entries, stats: {items, secret, unchecked, timed_out}}.
+function seriesEntries(cfg, items, check) {
+  const stats = { items: items.length, secret: 0, unchecked: 0, timed_out: 0 };
   const entries = [];
   for (const it of items) {
     if (it.gain <= 0) continue;
-    const held = secretCheck(it.body.replace(own, 'file.txt'), cfg.privatePaths, budget);
+    const { held } = check(it.body);
     if (held) { stats[held]++; continue; }
     entries.push({ id: `s:${contentHash(it.key)}`, kind: 'series', gain: it.gain, tokens: seriesTok(it.body, cfg.rates), item: it });
   }
   return { entries, stats };
+}
+
+// --- archive of calls and results (OMC_JEV_COMPACT_ARCHIVE) ---------------------------------------------------------------------------------
+// See the header of this file. `active`: every call and result the cut traces, shortens or removes goes to <state dir>/compaction-archive/<session>/<id>.txt, the trace names it once
+// the file reads back equal, and neighbouring traces of one identical call merge. `shadow`: the counts only. `$.fs` has no rename, remove or append, so a trace or cut names its file only
+// after the write resolved and the file read back equals the content; a file of the same byte size is reused only when its text equals the content, any other file is written again.
+const ARCHIVE_MAX_BYTES = 4194304; // what $.fs.write takes (Claude Code 2.1.322: 4194304 bytes of UTF-8)
+const ARCHIVE_NAME_MAX = 80;
+const ARCHIVE_PARALLEL = 8;
+// No new write starts after ARCHIVE_BUDGET_MS from the start of the batch, nor after the compaction's own deadline; the rest is skipped as `time` (no file, no path in the trace).
+const ARCHIVE_BUDGET_MS = 1500;
+const ARCHIVE_LABEL = 'full call and result: ';
+const ARCHIVE_HEAD = '[compaction archive]';
+const ARCHIVE_HEAD_SLACK = 1000; // bytes over the result and the input JSON that the head and the masking can add
+// The file of a session directory that every compaction with the archive touches, so the retention sees a live session by its newest file even when nothing new was archived.
+const ARCHIVE_MARKER = '.compaction';
+// Texts the module wrote in place of a result (shortText, the placeholder of a non-text result kept in a rebuilt row).
+const ARCHIVE_PRODUCTS = ['[result shortened at compaction: ', '[notification shortened at compaction: ', '[non-text result (image or file) removed at compaction]'];
+const ARCHIVE_RESERVED = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i; // Windows device names
+const ARCHIVE_SCAN_MAX = 2000; // strings of one input walked; a larger input counts as a secret (fail closed)
+const archiveOn = (cfg) => Boolean(cfg.archive) && cfg.archive !== 'off';
+// Do the series read the path of an archive file, and a counter, in a trace? Only while the archive writes them into traces: `active` with the point active. With `shadow`, `off`, or `active` in a
+// compaction that is not active, a trace is read as before the archive, so the conversation is the one built without the variable.
+const archivePathsOn = (cfg) => cfg.archive === 'active' && cfg.mode === 'active';
+const ARCHIVE_SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'Monitor']);
+// A secret named by a word without a separator ("the password is X", "PIN 1234", which maskSecrets does not mask), in English and in Polish. The words of the other languages of LOCAL_NAMES of
+// scripts/lib/jev-mask.mjs are not covered, so a result that names a secret only in one of them is archived.
+const SECRET_WORD = /(?<![\p{L}\p{N}_])(?:has[\u0142l](?:o|a|em|u|ach|ami|om)?|has[e\u0119][\u0142l]|ha\u015ble|klucz(?:a|e|em|u|y|om|ami|ach)?|pin(?:u|em|y|\u00f3w)?|token(?:a|u|em|ie)?|sekret(?:u|em|y|\u00f3w|ami|ach)?|secrets?|passwords?|passwd|passphrase|passcode|api[ _-]?keys?|apikeys?|private[ _-]?keys?|credentials?)(?![\p{L}\p{N}_])/iu;
+// A key whose value is a secret; its value goes to the head of an archive file as *** whole, also a number, an array or an object, and so does the value of a {name|key: <such a name>, value} pair.
+const SECRET_KEY = /key(?!word|board|stroke|frame)|token|secret|passw|pass(?:[_-]?(?:phrase|wd|code)|$|[^a-z])|pwd|credential|auth(?!ors?(?:$|[^i]))|cookie|session(?:[_-]?id)?$|^sid$|^otp$|otp[_-]?(?:code|secret)|pin(?:[_-]?code)?$|has[\u0142l]o|klucz|sekret|signature|private/i;
+const ARCHIVE_SECRET_TOOL = /^mcp__bitwarden__|vault|password|secret/i;
+// Commands that print secrets: printenv, a bare env or set, gh auth token, a password manager.
+const ARCHIVE_SECRET_COMMAND = /(?:^|[\s;|&(`$"'])(?:printenv\b|(?:env|set|export[ \t]+-p|declare[ \t]+-[px]+)[ \t]*(?=$|[\n;|&)`>])|gh[ \t]+auth[ \t]+(?:token\b|status\b[^\n;|&]*(?:[ \t]-t\b|--show-token\b))|bw[ \t]+(?:get|list|export)\b|op[ \t]+(?:read|item[ \t]+get)\b|pass[ \t]+show\b|security[ \t]+find-(?:generic|internet)-password\b|secret-tool[ \t]+lookup\b|(?:Get-ChildItem|gci|dir|ls)[ \t]+env:)/i;
+
+/** The switch: `active` or `shadow` (any case, spaces trimmed), anything else off. */
+export function archiveModeOf(raw) {
+  const v = String(raw ?? '').trim().toLowerCase();
+  return v === 'active' || v === 'shadow' ? v : 'off';
+}
+
+// The archive's mode for one compaction: active only with the compaction active and a session id, shadow (counts only) otherwise; off without the switch or a state directory.
+function archiveModeIn(cfg, record) {
+  if (!archiveOn(cfg) || !cfg.archiveDir) return 'off';
+  return cfg.archive === 'active' && cfg.mode === 'active' && record.session_id ? 'active' : 'shadow';
+}
+
+// Does `test` hold for any string of the value (keys too, nested objects and arrays)? Bounded walk; too large or too deep counts as true.
+function archAnyString(value, test) {
+  let seen = 0;
+  const walk = (v, depth) => {
+    if (++seen > ARCHIVE_SCAN_MAX || depth > 8) return true;
+    if (typeof v === 'string') return test(v);
+    if (Array.isArray(v)) return v.some((x) => walk(x, depth + 1));
+    if (v && typeof v === 'object') return Object.entries(v).some(([k, x]) => test(k) || walk(x, depth + 1));
+    return false;
+  };
+  return walk(value, 0);
+}
+
+const archSecretMemo = new WeakMap();
+function archMemo(c, key, fn) {
+  let m = archSecretMemo.get(c);
+  if (!m) { m = {}; try { archSecretMemo.set(c, m); } catch { /* not an object */ } }
+  if (!(key in m)) m[key] = fn();
+  return m[key];
+}
+
+// 'secret' when the call may hold or reveal a secret (a secret or private path or a secret word in any string of its input, a secret tool, a shell command that prints secrets, a
+// call the stages hold as secret), else ''. A value maskSecrets masks may stay: the input goes to the file masked.
+export function archiveSecretInput(c, privatePaths = []) {
+  if (!c) return '';
+  return archMemo(c, 'input', () => {
+    if (c.secret || c.proseSecret) return 'secret';
+    if (c.note) return '';
+    const tool = String(c.use?.tool ?? '');
+    if (ARCHIVE_SECRET_TOOL.test(tool)) return 'secret';
+    const command = c.use?.input && typeof c.use.input === 'object' ? c.use.input.command : undefined;
+    if (ARCHIVE_SHELL_TOOLS.has(tool) && typeof command === 'string' && ARCHIVE_SECRET_COMMAND.test(command)) return 'secret';
+    return archAnyString(c.use?.input, (s) => namesSecretPath(s, privatePaths) || SECRET_WORD.test(s)) ? 'secret' : '';
+  });
+}
+
+// true when the result (or notification) may hold a secret: a secret or private path, a secret word, or any text maskSecrets would change. The result goes to the file unchanged,
+// so such a result is not archived at all (`secret_in_result`) and its trace names no file.
+export function archiveSecretResult(c, privatePaths = []) {
+  if (!c) return false;
+  return archMemo(c, 'result', () => {
+    const text = typeof c.res?.text === 'string' ? c.res.text : '';
+    return namesSecretPath(text, privatePaths) || SECRET_WORD.test(text) || maskSecrets(text) !== text;
+  });
+}
+
+// One path segment from a tool_use id: only [A-Za-z0-9_-], at most ARCHIVE_NAME_MAX characters; an id that had to change (or a Windows device name) gets a hash of the original,
+// so two ids never share a file. Empty: ''.
+export function archiveSegment(id) {
+  const raw = String(id ?? '');
+  if (!raw) return '';
+  const clean = raw.replace(/[^A-Za-z0-9_-]/g, '_');
+  if (clean === raw && clean.length <= ARCHIVE_NAME_MAX && !ARCHIVE_RESERVED.test(clean)) return clean;
+  return `${clean.slice(0, ARCHIVE_NAME_MAX - 17)}-${contentHash(raw)}`;
+}
+
+// The archive name of a candidate: its tool_use_id; a notification (c.note, id `notification-<row>`, a row index that changes between compactions) is named by a hash of its text.
+function archiveIdOf(c) {
+  if (!c) return '';
+  if (c.note) return `notification-${contentHash(c.res?.text ?? '')}`;
+  return String(c.id ?? '');
+}
+
+// The directory of a session: its id as a path segment (archiveSegment), so session ids that differ only in characters outside the set, or that are device names, never share one.
+// scripts/lib/jev-compaction-state.mjs names the directory the same way.
+function archiveDirOf(cfg, sessionId) {
+  const segment = archiveSegment(sessionId);
+  return cfg.archiveDir && segment ? `${cfg.archiveDir}/${segment}` : undefined;
+}
+
+// The path of a candidate's archive (pure: no file is touched), undefined without a state directory, a session id or an id.
+export function archivePathOf(cfg, sessionId, c) {
+  const dir = archiveDirOf(cfg, sessionId);
+  const name = archiveSegment(archiveIdOf(c));
+  return dir && name ? `${dir}/${name}.txt` : undefined;
+}
+
+const archIsProduct = (text) => text.startsWith('[compacted] ') || ARCHIVE_PRODUCTS.some((p) => text.includes(p));
+const archNamesPath = (text, path) => String(text ?? '').includes(`; ${ARCHIVE_LABEL}${path}`);
+const archiveSuffix = (path) => (path ? `; ${ARCHIVE_LABEL}${path}` : '');
+
+// Why a candidate is not archived, or '' when it is: secret (the call), no_text, empty, after_compaction (the text is a compaction's own), over_limit, secret_in_result.
+export function archiveSkip(c, privatePaths = []) {
+  const secret = archiveSecretInput(c, privatePaths);
+  if (secret) return secret;
+  if (c.textOnly === false) return 'no_text';
+  const text = typeof c.res?.text === 'string' ? c.res.text : '';
+  if (!text) return 'empty';
+  if (archIsProduct(text)) return 'after_compaction';
+  if (utf8Bytes(text) + (c.note ? 0 : utf8Bytes(archInputJson(c))) + ARCHIVE_HEAD_SLACK > ARCHIVE_MAX_BYTES) return 'over_limit';
+  if (archiveSecretResult(c, privatePaths)) return 'secret_in_result';
+  return '';
+}
+
+function archInputJson(c) {
+  try { return JSON.stringify(c.use?.input ?? {}, null, 2) ?? ''; } catch { return ''; }
+}
+
+// The input for the archive head, masked before it is serialised: the value of a secret-like key and of a name/value pair with a secret-like name becomes ***, every other string goes
+// through maskSecrets; the JSON is masked once more as a whole.
+function archMaskedInput(c) {
+  const pairName = (v) => (typeof v?.name === 'string' ? v.name : typeof v?.key === 'string' ? v.key : '');
+  try {
+    const json = JSON.stringify(c.use?.input ?? {}, (key, v) => {
+      if (key && SECRET_KEY.test(key) && v !== null && v !== undefined) return '***';
+      if (v && typeof v === 'object' && !Array.isArray(v) && 'value' in v && SECRET_KEY.test(pairName(v))) return { ...v, value: '***' };
+      return typeof v === 'string' ? maskSecrets(v) : v;
+    }, 2) ?? '';
+    return maskSecrets(json);
+  } catch { return ''; }
+}
+
+// The head of an archive file: what the call was (tool, tool_use_id) and its input as masked JSON, then a line that opens the result; a notification has no call. The result follows
+// the head unchanged.
+export function archiveHeaderOf(c) {
+  const text = typeof c.res?.text === 'string' ? c.res.text : '';
+  if (c.note) return `${ARCHIVE_HEAD} background task notification\n--- content (${text.length} chars, unchanged) ---\n`;
+  const what = `${oneLine(c.use?.tool ?? '')}, tool_use_id ${oneLine(c.id ?? '')}`;
+  return `${ARCHIVE_HEAD} call ${what}\n--- input (masked) ---\n${archMaskedInput(c)}\n--- ${c.res?.isError ? 'error' : 'result'} (${text.length} chars, unchanged) ---\n`;
+}
+
+export const archiveContentOf = (c) => archiveHeaderOf(c) + (typeof c.res?.text === 'string' ? c.res.text : '');
+
+// The path a trace or cut may name before the write (in decide, before the floor and the cascade count the trace): the archive path of a candidate that will be archived, and the path
+// a cut of an earlier compaction already names (its archive exists; archiveResults reuses it, so a cut traced now keeps pointing at the full text); else undefined. After archiveResults a
+// planned path without `path` in byId is dropped from the trace.
+function archivePlannedPath(cfg, sessionId, c) {
+  const path = archivePathOf(cfg, sessionId, c);
+  if (!path) return undefined;
+  const skip = archiveSkip(c, cfg.privatePaths);
+  if (!skip) return path;
+  return skip === 'after_compaction' && archNamesPath(c.res?.text, path) ? path : undefined;
+}
+
+// The costs of a candidate again, after its archive path was set or dropped (findCandidates sets them from the same texts).
+function archiveCosts(c) {
+  c.trace = traceLine(c);
+  c.traceCost = c.note ? c.trace.length : c.trace.length + 1;
+  c.shortCost = c.resultChars > SHORT_CHARS ? (c.note ? 0 : c.inputChars) + shortText(c).length : c.fullCost;
+}
+
+// One candidate: {id, path?, reused?, rewritten?, skipped?, error?, bytes}. `existing` maps the file names already in the session directory to their sizes; `lim` = {writeBy, hardEnd, gate}:
+// no write starts at or after writeBy, no read after hardEnd (undefined: none), and none at all once a host call hit its HOST_MS cap (gate.stalled; that call's item gets the error `host_time`).
+async function archiveOne($, dir, c, existing, verify, privatePaths, lim) {
+  const name = archiveSegment(archiveIdOf(c));
+  const out = { id: c.id, bytes: 0 };
+  if (!name) { out.skipped = 'no_id'; return out; }
+  const path = `${dir}/${name}.txt`;
+  const text = typeof c.res?.text === 'string' ? c.res.text : '';
+  const skip = archiveSkip(c, privatePaths);
+  if (skip === 'after_compaction' && archNamesPath(text, path) && existing.has(`${name}.txt`)) { out.path = path; out.reused = true; return out; }
+  if (skip) { out.skipped = skip; return out; }
+  const content = archiveContentOf(c);
+  const bytes = utf8Bytes(content);
+  out.bytes = bytes;
+  if (bytes > ARCHIVE_MAX_BYTES) { out.skipped = 'over_limit'; return out; }
+  const late = (end) => lim.gate.stalled || (end !== undefined && Date.now() >= end);
+  const failed = (r) => { if (r.timeout) { lim.gate.stalled = true; out.error = 'host_time'; } else out.error = clip(oneLine(String(r.error?.message ?? r.error)), 200); return out; };
+  // A file of the same size is used only when its text is the content (a write that failed its read-back, or an older head of the same length, leaves such a file); any other file is written again.
+  if (existing.get(`${name}.txt`) === bytes) {
+    if (late(lim.hardEnd)) { out.skipped = 'time'; return out; }
+    const r = await fsCall($, lim.gate, () => $.fs.read(path));
+    if (r.timeout) return failed(r);
+    if (!r.error && r.value === content) { out.path = path; out.reused = true; return out; }
+    out.rewritten = true;
+  }
+  if (late(lim.writeBy)) { out.skipped = 'time'; return out; }
+  const w = await fsCall($, lim.gate, () => $.fs.write(path, content));
+  if (w.timeout || w.error) return failed(w);
+  if (verify) {
+    const r = await fsCall($, lim.gate, () => $.fs.read(path));
+    if (r.timeout || r.error) return failed(r);
+    if (r.value !== content) { out.error = 'read_mismatch'; return out; }
+  }
+  out.path = path;
+  return out;
+}
+
+/**
+ * The archive of a compaction: every candidate whose keep is not 'full' (all given when keep is not set). Never throws. Returns {ms, written, reused, rewritten, bytes, skipped: {reason: n},
+ * errors, timedOut, stalled, marker, byId: Map(c.id -> {id, path?, reused?, rewritten?, skipped?, error?, bytes})}; only an entry with `path` may be named in a trace. Time: no write starts
+ * later than min(budgetMs, leftMs) after the start (budgetMs default ARCHIVE_BUDGET_MS, leftMs the time the compaction has left; Infinity = no limit) and no read later than leftMs; every
+ * list, read and write is capped at HOST_MS, and after one that hit the cap no call starts. Such items get skipped `time` or the error `host_time`, both counted in `timedOut`. With `marker`
+ * the directory's ARCHIVE_MARKER is written first (the retention's sign of a live session), when the directory exists or something is to be archived.
+ */
+export async function archiveResults($, cfg, sessionId, candidates, { verify = true, parallel = ARCHIVE_PARALLEL, budgetMs = ARCHIVE_BUDGET_MS, leftMs = Infinity, marker = false } = {}) {
+  const started = Date.now();
+  const left = typeof leftMs === 'number' && !Number.isNaN(leftMs) ? Math.max(0, leftMs) : Infinity;
+  const budget = typeof budgetMs === 'number' && !Number.isNaN(budgetMs) ? Math.max(0, budgetMs) : Infinity;
+  const writeSpan = Math.min(budget, left);
+  const lim = { writeBy: Number.isFinite(writeSpan) ? started + writeSpan : undefined, hardEnd: Number.isFinite(left) ? started + left : undefined, gate: { deadline: Number.isFinite(left) ? started + left : Infinity, stalled: false } };
+  const summary = { ms: 0, written: 0, reused: 0, rewritten: 0, bytes: 0, skipped: {}, errors: 0, timedOut: 0, stalled: false, marker: false, byId: new Map() };
+  const items = (candidates || []).filter((c) => c && (c.keep === undefined || c.keep !== 'full'));
+  const dir = archiveDirOf(cfg, sessionId);
+  const results = [];
+  if (!dir) {
+    for (const c of items) results.push({ id: c.id, bytes: 0, skipped: 'no_session' });
+  } else if (items.length || marker) {
+    const existing = new Map();
+    // Past the compaction's end (leftMs 0) not even the list starts: every item gets `time` below.
+    const listed = lim.hardEnd !== undefined && Date.now() >= lim.hardEnd ? {} : await fsCall($, lim.gate, () => $.fs.list(dir));
+    if (Array.isArray(listed.value)) for (const e of listed.value) if (e && e.kind === 'file') existing.set(e.name, e.size);
+    if (marker && (Array.isArray(listed.value) || items.length) && !lim.gate.stalled && (lim.writeBy === undefined || Date.now() < lim.writeBy)) {
+      const w = await fsCall($, lim.gate, () => $.fs.write(`${dir}/${ARCHIVE_MARKER}`, `${isoNow()}\n`));
+      summary.marker = !w.timeout && !w.error;
+    }
+    let next = 0;
+    const worker = async () => {
+      while (next < items.length) {
+        const k = next++;
+        try { results[k] = await archiveOne($, dir, items[k], existing, verify, cfg.privatePaths, lim); } catch (error) { results[k] = { id: items[k].id, bytes: 0, error: String(error?.message ?? error) }; }
+      }
+    };
+    if (items.length) await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, items.length)) }, worker));
+  }
+  for (const r of results) {
+    summary.byId.set(r.id, r);
+    if (r.skipped) summary.skipped[r.skipped] = (summary.skipped[r.skipped] || 0) + 1;
+    else if (r.error) summary.errors++;
+    else if (r.reused) summary.reused++;
+    else { summary.written++; summary.bytes += r.bytes; if (r.rewritten) summary.rewritten++; }
+    if (r.skipped === 'time' || r.error === 'host_time') summary.timedOut++;
+  }
+  summary.stalled = lim.gate.stalled;
+  summary.ms = Date.now() - started;
+  return summary;
+}
+
+// Shadow: what archiveResults would try, with no file touched: {planned, skipped: {reason: n}, byId: Map(c.id -> {id, skipped?})} for every candidate whose keep is not 'full'.
+export function archivePlan(candidates, privatePaths = []) {
+  const plan = { planned: 0, skipped: {}, byId: new Map() };
+  for (const c of candidates || []) {
+    if (!c || c.keep === 'full') continue;
+    const skip = archiveSkip(c, privatePaths);
+    plan.byId.set(c.id, skip ? { id: c.id, skipped: skip } : { id: c.id });
+    if (skip) plan.skipped[skip] = (plan.skipped[skip] || 0) + 1;
+    else plan.planned++;
+  }
+  return plan;
+}
+
+// --- merging neighbouring traces of one identical call ----------------------------------------------------------------------------------------
+
+// The entry of a traced candidate (`msg` the API message of its row, groupsOf). `key` is a hash of the tool and the whole input: only entries with the same key and message merge. Other
+// entries ({kind: 'text', text}, {kind: 'call'}, {kind: 'result'}, anything without kind 'trace') stand between traces; a text entry with only white space does not part them.
+function traceEntryOf(c, msg) {
+  return {
+    kind: 'trace',
+    id: c.id,
+    tool: c.use?.tool ?? '',
+    target: c.summary ?? '',
+    key: contentHash(`${c.use?.tool ?? ''}\n${archInputJson(c)}`),
+    msg: msg ?? null,
+    line: c.trace,
+    resultChars: c.resultChars,
+    isError: Boolean(c.res?.isError),
+    note: Boolean(c.note),
+    textOnly: c.textOnly !== false,
+    path: c.archivePath,
+  };
+}
+
+const mergeable = (e) => e && e.kind === 'trace' && !e.note && e.textOnly !== false;
+const mergeBreaks = (e) => !(e && e.kind === 'text' && !String(e.text ?? '').trim());
+
+function mergedLine(run) {
+  const head = run[0];
+  const results = run.reduce((s, e) => s + (Number(e.resultChars) || 0), 0);
+  const errors = run.filter((e) => e.isError).length;
+  let line = `[compacted] ${head.tool}(${clip(String(head.target ?? ''), TRACE_INPUT_CHARS)}) x${run.length} - results of ${results} chars removed`;
+  if (errors) line += `, including ${errors} ${errors === 1 ? 'error' : 'errors'}`;
+  const paths = run.map((e) => e.path).filter(Boolean);
+  if (paths.length) {
+    const dir = paths[0].slice(0, paths[0].lastIndexOf('/') + 1);
+    const sameDir = paths.every((p) => p.slice(0, p.lastIndexOf('/') + 1) === dir);
+    const files = sameDir ? paths.map((p) => p.slice(dir.length)) : paths;
+    line += `; full calls and results${paths.length < run.length ? ` ${paths.length} of ${run.length}` : ''}: ${sameDir ? `${dir} (${files.join(', ')})` : files.join(', ')}`;
+  }
+  return line;
+}
+
+/**
+ * Entries in conversation order in, the same list out with every run of at least two neighbouring mergeable traces (same tool, same key: the whole input; same API message; no breaking
+ * entry between them) replaced by one entry {kind: 'trace', merged: true, id (the first), ids, count, tool, target, line, resultChars, errors, paths}. Other entries come back as the same
+ * objects; blank text entries inside a run are dropped with it.
+ */
+export function mergeTraceEntries(entries) {
+  const out = [];
+  const list = Array.isArray(entries) ? entries : [];
+  let i = 0;
+  while (i < list.length) {
+    const e = list[i];
+    if (!mergeable(e)) { out.push(e); i++; continue; }
+    const run = [e];
+    let j = i + 1;
+    let end = i + 1;
+    while (j < list.length) {
+      const x = list[j];
+      if (mergeable(x) && x.tool === e.tool && x.key === e.key && x.msg === e.msg) { run.push(x); j++; end = j; continue; }
+      if (!mergeBreaks(x)) { j++; continue; }
+      break;
+    }
+    if (run.length < 2) { out.push(e); i++; continue; }
+    out.push({
+      kind: 'trace',
+      merged: true,
+      id: e.id,
+      ids: run.map((x) => x.id),
+      count: run.length,
+      tool: e.tool,
+      target: e.target,
+      line: mergedLine(run),
+      resultChars: run.reduce((s, x) => s + (Number(x.resultChars) || 0), 0),
+      errors: run.filter((x) => x.isError).length,
+      paths: run.map((x) => x.path).filter(Boolean),
+    });
+    i = end;
+  }
+  return out;
+}
+
+// The entries for mergeTraceEntries from the rows before keepFrom, in the order build writes them: per assistant row its text, the traces of its calls, then a break per kept call; per
+// result row a break per kept result, then its text; a traced notification as a trace that never merges (it parts its neighbours), a kept or cut one as text; a removed call or
+// notification leaves nothing (unless a delivered message is carried in its place); every other row is text. A trace carries the API message of its row (`group` of groupsOf), so traces of two
+// messages never merge.
+export function archTraceEntries(rows, candidates, keepFrom, group, queued = new Map()) {
+  const byId = new Map();
+  const notes = new Map();
+  for (const c of candidates) { if (c.note) notes.set(c.resIdx, c); else byId.set(c.id, c); }
+  const out = [];
+  for (let i = 0; i < Math.min(keepFrom, rows.length); i++) {
+    const m = rows[i];
+    if (m.trimDrop === true) continue;
+    const note = notes.get(i);
+    if (note) {
+      if (note.keep === 'trace') out.push(traceEntryOf(note));
+      else if (note.keep !== 'drop' || queued.get(i)) out.push({ kind: 'text', text: note.res.text });
+      continue;
+    }
+    if (m.role === 'assistant') {
+      if (m.text) out.push({ kind: 'text', text: m.text });
+      const calls = [];
+      for (const u of m.toolUses || []) {
+        const c = byId.get(u.tool_use_id);
+        if (c && c.keep === 'trace') out.push(traceEntryOf(c, Array.isArray(group) ? group[i] : undefined));
+        else if (!(c && c.keep === 'drop')) calls.push({ kind: 'call' });
+      }
+      out.push(...calls);
+      continue;
+    }
+    if (m.role === 'user' && (m.toolResults || []).length) {
+      for (const r of m.toolResults) { const c = byId.get(r.tool_use_id); if (!c || c.keep === 'full' || c.keep === 'short') out.push({ kind: 'result' }); }
+      if (m.text || queued.get(i)) out.push({ kind: 'text', text: m.text || '-' });
+      continue;
+    }
+    out.push({ kind: 'text', text: typeof m.text === 'string' && m.text ? m.text : '-' });
+  }
+  return out;
+}
+
+// The archive step of decide, after the plan and before build: the files (active) or the counts (shadow), then the merge of neighbouring identical traces. A candidate whose file was not
+// written has its path taken out of the trace; the prediction of the plan is not changed (the archive takes no tokens off: the files come after the plan).
+async function archiveStep($, cfg, record, mode, candidates, rows, keepFrom, group, queued, started) {
+  record.archive_mode = mode;
+  let arch;
+  if (mode === 'active') {
+    arch = await archiveResults($, cfg, record.session_id, candidates, { leftMs: started + TOTAL_MS - Date.now(), marker: true });
+    for (const c of candidates) if (c.archivePath && c.keep !== 'full' && !arch.byId.get(c.id)?.path) { c.archivePath = undefined; archiveCosts(c); }
+    Object.assign(record, { archive_ms: arch.ms, archive_written: arch.written, archive_reused: arch.reused, archive_rewritten: arch.rewritten, archive_bytes: arch.bytes, archive_skipped: arch.skipped, archive_errors: arch.errors, archive_timed_out: arch.timedOut, archive_marker: arch.marker });
+  } else {
+    arch = archivePlan(candidates, cfg.privatePaths);
+    Object.assign(record, { archive_planned: arch.planned, archive_skipped: arch.skipped });
+  }
+  const merged = mergeTraceEntries(archTraceEntries(rows, candidates, keepFrom, group, queued));
+  if (mode === 'active') {
+    const byId = new Map(candidates.filter((c) => !c.note).map((c) => [c.id, c]));
+    for (const e of merged) {
+      if (!e.merged) continue;
+      byId.get(e.id).trace = e.line;
+      for (const id of e.ids.slice(1)) byId.get(id).mergedInto = e.id;
+    }
+  }
+  Object.assign(record, { merged_traces: merged.filter((e) => e.merged).length, merged_items: merged.reduce((n, e) => n + (e.merged ? e.ids.length : 0), 0) });
 }
 
 async function decide($, e, cfg, record, started) {
@@ -5591,6 +6153,9 @@ async function decide($, e, cfg, record, started) {
   // Results of the calls that keep their handles stay whole (a built row may not stand among them).
   const candidates = findCandidates(messages, cfg.privatePaths, cfg.notifications, cfg.blockTraces).filter((c) => (c.note ? c.resIdx : c.useIdx) < keepFrom);
   record.candidates = candidates.length;
+  // Archive: the planned path goes into every trace and cut before the floor and the cascade count their lengths (active only).
+  const archMode = archiveModeIn(cfg, record);
+  if (archMode === 'active') for (const c of candidates) { const path = archivePlannedPath(cfg, record.session_id, c); if (path) { c.archivePath = path; archiveCosts(c); } }
   if (cfg.notifications) record.notifications = candidates.filter((c) => c.note).length;
   const envelopes = envelopeChars(messages, queued, candidates);
   const removable = removableChars(candidates);
@@ -5621,10 +6186,13 @@ async function decide($, e, cfg, record, started) {
   const blocksPotential = blockPlan && blocksMode === 'active' && blockOn ? blockPlan.potential : 0;
   // The series of traces count in the floor like the blocks: what merging them gives back (the same switch, the same gate).
   let seriesPlan;
+  let seriesPotential = 0;
   if (blocksMode !== 'off') {
-    try { seriesPlan = planSeries(cfg, messages, trimmed, api, queued, keepFrom, record.session_id, e.agentId !== undefined); } catch { seriesPlan = undefined; }
+    try {
+      seriesPlan = planSeries(cfg, messages, trimmed, api, queued, keepFrom, record.session_id, e.agentId !== undefined, deadline);
+      if (blocksMode === 'active' && blockOn) seriesPotential = seriesPlan.potential();
+    } catch { seriesPlan = undefined; }
   }
-  const seriesPotential = seriesPlan && blocksMode === 'active' && blockOn ? seriesPlan.potential : 0;
   // The blocks and messages that the keep decisions take off the list, which the predictions in tokens count with the costs of the candidates (shapeOf).
   const shapeFrom = (rows) => (tokenMode ? shapeOf(messages, candidates, { rows, group, keepFrom, queued, rates: cfg.rates }) : undefined);
   let shape = shapeFrom(trimmed);
@@ -5888,10 +6456,10 @@ async function decide($, e, cfg, record, started) {
         // The series of traces on the rows the blocks left (their traces may stand beside the old ones now): Jev rates them with the question of the round, then they stand in the queue
         // with the results and the blocks. The rows another stage changes stay out (blockHold), as for the blocks.
         const seriesCtx = seriesPlan?.ctx && !seriesPlan.ctx.reason ? seriesContext(cfg, messages, api, keepFrom, queued) : undefined;
-        let seriesRated = { entries: [], stats: { items: 0, secret: 0, unchecked: 0 } };
+        let seriesRated = { entries: [], stats: { items: 0, secret: 0, unchecked: 0, timed_out: 0 } };
         if (seriesCtx && !seriesCtx.reason) {
           for (const r of blockHold) seriesCtx.fixed.add(r);
-          seriesRated = seriesEntries(cfg, seriesItems(cfg, currentRows(), seriesCtx, record.session_id, e.agentId !== undefined), deadline);
+          seriesRated = seriesEntries(cfg, seriesItems(cfg, currentRows(), seriesCtx, record.session_id, e.agentId !== undefined), seriesPlan.check);
           if (seriesRated.entries.length) await askTie($, cfg, seriesRated.entries, { user: blockUser, goal: target, restNeed: first.predicted - target, deadline, rateOnly: true });
         }
         const seriesAnswered = seriesRated.entries.filter((x) => typeof x.score === 'number');
@@ -5917,7 +6485,7 @@ async function decide($, e, cfg, record, started) {
         // The series that came down are merged on the rows as they stand now (after the blocks were carried out again): one line and a file, the tokens come off the base.
         if (seriesKeys.size) {
           const headerBefore = headerTokens();
-          seriesEdits = await mergeSeries($, cfg, record, currentRows(), seriesCtx, seriesKeys, record.session_id, deadline);
+          seriesEdits = await mergeSeries($, cfg, record, currentRows(), seriesCtx, seriesKeys, record.session_id, deadline, seriesPlan.check);
           if (seriesEdits.size) {
             seriesSaved = record.series.tokens_before - record.series.tokens_after;
             base += headerTokens() - headerBefore - seriesSaved;
@@ -5964,6 +6532,7 @@ async function decide($, e, cfg, record, started) {
   }
   const header = headerOf();
   if (header !== undefined) rows = rows.map((m) => (isHeaderRow(m) ? { ...m, trimDrop: true } : m));
+  if (archMode !== 'off') await archiveStep($, cfg, record, archMode, candidates, rows, keepFrom, group, queued, started);
   let built = build(rows, candidates, keepFrom, group, stats, queued);
   if (!pairingOk(messages, built)) return { fallback: 'build_error' };
   if (cfg.replies !== 'off' && e.agentId === undefined) {
@@ -6182,7 +6751,7 @@ async function ownThreshold($, e, next) {
           // What the blocks may give back (every one at level 0), as the floor of decide counts it.
           if (blocksCount && sessionId) {
             stageTokens += planBlocks(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
-            stageTokens += planSeries(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId).potential;
+            stageTokens += planSeries(cfg, messages, stage.trimmed, api, delivered ? delivered.rows : new Map(), keepFrom, sessionId, false, Date.now() + TOTAL_MS).potential();
           }
         } catch { stageTokens = 0; }
       }

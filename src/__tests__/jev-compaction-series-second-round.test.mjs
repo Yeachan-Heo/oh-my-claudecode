@@ -5,7 +5,7 @@
  * traces join a series. The calls of Jev are a fake `$.http.fetch`; no network.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { register } from '../../hooks/jev-compaction.mjs';
 
@@ -102,7 +102,7 @@ const allText = (out) => (out?.messages ?? []).map((m) => m.text ?? '').join('\n
 describe('series of traces in the compaction run: the queue of the second round', () => {
   it('puts the series to Jev with the question of the round, once per text, and merges the one it rates lowest into one line and a file', async () => {
     const run = await compactRun(CASCADE(60), session(40, withSeries), { rate: (item) => (item.text.includes('file-11.txt') ? 0 : 3) });
-    expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 0, unchecked: 0, answered: 2 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, answered: 2 });
     expect(run.asked.map((x) => x.item.series.calls).sort()).toEqual([4, 4]);
     expect(run.asked[0].item).toMatchObject({ kind: 'trace_series', author: 'module', has_file: true, series: { kind: 'trace_series', traces: 4 } });
     expect(run.asked[0].f2).toMatchObject({ goal_tokens: expect.any(Number), to_remove_tokens: expect.any(Number) });
@@ -118,15 +118,148 @@ describe('series of traces in the compaction run: the queue of the second round'
     expect(file).toBe(`${SERIES(11)}\n`);
   });
 
-  it('leaves a series Jev rates high where it is, and a series that names a secret path is not sent to Jev at all', async () => {
-    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : i === 5 ? `\n\n[compacted] Read(/home/u/.ssh/id_rsa) - result of 1700 chars removed\n${call(12)}\n${call(13)}\n${call(14)}` : '')), { rate: () => 3 });
-    expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 1, answered: 1 });
+  it('puts a series in the last row, the newest row before the end of the conversation, to Jev and merges it when Jev rates it lowest; a series of the same row that holds a secret value is sent masked', async () => {
+    const base = session(40, withSeries);
+    const last = base.length - 1;
+    const SECRET_SERIES = `${call(31)}\n${call(32)}\n${call(33)}\n[compacted] Bash(export API_TOKEN=abc123def456) - result of 20 chars removed`;
+    const messages = frozen(base.map((m, i) => (i === last ? { ...m, text: `Summary: done.\n\n${SERIES(21)}\nand then\n${SECRET_SERIES}` } : m)));
+    const run = await compactRun(CASCADE(60), messages, { rate: (item) => (item.text.includes('file-21.txt') ? 0 : 3) });
+    expect(run.asked.map((x) => x.item.series.calls).sort()).toEqual([4, 4, 4, 4]);
+    expect(run.record.f2.series_question).toMatchObject({ items: 4, answered: 4 });
+    expect(JSON.stringify(run.asked)).not.toContain('abc123def456');
+    expect(JSON.stringify(run.asked)).toContain('Bash(export API_TOKEN=***');
+    expect(run.record.series).toMatchObject({ mode: 'active', series: 1, traces: 4, files: 1, written: 1, installed: true });
+    const text = allText(run.out);
+    expect(text).toContain('Summary: done.\n\n[compacted] traces merged: 4 calls, 0 replies, 0 others; list in /home/u/.omc/state/jev/compaction-pastes/sess-series-f2/');
+    expect(text).not.toContain(call(21));
+    expect(text).toContain(SECRET_SERIES);
+    expect([...run.files().values()].filter((t) => t.includes(call(21)))).toEqual([`${SERIES(21)}\n`]);
+    expect([...run.files().values()].join('')).not.toContain('abc123def456');
+  });
+
+  it.each([['a series of an early row', 3], ['a series of the newest row', undefined]])('a password named in words only reaches neither Jev nor the file: %s', async (_, step) => {
+    const PROSE = `${call(41)}\n[compacted] Bash(echo "the password is Zaq12wsx9" > note.txt) - result of 20 chars removed\n${call(43)}\n${call(44)}`;
+    const base = session(40, (i) => (i === step ? `\n\n${PROSE}` : ''));
+    const messages = step ? base : frozen(base.map((m, i) => (i === base.length - 1 ? { ...m, text: `Summary: done.\n\n${PROSE}` } : m)));
+    const run = await compactRun(CASCADE(60), messages, { rate: () => 0 });
     expect(run.asked).toHaveLength(1);
+    expect(run.asked[0].item.text).toContain('the password is ***');
+    expect(JSON.stringify(run.asked)).not.toContain('Zaq12wsx9');
+    expect(run.record.series).toMatchObject({ mode: 'active', series: 1, traces: 4, written: 1, secret: 0, installed: true });
+    const files = [...run.files().values()].join('');
+    expect(files).toContain('the password is ***');
+    expect(files).not.toContain('Zaq12wsx9');
+    expect(allText(run.out)).not.toContain('Zaq12wsx9');
+  });
+
+  it('leaves a series Jev rates high where it is, and a series that names a secret path is sent to Jev with that line replaced', async () => {
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : i === 5 ? `\n\n[compacted] Read(/home/u/.ssh/id_rsa) - result of 1700 chars removed\n${call(12)}\n${call(13)}\n${call(14)}` : '')), { rate: () => 3 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 0, answered: 2 });
+    expect(run.asked).toHaveLength(2);
     expect(JSON.stringify(run.asked)).not.toContain('id_rsa');
+    expect(JSON.stringify(run.asked)).toContain('[line omitted: secret path]');
     expect(run.record.f2.lowered.by_kind.series).toBeUndefined();
     expect(run.record.series).toBeUndefined();
     expect(allText(run.out)).toContain(call(1));
     expect(allText(run.out)).toContain('id_rsa');
+  });
+
+  it('a series that names a private path of the list is not sent to Jev at all and stays', async () => {
+    const env = CASCADE(60, { OMC_JEV_COMPACT_PRIVATE_PATHS: '/srv/diary' });
+    const run = await compactRun(env, session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : i === 5 ? `\n\n[compacted] Read(/srv/diary/may.md) - result of 1700 chars removed\n${call(12)}\n${call(13)}\n${call(14)}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 1, answered: 1 });
+    expect(JSON.stringify(run.asked)).not.toContain('diary');
+    expect(allText(run.out)).toContain('/srv/diary/may.md');
+    expect(run.record.series).toMatchObject({ series: 1, secret: 0 });
+    const only = await compactRun(env, session(40, (i) => (i === 5 ? `\n\n[compacted] Read(/srv/diary/may.md) - result of 1700 chars removed\n${call(12)}\n${call(13)}\n${call(14)}` : '')), { rate: () => 0 });
+    expect(only.record.floor_series_tokens).toBeUndefined();
+  });
+
+  // Literals the mask lets through and the check of the other stages finds: the floor, the question and the file give one answer.
+  it.each([
+    ['a German word for a secret', 'Bash(echo "kennwort: Zq8Tr4Lm2Xp" > a.txt)'],
+    ['escaped JSON, found in the text of the question only', 'Bash(echo {\\"password\\": \\"Zq8Tr4Lm2Xp\\"})'],
+    ['a .ssh directory with a suffix', 'Read(/home/u/.ssh_backup/Zq8Tr4Lm2Xp)'],
+  ])('a series the check holds is not sent to Jev, not written and not counted in the floor: %s', async (_, literal) => {
+    const HELD = `[compacted] ${literal} - result of 20 chars removed\n${call(12)}\n${call(13)}\n${call(14)}`;
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : i === 5 ? `\n\n${HELD}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 1, unchecked: 0, answered: 1 });
+    expect(JSON.stringify(run.asked)).not.toContain('Zq8Tr4Lm2Xp');
+    expect([...run.files().values()].join('')).not.toContain('Zq8Tr4Lm2Xp');
+    expect(run.record.series).toMatchObject({ series: 1, secret: 0 });
+    expect(allText(run.out)).toContain(HELD);
+    const alone = await compactRun(CASCADE(60), session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : '')), { rate: () => 0 });
+    expect(alone.record.floor_series_tokens).toBeGreaterThan(0);
+    expect(run.record.floor_series_tokens).toBe(alone.record.floor_series_tokens);
+    const only = await compactRun(CASCADE(60), session(40, (i) => (i === 5 ? `\n\n${HELD}` : '')), { rate: () => 0 });
+    expect(only.record.floor_series_tokens).toBeUndefined();
+    expect(only.asked).toHaveLength(0);
+    const shadow = await compactRun({ ...CASCADE(60), OMC_JEV_COMPACT_BLOCKS: 'shadow' }, session(40, (i) => (i === 5 ? `\n\n${HELD}` : '')));
+    expect(shadow.record.f2).toMatchObject({ mode: 'shadow', candidates: { series: 1 } });
+    expect(allText(shadow.out)).toContain(HELD);
+  });
+
+  // Forms the mask of a series cuts apart and the shared mask of the other stages reads: neither the question nor the file holds the value.
+  it.each([
+    ['a value behind an escaped quote', 'Bash(curl {"cmd":"export DB_PASSWORD=\\"Zq8Tr4Lm2Xp\\""})'],
+    ['a secret name after a secret name', 'Bash(curl secret: x-api-key: Zq8Tr4Lm2Xp)'],
+    ['a value with a bracket behind an escaped quote', 'Bash(curl {"cmd":"API_KEY=\\"ab(cd)Zq8Tr4Lm2Xp\\""})'],
+  ])('the question and the file of a series hold no value of %s', async (_, literal) => {
+    const form = `[compacted] ${literal} - result of 20 chars removed\n${call(12)}\n${call(13)}`;
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 5 ? `\n\n${form}` : '')), { rate: () => 0 });
+    expect(run.record.series).toMatchObject({ series: 1, secret: 0 });
+    expect(run.asked).toHaveLength(1);
+    expect(run.asked[0].item.text).toContain('file-12.txt');
+    expect(JSON.stringify(run.asked)).not.toContain('Zq8Tr4Lm2Xp');
+    const files = [...run.files().values()].join('');
+    expect(files).toContain(call(13));
+    expect(files).not.toContain('Zq8Tr4Lm2Xp');
+  });
+
+  it.each([
+    ['a token', `ghp_${'abcdefghijklmnopqrstuvwxyz0123'}`],
+    ['an assignment', 'password=Zaq12wsx9'],
+    ['a token as the tool part of an MCP name', `mcp__server__ghp_${'abcdefghijklmnopqrstuvwxyz0123'}`],
+  ])('a series with a tool name that holds a secret (%s) is not sent to Jev and stays', async (_, name) => {
+    const held = `[compacted] ${name}(x) - result of 20 chars removed\n${call(12)}\n${call(13)}`;
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 3 ? `\n\n${SERIES(1)}` : i === 5 ? `\n\n${held}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, secret: 1, answered: 1 });
+    expect(JSON.stringify(run.asked)).not.toContain(name.replace('mcp__server__', ''));
+    expect(allText(run.out)).toContain(held);
+  });
+
+  it('real tool names hold no series back, long MCP names with digits and server ids among them', async () => {
+    const names = ['Read', 'mcp__plugin_context7_context7__resolve-library-id', 'mcp__plugin_oh-my-claudecode_t__ast_grep_search', 'mcp__9f0e1c2a-1111-4222-8333-944455566677__list_events', 'mcp__claude_ai_Google_Calendar__get_token'];
+    const series = names.map((name) => `[compacted] ${name}(x) - result of 20 chars removed`).join('\n');
+    const run = await compactRun(CASCADE(60), session(40, (i) => (i === 5 ? `\n\n${series}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 1, secret: 0, answered: 1 });
+    // An MCP name is read part by part; the server id here is a part the shared mask takes for a token, so that name is counted under a neutral name.
+    expect(run.asked[0].item.series.tools).toEqual({ [names[0]]: 1, [names[1]]: 1, [names[2]]: 1, masked_tool: 1, [names[4]]: 1 });
+  });
+
+  it('a deadline that has passed when a series is checked keeps it whole and counts it timed out in the question of the second round', async () => {
+    const now = Date.now.bind(Date);
+    // The clock is past every deadline inside the check of a series and as usual everywhere else.
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => {
+      const limit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 40;
+      const inCheck = new Error().stack.includes('checkSeries');
+      Error.stackTraceLimit = limit;
+      return inCheck ? now() + 3_600_000 : now();
+    });
+    let run;
+    try { run = await compactRun(CASCADE(60), session(40, withSeries), { rate: () => 0 }); } finally { clock.mockRestore(); }
+    expect(run.record.f2.series_question).toMatchObject({ items: 2, timed_out: 2, secret: 0 });
+    expect(run.asked).toEqual([]);
+    expect(allText(run.out)).toContain(call(11));
+  });
+
+  it('a series is checked once for the floor, the question and the file, so three long series fit the amount one compaction checks', async () => {
+    const long = (base) => Array.from({ length: 100 }, (_, k) => call(base + k)).map((line) => `${line} ${'x'.repeat(200)}`).join('\n');
+    const run = await compactRun(CASCADE(60), session(40, (i) => ([3, 5, 7].includes(i) ? `\n\n${long(i * 100000)}` : '')), { rate: () => 0 });
+    expect(run.record.f2.series_question).toMatchObject({ items: 3, secret: 0, unchecked: 0, answered: 3 });
+    expect(run.record.series.unchecked).toBe(0);
+    expect(run.record.series.series).toBeGreaterThan(0);
   });
 
   it('asks nothing about series when the prediction is already at the goal, and without the switch there is no series at all', async () => {

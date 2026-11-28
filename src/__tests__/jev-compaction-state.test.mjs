@@ -13,8 +13,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { archiveSegment } from '../../hooks/jev-compaction.mjs';
 import { maskSecrets } from '../../scripts/lib/jev-mask.mjs';
-import { afterSessionStart, foldRegistry, MISSING_MESSAGE, pastesDays, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry, sweepPastes } from '../../scripts/lib/jev-compaction-state.mjs';
+import { afterSessionStart, archiveDays, foldRegistry, MISSING_MESSAGE, pastesDays, recordCompactionState, REGISTRY_CHARS, registryPath, renderRegistry, sweepArchive, sweepPastes } from '../../scripts/lib/jev-compaction-state.mjs';
 import * as writers from '../../scripts/lib/context-text-sanitize.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -344,6 +345,172 @@ describe('jev-compaction-state: pasted text kept for the traces of the module (O
       expect(existsSync(dir)).toBe(false);
     }
     expect(existsSync(old)).toBe(false);
+  });
+});
+
+describe('jev-compaction-state: archive of calls and results kept for the traces of the module (OMC_JEV_COMPACT_ARCHIVE)', () => {
+  const DAY = 24 * 3600_000;
+  const archiveRoot = (env) => join(env.OMC_JEV_LOG_DIR, 'compaction-archive');
+  /** A session directory with the given files, each last changed `ageDays` days ago (the directory too). */
+  function archive(env, session, ageDays, names = ['toolu_a.txt']) {
+    const dir = join(archiveRoot(env), session);
+    mkdirSync(dir, { recursive: true });
+    const when = new Date(Date.now() - ageDays * DAY);
+    for (const name of names) {
+      const file = join(dir, name);
+      writeFileSync(file, 'result text');
+      utimesSync(file, when, when);
+    }
+    utimesSync(dir, when, when);
+    return dir;
+  }
+
+  it('OMC_JEV_ARCHIVE_DAYS is a whole number of days from 1 to 99999, 14 when unset; anything else keeps everything', () => {
+    expect(archiveDays({})).toBe(14);
+    expect(archiveDays({ OMC_JEV_ARCHIVE_DAYS: '' })).toBe(14);
+    expect(archiveDays({ OMC_JEV_ARCHIVE_DAYS: ' 7 ' })).toBe(7);
+    expect(archiveDays({ OMC_JEV_ARCHIVE_DAYS: '99999' })).toBe(99999);
+    for (const bad of ['0', '-1', '1.5', '01', '100000', 'abc', '7d', '1e2', '+7']) expect(archiveDays({ OMC_JEV_ARCHIVE_DAYS: bad })).toBe(0);
+  });
+
+  it('removes the session directories whose newest file is older than the days, with the given time; keeps newer ones, the current session and links', () => {
+    const { env } = setup();
+    const old = archive(env, 'old-session', 20, ['toolu_a.txt', 'toolu_b.txt']);
+    const young = archive(env, 'young-session', 3);
+    const mixed = archive(env, 'mixed-session', 20, ['old.txt']);
+    writeFileSync(join(mixed, 'new.txt'), 'fresh');
+    const mine = archive(env, 'my-session', 40);
+    const target = join(tmp, `archive-link-target-${n}`);
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, 'keep.txt'), 'outside');
+    let linked = true;
+    try { symlinkSync(target, join(archiveRoot(env), 'linked-session'), 'dir'); } catch { linked = false; }
+    const out = sweepArchive('my-session', Date.now(), env);
+    expect(out).toMatchObject({ days: 14, removed_dirs: 1, removed_files: 2, stopped: false });
+    expect(out.removed_bytes).toBe(2 * 'result text'.length);
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(young)).toBe(true);
+    expect(existsSync(mixed)).toBe(true);
+    expect(existsSync(mine)).toBe(true);
+    if (linked) { expect(existsSync(join(target, 'keep.txt'))).toBe(true); expect(out.links_skipped).toBe(1); }
+    // The time is a parameter: 30 days later the young directory is old too (the current session's directory never goes).
+    expect(sweepArchive('my-session', Date.now() + 30 * DAY, { ...env, OMC_JEV_ARCHIVE_DAYS: '5' })).toMatchObject({ removed_dirs: 2 });
+    expect(existsSync(young)).toBe(false);
+    expect(existsSync(mixed)).toBe(false);
+    expect(existsSync(mine)).toBe(true);
+  });
+
+  it('a live session is told by its newest file, the marker included, not by its first file', () => {
+    const { env } = setup();
+    const live = archive(env, 'live-session', 30, ['toolu_a.txt', '.compaction']);
+    const fresh = new Date();
+    utimesSync(join(live, '.compaction'), fresh, fresh);
+    const idle = archive(env, 'idle-session', 30, ['toolu_a.txt', '.compaction']);
+    expect(sweepArchive('my-session', Date.now(), env)).toMatchObject({ removed_dirs: 1 });
+    expect(existsSync(join(live, 'toolu_a.txt'))).toBe(true);
+    expect(existsSync(idle)).toBe(false);
+  });
+
+  it('the current session is found by the name the module gives its directory, also for ids with a dot, a slash or a device name, and a directory that only looks like it goes', () => {
+    const ids = ['a/b', 'a.b', 'a b', 'CON', 'nul', 'x'.repeat(100), '123e4567-e89b-12d3-a456-426614174000'];
+    for (const id of ids) {
+      const { env } = setup();
+      const mine = archive(env, archiveSegment(id), 40);
+      const lookalike = archive(env, id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80), 40);
+      const other = archive(env, 'other-session', 40);
+      expect(sweepArchive(id, Date.now(), env), id).toMatchObject({ stopped: false });
+      expect(existsSync(mine), id).toBe(true);
+      expect(existsSync(other), id).toBe(false);
+      expect(existsSync(lookalike), id).toBe(lookalike === mine);
+    }
+    const { env } = setup();
+    const a = archive(env, archiveSegment('a/b'), 40);
+    const b = archive(env, archiveSegment('a_b'), 40);
+    expect(archiveSegment('a/b')).not.toBe(archiveSegment('a_b'));
+    sweepArchive('a_b', Date.now(), env);
+    expect(existsSync(b)).toBe(true);
+    expect(existsSync(a)).toBe(false);
+  });
+
+  it('keeps a directory that holds anything but plain files, and finishes a directory that was renamed to be removed, whatever its age', () => {
+    const { env } = setup();
+    const nested = archive(env, 'nested-session', 20);
+    mkdirSync(join(nested, 'inner'));
+    const longAgo = new Date(Date.now() - 20 * DAY);
+    utimesSync(nested, longAgo, longAgo);
+    const doomed = archive(env, 'half.abc123.removing', 0, ['x.txt', 'y.txt']);
+    const out = sweepArchive('my-session', Date.now(), env);
+    expect(out).toMatchObject({ removed_dirs: 1, removed_files: 3 });
+    expect(existsSync(doomed)).toBe(false);
+    expect(readdirSync(archiveRoot(env)).filter((name) => name.startsWith('nested-session')).length).toBe(1);
+    expect(existsSync(join(archiveRoot(env), 'nested-session', 'inner'))).toBe(false);
+  });
+
+  it('stops when the time budget is used, after at least one file, and the next start finishes', () => {
+    const { env } = setup();
+    for (const name of ['s1', 's2', 's3', 's4']) archive(env, name, 20, ['a.txt', 'b.txt', 'c.txt']);
+    const first = sweepArchive('my-session', Date.now(), env, 0);
+    expect(first.stopped).toBe(true);
+    expect(first.removed_files).toBeGreaterThanOrEqual(1);
+    expect(first.removed_files).toBeLessThan(12);
+    let guard = 0;
+    while (readdirSync(archiveRoot(env)).length && guard++ < 20) sweepArchive('my-session', Date.now(), env, 0);
+    expect(readdirSync(archiveRoot(env))).toEqual([]);
+  });
+
+  it('removes and touches nothing without a session id or with the days turned off, and does not fail without the directory', () => {
+    const { env } = setup();
+    const old = archive(env, 'old-session', 20);
+    expect(sweepArchive(undefined, Date.now(), env)).toBeUndefined();
+    expect(sweepArchive('', Date.now(), env)).toBeUndefined();
+    expect(sweepArchive('x', Date.now() + 90 * DAY, { ...env, OMC_JEV_ARCHIVE_DAYS: '0' })).toBeUndefined();
+    expect(existsSync(old)).toBe(true);
+    expect(sweepArchive('x', Date.now(), { OMC_JEV_LOG_DIR: join(tmp, 'no-such-archive-state-dir') })).toBeUndefined();
+  });
+
+  it('SessionStart removes old archive directories and logs a row at startup, on resume and on clear, but not after a compaction and not when the point is not named', () => {
+    const { env, sid, log } = setup();
+    const old = archive(env, 'old-session', 20);
+    afterSessionStart({ session_id: sid, source: 'compact' }, {}, env);
+    expect(existsSync(old)).toBe(true);
+    afterSessionStart({ session_id: sid, source: 'startup' }, {}, { ...env, OMC_JEV: 'all:active' });
+    expect(existsSync(old)).toBe(true);
+    const out = afterSessionStart({ session_id: sid, source: 'startup' }, {}, env);
+    expect(out).toEqual({});
+    expect(existsSync(old)).toBe(false);
+    const rows = logRows(log).filter((r) => r.event === 'archive_retention');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ point: 'compaction', session_id: sid, removed_dirs: 1, removed_files: 1, days: 14 });
+    // Nothing removed, nothing logged.
+    afterSessionStart({ session_id: sid, source: 'resume' }, {}, env);
+    expect(logRows(log).filter((r) => r.event === 'archive_retention')).toHaveLength(1);
+    // The same on resume and on clear: an old directory goes and a row says so.
+    for (const [k, source] of ['resume', 'clear'].entries()) {
+      const older = archive(env, `older-${source}`, 20);
+      afterSessionStart({ session_id: sid, source }, {}, env);
+      expect(existsSync(older), source).toBe(false);
+      expect(logRows(log).filter((r) => r.event === 'archive_retention'), source).toHaveLength(k + 2);
+    }
+  });
+
+  it('a directory that keeps a link or a subdirectory after the removal does not add a row at every start: the row says what was removed, and only that', () => {
+    const { env, sid, log } = setup();
+    const target = join(tmp, `archive-kept-target-${n}`);
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, 'keep.txt'), 'outside');
+    const doomed = archive(env, 'half.abc123.removing', 0, ['x.txt']);
+    let linked = true;
+    try { symlinkSync(join(target, 'keep.txt'), join(doomed, 'link.txt')); } catch { linked = false; }
+    mkdirSync(join(doomed, 'inner'));
+    afterSessionStart({ session_id: sid, source: 'startup' }, {}, env);
+    const rows = () => logRows(log).filter((r) => r.event === 'archive_retention');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toMatchObject({ removed_dirs: 0, removed_files: 1, links_skipped: linked ? 1 : 0 });
+    expect(existsSync(doomed)).toBe(true);
+    for (const source of ['resume', 'clear', 'startup']) afterSessionStart({ session_id: sid, source }, {}, env);
+    expect(rows()).toHaveLength(1);
+    expect(sweepArchive(sid, Date.now(), env)).toMatchObject({ removed_files: 0, removed_dirs: 0, links_skipped: linked ? 1 : 0 });
+    expect(existsSync(join(target, 'keep.txt'))).toBe(true);
   });
 });
 
