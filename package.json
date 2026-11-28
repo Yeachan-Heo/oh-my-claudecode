@@ -94,9 +94,9 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
     "@ast-grep/napi": "^0.31.0",
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@types/better-sqlite3": "^7.6.13",
-    "ajv": "^8.17.1",
+    "ajv": "^8.18.0",
     "better-sqlite3": "^12.10.0",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
