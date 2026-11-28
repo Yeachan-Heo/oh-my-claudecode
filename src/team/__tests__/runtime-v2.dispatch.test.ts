@@ -68,7 +68,7 @@ vi.mock('node:fs/promises', importOriginal => mockFsPromises(importOriginal));
 vi.mock('fs/promises', importOriginal => mockFsPromises(importOriginal));
 
 import { enqueueDispatchRequest, listDispatchRequests, transitionDispatchRequest } from '../dispatch-queue.js';
-import { readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
+import { canonicalRecoveryPayloadHash, readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
 import { hashTaskRecoveryCheckpointPayload, taskRecoveryClaimTokenHash } from '../task-recovery-checkpoint.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import { createTeamInstanceBinding, reserveTeamInstance } from '../team-instance.js';
@@ -142,6 +142,7 @@ const mocks = vi.hoisted(() => {
     spawnWorkerInPane: vi.fn(),
     spawnOwnedWorkerInPane: vi.fn(),
     deliverStartupInbox: vi.fn(),
+    waitForStartupPaneReady: vi.fn(),
     probeStartupPaneActivity: vi.fn(),
     startupProviderExited: vi.fn(),
     retryStartupInboxSubmit: vi.fn(),
@@ -351,6 +352,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     spawnWorkerInPane: mocks.spawnWorkerInPane,
     spawnOwnedWorkerInPane: mocks.spawnOwnedWorkerInPane,
     deliverStartupInbox: mocks.deliverStartupInbox,
+    waitForStartupPaneReady: mocks.waitForStartupPaneReady,
     probeStartupPaneActivity: mocks.probeStartupPaneActivity,
     startupProviderExited: mocks.startupProviderExited,
     retryStartupInboxSubmit: mocks.retryStartupInboxSubmit,
@@ -745,6 +747,40 @@ describe('runtime v2 startup inbox dispatch', () => {
     };
   }
 
+  // Startup settlement runs only for a recovery that owns work: an idle
+  // recovery has no progress to prove, so these fixtures own task 1.
+  async function seedOwnedRecoveryTask(teamName: string): Promise<void> {
+    const claimToken = 'owned-claim-token';
+    const createdAt = new Date().toISOString();
+    const taskPath = absPath(cwd, TeamPaths.taskFile(teamName, '1'));
+    await mkdir(join(taskPath, '..'), { recursive: true });
+    await writeFile(taskPath, JSON.stringify({
+      id: '1',
+      subject: 'Recover owned task',
+      description: 'The dead worker owned this task.',
+      status: 'in_progress',
+      owner: 'worker-1',
+      version: 1,
+      claim: { owner: 'worker-1', token: claimToken, leased_until: '2099-01-01T00:00:00.000Z' },
+      created_at: createdAt,
+    }));
+    const resumePayload = { resume: 'continue owned task' };
+    const checkpointPath = absPath(cwd, TeamPaths.checkpoint(teamName, '1', taskRecoveryClaimTokenHash(claimToken), 1));
+    await mkdir(join(checkpointPath, '..'), { recursive: true });
+    await writeFile(checkpointPath, JSON.stringify({
+      schema_version: 1,
+      team_name: teamName,
+      task_id: '1',
+      worker_name: 'worker-1',
+      sequence: 1,
+      task_version: 1,
+      claim_token: claimToken,
+      resume_payload_hash: hashTaskRecoveryCheckpointPayload(resumePayload),
+      resume_payload: resumePayload,
+      updated_at: createdAt,
+    }));
+  }
+
   function configureOwnerPaneLifecycle(): Set<string> {
     const deadPanes = new Set(['%91']);
     launchMocks.loadCurrentWorkerLaunchAttempt.mockResolvedValue(null);
@@ -976,6 +1012,8 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.spawnWorkerInPane.mockReset();
     mocks.spawnOwnedWorkerInPane.mockReset();
     mocks.deliverStartupInbox.mockReset();
+    mocks.waitForStartupPaneReady.mockReset();
+    mocks.waitForStartupPaneReady.mockResolvedValue({ ok: true });
     mocks.probeStartupPaneActivity.mockReset();
     mocks.startupProviderExited.mockReset();
     mocks.retryStartupInboxSubmit.mockReset();
@@ -3161,6 +3199,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd = await mkdtempFixture('omc-runtime-v2-rollback-tree-replacement-');
       mocks.autoStartupEvidence = false;
       const fixture = await seedOwnerRecoveryFixture('codex', 'before-dispatch');
+      await seedOwnedRecoveryTask(fixture.teamName); // an idle recovery delivers no startup inbox, so the dead worker owns task 1
       configureOwnerPaneLifecycle();
       useFencedRetirement({ kill: mocks.killOwnedWorkerPane.getMockImplementation() });
       customize();
@@ -4039,6 +4078,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd = await mkdtempFixture(`omc-runtime-v2-owner-${provider}-before-dispatch-`);
       mocks.autoStartupEvidence = false;
       const fixture = await seedOwnerRecoveryFixture(provider, 'before-dispatch');
+      await seedOwnedRecoveryTask(fixture.teamName);
       configureOwnerPaneLifecycle();
       const deliveryGate = deferred<void>();
       const probeGate = deferred<void>();
@@ -4101,6 +4141,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     cwd = await mkdtempFixture('omc-runtime-v2-owner-store-refused-');
     useProductionLaunchFence();
     const fixture = await seedOwnerRecoveryFixture('codex', 'store-refused');
+    await seedOwnedRecoveryTask(fixture.teamName);
     configureOwnerPaneLifecycle();
     const storePath = absPath(cwd, TeamPaths.dispatchRequests(fixture.teamName));
     await mkdir(join(storePath, '..'), { recursive: true });
@@ -4133,6 +4174,152 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.deliverStartupInbox).toHaveBeenCalledTimes(1);
     expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
     expect(readRecoveryOutcome(cwd, fixture.requestId)).toMatchObject({ kind: 'final', outcome: 'succeeded' });
+  });
+
+  it('finalizes an idle interactive recovery without waiting for progress the worker is told not to make', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-owner-idle-');
+    mocks.autoStartupEvidence = false;
+    const fixture = await seedOwnerRecoveryFixture('codex', 'idle');
+    configureOwnerPaneLifecycle();
+
+    const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+    const result = await executeRecoverDeadWorkerV2Owner({
+      teamName: fixture.teamName,
+      cwd,
+      workerName: 'worker-1',
+      requestId: fixture.requestId,
+      instanceId: fixture.instanceId,
+    });
+
+    expect(result).toMatchObject({ outcome: 'recovered', committed: true, requeuedTaskIds: [], newPaneId: '%2' });
+    expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+    // The pane must still be proven ready (a trust dialog answered) before success.
+    expect(mocks.waitForStartupPaneReady).toHaveBeenCalledTimes(1);
+    expect(mocks.waitForStartupPaneReady).toHaveBeenCalledWith(
+      expect.objectContaining({ ownership: expect.objectContaining({ paneId: '%2' }) }),
+      expect.objectContaining({ attemptAlreadyFenced: true }),
+    );
+    expect(readRecoveryOutcome(cwd, fixture.requestId)).toMatchObject({ kind: 'final', outcome: 'succeeded' });
+    const config = JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
+    expect(config.active_recovery).toBeUndefined();
+  });
+
+  it('ends an idle interactive recovery in a failed final when the replacement pane never becomes ready', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-owner-idle-not-ready-');
+    mocks.autoStartupEvidence = false;
+    const fixture = await seedOwnerRecoveryFixture('codex', 'idle-not-ready');
+    configureOwnerPaneLifecycle();
+    mocks.waitForStartupPaneReady.mockResolvedValue({ ok: false, reason: 'selector_persistent' });
+
+    const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+    const result = await executeRecoverDeadWorkerV2Owner({
+      teamName: fixture.teamName,
+      cwd,
+      workerName: 'worker-1',
+      requestId: fixture.requestId,
+      instanceId: fixture.instanceId,
+    });
+
+    expect(result, JSON.stringify(result)).toMatchObject({ outcome: 'failed', committed: false });
+    expect(result).toMatchObject({ message: expect.stringContaining('selector_persistent') });
+    expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+    // A failed final, not a pending phase the owner would retry forever.
+    expect(readRecoveryOutcome(cwd, fixture.requestId)).toMatchObject({ kind: 'final', outcome: 'failed' });
+    const config = JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
+    expect(config.active_recovery).toBeUndefined();
+    expect(config.last_recovery).toMatchObject({ recovery_id: fixture.recoveryId, phase: 'failed' });
+    // The not-ready replacement is torn down, so a later recover under a new
+    // request sees a dead worker and relaunches instead of confirming it.
+    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ pane_id: '%2' }),
+      expect.stringContaining('worker_startup_not_ready'),
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+  });
+
+  it('ends a later recovery at the owner deadline when the not-ready replacement could not be proven gone', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-owner-idle-unproven-');
+    mocks.autoStartupEvidence = false;
+    const fixture = await seedOwnerRecoveryFixture('codex', 'idle-unproven');
+    configureOwnerPaneLifecycle();
+    const launchActual = await vi.importActual<typeof import('../worker-launch-ack.js')>('../worker-launch-ack.js');
+    mocks.waitForStartupPaneReady.mockImplementationOnce(async (context) => {
+      // Persist the replacement's launch record, which an unproven teardown leaves behind.
+      const { active_recovery, workers } = JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
+      await launchActual.prepareWorkerLaunchAttempt({
+        cwd,
+        teamName: fixture.teamName,
+        workerName: 'worker-1',
+        instanceId: ORIGINAL_INSTANCE_ID,
+        paneId: context.ownership.paneId,
+        provider: 'codex',
+        runtimeCliPath: '/runtime-cli.cjs',
+        context: {
+          kind: 'recovery',
+          recovery_id: active_recovery.recovery_id,
+          replacement_generation: workers[0].replacement_generation,
+          pane_attempt_id: workers[0].pane_attempt_id,
+        },
+      });
+      return { ok: false, reason: 'selector_persistent' };
+    });
+    launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementation(async (
+      attempt: DurableWorkerLaunchAttempt,
+      _reason: string,
+      cleanup: () => Promise<boolean>,
+    ) => attempt.pane_id === '%2' ? false : cleanup());
+    launchMocks.observeWorkerLaunchProvider.mockImplementation(async (attempt: WorkerLaunchProviderObservationInput) =>
+      attempt.attempt_id === fixture.launchAttemptId ? 'dead' : 'unknown');
+    const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+    const recover = (requestId: string) => executeRecoverDeadWorkerV2Owner({
+      teamName: fixture.teamName, cwd, workerName: 'worker-1', requestId, instanceId: fixture.instanceId,
+    });
+    const readConfig = async () => JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
+
+    await expect(recover(fixture.requestId)).resolves.toMatchObject({ outcome: 'failed', error: 'worker_startup_not_ready' });
+    expect((await readConfig()).active_recovery).toBeUndefined();
+
+    const requestId = 'owner-codex-idle-unproven-later-request';
+    const recoveryId = 'owner-codex-idle-unproven-later-recovery';
+    const payload = {
+      operation: 'recover-worker' as const,
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+      teamName: fixture.teamName,
+      workerName: 'worker-1',
+      instanceId: ORIGINAL_INSTANCE_ID,
+    };
+    const writeIntent = async (ageMs: number) => {
+      const path = absPath(cwd, TeamPaths.recoveryIntent(fixture.teamName, recoveryId));
+      await mkdir(join(path, '..'), { recursive: true });
+      await writeFile(path, JSON.stringify({
+        schema_version: 1,
+        kind: 'recover-worker',
+        request_id: requestId,
+        recovery_id: recoveryId,
+        operation: payload.operation,
+        workspace_hash: payload.workspaceHash,
+        payload_hash: canonicalRecoveryPayloadHash(payload),
+        team_name: payload.teamName,
+        worker_name: payload.workerName,
+        instance_id: payload.instanceId,
+        created_at: new Date(Date.now() - ageMs).toISOString(),
+      }), 'utf8');
+    };
+    reserveRecoveryRequest(cwd, requestId, payload, recoveryId);
+
+    await writeIntent(0);
+    await expect(recover(requestId)).resolves.toMatchObject({ outcome: 'failed', error: 'worker_liveness_unknown' });
+    expect((await readConfig()).active_recovery).toMatchObject({ recovery_id: recoveryId });
+
+    // What the earlier recovery left behind belongs to that recovery, so it
+    // must not hold this one, and with it shutdown, past the deadline.
+    await writeIntent(301_000);
+    await expect(recover(requestId)).resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
+    expect(readRecoveryOutcome(cwd, requestId)).toMatchObject({ kind: 'final', outcome: 'failed' });
+    expect((await readConfig()).active_recovery).toBeUndefined();
+    expect((await readConfig()).workers[0]).toMatchObject({ pane_id: '%2', recovery_id: fixture.recoveryId });
   });
 
   it('requeues the selected task through an exact read when a sibling corrupts after inventory', async () => {
@@ -4314,6 +4501,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd = await mkdtempFixture(`omc-runtime-v2-owner-${provider}-${mode}-`);
       mocks.autoStartupEvidence = false;
       const fixture = await seedOwnerRecoveryFixture(provider, mode);
+      await seedOwnedRecoveryTask(fixture.teamName);
       configureOwnerPaneLifecycle();
       const deliveryGate = deferred<void>();
       const probeGate = deferred<void>();
@@ -4387,6 +4575,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd = await mkdtempFixture(`omc-runtime-v2-owner-${provider}-pending-dispatch-`);
       mocks.autoStartupEvidence = false;
       const fixture = await seedOwnerRecoveryFixture(provider, 'pending-dispatch');
+      await seedOwnedRecoveryTask(fixture.teamName);
       await seedRecoveryDispatchCheckpoint(fixture, 'pending');
       configureOwnerPaneLifecycle();
 
@@ -4435,6 +4624,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       cwd = await mkdtempFixture(`omc-runtime-v2-owner-${provider}-terminal-${checkpoint}-`);
       mocks.autoStartupEvidence = false;
       const fixture = await seedOwnerRecoveryFixture(provider, `terminal-${checkpoint}`);
+      await seedOwnedRecoveryTask(fixture.teamName);
       await seedRecoveryDispatchCheckpoint(fixture, checkpoint);
       configureOwnerPaneLifecycle();
       const deliveryGate = deferred<void>();
