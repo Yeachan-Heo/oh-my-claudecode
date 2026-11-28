@@ -403,6 +403,12 @@ export function cleanupTransientState(directory: string, endingSessionId?: strin
         // HUD's stdin cache is session-scoped (see `src/hud/stdin.ts`)
         // and consumed by `omc hud --watch` for the owning session.
         /^hud-stdin-cache\.json$/,
+        // HUD's call count checkpoint (see `src/hud/call-counter.ts`) and
+        // what an interrupted write of it leaves behind. A resumed session
+        // counts its transcript again.
+        /^hud-call-counts\.json$/,
+        /^\.hud-call-counts\.json\.tmp\./,
+        /^hud-call-counts\.json\.rollback\./,
       ];
       const isEndingSession = (sid: string): boolean =>
         typeof endingSessionId === 'string'
