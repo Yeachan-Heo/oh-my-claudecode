@@ -25,9 +25,20 @@ describe('multi-repo workspace anchor', () => {
   const savedOMC_STATE_DIR = process.env.OMC_STATE_DIR;
 
   beforeEach(() => {
+    // Opt-out of OMC_STATE_DIR isolation for this fixture-based test (finding P1)
+    // This test needs to verify getOmcRoot() behavior with and without OMC_STATE_DIR
+    // The per-test setup sets OMC_STATE_DIR, but this test manages its own state
+    delete process.env.OMC_STATE_DIR;
     clearWorktreeCache();
     // Fresh temp parent dir per test — no .git, no .omc-workspace yet
-    parent = mkdtempSync(join(homedir(), 'omc-multirepo-'));
+    // Create in the original real home directory instead of temp HOME, to avoid
+    // isSensitiveStateLocation() blocking workspace markers (finding P5 conflict).
+    // This test fixture must work with or without OMC_STATE_DIR isolation.
+    // Note: Don't use dotfiles in the path as isSensitiveStateLocation marks them as sensitive.
+    const realHome = process.env.__VITEST_ORIG_HOME || homedir();
+    const fixtureBase = join(realHome, 'omc-test-fixtures');
+    mkdirSync(fixtureBase, { recursive: true });
+    parent = mkdtempSync(join(fixtureBase, 'multirepo-'));
     repoA = join(parent, 'repoA');
     repoB = join(parent, 'repoB');
     mkdirSync(repoA, { recursive: true });
